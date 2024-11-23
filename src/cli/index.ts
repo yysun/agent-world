@@ -64,13 +64,13 @@ export class CLI {
         await this.killAgent(args[0]);
         break;
 
-      case 'interact':
+      case 'ask':
         if (args.length < 2) {
-          console.log('Usage: interact <agentId> <message>');
+          console.log('Usage: ask <agentId> <message>');
           return;
         }
         const [agentId, ...messageWords] = args;
-        await this.interactWithAgent(agentId, messageWords.join(' '));
+        await this.askAgent(agentId, messageWords.join(' '));
         break;
 
       case 'status':
@@ -97,7 +97,7 @@ Available commands:
   spawn <name> <provider>  - Create a new agent (provider: openai|anthropic)
   list                     - List all active agents
   kill <agentId>          - Terminate an agent
-  interact <agentId> <msg> - Send a message to an agent
+  ask <agentId> <msg>     - Ask a question to an agent
   status <agentId>        - Show agent status
   help                    - Show this help message
   exit                    - Exit the program
@@ -159,7 +159,7 @@ Available commands:
     }
   }
 
-  private async interactWithAgent(agentId: string, message: string): Promise<void> {
+  private async askAgent(agentId: string, message: string): Promise<void> {
     const agents = this.world.getAgents();
     const agent = agents.get(agentId);
 
@@ -169,7 +169,7 @@ Available commands:
     }
 
     try {
-      console.log(`Sending message to agent ${agentId}...`);
+      console.log(`Asking agent ${agentId}...`);
       const response = await agent.interact(message, (chunk) => {
         process.stdout.write(chunk);
       });
@@ -182,7 +182,7 @@ Available commands:
         });
       }
     } catch (error) {
-      console.error('Failed to interact with agent:', error instanceof Error ? error.message : 'Unknown error');
+      console.error('Failed to ask agent:', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 
