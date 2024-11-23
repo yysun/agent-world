@@ -65,12 +65,18 @@ export class CLI {
         break;
 
       case 'ask':
-        if (args.length < 2) {
-          console.log('Usage: ask <name> <message>');
+        if (args.length < 1) {
+          console.log('Usage: ask [name] <message>');
           return;
         }
-        const [name, ...messageWords] = args;
-        await this.askAgent(name, messageWords.join(' '));
+        if (args.length === 1) {
+          // If only one argument, it's the message to all agents
+          await this.askAllAgents(args[0]);
+        } else {
+          // First argument is name, rest is message
+          const [name, ...messageWords] = args;
+          await this.askAgent(name, messageWords.join(' '));
+        }
         break;
 
       case 'status':
@@ -105,7 +111,7 @@ Available commands:
   new <name> [provider]    - Create a new agent (provider: openai|anthropic, defaults to anthropic)
   list                     - List all active agents
   kill <name>             - Terminate an agent by name
-  ask <name> <msg>        - Ask a question to an agent by name
+  ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
   status <name>           - Show agent status and memory by name
   clear <name>            - Clear agent's short-term memory
   help                    - Show this help message
@@ -217,6 +223,33 @@ Available commands:
       }
     } catch (error) {
       console.error('Failed to ask agent:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
+
+  private async askAllAgents(message: string): Promise<void> {
+    const agents = this.world.getAgents();
+    if (agents.size === 0) {
+      console.log('No active agents to ask');
+      return;
+    }
+
+    console.log('Asking all agents...\n');
+    for (const agent of agents.values()) {
+      console.log(`\n=== Response from ${agent.getName()} ===`);
+      try {
+        const response = await agent.interact(message, (chunk) => {
+          process.stdout.write(chunk);
+        });
+        console.log('\nTool Calls:');
+        if (response.toolCalls?.length) {
+          response.toolCalls.forEach(call => {
+            console.log(`- ${call.name}:`, call.arguments);
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to ask agent ${agent.getName()}:`, error instanceof Error ? error.message : 'Unknown error');
+      }
+      console.log('\n' + '='.repeat(40));
     }
   }
 
