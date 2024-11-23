@@ -6,8 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "watch": "nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
+    "dev": "nodemon --watch src --ext ts --exec \"npm run build && npm start\"",
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -34,7 +33,6 @@
     "@types/winston": "^2.4.4",
     "nodemon": "^3.0.2",
     "rimraf": "^5.0.10",
-    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
 }
