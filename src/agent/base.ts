@@ -1,66 +1,84 @@
 import { OpenAI } from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { EventEmitter } from 'events';
-import { AgentConfig, Memory, Tool, LLMResponse } from '../types';
+import { AgentConfig, Tool, LLMResponse } from '../types';
 import { logger } from '../config';
 
 export class Agent extends EventEmitter {
   private id: string;
   private name: string;
-  private memory: Memory;
+  private role: string;
   private provider: 'openai' | 'anthropic';
   private model: string;
+  private status: 'idle' | 'busy' | 'error';
+  private lastActive: Date;
+  private shortTermMemory: Map<string, any>;
+  private longTermMemory: Map<string, any>;
   private tools: Map<string, Tool>;
   private openaiClient?: OpenAI;
   private anthropicClient?: Anthropic;
   private maxRetries: number = 3;
 
-  constructor(config: AgentConfig) {
+  constructor(config: AgentConfig, apiKey: string) {
     super();
     this.id = config.id;
     this.name = config.name;
+    this.role = config.role;
     this.provider = config.provider;
     this.model = config.model;
-    this.memory = {
-      shortTerm: new Map(),
-      longTerm: new Map()
-    };
+    this.status = config.status || 'idle';
+    this.lastActive = config.lastActive || new Date();
+    this.shortTermMemory = new Map();
+    this.longTermMemory = new Map();
     this.tools = new Map();
 
-    // Initialize LLM client based on provider
+    // Initialize the appropriate client based on provider
     if (this.provider === 'openai') {
       this.openaiClient = new OpenAI({
-        apiKey: config.apiKey
+        apiKey
       });
     } else {
       this.anthropicClient = new Anthropic({
-        apiKey: config.apiKey
+        apiKey
       });
     }
   }
 
-  // Memory management
   public setShortTermMemory(key: string, value: any): void {
-    this.memory.shortTerm.set(key, value);
+    this.shortTermMemory.set(key, value);
     this.emit('memoryUpdate', { type: 'shortTerm', key, value });
   }
 
   public setLongTermMemory(key: string, value: any): void {
-    this.memory.longTerm.set(key, value);
+    this.longTermMemory.set(key, value);
     this.emit('memoryUpdate', { type: 'longTerm', key, value });
   }
 
-  public getMemory(): Memory {
-    return this.memory;
+  public getMemory(): { shortTerm: Map<string, any>; longTerm: Map<string, any> } {
+    return {
+      shortTerm: this.shortTermMemory,
+      longTerm: this.longTermMemory
+    };
   }
 
-  // Tool management
+  public getStatus(): AgentConfig {
+    this.lastActive = new Date(); // Update lastActive when status is checked
+    return {
+      id: this.id,
+      name: this.name,
+      role: this.role,
+      provider: this.provider,
+      model: this.model,
+      status: this.status,
+      lastActive: this.lastActive
+    };
+  }
+
   public registerTool(tool: Tool): void {
     this.tools.set(tool.name, tool);
     logger.info(`Tool ${tool.name} registered for agent ${this.name}`);
   }
 
-  // LLM interaction with retry mechanism
   private async retryOperation<T>(
     operation: () => Promise<T>,
     retries: number = this.maxRetries
@@ -82,18 +100,47 @@ export class Agent extends EventEmitter {
     return retryableStatusCodes.includes(error.status) || error.code === 'ECONNRESET';
   }
 
-  // Main interaction method with streaming support
   public async interact(
     input: string,
     onStream?: (chunk: string) => void
   ): Promise<LLMResponse> {
-    return this.retryOperation(async () => {
-      if (this.provider === 'openai') {
-        return this.handleOpenAIInteraction(input, onStream);
-      } else {
-        return this.handleAnthropicInteraction(input, onStream);
-      }
-    });
+    this.status = 'busy';
+    this.lastActive = new Date();
+    this.emit('stateUpdate', this.getStatus());
+
+    try {
+      const response = await this.retryOperation(async () => {
+        if (this.provider === 'openai') {
+          return this.handleOpenAIInteraction(input, onStream);
+        } else {
+          return this.handleAnthropicInteraction(input, onStream);
+        }
+      });
+
+      const timestamp = Date.now();
+      this.setShortTermMemory(`interaction-${timestamp}`, {
+        input,
+        response: response.content,
+        timestamp
+      });
+
+      this.setLongTermMemory(`summary-${timestamp}`, {
+        type: 'interaction',
+        summary: `Interaction about: ${input.substring(0, 50)}...`,
+        timestamp
+      });
+
+      this.status = 'idle';
+      this.lastActive = new Date();
+      this.emit('stateUpdate', this.getStatus());
+
+      return response;
+    } catch (error) {
+      this.status = 'error';
+      this.lastActive = new Date();
+      this.emit('stateUpdate', this.getStatus());
+      throw error;
+    }
   }
 
   private async handleOpenAIInteraction(
@@ -117,7 +164,10 @@ export class Agent extends EventEmitter {
     if (onStream) {
       const stream = await this.openaiClient.chat.completions.create({
         model: this.model,
-        messages: [{ role: 'user', content: input }],
+        messages: [
+          { role: 'system', content: this.role },
+          { role: 'user', content: input }
+        ],
         tools,
         stream: true
       });
@@ -135,7 +185,10 @@ export class Agent extends EventEmitter {
 
     const completion = await this.openaiClient.chat.completions.create({
       model: this.model,
-      messages: [{ role: 'user', content: input }],
+      messages: [
+        { role: 'system', content: this.role },
+        { role: 'user', content: input }
+      ],
       tools,
       stream: false
     });
@@ -155,11 +208,14 @@ export class Agent extends EventEmitter {
   ): Promise<LLMResponse> {
     if (!this.anthropicClient) throw new Error('Anthropic client not initialized');
 
+    const systemMessage = `\n\nSystem: ${this.role}\n\n`;
+    const fullInput = systemMessage + input;
+
     if (onStream) {
       const stream = await this.anthropicClient.messages.create({
         model: this.model,
         max_tokens: 1024,
-        messages: [{ role: 'user', content: input }],
+        messages: [{ role: 'user', content: fullInput }],
         stream: true
       });
 
@@ -179,7 +235,7 @@ export class Agent extends EventEmitter {
     const response = await this.anthropicClient.messages.create({
       model: this.model,
       max_tokens: 1024,
-      messages: [{ role: 'user', content: input }],
+      messages: [{ role: 'user', content: fullInput }],
       stream: false
     });
 
@@ -189,7 +245,6 @@ export class Agent extends EventEmitter {
     };
   }
 
-  // Utility methods
   public getId(): string {
     return this.id;
   }
@@ -200,5 +255,9 @@ export class Agent extends EventEmitter {
 
   public getProvider(): string {
     return this.provider;
+  }
+
+  public getRole(): string {
+    return this.role;
   }
 }

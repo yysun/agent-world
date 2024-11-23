@@ -98,10 +98,18 @@ Available commands:
   list                     - List all active agents
   kill <name>             - Terminate an agent by name
   ask <name> <msg>        - Ask a question to an agent by name
-  status <name>           - Show agent status by name
+  status <name>           - Show agent status and memory by name
   help                    - Show this help message
   exit                    - Exit the program
     `);
+  }
+
+  private async askForRole(): Promise<string> {
+    return new Promise((resolve) => {
+      this.rl.question('Enter role (press Enter for default "AI assistant"): ', (role) => {
+        resolve(role.trim() || 'AI assistant');
+      });
+    });
   }
 
   private async spawnAgent(args: string[]): Promise<void> {
@@ -116,16 +124,23 @@ Available commands:
       return;
     }
 
+    const role = await this.askForRole();
+
     const agentConfig: AgentConfig = {
       id: uuidv4(),
       name,
       provider: provider as 'openai' | 'anthropic',
       model: provider === 'openai' ? config.openai.defaultModel : config.anthropic.defaultModel,
-      apiKey: provider === 'openai' ? config.openai.apiKey : config.anthropic.apiKey
+      role,
+      status: 'idle',
+      lastActive: new Date()
     };
 
+    // Get the appropriate API key
+    const apiKey = provider === 'openai' ? config.openai.apiKey : config.anthropic.apiKey;
+
     try {
-      const agent = await this.world.spawnAgent(agentConfig);
+      const agent = await this.world.spawnAgent(agentConfig, apiKey);
       console.log(`Agent spawned successfully! ID: ${agent.getId()}`);
     } catch (error) {
       console.error('Failed to spawn agent:', error instanceof Error ? error.message : 'Unknown error');
@@ -145,6 +160,7 @@ Available commands:
       console.log(`- ${agent.getName()} (${id})`);
       console.log(`  Status: ${status.status}`);
       console.log(`  Provider: ${agent.getProvider()}`);
+      console.log(`  Role: ${agent.getRole()}`);
       console.log(`  Last Active: ${status.lastActive.toISOString()}`);
       console.log();
     }
@@ -203,9 +219,15 @@ Available commands:
     }
 
     try {
-      const status = await this.world.getAgentState(agent.getId());
+      const worldState = await this.world.getAgentState(agent.getId());
+      const agentStatus = agent.getStatus();
+
       console.log('\nAgent Status:');
-      console.log(JSON.stringify(status, null, 2));
+      console.log(JSON.stringify({
+        ...agentStatus,
+        status: worldState.status,
+        lastActive: worldState.lastActive
+      }, null, 2));
     } catch (error) {
       console.error('Failed to get agent status:', error instanceof Error ? error.message : 'Unknown error');
     }

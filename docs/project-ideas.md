@@ -21,3 +21,18 @@ Build an AI agent world application that has the following ideas:
 - [ ] Use Node.js EventEmitter to handle agent events and enable better inter-agent communication
 - [ ] Use logging libraries like winston for structured logging
 - [ ] Create a simple CLI for the agent to interact with the world
+
+
+
+- [ ] agenta should have a JSON file to save long term memory 
+- [ ] use agent name instead of id to name the agent JSON file, make file name safe to file system
+- [ ] don't save api key to the agent JSON file
+- [ ] agents should update memories after each interaction:
+    - [ ] save their long term memory to JSON file 
+    - [ ] update short memory in running code memory, but not save it to JSON file
+- [ ] the status command should show the agent's current status and memory
+
+- [ ] add a `role` property to agent 
+    - [ ] use `role` to define the system message to LLM
+    - [ ] when creating a new agnet in CLI, ask for role
+    - [ ] use 'You are an AI assistent.' as the default

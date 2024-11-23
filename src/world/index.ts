@@ -3,8 +3,9 @@ import { Worker } from 'worker_threads';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Agent } from '../agent/base';
-import { AgentConfig, WorldConfig, AgentState } from '../types';
-import { logger, worldConfig } from '../config';
+import { AgentConfig, WorldConfig } from '../types';
+import { logger, worldConfig, config } from '../config';
+import { sanitizeFilename } from '../utils';
 
 export class World extends EventEmitter {
   private agents: Map<string, Agent>;
@@ -39,58 +40,106 @@ export class World extends EventEmitter {
 
       for (const file of agentFiles) {
         const content = await fs.readFile(path.join(this.persistPath, file), 'utf-8');
-        const config: AgentConfig = JSON.parse(content);
-        await this.spawnAgent(config);
+        const agentConfig: AgentConfig = JSON.parse(content);
+        // Get the appropriate API key from the global config
+        const apiKey = agentConfig.provider === 'openai' 
+          ? config.openai.apiKey 
+          : config.anthropic.apiKey;
+        await this.spawnAgent(agentConfig, apiKey);
       }
     } catch (error) {
       logger.error('Failed to load persisted agents:', error);
     }
   }
 
-  public async spawnAgent(config: AgentConfig): Promise<Agent> {
+  public async spawnAgent(agentConfig: AgentConfig, apiKey: string): Promise<Agent> {
     if (this.agents.size >= this.config.maxAgents) {
       throw new Error(`Maximum number of agents (${this.config.maxAgents}) reached`);
     }
 
-    if (this.agents.has(config.id)) {
-      throw new Error(`Agent with ID ${config.id} already exists`);
+    if (this.agents.has(agentConfig.id)) {
+      throw new Error(`Agent with ID ${agentConfig.id} already exists`);
     }
 
     try {
-      // Create and initialize the agent
-      const agent = new Agent(config);
-      this.agents.set(config.id, agent);
+      // Create and initialize the agent with the API key
+      const agent = new Agent(agentConfig, apiKey);
+      this.agents.set(agentConfig.id, agent);
+
+      // Create a clean config object for persistence (ensures no apiKey is included)
+      const persistConfig: AgentConfig = {
+        id: agentConfig.id,
+        name: agentConfig.name,
+        role: agentConfig.role,
+        provider: agentConfig.provider,
+        model: agentConfig.model,
+        status: agentConfig.status,
+        lastActive: agentConfig.lastActive
+      };
 
       // Persist agent configuration
-      await this.persistAgentConfig(config);
+      await this.persistAgentConfig(persistConfig);
 
       // Set up event listeners
       this.setupAgentEventListeners(agent);
 
       // Spawn worker thread for the agent
-      await this.spawnWorkerThread(config.id);
+      await this.spawnWorkerThread(agentConfig.id);
 
-      logger.info(`Agent ${config.id} spawned successfully`);
-      this.emit('agentSpawned', { agentId: config.id });
+      logger.info(`Agent ${agentConfig.id} spawned successfully`);
+      this.emit('agentSpawned', { agentId: agentConfig.id });
 
       return agent;
     } catch (error) {
-      logger.error(`Failed to spawn agent ${config.id}:`, error);
+      logger.error(`Failed to spawn agent ${agentConfig.id}:`, error);
       throw error;
     }
   }
 
   private async persistAgentConfig(config: AgentConfig): Promise<void> {
-    const filePath = path.join(this.persistPath, `${config.id}.agent.json`);
-    await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+    try {
+      const safeFilename = sanitizeFilename(config.name);
+      const filePath = path.join(this.persistPath, `${safeFilename}.agent.json`);
+      
+      // Get the current memory state if the agent exists
+      const agent = this.agents.get(config.id);
+      if (agent) {
+        const memory = agent.getMemory();
+        const persistData = {
+          ...config,
+          memory: {
+            longTerm: Object.fromEntries(memory.longTerm)
+          }
+        };
+        await fs.writeFile(filePath, JSON.stringify(persistData, null, 2));
+      } else {
+        // If agent doesn't exist yet (during initial spawn), just save the config
+        await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+      }
+      
+      logger.info(`Persisted agent ${config.name} configuration and memory`);
+    } catch (error) {
+      logger.error(`Failed to persist agent ${config.name} configuration:`, error);
+      throw error;
+    }
   }
 
   private setupAgentEventListeners(agent: Agent): void {
-    agent.on('memoryUpdate', (data) => {
+    // Listen for memory updates
+    agent.on('memoryUpdate', async (data) => {
       this.emit('agentMemoryUpdate', { agentId: agent.getId(), ...data });
+      
+      // Persist the updated state when long-term memory changes
+      if (data.type === 'longTerm') {
+        await this.persistAgentConfig(agent.getStatus());
+      }
     });
 
-    // Add more event listeners as needed
+    // Listen for state updates (status changes, interactions, etc.)
+    agent.on('stateUpdate', async (status: AgentConfig) => {
+      this.emit('agentStateUpdate', { agentId: agent.getId(), status });
+      await this.persistAgentConfig(status);
+    });
   }
 
   private async spawnWorkerThread(agentId: string): Promise<void> {
@@ -148,13 +197,12 @@ export class World extends EventEmitter {
       }
 
       // Remove agent
+      const safeFilename = sanitizeFilename(agent.getName());
+      const configPath = path.join(this.persistPath, `${safeFilename}.agent.json`);
+      await fs.unlink(configPath);
       this.agents.delete(agentId);
 
-      // Remove persisted configuration
-      const configPath = path.join(this.persistPath, `${agentId}.agent.json`);
-      await fs.unlink(configPath);
-
-      logger.info(`Agent ${agentId} killed successfully`);
+      logger.info(`Agent ${agent.getName()} killed successfully`);
       this.emit('agentKilled', { agentId });
     } catch (error) {
       logger.error(`Failed to kill agent ${agentId}:`, error);
@@ -162,7 +210,15 @@ export class World extends EventEmitter {
     }
   }
 
-  public async getAgentState(agentId: string): Promise<AgentState> {
+  public getAgentState(agentId: string): {
+    id: string;
+    status: 'idle' | 'busy' | 'error';
+    lastActive: Date;
+    memory: {
+      shortTerm: Map<string, any>;
+      longTerm: Map<string, any>;
+    };
+  } {
     const agent = this.agents.get(agentId);
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
