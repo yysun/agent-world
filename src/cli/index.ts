@@ -94,7 +94,7 @@ export class CLI {
   private showHelp(): void {
     console.log(`
 Available commands:
-  spawn <name> <provider>  - Create a new agent (provider: openai|anthropic)
+  spawn <name> [provider]  - Create a new agent (provider: openai|anthropic, default: anthropic)
   list                     - List all active agents
   kill <agentId>          - Terminate an agent
   ask <agentId> <msg>     - Ask a question to an agent
@@ -105,12 +105,12 @@ Available commands:
   }
 
   private async spawnAgent(args: string[]): Promise<void> {
-    if (args.length < 2) {
-      console.log('Usage: spawn <name> <provider>');
+    if (args.length < 1) {
+      console.log('Usage: spawn <name> [provider]');
       return;
     }
 
-    const [name, provider] = args;
+    const [name, provider = 'anthropic'] = args;
     if (!['openai', 'anthropic'].includes(provider)) {
       console.log('Provider must be either "openai" or "anthropic"');
       return;
