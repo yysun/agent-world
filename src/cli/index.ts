@@ -48,7 +48,7 @@ export class CLI {
         this.showHelp();
         break;
 
-      case 'spawn':
+      case 'new':
         await this.spawnAgent(args);
         break;
 
@@ -94,7 +94,7 @@ export class CLI {
   private showHelp(): void {
     console.log(`
 Available commands:
-  spawn <name> [provider]  - Create a new agent (provider: openai|anthropic, defaults to anthropic)
+  new <name> [provider]    - Create a new agent (provider: openai|anthropic, defaults to anthropic)
   list                     - List all active agents
   kill <name>             - Terminate an agent by name
   ask <name> <msg>        - Ask a question to an agent by name
@@ -106,7 +106,7 @@ Available commands:
 
   private async spawnAgent(args: string[]): Promise<void> {
     if (args.length < 1) {
-      console.log('Usage: spawn <name> [provider]');
+      console.log('Usage: new <name> [provider]');
       return;
     }
 
