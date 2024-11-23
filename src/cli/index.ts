@@ -58,7 +58,7 @@ export class CLI {
 
       case 'kill':
         if (args.length < 1) {
-          console.log('Usage: kill <agentId>');
+          console.log('Usage: kill <name>');
           return;
         }
         await this.killAgent(args[0]);
@@ -66,16 +66,16 @@ export class CLI {
 
       case 'ask':
         if (args.length < 2) {
-          console.log('Usage: ask <agentId> <message>');
+          console.log('Usage: ask <name> <message>');
           return;
         }
-        const [agentId, ...messageWords] = args;
-        await this.askAgent(agentId, messageWords.join(' '));
+        const [name, ...messageWords] = args;
+        await this.askAgent(name, messageWords.join(' '));
         break;
 
       case 'status':
         if (args.length < 1) {
-          console.log('Usage: status <agentId>');
+          console.log('Usage: status <name>');
           return;
         }
         await this.showAgentStatus(args[0]);
@@ -94,11 +94,11 @@ export class CLI {
   private showHelp(): void {
     console.log(`
 Available commands:
-  spawn <name> [provider]  - Create a new agent (provider: openai|anthropic, default: anthropic)
+  spawn <name> [provider]  - Create a new agent (provider: openai|anthropic, defaults to anthropic)
   list                     - List all active agents
-  kill <agentId>          - Terminate an agent
-  ask <agentId> <msg>     - Ask a question to an agent
-  status <agentId>        - Show agent status
+  kill <name>             - Terminate an agent by name
+  ask <name> <msg>        - Ask a question to an agent by name
+  status <name>           - Show agent status by name
   help                    - Show this help message
   exit                    - Exit the program
     `);
@@ -150,31 +150,40 @@ Available commands:
     }
   }
 
-  private async killAgent(agentId: string): Promise<void> {
+  private findAgentByName(name: string) {
+    const agents = this.world.getAgents();
+    return Array.from(agents.values()).find(agent => agent.getName() === name);
+  }
+
+  private async killAgent(name: string): Promise<void> {
+    const agent = this.findAgentByName(name);
+    if (!agent) {
+      console.log(`Agent "${name}" not found`);
+      return;
+    }
+
     try {
-      await this.world.killAgent(agentId);
-      console.log(`Agent ${agentId} terminated successfully`);
+      await this.world.killAgent(agent.getId());
+      console.log(`Agent "${name}" terminated successfully`);
     } catch (error) {
       console.error('Failed to kill agent:', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 
-  private async askAgent(agentId: string, message: string): Promise<void> {
-    const agents = this.world.getAgents();
-    const agent = agents.get(agentId);
-
+  private async askAgent(name: string, message: string): Promise<void> {
+    const agent = this.findAgentByName(name);
     if (!agent) {
-      console.log(`Agent ${agentId} not found`);
+      console.log(`Agent "${name}" not found`);
       return;
     }
 
     try {
-      console.log(`Asking agent ${agentId}...`);
+      console.log(`Asking agent "${name}"...`);
       const response = await agent.interact(message, (chunk) => {
         process.stdout.write(chunk);
       });
       console.log('\nResponse:', response.content);
-      
+
       if (response.toolCalls?.length) {
         console.log('\nTool Calls:');
         response.toolCalls.forEach(call => {
@@ -186,9 +195,15 @@ Available commands:
     }
   }
 
-  private async showAgentStatus(agentId: string): Promise<void> {
+  private async showAgentStatus(name: string): Promise<void> {
+    const agent = this.findAgentByName(name);
+    if (!agent) {
+      console.log(`Agent "${name}" not found`);
+      return;
+    }
+
     try {
-      const status = await this.world.getAgentState(agentId);
+      const status = await this.world.getAgentState(agent.getId());
       console.log('\nAgent Status:');
       console.log(JSON.stringify(status, null, 2));
     } catch (error) {
