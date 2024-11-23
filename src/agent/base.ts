@@ -4,6 +4,14 @@ import { EventEmitter } from 'events';
 import { AgentConfig, Tool, LLMResponse } from '../types';
 import { logger } from '../config';
 
+type ChatRole = 'system' | 'user' | 'assistant';
+
+interface ChatMessage {
+  role: ChatRole;
+  content: string;
+  timestamp: number;
+}
+
 export class Agent extends EventEmitter {
   private id: string;
   private name: string;
@@ -12,8 +20,8 @@ export class Agent extends EventEmitter {
   private model: string;
   private status: 'idle' | 'busy' | 'error';
   private lastActive: Date;
-  private shortTermMemory: Map<string, any>;
-  private longTermMemory: Map<string, any>;
+  private shortTermMemory: Map<string, ChatMessage>;
+  private longTermMemory: Map<string, ChatMessage>;
   private tools: Map<string, Tool>;
   private openaiClient?: OpenAI;
   private anthropicClient?: Anthropic;
@@ -44,6 +52,31 @@ export class Agent extends EventEmitter {
     }
   }
 
+  private addMessage(role: ChatRole, content: string): void {
+    const timestamp = Date.now();
+    const message: ChatMessage = {
+      role,
+      content,
+      timestamp
+    };
+
+    // Add to both memories
+    const key = `chat-${timestamp}`;
+    this.longTermMemory.set(key, message);
+    this.shortTermMemory.set(key, message);
+
+    // Keep only last 10 messages in short term memory
+    const shortTermKeys = Array.from(this.shortTermMemory.keys()).sort();
+    while (shortTermKeys.length > 10) {
+      const oldestKey = shortTermKeys.shift();
+      if (oldestKey) {
+        this.shortTermMemory.delete(oldestKey);
+      }
+    }
+
+    this.emit('memoryUpdate', { type: 'message', key, value: message });
+  }
+
   public setShortTermMemory(key: string, value: any): void {
     this.shortTermMemory.set(key, value);
     this.emit('memoryUpdate', { type: 'shortTerm', key, value });
@@ -62,7 +95,7 @@ export class Agent extends EventEmitter {
   }
 
   public getStatus(): AgentConfig {
-    this.lastActive = new Date(); // Update lastActive when status is checked
+    this.lastActive = new Date();
     return {
       id: this.id,
       name: this.name,
@@ -109,6 +142,9 @@ export class Agent extends EventEmitter {
     this.emit('stateUpdate', this.getStatus());
 
     try {
+      // Add user message to memory
+      this.addMessage('user', input);
+
       const response = await this.retryOperation(async () => {
         if (this.provider === 'openai') {
           return this.handleOpenAIInteraction(input, onStream);
@@ -117,18 +153,8 @@ export class Agent extends EventEmitter {
         }
       });
 
-      const timestamp = Date.now();
-      this.setShortTermMemory(`interaction-${timestamp}`, {
-        input,
-        response: response.content,
-        timestamp
-      });
-
-      this.setLongTermMemory(`summary-${timestamp}`, {
-        type: 'interaction',
-        summary: `Interaction about: ${input.substring(0, 50)}...`,
-        timestamp
-      });
+      // Add assistant response to memory
+      this.addMessage('assistant', response.content);
 
       this.status = 'idle';
       this.lastActive = new Date();

@@ -81,6 +81,14 @@ export class CLI {
         await this.showAgentStatus(args[0]);
         break;
 
+      case 'clear':
+        if (args.length < 1) {
+          console.log('Usage: clear <name>');
+          return;
+        }
+        await this.clearAgent(args[0]);
+        break;
+
       case 'exit':
       case 'quit':
         this.rl.close();
@@ -99,6 +107,7 @@ Available commands:
   kill <name>             - Terminate an agent by name
   ask <name> <msg>        - Ask a question to an agent by name
   status <name>           - Show agent status and memory by name
+  clear <name>            - Clear agent's short-term memory
   help                    - Show this help message
   exit                    - Exit the program
     `);
@@ -230,6 +239,23 @@ Available commands:
       }, null, 2));
     } catch (error) {
       console.error('Failed to get agent status:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
+
+  private async clearAgent(name: string): Promise<void> {
+    const agent = this.findAgentByName(name);
+    if (!agent) {
+      console.log(`Agent "${name}" not found`);
+      return;
+    }
+
+    try {
+      // Clear the short-term memory map
+      const memory = agent.getMemory();
+      memory.shortTerm.clear();
+      console.log(`Short-term memory cleared for agent "${name}"`);
+    } catch (error) {
+      console.error('Failed to clear agent:', error instanceof Error ? error.message : 'Unknown error');
     }
   }
 }
