@@ -4,40 +4,173 @@ import { logger, config } from '../config';
 import { AgentConfig } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
+const MAX_HISTORY = 1000;
+let commandHistory: string[] = [];
+let historyIndex = -1;
+
+function readInput(prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+
+    if (!stdin.isTTY) {
+      stdout.write(prompt);
+
+      const rl = readline.createInterface({
+        input: stdin,
+        output: stdout,
+        terminal: false
+      });
+
+      // Read a single line and resolve
+      rl.on('line', (line) => {
+        resolve(line);
+      });
+
+      rl.on('close', () => {
+        resolve('');
+      });
+
+      return;
+    }
+
+    // Configure stdin for interactive mode
+    stdin.setRawMode(true);
+    stdin.setEncoding('utf8');
+    stdin.resume();
+    readline.emitKeypressEvents(stdin);
+
+    let input = '';
+    let cursorPos = 0;
+    let tempInput = ''; // Store original input when navigating history
+
+    stdout.write(prompt);
+
+    function setInput(newInput: string, newCursorPos?: number) {
+      input = newInput;
+      cursorPos = newCursorPos ?? input.length;
+      redrawLine();
+    }
+
+    function navigateHistory(direction: 'up' | 'down') {
+      if (commandHistory.length === 0) return;
+
+      if (historyIndex === -1) {
+        tempInput = input; // Save current input before navigating
+      }
+
+      if (direction === 'up') {
+        historyIndex = historyIndex < commandHistory.length - 1 ? historyIndex + 1 : historyIndex;
+      } else {
+        historyIndex = historyIndex > -1 ? historyIndex - 1 : -1;
+      }
+
+      setInput(historyIndex === -1 ? tempInput : commandHistory[historyIndex]);
+    }
+
+    function handleKeypress(_str: string, key: readline.Key) {
+      if (key.ctrl && key.name === 'c') {
+        stdout.write('\n');
+        process.exit();
+      } else if (key.name === 'return') {
+        stdout.write('\n');
+        cleanup();
+        if (input.trim()) {
+          commandHistory.unshift(input);
+          if (commandHistory.length > MAX_HISTORY) {
+            commandHistory.pop();
+          }
+        }
+        historyIndex = -1;
+        resolve(input);
+      } else if (key.name === 'backspace') {
+        if (cursorPos > 0) {
+          input = input.slice(0, cursorPos - 1) + input.slice(cursorPos);
+          cursorPos--;
+          redrawLine();
+        }
+      } else if (key.name === 'left') {
+        if (cursorPos > 0) {
+          cursorPos--;
+          stdout.cursorTo(prompt.length + cursorPos);
+        }
+      } else if (key.name === 'right') {
+        if (cursorPos < input.length) {
+          cursorPos++;
+          stdout.cursorTo(prompt.length + cursorPos);
+        }
+      } else if (key.name === 'up') {
+        navigateHistory('up');
+      } else if (key.name === 'down') {
+        navigateHistory('down');
+      } else if (key.name === 'home') {
+        cursorPos = 0;
+        stdout.cursorTo(prompt.length);
+      } else if (key.name === 'end') {
+        cursorPos = input.length;
+        stdout.cursorTo(prompt.length + cursorPos);
+      } else if (!key.ctrl && !key.meta && key.sequence) {
+        input = input.slice(0, cursorPos) + key.sequence + input.slice(cursorPos);
+        cursorPos += key.sequence.length;
+        redrawLine();
+      }
+    }
+
+    function redrawLine() {
+      stdout.cursorTo(prompt.length);
+      stdout.clearLine(1);
+      stdout.write(input);
+      stdout.cursorTo(prompt.length + cursorPos);
+    }
+
+    function cleanup() {
+      if (stdin.isTTY) {
+        stdin.setRawMode(false);
+      }
+      stdin.removeListener('keypress', handleKeypress);
+      stdin.pause();
+    }
+
+    // Add error handler
+    stdin.on('error', (err) => {
+      console.error('stdin error:', err);
+      cleanup();
+      resolve(input);
+    });
+
+    stdin.on('keypress', handleKeypress);
+  });
+}
+
 export class CLI {
   private world: World;
-  private rl: readline.Interface;
+  private isRunning: boolean;
 
   constructor() {
     this.world = new World();
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: 'agent-world> '
-    });
+    this.isRunning = false;
   }
 
   public async start(): Promise<void> {
     console.log('Welcome to Agent World CLI!');
     console.log('Type "help" for available commands');
 
-    this.rl.prompt();
+    this.isRunning = true;
 
-    this.rl.on('line', async (line) => {
+    while (this.isRunning) {
       try {
-        await this.handleCommand(line.trim());
+        const input = await readInput('agent-world> ');
+        await this.handleCommand(input.trim());
       } catch (error) {
         logger.error('Error executing command:', error);
         console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
       }
-      this.rl.prompt();
-    });
+    }
+  }
 
-    this.rl.on('close', async () => {
-      console.log('\nShutting down Agent World...');
-      await this.world.shutdown();
-      process.exit(0);
-    });
+  private async askForRole(): Promise<string> {
+    const role = await readInput('Enter role (press Enter for default "AI assistant"): ');
+    return role.trim() || 'AI assistant';
   }
 
   private async handleCommand(input: string): Promise<void> {
@@ -71,7 +204,7 @@ export class CLI {
           console.log('Usage: ask [name] <message>');
           return;
         }
-        
+
         // Check if first argument could be an agent name
         const agent = this.findAgentByName(args[0]);
         if (agent) {
@@ -107,11 +240,13 @@ export class CLI {
 
       case 'exit':
       case 'quit':
-        this.rl.close();
+        await this.shutdown();
         break;
 
       default:
-        console.log('Unknown command. Type "help" for available commands.');
+        if (input) {
+          console.log('Unknown command. Type "help" for available commands.');
+        }
     }
   }
 
@@ -127,14 +262,6 @@ Available commands:
   help                     - Show this help message
   exit                     - Exit the program
     `);
-  }
-
-  private async askForRole(): Promise<string> {
-    return new Promise((resolve) => {
-      this.rl.question('Enter role (press Enter for default "AI assistant"): ', (role) => {
-        resolve(role.trim() || 'AI assistant');
-      });
-    });
   }
 
   private async spawnAgent(args: string[]): Promise<void> {
@@ -304,7 +431,7 @@ Available commands:
           lastActive: worldState.lastActive
         }, null, 2));
       } catch (error) {
-        console.error(`Failed to get status for agent ${agent.getName()}:`, 
+        console.error(`Failed to get status for agent ${agent.getName()}:`,
           error instanceof Error ? error.message : 'Unknown error');
       }
       console.log('='.repeat(40));
@@ -341,10 +468,17 @@ Available commands:
         memory.shortTerm.clear();
         console.log(`Short-term memory cleared for agent "${agent.getName()}"`);
       } catch (error) {
-        console.error(`Failed to clear agent ${agent.getName()}:`, 
+        console.error(`Failed to clear agent ${agent.getName()}:`,
           error instanceof Error ? error.message : 'Unknown error');
       }
     }
+  }
+
+  private async shutdown(): Promise<void> {
+    this.isRunning = false;
+    console.log('\nShutting down Agent World...');
+    await this.world.shutdown();
+    process.exit(0);
   }
 }
 
