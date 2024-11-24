@@ -1,3 +1,9 @@
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
 export interface AgentConfig {
   id: string;
   name: string;
@@ -6,6 +12,9 @@ export interface AgentConfig {
   model: string;
   status: 'idle' | 'busy' | 'error';
   lastActive: Date;
+  memory?: {
+    longTerm?: Record<string, ChatMessage>;
+  };
 }
 
 export interface Tool {

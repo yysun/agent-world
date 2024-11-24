@@ -1,16 +1,8 @@
 import { OpenAI } from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { EventEmitter } from 'events';
-import { AgentConfig, Tool, LLMResponse } from '../types';
+import { AgentConfig, Tool, LLMResponse, ChatMessage } from '../types';
 import { logger } from '../config';
-
-type ChatRole = 'system' | 'user' | 'assistant';
-
-interface ChatMessage {
-  role: ChatRole;
-  content: string;
-  timestamp: number;
-}
 
 export class Agent extends EventEmitter {
   private id: string;
@@ -37,7 +29,9 @@ export class Agent extends EventEmitter {
     this.status = config.status || 'idle';
     this.lastActive = config.lastActive || new Date();
     this.shortTermMemory = new Map();
-    this.longTermMemory = new Map();
+    this.longTermMemory = config.memory?.longTerm 
+      ? new Map(Object.entries(config.memory.longTerm))
+      : new Map();
     this.tools = new Map();
 
     // Initialize the appropriate client based on provider
@@ -52,7 +46,7 @@ export class Agent extends EventEmitter {
     }
   }
 
-  private addMessage(role: ChatRole, content: string): void {
+  private addMessage(role: ChatMessage['role'], content: string): void {
     const timestamp = Date.now();
     const message: ChatMessage = {
       role,
@@ -103,7 +97,10 @@ export class Agent extends EventEmitter {
       provider: this.provider,
       model: this.model,
       status: this.status,
-      lastActive: this.lastActive
+      lastActive: this.lastActive,
+      memory: {
+        longTerm: Object.fromEntries(this.longTermMemory)
+      }
     };
   }
 
