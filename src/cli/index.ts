@@ -41,9 +41,11 @@ export class CLI {
   }
 
   private async handleCommand(input: string): Promise<void> {
-    const [command, ...args] = input.split(' ');
+    // Parse command respecting quotes
+    const args = input.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(arg => arg.replace(/^"|"$/g, '')) || [];
+    const command = args.shift()?.toLowerCase() || '';
 
-    switch (command.toLowerCase()) {
+    switch (command) {
       case 'help':
         this.showHelp();
         break;
@@ -69,30 +71,38 @@ export class CLI {
           console.log('Usage: ask [name] <message>');
           return;
         }
-        if (args.length === 1) {
-          // If only one argument, it's the message to all agents
-          await this.askAllAgents(args[0]);
+        
+        // Check if first argument could be an agent name
+        const agent = this.findAgentByName(args[0]);
+        if (agent) {
+          // If agent exists, first arg is name, rest is message
+          const message = args.slice(1).join(' ');
+          if (!message) {
+            console.log('Usage: ask [name] <message>');
+            return;
+          }
+          await this.askAgent(args[0], message);
         } else {
-          // First argument is name, rest is message
-          const [name, ...messageWords] = args;
-          await this.askAgent(name, messageWords.join(' '));
+          // No agent name provided or invalid agent, treat entire args as message
+          const message = args.join(' ');
+          await this.askAllAgents(message);
         }
         break;
 
       case 'status':
-        if (args.length < 1) {
-          console.log('Usage: status <name>');
-          return;
+        if (args.length === 0) {
+          await this.showAllAgentsStatus();
+        } else {
+          await this.showAgentStatus(args[0]);
         }
-        await this.showAgentStatus(args[0]);
         break;
 
       case 'clear':
-        if (args.length < 1) {
-          console.log('Usage: clear <name>');
-          return;
+        if (args.length === 0) {
+          await this.clearAllAgents();
+        } else {
+          await this.clearAgent(args[0]);
         }
-        await this.clearAgent(args[0]);
         break;
 
       case 'exit':
@@ -110,12 +120,12 @@ export class CLI {
 Available commands:
   new <name> [provider]    - Create a new agent (provider: openai|anthropic, defaults to anthropic)
   list                     - List all active agents
-  kill <name>             - Terminate an agent by name
-  ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
-  status <name>           - Show agent status and memory by name
-  clear <name>            - Clear agent's short-term memory
-  help                    - Show this help message
-  exit                    - Exit the program
+  kill <name>              - Terminate an agent by name
+  ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
+  status [name]            - Show agent status and memory (or all agents if no name specified)
+  clear [name]             - Clear agent's short-term memory (or all agents if no name specified)
+  help                     - Show this help message
+  exit                     - Exit the program
     `);
   }
 
@@ -275,6 +285,32 @@ Available commands:
     }
   }
 
+  private async showAllAgentsStatus(): Promise<void> {
+    const agents = this.world.getAgents();
+    if (agents.size === 0) {
+      console.log('No active agents');
+      return;
+    }
+
+    console.log('\nAll Agents Status:');
+    for (const agent of agents.values()) {
+      console.log(`\n=== ${agent.getName()} ===`);
+      try {
+        const worldState = await this.world.getAgentState(agent.getId());
+        const agentStatus = agent.getStatus();
+        console.log(JSON.stringify({
+          ...agentStatus,
+          status: worldState.status,
+          lastActive: worldState.lastActive
+        }, null, 2));
+      } catch (error) {
+        console.error(`Failed to get status for agent ${agent.getName()}:`, 
+          error instanceof Error ? error.message : 'Unknown error');
+      }
+      console.log('='.repeat(40));
+    }
+  }
+
   private async clearAgent(name: string): Promise<void> {
     const agent = this.findAgentByName(name);
     if (!agent) {
@@ -289,6 +325,25 @@ Available commands:
       console.log(`Short-term memory cleared for agent "${name}"`);
     } catch (error) {
       console.error('Failed to clear agent:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
+
+  private async clearAllAgents(): Promise<void> {
+    const agents = this.world.getAgents();
+    if (agents.size === 0) {
+      console.log('No active agents to clear');
+      return;
+    }
+
+    for (const agent of agents.values()) {
+      try {
+        const memory = agent.getMemory();
+        memory.shortTerm.clear();
+        console.log(`Short-term memory cleared for agent "${agent.getName()}"`);
+      } catch (error) {
+        console.error(`Failed to clear agent ${agent.getName()}:`, 
+          error instanceof Error ? error.message : 'Unknown error');
+      }
     }
   }
 }
