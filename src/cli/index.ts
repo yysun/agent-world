@@ -276,6 +276,12 @@ Available commands:
       return;
     }
 
+    // Check if an agent with this name already exists
+    if (this.findAgentByName(name)) {
+      console.log(`An agent named "${name}" already exists. Please choose a different name.`);
+      return;
+    }
+
     const role = await this.askForRole();
 
     const agentConfig: AgentConfig = {
