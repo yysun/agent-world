@@ -153,7 +153,8 @@ export class CLI {
 
   public async start(): Promise<void> {
     console.log('Welcome to Agent World CLI!');
-    console.log('Type "help" for available commands');
+    // console.log('Type "help" for available commands');
+    await this.handleCommand("/help")
 
     this.isRunning = true;
 
@@ -174,9 +175,17 @@ export class CLI {
   }
 
   private async handleCommand(input: string): Promise<void> {
-    // Parse command respecting quotes
+    // If input doesn't start with /, treat as message to all agents
+    if (!input.startsWith('/')) {
+      if (input.trim()) {
+        await this.askAllAgents(input);
+      }
+      return;
+    }
+
+    // Parse command respecting quotes (remove leading slash)
     const args = input.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(arg => arg.replace(/^"|"$/g, '')) || [];
-    const command = args.shift()?.toLowerCase() || '';
+    const command = args.shift()?.toLowerCase().replace(/^\//, '') || '';
 
     switch (command) {
       case 'help':
@@ -245,7 +254,7 @@ export class CLI {
 
       default:
         if (input) {
-          console.log('Unknown command. Type "help" for available commands.');
+          console.log('Unknown command. Type "/help" for available commands, or type without "/" to talk to all agents.');
         }
     }
   }
@@ -253,14 +262,14 @@ export class CLI {
   private showHelp(): void {
     console.log(`
 Available commands:
-  new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
-  list                     - List all active agents
-  kill <name>              - Terminate an agent by name
-  ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
-  status [name]            - Show agent status and memory (or all agents if no name specified)
-  clear [name]             - Clear agent's short-term memory (or all agents if no name specified)
-  help                     - Show this help message
-  exit                     - Exit the program
+  /new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
+  /list                     - List all active agents
+  /kill <name>              - Terminate an agent by name
+  /ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
+  /status [name]            - Show agent status and memory (or all agents if no name specified)
+  /clear [name]             - Clear agent's short-term memory (or all agents if no name specified)
+  /help                     - Show this help message
+  /exit                     - Exit the program
     `);
   }
 
@@ -363,7 +372,7 @@ Available commands:
       console.log('\nResponse:', response.content);
 
       if (response.toolCalls?.length) {
-        console.log('\nTool Calls:');
+        // console.log('\nTool Calls:');
         response.toolCalls.forEach(call => {
           console.log(`- ${call.name}:`, call.arguments);
         });
@@ -387,7 +396,7 @@ Available commands:
         const response = await agent.interact(message, (chunk) => {
           process.stdout.write(chunk);
         });
-        console.log('\nTool Calls:');
+        // console.log('\nTool Calls:');
         if (response.toolCalls?.length) {
           response.toolCalls.forEach(call => {
             console.log(`- ${call.name}:`, call.arguments);
