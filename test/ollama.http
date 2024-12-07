@@ -1,0 +1,52 @@
+### Test Ollama Chat API - Single message
+POST http://localhost:11434/api/chat
+Content-Type: application/json
+
+{
+    "model": "llama3:latest",
+    "messages": [
+        {
+            "role": "user",
+            "content": "What is the capital of France?"
+        }
+    ],
+    "stream": false
+}
+
+### Test Ollama Chat API - Conversation
+POST http://localhost:11434/api/chat
+Content-Type: application/json
+
+{
+    "model": "llama3:latest",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Hello, how are you?"
+        },
+        {
+            "role": "assistant",
+            "content": "I'm doing well, thank you! How can I help you today?"
+        },
+        {
+            "role": "user",
+            "content": "Tell me a brief joke."
+        }
+    ],
+    "stream": false
+}
+
+### Test Ollama Chat API - With streaming
+POST http://localhost:11434/api/chat
+Content-Type: application/json
+
+{
+    "model": "llama3:latest",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Write a short poem about coding."
+        }
+    ],
+    "stream": true
+}

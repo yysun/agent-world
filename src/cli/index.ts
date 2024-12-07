@@ -253,7 +253,7 @@ export class CLI {
   private showHelp(): void {
     console.log(`
 Available commands:
-  new <name> [provider]    - Create a new agent (provider: openai|anthropic, defaults to anthropic)
+  new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
   list                     - List all active agents
   kill <name>              - Terminate an agent by name
   ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
@@ -270,9 +270,9 @@ Available commands:
       return;
     }
 
-    const [name, provider = 'anthropic'] = args;
-    if (!['openai', 'anthropic'].includes(provider)) {
-      console.log('Provider must be either "openai" or "anthropic"');
+    const [name, provider = 'ollama'] = args;
+    if (!['openai', 'anthropic', 'ollama'].includes(provider)) {
+      console.log('Provider must be either "openai", "anthropic", or "ollama"');
       return;
     }
 
@@ -287,15 +287,19 @@ Available commands:
     const agentConfig: AgentConfig = {
       id: uuidv4(),
       name,
-      provider: provider as 'openai' | 'anthropic',
-      model: provider === 'openai' ? config.openai.defaultModel : config.anthropic.defaultModel,
+      provider: provider as 'openai' | 'anthropic' | 'ollama',
+      model: provider === 'openai' ? config.openai.defaultModel :
+             provider === 'anthropic' ? config.anthropic.defaultModel :
+             config.ollama.defaultModel,
       role,
       status: 'idle',
       lastActive: new Date()
     };
 
-    // Get the appropriate API key
-    const apiKey = provider === 'openai' ? config.openai.apiKey : config.anthropic.apiKey;
+    // Get the appropriate API key - note that Ollama doesn't need one
+    const apiKey = provider === 'openai' ? config.openai.apiKey :
+                  provider === 'anthropic' ? config.anthropic.apiKey :
+                  '';
 
     try {
       const agent = await this.world.spawnAgent(agentConfig, apiKey);

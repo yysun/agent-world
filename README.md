@@ -7,7 +7,7 @@ A TypeScript-based AI agent world application that allows you to create, manage,
 ### Agents
 - ✅ AI agents using TypeScript and Node.js
 - ✅ Multiple agent instances with unique configurations
-- ✅ OpenAI and Anthropic API integration
+- ✅ OpenAI, Anthropic, Ollama API integration
 - ✅ Streaming support for real-time responses
 - ✅ Short-term and long-term memory management
 - ✅ Function calling capabilities

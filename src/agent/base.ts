@@ -1,22 +1,19 @@
-import { OpenAI } from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
 import { EventEmitter } from 'events';
-import { AgentConfig, Tool, LLMResponse, ChatMessage } from '../types';
+import { AgentConfig, Tool, LLMResponse, ChatMessage, LLMProvider } from '../types';
 import { logger } from '../config';
+import { LLMFactory } from '../llm/base';
 
 export class Agent extends EventEmitter {
   private id: string;
   private name: string;
   private role: string;
-  private provider: 'openai' | 'anthropic';
-  private model: string;
+  private providerType: AgentConfig['provider'];
+  private provider?: LLMProvider;
   private status: 'idle' | 'busy' | 'error';
   private lastActive: Date;
   private shortTermMemory: Map<string, ChatMessage>;
   private longTermMemory: Map<string, ChatMessage>;
   private tools: Map<string, Tool>;
-  private openaiClient?: OpenAI;
-  private anthropicClient?: Anthropic;
   private maxRetries: number = 3;
 
   constructor(config: AgentConfig, apiKey: string) {
@@ -24,8 +21,7 @@ export class Agent extends EventEmitter {
     this.id = config.id;
     this.name = config.name;
     this.role = config.role;
-    this.provider = config.provider;
-    this.model = config.model;
+    this.providerType = config.provider;
     this.status = config.status || 'idle';
     this.lastActive = config.lastActive || new Date();
     this.shortTermMemory = new Map();
@@ -34,15 +30,28 @@ export class Agent extends EventEmitter {
       : new Map();
     this.tools = new Map();
 
-    // Initialize the appropriate client based on provider
-    if (this.provider === 'openai') {
-      this.openaiClient = new OpenAI({
-        apiKey
-      });
-    } else {
-      this.anthropicClient = new Anthropic({
-        apiKey
-      });
+    // Initialize the provider asynchronously
+    this.initializeProvider(config.provider, apiKey, config.model);
+  }
+
+  private async initializeProvider(
+    provider: AgentConfig['provider'],
+    apiKey: string,
+    model: string
+  ): Promise<void> {
+    try {
+      this.provider = await LLMFactory.createProvider(provider, apiKey, model);
+      
+      // Register tools if provider supports them
+      if ('registerTool' in this.provider) {
+        this.tools.forEach(tool => {
+          (this.provider as any).registerTool(tool);
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to initialize provider:', error);
+      this.status = 'error';
+      throw error;
     }
   }
 
@@ -94,8 +103,8 @@ export class Agent extends EventEmitter {
       id: this.id,
       name: this.name,
       role: this.role,
-      provider: this.provider,
-      model: this.model,
+      provider: this.providerType,
+      model: this.provider?.model || '',
       status: this.status,
       lastActive: this.lastActive,
       memory: {
@@ -106,6 +115,10 @@ export class Agent extends EventEmitter {
 
   public registerTool(tool: Tool): void {
     this.tools.set(tool.name, tool);
+    // Register tool with provider if supported
+    if (this.provider && 'registerTool' in this.provider) {
+      (this.provider as any).registerTool(tool);
+    }
     logger.info(`Tool ${tool.name} registered for agent ${this.name}`);
   }
 
@@ -134,6 +147,10 @@ export class Agent extends EventEmitter {
     input: string,
     onStream?: (chunk: string) => void
   ): Promise<LLMResponse> {
+    if (!this.provider) {
+      throw new Error('Provider not initialized');
+    }
+
     this.status = 'busy';
     this.lastActive = new Date();
     this.emit('stateUpdate', this.getStatus());
@@ -142,12 +159,14 @@ export class Agent extends EventEmitter {
       // Add user message to memory
       this.addMessage('user', input);
 
+      // Get recent messages including system role
+      const messages: ChatMessage[] = [
+        { role: 'system', content: this.role, timestamp: Date.now() },
+        ...Array.from(this.shortTermMemory.values())
+      ];
+
       const response = await this.retryOperation(async () => {
-        if (this.provider === 'openai') {
-          return this.handleOpenAIInteraction(input, onStream);
-        } else {
-          return this.handleAnthropicInteraction(input, onStream);
-        }
+        return this.provider!.chat(messages, onStream);
       });
 
       // Add assistant response to memory
@@ -166,108 +185,6 @@ export class Agent extends EventEmitter {
     }
   }
 
-  private async handleOpenAIInteraction(
-    input: string,
-    onStream?: (chunk: string) => void
-  ): Promise<LLMResponse> {
-    if (!this.openaiClient) throw new Error('OpenAI client not initialized');
-
-    const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = Array.from(this.tools.values()).map(tool => ({
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: {
-          type: 'object',
-          properties: {}
-        }
-      }
-    }));
-
-    if (onStream) {
-      const stream = await this.openaiClient.chat.completions.create({
-        model: this.model,
-        messages: [
-          { role: 'system', content: this.role },
-          { role: 'user', content: input }
-        ],
-        tools,
-        stream: true
-      });
-
-      let fullContent = '';
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          fullContent += content;
-          onStream(content);
-        }
-      }
-      return { content: fullContent };
-    }
-
-    const completion = await this.openaiClient.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: 'system', content: this.role },
-        { role: 'user', content: input }
-      ],
-      tools,
-      stream: false
-    });
-
-    return {
-      content: completion.choices[0]?.message?.content || '',
-      toolCalls: completion.choices[0]?.message?.tool_calls?.map(call => ({
-        name: call.function.name,
-        arguments: JSON.parse(call.function.arguments)
-      }))
-    };
-  }
-
-  private async handleAnthropicInteraction(
-    input: string,
-    onStream?: (chunk: string) => void
-  ): Promise<LLMResponse> {
-    if (!this.anthropicClient) throw new Error('Anthropic client not initialized');
-
-    const systemMessage = `\n\nSystem: ${this.role}\n\n`;
-    const fullInput = systemMessage + input;
-
-    if (onStream) {
-      const stream = await this.anthropicClient.messages.create({
-        model: this.model,
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: fullInput }],
-        stream: true
-      });
-
-      let fullContent = '';
-      for await (const chunk of stream) {
-        if (chunk.type === 'content_block_delta' && 'text' in chunk.delta) {
-          const content = chunk.delta.text;
-          if (content) {
-            fullContent += content;
-            onStream(content);
-          }
-        }
-      }
-      return { content: fullContent };
-    }
-
-    const response = await this.anthropicClient.messages.create({
-      model: this.model,
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: fullInput }],
-      stream: false
-    });
-
-    const textBlock = response.content.find(block => block.type === 'text');
-    return {
-      content: textBlock?.text || ''
-    };
-  }
-
   public getId(): string {
     return this.id;
   }
@@ -276,8 +193,8 @@ export class Agent extends EventEmitter {
     return this.name;
   }
 
-  public getProvider(): string {
-    return this.provider;
+  public getProvider(): AgentConfig['provider'] {
+    return this.providerType;
   }
 
   public getRole(): string {

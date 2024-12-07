@@ -48,5 +48,9 @@ export const config = {
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY!,
     defaultModel: process.env.ANTHROPIC_MODEL || 'claude-2.1'
+  },
+  ollama: {
+    defaultModel: process.env.OLLAMA_MODEL || 'llama3',
+    url: process.env.OLLAMA_URL || 'http://localhost:11434'
   }
 };
