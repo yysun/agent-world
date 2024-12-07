@@ -25,11 +25,38 @@ export class World extends EventEmitter {
   private async initialize(): Promise<void> {
     try {
       await fs.mkdir(this.persistPath, { recursive: true });
+      // First load agents from data folder
+      await this.loadDataAgents();
+      // Then load any persisted agents
       await this.loadPersistedAgents();
       logger.info('World initialized successfully');
     } catch (error) {
       logger.error('Failed to initialize world:', error);
       throw error;
+    }
+  }
+
+  private async loadDataAgents(): Promise<void> {
+    try {
+      const dataPath = path.resolve('data');
+      const files = await fs.readdir(dataPath);
+      const agentFiles = files.filter(file => file.endsWith('.agent.json'));
+
+      for (const file of agentFiles) {
+        const content = await fs.readFile(path.join(dataPath, file), 'utf-8');
+        const agentConfig: AgentConfig = JSON.parse(content);
+        // Get the appropriate API key from the global config
+        const apiKey = agentConfig.provider === 'openai' 
+          ? config.openai.apiKey 
+          : config.anthropic.apiKey;
+        
+        // Only spawn if agent doesn't already exist
+        if (!this.agents.has(agentConfig.id)) {
+          await this.spawnAgent(agentConfig, apiKey);
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to load agents from data folder:', error);
     }
   }
 
@@ -45,7 +72,11 @@ export class World extends EventEmitter {
         const apiKey = agentConfig.provider === 'openai' 
           ? config.openai.apiKey 
           : config.anthropic.apiKey;
-        await this.spawnAgent(agentConfig, apiKey);
+        
+        // Only spawn if agent doesn't already exist
+        if (!this.agents.has(agentConfig.id)) {
+          await this.spawnAgent(agentConfig, apiKey);
+        }
       }
     } catch (error) {
       logger.error('Failed to load persisted agents:', error);
