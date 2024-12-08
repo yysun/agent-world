@@ -94,10 +94,9 @@ export class Agent extends EventEmitter implements AgentConfig {
     
     // Check for common issues
     const containsOnlyWhitespace = /^\s*$/.test(content);
-    const containsControlCharacters = /[\x00-\x1F\x7F]/.test(content);
     const exceedsMaxLength = content.length >= 32768;
     
-    if (containsOnlyWhitespace || containsControlCharacters || exceedsMaxLength) {
+    if (containsOnlyWhitespace || exceedsMaxLength) {
       return false;
     }
     
@@ -313,7 +312,6 @@ export class Agent extends EventEmitter implements AgentConfig {
       throw new AgentError('Invalid knowledge content', 'INVALID_KNOWLEDGE');
     }
     this.knowledge = knowledge;
-    this.emit('stateUpdate', this.toConfig());
   }
 
   public getKnowledge(): string {
