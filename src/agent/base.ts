@@ -7,6 +7,7 @@ export class Agent extends EventEmitter {
   private id: string;
   private name: string;
   private role: string;
+  private knowledge: string;
   private providerType: AgentConfig['provider'];
   private provider?: LLMProvider;
   private status: 'idle' | 'busy' | 'error';
@@ -21,6 +22,7 @@ export class Agent extends EventEmitter {
     this.id = config.id;
     this.name = config.name;
     this.role = config.role;
+    this.knowledge = config.knowledge || '';
     this.providerType = config.provider;
     this.status = config.status || 'idle';
     this.lastActive = config.lastActive || new Date();
@@ -103,6 +105,7 @@ export class Agent extends EventEmitter {
       id: this.id,
       name: this.name,
       role: this.role,
+      knowledge: this.knowledge,
       provider: this.providerType,
       model: this.provider?.model || '',
       status: this.status,
@@ -199,5 +202,14 @@ export class Agent extends EventEmitter {
 
   public getRole(): string {
     return this.role;
+  }
+
+  public setKnowledge(knowledge: string): void {
+    this.knowledge = knowledge;
+    this.emit('stateUpdate', this.getStatus());
+  }
+
+  public getKnowledge(): string {
+    return this.knowledge;
   }
 }

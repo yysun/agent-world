@@ -29,6 +29,7 @@ export interface AgentConfig {
   role: string;
   provider: 'openai' | 'anthropic' | 'ollama';
   model: string;
+  knowledge?: string;  // Add this line
   status?: 'idle' | 'busy' | 'error';
   lastActive?: Date;
   memory?: {
