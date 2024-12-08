@@ -23,6 +23,13 @@ export interface LLMProvider {
   model: string;
 }
 
+export enum AgentType {
+  BASE = 'base',
+  ARCHITECT = 'architect',
+  CODER = 'coder',
+  RESEARCHER = 'researcher'
+}
+
 export interface AgentConfig {
   id: string;
   name: string;
@@ -35,6 +42,7 @@ export interface AgentConfig {
   memory?: {
     longTerm: Record<string, ChatMessage>;
   };
+  type?: AgentType;
 }
 
 export interface Tool {

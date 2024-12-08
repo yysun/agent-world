@@ -3,7 +3,10 @@ import { Worker } from 'worker_threads';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Agent } from '../agent/base';
-import { AgentConfig, WorldConfig } from '../types';
+import { ArchitectAgent } from '../agent/architect';
+import { CoderAgent } from '../agent/coder';
+import { ResearcherAgent } from '../agent/researcher';
+import { AgentConfig, WorldConfig, AgentType } from '../types';
 import { logger, worldConfig, config } from '../config';
 import { sanitizeFilename } from '../utils';
 
@@ -20,6 +23,19 @@ export class World extends EventEmitter {
     this.config = config;
     this.persistPath = path.resolve(config.persistPath);
     this.initialize();
+  }
+
+  private createAgentInstance(agentConfig: AgentConfig, apiKey: string): Agent {
+    switch (agentConfig.type) {
+      case AgentType.ARCHITECT:
+        return new ArchitectAgent(agentConfig, apiKey);
+      case AgentType.CODER:
+        return new CoderAgent(agentConfig, apiKey);
+      case AgentType.RESEARCHER:
+        return new ResearcherAgent(agentConfig, apiKey);
+      default:
+        return new Agent(agentConfig, apiKey);
+    }
   }
 
   private async initialize(): Promise<void> {
@@ -93,8 +109,8 @@ export class World extends EventEmitter {
     }
 
     try {
-      // Create and initialize the agent with the API key
-      const agent = new Agent(agentConfig, apiKey);
+      // Create the appropriate agent instance based on type
+      const agent = this.createAgentInstance(agentConfig, apiKey);
       this.agents.set(agentConfig.id, agent);
 
       // Create a clean config object for persistence (ensures no apiKey is included)
@@ -105,7 +121,8 @@ export class World extends EventEmitter {
         provider: agentConfig.provider,
         model: agentConfig.model,
         status: agentConfig.status,
-        lastActive: agentConfig.lastActive
+        lastActive: agentConfig.lastActive,
+        type: agentConfig.type
       };
 
       // Persist agent configuration

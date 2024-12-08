@@ -1,6 +1,6 @@
 import { World } from '../world';
 import { logger, config } from '../config';
-import { AgentConfig } from '../types';
+import { AgentConfig, AgentType } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { readInput as cliReadInput } from './input';
 
@@ -30,12 +30,24 @@ export class CLI {
     }
   }
 
-  private async askForRole(): Promise<string> {
-    const role = await cliReadInput('Enter role (press Enter for default "AI assistant"): ');
-    return role.trim() || 'AI assistant';
+  private async askForAgentType(): Promise<AgentType> {
+    console.log('\nAvailable agent types:');
+    console.log('1. Architect - Specialized in software architecture and system design');
+    console.log('2. Coder - Specialized in software development and implementation');
+    console.log('3. Researcher - Specialized in technical research and analysis');
+
+    while (true) {
+      const input = await cliReadInput('Select agent type (1-3): ');
+      switch (input.trim()) {
+        case '1': return AgentType.ARCHITECT;
+        case '2': return AgentType.CODER;
+        case '3': return AgentType.RESEARCHER;
+        default: console.log('Invalid selection. Please choose 1-3.');
+      }
+    }
   }
 
-  private async handleCommand(input: string): Promise<void> {
+  public async handleCommand(input: string): Promise<void> {
     // If input doesn't start with /, treat as message to all agents
     if (!input.startsWith('/')) {
       if (input.trim()) {
@@ -120,20 +132,6 @@ export class CLI {
     }
   }
 
-  private showHelp(): void {
-    console.log(`
-Available commands:
-  /new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
-  /list                     - List all active agents
-  /kill <name>             - Terminate an agent by name
-  /ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
-  /status [name]           - Show agent status and memory (or all agents if no name specified)
-  /clear [name]            - Clear agent's short-term memory (or all agents if no name specified)
-  /help                    - Show this help message
-  /exit                    - Exit the program
-    `);
-  }
-
   private async spawnAgent(args: string[]): Promise<void> {
     if (args.length < 1) {
       console.log('Usage: new <name> [provider]');
@@ -152,7 +150,7 @@ Available commands:
       return;
     }
 
-    const role = await this.askForRole();
+    const agentType = await this.askForAgentType();
 
     const agentConfig: AgentConfig = {
       id: uuidv4(),
@@ -161,9 +159,10 @@ Available commands:
       model: provider === 'openai' ? config.openai.defaultModel :
         provider === 'anthropic' ? config.anthropic.defaultModel :
           config.ollama.defaultModel,
-      role,
+      role: '', // Role will be set by the specific agent class
       status: 'idle',
-      lastActive: new Date()
+      lastActive: new Date(),
+      type: agentType
     };
 
     // Get the appropriate API key - note that Ollama doesn't need one
@@ -192,7 +191,7 @@ Available commands:
       console.log(`- ${agent.getName()} (${id})`);
       console.log(`  Status: ${status.status}`);
       console.log(`  Provider: ${agent.getProvider()}`);
-      console.log(`  Role: ${agent.getRole()}`);
+      console.log(`  Type: ${agent.getStatus().type}`);
       console.log(`  Last Active: ${status.lastActive.toISOString()}`);
       console.log();
     }
@@ -227,7 +226,7 @@ Available commands:
 
     try {
       console.log(`Asking agent "${name}"...`);
-      const response = await agent.interact(message, (chunk) => {
+      const response = await agent.chat(message, (chunk) => {
         process.stdout.write(chunk);
       });
       console.log('\nResponse:', response.content);
@@ -252,7 +251,7 @@ Available commands:
     for (const agent of agents.values()) {
       console.log(`\n=== Response from ${agent.getName()} ===`);
       try {
-        const response = await agent.interact(message, (chunk) => {
+        const response = await agent.chat(message, (chunk) => {
           process.stdout.write(chunk);
         });
         if (response.toolCalls?.length) {
@@ -356,6 +355,20 @@ Available commands:
     console.log('\nShutting down Agent World...');
     await this.world.shutdown();
     process.exit(0);
+  }
+
+  private showHelp(): void {
+    console.log(`
+Available commands:
+  /new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
+  /list                     - List all active agents
+  /kill <name>             - Terminate an agent by name
+  /ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
+  /status [name]           - Show agent status and memory (or all agents if no name specified)
+  /clear [name]            - Clear agent's short-term memory (or all agents if no name specified)
+  /help                    - Show this help message
+  /exit                    - Exit the program
+    `);
   }
 }
 

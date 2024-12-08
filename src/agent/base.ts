@@ -27,7 +27,7 @@ export class Agent extends EventEmitter {
     this.status = config.status || 'idle';
     this.lastActive = config.lastActive || new Date();
     this.shortTermMemory = new Map();
-    this.longTermMemory = config.memory?.longTerm 
+    this.longTermMemory = config.memory?.longTerm
       ? new Map(Object.entries(config.memory.longTerm))
       : new Map();
     this.tools = new Map();
@@ -43,7 +43,7 @@ export class Agent extends EventEmitter {
   ): Promise<void> {
     try {
       this.provider = await LLMFactory.createProvider(provider, apiKey, model);
-      
+
       // Register tools if provider supports them
       if ('registerTool' in this.provider) {
         this.tools.forEach(tool => {
@@ -146,7 +146,7 @@ export class Agent extends EventEmitter {
     return retryableStatusCodes.includes(error.status) || error.code === 'ECONNRESET';
   }
 
-  public async interact(
+  public async chat(
     input: string,
     onStream?: (chunk: string) => void
   ): Promise<LLMResponse> {
