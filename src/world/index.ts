@@ -22,6 +22,7 @@ export class World extends EventEmitter {
   private config: WorldConfig;
   private persistPath: string;
   private workers: Map<string, Worker>;
+  private initialized: boolean = false;
 
   constructor(config: WorldConfig = worldConfig) {
     super();
@@ -29,7 +30,6 @@ export class World extends EventEmitter {
     this.workers = new Map();
     this.config = config;
     this.persistPath = path.resolve(config.persistPath);
-    this.initialize();
   }
 
   private createAgentInstance(agentConfig: AgentConfig, apiKey: string): Agent {
@@ -45,13 +45,15 @@ export class World extends EventEmitter {
     }
   }
 
-  private async initialize(): Promise<void> {
+  public async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
     try {
       await fs.mkdir(this.persistPath, { recursive: true });
-      // First load agents from data folder
-      await this.loadDataAgents();
-      // Then load any persisted agents
-      await this.loadPersistedAgents();
+      await this.loadAgents();
+      this.initialized = true;
       logger.info('World initialized successfully');
     } catch (error) {
       logger.error('Failed to initialize world:', error);
@@ -59,86 +61,61 @@ export class World extends EventEmitter {
     }
   }
 
-  private async loadDataAgents(): Promise<void> {
+  private async loadAgents(): Promise<void> {
     try {
       const dataPath = path.resolve('data');
       const files = await fs.readdir(dataPath);
       const agentFiles = files.filter(file => file.endsWith('.agent.json'));
 
+      logger.info(`Found ${agentFiles.length} agent files in data folder`);
+
       for (const file of agentFiles) {
-        const content = await fs.readFile(path.join(dataPath, file), 'utf-8');
-        const persistedData = JSON.parse(content);
-        const agentConfig: AgentConfig = {
-          ...persistedData,
-          // Ensure knowledge and chatHistory are loaded if they exist
-          knowledge: persistedData.knowledge || '',
-          chatHistory: persistedData.chatHistory || []
-        };
+        try {
+          const content = await fs.readFile(path.join(dataPath, file), 'utf-8');
+          const persistedData = JSON.parse(content);
 
-        // Determine agent type from role if not present
-        if (!agentConfig.type) {
-          if (agentConfig.role.includes('Architect')) {
-            agentConfig.type = AgentType.ARCHITECT;
-          } else if (agentConfig.role.includes('Coder')) {
-            agentConfig.type = AgentType.CODER;
-          } else if (agentConfig.role.includes('Researcher')) {
-            agentConfig.type = AgentType.RESEARCHER;
+          // Convert string type to AgentType enum
+          let agentType: AgentType;
+          switch (persistedData.type?.toLowerCase()) {
+            case 'architect':
+              agentType = AgentType.ARCHITECT;
+              break;
+            case 'coder':
+              agentType = AgentType.CODER;
+              break;
+            case 'researcher':
+              agentType = AgentType.RESEARCHER;
+              break;
+            default:
+              agentType = AgentType.BASE;
           }
-        }
 
-        // Get the appropriate API key from the global config
-        const apiKey = agentConfig.provider === 'openai'
-          ? config.openai.apiKey
-          : config.anthropic.apiKey;
+          const agentConfig: AgentConfig = {
+            ...persistedData,
+            // Ensure knowledge and chatHistory are loaded if they exist
+            knowledge: persistedData.knowledge || '',
+            chatHistory: persistedData.chatHistory || [],
+            // Set the proper enum type
+            type: agentType
+          };
 
-        // Only spawn if agent doesn't already exist
-        if (!this.agents.has(agentConfig.id)) {
-          await this.spawnAgent(agentConfig, apiKey);
+          // Get the appropriate API key from the global config
+          const apiKey = agentConfig.provider === 'openai'
+            ? config.openai.apiKey
+            : config.anthropic.apiKey;
+
+          // Only spawn if agent doesn't already exist
+          if (!this.agents.has(agentConfig.id)) {
+            await this.spawnAgent(agentConfig, apiKey);
+            logger.info(`Loaded and spawned agent ${agentConfig.name} from ${file}`);
+          }
+        } catch (error) {
+          logger.error(`Failed to load agent from file ${file}:`, error);
         }
       }
     } catch (error) {
       logger.error('Failed to load agents from data folder:', error);
-    }
-  }
-
-  private async loadPersistedAgents(): Promise<void> {
-    try {
-      const files = await fs.readdir(this.persistPath);
-      const agentFiles = files.filter(file => file.endsWith('.agent.json'));
-
-      for (const file of agentFiles) {
-        const content = await fs.readFile(path.join(this.persistPath, file), 'utf-8');
-        const persistedData = JSON.parse(content);
-        const agentConfig: AgentConfig = {
-          ...persistedData,
-          // Ensure knowledge and chatHistory are loaded if they exist
-          knowledge: persistedData.knowledge || '',
-          chatHistory: persistedData.chatHistory || []
-        };
-
-        // Determine agent type from role if not present
-        if (!agentConfig.type) {
-          if (agentConfig.role.includes('Architect')) {
-            agentConfig.type = AgentType.ARCHITECT;
-          } else if (agentConfig.role.includes('Coder')) {
-            agentConfig.type = AgentType.CODER;
-          } else if (agentConfig.role.includes('Researcher')) {
-            agentConfig.type = AgentType.RESEARCHER;
-          }
-        }
-
-        // Get the appropriate API key from the global config
-        const apiKey = agentConfig.provider === 'openai'
-          ? config.openai.apiKey
-          : config.anthropic.apiKey;
-
-        // Only spawn if agent doesn't already exist
-        if (!this.agents.has(agentConfig.id)) {
-          await this.spawnAgent(agentConfig, apiKey);
-        }
-      }
-    } catch (error) {
-      logger.error('Failed to load persisted agents:', error);
+      throw error;
     }
   }
 
@@ -146,7 +123,6 @@ export class World extends EventEmitter {
     try {
       const safeFilename = sanitizeFilename(config.name);
       const dataPath = path.join('data', `${safeFilename}.agent.json`);
-      const persistPath = path.join(this.persistPath, `${safeFilename}.agent.json`);
 
       // Get the current memory state if the agent exists
       const agent = this.agents.get(config.id);
@@ -158,13 +134,9 @@ export class World extends EventEmitter {
 
       const content = JSON.stringify(persistData, null, 2);
 
-      // Save to both locations in parallel
-      await Promise.all([
-        fs.mkdir(path.dirname(dataPath), { recursive: true })
-          .then(() => fs.writeFile(dataPath, content)),
-        fs.mkdir(path.dirname(persistPath), { recursive: true })
-          .then(() => fs.writeFile(persistPath, content))
-      ]);
+      // Save to data folder
+      await fs.mkdir(path.dirname(dataPath), { recursive: true });
+      await fs.writeFile(dataPath, content);
 
       logger.info(`Saved agent ${config.name} data`);
     } catch (error) {
@@ -287,14 +259,10 @@ export class World extends EventEmitter {
         this.workers.delete(agentId);
       }
 
-      // Remove agent from both data and persist folders
+      // Remove agent from data folder
       const safeFilename = sanitizeFilename(agent.getName());
-      const configPath = path.join(this.persistPath, safeFilename + '.agent.json');
       const dataPath = path.join('data', safeFilename + '.agent.json');
-      await Promise.all([
-        fs.unlink(configPath).catch(() => { }),
-        fs.unlink(dataPath).catch(() => { })
-      ]);
+      await fs.unlink(dataPath).catch(() => { });
       this.agents.delete(agentId);
 
       logger.info('Agent ' + agent.getName() + ' killed successfully');

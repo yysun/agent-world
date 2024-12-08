@@ -14,8 +14,12 @@ export class CLI {
   }
 
   public async start(): Promise<void> {
+    // Initialize world before starting CLI
+    await this.world.initialize();
+    
     console.log('Welcome to Agent World CLI!');
     await this.handleCommand("/help")
+    await this.listAgents(); // Show loaded agents on startup
 
     this.isRunning = true;
 

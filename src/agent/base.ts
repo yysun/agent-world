@@ -3,6 +3,13 @@ import { Tool, LLMResponse, ChatMessage, LLMProvider, AgentType, AgentConfig } f
 import { logger } from '../config';
 import { LLMFactory } from '../llm/base';
 
+class AgentError extends Error {
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = 'AgentError';
+  }
+}
+
 export class Agent extends EventEmitter implements AgentConfig {
   // Required AgentConfig properties
   public readonly id: string;
@@ -23,6 +30,7 @@ export class Agent extends EventEmitter implements AgentConfig {
   protected tools: Map<string, Tool>;
   private maxRetries: number = 3;
   private maxChatHistory: number = 10;
+  private readonly memoryLimit: number = 100000; // Limit total memory size
 
   constructor(config: AgentConfig, apiKey: string) {
     super();
@@ -59,11 +67,35 @@ export class Agent extends EventEmitter implements AgentConfig {
     } catch (error) {
       logger.error('Failed to initialize provider:', error);
       this.status = 'error';
-      throw error;
+      throw new AgentError('Provider initialization failed', 'PROVIDER_INIT_FAILED');
     }
   }
 
+  protected validateMessage(content: string): boolean {
+    return content.length > 0 && content.length < 32768; // Max 32KB per message
+  }
+
+  protected cleanupMemory(): void {
+    if (!this.chatHistory.length) return;
+    
+    let totalSize = 0;
+    const reversedHistory = [...this.chatHistory].reverse();
+    const newHistory: ChatMessage[] = [];
+    
+    for (const message of reversedHistory) {
+      totalSize += message.content.length;
+      if (totalSize > this.memoryLimit) break;
+      newHistory.unshift(message);
+    }
+    
+    this.chatHistory = newHistory;
+  }
+
   protected addMessage(role: ChatMessage['role'], content: string): void {
+    if (!this.validateMessage(content)) {
+      throw new AgentError('Invalid message content', 'INVALID_MESSAGE');
+    }
+    
     const timestamp = Date.now();
     const message: ChatMessage = {
       role,
@@ -72,13 +104,14 @@ export class Agent extends EventEmitter implements AgentConfig {
     };
 
     this.chatHistory.push(message);
-
-    // Keep only last N messages in chat history
-    while (this.chatHistory.length > this.maxChatHistory) {
-      this.chatHistory.shift();
-    }
+    this.cleanupMemory();
 
     // Emit state update
+    this.emit('stateUpdate', this.toConfig());
+  }
+
+  public clearChatHistory(): void {
+    this.chatHistory = [];
     this.emit('stateUpdate', this.toConfig());
   }
 
@@ -113,6 +146,10 @@ export class Agent extends EventEmitter implements AgentConfig {
   }
 
   public registerTool(tool: Tool): void {
+    if (this.tools.has(tool.name)) {
+      throw new AgentError(`Tool ${tool.name} already registered`, 'DUPLICATE_TOOL');
+    }
+    
     this.tools.set(tool.name, tool);
     // Register tool with provider if supported
     if (this.llmProvider && 'registerTool' in this.llmProvider) {
@@ -130,7 +167,7 @@ export class Agent extends EventEmitter implements AgentConfig {
     } catch (error: any) {
       if (retries > 0 && this.isRetryableError(error)) {
         logger.warn(`Retrying operation, ${retries} attempts remaining`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1000 * (this.maxRetries - retries + 1)));
         return this.retryOperation(operation, retries - 1);
       }
       throw error;
@@ -139,7 +176,9 @@ export class Agent extends EventEmitter implements AgentConfig {
 
   private isRetryableError(error: any): boolean {
     const retryableStatusCodes = [429, 500, 502, 503, 504];
-    return retryableStatusCodes.includes(error.status) || error.code === 'ECONNRESET';
+    return retryableStatusCodes.includes(error.status) || 
+           error.code === 'ECONNRESET' || 
+           error.message?.includes('timeout');
   }
 
   public async chat(
@@ -147,7 +186,11 @@ export class Agent extends EventEmitter implements AgentConfig {
     onStream?: (chunk: string) => void
   ): Promise<LLMResponse> {
     if (!this.llmProvider) {
-      throw new Error('Provider not initialized');
+      throw new AgentError('Provider not initialized', 'PROVIDER_NOT_INITIALIZED');
+    }
+
+    if (!this.validateMessage(input)) {
+      throw new AgentError('Invalid input message', 'INVALID_INPUT');
     }
 
     this.status = 'busy';
@@ -180,7 +223,11 @@ export class Agent extends EventEmitter implements AgentConfig {
       this.status = 'error';
       this.lastActive = new Date();
       this.emit('stateUpdate', this.toConfig());
-      throw error;
+      
+      if (error instanceof AgentError) {
+        throw error;
+      }
+      throw new AgentError('Chat operation failed', 'CHAT_FAILED');
     }
   }
 
@@ -201,6 +248,9 @@ export class Agent extends EventEmitter implements AgentConfig {
   }
 
   public setKnowledge(knowledge: string): void {
+    if (!this.validateMessage(knowledge)) {
+      throw new AgentError('Invalid knowledge content', 'INVALID_KNOWLEDGE');
+    }
     this.knowledge = knowledge;
     this.emit('stateUpdate', this.toConfig());
   }
