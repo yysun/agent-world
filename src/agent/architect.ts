@@ -6,11 +6,9 @@ export class ArchitectAgent extends Agent {
     // Set specific architect role and type
     const architectConfig: AgentConfig = {
       ...config,
-      role: `You are an AI Architect specialized in software architecture and system design.
-Your responsibilities include:
-- Collecting and analyzing requirements
-- Building knowledge bases of the system to be developed
-- Creating step by step plans for system implementation as a short bullet list
+      role: `You are an AI Architect specialized in software design. Your responsibilities include:
+- Organize features of the system as a short bullet list
+- Focus on only functional features, and UI/UX featues, not technical details
 `,
       type: AgentType.ARCHITECT
     };
@@ -41,11 +39,12 @@ Your responsibilities include:
       },
       {
         role: 'user',
-        content: `Combine the current knowledge base with new information to create a short bullet list:
-
-  Current Knowledge Base:\n${currentKnowledge}\n\nNew Information to Integrate:\n${input}
-  
-  Retain the current knowledgebase as much as possible. Return ONLY the reorganized knowledge as the response.
+        content: `Combine and reorganize the current features with new requirements:  
+- Retain the current features as much as possible unless it is asked to remove.
+- Create a implementation plan under each feature as a bullet list.
+- Return ONLY the features list as the response. No explanations needed.
+   
+Current features:\n${currentKnowledge}\n\nNew requirements:\n${input}
   `,
         timestamp: Date.now()
       }
@@ -57,6 +56,7 @@ Your responsibilities include:
     // Update the knowledge base with the reorganized content
     this.setKnowledge(reorganizedKnowledge.content);
 
+    this.addMessage('assistant', reorganizedKnowledge.content);
     this.status = 'idle';
     this.lastActive = new Date();
     this.emit('stateUpdate', this.toConfig());

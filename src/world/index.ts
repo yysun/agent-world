@@ -67,7 +67,13 @@ export class World extends EventEmitter {
 
       for (const file of agentFiles) {
         const content = await fs.readFile(path.join(dataPath, file), 'utf-8');
-        const agentConfig: AgentConfig = JSON.parse(content);
+        const persistedData = JSON.parse(content);
+        const agentConfig: AgentConfig = {
+          ...persistedData,
+          // Ensure knowledge and chatHistory are loaded if they exist
+          knowledge: persistedData.knowledge || '',
+          chatHistory: persistedData.chatHistory || []
+        };
 
         // Determine agent type from role if not present
         if (!agentConfig.type) {
@@ -102,7 +108,13 @@ export class World extends EventEmitter {
 
       for (const file of agentFiles) {
         const content = await fs.readFile(path.join(this.persistPath, file), 'utf-8');
-        const agentConfig: AgentConfig = JSON.parse(content);
+        const persistedData = JSON.parse(content);
+        const agentConfig: AgentConfig = {
+          ...persistedData,
+          // Ensure knowledge and chatHistory are loaded if they exist
+          knowledge: persistedData.knowledge || '',
+          chatHistory: persistedData.chatHistory || []
+        };
 
         // Determine agent type from role if not present
         if (!agentConfig.type) {
@@ -140,7 +152,8 @@ export class World extends EventEmitter {
       const agent = this.agents.get(config.id);
       const persistData = agent ? {
         ...config,
-        chatHistory: agent.getChatHistory()
+        chatHistory: agent.getChatHistory(),
+        knowledge: agent.getKnowledge()
       } : config;
 
       const content = JSON.stringify(persistData, null, 2);
@@ -183,7 +196,9 @@ export class World extends EventEmitter {
         model: agentConfig.model,
         status: agentConfig.status,
         lastActive: agentConfig.lastActive,
-        type: agentConfig.type
+        type: agentConfig.type,
+        knowledge: agentConfig.knowledge,
+        chatHistory: agentConfig.chatHistory
       };
 
       // Save agent data
