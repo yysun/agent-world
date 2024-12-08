@@ -1,146 +1,8 @@
-import readline from 'readline';
 import { World } from '../world';
 import { logger, config } from '../config';
 import { AgentConfig } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-
-const MAX_HISTORY = 1000;
-let commandHistory: string[] = [];
-let historyIndex = -1;
-
-function readInput(prompt: string): Promise<string> {
-  return new Promise((resolve) => {
-    const stdin = process.stdin;
-    const stdout = process.stdout;
-
-    if (!stdin.isTTY) {
-      stdout.write(prompt);
-
-      const rl = readline.createInterface({
-        input: stdin,
-        output: stdout,
-        terminal: false
-      });
-
-      // Read a single line and resolve
-      rl.on('line', (line) => {
-        resolve(line);
-      });
-
-      rl.on('close', () => {
-        resolve('');
-      });
-
-      return;
-    }
-
-    // Configure stdin for interactive mode
-    stdin.setRawMode(true);
-    stdin.setEncoding('utf8');
-    stdin.resume();
-    readline.emitKeypressEvents(stdin);
-
-    let input = '';
-    let cursorPos = 0;
-    let tempInput = ''; // Store original input when navigating history
-
-    stdout.write(prompt);
-
-    function setInput(newInput: string, newCursorPos?: number) {
-      input = newInput;
-      cursorPos = newCursorPos ?? input.length;
-      redrawLine();
-    }
-
-    function navigateHistory(direction: 'up' | 'down') {
-      if (commandHistory.length === 0) return;
-
-      if (historyIndex === -1) {
-        tempInput = input; // Save current input before navigating
-      }
-
-      if (direction === 'up') {
-        historyIndex = historyIndex < commandHistory.length - 1 ? historyIndex + 1 : historyIndex;
-      } else {
-        historyIndex = historyIndex > -1 ? historyIndex - 1 : -1;
-      }
-
-      setInput(historyIndex === -1 ? tempInput : commandHistory[historyIndex]);
-    }
-
-    function handleKeypress(_str: string, key: readline.Key) {
-      if (key.ctrl && key.name === 'c') {
-        stdout.write('\n');
-        process.exit();
-      } else if (key.name === 'return') {
-        stdout.write('\n');
-        cleanup();
-        if (input.trim()) {
-          commandHistory.unshift(input);
-          if (commandHistory.length > MAX_HISTORY) {
-            commandHistory.pop();
-          }
-        }
-        historyIndex = -1;
-        resolve(input);
-      } else if (key.name === 'backspace') {
-        if (cursorPos > 0) {
-          input = input.slice(0, cursorPos - 1) + input.slice(cursorPos);
-          cursorPos--;
-          redrawLine();
-        }
-      } else if (key.name === 'left') {
-        if (cursorPos > 0) {
-          cursorPos--;
-          stdout.cursorTo(prompt.length + cursorPos);
-        }
-      } else if (key.name === 'right') {
-        if (cursorPos < input.length) {
-          cursorPos++;
-          stdout.cursorTo(prompt.length + cursorPos);
-        }
-      } else if (key.name === 'up') {
-        navigateHistory('up');
-      } else if (key.name === 'down') {
-        navigateHistory('down');
-      } else if (key.name === 'home') {
-        cursorPos = 0;
-        stdout.cursorTo(prompt.length);
-      } else if (key.name === 'end') {
-        cursorPos = input.length;
-        stdout.cursorTo(prompt.length + cursorPos);
-      } else if (!key.ctrl && !key.meta && key.sequence) {
-        input = input.slice(0, cursorPos) + key.sequence + input.slice(cursorPos);
-        cursorPos += key.sequence.length;
-        redrawLine();
-      }
-    }
-
-    function redrawLine() {
-      stdout.cursorTo(prompt.length);
-      stdout.clearLine(1);
-      stdout.write(input);
-      stdout.cursorTo(prompt.length + cursorPos);
-    }
-
-    function cleanup() {
-      if (stdin.isTTY) {
-        stdin.setRawMode(false);
-      }
-      stdin.removeListener('keypress', handleKeypress);
-      stdin.pause();
-    }
-
-    // Add error handler
-    stdin.on('error', (err) => {
-      console.error('stdin error:', err);
-      cleanup();
-      resolve(input);
-    });
-
-    stdin.on('keypress', handleKeypress);
-  });
-}
+import { readInput as cliReadInput } from './input';
 
 export class CLI {
   private world: World;
@@ -153,14 +15,13 @@ export class CLI {
 
   public async start(): Promise<void> {
     console.log('Welcome to Agent World CLI!');
-    // console.log('Type "help" for available commands');
     await this.handleCommand("/help")
 
     this.isRunning = true;
 
     while (this.isRunning) {
       try {
-        const input = await readInput('agent-world> ');
+        const input = await cliReadInput('agent-world> ');
         await this.handleCommand(input.trim());
       } catch (error) {
         logger.error('Error executing command:', error);
@@ -170,7 +31,7 @@ export class CLI {
   }
 
   private async askForRole(): Promise<string> {
-    const role = await readInput('Enter role (press Enter for default "AI assistant"): ');
+    const role = await cliReadInput('Enter role (press Enter for default "AI assistant"): ');
     return role.trim() || 'AI assistant';
   }
 
@@ -264,12 +125,12 @@ export class CLI {
 Available commands:
   /new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
   /list                     - List all active agents
-  /kill <name>              - Terminate an agent by name
-  /ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
-  /status [name]            - Show agent status and memory (or all agents if no name specified)
-  /clear [name]             - Clear agent's short-term memory (or all agents if no name specified)
-  /help                     - Show this help message
-  /exit                     - Exit the program
+  /kill <name>             - Terminate an agent by name
+  /ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
+  /status [name]           - Show agent status and memory (or all agents if no name specified)
+  /clear [name]            - Clear agent's short-term memory (or all agents if no name specified)
+  /help                    - Show this help message
+  /exit                    - Exit the program
     `);
   }
 
@@ -298,8 +159,8 @@ Available commands:
       name,
       provider: provider as 'openai' | 'anthropic' | 'ollama',
       model: provider === 'openai' ? config.openai.defaultModel :
-             provider === 'anthropic' ? config.anthropic.defaultModel :
-             config.ollama.defaultModel,
+        provider === 'anthropic' ? config.anthropic.defaultModel :
+          config.ollama.defaultModel,
       role,
       status: 'idle',
       lastActive: new Date()
@@ -307,8 +168,8 @@ Available commands:
 
     // Get the appropriate API key - note that Ollama doesn't need one
     const apiKey = provider === 'openai' ? config.openai.apiKey :
-                  provider === 'anthropic' ? config.anthropic.apiKey :
-                  '';
+      provider === 'anthropic' ? config.anthropic.apiKey :
+        '';
 
     try {
       const agent = await this.world.spawnAgent(agentConfig, apiKey);
@@ -372,7 +233,6 @@ Available commands:
       console.log('\nResponse:', response.content);
 
       if (response.toolCalls?.length) {
-        // console.log('\nTool Calls:');
         response.toolCalls.forEach(call => {
           console.log(`- ${call.name}:`, call.arguments);
         });
@@ -389,21 +249,20 @@ Available commands:
       return;
     }
 
-    console.log('Asking all agents...\n');
     for (const agent of agents.values()) {
       console.log(`\n=== Response from ${agent.getName()} ===`);
       try {
         const response = await agent.interact(message, (chunk) => {
           process.stdout.write(chunk);
         });
-        // console.log('\nTool Calls:');
         if (response.toolCalls?.length) {
           response.toolCalls.forEach(call => {
             console.log(`- ${call.name}:`, call.arguments);
           });
         }
       } catch (error) {
-        console.error(`Failed to ask agent ${agent.getName()}:`, error instanceof Error ? error.message : 'Unknown error');
+        console.error(`Failed to ask agent ${agent.getName()}:`,
+          error instanceof Error ? error.message : 'Unknown error');
       }
       console.log('\n' + '='.repeat(40));
     }
@@ -465,7 +324,6 @@ Available commands:
     }
 
     try {
-      // Clear the short-term memory map
       const memory = agent.getMemory();
       memory.shortTerm.clear();
       console.log(`Short-term memory cleared for agent "${name}"`);
