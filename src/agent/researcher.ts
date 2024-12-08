@@ -48,8 +48,8 @@ export class ResearcherAgent extends Agent {
     // Build chat messages for knowledge extraction
     const extractionPrompt: ChatMessage[] = [
       {
-      role: 'system',
-      content: `You are a knowledge-distillation assistant. You have some existing knowledge:
+        role: 'system',
+        content: `You are a knowledge-distillation assistant. You have some existing knowledge:
   ${this.getKnowledge}
 
   Answer user's question:
@@ -60,12 +60,12 @@ export class ResearcherAgent extends Agent {
   - Do NOT simply repeat the existing knowledge.
 
   Return ONLY Markdown bullet points in the format "- fact".`,
-      timestamp: Date.now()
+        timestamp: Date.now()
       },
       {
-      role: 'user',
-      content: `${userInfo}\n\n`,
-      timestamp: Date.now() 
+        role: 'user',
+        content: `${userInfo}\n\n`,
+        timestamp: Date.now()
       }
     ];
 

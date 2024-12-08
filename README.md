@@ -7,9 +7,9 @@ A TypeScript-based AI agent world application that allows you to create, manage,
 ### Agents
 - ✅ AI agents using TypeScript and Node.js
 - ✅ Multiple agent instances with unique configurations
-- ✅ OpenAI, Anthropic, Ollama API integration
+- ✅ OpenAI, Anthropic, and Ollama API integration
 - ✅ Streaming support for real-time responses
-- ✅ Short-term and long-term memory management
+- ✅ Knowledge and chat history management
 - ✅ Function calling capabilities
 - ✅ Built-in retry mechanisms for error handling
 
@@ -28,6 +28,7 @@ A TypeScript-based AI agent world application that allows you to create, manage,
 - Node.js (v16 or higher)
 - OpenAI API key
 - Anthropic API key
+- Local Ollama
 
 ## Installation
 
@@ -69,39 +70,16 @@ npm start
 
 Once the application is running, you can use the following commands:
 
-- Spawn a new agent:
 ```
-agent-world> spawn agent1 openai
-```
-
-- List all agents:
-```
-agent-world> list
-```
-
-- Interact with an agent:
-```
-agent-world> interact <agent-id> What is the weather like today?
-```
-
-- Check agent status:
-```
-agent-world> status <agent-id>
-```
-
-- Kill an agent:
-```
-agent-world> kill <agent-id>
-```
-
-- Show help:
-```
-agent-world> help
-```
-
-- Exit the application:
-```
-agent-world> exit
+Available commands:
+  /new <name> [provider]    - Create a new agent (provider: openai|anthropic|ollama, defaults to ollama)
+  /list                     - List all active agents
+  /kill <name>             - Terminate an agent by name
+  /ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
+  /status [name]           - Show agent status and memory (or all agents if no name specified)
+  /clear [name]            - Clear agent's chat history (or all agents if no name specified)
+  /help                    - Show this help message
+  /exit                    - Exit the program
 ```
 
 ## Project Structure
@@ -131,9 +109,11 @@ agent-world/
 The application can be configured through environment variables:
 
 - `OPENAI_API_KEY`: Your OpenAI API key
+- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o)
 - `ANTHROPIC_API_KEY`: Your Anthropic API key
-- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4-1106-preview)
-- `ANTHROPIC_MODEL`: Anthropic model to use (default: claude-2.1)
+- `ANTHROPIC_MODEL`: Anthropic model to use (default: claude-3.5)
+- `OLLAMA_URL`: URL for the local Ollama instance (default: http://localhost:11434)
+- `OLLAMA_MODEL`: Ollama model to use (default: llama3)
 - `MAX_AGENTS`: Maximum number of concurrent agents (default: 10)
 - `PERSIST_PATH`: Path for persisting agent data (default: ./data)
 - `LOG_LEVEL`: Logging level (default: info)
@@ -149,7 +129,7 @@ npm run build
 ### Watching for Changes
 
 ```bash
-npm run watch
+npm run dev
 ```
 
 ### Cleaning Build Files

@@ -42,17 +42,6 @@ Build an AI agent world application that has the following ideas:
 - [X] Use logging libraries like winston for structured logging
 - [X] Create a simple CLI for the agent to interact with the world: 
 
-```
-Available commands:
-  new <name> [provider]    - Create a new agent (provider: openai|anthropic, defaults to anthropic)
-  list                     - List all active agents
-  kill <name>              - Terminate an agent by name
-  ask [name] <msg>         - Ask a question to an agent (or all agents if no name specified)
-  status [name]            - Show agent status and memory (or all agents if no name specified)
-  clear [name]             - Clear agent's short-term memory (or all agents if no name specified)
-  help                     - Show this help message
-  exit                     - Exit the program
-```  
 
 ### Agent Management
 
