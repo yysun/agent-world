@@ -61,6 +61,18 @@ export class World extends EventEmitter {
       for (const file of agentFiles) {
         const content = await fs.readFile(path.join(dataPath, file), 'utf-8');
         const agentConfig: AgentConfig = JSON.parse(content);
+
+        // Determine agent type from role if not present
+        if (!agentConfig.type) {
+          if (agentConfig.role.includes('Architect')) {
+            agentConfig.type = AgentType.ARCHITECT;
+          } else if (agentConfig.role.includes('Coder')) {
+            agentConfig.type = AgentType.CODER;
+          } else if (agentConfig.role.includes('Researcher')) {
+            agentConfig.type = AgentType.RESEARCHER;
+          }
+        }
+
         // Get the appropriate API key from the global config
         const apiKey = agentConfig.provider === 'openai' 
           ? config.openai.apiKey 
@@ -84,6 +96,18 @@ export class World extends EventEmitter {
       for (const file of agentFiles) {
         const content = await fs.readFile(path.join(this.persistPath, file), 'utf-8');
         const agentConfig: AgentConfig = JSON.parse(content);
+
+        // Determine agent type from role if not present
+        if (!agentConfig.type) {
+          if (agentConfig.role.includes('Architect')) {
+            agentConfig.type = AgentType.ARCHITECT;
+          } else if (agentConfig.role.includes('Coder')) {
+            agentConfig.type = AgentType.CODER;
+          } else if (agentConfig.role.includes('Researcher')) {
+            agentConfig.type = AgentType.RESEARCHER;
+          }
+        }
+
         // Get the appropriate API key from the global config
         const apiKey = agentConfig.provider === 'openai' 
           ? config.openai.apiKey 
@@ -125,6 +149,9 @@ export class World extends EventEmitter {
         type: agentConfig.type
       };
 
+      // Also save to data folder
+      await this.saveToDataFolder(persistConfig);
+
       // Persist agent configuration
       await this.persistAgentConfig(persistConfig);
 
@@ -140,6 +167,36 @@ export class World extends EventEmitter {
       return agent;
     } catch (error) {
       logger.error(`Failed to spawn agent ${agentConfig.id}:`, error);
+      throw error;
+    }
+  }
+
+  private async saveToDataFolder(config: AgentConfig): Promise<void> {
+    try {
+      const dataPath = path.resolve('data');
+      await fs.mkdir(dataPath, { recursive: true });
+      const safeFilename = sanitizeFilename(config.name);
+      const filePath = path.join(dataPath, `${safeFilename}.agent.json`);
+      
+      // Get the current memory state if the agent exists
+      const agent = this.agents.get(config.id);
+      if (agent) {
+        const memory = agent.getMemory();
+        const persistData = {
+          ...config,
+          memory: {
+            longTerm: Object.fromEntries(memory.longTerm)
+          }
+        };
+        await fs.writeFile(filePath, JSON.stringify(persistData, null, 2));
+      } else {
+        // If agent doesn't exist yet (during initial spawn), just save the config
+        await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+      }
+      
+      logger.info(`Saved agent ${config.name} configuration to data folder`);
+    } catch (error) {
+      logger.error(`Failed to save agent ${config.name} to data folder:`, error);
       throw error;
     }
   }
@@ -244,10 +301,14 @@ export class World extends EventEmitter {
         this.workers.delete(agentId);
       }
 
-      // Remove agent
+      // Remove agent from both data and persist folders
       const safeFilename = sanitizeFilename(agent.getName());
       const configPath = path.join(this.persistPath, `${safeFilename}.agent.json`);
-      await fs.unlink(configPath);
+      const dataPath = path.join('data', `${safeFilename}.agent.json`);
+      await Promise.all([
+        fs.unlink(configPath).catch(() => {}),
+        fs.unlink(dataPath).catch(() => {})
+      ]);
       this.agents.delete(agentId);
 
       logger.info(`Agent ${agent.getName()} killed successfully`);

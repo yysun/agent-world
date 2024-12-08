@@ -9,7 +9,7 @@ export class Agent extends EventEmitter {
   private role: string;
   private knowledge: string;
   private providerType: AgentConfig['provider'];
-  private provider?: LLMProvider;
+  protected provider?: LLMProvider;  // Changed from private to protected
   private status: 'idle' | 'busy' | 'error';
   private lastActive: Date;
   private shortTermMemory: Map<string, ChatMessage>;
