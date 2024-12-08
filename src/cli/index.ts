@@ -279,15 +279,18 @@ export class CLI {
     }
 
     try {
-      const worldState = await this.world.getAgentState(agent.getId());
-      const agentStatus = agent.getStatus();
+      // const worldState = await this.world.getAgentState(agent.getId());
+      // const agentStatus = agent.getStatus();
+      // console.log('\nAgent Status:');
+      // console.log(JSON.stringify({
+      //   ...agentStatus,
+      //   status: worldState.status,
+      //   lastActive: worldState.lastActive
+      // }, null, 2));
 
-      console.log('\nAgent Status:');
-      console.log(JSON.stringify({
-        ...agentStatus,
-        status: worldState.status,
-        lastActive: worldState.lastActive
-      }, null, 2));
+      console.log('\nAgent Knowledge:');
+      console.log(agent.getKnowledge());
+
     } catch (error) {
       console.error('Failed to get agent status:', error instanceof Error ? error.message : 'Unknown error');
     }
@@ -330,6 +333,7 @@ export class CLI {
       // Update the agent's config with an empty chat history
       const config = agent.getStatus();
       config.chatHistory = [];
+      config.knowledge = '';
       // Emit state update to persist the change
       agent.emit('stateUpdate', config);
       console.log(`Chat history cleared for agent "${name}"`);
@@ -350,6 +354,7 @@ export class CLI {
         // Update each agent's config with an empty chat history
         const config = agent.getStatus();
         config.chatHistory = [];
+        config.knowledge = '';
         // Emit state update to persist the change
         agent.emit('stateUpdate', config);
         console.log(`Chat history cleared for agent "${agent.getName()}"`);
