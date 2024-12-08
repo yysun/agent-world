@@ -10,6 +10,13 @@ import { AgentConfig, WorldConfig, AgentType } from '../types';
 import { logger, worldConfig, config } from '../config';
 import { sanitizeFilename } from '../utils';
 
+interface AgentState {
+  id: string;
+  status: 'idle' | 'busy' | 'error';
+  lastActive: Date;
+  memory: ReturnType<Agent['getChatHistory']>;
+}
+
 export class World extends EventEmitter {
   private agents: Map<string, Agent>;
   private config: WorldConfig;
@@ -74,10 +81,10 @@ export class World extends EventEmitter {
         }
 
         // Get the appropriate API key from the global config
-        const apiKey = agentConfig.provider === 'openai' 
-          ? config.openai.apiKey 
+        const apiKey = agentConfig.provider === 'openai'
+          ? config.openai.apiKey
           : config.anthropic.apiKey;
-        
+
         // Only spawn if agent doesn't already exist
         if (!this.agents.has(agentConfig.id)) {
           await this.spawnAgent(agentConfig, apiKey);
@@ -109,10 +116,10 @@ export class World extends EventEmitter {
         }
 
         // Get the appropriate API key from the global config
-        const apiKey = agentConfig.provider === 'openai' 
-          ? config.openai.apiKey 
+        const apiKey = agentConfig.provider === 'openai'
+          ? config.openai.apiKey
           : config.anthropic.apiKey;
-        
+
         // Only spawn if agent doesn't already exist
         if (!this.agents.has(agentConfig.id)) {
           await this.spawnAgent(agentConfig, apiKey);
@@ -120,6 +127,36 @@ export class World extends EventEmitter {
       }
     } catch (error) {
       logger.error('Failed to load persisted agents:', error);
+    }
+  }
+
+  private async saveAgentData(config: AgentConfig): Promise<void> {
+    try {
+      const safeFilename = sanitizeFilename(config.name);
+      const dataPath = path.join('data', `${safeFilename}.agent.json`);
+      const persistPath = path.join(this.persistPath, `${safeFilename}.agent.json`);
+
+      // Get the current memory state if the agent exists
+      const agent = this.agents.get(config.id);
+      const persistData = agent ? {
+        ...config,
+        chatHistory: agent.getChatHistory()
+      } : config;
+
+      const content = JSON.stringify(persistData, null, 2);
+
+      // Save to both locations in parallel
+      await Promise.all([
+        fs.mkdir(path.dirname(dataPath), { recursive: true })
+          .then(() => fs.writeFile(dataPath, content)),
+        fs.mkdir(path.dirname(persistPath), { recursive: true })
+          .then(() => fs.writeFile(persistPath, content))
+      ]);
+
+      logger.info(`Saved agent ${config.name} data`);
+    } catch (error) {
+      logger.error(`Failed to save agent ${config.name} data:`, error);
+      throw error;
     }
   }
 
@@ -149,11 +186,8 @@ export class World extends EventEmitter {
         type: agentConfig.type
       };
 
-      // Also save to data folder
-      await this.saveToDataFolder(persistConfig);
-
-      // Persist agent configuration
-      await this.persistAgentConfig(persistConfig);
+      // Save agent data
+      await this.saveAgentData(persistConfig);
 
       // Set up event listeners
       this.setupAgentEventListeners(agent);
@@ -171,79 +205,13 @@ export class World extends EventEmitter {
     }
   }
 
-  private async saveToDataFolder(config: AgentConfig): Promise<void> {
-    try {
-      const dataPath = path.resolve('data');
-      await fs.mkdir(dataPath, { recursive: true });
-      const safeFilename = sanitizeFilename(config.name);
-      const filePath = path.join(dataPath, `${safeFilename}.agent.json`);
-      
-      // Get the current memory state if the agent exists
-      const agent = this.agents.get(config.id);
-      if (agent) {
-        const memory = agent.getMemory();
-        const persistData = {
-          ...config,
-          memory: {
-            longTerm: Object.fromEntries(memory.longTerm)
-          }
-        };
-        await fs.writeFile(filePath, JSON.stringify(persistData, null, 2));
-      } else {
-        // If agent doesn't exist yet (during initial spawn), just save the config
-        await fs.writeFile(filePath, JSON.stringify(config, null, 2));
-      }
-      
-      logger.info(`Saved agent ${config.name} configuration to data folder`);
-    } catch (error) {
-      logger.error(`Failed to save agent ${config.name} to data folder:`, error);
-      throw error;
-    }
-  }
-
-  private async persistAgentConfig(config: AgentConfig): Promise<void> {
-    try {
-      const safeFilename = sanitizeFilename(config.name);
-      const filePath = path.join(this.persistPath, `${safeFilename}.agent.json`);
-      
-      // Get the current memory state if the agent exists
-      const agent = this.agents.get(config.id);
-      if (agent) {
-        const memory = agent.getMemory();
-        const persistData = {
-          ...config,
-          memory: {
-            longTerm: Object.fromEntries(memory.longTerm)
-          }
-        };
-        await fs.writeFile(filePath, JSON.stringify(persistData, null, 2));
-      } else {
-        // If agent doesn't exist yet (during initial spawn), just save the config
-        await fs.writeFile(filePath, JSON.stringify(config, null, 2));
-      }
-      
-      logger.info(`Persisted agent ${config.name} configuration and memory`);
-    } catch (error) {
-      logger.error(`Failed to persist agent ${config.name} configuration:`, error);
-      throw error;
-    }
-  }
-
   private setupAgentEventListeners(agent: Agent): void {
-    // Listen for memory updates
-    agent.on('memoryUpdate', async (data) => {
-      this.emit('agentMemoryUpdate', { agentId: agent.getId(), ...data });
-      
-      // Persist the updated state when long-term memory changes
-      if (data.type === 'longTerm') {
-        await this.persistAgentConfig(agent.getStatus());
-      }
-    });
-
     // Listen for state updates (status changes, interactions, etc.)
     agent.on('stateUpdate', async (status: AgentConfig) => {
+      // Save the data first
+      await this.saveAgentData(status);
+      // Then emit our event
       this.emit('agentStateUpdate', { agentId: agent.getId(), status });
-      await this.persistAgentConfig(status);
     });
   }
 
@@ -283,17 +251,20 @@ export class World extends EventEmitter {
         this.emit('agentResult', { agentId, result: message.data });
         break;
       default:
-        logger.warn(`Unknown message type from worker: ${message.type}`);
+        logger.warn('Unknown message type from worker: ' + message.type);
     }
   }
 
   public async killAgent(agentId: string): Promise<void> {
     const agent = this.agents.get(agentId);
     if (!agent) {
-      throw new Error(`Agent ${agentId} not found`);
+      throw new Error('Agent ' + agentId + ' not found');
     }
 
     try {
+      // Remove all listeners from the agent
+      agent.removeAllListeners();
+
       // Terminate worker thread
       const worker = this.workers.get(agentId);
       if (worker) {
@@ -303,41 +274,33 @@ export class World extends EventEmitter {
 
       // Remove agent from both data and persist folders
       const safeFilename = sanitizeFilename(agent.getName());
-      const configPath = path.join(this.persistPath, `${safeFilename}.agent.json`);
-      const dataPath = path.join('data', `${safeFilename}.agent.json`);
+      const configPath = path.join(this.persistPath, safeFilename + '.agent.json');
+      const dataPath = path.join('data', safeFilename + '.agent.json');
       await Promise.all([
-        fs.unlink(configPath).catch(() => {}),
-        fs.unlink(dataPath).catch(() => {})
+        fs.unlink(configPath).catch(() => { }),
+        fs.unlink(dataPath).catch(() => { })
       ]);
       this.agents.delete(agentId);
 
-      logger.info(`Agent ${agent.getName()} killed successfully`);
+      logger.info('Agent ' + agent.getName() + ' killed successfully');
       this.emit('agentKilled', { agentId });
     } catch (error) {
-      logger.error(`Failed to kill agent ${agentId}:`, error);
+      logger.error('Failed to kill agent ' + agentId + ':', error);
       throw error;
     }
   }
 
-  public getAgentState(agentId: string): {
-    id: string;
-    status: 'idle' | 'busy' | 'error';
-    lastActive: Date;
-    memory: {
-      shortTerm: Map<string, any>;
-      longTerm: Map<string, any>;
-    };
-  } {
+  public getAgentState(agentId: string): AgentState {
     const agent = this.agents.get(agentId);
     if (!agent) {
-      throw new Error(`Agent ${agentId} not found`);
+      throw new Error('Agent ' + agentId + ' not found');
     }
 
     return {
       id: agent.getId(),
       status: this.workers.has(agentId) ? 'busy' : 'idle',
       lastActive: new Date(),
-      memory: agent.getMemory()
+      memory: agent.getChatHistory()
     };
   }
 
@@ -347,17 +310,25 @@ export class World extends EventEmitter {
 
   public async shutdown(): Promise<void> {
     logger.info('Shutting down world...');
-    
+
+    // Remove all listeners from agents
+    for (const agent of this.agents.values()) {
+      agent.removeAllListeners();
+    }
+
     // Terminate all worker threads
-    const workerTerminations = Array.from(this.workers.values()).map(worker => 
+    const workerTerminations = Array.from(this.workers.values()).map(worker =>
       worker.terminate()
     );
     await Promise.all(workerTerminations);
-    
+
     // Clear maps
     this.workers.clear();
     this.agents.clear();
-    
+
+    // Remove all World instance listeners
+    this.removeAllListeners();
+
     logger.info('World shutdown complete');
   }
 }

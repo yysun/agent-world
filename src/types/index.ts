@@ -36,19 +36,11 @@ export interface AgentConfig {
   role: string;
   provider: 'openai' | 'anthropic' | 'ollama';
   model: string;
-  knowledge?: string;  // Add this line
+  type?: AgentType;
+  knowledge?: string;
   status?: 'idle' | 'busy' | 'error';
   lastActive?: Date;
-  memory?: {
-    longTerm: Record<string, ChatMessage>;
-  };
-  type?: AgentType;
-}
-
-export interface Tool {
-  name: string;
-  description: string;
-  execute: (args: any) => Promise<any>;
+  chatHistory?: ChatMessage[];
 }
 
 export interface WorldConfig {

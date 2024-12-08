@@ -226,7 +226,7 @@ export class CLI {
 
     try {
       console.log(`Asking agent "${name}"...`);
-      const response = await agent.chat(message, (chunk) => {
+      const response = await agent.chat(message, (chunk: string) => {
         process.stdout.write(chunk);
       });
       console.log('\nResponse:', response.content);
@@ -251,7 +251,7 @@ export class CLI {
     for (const agent of agents.values()) {
       console.log(`\n=== Response from ${agent.getName()} ===`);
       try {
-        const response = await agent.chat(message, (chunk) => {
+        const response = await agent.chat(message, (chunk: string) => {
           process.stdout.write(chunk);
         });
         if (response.toolCalls?.length) {
@@ -323,9 +323,12 @@ export class CLI {
     }
 
     try {
-      const memory = agent.getMemory();
-      memory.shortTerm.clear();
-      console.log(`Short-term memory cleared for agent "${name}"`);
+      // Update the agent's config with an empty chat history
+      const config = agent.getStatus();
+      config.chatHistory = [];
+      // Emit state update to persist the change
+      agent.emit('stateUpdate', config);
+      console.log(`Chat history cleared for agent "${name}"`);
     } catch (error) {
       console.error('Failed to clear agent:', error instanceof Error ? error.message : 'Unknown error');
     }
@@ -340,9 +343,12 @@ export class CLI {
 
     for (const agent of agents.values()) {
       try {
-        const memory = agent.getMemory();
-        memory.shortTerm.clear();
-        console.log(`Short-term memory cleared for agent "${agent.getName()}"`);
+        // Update each agent's config with an empty chat history
+        const config = agent.getStatus();
+        config.chatHistory = [];
+        // Emit state update to persist the change
+        agent.emit('stateUpdate', config);
+        console.log(`Chat history cleared for agent "${agent.getName()}"`);
       } catch (error) {
         console.error(`Failed to clear agent ${agent.getName()}:`,
           error instanceof Error ? error.message : 'Unknown error');
@@ -365,7 +371,7 @@ Available commands:
   /kill <name>             - Terminate an agent by name
   /ask [name] <msg>        - Ask a question to an agent (or all agents if no name specified)
   /status [name]           - Show agent status and memory (or all agents if no name specified)
-  /clear [name]            - Clear agent's short-term memory (or all agents if no name specified)
+  /clear [name]            - Clear agent's chat history (or all agents if no name specified)
   /help                    - Show this help message
   /exit                    - Exit the program
     `);

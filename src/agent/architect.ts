@@ -8,12 +8,10 @@ export class ArchitectAgent extends Agent {
       ...config,
       role: `You are an AI Architect specialized in software architecture and system design.
 Your responsibilities include:
-- Analyzing system requirements and constraints
-- Designing scalable and maintainable software architectures
-- Making high-level technical decisions
-- Creating architectural diagrams and documentation
-- Evaluating technical trade-offs
-- Ensuring system quality attributes (performance, security, reliability)`,
+- Collecting and analyzing requirements
+- Building knowledge bases of the system to be developed
+- Creating step by step plans for system implementation as a short bullet list
+`,
       type: AgentType.ARCHITECT
     };
 
@@ -21,9 +19,15 @@ Your responsibilities include:
   }
 
   public async chat(input: string, onStream?: (chunk: string) => void): Promise<LLMResponse> {
-    if (!this.provider) {
+    if (!this.llmProvider) {
       throw new Error('Provider not initialized');
     }
+
+    this.addMessage('user', input);
+
+    this.status = 'busy';
+    this.lastActive = new Date();
+    this.emit('stateUpdate', this.toConfig());
 
     // First, get the current knowledge
     const currentKnowledge = this.getKnowledge();
@@ -32,23 +36,30 @@ Your responsibilities include:
     const reorganizeMessage: ChatMessage[] = [
       {
         role: 'system',
-        content: `You are an AI Architect. Your task is to reorganize and integrate the following new information with the existing knowledge base. 
-Maintain a clear and structured format, removing any redundancies while preserving all important technical details.
-Focus on architectural decisions, system design patterns, and technical requirements.`,
+        content: this.getRole(),
         timestamp: Date.now()
       },
       {
         role: 'user',
-        content: `Current Knowledge Base:\n${currentKnowledge}\n\nNew Information to Integrate:\n${input}`,
+        content: `Combine the current knowledge base with new information to create a short bullet list:
+
+  Current Knowledge Base:\n${currentKnowledge}\n\nNew Information to Integrate:\n${input}
+  
+  Retain the current knowledgebase as much as possible. Return ONLY the reorganized knowledge as the response.
+  `,
         timestamp: Date.now()
       }
     ];
 
     // Use the LLM provider directly to reorganize knowledge, passing through the onStream callback
-    const reorganizedKnowledge = await this.provider.chat(reorganizeMessage, onStream);
+    const reorganizedKnowledge = await this.llmProvider.chat(reorganizeMessage, onStream);
     
     // Update the knowledge base with the reorganized content
     this.setKnowledge(reorganizedKnowledge.content);
+
+    this.status = 'idle';
+    this.lastActive = new Date();
+    this.emit('stateUpdate', this.toConfig());
 
     // Return the reorganized knowledge as the response
     return {
