@@ -32,8 +32,20 @@ export class Agent extends EventEmitter implements AgentConfig {
   private maxChatHistory: number = 10;
   private readonly memoryLimit: number = 100000; // Limit total memory size
 
+  // Rate limiting
+  private rateLimiter = {
+    tokens: 10,
+    maxTokens: 10,
+    lastRefill: Date.now(),
+    refillRate: 1000, // 1 token per second
+  };
+
   constructor(config: AgentConfig, apiKey: string) {
     super();
+    if (!this.isValidProvider(config.provider)) {
+      throw new AgentError('Invalid provider specified', 'INVALID_PROVIDER');
+    }
+
     this.id = config.id;
     this.name = config.name;
     this.role = config.role;
@@ -48,6 +60,10 @@ export class Agent extends EventEmitter implements AgentConfig {
 
     // Initialize the provider asynchronously
     this.initializeProvider(config.provider, apiKey, config.model);
+  }
+
+  protected isValidProvider(provider: string): provider is 'openai' | 'anthropic' | 'ollama' {
+    return ['openai', 'anthropic', 'ollama'].includes(provider);
   }
 
   private async initializeProvider(
@@ -72,7 +88,27 @@ export class Agent extends EventEmitter implements AgentConfig {
   }
 
   protected validateMessage(content: string): boolean {
-    return content.length > 0 && content.length < 32768; // Max 32KB per message
+    if (!content || typeof content !== 'string') {
+      return false;
+    }
+    
+    // Check for common issues
+    const containsOnlyWhitespace = /^\s*$/.test(content);
+    const containsControlCharacters = /[\x00-\x1F\x7F]/.test(content);
+    const exceedsMaxLength = content.length >= 32768;
+    
+    if (containsOnlyWhitespace || containsControlCharacters || exceedsMaxLength) {
+      return false;
+    }
+    
+    // Validate UTF-8 encoding
+    try {
+      const encoded = new TextEncoder().encode(content);
+      new TextDecoder('utf-8', {fatal: true}).decode(encoded);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   protected cleanupMemory(): void {
@@ -89,6 +125,29 @@ export class Agent extends EventEmitter implements AgentConfig {
     }
     
     this.chatHistory = newHistory;
+  }
+
+  private async acquireToken(): Promise<void> {
+    const now = Date.now();
+    const timePassed = now - this.rateLimiter.lastRefill;
+    const tokensToAdd = Math.floor(timePassed / this.rateLimiter.refillRate);
+    
+    if (tokensToAdd > 0) {
+      this.rateLimiter.tokens = Math.min(
+        this.rateLimiter.maxTokens,
+        this.rateLimiter.tokens + tokensToAdd
+      );
+      this.rateLimiter.lastRefill = now;
+    }
+    
+    if (this.rateLimiter.tokens <= 0) {
+      await new Promise(resolve => 
+        setTimeout(resolve, this.rateLimiter.refillRate)
+      );
+      return this.acquireToken();
+    }
+    
+    this.rateLimiter.tokens--;
   }
 
   protected addMessage(role: ChatMessage['role'], content: string): void {
@@ -192,6 +251,8 @@ export class Agent extends EventEmitter implements AgentConfig {
     if (!this.validateMessage(input)) {
       throw new AgentError('Invalid input message', 'INVALID_INPUT');
     }
+
+    await this.acquireToken(); // Add rate limiting
 
     this.status = 'busy';
     this.lastActive = new Date();
