@@ -5,37 +5,36 @@
  * - Function-based architecture (no classes or inheritance)
  * - Uses existing llm.ts module for all LLM operations
  * - Uses existing event-bus.ts module for all event handling
- * - Uses function-based storage.ts module for persistence
- * - Simple memory management with JSON persistence
- * - Mention-based message filtering for loop prevention
- * - Direct LLM response generation without fallbacks
+ * - Simplified mention-based message filtering for loop prevention
+ * - Direct LLM response generation with conversation history context
+ * - Agent memory persistence in separate memory.json files per agent
  * - Basic agent configuration and lifecycle management
  * 
  * Logic:
- * - processAgentMessage: Main function for handling agent messages
- * - Uses storage.ts functions directly for memory persistence
- * - shouldRespondToMessage: Mention-based filtering logic
- * - extractMentions: Parse @mentions from message content
- * - Direct integration with llm.ts, event-bus.ts and storage.ts modules
- * - No complex state management, monitoring, or tool systems
+ * - processAgentMessage: Main function for handling agent messages with memory
+ * - shouldRespondToMessage: Simple mention-based filtering logic
+ * - buildPrompt: Unified prompt building with conversation history context
+ * - Direct integration with llm.ts and event-bus.ts modules
+ * - Memory stored separately in data/worlds/{world}/agents/{agent}/memory.json
+ * - Conversation history included in LLM context for contextual responses
  * 
  * Changes:
  * - Initial implementation combining AIAgent and BaseAgent functionality
  * - Removed class-based architecture in favor of pure functions
  * - Eliminated tool system, fallback logic, and monitoring complexity
  * - Uses existing modules instead of duplicating LLM/event functionality
- * - Simple memory structure with conversation history only
- * - Maintains core functionality: message handling, LLM integration, memory
- * - UPDATED: Migrated from class-based FileStorage to function-based storage.ts
- * - REMOVED: Local loadAgentMemory/saveAgentMemory functions in favor of imports
- * - SIMPLIFIED: Function signatures by removing storage parameter dependency
+ * - Maintains core functionality: message handling, LLM integration
+ * - SIMPLIFIED: Mention detection to basic @name matching
+ * - MERGED: buildSystemPrompt and buildUserPrompt into single buildPrompt function
+ * - IMPLEMENTED: Agent memory/history system with separate file storage
+ * - ENHANCED: LLM context includes conversation history for better responses
+ * - STREAMLINED: Response message publishing and processing
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { AgentMemory, Event, EventType } from './types';
-import { loadLLMProvider, chatWithLLM, ChatOptions, LLMConfig } from './llm';
+import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
 import { publishSSE, publishMessage } from './event-bus';
-import { loadAgentMemory as loadMemory, saveAgentMemory as saveMemory } from './storage';
 import { agentLogger } from './logger';
 
 // Types moved to types.ts
@@ -48,20 +47,17 @@ import type { AgentConfig, MessageData } from './types';
 export async function processAgentMessage(
   agentConfig: AgentConfig,
   messageData: MessageData,
-  messageId?: string
+  messageId?: string,
+  worldId?: string
 ): Promise<string> {
   const msgId = messageId || uuidv4();
 
-  try {
-    // Load agent memory
-    const loadedMemory = await loadMemory(agentConfig.id);
-    const memory: AgentMemory = loadedMemory || {
-      agentId: agentConfig.id,
-      conversationHistory: [],
-      lastActivity: new Date().toISOString(),
-      facts: {}
-    };
+  // Ensure agent has an ID
+  if (!agentConfig.id) {
+    throw new Error('Agent config must have an ID for processing messages');
+  }
 
+  try {
     // Check if agent should respond to this message
     if (!shouldRespondToMessage(agentConfig, messageData)) {
       agentLogger.debug({
@@ -88,11 +84,12 @@ export async function processAgentMessage(
 
     const provider = loadLLMProvider(llmConfig);
 
-    // Build system prompt
-    const systemPrompt = buildSystemPrompt(agentConfig, memory);
+    // Load conversation history for context (import function from world.ts)
+    const { getAgentConversationHistory, addToAgentMemory } = await import('./world');
+    const conversationHistory = await getAgentConversationHistory(worldId || 'default', agentConfig.id!, 10);
 
-    // Build user prompt with context
-    const userPrompt = buildUserPrompt(messageData, memory);
+    // Build complete prompt with history
+    const prompt = buildPrompt(agentConfig, messageData, conversationHistory);
 
     // Generate response using LLM
     const chatOptions: ChatOptions = {
@@ -102,51 +99,31 @@ export async function processAgentMessage(
       agentName: agentConfig.name
     };
 
-    const response = await chatWithLLM(
+    const response = await streamChatWithLLM(
       provider,
-      systemPrompt,
-      userPrompt,
+      prompt,
+      '', // No separate user prompt - everything is in system prompt
+      msgId,
       chatOptions
     );
 
-    // Update memory with new conversation
-    if (!memory.conversationHistory) {
-      memory.conversationHistory = [];
-    }
-
-    // Add input message
-    memory.conversationHistory.push({
-      id: messageData.id,
-      type: EventType.MESSAGE,
-      timestamp: new Date().toISOString(),
-      payload: {
-        content: messageData.content || messageData.payload?.content || '',
-        sender: messageData.sender || 'unknown',
-        messageId: messageData.id
-      }
+    // Add the current message and response to agent memory
+    await addToAgentMemory(worldId || 'default', agentConfig.id!, {
+      type: 'incoming',
+      sender: messageData.sender,
+      content: messageData.content || messageData.payload?.content || '',
+      messageId: msgId
+    });
+    
+    await addToAgentMemory(worldId || 'default', agentConfig.id!, {
+      type: 'outgoing',
+      sender: agentConfig.id,
+      content: response,
+      messageId: msgId,
+      inResponseTo: messageData.id
     });
 
-    // Add response message  
-    memory.conversationHistory.push({
-      id: msgId,
-      type: EventType.MESSAGE,
-      timestamp: new Date().toISOString(),
-      payload: {
-        content: response,
-        sender: agentConfig.id,
-        messageId: msgId
-      }
-    });
-
-    // Keep only last 20 messages to prevent memory bloat
-    if (memory.conversationHistory.length > 20) {
-      memory.conversationHistory = memory.conversationHistory.slice(-20);
-    }
-
-    memory.lastActivity = new Date().toISOString();
-
-    // Save updated memory
-    await saveMemory(agentConfig.id, memory);
+    // Note: Using memory persistence to separate memory.json files
 
     // Publish response message
     await publishMessage({
@@ -155,33 +132,40 @@ export async function processAgentMessage(
         content: response,
         agentId: agentConfig.id,
         agentName: agentConfig.name,
-        inResponseTo: messageData.id
+        inResponseTo: messageData.id,
+        worldId: worldId,  // Include worldId for proper filtering
+        sender: agentConfig.id
       },
-      id: msgId,
-      sender: agentConfig.id
+      id: msgId
     });
 
-    agentLogger.info({
-      agentId: agentConfig.id,
-      messageId: msgId,
-      responseLength: response.length
-    }, 'Agent message processed successfully');
+    // agentLogger.info({
+    //   agentId: agentConfig.id,
+    //   messageId: msgId,
+    //   responseLength: response.length
+    // }, 'Agent message processed successfully');
 
     return response;
 
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
     agentLogger.error({
-      agentId: agentConfig.id,
+      agentId: agentConfig.id!,
       messageId: msgId,
-      error
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined
     }, 'Agent message processing failed');
+
+    // Also log to console for immediate visibility
+    console.error(`Agent ${agentConfig.name} (${agentConfig.id}) failed to process message:`, errorMessage);
 
     // Emit error SSE event
     await publishSSE({
-      agentId: agentConfig.id,
+      agentId: agentConfig.id!,
       type: 'error',
       messageId: msgId,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: errorMessage
     });
 
     throw error;
@@ -189,7 +173,7 @@ export async function processAgentMessage(
 }
 
 /**
- * Check if agent should respond to a message (mention-based filtering)
+ * Check if agent should respond to a message (simplified)
  */
 export function shouldRespondToMessage(
   agentConfig: AgentConfig,
@@ -202,87 +186,53 @@ export function shouldRespondToMessage(
 
   const content = messageData.content || messageData.payload?.content || '';
 
-  // Always respond to direct messages or system messages
+  // Always respond to system messages
   if (!messageData.sender || messageData.sender === 'system') {
     return true;
   }
 
+  // For CLI/user messages, respond to all or check basic @name mentions
+  if (messageData.sender === 'CLI' || messageData.sender === 'human') {
+    // Simple check for @name mention
+    const agentName = agentConfig.name.toLowerCase();
+    const hasNameMention = content.toLowerCase().includes(`@${agentName}`);
+
+    // If no mentions at all, respond to all (broadcast)
+    if (!content.includes('@')) {
+      return true;
+    }
+
+    // If there are mentions, only respond if this agent is mentioned
+    return hasNameMention;
+  }
+
   // For agent messages, only respond if mentioned
-  if (messageData.sender && messageData.sender !== 'human') {
-    return isMentioned(agentConfig, content);
-  }
-
-  // For human messages, respond if no mentions or if mentioned
-  const mentions = extractMentions(content);
-  return mentions.length === 0 || isMentioned(agentConfig, content);
-}
-
-/**
- * Extract mentions from message content
- */
-export function extractMentions(content: string): string[] {
-  const mentionRegex = /@(\w+)/g;
-  const mentions: string[] = [];
-  let match;
-
-  while ((match = mentionRegex.exec(content)) !== null) {
-    mentions.push(match[1].toLowerCase());
-  }
-
-  return mentions;
-}
-
-/**
- * Check if agent is mentioned in content
- */
-export function isMentioned(agentConfig: AgentConfig, content: string): boolean {
-  const mentions = extractMentions(content);
   const agentName = agentConfig.name.toLowerCase();
-  const agentId = agentConfig.id.toLowerCase();
-
-  return mentions.some(mention =>
-    mention === agentName ||
-    mention === agentId ||
-    agentId.includes(mention) // Support partial ID matching
-  );
+  return content.toLowerCase().includes(`@${agentName}`);
 }
 
 /**
- * Build system prompt for the agent
+ * Build complete prompt for the agent with conversation history
  */
-function buildSystemPrompt(agentConfig: AgentConfig, memory: AgentMemory): string {
-  let prompt = `You are ${agentConfig.name}, an AI agent.`;
+function buildPrompt(agentConfig: AgentConfig, messageData: MessageData, conversationHistory: any[] = []): string {
+  let prompt = agentConfig.systemPrompt || `You are ${agentConfig.name}, an AI agent.`;
 
-  if (agentConfig.personality) {
-    prompt += `\n\nPersonality: ${agentConfig.personality}`;
-  }
-
-  if (agentConfig.instructions) {
-    prompt += `\n\nInstructions: ${agentConfig.instructions}`;
-  }
-
-  // Add recent conversation context
-  if (memory.conversationHistory && memory.conversationHistory.length > 0) {
-    const recentMessages = memory.conversationHistory.slice(-5);
-    prompt += `\n\nRecent conversation context:`;
-    recentMessages.forEach(msg => {
-      const sender = msg.payload?.sender || 'unknown';
-      const content = msg.payload?.content || '';
-      prompt += `\n- ${sender}: ${content}`;
+  // Add conversation history for context
+  if (conversationHistory.length > 0) {
+    prompt += `\n\nRecent conversation history:`;
+    conversationHistory.forEach((msg, index) => {
+      const sender = msg.sender || 'unknown';
+      const content = msg.content || msg.payload?.content || '';
+      prompt += `\n${sender}: ${content}`;
     });
   }
 
   prompt += `\n\nRespond naturally and conversationally. Be helpful and engaging.`;
 
-  return prompt;
-}
-
-/**
- * Build user prompt from message data
- */
-function buildUserPrompt(messageData: MessageData, memory: AgentMemory): string {
+  // Add the current message
   const content = messageData.content || messageData.payload?.content || '';
   const sender = messageData.sender || 'unknown';
+  prompt += `\n\nCurrent message: ${sender}: ${content}`;
 
-  return `${sender}: ${content}`;
+  return prompt;
 }

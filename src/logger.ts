@@ -19,6 +19,7 @@
  * - Initial implementation of centralized pino logging
  */
 
+import 'dotenv/config';
 import pino from 'pino';
 
 // Determine environment
@@ -28,7 +29,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 // Base logger configuration
 const baseConfig: pino.LoggerOptions = {
-  name: 'dapr-world-backend',
+  name: 'agent-world',
   level: isTest ? 'silent' : isDevelopment ? 'debug' : 'info',
   timestamp: pino.stdTimeFunctions.isoTime,
 };

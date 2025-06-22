@@ -35,6 +35,8 @@ export interface Agent {
  * - Replaces shared package dependencies with local types
  * - Provides type safety for world management functions
  * - Defines core interfaces for agent and world management
+ * - UPDATED: Replaced personality/instructions with systemPrompt field
+ * - systemPrompt is saved as separate system-prompt.md file per agent
  */
 
 // Agent Types
@@ -44,15 +46,14 @@ export interface Agent {
  * (Moved from agent.ts, reconciled fields)
  */
 export interface AgentConfig {
-  id: string;
+  id?: string;
   name: string;
   type: string;
   provider: LLMProvider;
   model: string;
   apiKey?: string;
   baseUrl?: string;
-  personality?: string;
-  instructions?: string;
+  systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
   // Provider-specific configs
@@ -87,7 +88,6 @@ export interface Event {
   type: EventType;
   timestamp: string;
   payload: any;
-  metadata?: Record<string, any>;
 }
 
 export enum EventType {
@@ -106,8 +106,7 @@ export const EventSchema = z.object({
   id: z.string(),
   type: z.nativeEnum(EventType),
   timestamp: z.string().datetime(),
-  payload: z.record(z.any()),
-  metadata: z.record(z.any()).optional()
+  payload: z.record(z.any())
 });
 
 // World Types
@@ -115,21 +114,16 @@ export interface WorldState {
   id: string;
   name: string;
   agents: Map<string, Agent>;
-  createdAt: Date;
-  metadata: Record<string, any>;
 }
 
 export interface WorldOptions {
   name?: string;
-  metadata?: Record<string, any>;
 }
 
 export interface WorldInfo {
   id: string;
   name: string;
   agentCount: number;
-  createdAt: Date;
-  metadata: Record<string, any>;
 }
 
 // LLM Types (for future use)
@@ -145,15 +139,8 @@ export enum LLMProvider {
 
 // Message Types
 export interface MessagePayload {
-  name: string;
-  payload: any;
-  id: string;
-  sender?: string;
-  senderType?: string;
-  recipient?: string;
-  content?: string;
-  timestamp?: string;
-  [key: string]: any;
+  content: string;
+  sender: string;
 }
 
 // File Storage Types
@@ -180,4 +167,4 @@ export interface AgentMemory {
   longTerm?: Array<{ content: string; timestamp: string }>;
 }
 
-export type StorageType = 'messages' | 'events';
+

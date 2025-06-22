@@ -60,5 +60,6 @@ export default {
         moduleResolution: 'node'
       }
     }]
-  }
+  },
+  globalTeardown: '<rootDir>/tests/global-teardown.ts'
 };

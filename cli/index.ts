@@ -38,6 +38,7 @@
  * - Real-time streaming responses via SSE events with instant display
  * - Agent response separation with clear headers and dividers
  * - Smart prompt restoration only after all agents complete streaming
+ * - File storage initialization is now handled automatically by World.ensureDefaultWorld
  */
 
 import * as readline from 'readline';
@@ -51,6 +52,11 @@ import { useCommand } from './commands/use';
 import * as World from '../src/world';
 import { colors } from './utils/colors';
 import { EventType } from '../src/types';
+// Debug utility: prints debug data in gray
+function debug(...args: any[]) {
+  // Print debug output in gray color
+  console.log(colors.gray('[debug]'), ...args);
+}
 
 // Load agents function (merged from loader.ts)
 async function loadAgents(worldId: string): Promise<void> {
@@ -91,55 +97,54 @@ interface StreamingAgent {
   hasStarted: boolean;
 }
 
-class StreamingManager {
-  private activeStreams: Map<string, StreamingAgent> = new Map();
+// Function-based streaming manager
+const activeStreams = new Map<string, StreamingAgent>();
 
-  startStreaming(agentId: string, agentName: string): void {
-    if (!this.activeStreams.has(agentId)) {
-      this.activeStreams.set(agentId, {
-        agentId,
-        agentName,
-        isStreaming: true,
-        hasStarted: false
-      });
-    }
-
-    const stream = this.activeStreams.get(agentId)!;
-    if (!stream.hasStarted) {
-      process.stdout.write(colors.blue(`\n> ${agentName}: `));
-      stream.hasStarted = true;
-    }
+function startStreaming(agentId: string, agentName: string): void {
+  if (!activeStreams.has(agentId)) {
+    activeStreams.set(agentId, {
+      agentId,
+      agentName,
+      isStreaming: true,
+      hasStarted: false
+    });
   }
 
-  addContent(agentId: string, content: string): void {
-    const stream = this.activeStreams.get(agentId);
-    if (stream && stream.isStreaming) {
-      // Display content immediately for real-time streaming
-      process.stdout.write(content);
-    }
+  const stream = activeStreams.get(agentId)!;
+  if (!stream.hasStarted) {
+    process.stdout.write(colors.blue(`\n> ${agentName}: `));
+    stream.hasStarted = true;
   }
+}
 
-  endStreaming(agentId: string): void {
-    const stream = this.activeStreams.get(agentId);
-    if (stream) {
-      stream.isStreaming = false;
-      // Add newline after streaming completes
-      console.log();
-      this.activeStreams.delete(agentId);
-    }
+function addStreamingContent(agentId: string, content: string): void {
+  const stream = activeStreams.get(agentId);
+  if (stream && stream.isStreaming) {
+    // Display content immediately for real-time streaming
+    process.stdout.write(content);
   }
+}
 
-  markError(agentId: string): void {
-    const stream = this.activeStreams.get(agentId);
-    if (stream) {
-      console.log(colors.red('\n[Response ended with error]'));
-      this.activeStreams.delete(agentId);
-    }
+function endStreaming(agentId: string): void {
+  const stream = activeStreams.get(agentId);
+  if (stream) {
+    stream.isStreaming = false;
+    // Add newline after streaming completes
+    console.log();
+    activeStreams.delete(agentId);
   }
+}
 
-  isActive(): boolean {
-    return this.activeStreams.size > 0;
+function markStreamingError(agentId: string): void {
+  const stream = activeStreams.get(agentId);
+  if (stream) {
+    console.log(colors.red('\n[Response ended with error]'));
+    activeStreams.delete(agentId);
   }
+}
+
+function isStreamingActive(): boolean {
+  return activeStreams.size > 0;
 }
 
 // Command registry
@@ -154,11 +159,10 @@ const commands: Record<string, (args: string[], worldId: string) => Promise<void
 };
 
 async function main() {
-  // Use our fixed sample world
-  const worldId = 'world_sample';
-  
-  // Initialize streaming manager
-  const streamingManager = new StreamingManager();
+  // Load worlds with smart selection (also initializes file storage)
+  const worldId = await World.loadWorldsWithSelection();
+
+  // Streaming manager is now function-based (no initialization needed)
 
   // Handle graceful shutdown
   const shutdown = async () => {
@@ -200,6 +204,11 @@ async function main() {
       rl.prompt();
       return;
     }
+
+    // Clear the current line to prevent echoing the command input
+    readline.moveCursor(process.stdout, 0, -1); // Move cursor up one line
+    readline.clearLine(process.stdout, 0);      // Clear the line
+    readline.cursorTo(process.stdout, 0);       // Move cursor to start
 
     if (trimmedInput.startsWith('/')) {
       // Handle commands
@@ -243,24 +252,24 @@ async function main() {
 
       switch (sseData.type) {
         case 'start':
-          streamingManager.startStreaming(sseData.agentId, agentName);
+          startStreaming(sseData.agentId, agentName);
           break;
         case 'chunk':
-          streamingManager.addContent(sseData.agentId, sseData.content || '');
+          addStreamingContent(sseData.agentId, sseData.content || '');
           break;
         case 'end':
-          streamingManager.endStreaming(sseData.agentId);
+          endStreaming(sseData.agentId);
           // Show prompt again after response completes
           setTimeout(() => {
-            if (!streamingManager.isActive()) {
+            if (!isStreamingActive()) {
               rl.prompt();
             }
           }, 100);
           break;
         case 'error':
-          streamingManager.markError(sseData.agentId);
+          markStreamingError(sseData.agentId);
           setTimeout(() => {
-            if (!streamingManager.isActive()) {
+            if (!isStreamingActive()) {
               rl.prompt();
             }
           }, 100);

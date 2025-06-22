@@ -160,17 +160,11 @@ export async function publishMessage(messageObj: {
   name: string;
   payload: any;
   id: string;
-  sender?: string;
-  senderType?: string;
-  recipient?: string;
-  content?: string;
-  timestamp?: string;
   [key: string]: any;
 }): Promise<Event> {
   return publishEvent(TOPICS.MESSAGES, {
     type: EventType.MESSAGE,
-    payload: messageObj,
-    metadata: messageObj.sender ? { agentId: messageObj.sender } : undefined
+    payload: messageObj
   });
 }
 
@@ -195,8 +189,7 @@ export async function publishSSE(sseMessage: {
     payload: {
       ...sseMessage,
       timestamp: new Date().toISOString()
-    },
-    metadata: { agentId: sseMessage.agentId }
+    }
   });
 }
 
@@ -253,10 +246,8 @@ function matchesFilter(event: Event, filter: EventFilter): boolean {
     return false;
   }
 
-  // Check agent filter
-  if (filter.agentId &&
-    event.payload.agentId !== filter.agentId &&
-    !(event.metadata && event.metadata.agentId === filter.agentId)) {
+  // Check agent filter - only check payload
+  if (filter.agentId && event.payload.agentId !== filter.agentId) {
     return false;
   }
 

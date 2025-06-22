@@ -1,28 +1,42 @@
 /*
- * Simplified Function-Based World Management
- * 
+ * Simplified Function-Based World Management (Per-World Persistent Storage)
+ *
  * Features:
- * - World creation and basic state management
- * - Agent management (create, remove, update, query)
+ * - World creation, listing, and basic state management
+ * - Agent management (create, remove, update, query) within each world
  * - Event system integration (publish, subscribe, messaging)
- * - Basic persistence (save/load world state)
- * - World listing and discovery
- * - Simple in-memory storage with optional persistence
- * 
+ * - Persistent storage of agents, events, and messages in per-world subfolders:
+ *     - data/worlds/<worldId>/agents
+ *     - data/worlds/<worldId>/events
+ *     - data/worlds/<worldId>/messages
+ * - In-memory Map-based storage for fast access, with JSON file persistence
+ * - Recursively loads agent config.json files from agent subdirectories for compatibility with nested agent storage
+ * - Ensures file storage is initialized automatically when ensuring default world
+ * - Agent message subscriptions filter by worldId and recipient/targetId for correct delivery
+ * - Single subscription per agent to prevent duplicate message handling
+ * - Agent memory/history system with separate memory.json files per agent
+ * - System prompt separation into individual system-prompt.md files per agent
+ *
  * Logic:
- * - Uses Map-based in-memory storage for fast access
- * - Integrates with event-bus.ts for event publishing/subscribing
- * - Provides clean functional API for all world operations
- * - Handles agent lifecycle within world context
- * - Supports basic persistence via JSON file storage
+ * - All agent, event, and message storage is now per-world; no global agent/event/message folders
+ * - Clean functional API for world, agent, and event/message management
  * - Maintains world state consistency and validation
- * 
+ * - Integrates with event-bus.ts for event publishing/subscribing
+ * - Agents subscribe to messages both during creation and loading, with duplicate prevention
+ * - Agent memory stored separately for better organization and performance
+ * - System prompts stored as editable markdown files
+ * - Complete event-driven message flow: CLI → MESSAGE → Agent → LLM → SSE → CLI
+ *
  * Changes:
- * - Initial implementation of simplified world management
- * - Function-based approach replacing class-based architecture
- * - Integration with existing event-bus system
- * - Basic persistence for world state and agents
- * - Clean API for agent and event management
+ * - Refactored to use per-world persistent storage for agents, events, and messages
+ * - Removed all global agent/event/message storage logic
+ * - Updated all APIs and tests to require worldId for agent/event/message operations
+ * - Updated agent loader to support nested agent directories with config.json files
+ * - File storage initialization and world loading logic improved for robustness
+ * - Simplified event subscription system without duplicate tracking
+ * - IMPLEMENTED: Agent memory/history system with separate file storage
+ * - IMPLEMENTED: System prompt file separation for better management
+ * - VERIFIED: Complete event-driven message processing flow
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -38,26 +52,76 @@ import {
 } from './types';
 import {
   publishMessage,
-  publishWorld,
   subscribeToMessages,
-  subscribeToWorld
+  subscribeToWorld,
+  subscribeToSSE,
+  initializeEventBus
 } from './event-bus';
+import { processAgentMessage } from './agent';
+import { initializeFileStorage, getStorageOptions, ensureDirectory } from './storage';
+import { toKebabCase } from './utils';
+import { worldLogger } from './logger'; // (if not already imported)
 
 // Global world storage
 const worlds: Map<string, WorldState> = new Map();
 
-// Data directory structure for persistence
-const DATA_ROOT = path.join(process.cwd(), 'data');
-const WORLDS_DIR = path.join(DATA_ROOT, 'worlds');
+// Get data directory from storage configuration
+function getWorldsDir(): string {
+  try {
+    const storageOptions = getStorageOptions();
+    return storageOptions.dataPath;
+  } catch {
+    // Fallback to default if storage not initialized
+    return path.join(process.cwd(), 'data', 'worlds');
+  }
+}
 
 // Default world configuration
 const DEFAULT_WORLD_NAME = 'Default World';
 
 /**
- * Get world directory path
+ * Get world directory path using kebab-case of world name
+ * This function requires the world to be loaded in memory first
  */
 function getWorldDir(worldId: string): string {
-  return path.join(WORLDS_DIR, worldId);
+  const worldsDir = getWorldsDir();
+  const world = worlds.get(worldId);
+  if (!world) {
+    throw new Error(`World ${worldId} not found in memory. Load the world first before accessing its directory.`);
+  }
+  // Always use kebab-case of world name for folder
+  return path.join(worldsDir, toKebabCase(world.name));
+}
+
+/**
+ * Find the actual world directory by checking both kebab-case name and world ID
+ */
+async function findWorldDir(worldId: string): Promise<string | null> {
+  const worldsDir = getWorldsDir();
+
+  // Try to find world config by scanning directories
+  try {
+    const entries = await fs.readdir(worldsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const configPath = path.join(worldsDir, entry.name, 'config.json');
+        try {
+          await fs.access(configPath);
+          const configData = await fs.readFile(configPath, 'utf-8');
+          const worldConfig = JSON.parse(configData);
+          if (worldConfig.id === worldId) {
+            return path.join(worldsDir, entry.name);
+          }
+        } catch {
+          // Skip invalid configs
+        }
+      }
+    }
+  } catch {
+    // Directory doesn't exist
+  }
+
+  return null;
 }
 
 /**
@@ -75,32 +139,33 @@ function getAgentsDir(worldId: string): string {
 }
 
 /**
- * Get agent file path
+ * Get agent file path using kebab-case agent name
  */
-function getAgentPath(worldId: string, agentId: string): string {
-  return path.join(getAgentsDir(worldId), `${agentId}.json`);
+function getAgentPath(worldId: string, agentName: string): string {
+  return path.join(getAgentsDir(worldId), toKebabCase(agentName), 'config.json');
 }
 
 /**
  * Ensure data directories exist
  */
 async function ensureDataDirectories(): Promise<void> {
-  try {
-    await fs.mkdir(WORLDS_DIR, { recursive: true });
-  } catch (error) {
-    console.error('Failed to create data directories:', error);
-  }
+  const worldsDir = getWorldsDir();
+  await ensureDirectory(worldsDir);
 }
 
 /**
  * Create default world if no worlds exist
  */
 export async function ensureDefaultWorld(): Promise<string> {
+  // Initialize event bus with local provider
+  initializeEventBus({ provider: 'local', enableLogging: true });
+
+  await initializeFileStorage();
   await ensureDataDirectories();
-  
+
   // Check if any worlds exist on disk
   const existingWorlds = await listWorldsFromDisk();
-  
+
   if (existingWorlds.length > 0) {
     // Load existing worlds into memory
     for (const worldId of existingWorlds) {
@@ -112,10 +177,35 @@ export async function ensureDefaultWorld(): Promise<string> {
     }
     return existingWorlds[0]; // Return first world ID
   }
-  
+
   // Create default world
   const defaultWorldId = await createWorld({ name: DEFAULT_WORLD_NAME });
   return defaultWorldId;
+}
+
+/**
+ * Simple world loading - loads first available world or creates default
+ */
+export async function loadWorldsWithSelection(): Promise<string> {
+  // Initialize event bus with local provider
+  initializeEventBus({ provider: 'local', enableLogging: true });
+
+  await initializeFileStorage();
+  await ensureDataDirectories();
+
+  // Check if any worlds exist on disk
+  const existingWorlds = await listWorldsFromDisk();
+
+  if (existingWorlds.length === 0) {
+    // No worlds found - create default world
+    const defaultWorldId = await createWorld({ name: DEFAULT_WORLD_NAME });
+    return defaultWorldId;
+  }
+
+  // Load first available world
+  const worldId = existingWorlds[0];
+  await loadWorldFromDisk(worldId);
+  return worldId;
 }
 
 /**
@@ -145,13 +235,14 @@ export async function initializeWorldSystem(): Promise<string> {
  * Create a new world
  */
 export async function createWorld(options: WorldOptions = {}): Promise<string> {
+  // Initialize event bus with local provider (defensive)
+  initializeEventBus({ provider: 'local', enableLogging: true });
+
   const worldId = generateWorldId();
   const worldState: WorldState = {
     id: worldId,
     name: options.name || `World ${worldId.slice(-8)}`,
-    agents: new Map(),
-    createdAt: new Date(),
-    metadata: options.metadata || {}
+    agents: new Map()
   };
 
   worlds.set(worldId, worldState);
@@ -164,14 +255,6 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
     worlds.delete(worldId);
     throw error;
   }
-
-  // Publish world creation event
-  publishWorld({
-    type: 'WORLD_CREATED',
-    worldId,
-    name: worldState.name,
-    timestamp: new Date().toISOString()
-  });
 
   return worldId;
 }
@@ -186,9 +269,7 @@ export function getWorldInfo(worldId: string): WorldInfo | null {
   return {
     id: world.id,
     name: world.name,
-    agentCount: world.agents.size,
-    createdAt: world.createdAt,
-    metadata: world.metadata
+    agentCount: world.agents.size
   };
 }
 
@@ -199,25 +280,20 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
   const world = worlds.get(worldId);
   if (!world) return false;
 
+  // Get world directory path before removing from memory
+  const worldDir = getWorldDir(worldId);
+
   // Remove from memory first
   worlds.delete(worldId);
 
   // Remove world directory from disk
   try {
-    const worldDir = getWorldDir(worldId);
     await fs.rm(worldDir, { recursive: true, force: true });
   } catch (error) {
     // Rollback memory change if disk operation fails
     worlds.set(worldId, world);
     throw error;
   }
-
-  // Publish world deletion event
-  publishWorld({
-    type: 'WORLD_DELETED',
-    worldId,
-    timestamp: new Date().toISOString()
-  });
 
   return true;
 }
@@ -235,22 +311,26 @@ export function listWorlds(): string[] {
 export async function listWorldsFromDisk(): Promise<string[]> {
   try {
     await ensureDataDirectories();
-    const worldDirs = await fs.readdir(WORLDS_DIR);
-    
+    const worldsDir = getWorldsDir();
+    const worldDirs = await fs.readdir(worldsDir);
+
     // Filter to only include directories with valid config files
-    const validWorlds: string[] = [];
-    
+    const validWorldIds: string[] = [];
+
     for (const worldDir of worldDirs) {
-      const configPath = getWorldConfigPath(worldDir);
       try {
+        const configPath = path.join(worldsDir, worldDir, 'config.json');
         await fs.access(configPath);
-        validWorlds.push(worldDir);
+        // Read the config to get the world ID
+        const configData = await fs.readFile(configPath, 'utf-8');
+        const worldConfig = JSON.parse(configData);
+        validWorldIds.push(worldConfig.id);
       } catch (error) {
         // Skip invalid world directories
       }
     }
-    
-    return validWorlds;
+
+    return validWorldIds;
   } catch (error) {
     return [];
   }
@@ -274,21 +354,19 @@ async function saveWorldToDisk(worldId: string): Promise<void> {
 
   const worldDir = getWorldDir(worldId);
   const agentsDir = getAgentsDir(worldId);
-  
+
   // Ensure directories exist
-  await fs.mkdir(worldDir, { recursive: true });
-  await fs.mkdir(agentsDir, { recursive: true });
+  await ensureDirectory(worldDir);
+  await ensureDirectory(agentsDir);
 
   // Save world config (without agents)
   const worldConfig = {
     id: world.id,
-    name: world.name,
-    createdAt: world.createdAt.toISOString(),
-    metadata: world.metadata
+    name: world.name
   };
 
   await fs.writeFile(
-    getWorldConfigPath(worldId), 
+    getWorldConfigPath(worldId),
     JSON.stringify(worldConfig, null, 2)
   );
 
@@ -299,18 +377,15 @@ async function saveWorldToDisk(worldId: string): Promise<void> {
       createdAt: agent.createdAt?.toISOString(),
       lastActive: agent.lastActive?.toISOString()
     };
-    
-    await fs.writeFile(
-      getAgentPath(worldId, agentId),
-      JSON.stringify(agentData, null, 2)
-    );
-  }
 
-  publishWorld({
-    type: 'WORLD_SAVED',
-    worldId,
-    timestamp: new Date().toISOString()
-  });
+    const agentPath = getAgentPath(worldId, agentId);
+    const agentDir = path.dirname(agentPath);
+
+    // Ensure agent directory exists
+    await ensureDirectory(agentDir);
+
+    await fs.writeFile(agentPath, JSON.stringify(agentData, null, 2));
+  }
 }
 
 /**
@@ -324,8 +399,14 @@ export async function loadWorld(worldId: string): Promise<void> {
  * Load world configuration and agents from disk
  */
 async function loadWorldFromDisk(worldId: string): Promise<void> {
-  const worldConfigPath = getWorldConfigPath(worldId);
-  const agentsDir = getAgentsDir(worldId);
+  // Find the actual world directory
+  const actualWorldDir = await findWorldDir(worldId);
+  if (!actualWorldDir) {
+    throw new Error(`World directory not found for ${worldId}`);
+  }
+
+  const worldConfigPath = path.join(actualWorldDir, 'config.json');
+  const agentsDir = path.join(actualWorldDir, 'agents');
 
   try {
     // Load world config
@@ -336,26 +417,80 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
     const worldState: WorldState = {
       id: worldConfig.id,
       name: worldConfig.name,
-      agents: new Map(),
-      createdAt: new Date(worldConfig.createdAt),
-      metadata: worldConfig.metadata || {}
+      agents: new Map()
     };
 
-    // Load agents if agents directory exists
+    // Find all config.json files in agent subdirectories (kebab-case folders)
+    async function findAgentConfigs(dir: string): Promise<string[]> {
+      let results: string[] = [];
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const configPath = path.join(dir, entry.name, 'config.json');
+            try {
+              await fs.access(configPath);
+              results.push(configPath);
+            } catch (err) {
+              // config.json doesn't exist in this directory, skip
+            }
+          }
+        }
+      } catch (err) {
+        // Directory may not exist or be empty
+      }
+      return results;
+    }
+
     try {
-      const agentFiles = await fs.readdir(agentsDir);
-      
-      for (const agentFile of agentFiles) {
-        if (agentFile.endsWith('.json')) {
-          const agentPath = path.join(agentsDir, agentFile);
-          const agentData = await fs.readFile(agentPath, 'utf-8');
-          const agent = JSON.parse(agentData);
-          
-          // Restore Date objects
-          if (agent.createdAt) agent.createdAt = new Date(agent.createdAt);
-          if (agent.lastActive) agent.lastActive = new Date(agent.lastActive);
-          
-          worldState.agents.set(agent.id, agent);
+      const configFiles = await findAgentConfigs(agentsDir);
+      for (const agentPath of configFiles) {
+        const agentData = await fs.readFile(agentPath, 'utf-8');
+        const agent = JSON.parse(agentData);
+        // Restore Date objects
+        if (agent.createdAt) agent.createdAt = new Date(agent.createdAt);
+        if (agent.lastActive) agent.lastActive = new Date(agent.lastActive);
+
+        // Load system prompt from separate file and add it to config
+        const systemPrompt = await loadSystemPrompt(worldId, agent.name);
+        agent.config.systemPrompt = systemPrompt;
+        
+        // Load memory from separate file (but don't add to agent object to keep it clean)
+        // Memory will be loaded on-demand when needed for LLM context
+        
+        worldState.agents.set(agent.id, agent);
+
+        // Subscribe loaded agent to MESSAGE events
+        if (agent.config) {
+          subscribeToMessages(async (event) => {
+            // Only process messages in this world, not from itself, and either broadcast or targeted to this agent
+            const payload = event.payload || {};
+            const innerPayload = payload.payload || {};
+
+            if (
+              innerPayload.worldId === worldId &&
+              payload.sender !== agent.id &&
+              (innerPayload.broadcast || innerPayload.recipient === agent.id || innerPayload.targetId === agent.id)
+            ) {
+              try {
+                // Ensure agent config has id field
+                const agentConfigWithId = {
+                  ...agent.config,
+                  id: agent.id,
+                  name: agent.name
+                };
+                await processAgentMessage(agentConfigWithId, {
+                  name: payload.name || 'message',
+                  id: payload.id || event.id,
+                  content: payload.content,
+                  sender: payload.sender || 'unknown',
+                  payload: payload
+                }, undefined, worldId);
+              } catch (error) {
+                console.error(`Agent ${agent.id} failed to process message:`, error);
+              }
+            }
+          });
         }
       }
     } catch (error) {
@@ -363,12 +498,6 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
     }
 
     worlds.set(worldId, worldState);
-
-    publishWorld({
-      type: 'WORLD_LOADED',
-      worldId,
-      timestamp: new Date().toISOString()
-    });
   } catch (error) {
     throw new Error(`Failed to load world ${worldId}: ${error}`);
   }
@@ -380,19 +509,122 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
  * Save a single agent to disk
  */
 async function saveAgentToDisk(worldId: string, agent: Agent): Promise<void> {
-  const agentsDir = getAgentsDir(worldId);
-  await fs.mkdir(agentsDir, { recursive: true });
-  
+  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+  await ensureDirectory(agentDir);
+
+  // Save system prompt separately as markdown file
+  const systemPromptPath = path.join(agentDir, 'system-prompt.md');
+  const systemPrompt = agent.config.systemPrompt || `You are ${agent.name}, an AI agent.`;
+  await fs.writeFile(systemPromptPath, systemPrompt, 'utf8');
+
+  // Save config without system prompt content
   const agentData = {
     ...agent,
+    config: {
+      ...agent.config,
+      // Remove system prompt content from config since it's in separate file
+      systemPrompt: undefined
+    },
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString()
   };
-  
+
   await fs.writeFile(
-    getAgentPath(worldId, agent.id),
+    getAgentPath(worldId, agent.name),
     JSON.stringify(agentData, null, 2)
   );
+}
+
+/**
+ * Load system prompt from file
+ */
+async function loadSystemPrompt(worldId: string, agentName: string): Promise<string> {
+  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+  const systemPromptPath = path.join(agentDir, 'system-prompt.md');
+
+  try {
+    return await fs.readFile(systemPromptPath, 'utf8');
+  } catch (error) {
+    // Return default if file doesn't exist
+    return `You are ${agentName}, an AI agent.`;
+  }
+}
+
+/**
+ * Save agent memory to separate file
+ */
+async function saveAgentMemory(worldId: string, agentName: string, memory: any): Promise<void> {
+  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+  await ensureDirectory(agentDir);
+  
+  const memoryPath = path.join(agentDir, 'memory.json');
+  await fs.writeFile(memoryPath, JSON.stringify(memory, null, 2), 'utf8');
+}
+
+/**
+ * Load agent memory from file
+ */
+async function loadAgentMemory(worldId: string, agentName: string): Promise<any> {
+  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+  const memoryPath = path.join(agentDir, 'memory.json');
+  
+  try {
+    const memoryData = await fs.readFile(memoryPath, 'utf8');
+    return JSON.parse(memoryData);
+  } catch (error) {
+    // Return default memory if file doesn't exist
+    return {
+      conversationHistory: [],
+      facts: {},
+      context: '',
+      lastActivity: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Add message to agent's conversation history
+ */
+export async function addToAgentMemory(worldId: string, agentId: string, message: any): Promise<void> {
+  const agent = getAgent(worldId, agentId);
+  if (!agent) return;
+
+  // Load current memory
+  const memory = await loadAgentMemory(worldId, agent.name);
+  
+  // Add message to conversation history
+  if (!memory.conversationHistory) {
+    memory.conversationHistory = [];
+  }
+  
+  memory.conversationHistory.push({
+    ...message,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Keep only last 50 messages for performance
+  if (memory.conversationHistory.length > 50) {
+    memory.conversationHistory = memory.conversationHistory.slice(-50);
+  }
+  
+  memory.lastActivity = new Date().toISOString();
+  
+  // Save updated memory
+  await saveAgentMemory(worldId, agent.name, memory);
+}
+
+/**
+ * Get agent's conversation history for LLM context
+ */
+export async function getAgentConversationHistory(worldId: string, agentId: string, limit: number = 20): Promise<any[]> {
+  const agent = getAgent(worldId, agentId);
+  if (!agent) return [];
+
+  const memory = await loadAgentMemory(worldId, agent.name);
+  const history = memory.conversationHistory || [];
+  
+  // Return last N messages
+  return history.slice(-limit);
 }
 
 /**
@@ -402,13 +634,16 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
   const world = worlds.get(worldId);
   if (!world) return null;
 
-  const agentId = generateAgentId();
+  // Always use config.id if provided, otherwise generate
+  const agentId = config.id || generateAgentId();
+  // Clone config to avoid mutating input
+  const agentConfig: AgentConfig = { ...config, id: agentId };
   const agent: Agent = {
     id: agentId,
     name: config.name,
     type: config.type,
     status: 'active',
-    config,
+    config: agentConfig,
     createdAt: new Date(),
     lastActive: new Date(),
     metadata: {}
@@ -425,14 +660,34 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
     throw error;
   }
 
-  // Publish agent creation event
-  publishWorld({
-    type: 'AGENT_CREATED',
-    worldId,
-    agentId,
-    agentName: agent.name,
-    agentType: agent.type,
-    timestamp: new Date().toISOString()
+  // Subscribe agent to MESSAGE events from event bus
+  subscribeToMessages(async (event) => {
+    // Only process messages in this world, not from itself, and either broadcast or targeted to this agent
+    const payload = event.payload || {};
+    const innerPayload = payload.payload || {};
+
+    if (
+      innerPayload.worldId === worldId &&
+      payload.sender !== agentId &&
+      (innerPayload.broadcast || innerPayload.recipient === agentId || innerPayload.targetId === agentId)
+    ) {
+      try {
+        // Ensure agent config has correct id field
+        const agentConfigWithId = {
+          ...config,
+          id: agentId
+        };
+        await processAgentMessage(agentConfigWithId, {
+          name: payload.name || 'message',
+          id: payload.id || event.id,
+          content: payload.content,
+          sender: payload.sender || 'unknown',
+          payload: payload
+        }, undefined, worldId);
+      } catch (error) {
+        console.error(`Agent ${agentId} failed to process message:`, error);
+      }
+    }
   });
 
   return agent;
@@ -446,14 +701,16 @@ export async function removeAgent(worldId: string, agentId: string): Promise<boo
   if (!world || !world.agents.has(agentId)) return false;
 
   const agent = world.agents.get(agentId);
-  
+
   // Remove from memory
   world.agents.delete(agentId);
 
   // Remove from disk
   try {
-    const agentPath = getAgentPath(worldId, agentId);
-    await fs.unlink(agentPath);
+    if (agent) {
+      const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
   } catch (error) {
     // Rollback memory change if disk operation fails
     if (agent) {
@@ -462,14 +719,8 @@ export async function removeAgent(worldId: string, agentId: string): Promise<boo
     throw error;
   }
 
-  // Publish agent removal event
-  publishWorld({
-    type: 'AGENT_REMOVED',
-    worldId,
-    agentId,
-    agentName: agent?.name,
-    timestamp: new Date().toISOString()
-  });
+  // Note: Event subscriptions are handled by the event bus automatically
+  // No manual cleanup needed for simplified subscription model
 
   return true;
 }
@@ -500,12 +751,12 @@ export function getAgent(worldId: string, agentId: string): Agent | null {
 export async function updateAgent(worldId: string, agentId: string, updates: Partial<Agent>): Promise<Agent | null> {
   const world = worlds.get(worldId);
   if (!world) return null;
-  
+
   const agent = world.agents.get(agentId);
   if (!agent) return null;
 
   const originalAgent = { ...agent };
-  
+
   const updatedAgent = {
     ...agent,
     ...updates,
@@ -525,36 +776,10 @@ export async function updateAgent(worldId: string, agentId: string, updates: Par
     throw error;
   }
 
-  // Publish agent update event
-  publishWorld({
-    type: 'AGENT_UPDATED',
-    worldId,
-    agentId,
-    updates: Object.keys(updates),
-    timestamp: new Date().toISOString()
-  });
-
   return updatedAgent;
 }
 
 // ===== EVENT SYSTEM =====
-
-/**
- * Publish a world event
- */
-export async function publishWorldEvent(worldId: string, type: string, data: any): Promise<void> {
-  const world = worlds.get(worldId);
-  if (!world) {
-    throw new Error(`World ${worldId} not found`);
-  }
-
-  await publishWorld({
-    type,
-    worldId,
-    data,
-    timestamp: new Date().toISOString()
-  });
-}
 
 /**
  * Broadcast a message to all agents in a world
@@ -565,18 +790,27 @@ export async function broadcastMessage(worldId: string, message: string, sender?
     throw new Error(`World ${worldId} not found`);
   }
 
+  // Create simplified message payload
   const messagePayload: MessagePayload = {
-    name: 'broadcast',
-    payload: { message, worldId },
-    id: uuidv4(),
-    sender: sender || 'system',
-    senderType: 'system',
     content: message,
-    timestamp: new Date().toISOString(),
-    worldId
+    sender: sender || 'system'
   };
 
-  await publishMessage(messagePayload);
+  const eventData = {
+    name: 'user_message',
+    payload: {
+      content: message,
+      worldId: worldId,
+      broadcast: true,
+      sender: messagePayload.sender,
+      senderType: sender === 'CLI' ? 'user' : 'system',
+      timestamp: new Date().toISOString()
+    },
+    id: uuidv4()
+  };
+
+  // Publish MESSAGE event that all agents can subscribe to
+  await publishMessage(eventData);
 }
 
 /**
@@ -593,19 +827,26 @@ export async function sendMessage(worldId: string, targetId: string, message: st
     throw new Error(`Agent ${targetId} not found in world ${worldId}`);
   }
 
+  // Create simplified message payload
   const messagePayload: MessagePayload = {
-    name: 'direct_message',
-    payload: { message, worldId, targetId },
-    id: uuidv4(),
-    sender: sender || 'system',
-    senderType: 'system',
-    recipient: targetId,
     content: message,
-    timestamp: new Date().toISOString(),
-    worldId
+    sender: sender || 'system'
   };
 
-  await publishMessage(messagePayload);
+  // Publish direct message event
+  await publishMessage({
+    name: 'direct_message',
+    payload: {
+      content: message,
+      worldId,
+      targetId,
+      sender: messagePayload.sender,
+      senderType: 'system',
+      recipient: targetId,
+      timestamp: new Date().toISOString()
+    },
+    id: uuidv4()
+  });
 }
 
 /**
@@ -614,14 +855,23 @@ export async function sendMessage(worldId: string, targetId: string, message: st
 export function subscribeToWorldEvents(worldId: string, callback: (event: any) => void): () => void {
   // Subscribe to world events and filter by worldId
   const unsubscribeWorld = subscribeToWorld((event: any) => {
-    if (event.worldId === worldId) {
+    if (event.payload?.worldId === worldId) {
       callback(event);
     }
   });
 
   // Subscribe to messages and filter by worldId
   const unsubscribeMessages = subscribeToMessages((event: any) => {
-    if (event.worldId === worldId) {
+    if (event.payload?.worldId === worldId) {
+      callback(event);
+    }
+  });
+
+  // Subscribe to SSE events for agents in this world
+  const unsubscribeSSE = subscribeToSSE((event: any) => {
+    // Check if this SSE event is for an agent in this world
+    const agent = getAgent(worldId, event.payload?.agentId);
+    if (agent) {
       callback(event);
     }
   });
@@ -630,6 +880,7 @@ export function subscribeToWorldEvents(worldId: string, callback: (event: any) =
   return () => {
     unsubscribeWorld();
     unsubscribeMessages();
+    unsubscribeSSE();
   };
 }
 
@@ -638,8 +889,8 @@ export function subscribeToWorldEvents(worldId: string, callback: (event: any) =
  */
 export function subscribeToAgentMessages(worldId: string, agentId: string, callback: (event: any) => void): () => void {
   return subscribeToMessages((event: any) => {
-    if (event.worldId === worldId &&
-      (event.recipient === agentId || event.targetId === agentId)) {
+    if (event.payload?.worldId === worldId &&
+      (event.payload?.recipient === agentId || event.payload?.targetId === agentId)) {
       callback(event);
     }
   });

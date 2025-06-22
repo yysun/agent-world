@@ -130,13 +130,13 @@ describe('Event Bus', () => {
         name: 'test-message',
         payload: { content: 'hello' },
         id: 'msg-1',
-        sender: 'agent-1'
+        agentId: 'agent-1'
       });
 
       expect(messages).toHaveLength(1);
       expect(messages[0].type).toBe(EventType.MESSAGE);
       expect(messages[0].payload.name).toBe('test-message');
-      expect(messages[0].metadata?.agentId).toBe('agent-1');
+      expect(messages[0].payload.agentId).toBe('agent-1');
 
       unsubscribe();
     });
@@ -177,7 +177,7 @@ describe('Event Bus', () => {
       expect(sseEvents).toHaveLength(1);
       expect(sseEvents[0].type).toBe(EventType.SSE);
       expect(sseEvents[0].payload.content).toBe('Hello world');
-      expect(sseEvents[0].metadata?.agentId).toBe('agent-1');
+      expect(sseEvents[0].payload.agentId).toBe('agent-1');
 
       unsubscribe();
     });
@@ -194,8 +194,9 @@ describe('Event Bus', () => {
       // Send message from agent-1
       await publishMessage({
         name: 'test',
-        payload: 'data',
+        payload: { data: 'test' },
         id: 'msg-1',
+        agentId: 'agent-1',
         sender: 'agent-1'
       });
 
@@ -241,8 +242,8 @@ describe('Event Bus', () => {
         agentEvents.push(event);
       }, { agentId: 'agent-1' });
 
-      await publishMessage({ name: 'msg1', payload: 'data', id: 'id1', sender: 'agent-1' });
-      await publishMessage({ name: 'msg2', payload: 'data', id: 'id2', sender: 'agent-2' });
+      await publishMessage({ name: 'msg1', payload: { data: 'test' }, id: 'id1', agentId: 'agent-1', sender: 'agent-1' });
+      await publishMessage({ name: 'msg2', payload: { data: 'test' }, id: 'id2', agentId: 'agent-2', sender: 'agent-2' });
 
       expect(agentEvents).toHaveLength(1);
       expect(agentEvents[0].payload.sender).toBe('agent-1');

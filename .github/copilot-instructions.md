@@ -4,13 +4,12 @@
 - Ensure clarity, accuracy, and completeness
 
 ## Command Keywords
-- **AA**: Create plan with check boxes → save checklist to `docs/plan/`
-- **AS**: Execute plan → implement step-by-step, mark done, git stage with messages
-- **CC**: Present options → wait for confirmation before proceeding  
-- **DD**: Update file comment block → remove redundancy, ensure accuracy
-- **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step
-- **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed)
-
+- **AA**: Create plan with check boxes → save checklist to `docs/plan/`.
+- **AS**: Execute plan → implement step-by-step, mark done, git stage changed, commit with messages.
+- **CC**: Present options → wait for confirmation before proceeding.  
+- **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step.
+- **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed).
+- **!!**: save my requirements a file to `docs/requirements`, no plan.
 ## Planning Rules
 - Large changes or "AA" → always create plan first, get confirmation
 - Focus on functionality/logic, not optimizations

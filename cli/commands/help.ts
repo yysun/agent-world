@@ -24,7 +24,7 @@ export async function helpCommand(args: string[], worldId: string): Promise<void
   const commands = [
     { command: '/help', description: 'Show this help message' },
     { command: '/list', description: 'List all agents and their status' },
-    { command: '/add', description: 'Create a new agent' },
+    { command: '/add [name]', description: 'Create a new agent (optionally specify name)' },
     { command: '/use', description: 'Activate an agent' },
     { command: '/stop', description: 'Deactivate an agent' },
     { command: '/clear', description: 'Clear agent memory' },
