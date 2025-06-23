@@ -19,8 +19,8 @@
  * - Updated agent subscription logic to use new flat event payload structure
  * - Modified message broadcasting to work with MessageEventPayload type
  * - Updated direct messaging functions to use new payload format
- * - Added clearAgentMemory function for simplified memory clearing (only LLM messages)
- * - Enhanced memory management with simplified structure (conversationHistory + lastActivity only)
+ * - Added clearAgentMemory function for simplified memory clearing with archiving (only LLM messages)
+ * - Enhanced memory management with simplified structure and archive preservation
  * - Changed sender recognition from "CLI" to "HUMAN" in message processing
  * - Fixed event filtering and routing for agent-specific message delivery
  * - Improved type safety with strict payload typing throughout message handling
@@ -48,7 +48,7 @@
  * - Simplified event subscription system without duplicate tracking
  * - IMPLEMENTED: Agent memory/history system with separate file storage
  * - IMPLEMENTED: System prompt file separation for better management
- * - IMPLEMENTED: clearAgentMemory function for simplified memory reset (LLM messages only)
+ * - IMPLEMENTED: clearAgentMemory function for simplified memory reset with archiving (LLM messages only)
  * - VERIFIED: Complete event-driven message processing flow  
  * - FIXED: Duplicate agent subscriptions prevented with subscription tracking
  */
@@ -918,7 +918,7 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
 }
 
 /**
- * Clear agent's memory - deletes memory.json file and creates fresh simplified memory
+ * Clear agent's memory - archives existing memory.json then creates fresh simplified memory
  */
 export async function clearAgentMemory(worldId: string, agentId: string): Promise<boolean> {
   const agent = getAgent(worldId, agentId);
@@ -927,6 +927,30 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
   try {
     const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
     const memoryPath = path.join(agentDir, 'memory.json');
+
+    // Archive the existing memory.json file if it exists
+    try {
+      // Check if memory file exists and has content
+      const existingMemory = await fs.readFile(memoryPath, 'utf8');
+      const memoryData = JSON.parse(existingMemory);
+
+      // Only archive if there's meaningful content (conversation history)
+      if (memoryData.conversationHistory && memoryData.conversationHistory.length > 0) {
+        // Create archives directory within agent folder
+        const archivesDir = path.join(agentDir, 'archives');
+        await ensureDirectory(archivesDir);
+
+        // Create timestamped archive filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const archivePath = path.join(archivesDir, `memory_archive_${timestamp}.json`);
+
+        // Copy the existing memory to archive
+        await fs.copyFile(memoryPath, archivePath);
+        console.log(`📦 Archived agent memory: ${path.basename(archivePath)}`);
+      }
+    } catch (error) {
+      // File might not exist or be invalid JSON, which is fine - continue with clear
+    }
 
     // Delete the existing memory.json file if it exists
     try {

@@ -3,23 +3,25 @@
  * 
  * Features:
  * - Tests clearAgentMemory function for individual agents
- * - Verifies memory.json file deletion and recreation
+ * - Verifies memory.json file archiving and recreation
  * - Tests simplified memory structure with only LLM messages
+ * - Tests memory archiving functionality before clearing
  * - Tests clear command CLI functionality
  * - Validates simplified memory structure after clearing
  * 
  * Logic:
  * - Creates test agents with memory data
  * - Verifies memory exists before clearing
- * - Tests clearAgentMemory function directly
- * - Validates memory is properly reset to simplified structure
+ * - Tests clearAgentMemory function directly with archiving
+ * - Validates memory is properly archived then reset to simplified structure
  * - Tests CLI clear command integration
  * 
  * Changes:
  * - Initial implementation of clear memory tests
  * - Tests both World.clearAgentMemory and CLI clear command
- * - Validates file system operations (delete/recreate memory.json)
+ * - Validates file system operations (archive/delete/recreate memory.json)
  * - Updated for simplified memory structure containing only conversationHistory and lastActivity
+ * - Added tests for memory archiving functionality
  * - Removed validation for facts, relationships, goals, context, shortTerm, longTerm fields
  */
 
@@ -136,6 +138,48 @@ describe('Clear Memory Functionality', () => {
       const timestampAfter = agentAfter!.lastActive!.getTime();
 
       expect(timestampAfter).toBeGreaterThan(timestampBefore);
+    });
+
+    test('should archive existing memory before clearing', async () => {
+      const agent = World.getAgent(testWorldId, testAgentId);
+      expect(agent).not.toBeNull();
+
+      // Get the agent and archives directory paths
+      const agentDir = path.join(process.cwd(), 'data', 'worlds', 'default-world', 'agents', 'test-agent');
+      const archivesDir = path.join(agentDir, 'archives');
+
+      // Verify memory exists with conversation history
+      const historyBefore = await World.getAgentConversationHistory(testWorldId, testAgentId);
+      expect(historyBefore.length).toBeGreaterThan(0);
+
+      // Clear memory (which should create an archive)
+      const success = await World.clearAgentMemory(testWorldId, testAgentId);
+      expect(success).toBe(true);
+
+      // Verify archives directory was created
+      try {
+        await fs.access(archivesDir);
+
+        // Check for archive files
+        const archiveFiles = await fs.readdir(archivesDir);
+        const memoryArchives = archiveFiles.filter(file => file.startsWith('memory_archive_') && file.endsWith('.json'));
+
+        expect(memoryArchives.length).toBeGreaterThan(0);
+
+        // Verify the archive contains the original memory data
+        const archivePath = path.join(archivesDir, memoryArchives[0]);
+        const archivedMemory = JSON.parse(await fs.readFile(archivePath, 'utf8'));
+        expect(archivedMemory.conversationHistory.length).toBeGreaterThan(0);
+
+      } catch (error) {
+        // If no archive was created, that's only okay if there was no meaningful content
+        // In our test case, we added messages, so an archive should exist
+        fail('Expected archive to be created when clearing memory with conversation history');
+      }
+
+      // Verify memory was still cleared
+      const historyAfter = await World.getAgentConversationHistory(testWorldId, testAgentId);
+      expect(historyAfter).toEqual([]);
     });
   });
 

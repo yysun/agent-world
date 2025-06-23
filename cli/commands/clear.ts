@@ -5,21 +5,22 @@
  * - Clear memory of individual agents or all agents
  * - Support for agent selection by ID or name
  * - Bulk memory clearing operation
- * - Complete memory reset with simplified structure (LLM messages only)
+ * - Complete memory reset with simplified structure and archiving (LLM messages only)
  * 
  * Logic:
  * - Handles agent selection by ID or name
  * - Provides system-wide clear option with "all" keyword
- * - Uses clearAgentMemory function to properly reset memory to simplified structure
+ * - Uses clearAgentMemory function to archive existing memory then reset to simplified structure
+ * - Archives memory files with conversation history before clearing
  * - Resets only conversationHistory and lastActivity timestamp
  * - Preserves agent ID and basic configuration
  * - Updates last activity timestamp after clearing
  * 
  * Changes:
  * - Initial implementation of clear command
- * - Updated to use World.clearAgentMemory() function for simplified memory clearing
- * - Replaced complex memory structure with simplified structure (LLM messages only)
- * - Now properly clears memory.json to contain only conversationHistory and lastActivity
+ * - Updated to use World.clearAgentMemory() function for simplified memory clearing with archiving
+ * - Replaced complex memory structure with simplified structure and archive preservation
+ * - Now properly archives memory.json before clearing to contain only conversationHistory and lastActivity
  * - Enhanced error handling and user feedback
  */
 
