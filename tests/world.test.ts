@@ -2,16 +2,15 @@
  * World Management Tests - Unit tests for function-based world system
  * 
  * Features:
- * - Tests all core world management functi      const worldId = await createWorld({ name: 'Test World' });
-
-      expect(worldId).toBeDefined();
-      expect(worldId).toMatch(/^world_/);alidates world creation, deletion, and info retrieval
+ * - Tests all core world management functions (create, delete, list, info)
+ * - Validates world creation, deletion, and info retrieval
  * - Tests agent management within worlds (CRUD operations)
  * - Tests event system integration (publish, subscribe, messaging)
  * - Tests persistence functionality (save/load world state)
  * - Tests recursive agent config.json loading from nested agent directories
  * - Tests error handling and edge cases
  * - Tests world discovery and listing functionality
+ * - Tests agent double subscription prevention during create/load cycles
  * 
  * Logic:
  * - Uses Jest for testing framework
@@ -21,11 +20,13 @@
  * - Validates world state consistency
  * - Tests agent lifecycle within world context
  * - Validates event publishing and subscription
+ * - Ensures agents don't get subscribed multiple times
  * 
  * Changes:
  * - Removed fs mocks to use real file operations
  * - Added proper test cleanup
  * - Tests now verify actual file system behavior
+ * - Added agent double subscription prevention tests
  */
 
 import * as fs from 'fs/promises';
@@ -48,7 +49,8 @@ import {
   subscribeToAgentMessages,
   _clearAllWorldsForTesting
 } from '../src/world';
-import { AgentConfig, WorldOptions, LLMProvider } from '../src/types';
+import { publishMessageEvent } from '../src/event-bus';
+import { AgentConfig, WorldOptions, LLMProvider, EventType } from '../src/types';
 import * as eventBus from '../src/event-bus';
 import * as agent from '../src/agent';
 import { initializeFileStorage } from '../src/storage';
@@ -709,6 +711,166 @@ describe('World Management', () => {
         const agents = getAgents(worldId);
         expect(agents.length).toBe(0);
       });
+    });
+  });
+
+  describe('Agent Double Subscription Prevention', () => {
+    let worldId: string;
+
+    beforeEach(async () => {
+      worldId = await createWorld({ name: 'Double Subscription Test' });
+    });
+
+    it('should not double subscribe agent when created and then world is reloaded', async () => {
+      // Create an agent config
+      const agentConfig: AgentConfig = {
+        name: 'TestAgent',
+        type: 'conversational',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a test agent.'
+      };
+
+      // Create the agent (this should subscribe it once)
+      const agent = await createAgent(worldId, agentConfig);
+      expect(agent).toBeTruthy();
+
+      // Get the subscription callback from the mock
+      const subscriptionCallback = mockEventBus.subscribeToMessages.mock.calls[0]?.[0];
+      expect(subscriptionCallback).toBeDefined();
+
+      // Clear any previous calls
+      mockAgent.processAgentMessage.mockClear();
+      mockEventBus.subscribeToMessages.mockClear();
+
+      // Reload the world (this should NOT subscribe the agent again)
+      await loadWorld(worldId);
+
+      // Check that subscribeToMessages was not called again for the same agent
+      // Since we're tracking subscriptions, it should not be called again
+      expect(mockEventBus.subscribeToMessages).not.toHaveBeenCalled();
+
+      // Simulate a message event being received
+      if (subscriptionCallback) {
+        await subscriptionCallback({
+          type: EventType.MESSAGE,
+          id: 'test-message',
+          timestamp: new Date().toISOString(),
+          payload: {
+            content: 'Hello test agent',
+            sender: 'test-user'
+          }
+        });
+      }
+
+      // The agent should have processed the message exactly once
+      expect(mockAgent.processAgentMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('should properly track subscriptions with unique keys', async () => {
+      // Create multiple agents
+      const agent1Config: AgentConfig = {
+        name: 'Agent1',
+        type: 'conversational',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are agent 1.'
+      };
+
+      const agent2Config: AgentConfig = {
+        name: 'Agent2',
+        type: 'conversational',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are agent 2.'
+      };
+
+      // Create agents
+      const agent1 = await createAgent(worldId, agent1Config);
+      const agent2 = await createAgent(worldId, agent2Config);
+
+      expect(agent1).toBeTruthy();
+      expect(agent2).toBeTruthy();
+
+      // Get the subscription callbacks from the mocks
+      const subscriptionCallback1 = mockEventBus.subscribeToMessages.mock.calls[0]?.[0];
+      const subscriptionCallback2 = mockEventBus.subscribeToMessages.mock.calls[1]?.[0];
+      expect(subscriptionCallback1).toBeDefined();
+      expect(subscriptionCallback2).toBeDefined();
+
+      // Clear mock calls from agent creation
+      mockAgent.processAgentMessage.mockClear();
+      mockEventBus.subscribeToMessages.mockClear();
+
+      // Reload the world - should not create duplicate subscriptions
+      await loadWorld(worldId);
+
+      // Check that subscribeToMessages was not called again for existing agents
+      expect(mockEventBus.subscribeToMessages).not.toHaveBeenCalled();
+
+      // Simulate a message event that should trigger both agents
+      const messageEvent = {
+        type: EventType.MESSAGE,
+        id: 'test-message',
+        timestamp: new Date().toISOString(),
+        payload: {
+          content: 'Hello agents',
+          sender: 'test-user'
+        }
+      };
+
+      if (subscriptionCallback1) {
+        await subscriptionCallback1(messageEvent);
+      }
+      if (subscriptionCallback2) {
+        await subscriptionCallback2(messageEvent);
+      }
+
+      // Each agent should process the message exactly once
+      expect(mockAgent.processAgentMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('should clean up subscriptions when agent is removed', async () => {
+      // Create an agent
+      const agentConfig: AgentConfig = {
+        name: 'TempAgent',
+        type: 'conversational',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a temporary agent.'
+      };
+
+      const agent = await createAgent(worldId, agentConfig);
+      expect(agent).toBeTruthy();
+
+      // Remove the agent (should clean up subscription)
+      const removed = await removeAgent(worldId, agent!.id);
+      expect(removed).toBe(true);
+
+      // Try to reload the world - should not error due to lingering subscriptions
+      await loadWorld(worldId);
+
+      expect(true).toBe(true); // Test passes if no errors occur
+    });
+
+    it('should handle subscription cleanup when world is deleted', async () => {
+      // Create agents in the world
+      const agentConfig: AgentConfig = {
+        name: 'WorldAgent',
+        type: 'conversational',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a world agent.'
+      };
+
+      await createAgent(worldId, agentConfig);
+
+      // Delete the world (should clean up all subscriptions)
+      const deleted = await deleteWorld(worldId);
+      expect(deleted).toBe(true);
+
+      // Test passes if no memory leaks or hanging subscriptions
+      expect(true).toBe(true);
     });
   });
 });

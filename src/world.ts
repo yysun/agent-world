@@ -54,6 +54,7 @@
  * - Single subscription per agent to prevent duplicate message handling
  * - Agent memory/history system with separate memory.json files per agent
  * - System prompt separation into individual system-prompt.md files per agent
+ * - Subscription tracking to prevent double subscriptions during create/load operations
  *
  * Logic:
  * - All agent, event, and message storage is now per-world; no global agent/event/message folders
@@ -74,7 +75,8 @@
  * - Simplified event subscription system without duplicate tracking
  * - IMPLEMENTED: Agent memory/history system with separate file storage
  * - IMPLEMENTED: System prompt file separation for better management
- * - VERIFIED: Complete event-driven message processing flow
+ * - VERIFIED: Complete event-driven message processing flow  
+ * - FIXED: Duplicate agent subscriptions prevented with subscription tracking
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -105,6 +107,9 @@ import { worldLogger } from './logger'; // (if not already imported)
 
 // Global world storage
 const worlds: Map<string, WorldState> = new Map();
+
+// Track agent message subscriptions to prevent double subscription
+const agentSubscriptions: Map<string, () => void> = new Map();
 
 // Get data directory from storage configuration
 function getWorldsDir(): string {
@@ -332,6 +337,11 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
   // Get world directory path before removing from memory
   const worldDir = getWorldDir(worldId);
 
+  // Clean up all agent subscriptions for this world
+  for (const agentId of world.agents.keys()) {
+    unsubscribeAgentFromMessages(worldId, agentId);
+  }
+
   // Remove from memory first
   worlds.delete(worldId);
 
@@ -454,12 +464,8 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
     throw new Error(`World directory not found for ${worldId}`);
   }
 
-  console.log('Loading world from:', actualWorldDir);
-
   const worldConfigPath = path.join(actualWorldDir, 'config.json');
   const agentsDir = path.join(actualWorldDir, 'agents');
-
-  console.log('Agents directory:', agentsDir);
 
   try {
     // Load world config
@@ -513,36 +519,8 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
 
         worldState.agents.set(agent.id, agent);
 
-        // Subscribe loaded agent to MESSAGE events
-        if (agent.config) {
-          subscribeToMessages(async (event) => {
-            // Only process MESSAGE events with MessageEventPayload
-            if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
-              const payload = event.payload as MessageEventPayload;
-
-              // Don't process messages from this agent itself
-              if (payload.sender !== agent.id) {
-                try {
-                  // Ensure agent config has id field
-                  const agentConfigWithId = {
-                    ...agent.config,
-                    id: agent.id,
-                    name: agent.name
-                  };
-                  await processAgentMessage(agentConfigWithId, {
-                    name: 'message',
-                    id: event.id,
-                    content: payload.content,
-                    sender: payload.sender,
-                    payload: payload
-                  }, undefined, worldId);
-                } catch (error) {
-                  console.error(`Agent ${agent.id} failed to process message:`, error);
-                }
-              }
-            }
-          });
-        }
+        // Subscribe loaded agent to MESSAGE events (with duplicate prevention)
+        subscribeAgentToMessages(worldId, agent);
       }
     } catch (error) {
       // Agents directory doesn't exist or is empty
@@ -555,6 +533,63 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
 }
 
 // ===== AGENT MANAGEMENT =====
+
+/**
+ * Subscribe an agent to message events if not already subscribed
+ */
+function subscribeAgentToMessages(worldId: string, agent: Agent): void {
+  const subscriptionKey = `${worldId}:${agent.id}`;
+
+  // Check if already subscribed
+  if (agentSubscriptions.has(subscriptionKey)) {
+    return; // Already subscribed, skip
+  }
+
+  // Subscribe agent to MESSAGE events from event bus
+  const unsubscribe = subscribeToMessages(async (event) => {
+    // Only process MESSAGE events with MessageEventPayload
+    if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
+      const payload = event.payload as MessageEventPayload;
+
+      // Don't process messages from this agent itself
+      if (payload.sender !== agent.id) {
+        try {
+          // Ensure agent config has id field
+          const agentConfigWithId = {
+            ...agent.config,
+            id: agent.id,
+            name: agent.name
+          };
+          await processAgentMessage(agentConfigWithId, {
+            name: 'message',
+            id: event.id,
+            content: payload.content,
+            sender: payload.sender,
+            payload: payload
+          }, undefined, worldId);
+        } catch (error) {
+          console.error(`Agent ${agent.id} failed to process message:`, error);
+        }
+      }
+    }
+  });
+
+  // Store the unsubscribe function
+  agentSubscriptions.set(subscriptionKey, unsubscribe);
+}
+
+/**
+ * Unsubscribe an agent from message events
+ */
+function unsubscribeAgentFromMessages(worldId: string, agentId: string): void {
+  const subscriptionKey = `${worldId}:${agentId}`;
+  const unsubscribe = agentSubscriptions.get(subscriptionKey);
+
+  if (unsubscribe) {
+    unsubscribe();
+    agentSubscriptions.delete(subscriptionKey);
+  }
+}
 
 /**
  * Save a single agent to disk
@@ -723,33 +758,8 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
     throw error;
   }
 
-  // Subscribe agent to MESSAGE events from event bus
-  subscribeToMessages(async (event) => {
-    // Only process MESSAGE events with MessageEventPayload
-    if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
-      const payload = event.payload as MessageEventPayload;
-
-      // Don't process messages from this agent itself
-      if (payload.sender !== agentId) {
-        try {
-          // Ensure agent config has correct id field
-          const agentConfigWithId = {
-            ...config,
-            id: agentId
-          };
-          await processAgentMessage(agentConfigWithId, {
-            name: 'message',
-            id: event.id,
-            content: payload.content,
-            sender: payload.sender,
-            payload: payload
-          }, undefined, worldId);
-        } catch (error) {
-          console.error(`Agent ${agentId} failed to process message:`, error);
-        }
-      }
-    }
-  });
+  // Subscribe agent to MESSAGE events (with duplicate prevention)
+  subscribeAgentToMessages(worldId, agent);
 
   return agent;
 }
@@ -762,6 +772,9 @@ export async function removeAgent(worldId: string, agentId: string): Promise<boo
   if (!world || !world.agents.has(agentId)) return false;
 
   const agent = world.agents.get(agentId);
+
+  // Unsubscribe from message events
+  unsubscribeAgentFromMessages(worldId, agentId);
 
   // Remove from memory
   world.agents.delete(agentId);
@@ -937,5 +950,11 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
  * @internal
  */
 export function _clearAllWorldsForTesting(): void {
+  // Clean up all subscriptions
+  for (const unsubscribe of agentSubscriptions.values()) {
+    unsubscribe();
+  }
+  agentSubscriptions.clear();
+
   worlds.clear();
 }

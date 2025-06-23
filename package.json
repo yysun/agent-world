@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development nodemon --watch src --watch cli --ext ts,js,json --exec \"npx tsx cli/index.ts\"",
+    "dev": "nodemon --watch src --watch cli --ext ts,js,json --exec \"npx tsx cli/index.ts\"",
     "build": "esbuild cli/index.ts --bundle --outfile=dist/cli.js --platform=node --target=node20",
     "start": "node dist/cli.js",
     "test": "jest --config jest.config.js",

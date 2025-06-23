@@ -69,11 +69,11 @@ export async function processAgentMessage(
   try {
     // Check if agent should respond to this message
     if (!shouldRespondToMessage(agentConfig, messageData)) {
-      agentLogger.debug({
-        agentId: agentConfig.id,
-        messageId: msgId,
-        sender: messageData.sender
-      }, 'Agent skipping message (not mentioned or from self)');
+      // agentLogger.debug({
+      //   agentId: agentConfig.id,
+      //   messageId: msgId,
+      //   sender: messageData.sender
+      // }, 'Agent skipping message (not mentioned or from self)');
       return '';
     }
 
