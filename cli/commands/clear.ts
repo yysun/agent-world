@@ -5,20 +5,22 @@
  * - Clear memory of individual agents or all agents
  * - Support for agent selection by ID or name
  * - Bulk memory clearing operation
- * - Memory reset with preservation of agent identity
+ * - Complete memory reset with simplified structure (LLM messages only)
  * 
  * Logic:
  * - Handles agent selection by ID or name
  * - Provides system-wide clear option with "all" keyword
- * - Resets conversation history, facts, relationships, and goals
- * - Preserves agent ID and basic metadata
+ * - Uses clearAgentMemory function to properly reset memory to simplified structure
+ * - Resets only conversationHistory and lastActivity timestamp
+ * - Preserves agent ID and basic configuration
  * - Updates last activity timestamp after clearing
  * 
  * Changes:
  * - Initial implementation of clear command
- * - Uses World object directly for agent management
- * - Accesses agents through world.getAgentManager()
- * - Implements memory reset functionality
+ * - Updated to use World.clearAgentMemory() function for simplified memory clearing
+ * - Replaced complex memory structure with simplified structure (LLM messages only)
+ * - Now properly clears memory.json to contain only conversationHistory and lastActivity
+ * - Enhanced error handling and user feedback
  */
 
 import * as World from '../../src/world';
@@ -46,14 +48,13 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
 
       for (const agent of agents) {
         try {
-          // Update agent to reset its metadata (simple memory clearing)
-          const updatedAgent = World.updateAgent(worldId, agent.id, {
-            metadata: {},
-            lastActive: new Date()
-          });
-          
-          if (updatedAgent) {
+          // Clear agent's memory using the proper clearAgentMemory function
+          const success = await World.clearAgentMemory(worldId, agent.id);
+
+          if (success) {
             console.log(colors.green(`✓ Cleared memory: ${agent.name}`));
+          } else {
+            console.log(colors.red(`✗ Failed to clear memory for ${agent.name}`));
           }
         } catch (error) {
           console.log(colors.red(`✗ Failed to clear memory for ${agent.name}: ${error}`));
@@ -81,13 +82,10 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
         return;
       }
 
-      // Update agent to reset its metadata (simple memory clearing)
-      const updatedAgent = World.updateAgent(worldId, agent.id, {
-        metadata: {},
-        lastActive: new Date()
-      });
+      // Clear memory for specific agent using the proper clearAgentMemory function
+      const success = await World.clearAgentMemory(worldId, agent.id);
 
-      if (updatedAgent) {
+      if (success) {
         console.log(colors.green(`✓ Memory cleared for agent: ${agent.name}`));
       } else {
         console.log(colors.red(`Failed to clear memory for agent: ${agent.name}`));

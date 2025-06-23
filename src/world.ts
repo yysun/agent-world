@@ -4,40 +4,11 @@
  * Features:
  * - World creation, listing, and basic state management
  * - Agent management (create, remove, update, query) within each world
+ * - Agent memory management (add, clear, retrieve conversation history with simplified structure)
  * - Event system integration (publish, subscribe, messaging)
  * - Persistent storage of agents, events, and messages in per-world subfolders:
  *     - data/worlds/<worldId>/agents
- *     - datasync funcasync funcasync function loadWorldFromDisk(worldId: string): Promise<void> {
-  // Find the actual world directory
-  const actualWorldDir = await findWorldDir(worldId);
-  if (!actualWorldDir) {
-    throw new Error(`World directory not found for ${worldId}`);
-  }
-
-  const worldConfigPath = path.join(actualWorldDir, 'config.json');
-  const agentsDir = path.join(actualWorldDir, 'agents');
-
-  try:romDisk(worldId: string): Promise<void> {
-  // Find the actual world directory
-  const actualWorldDir = await findWorldDir(worldId);
-  if (!actualWorldDir) {
-    throw new Error(`World directory not found for ${worldId}`);
-  }
-
-  const worldConfigPath = path.join(actualWorldDir, 'config.json');
-  const agentsDir = path.join(actualWorldDir, 'agents');
-
-  try:romDisk(worldId: string): Promise<void> {
-  // Find the actual world directory
-  const actualWorldDir = await findWorldDir(worldId);
-  if (!actualWorldDir) {
-    throw new Error(`World directory not found for ${worldId}`);
-  }
-
-  const worldConfigPath = path.join(actualWorldDir, 'config.json');
-  const agentsDir = path.join(actualWorldDir, 'agents');
-
-  try:Id>/events
+ *     - data/worlds/<worldId>/events
  *     - data/worlds/<worldId>/messages
  * - In-memory Map-based storage for fast access, with JSON file persistence
  * - Recursively loads agent config.json files from agent subdirectories for compatibility with nested agent storage
@@ -48,6 +19,8 @@
  * - Updated agent subscription logic to use new flat event payload structure
  * - Modified message broadcasting to work with MessageEventPayload type
  * - Updated direct messaging functions to use new payload format
+ * - Added clearAgentMemory function for simplified memory clearing (only LLM messages)
+ * - Enhanced memory management with simplified structure (conversationHistory + lastActivity only)
  * - Changed sender recognition from "CLI" to "HUMAN" in message processing
  * - Fixed event filtering and routing for agent-specific message delivery
  * - Improved type safety with strict payload typing throughout message handling
@@ -75,6 +48,7 @@
  * - Simplified event subscription system without duplicate tracking
  * - IMPLEMENTED: Agent memory/history system with separate file storage
  * - IMPLEMENTED: System prompt file separation for better management
+ * - IMPLEMENTED: clearAgentMemory function for simplified memory reset (LLM messages only)
  * - VERIFIED: Complete event-driven message processing flow  
  * - FIXED: Duplicate agent subscriptions prevented with subscription tracking
  */
@@ -670,11 +644,9 @@ async function loadAgentMemory(worldId: string, agentName: string): Promise<any>
     const memoryData = await fs.readFile(memoryPath, 'utf8');
     return JSON.parse(memoryData);
   } catch (error) {
-    // Return default memory if file doesn't exist
+    // Return simplified default memory if file doesn't exist - only stores LLM messages
     return {
       conversationHistory: [],
-      facts: {},
-      context: '',
       lastActivity: new Date().toISOString()
     };
   }
@@ -943,6 +915,45 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
       callback(event);
     }
   });
+}
+
+/**
+ * Clear agent's memory - deletes memory.json file and creates fresh simplified memory
+ */
+export async function clearAgentMemory(worldId: string, agentId: string): Promise<boolean> {
+  const agent = getAgent(worldId, agentId);
+  if (!agent) return false;
+
+  try {
+    const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+    const memoryPath = path.join(agentDir, 'memory.json');
+
+    // Delete the existing memory.json file if it exists
+    try {
+      await fs.unlink(memoryPath);
+    } catch (error) {
+      // File might not exist, which is fine
+    }
+
+    // Create simplified memory structure - only stores LLM messages
+    const emptyMemory = {
+      conversationHistory: [], // Empty array for LLM messages
+      lastActivity: new Date().toISOString()
+    };
+
+    // Save the simplified empty memory to the agent's memory file
+    await saveAgentMemory(worldId, agent.name, emptyMemory);
+
+    // Update agent's last active timestamp
+    await updateAgent(worldId, agentId, {
+      lastActive: new Date()
+    });
+
+    return true;
+  } catch (error) {
+    console.error(`Failed to clear memory for agent ${agentId}:`, error);
+    return false;
+  }
 }
 
 /**
