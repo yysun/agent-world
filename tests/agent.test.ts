@@ -139,8 +139,17 @@ describe('Agent Functions', () => {
       expect(mockLlm.streamChatWithLLM).toHaveBeenCalledTimes(1);
       expect(mockLlm.streamChatWithLLM).toHaveBeenCalledWith(
         {}, // LLM provider
-        expect.stringContaining('Helpful assistant'), // system prompt (full prompt)
-        '', // empty user prompt
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: 'system',
+            content: expect.stringContaining('Helpful assistant')
+          }),
+          expect.objectContaining({
+            role: 'user',
+            content: 'Hello agent!',
+            name: 'human'
+          })
+        ]), // messages array
         'test-msg-id', // message ID for streaming
         expect.objectContaining({
           temperature: 0.7,
@@ -185,8 +194,10 @@ describe('Agent Functions', () => {
 
       expect(mockLlm.streamChatWithLLM).toHaveBeenCalledWith(
         expect.anything(),
-        expect.anything(),
-        expect.anything(),
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'system' }),
+          expect.objectContaining({ role: 'user', content: 'Test without ID' })
+        ]),
         expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/), // UUID pattern
         expect.anything()
       );
@@ -251,7 +262,7 @@ describe('Agent Functions', () => {
 
       expect(mockEventBus.publishMessageEvent).toHaveBeenCalledWith({
         content: 'Published response',
-        sender: 'test-agent'
+        sender: 'TestAgent'
       });
     });
 

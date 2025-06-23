@@ -5,6 +5,7 @@
  * - Displays simplified usage information for all CLI commands
  * - Color-coded output for better readability
  * - Concise command descriptions without verbose examples
+ * - Includes show command for displaying agent conversation history
  * 
  * Logic:
  * - Shows available commands with brief descriptions
@@ -16,6 +17,7 @@
  * - Simplified to show only command names and brief descriptions
  * - Removed verbose usage examples, tips, and header message
  * - Added /quit command
+ * - Added /show command for agent conversation history display
  */
 
 import { colors } from '../utils/colors';
@@ -27,6 +29,7 @@ export async function helpCommand(args: string[], worldId: string): Promise<void
     { command: '/add [name]', description: 'Create a new agent (optionally specify name)' },
     { command: '/use', description: 'Activate an agent' },
     { command: '/stop', description: 'Deactivate an agent' },
+    { command: '/show <agent-name>', description: 'Display conversation history for an agent' },
     { command: '/clear', description: 'Clear agent memory' },
     { command: '/quit', description: 'Exit the CLI' }
   ];

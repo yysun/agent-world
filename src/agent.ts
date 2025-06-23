@@ -18,6 +18,8 @@
  * - Updated event publishing to use MessageEventPayload type
  * - Improved mention detection with case-insensitive matching
  * - Fixed agent response publishing with proper flat payload structure
+ * - Updated to use LLM chat message schema consistently
+ * - Fixed memory saving to include all conversation messages (user, assistant, tool) but exclude system messages
  * 
  * Logic:
  * - processAgentMessage: Main function for handling agent messages with memory
@@ -41,7 +43,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { AgentMemory, Event, EventType } from './types';
+import { AgentMemory, Event, EventType, ChatMessage } from './types';
 import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
 import { publishSSE, publishMessageEvent } from './event-bus';
 import { agentLogger } from './logger';
@@ -95,10 +97,10 @@ export async function processAgentMessage(
 
     // Load conversation history for context (import function from world.ts)
     const { getAgentConversationHistory, addToAgentMemory } = await import('./world');
-    const conversationHistory = await getAgentConversationHistory(worldId || 'default', agentConfig.id!, 10);
+    const conversationHistory = await getAgentConversationHistory(worldId || 'default', agentConfig.name, 10);
 
-    // Build complete prompt with history
-    const prompt = buildPrompt(agentConfig, messageData, conversationHistory);
+    // Prepare messages for LLM (including system prompt, history, and current message)
+    const messages = prepareMessagesForLLM(agentConfig, messageData, conversationHistory);
 
     // Generate response using LLM
     const chatOptions: ChatOptions = {
@@ -110,34 +112,20 @@ export async function processAgentMessage(
 
     const response = await streamChatWithLLM(
       provider,
-      prompt,
-      '', // No separate user prompt - everything is in system prompt
+      messages,
       msgId,
       chatOptions
     );
 
-    // Add the current message and response to agent memory
-    await addToAgentMemory(worldId || 'default', agentConfig.id!, {
-      type: 'incoming',
-      sender: messageData.sender,
-      content: messageData.content || messageData.payload?.content || '',
-      messageId: msgId
-    });
-
-    await addToAgentMemory(worldId || 'default', agentConfig.id!, {
-      type: 'outgoing',
-      sender: agentConfig.id,
-      content: response,
-      messageId: msgId,
-      inResponseTo: messageData.id
-    });
+    // Save all new messages to memory (system, user, assistant, tool messages)
+    await saveMessagesToMemory(worldId || 'default', agentConfig.name, messages, response);
 
     // Note: Using memory persistence to separate memory.json files
 
     // Publish response message
     await publishMessageEvent({
       content: response,
-      sender: agentConfig.id || 'agent'
+      sender: agentConfig.name
     });
 
     // agentLogger.info({
@@ -218,6 +206,40 @@ export function shouldRespondToMessage(
 /**
  * Build complete prompt for the agent with conversation history
  */
+/**
+ * Prepare messages array for LLM using standard chat message format
+ */
+function prepareMessagesForLLM(agentConfig: AgentConfig, messageData: MessageData, conversationHistory: ChatMessage[] = []): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+
+  // Add system message if available
+  if (agentConfig.systemPrompt) {
+    messages.push({
+      role: 'system',
+      content: agentConfig.systemPrompt
+    });
+  }
+
+  // Add conversation history (already in LLM format)
+  messages.push(...conversationHistory);
+
+  // Add current message as user input
+  const content = messageData.content || messageData.payload?.content || '';
+  const sender = messageData.sender || 'user';
+
+  messages.push({
+    role: 'user',
+    content: content,
+    name: sender !== 'user' ? sender : undefined
+  });
+
+  return messages;
+}
+
+/**
+ * Build prompt for LLM (legacy function - kept for compatibility)
+ * @deprecated Use prepareMessagesForLLM instead
+ */
 function buildPrompt(agentConfig: AgentConfig, messageData: MessageData, conversationHistory: any[] = []): string {
   let prompt = agentConfig.systemPrompt || `You are ${agentConfig.name}, an AI agent.`;
 
@@ -239,4 +261,45 @@ function buildPrompt(agentConfig: AgentConfig, messageData: MessageData, convers
   prompt += `\n\nCurrent message: ${sender}: ${content}`;
 
   return prompt;
+}
+
+// Import functions from world.ts
+import { addToAgentMemory } from './world';
+
+/**
+ * Save new conversation messages to agent memory
+ * Saves only the new user message and assistant response - excludes system messages and history
+ */
+async function saveMessagesToMemory(
+  worldId: string,
+  agentName: string,
+  messages: ChatMessage[],
+  assistantResponse: string
+): Promise<void> {
+  const currentTimestamp = new Date().toISOString();
+
+  // Find the last user message (the new message we're responding to)
+  // This is the most recent non-system message in the messages array
+  const newUserMessage = messages.filter(msg => msg.role !== 'system').slice(-1)[0];
+
+  if (newUserMessage) {
+    // Save the new user message with timestamp
+    const userMessageToSave: ChatMessage = {
+      ...newUserMessage,
+      timestamp: currentTimestamp
+    };
+
+    // Use agent name for memory storage
+    await addToAgentMemory(worldId, agentName, userMessageToSave);
+  }
+
+  // Add the assistant response
+  const assistantMessage: ChatMessage = {
+    role: 'assistant',
+    content: assistantResponse,
+    timestamp: currentTimestamp
+  };
+
+  // Use agent name for memory storage
+  await addToAgentMemory(worldId, agentName, assistantMessage);
 }

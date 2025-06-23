@@ -10,6 +10,7 @@
  * - Storage provider interfaces
  * - Zod schemas for runtime validation
  * - LLM provider configuration
+ * - Standard LLM chat message schema for consistent memory storage
  * 
  * Recent Changes:
  * - Added strict typing for event payloads (MessageEventPayload, SystemEventPayload, SSEEventPayload)
@@ -17,9 +18,36 @@
  * - Refactored event structure to remove nested payload nesting
  * - Changed sender terminology from "CLI" to "HUMAN"
  * - Updated Zod schemas for new event structure validation
+ * - Added standard LLM chat message schema types (ChatMessage, ChatRole)
+ * - Added AgentMemory interface for new memory structure
  */
 
 import { z } from 'zod';
+
+// LLM Chat Message Types
+export type ChatRole = 'system' | 'user' | 'assistant';
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  name?: string; // Optional sender identification
+  timestamp?: string; // ISO timestamp
+}
+
+export interface AgentMemory {
+  messages: ChatMessage[];
+  lastActivity: string; // ISO timestamp
+}
+
+// Legacy message type for migration
+export interface LegacyMessage {
+  type: 'incoming' | 'outgoing';
+  sender: string;
+  content: string;
+  messageId: string;
+  timestamp: string;
+  inResponseTo?: string;
+}
 
 export interface Agent {
   id: string;
@@ -187,16 +215,33 @@ export interface StoragePaths {
   events: string;
 }
 
-export interface AgentMemory {
-  agentId?: string;
-  conversationHistory?: Event[];
-  facts: Record<string, any>;
-  relationships?: Record<string, any>;
-  goals?: string[];
-  context?: string;
-  lastActivity?: string;
-  shortTerm?: Array<{ content: string; timestamp: string }>;
-  longTerm?: Array<{ content: string; timestamp: string }>;
-}
+// Zod Schemas for Validation
+export const ChatRoleSchema = z.enum(['system', 'user', 'assistant']);
+
+export const ChatMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string(),
+  name: z.string().optional(),
+  timestamp: z.string().optional(),
+});
+
+export const AgentMemorySchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  lastActivity: z.string(),
+});
+
+export const LegacyMessageSchema = z.object({
+  type: z.enum(['incoming', 'outgoing']),
+  sender: z.string(),
+  content: z.string(),
+  messageId: z.string(),
+  timestamp: z.string(),
+  inResponseTo: z.string().optional(),
+});
+
+export const LegacyMemorySchema = z.object({
+  conversationHistory: z.array(LegacyMessageSchema),
+  lastActivity: z.string(),
+});
 
 

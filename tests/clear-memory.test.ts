@@ -51,15 +51,14 @@ describe('Clear Memory Functionality', () => {
 
     // Add some memory to the agent
     await World.addToAgentMemory(testWorldId, testAgentId, {
-      type: 'test',
+      role: 'user',
       content: 'This is a test message',
-      sender: 'system'
+      name: 'system'
     });
 
     await World.addToAgentMemory(testWorldId, testAgentId, {
-      type: 'test',
-      content: 'Another test message',
-      sender: 'user'
+      role: 'assistant',
+      content: 'Another test message'
     });
   });
 
@@ -99,7 +98,7 @@ describe('Clear Memory Functionality', () => {
 
       // Verify memory file exists with data
       const memoryBefore = JSON.parse(await fs.readFile(memoryPath, 'utf8'));
-      expect(memoryBefore.conversationHistory.length).toBeGreaterThan(0);
+      expect(memoryBefore.messages.length).toBeGreaterThan(0);
 
       // Clear memory
       const success = await World.clearAgentMemory(testWorldId, testAgentId);
@@ -107,7 +106,7 @@ describe('Clear Memory Functionality', () => {
 
       // Verify memory file was recreated with simplified structure - only LLM messages
       const memoryAfter = JSON.parse(await fs.readFile(memoryPath, 'utf8'));
-      expect(memoryAfter.conversationHistory).toEqual([]);
+      expect(memoryAfter.messages).toEqual([]);
       expect(memoryAfter.lastActivity).toBeDefined();
       // Verify old fields are no longer present
       expect(memoryAfter.facts).toBeUndefined();
@@ -169,12 +168,12 @@ describe('Clear Memory Functionality', () => {
         // Verify the archive contains the original memory data
         const archivePath = path.join(archivesDir, memoryArchives[0]);
         const archivedMemory = JSON.parse(await fs.readFile(archivePath, 'utf8'));
-        expect(archivedMemory.conversationHistory.length).toBeGreaterThan(0);
+        expect(archivedMemory.messages.length).toBeGreaterThan(0);
 
       } catch (error) {
         // If no archive was created, that's only okay if there was no meaningful content
         // In our test case, we added messages, so an archive should exist
-        fail('Expected archive to be created when clearing memory with conversation history');
+        throw new Error('Expected archive to be created when clearing memory with conversation history');
       }
 
       // Verify memory was still cleared
@@ -232,9 +231,9 @@ describe('Clear Memory Functionality', () => {
 
       // Add memory to second agent
       await World.addToAgentMemory(testWorldId, agent2!.id, {
-        type: 'test',
+        role: 'user',
         content: 'Message for agent 2',
-        sender: 'system'
+        name: 'system'
       });
 
       const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
@@ -299,7 +298,7 @@ describe('Clear Memory Functionality', () => {
       const memory = JSON.parse(await fs.readFile(memoryPath, 'utf8'));
 
       // Verify only required fields exist in simplified structure
-      expect(memory).toHaveProperty('conversationHistory', []);
+      expect(memory).toHaveProperty('messages', []);
       expect(memory).toHaveProperty('lastActivity');
 
       // Verify old complex fields are no longer present

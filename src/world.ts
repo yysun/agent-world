@@ -59,6 +59,8 @@ import * as path from 'path';
 import {
   Agent,
   AgentConfig,
+  AgentMemory,
+  ChatMessage,
   WorldState,
   WorldOptions,
   WorldInfo,
@@ -634,64 +636,74 @@ async function saveAgentMemory(worldId: string, agentName: string, memory: any):
 }
 
 /**
- * Load agent memory from file
+ * Load agent memory from file - uses LLM-compatible schema
  */
-async function loadAgentMemory(worldId: string, agentName: string): Promise<any> {
+async function loadAgentMemory(worldId: string, agentName: string): Promise<AgentMemory> {
   const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
   const memoryPath = path.join(agentDir, 'memory.json');
 
   try {
     const memoryData = await fs.readFile(memoryPath, 'utf8');
-    return JSON.parse(memoryData);
+    const memory = JSON.parse(memoryData);
+
+    return memory;
   } catch (error) {
-    // Return simplified default memory if file doesn't exist - only stores LLM messages
+    // Return new LLM-compatible default memory structure
     return {
-      conversationHistory: [],
+      messages: [],
       lastActivity: new Date().toISOString()
     };
   }
 }
 
 /**
- * Add message to agent's conversation history
+ * Add message to agent's conversation history using LLM-compatible schema
  */
-export async function addToAgentMemory(worldId: string, agentId: string, message: any): Promise<void> {
-  const agent = getAgent(worldId, agentId);
+export async function addToAgentMemory(worldId: string, agentIdOrName: string, message: ChatMessage): Promise<void> {
+  // Check if agentIdOrName is an ID (UUID format) or a name
+  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
+    ? getAgent(worldId, agentIdOrName)  // Likely an ID
+    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
+
   if (!agent) return;
 
-  // Load current memory
+  // Load current memory using agent name
   const memory = await loadAgentMemory(worldId, agent.name);
 
   // Add message to conversation history
-  if (!memory.conversationHistory) {
-    memory.conversationHistory = [];
+  if (!memory.messages) {
+    memory.messages = [];
   }
 
-  memory.conversationHistory.push({
+  memory.messages.push({
     ...message,
-    timestamp: new Date().toISOString()
+    timestamp: message.timestamp || new Date().toISOString()
   });
 
   // Keep only last 50 messages for performance
-  if (memory.conversationHistory.length > 50) {
-    memory.conversationHistory = memory.conversationHistory.slice(-50);
+  if (memory.messages.length > 50) {
+    memory.messages = memory.messages.slice(-50);
   }
 
   memory.lastActivity = new Date().toISOString();
 
-  // Save updated memory
+  // Save updated memory using agent name
   await saveAgentMemory(worldId, agent.name, memory);
 }
 
 /**
  * Get agent's conversation history for LLM context
  */
-export async function getAgentConversationHistory(worldId: string, agentId: string, limit: number = 20): Promise<any[]> {
-  const agent = getAgent(worldId, agentId);
+export async function getAgentConversationHistory(worldId: string, agentIdOrName: string, limit: number = 20): Promise<ChatMessage[]> {
+  // Check if agentIdOrName is an ID (UUID format) or a name
+  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
+    ? getAgent(worldId, agentIdOrName)  // Likely an ID
+    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
+
   if (!agent) return [];
 
   const memory = await loadAgentMemory(worldId, agent.name);
-  const history = memory.conversationHistory || [];
+  const history = memory.messages || [];
 
   // Return last N messages
   return history.slice(-limit);
@@ -920,8 +932,12 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
 /**
  * Clear agent's memory - archives existing memory.json then creates fresh simplified memory
  */
-export async function clearAgentMemory(worldId: string, agentId: string): Promise<boolean> {
-  const agent = getAgent(worldId, agentId);
+export async function clearAgentMemory(worldId: string, agentIdOrName: string): Promise<boolean> {
+  // Check if agentIdOrName is an ID (UUID format) or a name
+  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
+    ? getAgent(worldId, agentIdOrName)  // Likely an ID
+    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
+
   if (!agent) return false;
 
   try {
@@ -934,8 +950,8 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
       const existingMemory = await fs.readFile(memoryPath, 'utf8');
       const memoryData = JSON.parse(existingMemory);
 
-      // Only archive if there's meaningful content (conversation history)
-      if (memoryData.conversationHistory && memoryData.conversationHistory.length > 0) {
+      // Only archive if there's meaningful content (messages)
+      if (memoryData.messages && memoryData.messages.length > 0) {
         // Create archives directory within agent folder
         const archivesDir = path.join(agentDir, 'archives');
         await ensureDirectory(archivesDir);
@@ -960,8 +976,8 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
     }
 
     // Create simplified memory structure - only stores LLM messages
-    const emptyMemory = {
-      conversationHistory: [], // Empty array for LLM messages
+    const emptyMemory: AgentMemory = {
+      messages: [], // Empty array for LLM messages
       lastActivity: new Date().toISOString()
     };
 
@@ -969,13 +985,18 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
     await saveAgentMemory(worldId, agent.name, emptyMemory);
 
     // Update agent's last active timestamp
-    await updateAgent(worldId, agentId, {
-      lastActive: new Date()
-    });
+    const agents = getAgents(worldId);
+    const agentForUpdate = agents.find(a => a.name === agent.name);
+    if (agentForUpdate) {
+      await updateAgent(worldId, agentForUpdate.id, {
+        lastActive: new Date()
+      });
+    }
 
     return true;
   } catch (error) {
-    console.error(`Failed to clear memory for agent ${agentId}:`, error);
+    const agentName = agent ? agent.name : agentIdOrName;
+    console.error(`Failed to clear memory for agent ${agentName}:`, error);
     return false;
   }
 }

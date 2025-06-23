@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Interactive command line interface for testing and managing agents
- * - Command routing system with support for all available commands
+ * - Command routing system with support for all available commands including /show
  * - Integrated agent loading and management via World object
  * - Message broadcasting to agents with flashing emoji preview and multi-line final display
  * - Multi-agent line management for concurrent streaming without overlap
@@ -11,6 +11,7 @@
  * - Clean startup without verbose initialization messages
  * - Uses "HUMAN" sender terminology for all CLI-originated messages
  * - Smart streaming display with 50-character preview, token count, and full content reveal
+ * - Agent conversation history display via /show command
  * 
  * Recent Changes:
  * - MAJOR: Implemented flashing emoji indicators (●/○) for active streaming states
@@ -28,6 +29,7 @@
  * - Updated final display to preserve original content structure and paragraphs
  * - Removed artificial line length limits to use full terminal width
  * - Simplified final display by removing left border for cleaner appearance
+ * - Added /show command for displaying agent conversation history
  * - Added gray color formatting for message content in final display
  * 
  * Streaming Display Logic:
@@ -88,6 +90,7 @@ import { addCommand } from './commands/add';
 import { clearCommand } from './commands/clear';
 import { helpCommand } from './commands/help';
 import { listCommand } from './commands/list';
+import { showCommand } from './commands/show';
 import { stopCommand } from './commands/stop';
 import { useCommand } from './commands/use';
 import * as World from '../src/world';
@@ -461,6 +464,7 @@ const commands: Record<string, (args: string[], worldId: string) => Promise<void
   clear: clearCommand,
   help: helpCommand,
   list: listCommand,
+  show: showCommand,
   stop: stopCommand,
   use: useCommand,
   quit: quitCommand,

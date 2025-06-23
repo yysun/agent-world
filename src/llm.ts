@@ -33,7 +33,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { v4 as uuidv4 } from 'uuid';
-import { LLMProvider } from './types';
+import { LLMProvider, ChatMessage } from './types';
 import { publishSSE } from './event-bus';
 import { agentLogger } from './logger';
 
@@ -109,15 +109,13 @@ export function loadLLMProvider(config: LLMConfig): any {
 // Direct chat function (non-streaming)
 export async function chatWithLLM(
   provider: any,
-  systemPrompt: string,
-  userPrompt: string,
+  messages: ChatMessage[],
   options: ChatOptions = {}
 ): Promise<string> {
   try {
     const { text } = await generateText({
       model: provider,
-      system: systemPrompt,
-      prompt: userPrompt,
+      messages: messages,
       temperature: options.temperature || 0.7,
       maxTokens: options.maxTokens || 1000,
     });
@@ -136,8 +134,7 @@ export async function chatWithLLM(
 // Streaming chat with SSE events (extracted from LLMQueue)
 export async function streamChatWithLLM(
   provider: any,
-  systemPrompt: string,
-  userPrompt: string,
+  messages: ChatMessage[],
   messageId: string,
   options: ChatOptions = {}
 ): Promise<string> {
@@ -161,8 +158,7 @@ export async function streamChatWithLLM(
     // Create the streaming request
     const streamPromise = handleStreamingRequest(
       provider,
-      systemPrompt,
-      userPrompt,
+      messages,
       messageId,
       options
     );
@@ -199,8 +195,7 @@ export async function streamChatWithLLM(
 // Core streaming implementation (extracted from LLMQueue.handleStreamingRequest)
 async function handleStreamingRequest(
   provider: any,
-  systemPrompt: string,
-  userPrompt: string,
+  messages: ChatMessage[],
   messageId: string,
   options: ChatOptions = {}
 ): Promise<string> {
@@ -210,8 +205,7 @@ async function handleStreamingRequest(
     // Generate response using streaming AI (from LLMQueue)
     const { textStream } = await streamText({
       model: provider,
-      system: systemPrompt,
-      prompt: userPrompt,
+      messages: messages,
       temperature: options.temperature || 0.7,
       maxTokens: options.maxTokens || 1000,
     });
@@ -253,11 +247,10 @@ async function handleStreamingRequest(
 // Single request convenience function
 export async function singleRequest(
   config: LLMConfig,
-  systemPrompt: string,
-  userPrompt: string
+  messages: ChatMessage[]
 ): Promise<string> {
   const provider = loadLLMProvider(config);
-  return await chatWithLLM(provider, systemPrompt, userPrompt, {
+  return await chatWithLLM(provider, messages, {
     temperature: config.temperature,
     maxTokens: config.maxTokens
   });

@@ -64,12 +64,14 @@ describe('Simplified LLM Wrapper', () => {
       expect(typeof singleRequest).toBe('function');
 
       // Test that it accepts the correct parameters
-      const systemPrompt = 'You are a test assistant.';
-      const userPrompt = 'Hello, world!';
+      const messages = [
+        { role: 'system' as const, content: 'You are a test assistant.' },
+        { role: 'user' as const, content: 'Hello, world!' }
+      ];
 
       // The function should be callable (will fail due to no real API key, but that's expected)
       try {
-        await singleRequest(config, systemPrompt, userPrompt);
+        await singleRequest(config, messages);
       } catch (error) {
         // Expected to fail without real API key, but function structure is correct
         expect(error).toBeDefined();
@@ -105,18 +107,20 @@ describe('Simplified LLM Wrapper', () => {
 
   describe('Extracted LLMQueue functionality', () => {
     it('should preserve streaming functionality structure', () => {
-      // Verify streamChatWithLLM has the expected signature (removed EventManager parameter)
-      expect(streamChatWithLLM.length).toBe(4); // 4 parameters (options is optional)
+      // Verify streamChatWithLLM has the expected signature (updated for messages array)
+      expect(streamChatWithLLM.length).toBe(3); // 3 parameters (options is optional)
 
       // Verify it requires messageId for SSE
       const provider = loadLLMProvider(config);
-      const systemPrompt = 'Test system';
-      const userPrompt = 'Test user';
+      const messages = [
+        { role: 'system' as const, content: 'Test system' },
+        { role: 'user' as const, content: 'Test user' }
+      ];
       const messageId = 'test-message-123';
 
       // Function should be callable with correct parameters
       expect(() => {
-        streamChatWithLLM(provider, systemPrompt, userPrompt, messageId);
+        streamChatWithLLM(provider, messages, messageId);
       }).not.toThrow();
     });
 
@@ -126,7 +130,7 @@ describe('Simplified LLM Wrapper', () => {
       expect(typeof streamChatWithLLM).toBe('function');
 
       // Should return a Promise (async function)
-      const result = streamChatWithLLM(provider, 'test', 'test', 'msg-id');
+      const result = streamChatWithLLM(provider, [{ role: 'user', content: 'test' }], 'msg-id');
       expect(result).toBeInstanceOf(Promise);
     });
   });
