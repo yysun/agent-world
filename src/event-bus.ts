@@ -1,4 +1,4 @@
-/*
+/**
  * Event Bus - Simplified Function-Based Event System
  * 
  * Features:
@@ -10,6 +10,14 @@
  * - Agent-specific event routing and filtering
  * - Event history and statistics tracking
  * - Structured logging with pino
+ * - Strict typing for event payloads with TypeScript interfaces
+ * 
+ * Recent Changes:
+ * - Updated event publishing functions to use flat payload structure
+ * - Added support for MessageEventPayload, SystemEventPayload, and SSEEventPayload types
+ * - Refactored publishMessage to use HUMAN as default sender
+ * - Removed nested payload.payload structure from all event publishing
+ * - Updated event filtering and routing logic for new payload format
  * 
  * Logic:
  * - Uses provider pattern to abstract local vs distributed event handling
@@ -27,7 +35,7 @@
  * - Maintains all existing functionality in simpler form
  */
 
-import { Event, EventType } from './types';
+import { Event, EventType, MessageEventPayload, SystemEventPayload, SSEEventPayload } from './types';
 import {
   EventBusProvider,
   EventFilter,
@@ -156,20 +164,15 @@ export function clearEventHistory(): void {
  */
 
 // MESSAGE events - structured message objects
-export async function publishMessage(messageObj: {
-  name: string;
-  payload: any;
-  id: string;
-  [key: string]: any;
-}): Promise<Event> {
+export async function publishMessage(payload: MessageEventPayload): Promise<Event> {
   return publishEvent(TOPICS.MESSAGES, {
     type: EventType.MESSAGE,
-    payload: messageObj
+    payload: payload
   });
 }
 
 // WORLD events - system events, agent lifecycle, etc.
-export async function publishWorld(payload: any): Promise<Event> {
+export async function publishWorld(payload: SystemEventPayload): Promise<Event> {
   return publishEvent(TOPICS.WORLD, {
     type: EventType.WORLD,
     payload
@@ -177,19 +180,10 @@ export async function publishWorld(payload: any): Promise<Event> {
 }
 
 // SSE events - streaming data for real-time updates
-export async function publishSSE(sseMessage: {
-  agentId: string;
-  type: string;
-  content?: string;
-  error?: string;
-  messageId?: string;
-}): Promise<Event> {
+export async function publishSSE(payload: SSEEventPayload): Promise<Event> {
   return publishEvent(TOPICS.SSE, {
     type: EventType.SSE,
-    payload: {
-      ...sseMessage,
-      timestamp: new Date().toISOString()
-    }
+    payload
   });
 }
 
@@ -246,9 +240,21 @@ function matchesFilter(event: Event, filter: EventFilter): boolean {
     return false;
   }
 
-  // Check agent filter - only check payload
-  if (filter.agentId && event.payload.agentId !== filter.agentId) {
-    return false;
+  // Check agent filter - check for agentId or sender in payload
+  if (filter.agentId) {
+    const payload = event.payload;
+    let hasMatchingAgent = false;
+
+    if ('agentId' in payload && payload.agentId === filter.agentId) {
+      hasMatchingAgent = true;
+    }
+    if ('sender' in payload && payload.sender === filter.agentId) {
+      hasMatchingAgent = true;
+    }
+
+    if (!hasMatchingAgent) {
+      return false;
+    }
   }
 
   // Check time filter

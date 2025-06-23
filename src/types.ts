@@ -1,5 +1,22 @@
 /**
- * Agent - Minimal agent structure for world and event types
+ * Core type definitions for the Agent World system.
+ * 
+ * This file defines all the core types, interfaces, and schemas used throughout
+ * the system for agents, events, storage, and configuration.
+ * 
+ * Features:
+ * - Agent configuration and state types
+ * - Event system types with strict payload typing
+ * - Storage provider interfaces
+ * - Zod schemas for runtime validation
+ * - LLM provider configuration
+ * 
+ * Recent Changes:
+ * - Added strict typing for event payloads (MessageEventPayload, SystemEventPayload, SSEEventPayload)
+ * - Updated Event interface to use union types for payload
+ * - Refactored event structure to remove nested payload nesting
+ * - Changed sender terminology from "CLI" to "HUMAN"
+ * - Updated Zod schemas for new event structure validation
  */
 
 import { z } from 'zod';
@@ -14,30 +31,8 @@ export interface Agent {
   lastActive?: Date;
   metadata?: Record<string, any>;
 }
-/*
- * Type Definitions - Agent, LLM, Event, and World Types
- * 
- * Features:
- * - Agent configuration and status types
- * - LLM provider and queue types
- * - Event-bus event and filter types
- * - World state and options types
- * - Replaces shared package dependencies
- * 
- * Logic:
- * - Provides all necessary types for world management
- * - Self-contained type definitions (no external dependencies)
- * - Clean interfaces for agents, events, and worlds
- * - Compatible with existing event-bus.ts structure
- * 
- * Changes:
- * - Initial implementation of consolidated type definitions
- * - Replaces shared package dependencies with local types
- * - Provides type safety for world management functions
- * - Defines core interfaces for agent and world management
- * - UPDATED: Replaced personality/instructions with systemPrompt field
- * - systemPrompt is saved as separate system-prompt.md file per agent
- */
+
+
 
 // Agent Types
 /**
@@ -83,11 +78,31 @@ export interface CreateAgentRequest {
 }
 
 // Event Types
+export interface MessageEventPayload {
+  content: string;
+  sender: string;
+}
+
+export interface SystemEventPayload {
+  action: string;
+  agentId?: string;
+  worldId?: string;
+  [key: string]: any;
+}
+
+export interface SSEEventPayload {
+  agentId: string;
+  type: 'start' | 'chunk' | 'end' | 'error';
+  content?: string;
+  error?: string;
+  messageId?: string;
+}
+
 export interface Event {
   id: string;
   type: EventType;
   timestamp: string;
-  payload: any;
+  payload: MessageEventPayload | SystemEventPayload | SSEEventPayload;
 }
 
 export enum EventType {
@@ -106,7 +121,24 @@ export const EventSchema = z.object({
   id: z.string(),
   type: z.nativeEnum(EventType),
   timestamp: z.string().datetime(),
-  payload: z.record(z.any())
+  payload: z.union([
+    z.object({
+      content: z.string(),
+      sender: z.string()
+    }),
+    z.object({
+      action: z.string(),
+      agentId: z.string().optional(),
+      worldId: z.string().optional()
+    }).and(z.record(z.any())),
+    z.object({
+      agentId: z.string(),
+      type: z.enum(['start', 'chunk', 'end', 'error']),
+      content: z.string().optional(),
+      error: z.string().optional(),
+      messageId: z.string().optional()
+    })
+  ])
 });
 
 // World Types

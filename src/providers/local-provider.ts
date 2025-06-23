@@ -143,8 +143,16 @@ export async function publishToLocal(topic: string, eventData: Omit<Event, 'id' 
     instance.emitter.emit(`topic:${topic}`, validatedEvent);
     instance.emitter.emit('event', validatedEvent);
 
-    // Emit agent-specific events if agentId is present in payload
-    const agentId = validatedEvent.payload?.agentId;
+    // Emit agent-specific events if agentId or sender is present in payload
+    const payload = validatedEvent.payload;
+    let agentId: string | undefined;
+
+    if ('agentId' in payload && payload.agentId) {
+      agentId = payload.agentId;
+    } else if ('sender' in payload && payload.sender) {
+      agentId = payload.sender;
+    }
+
     if (agentId) {
       instance.emitter.emit(`agent:${agentId}`, validatedEvent);
     }
@@ -200,9 +208,18 @@ export function getLocalHistory(filter?: EventFilter, providerId?: string): Even
       events = events.filter(event => filter.types!.includes(event.type));
     }
 
-    // Apply agent filter - only check payload
+    // Apply agent filter - check for agentId or sender in payload
     if (filter.agentId) {
-      events = events.filter(event => event.payload.agentId === filter.agentId);
+      events = events.filter(event => {
+        const payload = event.payload;
+        if ('agentId' in payload && payload.agentId === filter.agentId) {
+          return true;
+        }
+        if ('sender' in payload && payload.sender === filter.agentId) {
+          return true;
+        }
+        return false;
+      });
     }
 
     // Apply time filter

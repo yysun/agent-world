@@ -283,7 +283,16 @@ describe('Agent Lifecycle and Persistence', () => {
     const configData = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(configData);
     expect(config.name).toBe('StorageAgent');
-    expect(config.config.systemPrompt).toBe('Storage test agent');
+    // System prompt is now stored in separate file, so it shouldn't be in config
+    expect(config.config.systemPrompt).toBeUndefined();
+
+    // Verify system prompt is in separate file
+    const systemPromptPath = path.join(agentDir, 'system-prompt.md');
+    const systemPromptExists = await fs.access(systemPromptPath).then(() => true).catch(() => false);
+    expect(systemPromptExists).toBe(true);
+
+    const systemPromptData = await fs.readFile(systemPromptPath, 'utf-8');
+    expect(systemPromptData).toBe('Storage test agent');
 
     // Test agent removal
     const removed = await removeAgent(worldId, agent!.id);
@@ -348,7 +357,7 @@ describe('Agent Lifecycle and Persistence', () => {
 
     it('should handle invalid agent IDs gracefully', async () => {
       const worldId = await createWorld({ name: 'Test World' });
-      
+
       // Test getting non-existent agent
       const agent = getAgent(worldId, 'non-existent-agent');
       expect(agent).toBeNull();
@@ -364,7 +373,7 @@ describe('Agent Lifecycle and Persistence', () => {
 
     it('should handle empty agent lists gracefully', async () => {
       const worldId = await createWorld({ name: 'Empty World' });
-      
+
       const agents = getAgents(worldId);
       expect(agents).toEqual([]);
     });

@@ -65,14 +65,14 @@ describe('Event Bus', () => {
 
       const testEvent = {
         type: EventType.MESSAGE,
-        payload: { test: 'data' }
+        payload: { content: 'test data', sender: 'test-agent' }
       };
 
       await publishEvent(TOPICS.MESSAGES, testEvent);
 
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe(EventType.MESSAGE);
-      expect(events[0].payload).toEqual({ test: 'data' });
+      expect(events[0].payload).toEqual({ content: 'test data', sender: 'test-agent' });
       expect(events[0].id).toBeDefined();
       expect(events[0].timestamp).toBeDefined();
 
@@ -87,9 +87,8 @@ describe('Event Bus', () => {
       const unsub2 = subscribeToTopic(TOPICS.MESSAGES, (event) => events2.push(event));
 
       await publishMessage({
-        name: 'test',
-        payload: 'data',
-        id: 'test-id'
+        content: 'test data',
+        sender: 'test-agent'
       });
 
       expect(events1).toHaveLength(1);
@@ -107,14 +106,14 @@ describe('Event Bus', () => {
         events.push(event);
       });
 
-      await publishMessage({ name: 'test1', payload: 'data1', id: 'id1' });
+      await publishMessage({ content: 'test1', sender: 'HUMAN' });
 
       unsubscribe();
 
-      await publishMessage({ name: 'test2', payload: 'data2', id: 'id2' });
+      await publishMessage({ content: 'test2', sender: 'HUMAN' });
 
       expect(events).toHaveLength(1);
-      expect(events[0].payload.name).toBe('test1');
+      expect(events[0].payload.content).toBe('test1');
     });
   });
 
@@ -127,16 +126,14 @@ describe('Event Bus', () => {
       });
 
       await publishMessage({
-        name: 'test-message',
-        payload: { content: 'hello' },
-        id: 'msg-1',
-        agentId: 'agent-1'
+        content: 'hello',
+        sender: 'agent-1'
       });
 
       expect(messages).toHaveLength(1);
       expect(messages[0].type).toBe(EventType.MESSAGE);
-      expect(messages[0].payload.name).toBe('test-message');
-      expect(messages[0].payload.agentId).toBe('agent-1');
+      expect(messages[0].payload.content).toBe('hello');
+      expect(messages[0].payload.sender).toBe('agent-1');
 
       unsubscribe();
     });
@@ -169,7 +166,7 @@ describe('Event Bus', () => {
 
       await publishSSE({
         agentId: 'agent-1',
-        type: 'response',
+        type: 'chunk',
         content: 'Hello world',
         messageId: 'msg-1'
       });
@@ -193,17 +190,14 @@ describe('Event Bus', () => {
 
       // Send message from agent-1
       await publishMessage({
-        name: 'test',
-        payload: { data: 'test' },
-        id: 'msg-1',
-        agentId: 'agent-1',
+        content: 'test message',
         sender: 'agent-1'
       });
 
       // Send SSE to agent-2
       await publishSSE({
         agentId: 'agent-2',
-        type: 'response',
+        type: 'chunk',
         content: 'hello'
       });
 
@@ -226,7 +220,7 @@ describe('Event Bus', () => {
         messageEvents.push(event);
       }, { types: [EventType.MESSAGE] });
 
-      await publishMessage({ name: 'msg', payload: 'data', id: 'id1' });
+      await publishMessage({ content: 'msg data', sender: 'HUMAN' });
       await publishWorld({ action: 'test' });
 
       expect(messageEvents).toHaveLength(1);
@@ -242,8 +236,8 @@ describe('Event Bus', () => {
         agentEvents.push(event);
       }, { agentId: 'agent-1' });
 
-      await publishMessage({ name: 'msg1', payload: { data: 'test' }, id: 'id1', agentId: 'agent-1', sender: 'agent-1' });
-      await publishMessage({ name: 'msg2', payload: { data: 'test' }, id: 'id2', agentId: 'agent-2', sender: 'agent-2' });
+      await publishMessage({ content: 'test message 1', sender: 'agent-1' });
+      await publishMessage({ content: 'test message 2', sender: 'agent-2' });
 
       expect(agentEvents).toHaveLength(1);
       expect(agentEvents[0].payload.sender).toBe('agent-1');
@@ -254,16 +248,16 @@ describe('Event Bus', () => {
 
   describe('Event History', () => {
     it('should maintain event history', async () => {
-      await publishMessage({ name: 'msg1', payload: 'data1', id: 'id1' });
+      await publishMessage({ content: 'test message 1', sender: 'agent-1' });
       await publishWorld({ action: 'test1' });
-      await publishSSE({ agentId: 'agent-1', type: 'response' });
+      await publishSSE({ agentId: 'agent-1', type: 'chunk' });
 
       const history = getEventHistory();
       expect(history).toHaveLength(3);
 
       const messageEvents = getEventHistory({ types: [EventType.MESSAGE] });
       expect(messageEvents).toHaveLength(1);
-      expect(messageEvents[0].payload.name).toBe('msg1');
+      expect(messageEvents[0].payload.content).toBe('test message 1');
     });
 
     it('should limit event history size', async () => {
@@ -274,19 +268,19 @@ describe('Event Bus', () => {
         enableLogging: false
       });
 
-      await publishMessage({ name: 'msg1', payload: 'data', id: 'id1' });
-      await publishMessage({ name: 'msg2', payload: 'data', id: 'id2' });
-      await publishMessage({ name: 'msg3', payload: 'data', id: 'id3' });
+      await publishMessage({ content: 'message 1', sender: 'agent-1' });
+      await publishMessage({ content: 'message 2', sender: 'agent-2' });
+      await publishMessage({ content: 'message 3', sender: 'agent-3' });
 
       const history = getEventHistory();
       expect(history).toHaveLength(2);
-      expect(history[0].payload.name).toBe('msg2'); // First event dropped
-      expect(history[1].payload.name).toBe('msg3');
+      expect(history[0].payload.content).toBe('message 2'); // First event dropped
+      expect(history[1].payload.content).toBe('message 3');
     });
 
     it('should clear event history', async () => {
-      await publishMessage({ name: 'msg1', payload: 'data', id: 'id1' });
-      await publishMessage({ name: 'msg2', payload: 'data', id: 'id2' });
+      await publishMessage({ content: 'message 1', sender: 'agent-1' });
+      await publishMessage({ content: 'message 2', sender: 'agent-2' });
 
       expect(getEventHistory()).toHaveLength(2);
 
@@ -298,8 +292,8 @@ describe('Event Bus', () => {
 
   describe('Event Statistics', () => {
     it('should track event statistics', async () => {
-      await publishMessage({ name: 'msg1', payload: 'data', id: 'id1' });
-      await publishMessage({ name: 'msg2', payload: 'data', id: 'id2' });
+      await publishMessage({ content: 'message 1', sender: 'agent-1' });
+      await publishMessage({ content: 'message 2', sender: 'agent-2' });
       await publishWorld({ action: 'test' });
 
       const stats = getEventStats();
@@ -319,9 +313,9 @@ describe('Event Bus', () => {
         allEvents.push(event);
       });
 
-      await publishMessage({ name: 'msg', payload: 'data', id: 'id1' });
+      await publishMessage({ content: 'test message', sender: 'agent-1' });
       await publishWorld({ action: 'test' });
-      await publishSSE({ agentId: 'agent-1', type: 'response' });
+      await publishSSE({ agentId: 'agent-1', type: 'chunk' });
 
       expect(allEvents).toHaveLength(3);
       expect(allEvents[0].type).toBe(EventType.MESSAGE);
@@ -336,7 +330,7 @@ describe('Event Bus', () => {
     it('should handle invalid event data', async () => {
       const invalidEvent = {
         type: 'INVALID_TYPE' as any,
-        payload: {} // Empty object instead of null
+        payload: { invalidField: 'test' } as any // Invalid payload structure
       };
 
       await expect(publishEvent(TOPICS.MESSAGES, invalidEvent))

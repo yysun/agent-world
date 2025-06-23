@@ -1,4 +1,4 @@
-/*
+/**
  * CLI Interface - Interactive Command Line Tool with Real-time Agent Streaming
  * 
  * Features:
@@ -8,6 +8,13 @@
  * - Message broadcasting to agents with real-time streaming responses
  * - Simplified help system with minimal output
  * - Clean startup without verbose initialization messages
+ * - Uses "HUMAN" sender terminology for all CLI-originated messages
+ * 
+ * Recent Changes:
+ * - Updated message sending to use "HUMAN" as sender instead of "CLI"
+ * - Updated to work with new flat event payload structure
+ * - Improved compatibility with new MessageEventPayload typing
+ * - Maintains all existing functionality with updated event structure
  * - Real-time character-by-character streaming display
  * - Multiple agent streaming with proper separation
  * - Agent memory management via clear command
@@ -229,7 +236,7 @@ async function main() {
     } else {
       // Broadcast message to all agents
       try {
-        await World.broadcastMessage(worldId, trimmedInput, 'CLI');
+        await World.broadcastMessage(worldId, trimmedInput, 'HUMAN');
       } catch (error) {
         console.log(colors.red(`Error broadcasting message: ${error}`));
       }

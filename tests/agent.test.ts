@@ -139,8 +139,8 @@ describe('Agent Functions', () => {
       expect(mockLlm.streamChatWithLLM).toHaveBeenCalledTimes(1);
       expect(mockLlm.streamChatWithLLM).toHaveBeenCalledWith(
         {}, // LLM provider
-        expect.stringContaining('You are TestAgent'), // system prompt
-        'human: Hello agent!', // user prompt
+        expect.stringContaining('Helpful assistant'), // system prompt (full prompt)
+        '', // empty user prompt
         'test-msg-id', // message ID for streaming
         expect.objectContaining({
           temperature: 0.7,
@@ -250,16 +250,8 @@ describe('Agent Functions', () => {
       await processAgentMessage(mockAgentConfig, messageData, 'publish-msg-id');
 
       expect(mockEventBus.publishMessage).toHaveBeenCalledWith({
-        name: 'agent-response',
-        payload: {
-          content: 'Published response',
-          agentId: 'test-agent',
-          agentName: 'TestAgent',
-          inResponseTo: 'msg-1',
-          sender: 'test-agent',
-          worldId: undefined
-        },
-        id: 'publish-msg-id'
+        content: 'Published response',
+        sender: 'test-agent'
       });
     });
 

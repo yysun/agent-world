@@ -1,4 +1,4 @@
-/*
+/**
  * Simplified Function-Based Agent - Combines AIAgent and BaseAgent
  * 
  * Features:
@@ -9,10 +9,19 @@
  * - Direct LLM response generation with conversation history context
  * - Agent memory persistence in separate memory.json files per agent
  * - Basic agent configuration and lifecycle management
+ * - Support for both @name and @id mention detection
+ * 
+ * Recent Changes:
+ * - Updated message filtering to work with new flat event payload structure
+ * - Added support for both @name and @id mentions in shouldRespondToMessage
+ * - Changed sender recognition from "CLI" to "HUMAN"
+ * - Updated event publishing to use MessageEventPayload type
+ * - Improved mention detection with case-insensitive matching
+ * - Fixed agent response publishing with proper flat payload structure
  * 
  * Logic:
  * - processAgentMessage: Main function for handling agent messages with memory
- * - shouldRespondToMessage: Simple mention-based filtering logic
+ * - shouldRespondToMessage: Simple mention-based filtering logic with @name and @id support
  * - buildPrompt: Unified prompt building with conversation history context
  * - Direct integration with llm.ts and event-bus.ts modules
  * - Memory stored separately in data/worlds/{world}/agents/{agent}/memory.json
@@ -114,7 +123,7 @@ export async function processAgentMessage(
       content: messageData.content || messageData.payload?.content || '',
       messageId: msgId
     });
-    
+
     await addToAgentMemory(worldId || 'default', agentConfig.id!, {
       type: 'outgoing',
       sender: agentConfig.id,
@@ -127,16 +136,8 @@ export async function processAgentMessage(
 
     // Publish response message
     await publishMessage({
-      name: 'agent-response',
-      payload: {
-        content: response,
-        agentId: agentConfig.id,
-        agentName: agentConfig.name,
-        inResponseTo: messageData.id,
-        worldId: worldId,  // Include worldId for proper filtering
-        sender: agentConfig.id
-      },
-      id: msgId
+      content: response,
+      sender: agentConfig.id || 'agent'
     });
 
     // agentLogger.info({
@@ -191,19 +192,22 @@ export function shouldRespondToMessage(
     return true;
   }
 
-  // For CLI/user messages, respond to all or check basic @name mentions
-  if (messageData.sender === 'CLI' || messageData.sender === 'human') {
-    // Simple check for @name mention
+  // For HUMAN/user messages, respond to all or check basic @name/@id mentions
+  if (messageData.sender === 'HUMAN' || messageData.sender === 'human') {
+    // Simple check for @name or @id mention
     const agentName = agentConfig.name.toLowerCase();
-    const hasNameMention = content.toLowerCase().includes(`@${agentName}`);
+    const agentId = agentConfig.id?.toLowerCase() || '';
+    const contentLower = content.toLowerCase();
+    const hasNameMention = contentLower.includes(`@${agentName}`);
+    const hasIdMention = agentId && contentLower.includes(`@${agentId}`);
 
     // If no mentions at all, respond to all (broadcast)
     if (!content.includes('@')) {
       return true;
     }
 
-    // If there are mentions, only respond if this agent is mentioned
-    return hasNameMention;
+    // If there are mentions, only respond if this agent is mentioned (by name or ID)
+    return hasNameMention || hasIdMention;
   }
 
   // For agent messages, only respond if mentioned

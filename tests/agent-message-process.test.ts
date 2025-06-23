@@ -60,7 +60,7 @@ describe('Agent Message Processing', () => {
           broadcast: true
         },
         id: 'msg-123',
-        sender: 'CLI',
+        sender: 'HUMAN',
         senderType: 'user',
         content: 'Hello world',
         timestamp: new Date().toISOString(),
@@ -85,7 +85,7 @@ describe('Agent Message Processing', () => {
         name: 'user_message',
         payload: { broadcast: true },
         id: 'msg-1',
-        sender: 'CLI',
+        sender: 'HUMAN',
         content: 'Hello everyone!'
       };
 
@@ -200,7 +200,7 @@ describe('Agent Message Processing', () => {
 
   describe('Event-Driven Flow Integration', () => {
     it('should simulate full message processing flow', async () => {
-      // Simulate CLI broadcasting a message
+      // Simulate HUMAN broadcasting a message
       const broadcastMessage = {
         name: 'user_message',
         payload: {
@@ -209,7 +209,7 @@ describe('Agent Message Processing', () => {
           broadcast: true
         },
         id: 'msg-flow-1',
-        sender: 'CLI',
+        sender: 'HUMAN',
         senderType: 'user',
         content: 'Hello @TestAgent!',
         timestamp: new Date().toISOString(),

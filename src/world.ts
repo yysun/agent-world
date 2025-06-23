@@ -1,4 +1,4 @@
-/*
+/**
  * Simplified Function-Based World Management (Per-World Persistent Storage)
  *
  * Features:
@@ -7,12 +7,50 @@
  * - Event system integration (publish, subscribe, messaging)
  * - Persistent storage of agents, events, and messages in per-world subfolders:
  *     - data/worlds/<worldId>/agents
- *     - data/worlds/<worldId>/events
+ *     - datasync funcasync funcasync function loadWorldFromDisk(worldId: string): Promise<void> {
+  // Find the actual world directory
+  const actualWorldDir = await findWorldDir(worldId);
+  if (!actualWorldDir) {
+    throw new Error(`World directory not found for ${worldId}`);
+  }
+
+  const worldConfigPath = path.join(actualWorldDir, 'config.json');
+  const agentsDir = path.join(actualWorldDir, 'agents');
+
+  try:romDisk(worldId: string): Promise<void> {
+  // Find the actual world directory
+  const actualWorldDir = await findWorldDir(worldId);
+  if (!actualWorldDir) {
+    throw new Error(`World directory not found for ${worldId}`);
+  }
+
+  const worldConfigPath = path.join(actualWorldDir, 'config.json');
+  const agentsDir = path.join(actualWorldDir, 'agents');
+
+  try:romDisk(worldId: string): Promise<void> {
+  // Find the actual world directory
+  const actualWorldDir = await findWorldDir(worldId);
+  if (!actualWorldDir) {
+    throw new Error(`World directory not found for ${worldId}`);
+  }
+
+  const worldConfigPath = path.join(actualWorldDir, 'config.json');
+  const agentsDir = path.join(actualWorldDir, 'agents');
+
+  try:Id>/events
  *     - data/worlds/<worldId>/messages
  * - In-memory Map-based storage for fast access, with JSON file persistence
  * - Recursively loads agent config.json files from agent subdirectories for compatibility with nested agent storage
  * - Ensures file storage is initialized automatically when ensuring default world
  * - Agent message subscriptions filter by worldId and recipient/targetId for correct delivery
+ * 
+ * Recent Changes:
+ * - Updated agent subscription logic to use new flat event payload structure
+ * - Modified message broadcasting to work with MessageEventPayload type
+ * - Updated direct messaging functions to use new payload format
+ * - Changed sender recognition from "CLI" to "HUMAN" in message processing
+ * - Fixed event filtering and routing for agent-specific message delivery
+ * - Improved type safety with strict payload typing throughout message handling
  * - Single subscription per agent to prevent duplicate message handling
  * - Agent memory/history system with separate memory.json files per agent
  * - System prompt separation into individual system-prompt.md files per agent
@@ -48,10 +86,13 @@ import {
   WorldState,
   WorldOptions,
   WorldInfo,
-  MessagePayload
+  MessagePayload,
+  MessageEventPayload,
+  EventType
 } from './types';
 import {
   publishMessage,
+  publishWorld,
   subscribeToMessages,
   subscribeToWorld,
   subscribeToSSE,
@@ -256,6 +297,14 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
     throw error;
   }
 
+  // Publish world creation event
+  await publishWorld({
+    action: 'WORLD_CREATED',
+    worldId,
+    name: worldState.name,
+    timestamp: new Date().toISOString()
+  });
+
   return worldId;
 }
 
@@ -405,8 +454,12 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
     throw new Error(`World directory not found for ${worldId}`);
   }
 
+  console.log('Loading world from:', actualWorldDir);
+
   const worldConfigPath = path.join(actualWorldDir, 'config.json');
   const agentsDir = path.join(actualWorldDir, 'agents');
+
+  console.log('Agents directory:', agentsDir);
 
   try {
     // Load world config
@@ -452,42 +505,40 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
         if (agent.lastActive) agent.lastActive = new Date(agent.lastActive);
 
         // Load system prompt from separate file and add it to config
-        const systemPrompt = await loadSystemPrompt(worldId, agent.name);
+        const systemPrompt = await loadSystemPromptDirect(actualWorldDir, agent.name);
         agent.config.systemPrompt = systemPrompt;
-        
+
         // Load memory from separate file (but don't add to agent object to keep it clean)
         // Memory will be loaded on-demand when needed for LLM context
-        
+
         worldState.agents.set(agent.id, agent);
 
         // Subscribe loaded agent to MESSAGE events
         if (agent.config) {
           subscribeToMessages(async (event) => {
-            // Only process messages in this world, not from itself, and either broadcast or targeted to this agent
-            const payload = event.payload || {};
-            const innerPayload = payload.payload || {};
+            // Only process MESSAGE events with MessageEventPayload
+            if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
+              const payload = event.payload as MessageEventPayload;
 
-            if (
-              innerPayload.worldId === worldId &&
-              payload.sender !== agent.id &&
-              (innerPayload.broadcast || innerPayload.recipient === agent.id || innerPayload.targetId === agent.id)
-            ) {
-              try {
-                // Ensure agent config has id field
-                const agentConfigWithId = {
-                  ...agent.config,
-                  id: agent.id,
-                  name: agent.name
-                };
-                await processAgentMessage(agentConfigWithId, {
-                  name: payload.name || 'message',
-                  id: payload.id || event.id,
-                  content: payload.content,
-                  sender: payload.sender || 'unknown',
-                  payload: payload
-                }, undefined, worldId);
-              } catch (error) {
-                console.error(`Agent ${agent.id} failed to process message:`, error);
+              // Don't process messages from this agent itself
+              if (payload.sender !== agent.id) {
+                try {
+                  // Ensure agent config has id field
+                  const agentConfigWithId = {
+                    ...agent.config,
+                    id: agent.id,
+                    name: agent.name
+                  };
+                  await processAgentMessage(agentConfigWithId, {
+                    name: 'message',
+                    id: event.id,
+                    content: payload.content,
+                    sender: payload.sender,
+                    payload: payload
+                  }, undefined, worldId);
+                } catch (error) {
+                  console.error(`Agent ${agent.id} failed to process message:`, error);
+                }
               }
             }
           });
@@ -514,17 +565,14 @@ async function saveAgentToDisk(worldId: string, agent: Agent): Promise<void> {
 
   // Save system prompt separately as markdown file
   const systemPromptPath = path.join(agentDir, 'system-prompt.md');
-  const systemPrompt = agent.config.systemPrompt || `You are ${agent.name}, an AI agent.`;
-  await fs.writeFile(systemPromptPath, systemPrompt, 'utf8');
+  const systemPromptContent = agent.config.systemPrompt || `You are ${agent.name}, an AI agent.`;
+  await fs.writeFile(systemPromptPath, systemPromptContent, 'utf8');
 
   // Save config without system prompt content
+  const { systemPrompt, ...configWithoutPrompt } = agent.config;
   const agentData = {
     ...agent,
-    config: {
-      ...agent.config,
-      // Remove system prompt content from config since it's in separate file
-      systemPrompt: undefined
-    },
+    config: configWithoutPrompt,
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString()
   };
@@ -533,6 +581,21 @@ async function saveAgentToDisk(worldId: string, agent: Agent): Promise<void> {
     getAgentPath(worldId, agent.name),
     JSON.stringify(agentData, null, 2)
   );
+}
+
+/**
+ * Load system prompt from file using direct world directory path
+ */
+async function loadSystemPromptDirect(worldDir: string, agentName: string): Promise<string> {
+  const agentDir = path.join(worldDir, 'agents', toKebabCase(agentName));
+  const systemPromptPath = path.join(agentDir, 'system-prompt.md');
+
+  try {
+    return await fs.readFile(systemPromptPath, 'utf8');
+  } catch (error) {
+    // Return default if file doesn't exist
+    return `You are ${agentName}, an AI agent.`;
+  }
 }
 
 /**
@@ -556,7 +619,7 @@ async function loadSystemPrompt(worldId: string, agentName: string): Promise<str
 async function saveAgentMemory(worldId: string, agentName: string, memory: any): Promise<void> {
   const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
   await ensureDirectory(agentDir);
-  
+
   const memoryPath = path.join(agentDir, 'memory.json');
   await fs.writeFile(memoryPath, JSON.stringify(memory, null, 2), 'utf8');
 }
@@ -567,7 +630,7 @@ async function saveAgentMemory(worldId: string, agentName: string, memory: any):
 async function loadAgentMemory(worldId: string, agentName: string): Promise<any> {
   const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
   const memoryPath = path.join(agentDir, 'memory.json');
-  
+
   try {
     const memoryData = await fs.readFile(memoryPath, 'utf8');
     return JSON.parse(memoryData);
@@ -591,24 +654,24 @@ export async function addToAgentMemory(worldId: string, agentId: string, message
 
   // Load current memory
   const memory = await loadAgentMemory(worldId, agent.name);
-  
+
   // Add message to conversation history
   if (!memory.conversationHistory) {
     memory.conversationHistory = [];
   }
-  
+
   memory.conversationHistory.push({
     ...message,
     timestamp: new Date().toISOString()
   });
-  
+
   // Keep only last 50 messages for performance
   if (memory.conversationHistory.length > 50) {
     memory.conversationHistory = memory.conversationHistory.slice(-50);
   }
-  
+
   memory.lastActivity = new Date().toISOString();
-  
+
   // Save updated memory
   await saveAgentMemory(worldId, agent.name, memory);
 }
@@ -622,7 +685,7 @@ export async function getAgentConversationHistory(worldId: string, agentId: stri
 
   const memory = await loadAgentMemory(worldId, agent.name);
   const history = memory.conversationHistory || [];
-  
+
   // Return last N messages
   return history.slice(-limit);
 }
@@ -662,30 +725,28 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
 
   // Subscribe agent to MESSAGE events from event bus
   subscribeToMessages(async (event) => {
-    // Only process messages in this world, not from itself, and either broadcast or targeted to this agent
-    const payload = event.payload || {};
-    const innerPayload = payload.payload || {};
+    // Only process MESSAGE events with MessageEventPayload
+    if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
+      const payload = event.payload as MessageEventPayload;
 
-    if (
-      innerPayload.worldId === worldId &&
-      payload.sender !== agentId &&
-      (innerPayload.broadcast || innerPayload.recipient === agentId || innerPayload.targetId === agentId)
-    ) {
-      try {
-        // Ensure agent config has correct id field
-        const agentConfigWithId = {
-          ...config,
-          id: agentId
-        };
-        await processAgentMessage(agentConfigWithId, {
-          name: payload.name || 'message',
-          id: payload.id || event.id,
-          content: payload.content,
-          sender: payload.sender || 'unknown',
-          payload: payload
-        }, undefined, worldId);
-      } catch (error) {
-        console.error(`Agent ${agentId} failed to process message:`, error);
+      // Don't process messages from this agent itself
+      if (payload.sender !== agentId) {
+        try {
+          // Ensure agent config has correct id field
+          const agentConfigWithId = {
+            ...config,
+            id: agentId
+          };
+          await processAgentMessage(agentConfigWithId, {
+            name: 'message',
+            id: event.id,
+            content: payload.content,
+            sender: payload.sender,
+            payload: payload
+          }, undefined, worldId);
+        } catch (error) {
+          console.error(`Agent ${agentId} failed to process message:`, error);
+        }
       }
     }
   });
@@ -790,27 +851,14 @@ export async function broadcastMessage(worldId: string, message: string, sender?
     throw new Error(`World ${worldId} not found`);
   }
 
-  // Create simplified message payload
-  const messagePayload: MessagePayload = {
+  // Create simple message payload with flat structure
+  const messageEventPayload: MessageEventPayload = {
     content: message,
     sender: sender || 'system'
   };
 
-  const eventData = {
-    name: 'user_message',
-    payload: {
-      content: message,
-      worldId: worldId,
-      broadcast: true,
-      sender: messagePayload.sender,
-      senderType: sender === 'CLI' ? 'user' : 'system',
-      timestamp: new Date().toISOString()
-    },
-    id: uuidv4()
-  };
-
-  // Publish MESSAGE event that all agents can subscribe to
-  await publishMessage(eventData);
+  // Publish MESSAGE event with flat payload structure
+  await publishMessage(messageEventPayload);
 }
 
 /**
@@ -827,26 +875,14 @@ export async function sendMessage(worldId: string, targetId: string, message: st
     throw new Error(`Agent ${targetId} not found in world ${worldId}`);
   }
 
-  // Create simplified message payload
-  const messagePayload: MessagePayload = {
+  // Create simple message payload with flat structure
+  const messageEventPayload: MessageEventPayload = {
     content: message,
     sender: sender || 'system'
   };
 
   // Publish direct message event
-  await publishMessage({
-    name: 'direct_message',
-    payload: {
-      content: message,
-      worldId,
-      targetId,
-      sender: messagePayload.sender,
-      senderType: 'system',
-      recipient: targetId,
-      timestamp: new Date().toISOString()
-    },
-    id: uuidv4()
-  });
+  await publishMessage(messageEventPayload);
 }
 
 /**
