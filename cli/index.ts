@@ -1,87 +1,52 @@
 /**
  * CLI Interface - Interactive Command Line Tool with Real-time Agent Streaming
  * 
- * Features:
+ * Core Features:
  * - Interactive command line interface for testing and managing agents
  * - Command routing system with support for all available commands including /show
  * - Integrated agent loading and management via World object
- * - Message broadcasting to agents with flashing emoji preview and multi-line final display
- * - Multi-agent line management for concurrent streaming without overlap
- * - Simplified help system with minimal output
- * - Clean startup without verbose initialization messages
+ * - Unified external input handling: both piped input and CLI args are treated as user messages
+ * - Piped input support: `echo "message" | npm run dev` broadcasts message and stays interactive
+ * - Command line args support: `npm run dev hello world` broadcasts "hello world" and stays interactive
  * - Uses "HUMAN" sender terminology for all CLI-originated messages
- * - Smart streaming display with 50-character preview, token count, and full content reveal
  * - Agent conversation history display via /show command
+ * - Clean startup without verbose initialization messages
+ * - Simplified help system with minimal output
  * 
- * Recent Changes:
- * - MAJOR: Implemented flashing emoji indicators (●/○) for active streaming states
- * - Enhanced streaming preview to show exactly 50 characters with token count display
- * - Added real-time token counting for streaming responses
- * - Implemented emoji animation with 500ms flash interval for visual feedback
- * - Enhanced multi-agent streaming to prevent display overlap and conflicts
- * - Added proper cleanup of emoji timers on streaming completion or errors
- * - Improved concurrent streaming with proper line allocation system
- * - Enhanced terminal control with save/restore cursor functionality
- * - Added completed agents tracking for coordinated final display
- * - Implemented synchronized final content display after all agents complete
- * - Fixed SSE data routing to display on each agent's dedicated line
- * - CRITICAL: Fixed newline preservation in LLM responses for proper formatting
- * - Updated final display to preserve original content structure and paragraphs
- * - Removed artificial line length limits to use full terminal width
- * - Simplified final display by removing left border for cleaner appearance
- * - Added /show command for displaying agent conversation history
- * - Added gray color formatting for message content in final display
- * 
- * Streaming Display Logic:
+ * Streaming Display System:
+ * - Real-time agent streaming with flashing emoji indicators (●/○) for active states
+ * - Smart preview: 50-character preview with real-time token counting during streaming
+ * - Multi-agent line management for concurrent streaming without display overlap
  * - Each agent gets assigned a dedicated line offset for preview display
- * - During streaming: Shows flashing emoji with "● agentName: [50 chars] ... (xxx tokens)" format
- * - Multiple agents stream simultaneously without interfering with each other
- * - Content updates use cursor positioning to target specific agent lines
- * - Preview updates via emoji flashing animation (500ms interval)
- * - After all streaming: Clears all preview lines and displays complete content
- * - Final display shows all agent responses in order with proper formatting
- * - Proper spacing and agent headers for clear organization
+ * - Emoji flashing animation (500ms interval) provides visual feedback for active streaming
+ * - Cursor save/restore enables precise line targeting for simultaneous agent updates
+ * - After streaming: clears preview lines and displays complete formatted content
+ * - Final display preserves original content structure with proper newline formatting
+ * - Status emoji coloring: cyan for streaming, green for success, red for errors
+ * - Content formatting with gray color for message text and proper indentation
  * 
- * Multi-Agent Line Management:
- * - streamingStartLine: Tracks where the streaming block begins
- * - nextLineOffset: Assigns unique line positions to each agent
- * - activeStreams: Manages currently streaming agents with line positions and emoji timers
- * - completedAgents: Stores finished agents for synchronized final display
- * - Cursor save/restore: Enables precise line targeting for updates
- * - Line clearing and positioning: Ensures clean transitions and no overlap
- * - Emoji flashing: Provides visual feedback for active streaming state
- * 
- * Logic:
+ * Architecture & Implementation:
  * - Creates and initializes World instance silently on startup
  * - Loads persisted agents automatically with minimal output
  * - Uses standard console mode for familiar terminal interaction
  * - Routes commands to appropriate command handlers, passing World directly
- * - Provides interactive prompt for user input
- * - Broadcasts messages to all agents simultaneously
- * - Displays real-time streaming responses with flashing emoji indicators
- * - Shows agent headers and separators for clear organization
- * - Manages prompt restoration after streaming completes
- * - Shows agent headers and separators for clear organization
- * - Manages prompt restoration after streaming completes
+ * - Function-based streaming manager (no class initialization needed)
+ * - SSE event subscription for real-time streaming responses
+ * - Graceful shutdown handling and prompt restoration after streaming completes
+ * - Unified external input processing: concatenates all CLI args or piped input as messages
+ * - Enhanced display: external input shows as `> message` like regular user input
  * 
- * Changes:
- * - Updated to use World object instead of individual components
- * - Removed SimpleState wrapper - commands now receive World directly
- * - Simplified message broadcasting using World.broadcastMessage method
- * - /use and /stop commands now use agent.start() and agent.stop() methods
- * - Removed verbose initialization messages for clean startup
- * - Added /quit command for clean exit
- * - Simplified help and list output formats
- * - Merged loader functionality into main file for simplicity
- * - REMOVED: All split screen functionality and ConsoleModeManager
- * - REPLACED: Sequential queue with real-time streaming display
- * - ADDED: StreamingManager for immediate character-by-character output
- * - ENHANCED: Single-line preview with multi-line final display system
- * - ENHANCED: Multi-agent line management with dedicated positioning
- * - Real-time streaming responses via SSE events with smart display management
- * - Agent response separation with clear headers and dividers
- * - Smart prompt restoration only after all agents complete streaming
- * - File storage initialization is now handled automatically by World.ensureDefaultWorld
+ * Major Changes & Evolution:
+ * - UNIFIED: External input handling - removed complex CLI argument parsing
+ * - SIMPLIFIED: All CLI args and piped input treated as user messages to broadcast
+ * - ENHANCED: Real-time streaming with flashing emoji indicators and token counting
+ * - IMPROVED: Multi-agent concurrent streaming with dedicated line positioning
+ * - ADDED: Agent conversation history via /show command
+ * - REMOVED: Split screen functionality and ConsoleModeManager complexity
+ * - REPLACED: Sequential queue with immediate character-by-character streaming
+ * - INTEGRATED: World object pattern replacing individual component management
+ * - OPTIMIZED: Terminal control with cursor positioning and line management
+ * - FIXED: Newline preservation in LLM responses for proper content formatting
  */
 
 import * as readline from 'readline';
@@ -489,24 +454,62 @@ async function main() {
   // Load all agents from our sample world
   await loadAgents(worldId);
 
-  // Handle command line arguments (before starting UI)
-  const args = process.argv.slice(2);
-  if (args.length > 0) {
-    const commandName = args[0].replace(/^\//, ''); // Remove leading slash if present
-    if (commands[commandName]) {
-      await commands[commandName](args.slice(1), worldId);
-    } else {
-      console.log(colors.yellow(`Unknown command: ${args[0]}`));
-      await helpCommand([], worldId);
+  // Handle input from piped input or command line arguments
+  let hasExternalInput = false;
+  let externalMessage = '';
+
+  // Check for piped input first (like echo "message" | npm run dev)
+  if (!process.stdin.isTTY) {
+    hasExternalInput = true;
+    // Read all piped input
+    let pipedContent = '';
+    process.stdin.setEncoding('utf8');
+
+    for await (const chunk of process.stdin) {
+      pipedContent += chunk;
+    }
+
+    externalMessage = pipedContent.trim();
+  } else {
+    // Check for command line arguments
+    const args = process.argv.slice(2);
+    if (args.length > 0) {
+      hasExternalInput = true;
+      externalMessage = args.join(' ');
+    }
+  }
+
+  // If we have external input, broadcast it
+  if (hasExternalInput && externalMessage) {
+    console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
+    try {
+      await World.broadcastMessage(worldId, externalMessage, 'HUMAN');
+    } catch (error) {
+      console.log(colors.red(`Error broadcasting message: ${error}`));
     }
   }
 
   // Create readline interface
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: colors.cyan('> ')
-  });
+  let rl: readline.Interface;
+
+  if (hasExternalInput && !process.stdin.isTTY) {
+    // For piped input, we need to create readline interface differently
+    // since stdin was already consumed
+    rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: colors.cyan('> ')
+    });
+
+    // Ensure stdin is properly set up for interactive use after piped input
+    process.stdin.resume();
+  } else {
+    rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: colors.cyan('> ')
+    });
+  }
 
   // Handle input
   rl.on('line', async (input: string) => {
