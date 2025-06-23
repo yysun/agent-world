@@ -67,7 +67,7 @@ This is an AI agent simulation system with a CLI interface. The architecture fol
 
 **Event System (`src/event-bus.ts`)**
 - Centralized event handling for messages, world events, and SSE
-- Functions: `publishMessage()`, `subscribeToMessages()`, `publishSSE()` for real-time streaming
+- Functions: `publishMessageEvent()`, `subscribeToMessages()`, `publishSSE()` for real-time streaming
 - **Complete Message Flow**: USER → MESSAGE events → Agent handling → LLM processing → SSE events → CLI display
 
 **Storage (`src/storage.ts`)**

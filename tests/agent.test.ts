@@ -111,7 +111,7 @@ describe('Agent Functions', () => {
 
       // Default mock implementations
       mockLlm.loadLLMProvider.mockReturnValue({} as any);
-      mockEventBus.publishMessage.mockResolvedValue({} as any);
+      mockEventBus.publishMessageEvent.mockResolvedValue({} as any);
       mockEventBus.publishSSE.mockResolvedValue({} as any);
     });
 
@@ -205,7 +205,7 @@ describe('Agent Functions', () => {
 
       expect(result).toBe('');
       expect(mockLlm.streamChatWithLLM).not.toHaveBeenCalled();
-      expect(mockEventBus.publishMessage).not.toHaveBeenCalled();
+      expect(mockEventBus.publishMessageEvent).not.toHaveBeenCalled();
     });
 
     it('should handle streaming errors and publish SSE error', async () => {
@@ -249,7 +249,7 @@ describe('Agent Functions', () => {
 
       await processAgentMessage(mockAgentConfig, messageData, 'publish-msg-id');
 
-      expect(mockEventBus.publishMessage).toHaveBeenCalledWith({
+      expect(mockEventBus.publishMessageEvent).toHaveBeenCalledWith({
         content: 'Published response',
         sender: 'test-agent'
       });

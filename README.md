@@ -136,7 +136,7 @@ await processAgentMessage(agentConfig, {
 #### Event System
 
 ```typescript
-import { subscribeToMessages, publishMessage, subscribeToSSE } from './src/event-bus';
+import { subscribeToMessages, publishMessageEvent, subscribeToSSE } from './src/event-bus';
 
 // Subscribe to messages
 const unsubscribe = subscribeToMessages((event) => {
@@ -149,13 +149,10 @@ const unsubscribeSSE = subscribeToSSE((chunk) => {
 });
 
 // Publish a message
-await publishMessage({
-  name: 'MESSAGE',
-  payload: { 
-    worldId: 'my-world',
-    sender: 'human',
-    content: '@assistant Hello world!' 
-  }
+await publishMessageEvent({
+  worldId: 'my-world',
+  sender: 'human',
+  content: '@assistant Hello world!'
 });
 ```
 

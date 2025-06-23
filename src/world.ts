@@ -91,8 +91,8 @@ import {
   EventType
 } from './types';
 import {
-  publishMessage,
-  publishWorld,
+  publishMessageEvent,
+  publishWorldEvent,
   subscribeToMessages,
   subscribeToWorld,
   subscribeToSSE,
@@ -298,7 +298,7 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
   }
 
   // Publish world creation event
-  await publishWorld({
+  await publishWorldEvent({
     action: 'WORLD_CREATED',
     worldId,
     name: worldState.name,
@@ -858,7 +858,7 @@ export async function broadcastMessage(worldId: string, message: string, sender?
   };
 
   // Publish MESSAGE event with flat payload structure
-  await publishMessage(messageEventPayload);
+  await publishMessageEvent(messageEventPayload);
 }
 
 /**
@@ -882,7 +882,7 @@ export async function sendMessage(worldId: string, targetId: string, message: st
   };
 
   // Publish direct message event
-  await publishMessage(messageEventPayload);
+  await publishMessageEvent(messageEventPayload);
 }
 
 /**

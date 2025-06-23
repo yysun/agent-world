@@ -43,7 +43,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AgentMemory, Event, EventType } from './types';
 import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
-import { publishSSE, publishMessage } from './event-bus';
+import { publishSSE, publishMessageEvent } from './event-bus';
 import { agentLogger } from './logger';
 
 // Types moved to types.ts
@@ -135,7 +135,7 @@ export async function processAgentMessage(
     // Note: Using memory persistence to separate memory.json files
 
     // Publish response message
-    await publishMessage({
+    await publishMessageEvent({
       content: response,
       sender: agentConfig.id || 'agent'
     });

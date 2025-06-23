@@ -13,7 +13,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { publishMessage, subscribeToMessages, initializeEventBus, clearEventHistory } from '../src/event-bus';
+import { publishMessageEvent, subscribeToMessages, initializeEventBus, clearEventHistory } from '../src/event-bus';
 import { shouldRespondToMessage } from '../src/agent';
 import { AgentConfig, MessageData, EventType } from '../src/types';
 
@@ -67,9 +67,9 @@ describe('Agent Message Processing', () => {
         worldId: 'test-world'
       };
 
-      await publishMessage(messagePayload);
+      await publishMessageEvent(messagePayload);
 
-      expect(publishMessage).toHaveBeenCalledWith(messagePayload);
+      expect(publishMessageEvent).toHaveBeenCalledWith(messagePayload);
     });
 
     it('should allow agents to subscribe to MESSAGE events', () => {
@@ -217,10 +217,10 @@ describe('Agent Message Processing', () => {
       };
 
       // Publish the message
-      await publishMessage(broadcastMessage);
+      await publishMessageEvent(broadcastMessage);
 
       // Verify the message was published
-      expect(publishMessage).toHaveBeenCalledWith(broadcastMessage);
+      expect(publishMessageEvent).toHaveBeenCalledWith(broadcastMessage);
 
       // Simulate agent receiving the event
       if (mockSubscriptionCallback) {

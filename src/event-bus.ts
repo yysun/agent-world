@@ -164,7 +164,7 @@ export function clearEventHistory(): void {
  */
 
 // MESSAGE events - structured message objects
-export async function publishMessage(payload: MessageEventPayload): Promise<Event> {
+export async function publishMessageEvent(payload: MessageEventPayload): Promise<Event> {
   return publishEvent(TOPICS.MESSAGES, {
     type: EventType.MESSAGE,
     payload: payload
@@ -172,7 +172,7 @@ export async function publishMessage(payload: MessageEventPayload): Promise<Even
 }
 
 // WORLD events - system events, agent lifecycle, etc.
-export async function publishWorld(payload: SystemEventPayload): Promise<Event> {
+export async function publishWorldEvent(payload: SystemEventPayload): Promise<Event> {
   return publishEvent(TOPICS.WORLD, {
     type: EventType.WORLD,
     payload

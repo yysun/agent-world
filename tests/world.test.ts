@@ -75,8 +75,8 @@ describe('World Management', () => {
     await initializeFileStorage({ dataPath: TEST_DATA_PATH });
 
     // Mock event bus
-    mockEventBus.publishWorld.mockResolvedValue(Promise.resolve({ type: 'DUMMY_EVENT' } as any));
-    mockEventBus.publishMessage.mockResolvedValue(Promise.resolve({ type: 'DUMMY_MESSAGE' } as any));
+    mockEventBus.publishWorldEvent.mockResolvedValue(Promise.resolve({ type: 'DUMMY_EVENT' } as any));
+    mockEventBus.publishMessageEvent.mockResolvedValue(Promise.resolve({ type: 'DUMMY_MESSAGE' } as any));
     mockEventBus.subscribeToMessages.mockReturnValue(() => { });
     mockEventBus.subscribeToWorld.mockReturnValue(() => { });
 
@@ -138,7 +138,7 @@ describe('World Management', () => {
 
       expect(worldId).toBeDefined();
       expect(worldId).toMatch(/^world_/);
-      expect(mockEventBus.publishWorld).toHaveBeenCalledWith({
+      expect(mockEventBus.publishWorldEvent).toHaveBeenCalledWith({
         action: 'WORLD_CREATED',
         worldId,
         name: expect.stringContaining('World'),
@@ -464,7 +464,7 @@ describe('World Management', () => {
     it('should broadcast message to all agents', async () => {
       await broadcastMessage(worldId, 'Hello world', 'test-sender');
 
-      expect(mockEventBus.publishMessage).toHaveBeenCalledWith({
+      expect(mockEventBus.publishMessageEvent).toHaveBeenCalledWith({
         content: 'Hello world',
         sender: 'test-sender'
       });
@@ -473,7 +473,7 @@ describe('World Management', () => {
     it('should broadcast message with default sender', async () => {
       await broadcastMessage(worldId, 'Hello world');
 
-      expect(mockEventBus.publishMessage).toHaveBeenCalledWith({
+      expect(mockEventBus.publishMessageEvent).toHaveBeenCalledWith({
         content: 'Hello world',
         sender: 'system'
       });
@@ -497,7 +497,7 @@ describe('World Management', () => {
       await createAgent(worldId, config);
       await sendMessage(worldId, 'target-agent', 'Direct message', 'sender');
 
-      expect(mockEventBus.publishMessage).toHaveBeenCalledWith({
+      expect(mockEventBus.publishMessageEvent).toHaveBeenCalledWith({
         content: 'Direct message',
         sender: 'sender'
       });
