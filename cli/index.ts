@@ -1,53 +1,32 @@
 /**
  * CLI Interface - Interactive Command Line Tool with Real-time Agent Streaming
  * 
- * Core Features:
- * - Interactive command line interface for testing and managing agents
- * - Command routing system with support for all available commands including /show
- * - Integrated agent loading and management via World object
- * - Unified external input handling: both piped input and CLI args are treated as user messages
- * - Piped input support: `echo "message" | npm run dev` broadcasts message and stays interactive
- * - Command line args support: `npm run dev hello world` broadcasts "hello world" and stays interactive
- * - Uses "HUMAN" sender terminology for all CLI-originated messages
- * - Agent conversation history display via /show command
- * - Clean startup without verbose initialization messages
- * - Simplified help system with minimal output
+ * Features:
+ * - Interactive command interface for agent testing and management (/agents, /show, /add, etc.)
+ * - Unified external input: piped input and CLI args treated as user messages to broadcast
+ * - Real-time streaming with flashing emoji indicators (●/○) and token counting
+ * - Multi-agent concurrent streaming with dedicated line positioning and cursor management
+ * - Agent conversation history display and memory management
+ * - World object integration for agent loading and persistence
+ * - Graceful shutdown handling and clean terminal interaction
  * 
- * Streaming Display System:
- * - Real-time agent streaming with flashing emoji indicators (●/○) for active states
- * - Smart preview: 50-character preview with real-time token counting during streaming
- * - Multi-agent line management for concurrent streaming without display overlap
- * - Each agent gets assigned a dedicated line offset for preview display
- * - Emoji flashing animation (500ms interval) provides visual feedback for active streaming
- * - Cursor save/restore enables precise line targeting for simultaneous agent updates
- * - After streaming: clears preview lines and displays complete formatted content
- * - Final display preserves original content structure with proper newline formatting
- * - Status emoji coloring: cyan for streaming, green for success, red for errors
- * - Content formatting with gray color for message text and proper indentation
+ * Architecture:
+ * - Function-based streaming manager with SSE event subscription
+ * - Command routing system with World object pattern
+ * - Terminal control with cursor save/restore for precise line targeting
+ * - Status emoji coloring: cyan (streaming), green (success), red (errors)
+ * - Content formatting with proper newline preservation and gray text styling
  * 
- * Architecture & Implementation:
- * - Creates and initializes World instance silently on startup
- * - Loads persisted agents automatically with minimal output
- * - Uses standard console mode for familiar terminal interaction
- * - Routes commands to appropriate command handlers, passing World directly
- * - Function-based streaming manager (no class initialization needed)
- * - SSE event subscription for real-time streaming responses
- * - Graceful shutdown handling and prompt restoration after streaming completes
- * - Unified external input processing: concatenates all CLI args or piped input as messages
- * - Enhanced display: external input shows as `> message` like regular user input
- * 
- * Major Changes & Evolution:
- * - UNIFIED: External input handling - removed complex CLI argument parsing
- * - SIMPLIFIED: All CLI args and piped input treated as user messages to broadcast
- * - ENHANCED: Real-time streaming with flashing emoji indicators and token counting
- * - IMPROVED: Multi-agent concurrent streaming with dedicated line positioning
- * - ADDED: Agent conversation history via /show command
- * - REMOVED: Split screen functionality and ConsoleModeManager complexity
- * - REPLACED: Sequential queue with immediate character-by-character streaming
- * - INTEGRATED: World object pattern replacing individual component management
- * - OPTIMIZED: Terminal control with cursor positioning and line management
- * - FIXED: Newline preservation in LLM responses for proper content formatting
+ * Recent Changes:
+ * - Renamed /list command to /agents for better clarity
+ * - Enhanced streaming display with real-time preview and final content formatting
+ * - Unified external input processing for both piped input and CLI arguments
+ * - Integrated World object pattern replacing individual component management
+ * - Optimized terminal control with multi-agent line management
  */
+
+// npm run dev || echo "Test completed"
+// echo "final piped test" | npx tsx cli/index.ts
 
 import * as readline from 'readline';
 import { cliLogger } from '../src/logger';
@@ -79,9 +58,9 @@ async function loadAgents(worldId: string): Promise<void> {
 
     const agents = World.getAgents(worldId);
 
-    await listCommand([], worldId); // Call list command to display loaded agents
+    await listCommand([], worldId); // Call agents command to display loaded agents
     if (agents.length === 0) {
-      // Don't print anything if no agents - will be shown by list command
+      // Don't print anything if no agents - will be shown by agents command
     }
   } catch (error) {
     console.log(colors.red(`Failed to load agents: ${error}`));
@@ -426,9 +405,9 @@ function createBorderedContent(agentName: string, content: string, hasError?: bo
 // Command registry
 const commands: Record<string, (args: string[], worldId: string) => Promise<void>> = {
   add: addCommand,
+  agents: listCommand,
   clear: clearCommand,
   help: helpCommand,
-  list: listCommand,
   show: showCommand,
   stop: stopCommand,
   use: useCommand,
@@ -457,10 +436,43 @@ async function main() {
   // Handle input from piped input or command line arguments
   let hasExternalInput = false;
   let externalMessage = '';
+  let hasPipedInput = false;
 
   // Check for piped input first (like echo "message" | npm run dev)
-  if (!process.stdin.isTTY) {
+  // Try to detect if there's actual piped data by checking for immediate data availability
+  let hasPotentialPipedInput = false;
+
+  // First, check if stdin is definitely not a TTY (real piped input)
+  if (process.stdin.isTTY === false) {
+    hasPotentialPipedInput = true;
+  } else if (process.stdin.isTTY === undefined) {
+    // For tsx/nodemon, we need to check if there's actually piped data
+    // Set a very short timeout to see if data is immediately available
+    try {
+      const hasData = await new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 10); // Very short timeout
+
+        process.stdin.once('readable', () => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+
+        // If stdin is already readable with data, resolve immediately
+        if (process.stdin.readable && process.stdin.readableLength > 0) {
+          clearTimeout(timeout);
+          resolve(true);
+        }
+      });
+
+      hasPotentialPipedInput = hasData;
+    } catch (error) {
+      hasPotentialPipedInput = false;
+    }
+  }
+
+  if (hasPotentialPipedInput) {
     hasExternalInput = true;
+    hasPipedInput = true;
     // Read all piped input
     let pipedContent = '';
     process.stdin.setEncoding('utf8');
@@ -479,20 +491,10 @@ async function main() {
     }
   }
 
-  // If we have external input, broadcast it
-  if (hasExternalInput && externalMessage) {
-    console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
-    try {
-      await World.broadcastMessage(worldId, externalMessage, 'HUMAN');
-    } catch (error) {
-      console.log(colors.red(`Error broadcasting message: ${error}`));
-    }
-  }
-
-  // Create readline interface
+  // Create readline interface first
   let rl: readline.Interface;
 
-  if (hasExternalInput && !process.stdin.isTTY) {
+  if (hasPipedInput) {
     // For piped input, we need to create readline interface differently
     // since stdin was already consumed
     rl = readline.createInterface({
@@ -509,6 +511,16 @@ async function main() {
       output: process.stdout,
       prompt: colors.cyan('> ')
     });
+  }
+
+  // If we have external input, broadcast it
+  if (hasExternalInput && externalMessage) {
+    console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
+    try {
+      await World.broadcastMessage(worldId, externalMessage, 'HUMAN');
+    } catch (error) {
+      console.log(colors.red(`Error broadcasting message: ${error}`));
+    }
   }
 
   // Handle input
@@ -595,7 +607,18 @@ async function main() {
 
   // Show initial prompt
   console.log(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
-  rl.prompt();
+  console.log(); // Add extra spacing before prompt
+
+  // If we had external input, wait a bit for potential streaming to start before showing prompt
+  if (hasExternalInput) {
+    setTimeout(() => {
+      if (!isStreamingActive()) {
+        rl.prompt();
+      }
+    }, 100);
+  } else {
+    rl.prompt();
+  }
 }
 
 // Run the CLI

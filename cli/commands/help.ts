@@ -18,6 +18,7 @@
  * - Removed verbose usage examples, tips, and header message
  * - Added /quit command
  * - Added /show command for agent conversation history display
+ * - Renamed /list command to /agents for better clarity
  */
 
 import { colors } from '../utils/colors';
@@ -25,12 +26,12 @@ import { colors } from '../utils/colors';
 export async function helpCommand(args: string[], worldId: string): Promise<void> {
   const commands = [
     { command: '/help', description: 'Show this help message' },
-    { command: '/list', description: 'List all agents and their status' },
-    { command: '/add [name]', description: 'Create a new agent (optionally specify name)' },
+    { command: '/agents', description: 'List all agents and their status' },
+    { command: '/add [agent-name]', description: 'Create a new agent (optionally specify name)' },
     { command: '/use', description: 'Activate an agent' },
     { command: '/stop', description: 'Deactivate an agent' },
     { command: '/show <agent-name>', description: 'Display conversation history for an agent' },
-    { command: '/clear', description: 'Clear agent memory' },
+    { command: '/clear <agent-name> | all', description: 'Clear agent memory' },
     { command: '/quit', description: 'Exit the CLI' }
   ];
 
