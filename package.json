@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --watch src --watch cli --ext ts,js,json --exec \"npx tsx cli/index.ts\"",
     "dev:tui": "tsx cli/index-tui.ts",
-    "start": "tsx cli/index.ts",
+    "start": "tsx cli/index-tui.ts",
     "test": "jest --config jest.config.js",
     "check": "tsc --noEmit"
   },

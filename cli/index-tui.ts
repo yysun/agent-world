@@ -2,67 +2,37 @@
 
 /**
  * Agent World - Terminal UI Entry Point
- * 
- * This is the main entry point for the terminal-based user interface.
- * It integrates the terminal-kit UI with the core Agent World system.
+ * Interactive Command Line Tool with Real-time Agent Streaming
  * 
  * Features:
- * - Interactive terminal interface with input fields
- * - Complete command system with all CLI commands implemented:
- *   • /help - Show help message with all available commands
- *   • /agents - List all agents and their status
- *   • /add [agent-name] - Create a new agent with optional name
- *   • /use <agent-name> - Activate an agent for message handling
- *   • /stop <agent-name> - Deactivate an agent
- *   • /show <agent-name> - Display conversation history for an agent
- *   • /clear <agent-name> | all - Clear agent memory or all agents
- *   • /quit - Exit the CLI with proper cleanup
- * - Real-time agent communication and message broadcasting
- * - Event-driven streaming response handling with SSE integration
- * - Agent lifecycle management (create, activate, deactivate)
- * - Memory management and conversation history display
- * - Error handling and user feedback for all operations
+ * - Interactive terminal interface with input fields and complete command system
+ * - Real-time streaming with flashing emoji indicators (●/○) and token counting
+ * - Multi-agent concurrent streaming with dedicated line positioning
+ * - Agent conversation history display and memory management
+ * - World integration for agent loading and persistence
+ * - Console output capture for consistent command execution display
+ * 
+ * Commands: /help, /agents, /add, /use, /stop, /show, /clear, /quit
+ * 
+ * Architecture:
+ * - Function-based streaming manager with SSE event subscription
+ * - Command registry pattern with individual function imports
+ * - Terminal control with flashing emoji indicators and color coding
+ * - Content formatting with proper newline preservation and gray text styling
+ * - Modular streaming manager for real-time agent response handling
  * 
  * Message Handling:
  * - Non-command input is broadcasted to all agents as HUMAN messages
  * - Subscribes to world events for real-time agent response streaming
- * - Shows agent thinking/responding status updates
- * - Handles streaming start, chunk, end, and error events
- * 
- * Command Integration:
- * - Uses existing command modules from cli/commands/ directory
- * - Captures console output from command functions for UI display
- * - Maintains agent state consistency between UI and world system
- * - Provides proper error handling and user guidance
- * 
- * Recent Changes:
- * - Implemented all CLI commands in TUI interface
- * - Added comprehensive command handling with proper error reporting
- * - Integrated existing command modules (help, add, show, clear)
- * - Added agent status management for use/stop commands
- * - Implemented quit command with cleanup
- * - Enhanced user feedback and error messages
- * - ADDED: Message broadcasting for non-command input like regular CLI
- * - ADDED: Event subscription for streaming agent responses
- * - ADDED: Real-time status updates for agent thinking/responding
- * - ADDED: Proper cleanup of event subscriptions on exit
- * - IMPROVED: Single-line streaming display that updates in place per agent
- * - FIXED: Streaming preview now properly maintains one line per agent
- * - FIXED: Multiple agents can stream simultaneously with separate preview lines
- * - ADDED: Automatic cleanup of streaming previews when responses complete
- * - IMPROVED: Input focus automatically returns to user input after all operations
- * - ENHANCED: Consistent input field focus management during streaming and commands
+ * - Delegates streaming management to dedicated streaming manager module
  */
 
 import {
-  ensureDefaultWorld,
+  loadWorldsWithSelection,
+  loadWorld,
   getAgents,
   getAgent,
-  initializeWorldSystem,
   broadcastMessage,
-  createAgent,
-  getAgentConversationHistory,
-  clearAgentMemory,
   subscribeToWorldEvents
 } from '../src/world';
 import { createTerminalKitUI, isTerminalCompatible } from './ui/terminal-kit-ui';
@@ -71,8 +41,16 @@ import { addCommand } from './commands/add';
 import { showCommand } from './commands/show';
 import { clearCommand } from './commands/clear';
 import { EventType } from '../src/types';
+import { colors, terminal } from './utils/colors';
+import { createStreamingManager } from './streaming/streaming-manager';
 
 async function main() {
+  // Initialize the world system
+  const worldId = await loadWorldsWithSelection();
+
+  // Load all agents from our world (same as index.ts)
+  await loadAgents(worldId);
+
   // Check terminal compatibility
   if (!isTerminalCompatible()) {
     console.error('Terminal is not compatible with the TUI interface.');
@@ -80,24 +58,95 @@ async function main() {
     process.exit(1);
   }
 
-  // Initialize the world system
-  const worldId = await initializeWorldSystem();
-
   // Create terminal UI
   const ui = createTerminalKitUI();
+
+  // Create streaming manager
+  const streamingManager = createStreamingManager(ui);
 
   // Variable to store event subscription cleanup function
   let unsubscribe: (() => void) | undefined;
 
-  // Streaming state management for real-time content display
-  const streamingAgents = new Map<string, {
-    agentId: string;
-    agentName: string;
-    contentBuffer: string;
-    tokenCount: number;
-    isStreaming: boolean;
-    lastPreviewLength: number;
-  }>();
+  // Load agents function (merged from loader.ts - same as index.ts)
+  async function loadAgents(worldId: string): Promise<void> {
+    try {
+      // Try to load world from disk if it exists
+      try {
+        await loadWorld(worldId);
+      } catch (error) {
+        // World doesn't exist on disk yet, that's okay
+      }
+
+      const agents = getAgents(worldId);
+
+      // Show agents using the list command approach
+      if (agents.length === 0) {
+        console.log(colors.gray('No agents found. Use /add to create your first agent.'));
+      } else {
+        console.log(colors.cyan(`Found ${agents.length} agent(s):`));
+        agents.forEach(agent => {
+          console.log(colors.gray(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`));
+        });
+      }
+    } catch (error) {
+      console.log(colors.red(`Failed to load agents: ${error}`));
+      throw error;
+    }
+
+    console.log(); // Add spacing
+  }
+
+  // Quit command implementation (same as index.ts)
+  async function quitCommand(args: string[], worldId: string): Promise<void> {
+    console.log(colors.cyan('Goodbye! 👋'));
+    process.exit(0);
+  }
+
+  // Command registry (same pattern as index.ts)
+  const commands: Record<string, (args: string[], worldId: string) => Promise<void>> = {
+    add: addCommand,
+    agents: async (args: string[], worldId: string) => {
+      const allAgents = getAgents(worldId);
+      if (allAgents.length === 0) {
+        console.log('No agents found. Use /add to create your first agent.');
+      } else {
+        console.log(`Found ${allAgents.length} agent(s):`);
+        allAgents.forEach(agent => {
+          console.log(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`);
+        });
+      }
+    },
+    clear: clearCommand,
+    help: helpCommand,
+    show: showCommand,
+    stop: async (args: string[], worldId: string) => {
+      if (args.length === 0) {
+        console.log('Usage: /stop <agent-name>');
+        return;
+      }
+      const agentToStop = args[0];
+      const targetAgent = getAgents(worldId).find(a => a.name === agentToStop);
+      if (!targetAgent) {
+        console.log(`Agent '${agentToStop}' not found.`);
+        return;
+      }
+      console.log(`Agent '${agentToStop}' deactivated.`);
+    },
+    use: async (args: string[], worldId: string) => {
+      if (args.length === 0) {
+        console.log('Usage: /use <agent-name>');
+        return;
+      }
+      const agentName = args[0];
+      const agent = getAgents(worldId).find(a => a.name === agentName);
+      if (!agent) {
+        console.log(`Agent '${agentName}' not found.`);
+        return;
+      }
+      console.log(`Agent '${agentName}' activated. Messages will be sent to this agent.`);
+    },
+    quit: quitCommand,
+  };
 
   // Initialize UI with handlers
   ui.initialize({
@@ -113,39 +162,25 @@ async function main() {
     },
 
     onCommand: async (command: string, args: string[]) => {
-      // Handle specific commands
+      // Handle specific commands using command registry (similar to index.ts)
       try {
-        switch (command) {
-          case 'help':
-            await helpCommand(args, worldId);
-            break;
+        const cmd = commands[command];
+        if (cmd) {
+          // Capture console output for the command
+          const originalLog = console.log;
+          let commandOutput = '';
+          console.log = (message: string) => {
+            commandOutput += message + '\n';
+          };
 
-          case 'agents':
-          case 'list':
-            const allAgents = getAgents(worldId);
-            if (allAgents.length === 0) {
-              ui.displaySystem('No agents found. Use /add to create your first agent.');
-            } else {
-              ui.displaySystem(`Found ${allAgents.length} agent(s):`);
-              allAgents.forEach(agent => {
-                ui.displaySystem(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`);
-              });
+          try {
+            await cmd(args, worldId);
+            if (commandOutput.trim()) {
+              ui.displaySystem(commandOutput.trim());
             }
-            break;
 
-          case 'add':
-            // Capture console output for the add command
-            const originalLog = console.log;
-            let addOutput = '';
-            console.log = (message: string) => {
-              addOutput += message + '\n';
-            };
-
-            try {
-              await addCommand(args, worldId);
-              ui.displaySystem(addOutput.trim());
-
-              // Refresh agent list in UI
+            // For add command, refresh agent list in UI
+            if (command === 'add') {
               const updatedAgents = getAgents(worldId);
               ui.updateAgents(updatedAgents.map(agent => ({
                 id: agent.id,
@@ -154,95 +189,13 @@ async function main() {
                 provider: String(agent.config.provider) || 'unknown',
                 status: agent.status || 'inactive'
               })));
-            } finally {
-              console.log = originalLog;
             }
-            break;
-
-          case 'use':
-            if (args.length === 0) {
-              ui.displayError('Usage: /use <agent-name>');
-              return;
-            }
-
-            const agentName = args[0];
-            const agent = getAgents(worldId).find(a => a.name === agentName);
-
-            if (!agent) {
-              ui.displayError(`Agent '${agentName}' not found.`);
-              return;
-            }
-
-            // Update agent status to active (for now, just mark as active)
-            // In a full implementation, this would start the agent's message processing
-            ui.displaySystem(`Agent '${agentName}' activated. Messages will be sent to this agent.`);
-            break;
-
-          case 'stop':
-            if (args.length === 0) {
-              ui.displayError('Usage: /stop <agent-name>');
-              return;
-            }
-
-            const agentToStop = args[0];
-            const targetAgent = getAgents(worldId).find(a => a.name === agentToStop);
-
-            if (!targetAgent) {
-              ui.displayError(`Agent '${agentToStop}' not found.`);
-              return;
-            }
-
-            // Update agent status to inactive
-            ui.displaySystem(`Agent '${agentToStop}' deactivated.`);
-            break;
-
-          case 'show':
-            // Capture console output for the show command
-            const originalShowLog = console.log;
-            let showOutput = '';
-            console.log = (message: string) => {
-              showOutput += message + '\n';
-            };
-
-            try {
-              await showCommand(args, worldId);
-              if (showOutput.trim()) {
-                ui.displaySystem(showOutput.trim());
-              }
-            } finally {
-              console.log = originalShowLog;
-            }
-            break;
-
-          case 'clear':
-            // Capture console output for the clear command
-            const originalClearLog = console.log;
-            let clearOutput = '';
-            console.log = (message: string) => {
-              clearOutput += message + '\n';
-            };
-
-            try {
-              await clearCommand(args, worldId);
-              if (clearOutput.trim()) {
-                ui.displaySystem(clearOutput.trim());
-              }
-            } finally {
-              console.log = originalClearLog;
-            }
-            break;
-
-          case 'quit':
-            // Cleanup event subscription
-            if (unsubscribe) {
-              unsubscribe();
-            }
-            process.exit(0);
-            break;
-
-          default:
-            ui.displayError(`Unknown command: ${command}`);
-            ui.displaySystem('Type /help to see available commands.');
+          } finally {
+            console.log = originalLog;
+          }
+        } else {
+          ui.displayError(`Unknown command: ${command}`);
+          ui.displaySystem('Type /help to see available commands.');
         }
       } catch (error) {
         ui.displayError(`Command error: ${error instanceof Error ? error.message : String(error)}`);
@@ -253,6 +206,7 @@ async function main() {
       if (unsubscribe) {
         unsubscribe();
       }
+      streamingManager.cleanup();
       process.exit(0);
     }
   });
@@ -267,92 +221,12 @@ async function main() {
       const agent = getAgent(worldId, sseData.agentId);
       const agentName = agent?.name || 'Unknown Agent';
 
-      switch (sseData.type) {
-        case 'start':
-          // Initialize streaming state for this agent
-          streamingAgents.set(sseData.agentId, {
-            agentId: sseData.agentId,
-            agentName,
-            contentBuffer: '',
-            tokenCount: 0,
-            isStreaming: true,
-            lastPreviewLength: 0
-          });
-          ui.displaySystem(`🤖 ${agentName} is thinking...`);
-          break;
-
-        case 'chunk':
-          // Update streaming content
-          const streamingAgent = streamingAgents.get(sseData.agentId);
-          if (streamingAgent && sseData.content) {
-            streamingAgent.contentBuffer += sseData.content;
-
-            // Calculate token count (approximate)
-            streamingAgent.tokenCount = streamingAgent.contentBuffer
-              .split(/[\s\.,;:!?\-'"()\[\]{}]+/)
-              .filter(token => token.length > 0).length;
-
-            // Create preview content (50 characters max)
-            const previewContent = streamingAgent.contentBuffer
-              .replace(/\n/g, ' ') // Replace newlines with spaces
-              .replace(/\s+/g, ' ') // Normalize whitespace
-              .trim();
-
-            let displayContent = previewContent;
-            if (displayContent.length > 50) {
-              displayContent = displayContent.substring(0, 47) + '...';
-            }
-
-            // Create the full preview line
-            const previewLine = `● ${agentName}: ${displayContent} (${streamingAgent.tokenCount} tokens)`;
-
-            // Update the streaming preview for this agent
-            ui.updateStreamingPreview(streamingAgent.agentId, previewLine);
-            streamingAgent.lastPreviewLength = previewLine.length;
-          }
-          break;
-
-        case 'end':
-          // Display final complete content
-          const completedAgent = streamingAgents.get(sseData.agentId);
-          if (completedAgent) {
-            // Clear the streaming preview for this agent
-            ui.clearStreamingPreview(sseData.agentId);
-
-            const fullContent = completedAgent.contentBuffer.trim();
-
-            if (fullContent) {
-              // Format the final response similar to regular CLI
-              ui.displayMessage(agentName, fullContent);
-            } else {
-              ui.displaySystem(`✅ ${agentName}: [no response]`);
-            }
-
-            // Clean up streaming state
-            streamingAgents.delete(sseData.agentId);
-          } else {
-            ui.displaySystem(`✅ ${agentName} has finished responding.`);
-          }
-          break;
-
-        case 'error':
-          // Display error and clean up
-          const errorAgent = streamingAgents.get(sseData.agentId);
-          if (errorAgent) {
-            // Clear the streaming preview for this agent
-            ui.clearStreamingPreview(sseData.agentId);
-
-            ui.displayError(`❌ ${agentName} encountered an error: ${sseData.error || 'Unknown error'}`);
-            streamingAgents.delete(sseData.agentId);
-          } else {
-            ui.displayError(`❌ ${agentName} encountered an error while responding.`);
-          }
-          break;
-      }
+      // Use the streaming manager to handle all streaming events
+      streamingManager.handleStreamingEvent(sseData.type, sseData.agentId, agentName, sseData.content);
     }
   });
 
-  // Load existing agents and update UI
+  // Load existing agents and update UI (same approach as index.ts)
   try {
     const agents = getAgents(worldId);
     ui.updateAgents(agents.map(agent => ({
@@ -364,14 +238,8 @@ async function main() {
 
     ui.setCurrentWorld(worldId);
 
-    if (agents.length === 0) {
-      ui.displaySystem('No agents found. Use /add to create your first agent.');
-    } else {
-      ui.displaySystem(`Found ${agents.length} agent(s). Use /agents to see them, /use <name> to activate.`);
-    }
-
-    // Show welcome message and start in chat mode
-    ui.displaySystem('Welcome to Agent World! Type /help for available commands.');
+    // Show welcome message similar to index.ts
+    ui.displaySystem(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
     ui.setMode('chat' as any);
   } catch (error) {
     ui.displayError(`Failed to load agents: ${error instanceof Error ? error.message : String(error)}`);
