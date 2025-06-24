@@ -32,7 +32,7 @@ import { worldLogger } from '../logger';
 export interface EventBusProvider {
   publish(topic: string, event: Omit<Event, 'id' | 'timestamp'>): Promise<Event>;
   subscribe(topic: string, handler: (event: Event) => void): () => void;
-  subscribeToAgent(agentId: string, handler: (event: Event) => void): () => void;
+  subscribeToAgent(agentName: string, handler: (event: Event) => void): () => void;
   getHistory(filter?: EventFilter): Event[];
   getStats(): EventStats;
   clearHistory(): void;
@@ -143,18 +143,18 @@ export async function publishToLocal(topic: string, eventData: Omit<Event, 'id' 
     instance.emitter.emit(`topic:${topic}`, validatedEvent);
     instance.emitter.emit('event', validatedEvent);
 
-    // Emit agent-specific events if agentId or sender is present in payload
+    // Emit agent-specific events if agentName or sender is present in payload
     const payload = validatedEvent.payload;
-    let agentId: string | undefined;
+    let agentName: string | undefined;
 
-    if ('agentId' in payload && payload.agentId) {
-      agentId = payload.agentId;
+    if ('agentName' in payload && payload.agentName) {
+      agentName = payload.agentName;
     } else if ('sender' in payload && payload.sender) {
-      agentId = payload.sender;
+      agentName = payload.sender;
     }
 
-    if (agentId) {
-      instance.emitter.emit(`agent:${agentId}`, validatedEvent);
+    if (agentName) {
+      instance.emitter.emit(`agent:${agentName}`, validatedEvent);
     }
 
     return validatedEvent;
@@ -184,10 +184,10 @@ export function subscribeToLocal(topic: string, handler: (event: Event) => void,
 /**
  * Subscribe to events for a specific agent
  */
-export function subscribeToLocalAgent(agentId: string, handler: (event: Event) => void, providerId?: string): () => void {
+export function subscribeToLocalAgent(agentName: string, handler: (event: Event) => void, providerId?: string): () => void {
   const instance = getProviderInstance(providerId);
 
-  const eventName = `agent:${agentId}`;
+  const eventName = `agent:${agentName}`;
   instance.emitter.on(eventName, handler);
 
   return () => {
@@ -270,7 +270,7 @@ export function createLocalProvider(providerOptions: LocalProviderOptions = {}):
   return {
     publish: (topic: string, eventData: Omit<Event, 'id' | 'timestamp'>) => publishToLocal(topic, eventData, providerId),
     subscribe: (topic: string, handler: (event: Event) => void) => subscribeToLocal(topic, handler, providerId),
-    subscribeToAgent: (agentId: string, handler: (event: Event) => void) => subscribeToLocalAgent(agentId, handler, providerId),
+    subscribeToAgent: (agentName: string, handler: (event: Event) => void) => subscribeToLocalAgent(agentName, handler, providerId),
     getHistory: (filter?: EventFilter) => getLocalHistory(filter, providerId),
     getStats: () => getLocalStats(providerId),
     clearHistory: () => clearLocalHistory(providerId)

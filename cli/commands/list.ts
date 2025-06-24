@@ -27,8 +27,8 @@
 import * as World from '../../src/world';
 import { colors } from '../utils/colors';
 
-export async function listCommand(args: string[], worldId: string): Promise<void> {
-  const agents = World.getAgents(worldId);
+export async function listCommand(args: string[], worldName: string): Promise<void> {
+  const agents = World.getAgents(worldName);
 
   if (agents.length === 0) {
     console.log(colors.yellow('📭 No agents found. Use /add to create your first agent.'));
@@ -40,9 +40,8 @@ export async function listCommand(args: string[], worldId: string): Promise<void
     const name = colors.white(agent.name || 'Unnamed Agent');
     const model = agent.config?.model || 'unknown';
     const modelInfo = colors.gray(`- ${model}`);
-    const shortId = colors.gray(`(${agent.id.slice(0, 8)}...)`);
 
-    console.log(`${status} ${name} ${modelInfo} ${shortId}`);
+    console.log(`${status} ${name} ${modelInfo}`);
   });
   console.log();
 }

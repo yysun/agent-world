@@ -24,7 +24,6 @@
 import { colors } from '../utils/colors';
 
 export interface StreamingAgent {
-  agentId: string;
   agentName: string;
   isStreaming: boolean;
   hasStarted: boolean;
@@ -40,12 +39,12 @@ export interface StreamingUI {
   displaySystem(message: string): void;
   displayMessage(agentName: string, content: string): void;
   displayError(message: string): void;
-  updateStreamingPreview(agentId: string, preview: string): void;
-  clearStreamingPreview(agentId: string): void;
+  updateStreamingPreview(agentName: string, preview: string): void;
+  clearStreamingPreview(agentName: string): void;
 }
 
 export interface StreamingManager {
-  handleStreamingEvent(type: 'start' | 'chunk' | 'end' | 'error', agentId: string, agentName: string, content?: string): void;
+  handleStreamingEvent(type: 'start' | 'chunk' | 'end' | 'error', agentName: string, agentDisplayName: string, content?: string): void;
   isStreamingActive(): boolean;
   cleanup(): void;
 }
@@ -67,19 +66,19 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
   /**
    * Handle incoming streaming events from SSE
    */
-  function handleStreamingEvent(type: 'start' | 'chunk' | 'end' | 'error', agentId: string, agentName: string, content?: string): void {
+  function handleStreamingEvent(type: 'start' | 'chunk' | 'end' | 'error', agentName: string, agentDisplayName: string, content?: string): void {
     switch (type) {
       case 'start':
-        startStreaming(agentId, agentName);
+        startStreaming(agentName, agentDisplayName);
         break;
       case 'chunk':
-        addStreamingContent(agentId, content || '');
+        addStreamingContent(agentName, content || '');
         break;
       case 'end':
-        endStreaming(agentId);
+        endStreaming(agentName);
         break;
       case 'error':
-        markStreamingError(agentId);
+        markStreamingError(agentName);
         break;
     }
   }
@@ -91,8 +90,8 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
     return activeStreams.size > 0;
   }
 
-  function startStreaming(agentId: string, agentName: string): void {
-    if (!activeStreams.has(agentId)) {
+  function startStreaming(agentName: string, agentDisplayName: string): void {
+    if (!activeStreams.has(agentName)) {
       // If this is the first agent, mark the starting line
       if (activeStreams.size === 0) {
         ui.displaySystem(''); // Add newline before streaming block starts
@@ -103,8 +102,7 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
       // Assign this agent the next available line
       const lineOffset = nextLineOffset++;
 
-      activeStreams.set(agentId, {
-        agentId,
+      activeStreams.set(agentName, {
         agentName,
         isStreaming: true,
         hasStarted: false,
@@ -116,21 +114,21 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
       });
     }
 
-    const stream = activeStreams.get(agentId)!;
+    const stream = activeStreams.get(agentName)!;
     if (!stream.hasStarted) {
       // Show initial flashing emoji preview for this agent (start with empty content)
       const initialEmoji = colors.cyan('●');
-      const initialPreview = `${initialEmoji} ${agentName}: ... (0 tokens)`;
-      ui.updateStreamingPreview(agentId, initialPreview);
+      const initialPreview = `${initialEmoji} ${agentDisplayName}: ... (0 tokens)`;
+      ui.updateStreamingPreview(agentName, initialPreview);
       stream.hasStarted = true;
 
       // Start flashing emoji animation
-      startEmojiFlashing(agentId);
+      startEmojiFlashing(agentName);
     }
   }
 
-  function addStreamingContent(agentId: string, content: string): void {
-    const stream = activeStreams.get(agentId);
+  function addStreamingContent(agentName: string, content: string): void {
+    const stream = activeStreams.get(agentName);
     if (stream && stream.isStreaming) {
       // Add content to buffer
       stream.contentBuffer += content;
@@ -141,23 +139,23 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
         .filter(token => token.length > 0).length;
 
       // Update preview immediately with current content
-      updateStreamingPreview(agentId);
+      updateStreamingPreview(agentName);
     }
   }
 
-  function endStreaming(agentId: string): void {
-    const stream = activeStreams.get(agentId);
+  function endStreaming(agentName: string): void {
+    const stream = activeStreams.get(agentName);
     if (stream) {
       stream.isStreaming = false;
 
       // Stop emoji flashing animation
-      stopEmojiFlashing(agentId);
+      stopEmojiFlashing(agentName);
 
       // Store completed agent data for final display
-      completedAgents.set(agentId, stream);
+      completedAgents.set(agentName, stream);
 
       // Remove this agent from active streams
-      activeStreams.delete(agentId);
+      activeStreams.delete(agentName);
 
       // If this is the last active stream, show all final content
       if (activeStreams.size === 0) {
@@ -166,7 +164,7 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
 
         // Clear all streaming previews
         completedStreams.forEach(stream => {
-          ui.clearStreamingPreview(stream.agentId);
+          ui.clearStreamingPreview(stream.agentName);
         });
 
         // Display final content for all agents
@@ -182,24 +180,24 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
     }
   }
 
-  function markStreamingError(agentId: string): void {
-    const stream = activeStreams.get(agentId);
+  function markStreamingError(agentName: string): void {
+    const stream = activeStreams.get(agentName);
     if (stream) {
       // Mark as error and stop emoji flashing animation
       stream.hasError = true;
-      stopEmojiFlashing(agentId);
+      stopEmojiFlashing(agentName);
 
       // Store completed agent data for final display (with error status)
-      completedAgents.set(agentId, stream);
+      completedAgents.set(agentName, stream);
 
       // Clear the streaming preview for this agent
-      ui.clearStreamingPreview(agentId);
+      ui.clearStreamingPreview(agentName);
 
       // Show error message
       ui.displayError(`❌ ${stream.agentName}: Response ended with error`);
 
       // Remove this agent from active streams
-      activeStreams.delete(agentId);
+      activeStreams.delete(agentName);
 
       // If no more active streams, clean up and reset
       if (activeStreams.size === 0) {
@@ -209,8 +207,8 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
     }
   }
 
-  function startEmojiFlashing(agentId: string): void {
-    const stream = activeStreams.get(agentId);
+  function startEmojiFlashing(agentName: string): void {
+    const stream = activeStreams.get(agentName);
     if (!stream) return;
 
     // Clear any existing timer
@@ -220,17 +218,17 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
 
     // Start flashing animation (500ms interval)
     stream.emojiFlashTimer = setInterval(() => {
-      if (!activeStreams.has(agentId)) {
+      if (!activeStreams.has(agentName)) {
         clearInterval(stream.emojiFlashTimer!);
         return;
       }
 
-      updateStreamingPreview(agentId);
+      updateStreamingPreview(agentName);
     }, 500);
   }
 
-  function stopEmojiFlashing(agentId: string): void {
-    const stream = activeStreams.get(agentId) || completedAgents.get(agentId);
+  function stopEmojiFlashing(agentName: string): void {
+    const stream = activeStreams.get(agentName) || completedAgents.get(agentName);
     if (stream?.emojiFlashTimer) {
       clearInterval(stream.emojiFlashTimer);
       stream.emojiFlashTimer = undefined;
@@ -256,8 +254,8 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
     }
   }
 
-  function updateStreamingPreview(agentId: string): void {
-    const stream = activeStreams.get(agentId);
+  function updateStreamingPreview(agentName: string): void {
+    const stream = activeStreams.get(agentName);
     if (!stream || !stream.isStreaming) return;
 
     // Create preview content (50 characters max)
@@ -281,7 +279,7 @@ export function createStreamingManager(ui: StreamingUI): StreamingManager {
     const preview = `${emoji} ${stream.agentName}: ${displayContent} ... (${tokenCount} tokens)`;
 
     // Update the streaming preview for this agent
-    ui.updateStreamingPreview(stream.agentId, preview);
+    ui.updateStreamingPreview(stream.agentName, preview);
   }
 
   /**

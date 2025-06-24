@@ -7,6 +7,7 @@
  * - Coverage reporting excluding API and CLI code
  * - Mock support with auto-reset between tests
  * - Shared package module resolution
+ * - All tests use mocked file I/O operations
  * 
  * Logic:
  * - Uses ts-jest preset for TypeScript compilation
@@ -14,7 +15,8 @@
  * - Maps relative imports ending in .js to TypeScript files
  * - Maps 'shared' imports to the shared package source
  * - Excludes non-core functionality from coverage
- * - Runs tests sequentially to prevent file system conflicts
+ * - Runs tests sequentially to prevent conflicts
+ * - No global teardown needed as all tests use mocks
  * 
  * Changes:
  * - Initial Jest setup for AI World Simulation backend
@@ -25,6 +27,7 @@
  *   because Jest's module resolution differs from Node.js runtime
  * - Updated testTimeout from 30000ms to 15000ms for faster test execution
  * - Optimized for async utilities and event-driven waiting patterns
+ * - Removed globalTeardown as all tests now use mocked file operations
  */
 
 export default {
@@ -61,5 +64,5 @@ export default {
       }
     }]
   },
-  globalTeardown: '<rootDir>/tests/global-teardown.ts'
+  // Removed globalTeardown as all tests now use mocks instead of real file I/O
 };

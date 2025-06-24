@@ -27,7 +27,7 @@
 import * as World from '../../src/world';
 import { colors } from '../utils/colors';
 
-export async function showCommand(args: string[], worldId: string): Promise<void> {
+export async function showCommand(args: string[], worldName: string): Promise<void> {
   // Check if agent name is provided
   if (args.length === 0) {
     console.log(colors.yellow('❌ Please specify an agent name: /show <agent-name>'));
@@ -36,8 +36,8 @@ export async function showCommand(args: string[], worldId: string): Promise<void
 
   const agentName = args[0];
 
-  // Get all agents to find the one with matching name
-  const agent = World.findAgent(worldId, agentName);
+  // Get agent by name
+  const agent = World.getAgent(worldName, agentName);
 
   if (!agent) {
     console.log(colors.red(`❌ Agent "${agentName}" not found.`));
@@ -47,7 +47,7 @@ export async function showCommand(args: string[], worldId: string): Promise<void
 
   try {
     // Load conversation history
-    const history = await World.getAgentConversationHistory(worldId, agent.id);
+    const history = await World.getAgentConversationHistory(worldName, agent.name);
 
     // Display agent header
     console.log(`${colors.green('●')} ${colors.white(agent.name)}`);

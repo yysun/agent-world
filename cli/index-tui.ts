@@ -33,7 +33,7 @@ import {
   getAgents,
   getAgent,
   broadcastMessage,
-  subscribeToWorldEvents
+  subscribeToSSEEvents
 } from '../src/world';
 import { createTerminalKitUI, isTerminalCompatible } from './ui/terminal-kit-ui';
 import { helpCommand } from './commands/help';
@@ -46,10 +46,10 @@ import { createStreamingManager } from './streaming/streaming-manager';
 
 async function main() {
   // Initialize the world system
-  const worldId = await loadWorldsWithSelection();
+  const worldName = await loadWorldsWithSelection();
 
   // Load all agents from our world (same as index.ts)
-  await loadAgents(worldId);
+  await loadAgents(worldName);
 
   // Check terminal compatibility
   if (!isTerminalCompatible()) {
@@ -68,11 +68,11 @@ async function main() {
   let unsubscribe: (() => void) | undefined;
 
   // Load agents function (merged from loader.ts - same as index.ts)
-  async function loadAgents(worldId: string): Promise<void> {
+  async function loadAgents(worldName: string): Promise<void> {
     try {
       // Try to load world from disk if it exists
       try {
-        await loadWorld(worldId);
+        await loadWorld(worldName);
       } catch (error) {
         // World doesn't exist on disk yet, that's okay
       }
@@ -87,16 +87,16 @@ async function main() {
   }
 
   // Quit command implementation (same as index.ts)
-  async function quitCommand(args: string[], worldId: string): Promise<void> {
+  async function quitCommand(args: string[], worldName: string): Promise<void> {
     console.log(colors.cyan('Goodbye! 👋'));
     process.exit(0);
   }
 
   // Command registry (same pattern as index.ts)
-  const commands: Record<string, (args: string[], worldId: string) => Promise<void>> = {
+  const commands: Record<string, (args: string[], worldName: string) => Promise<void>> = {
     add: addCommand,
-    agents: async (args: string[], worldId: string) => {
-      const allAgents = getAgents(worldId);
+    agents: async (args: string[], worldName: string) => {
+      const allAgents = getAgents(worldName);
       if (allAgents.length === 0) {
         console.log(colors.gray('No agents found. Use /add to create your first agent.'));
       } else {
@@ -109,26 +109,26 @@ async function main() {
     clear: clearCommand,
     help: helpCommand,
     show: showCommand,
-    stop: async (args: string[], worldId: string) => {
+    stop: async (args: string[], worldName: string) => {
       if (args.length === 0) {
         console.log('Usage: /stop <agent-name>');
         return;
       }
       const agentToStop = args[0];
-      const targetAgent = getAgents(worldId).find(a => a.name === agentToStop);
+      const targetAgent = getAgents(worldName).find(a => a.name === agentToStop);
       if (!targetAgent) {
         console.log(`Agent '${agentToStop}' not found.`);
         return;
       }
       console.log(`Agent '${agentToStop}' deactivated.`);
     },
-    use: async (args: string[], worldId: string) => {
+    use: async (args: string[], worldName: string) => {
       if (args.length === 0) {
         console.log('Usage: /use <agent-name>');
         return;
       }
       const agentName = args[0];
-      const agent = getAgents(worldId).find(a => a.name === agentName);
+      const agent = getAgents(worldName).find(a => a.name === agentName);
       if (!agent) {
         console.log(`Agent '${agentName}' not found.`);
         return;
@@ -150,7 +150,7 @@ async function main() {
           // Small delay to ensure display completes before broadcasting
           await new Promise(resolve => setTimeout(resolve, 25));
 
-          await broadcastMessage(worldId, input.trim(), 'HUMAN');
+          await broadcastMessage(worldName, input.trim(), 'HUMAN');
         } catch (error) {
           ui.displayError(`Failed to broadcast message: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -170,16 +170,15 @@ async function main() {
           };
 
           try {
-            await cmd(args, worldId);
+            await cmd(args, worldName);
             if (commandOutput.trim()) {
               ui.displaySystem(commandOutput.trim());
             }
 
             // For add command, refresh agent list in UI
             if (command === 'add') {
-              const updatedAgents = getAgents(worldId);
+              const updatedAgents = getAgents(worldName);
               ui.updateAgents(updatedAgents.map(agent => ({
-                id: agent.id,
                 name: agent.name,
                 model: agent.config.model || 'unknown',
                 provider: String(agent.config.provider) || 'unknown',
@@ -207,24 +206,25 @@ async function main() {
     }
   });
 
-  // Subscribe to world events for agent streaming responses
-  unsubscribe = subscribeToWorldEvents(worldId, async (event) => {
+  // Subscribe to SSE events for agent streaming responses
+  unsubscribe = subscribeToSSEEvents(worldName, async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
       const sseData = event.payload as import('../src/types').SSEEventPayload;
 
       // Get agent name for display
-      const agent = getAgent(worldId, sseData.agentId);
+      const agents = getAgents(worldName);
+      const agent = agents.find(a => a.name === sseData.agentName);
       const agentName = agent?.name || 'Unknown Agent';
 
       // Use the streaming manager to handle all streaming events
-      streamingManager.handleStreamingEvent(sseData.type, sseData.agentId, agentName, sseData.content);
+      streamingManager.handleStreamingEvent(sseData.type, sseData.agentName, agentName, sseData.content);
     }
   });
 
   // Load existing agents and update UI (same approach as index.ts)
   try {
-    const agents = getAgents(worldId);
+    const agents = getAgents(worldName);
     ui.updateAgents(agents.map(agent => ({
       name: agent.name,
       model: agent.config.model || 'unknown',
@@ -232,7 +232,7 @@ async function main() {
       status: agent.status || 'inactive'
     })));
 
-    ui.setCurrentWorld(worldId);
+    ui.setCurrentWorld(worldName);
 
     // Show welcome message similar to index.ts
     ui.displaySystem('Type a message to broadcast to all agents, or use /help for commands.');
@@ -248,7 +248,7 @@ async function main() {
       };
 
       try {
-        await agentsCmd([], worldId);
+        await agentsCmd([], worldName);
         if (commandOutput.trim()) {
           ui.displaySystem(commandOutput.trim());
         }

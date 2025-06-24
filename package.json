@@ -8,6 +8,7 @@
     "dev:tui": "tsx cli/index-tui.ts",
     "start": "tsx cli/index-tui.ts",
     "test": "jest --config jest.config.js",
+    "build": "tsc --noEmit",
     "check": "tsc --noEmit"
   },
   "keywords": [],

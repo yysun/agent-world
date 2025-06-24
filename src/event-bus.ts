@@ -134,8 +134,8 @@ export function subscribeToTopic(
 /**
  * Subscribe to events for a specific agent
  */
-export function subscribeToAgent(agentId: string, handler: (event: Event) => void): () => void {
-  return getProvider().subscribeToAgent(agentId, handler);
+export function subscribeToAgent(agentName: string, handler: (event: Event) => void): () => void {
+  return getProvider().subscribeToAgent(agentName, handler);
 }
 
 /**

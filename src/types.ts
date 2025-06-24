@@ -18,15 +18,14 @@
  * - Refactored event structure to remove nested payload nesting
  * - Changed sender terminology from "CLI" to "HUMAN"
  * - Updated Zod schemas for new event structure validation
- * - Added standard LLM chat message schema types (ChatMessage, ChatRole)
+ * - Added standard LLM chat message schema types (ChatMessage)
  * - Added AgentMemory interface for new memory structure
+ * - Removed unused types (ChatRole, CreateAgentRequest, unused Zod schemas)
  */
 
 import { z } from 'zod';
 
 // LLM Chat Message Types
-export type ChatRole = 'system' | 'user' | 'assistant';
-
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -50,7 +49,6 @@ export interface LegacyMessage {
 }
 
 export interface Agent {
-  id: string;
   name: string;
   type: string;
   status?: 'active' | 'inactive' | 'error';
@@ -69,7 +67,6 @@ export interface Agent {
  * (Moved from agent.ts, reconciled fields)
  */
 export interface AgentConfig {
-  id?: string;
   name: string;
   type: string;
   provider: LLMProvider;
@@ -96,13 +93,7 @@ export interface MessageData {
   id: string;
   sender?: string;
   content?: string;
-  agentId?: string;
-}
-
-export interface CreateAgentRequest {
-  name: string;
-  type: string;
-  config?: Partial<AgentConfig>;
+  agentName?: string;
 }
 
 // Event Types
@@ -113,13 +104,13 @@ export interface MessageEventPayload {
 
 export interface SystemEventPayload {
   action: string;
-  agentId?: string;
-  worldId?: string;
+  agentName?: string;
+  worldName?: string;
   [key: string]: any;
 }
 
 export interface SSEEventPayload {
-  agentId: string;
+  agentName: string;
   type: 'start' | 'chunk' | 'end' | 'error';
   content?: string;
   error?: string;
@@ -141,7 +132,7 @@ export enum EventType {
 
 export interface EventFilter {
   types?: EventType[];
-  agentId?: string;
+  agentName?: string;
   since?: Date;
 }
 
@@ -156,11 +147,11 @@ export const EventSchema = z.object({
     }),
     z.object({
       action: z.string(),
-      agentId: z.string().optional(),
-      worldId: z.string().optional()
+      agentName: z.string().optional(),
+      worldName: z.string().optional()
     }).and(z.record(z.any())),
     z.object({
-      agentId: z.string(),
+      agentName: z.string(),
       type: z.enum(['start', 'chunk', 'end', 'error']),
       content: z.string().optional(),
       error: z.string().optional(),
@@ -171,7 +162,6 @@ export const EventSchema = z.object({
 
 // World Types
 export interface WorldState {
-  id: string;
   name: string;
   agents: Map<string, Agent>;
 }
@@ -181,7 +171,6 @@ export interface WorldOptions {
 }
 
 export interface WorldInfo {
-  id: string;
   name: string;
   agentCount: number;
 }
@@ -216,18 +205,11 @@ export interface StoragePaths {
 }
 
 // Zod Schemas for Validation
-export const ChatRoleSchema = z.enum(['system', 'user', 'assistant']);
-
 export const ChatMessageSchema = z.object({
   role: z.enum(['system', 'user', 'assistant']),
   content: z.string(),
   name: z.string().optional(),
   timestamp: z.string().optional(),
-});
-
-export const AgentMemorySchema = z.object({
-  messages: z.array(ChatMessageSchema),
-  lastActivity: z.string(),
 });
 
 export const LegacyMessageSchema = z.object({
@@ -237,11 +219,6 @@ export const LegacyMessageSchema = z.object({
   messageId: z.string(),
   timestamp: z.string(),
   inResponseTo: z.string().optional(),
-});
-
-export const LegacyMemorySchema = z.object({
-  conversationHistory: z.array(LegacyMessageSchema),
-  lastActivity: z.string(),
 });
 
 

@@ -59,7 +59,6 @@
  * - UPDATED: Memory functions to use smart agent detection instead of heuristics
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
@@ -86,7 +85,7 @@ import { processAgentMessage } from './agent';
 import { initializeFileStorage, getStorageOptions, ensureDirectory } from './storage';
 import { toKebabCase } from './utils';
 
-// Global world storage
+// Global world storage - keyed by world name
 const worlds: Map<string, WorldState> = new Map();
 
 // Track agent message subscriptions to prevent double subscription
@@ -108,44 +107,29 @@ const DEFAULT_WORLD_NAME = 'Default World';
 
 /**
  * Get world directory path using kebab-case of world name
- * This function requires the world to be loaded in memory first
  */
-function getWorldDir(worldId: string): string {
+function getWorldDir(worldName: string): string {
   const worldsDir = getWorldsDir();
-  const world = worlds.get(worldId);
-  if (!world) {
-    throw new Error(`World ${worldId} not found in memory. Load the world first before accessing its directory.`);
-  }
-  // Always use kebab-case of world name for folder
-  return path.join(worldsDir, toKebabCase(world.name));
+  return path.join(worldsDir, toKebabCase(worldName));
 }
 
 /**
- * Find the actual world directory by checking both kebab-case name and world ID
+ * Find the actual world directory by checking world name
  */
-async function findWorldDir(worldId: string): Promise<string | null> {
+async function findWorldDir(worldName: string): Promise<string | null> {
   const worldsDir = getWorldsDir();
+  const expectedDir = path.join(worldsDir, toKebabCase(worldName));
 
-  // Try to find world config by scanning directories
   try {
-    const entries = await fs.readdir(worldsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const configPath = path.join(worldsDir, entry.name, 'config.json');
-        try {
-          await fs.access(configPath);
-          const configData = await fs.readFile(configPath, 'utf-8');
-          const worldConfig = JSON.parse(configData);
-          if (worldConfig.id === worldId) {
-            return path.join(worldsDir, entry.name);
-          }
-        } catch {
-          // Skip invalid configs
-        }
-      }
+    const configPath = path.join(expectedDir, 'config.json');
+    await fs.access(configPath);
+    const configData = await fs.readFile(configPath, 'utf-8');
+    const worldConfig = JSON.parse(configData);
+    if (worldConfig.name === worldName) {
+      return expectedDir;
     }
-  } catch {
-    // Directory doesn't exist
+  } catch (error) {
+    // Directory or config doesn't exist
   }
 
   return null;
@@ -154,22 +138,22 @@ async function findWorldDir(worldId: string): Promise<string | null> {
 /**
  * Get world config file path
  */
-function getWorldConfigPath(worldId: string): string {
-  return path.join(getWorldDir(worldId), 'config.json');
+function getWorldConfigPath(worldName: string): string {
+  return path.join(getWorldDir(worldName), 'config.json');
 }
 
 /**
  * Get agents directory path
  */
-function getAgentsDir(worldId: string): string {
-  return path.join(getWorldDir(worldId), 'agents');
+function getAgentsDir(worldName: string): string {
+  return path.join(getWorldDir(worldName), 'agents');
 }
 
 /**
  * Get agent file path using kebab-case agent name
  */
-function getAgentPath(worldId: string, agentName: string): string {
-  return path.join(getAgentsDir(worldId), toKebabCase(agentName), 'config.json');
+function getAgentPath(worldName: string, agentName: string): string {
+  return path.join(getAgentsDir(worldName), toKebabCase(agentName), 'config.json');
 }
 
 /**
@@ -195,19 +179,19 @@ export async function ensureDefaultWorld(): Promise<string> {
 
   if (existingWorlds.length > 0) {
     // Load existing worlds into memory
-    for (const worldId of existingWorlds) {
+    for (const worldName of existingWorlds) {
       try {
-        await loadWorldFromDisk(worldId);
+        await loadWorldFromDisk(worldName);
       } catch (error) {
-        console.warn(`Failed to load world ${worldId}:`, error);
+        console.warn(`Failed to load world ${worldName}:`, error);
       }
     }
-    return existingWorlds[0]; // Return first world ID
+    return existingWorlds[0]; // Return first world name
   }
 
   // Create default world
-  const defaultWorldId = await createWorld({ name: DEFAULT_WORLD_NAME });
-  return defaultWorldId;
+  const defaultWorldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+  return defaultWorldName;
 }
 
 /**
@@ -225,28 +209,14 @@ export async function loadWorldsWithSelection(): Promise<string> {
 
   if (existingWorlds.length === 0) {
     // No worlds found - create default world
-    const defaultWorldId = await createWorld({ name: DEFAULT_WORLD_NAME });
-    return defaultWorldId;
+    const defaultWorldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+    return defaultWorldName;
   }
 
   // Load first available world
-  const worldId = existingWorlds[0];
-  await loadWorldFromDisk(worldId);
-  return worldId;
-}
-
-/**
- * Generate unique world ID
- */
-function generateWorldId(): string {
-  return `world_${uuidv4()}`;
-}
-
-/**
- * Generate unique agent ID
- */
-function generateAgentId(): string {
-  return `agent_${uuidv4()}`;
+  const worldName = existingWorlds[0];
+  await loadWorldFromDisk(worldName);
+  return worldName;
 }
 
 /**
@@ -265,44 +235,42 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
   // Initialize event bus with local provider (defensive)
   initializeEventBus({ provider: 'local', enableLogging: true });
 
-  const worldId = generateWorldId();
+  const worldName = options.name || `world-${Date.now()}`;
   const worldState: WorldState = {
-    id: worldId,
-    name: options.name || `World ${worldId.slice(-8)}`,
+    name: worldName,
     agents: new Map()
   };
 
-  worlds.set(worldId, worldState);
+  worlds.set(worldName, worldState);
 
   // Save to disk immediately
   try {
-    await saveWorldToDisk(worldId);
+    await saveWorldToDisk(worldName);
   } catch (error) {
     // Rollback memory change on disk error
-    worlds.delete(worldId);
+    worlds.delete(worldName);
     throw error;
   }
 
   // Publish world creation event
   await publishWorldEvent({
     action: 'WORLD_CREATED',
-    worldId,
+    worldName,
     name: worldState.name,
     timestamp: new Date().toISOString()
   });
 
-  return worldId;
+  return worldName;
 }
 
 /**
  * Get world information
  */
-export function getWorldInfo(worldId: string): WorldInfo | null {
-  const world = worlds.get(worldId);
+export function getWorldInfo(worldName: string): WorldInfo | null {
+  const world = worlds.get(worldName);
   if (!world) return null;
 
   return {
-    id: world.id,
     name: world.name,
     agentCount: world.agents.size
   };
@@ -311,27 +279,27 @@ export function getWorldInfo(worldId: string): WorldInfo | null {
 /**
  * Delete a world and cleanup
  */
-export async function deleteWorld(worldId: string): Promise<boolean> {
-  const world = worlds.get(worldId);
+export async function deleteWorld(worldName: string): Promise<boolean> {
+  const world = worlds.get(worldName);
   if (!world) return false;
 
   // Get world directory path before removing from memory
-  const worldDir = getWorldDir(worldId);
+  const worldDir = getWorldDir(worldName);
 
   // Clean up all agent subscriptions for this world
-  for (const agentId of world.agents.keys()) {
-    unsubscribeAgentFromMessages(worldId, agentId);
+  for (const agentName of world.agents.keys()) {
+    unsubscribeAgentFromMessages(worldName, agentName);
   }
 
   // Remove from memory first
-  worlds.delete(worldId);
+  worlds.delete(worldName);
 
   // Remove world directory from disk
   try {
     await fs.rm(worldDir, { recursive: true, force: true });
   } catch (error) {
     // Rollback memory change if disk operation fails
-    worlds.set(worldId, world);
+    worlds.set(worldName, world);
     throw error;
   }
 
@@ -339,7 +307,7 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
 }
 
 /**
- * List all world IDs (from memory)
+ * List all world names (from memory)
  */
 export function listWorlds(): string[] {
   return Array.from(worlds.keys());
@@ -355,22 +323,22 @@ export async function listWorldsFromDisk(): Promise<string[]> {
     const worldDirs = await fs.readdir(worldsDir);
 
     // Filter to only include directories with valid config files
-    const validWorldIds: string[] = [];
+    const validWorldNames: string[] = [];
 
     for (const worldDir of worldDirs) {
       try {
         const configPath = path.join(worldsDir, worldDir, 'config.json');
         await fs.access(configPath);
-        // Read the config to get the world ID
+        // Read the config to get the world name
         const configData = await fs.readFile(configPath, 'utf-8');
         const worldConfig = JSON.parse(configData);
-        validWorldIds.push(worldConfig.id);
+        validWorldNames.push(worldConfig.name);
       } catch (error) {
         // Skip invalid world directories
       }
     }
 
-    return validWorldIds;
+    return validWorldNames;
   } catch (error) {
     return [];
   }
@@ -379,21 +347,29 @@ export async function listWorldsFromDisk(): Promise<string[]> {
 /**
  * Save world state to disk
  */
-export async function saveWorld(worldId: string): Promise<void> {
-  await saveWorldToDisk(worldId);
+export async function saveWorld(worldName: string): Promise<boolean> {
+  try {
+    await saveWorldToDisk(worldName);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not found')) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**
  * Save world configuration and agents to disk
  */
-async function saveWorldToDisk(worldId: string): Promise<void> {
-  const world = worlds.get(worldId);
+async function saveWorldToDisk(worldName: string): Promise<void> {
+  const world = worlds.get(worldName);
   if (!world) {
-    throw new Error(`World ${worldId} not found`);
+    throw new Error(`World ${worldName} not found`);
   }
 
-  const worldDir = getWorldDir(worldId);
-  const agentsDir = getAgentsDir(worldId);
+  const worldDir = getWorldDir(worldName);
+  const agentsDir = getAgentsDir(worldName);
 
   // Ensure directories exist
   await ensureDirectory(worldDir);
@@ -401,24 +377,23 @@ async function saveWorldToDisk(worldId: string): Promise<void> {
 
   // Save world config (without agents)
   const worldConfig = {
-    id: world.id,
     name: world.name
   };
 
   await fs.writeFile(
-    getWorldConfigPath(worldId),
+    getWorldConfigPath(worldName),
     JSON.stringify(worldConfig, null, 2)
   );
 
   // Save each agent separately
-  for (const [agentId, agent] of world.agents) {
+  for (const [agentName, agent] of world.agents) {
     const agentData = {
       ...agent,
       createdAt: agent.createdAt?.toISOString(),
       lastActive: agent.lastActive?.toISOString()
     };
 
-    const agentPath = getAgentPath(worldId, agent.name);
+    const agentPath = getAgentPath(worldName, agent.name);
     const agentDir = path.dirname(agentPath);
 
     // Ensure agent directory exists
@@ -431,18 +406,18 @@ async function saveWorldToDisk(worldId: string): Promise<void> {
 /**
  * Load world state from disk
  */
-export async function loadWorld(worldId: string): Promise<void> {
-  await loadWorldFromDisk(worldId);
+export async function loadWorld(worldName: string): Promise<void> {
+  await loadWorldFromDisk(worldName);
 }
 
 /**
  * Load world configuration and agents from disk
  */
-async function loadWorldFromDisk(worldId: string): Promise<void> {
+async function loadWorldFromDisk(worldName: string): Promise<void> {
   // Find the actual world directory
-  const actualWorldDir = await findWorldDir(worldId);
+  const actualWorldDir = await findWorldDir(worldName);
   if (!actualWorldDir) {
-    throw new Error(`World directory not found for ${worldId}`);
+    throw new Error(`World directory not found for ${worldName}`);
   }
 
   const worldConfigPath = path.join(actualWorldDir, 'config.json');
@@ -455,7 +430,6 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
 
     // Create world state
     const worldState: WorldState = {
-      id: worldConfig.id,
       name: worldConfig.name,
       agents: new Map()
     };
@@ -498,61 +472,31 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
         // Load memory from separate file (but don't add to agent object to keep it clean)
         // Memory will be loaded on-demand when needed for LLM context
 
-        worldState.agents.set(agent.id, agent);
+        worldState.agents.set(agent.name, agent);
 
         // Subscribe loaded agent to MESSAGE events (with duplicate prevention)
-        subscribeAgentToMessages(worldId, agent);
+        subscribeAgentToMessages(worldName, agent);
       }
     } catch (error) {
       // Agents directory doesn't exist or is empty
     }
 
-    worlds.set(worldId, worldState);
+    worlds.set(worldName, worldState);
   } catch (error) {
-    throw new Error(`Failed to load world ${worldId}: ${error}`);
+    throw new Error(`Failed to load world ${worldName}: ${error}`);
   }
 }
 
 // ===== AGENT LOOKUP HELPERS =====
 
 /**
- * Get a specific agent from a world by ID only
+ * Get a specific agent from a world by name
  */
-export function getAgent(worldId: string, agentId: string): Agent | null {
-  const world = worlds.get(worldId);
+export function getAgent(worldName: string, agentName: string): Agent | null {
+  const world = worlds.get(worldName);
   if (!world) return null;
 
-  return world.agents.get(agentId) || null;
-}
-
-/**
- * Get a specific agent from a world by name only
- */
-export function getAgentByName(worldId: string, agentName: string): Agent | null {
-  const world = worlds.get(worldId);
-  if (!world) return null;
-
-  for (const agent of world.agents.values()) {
-    if (agent.name === agentName) {
-      return agent;
-    }
-  }
-  return null;
-}
-
-/**
- * Smart agent lookup helper - finds agent by ID or name
- * Uses heuristic: if input contains hyphens and is long, assume it's an ID
- */
-export function findAgent(worldId: string, idOrName: string): Agent | null {
-  // Try ID first if it looks like a UUID
-  if (idOrName.includes('-') && idOrName.length > 10) {
-    const agent = getAgent(worldId, idOrName);
-    if (agent) return agent;
-  }
-
-  // Try name lookup
-  return getAgentByName(worldId, idOrName);
+  return world.agents.get(agentName) || null;
 }
 
 // ===== AGENT MANAGEMENT =====
@@ -560,8 +504,8 @@ export function findAgent(worldId: string, idOrName: string): Agent | null {
 /**
  * Subscribe an agent to message events if not already subscribed
  */
-function subscribeAgentToMessages(worldId: string, agent: Agent): void {
-  const subscriptionKey = `${worldId}:${agent.id}`;
+function subscribeAgentToMessages(worldName: string, agent: Agent): void {
+  const subscriptionKey = `${worldName}:${agent.name}`;
 
   // Check if already subscribed
   if (agentSubscriptions.has(subscriptionKey)) {
@@ -575,23 +519,22 @@ function subscribeAgentToMessages(worldId: string, agent: Agent): void {
       const payload = event.payload as MessageEventPayload;
 
       // Don't process messages from this agent itself
-      if (payload.sender !== agent.id) {
+      if (payload.sender !== agent.name) {
         try {
-          // Ensure agent config has id field
-          const agentConfigWithId = {
+          // Ensure agent config has name field
+          const agentConfigWithName = {
             ...agent.config,
-            id: agent.id,
             name: agent.name
           };
-          await processAgentMessage(agentConfigWithId, {
+          await processAgentMessage(agentConfigWithName, {
             name: 'message',
             id: event.id,
             content: payload.content,
             sender: payload.sender,
             payload: payload
-          }, undefined, worldId);
+          }, undefined, worldName);
         } catch (error) {
-          console.error(`Agent ${agent.id} failed to process message:`, error);
+          console.error(`Agent ${agent.name} failed to process message:`, error);
         }
       }
     }
@@ -604,8 +547,8 @@ function subscribeAgentToMessages(worldId: string, agent: Agent): void {
 /**
  * Unsubscribe an agent from message events
  */
-function unsubscribeAgentFromMessages(worldId: string, agentId: string): void {
-  const subscriptionKey = `${worldId}:${agentId}`;
+function unsubscribeAgentFromMessages(worldName: string, agentName: string): void {
+  const subscriptionKey = `${worldName}:${agentName}`;
   const unsubscribe = agentSubscriptions.get(subscriptionKey);
 
   if (unsubscribe) {
@@ -617,8 +560,8 @@ function unsubscribeAgentFromMessages(worldId: string, agentId: string): void {
 /**
  * Save a single agent to disk
  */
-async function saveAgentToDisk(worldId: string, agent: Agent): Promise<void> {
-  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+async function saveAgentToDisk(worldName: string, agent: Agent): Promise<void> {
+  const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agent.name));
   await ensureDirectory(agentDir);
 
   // Save system prompt separately as markdown file
@@ -636,7 +579,7 @@ async function saveAgentToDisk(worldId: string, agent: Agent): Promise<void> {
   };
 
   await fs.writeFile(
-    getAgentPath(worldId, agent.name),
+    getAgentPath(worldName, agent.name),
     JSON.stringify(agentData, null, 2)
   );
 }
@@ -659,8 +602,8 @@ async function loadSystemPromptDirect(worldDir: string, agentName: string): Prom
 /**
  * Load system prompt from file
  */
-async function loadSystemPrompt(worldId: string, agentName: string): Promise<string> {
-  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+async function loadSystemPrompt(worldName: string, agentName: string): Promise<string> {
+  const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agentName));
   const systemPromptPath = path.join(agentDir, 'system-prompt.md');
 
   try {
@@ -674,8 +617,8 @@ async function loadSystemPrompt(worldId: string, agentName: string): Promise<str
 /**
  * Save agent memory to separate file
  */
-async function saveAgentMemory(worldId: string, agentName: string, memory: any): Promise<void> {
-  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+async function saveAgentMemory(worldName: string, agentName: string, memory: any): Promise<void> {
+  const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agentName));
   await ensureDirectory(agentDir);
 
   const memoryPath = path.join(agentDir, 'memory.json');
@@ -685,8 +628,8 @@ async function saveAgentMemory(worldId: string, agentName: string, memory: any):
 /**
  * Load agent memory from file - uses LLM-compatible schema
  */
-async function loadAgentMemory(worldId: string, agentName: string): Promise<AgentMemory> {
-  const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agentName));
+async function loadAgentMemory(worldName: string, agentName: string): Promise<AgentMemory> {
+  const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agentName));
   const memoryPath = path.join(agentDir, 'memory.json');
 
   try {
@@ -706,12 +649,12 @@ async function loadAgentMemory(worldId: string, agentName: string): Promise<Agen
 /**
  * Add message to agent's conversation history using LLM-compatible schema
  */
-export async function addToAgentMemory(worldId: string, agentIdOrName: string, message: ChatMessage): Promise<void> {
-  const agent = findAgent(worldId, agentIdOrName);
+export async function addToAgentMemory(worldName: string, agentName: string, message: ChatMessage): Promise<void> {
+  const agent = getAgent(worldName, agentName);
   if (!agent) return;
 
   // Load current memory using agent name
-  const memory = await loadAgentMemory(worldId, agent.name);
+  const memory = await loadAgentMemory(worldName, agent.name);
 
   // Add message to conversation history
   if (!memory.messages) {
@@ -731,17 +674,17 @@ export async function addToAgentMemory(worldId: string, agentIdOrName: string, m
   memory.lastActivity = new Date().toISOString();
 
   // Save updated memory using agent name
-  await saveAgentMemory(worldId, agent.name, memory);
+  await saveAgentMemory(worldName, agent.name, memory);
 }
 
 /**
  * Get agent's conversation history for LLM context
  */
-export async function getAgentConversationHistory(worldId: string, agentIdOrName: string, limit: number = 20): Promise<ChatMessage[]> {
-  const agent = findAgent(worldId, agentIdOrName);
+export async function getAgentConversationHistory(worldName: string, agentName: string, limit: number = 20): Promise<ChatMessage[]> {
+  const agent = getAgent(worldName, agentName);
   if (!agent) return [];
 
-  const memory = await loadAgentMemory(worldId, agent.name);
+  const memory = await loadAgentMemory(worldName, agent.name);
   const history = memory.messages || [];
 
   // Return last N messages
@@ -751,16 +694,18 @@ export async function getAgentConversationHistory(worldId: string, agentIdOrName
 /**
  * Create an agent in a world
  */
-export async function createAgent(worldId: string, config: AgentConfig): Promise<Agent | null> {
-  const world = worlds.get(worldId);
+export async function createAgent(worldName: string, config: AgentConfig): Promise<Agent | null> {
+  const world = worlds.get(worldName);
   if (!world) return null;
 
-  // Always use config.id if provided, otherwise generate
-  const agentId = config.id || generateAgentId();
+  // Validate required config fields
+  if (!config.name || !config.type) {
+    return null;
+  }
+
   // Clone config to avoid mutating input
-  const agentConfig: AgentConfig = { ...config, id: agentId };
+  const agentConfig: AgentConfig = { ...config };
   const agent: Agent = {
-    id: agentId,
     name: config.name,
     type: config.type,
     status: 'active',
@@ -770,19 +715,19 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
     metadata: {}
   };
 
-  world.agents.set(agentId, agent);
+  world.agents.set(agent.name, agent);
 
   // Save agent to disk
   try {
-    await saveAgentToDisk(worldId, agent);
+    await saveAgentToDisk(worldName, agent);
   } catch (error) {
     // Rollback memory change on disk error
-    world.agents.delete(agentId);
+    world.agents.delete(agent.name);
     throw error;
   }
 
   // Subscribe agent to MESSAGE events (with duplicate prevention)
-  subscribeAgentToMessages(worldId, agent);
+  subscribeAgentToMessages(worldName, agent);
 
   return agent;
 }
@@ -790,28 +735,28 @@ export async function createAgent(worldId: string, config: AgentConfig): Promise
 /**
  * Remove an agent from a world
  */
-export async function removeAgent(worldId: string, agentId: string): Promise<boolean> {
-  const world = worlds.get(worldId);
-  if (!world || !world.agents.has(agentId)) return false;
+export async function removeAgent(worldName: string, agentName: string): Promise<boolean> {
+  const world = worlds.get(worldName);
+  if (!world || !world.agents.has(agentName)) return false;
 
-  const agent = world.agents.get(agentId);
+  const agent = world.agents.get(agentName);
 
   // Unsubscribe from message events
-  unsubscribeAgentFromMessages(worldId, agentId);
+  unsubscribeAgentFromMessages(worldName, agentName);
 
   // Remove from memory
-  world.agents.delete(agentId);
+  world.agents.delete(agentName);
 
   // Remove from disk
   try {
     if (agent) {
-      const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+      const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agent.name));
       await fs.rm(agentDir, { recursive: true, force: true });
     }
   } catch (error) {
     // Rollback memory change if disk operation fails
     if (agent) {
-      world.agents.set(agentId, agent);
+      world.agents.set(agentName, agent);
     }
     throw error;
   }
@@ -825,8 +770,8 @@ export async function removeAgent(worldId: string, agentId: string): Promise<boo
 /**
  * Get all agents in a world
  */
-export function getAgents(worldId: string): Agent[] {
-  const world = worlds.get(worldId);
+export function getAgents(worldName: string): Agent[] {
+  const world = worlds.get(worldName);
   if (!world) return [];
 
   return Array.from(world.agents.values());
@@ -835,11 +780,11 @@ export function getAgents(worldId: string): Agent[] {
 /**
  * Update an agent's data
  */
-export async function updateAgent(worldId: string, agentId: string, updates: Partial<Agent>): Promise<Agent | null> {
-  const world = worlds.get(worldId);
+export async function updateAgent(worldName: string, agentName: string, updates: Partial<Agent>): Promise<Agent | null> {
+  const world = worlds.get(worldName);
   if (!world) return null;
 
-  const agent = world.agents.get(agentId);
+  const agent = world.agents.get(agentName);
   if (!agent) return null;
 
   const originalAgent = { ...agent };
@@ -847,19 +792,19 @@ export async function updateAgent(worldId: string, agentId: string, updates: Par
   const updatedAgent = {
     ...agent,
     ...updates,
-    id: agent.id, // Prevent ID changes
+    name: agent.name, // Prevent name changes
     lastActive: new Date()
   };
 
   // Update in memory
-  world.agents.set(agentId, updatedAgent);
+  world.agents.set(agentName, updatedAgent);
 
   // Save to disk
   try {
-    await saveAgentToDisk(worldId, updatedAgent);
+    await saveAgentToDisk(worldName, updatedAgent);
   } catch (error) {
     // Rollback memory change on disk error
-    world.agents.set(agentId, originalAgent);
+    world.agents.set(agentName, originalAgent);
     throw error;
   }
 
@@ -871,16 +816,16 @@ export async function updateAgent(worldId: string, agentId: string, updates: Par
 /**
  * Broadcast a message to all agents in a world
  */
-export async function broadcastMessage(worldId: string, message: string, sender?: string): Promise<void> {
-  const world = worlds.get(worldId);
+export async function broadcastMessage(worldName: string, message: string, sender?: string): Promise<void> {
+  const world = worlds.get(worldName);
   if (!world) {
-    throw new Error(`World ${worldId} not found`);
+    throw new Error(`World ${worldName} not found`);
   }
 
   // Create simple message payload with flat structure
   const messageEventPayload: MessageEventPayload = {
     content: message,
-    sender: sender || 'system'
+    sender: sender || 'HUMAN'
   };
 
   // Publish MESSAGE event with flat payload structure
@@ -890,15 +835,15 @@ export async function broadcastMessage(worldId: string, message: string, sender?
 /**
  * Send a direct message to a specific agent
  */
-export async function sendMessage(worldId: string, targetId: string, message: string, sender?: string): Promise<void> {
-  const world = worlds.get(worldId);
+export async function sendMessage(worldName: string, targetName: string, message: string, sender?: string): Promise<void> {
+  const world = worlds.get(worldName);
   if (!world) {
-    throw new Error(`World ${worldId} not found`);
+    throw new Error(`World not found`);
   }
 
-  const target = world.agents.get(targetId);
+  const target = world.agents.get(targetName);
   if (!target) {
-    throw new Error(`Agent ${targetId} not found in world ${worldId}`);
+    throw new Error(`Agent not found`);
   }
 
   // Create simple message payload with flat structure
@@ -912,47 +857,33 @@ export async function sendMessage(worldId: string, targetId: string, message: st
 }
 
 /**
- * Subscribe to world events with filtering
+ * Subscribe to message events for a world
  */
-export function subscribeToWorldEvents(worldId: string, callback: (event: any) => void): () => void {
-  // Subscribe to world events and filter by worldId
-  const unsubscribeWorld = subscribeToWorld((event: any) => {
-    if (event.payload?.worldId === worldId) {
-      callback(event);
-    }
-  });
+export function subscribeToMessageEvents(worldName: string, callback: (event: any) => void): () => void {
+  return subscribeToMessages(callback);
+}
 
-  // Subscribe to messages and filter by worldId
-  const unsubscribeMessages = subscribeToMessages((event: any) => {
-    if (event.payload?.worldId === worldId) {
-      callback(event);
-    }
-  });
+/**
+ * Subscribe to world events for a world
+ */
+export function subscribeToWorldEvents(worldName: string, callback: (event: any) => void): () => void {
+  return subscribeToWorld(callback);
+}
 
-  // Subscribe to SSE events for agents in this world
-  const unsubscribeSSE = subscribeToSSE((event: any) => {
-    // Check if this SSE event is for an agent in this world
-    const agent = getAgent(worldId, event.payload?.agentId);
-    if (agent) {
-      callback(event);
-    }
-  });
-
-  // Return combined unsubscribe function
-  return () => {
-    unsubscribeWorld();
-    unsubscribeMessages();
-    unsubscribeSSE();
-  };
+/**
+ * Subscribe to SSE events for a world
+ */
+export function subscribeToSSEEvents(worldName: string, callback: (event: any) => void): () => void {
+  return subscribeToSSE(callback);
 }
 
 /**
  * Subscribe to messages for a specific agent in a world
  */
-export function subscribeToAgentMessages(worldId: string, agentId: string, callback: (event: any) => void): () => void {
+export function subscribeToAgentMessages(worldName: string, agentName: string, callback: (event: any) => void): () => void {
   return subscribeToMessages((event: any) => {
-    if (event.payload?.worldId === worldId &&
-      (event.payload?.recipient === agentId || event.payload?.targetId === agentId)) {
+    if (event.payload?.worldName === worldName &&
+      (event.payload?.recipient === agentName || event.payload?.targetName === agentName)) {
       callback(event);
     }
   });
@@ -961,12 +892,12 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
 /**
  * Clear agent's memory - archives existing memory.json then creates fresh simplified memory
  */
-export async function clearAgentMemory(worldId: string, agentIdOrName: string): Promise<boolean> {
-  const agent = findAgent(worldId, agentIdOrName);
+export async function clearAgentMemory(worldName: string, agentName: string): Promise<boolean> {
+  const agent = getAgent(worldName, agentName);
   if (!agent) return false;
 
   try {
-    const agentDir = path.join(getAgentsDir(worldId), toKebabCase(agent.name));
+    const agentDir = path.join(getAgentsDir(worldName), toKebabCase(agent.name));
     const memoryPath = path.join(agentDir, 'memory.json');
 
     // Archive the existing memory.json file if it exists
@@ -1006,21 +937,21 @@ export async function clearAgentMemory(worldId: string, agentIdOrName: string): 
     };
 
     // Save the simplified empty memory to the agent's memory file
-    await saveAgentMemory(worldId, agent.name, emptyMemory);
+    await saveAgentMemory(worldName, agent.name, emptyMemory);
 
     // Update agent's last active timestamp
-    const agents = getAgents(worldId);
+    const agents = getAgents(worldName);
     const agentForUpdate = agents.find(a => a.name === agent.name);
     if (agentForUpdate) {
-      await updateAgent(worldId, agentForUpdate.id, {
+      await updateAgent(worldName, agentForUpdate.name, {
         lastActive: new Date()
       });
     }
 
     return true;
   } catch (error) {
-    const agentName = agent ? agent.name : agentIdOrName;
-    console.error(`Failed to clear memory for agent ${agentName}:`, error);
+    const agentNameStr = agent ? agent.name : agentName;
+    console.error(`Failed to clear memory for agent ${agentNameStr}:`, error);
     return false;
   }
 }
@@ -1032,7 +963,9 @@ export async function clearAgentMemory(worldId: string, agentIdOrName: string): 
 export function _clearAllWorldsForTesting(): void {
   // Clean up all subscriptions
   for (const unsubscribe of agentSubscriptions.values()) {
-    unsubscribe();
+    if (typeof unsubscribe === 'function') {
+      unsubscribe();
+    }
   }
   agentSubscriptions.clear();
 

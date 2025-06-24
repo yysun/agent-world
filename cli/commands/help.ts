@@ -23,13 +23,13 @@
 
 import { colors } from '../utils/colors';
 
-export async function helpCommand(args: string[], worldId: string): Promise<void> {
+export async function helpCommand(args: string[], worldName: string): Promise<void> {
   const commands = [
     { command: '/help', description: 'Show this help message' },
     { command: '/agents', description: 'List all agents and their status' },
     { command: '/add [agent-name]', description: 'Create a new agent (optionally specify name)' },
-    { command: '/use', description: 'Activate an agent' },
-    { command: '/stop', description: 'Deactivate an agent' },
+    { command: '/use <agent-name>', description: 'Activate an agent' },
+    { command: '/stop <agent-name> | all', description: 'Deactivate an agent' },
     { command: '/show <agent-name>', description: 'Display conversation history for an agent' },
     { command: '/clear <agent-name> | all', description: 'Clear agent memory' },
     { command: '/quit', description: 'Exit the CLI' }

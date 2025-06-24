@@ -59,13 +59,13 @@ export async function processAgentMessage(
   agentConfig: AgentConfig,
   messageData: MessageData,
   messageId?: string,
-  worldId?: string
+  worldName?: string
 ): Promise<string> {
   const msgId = messageId || uuidv4();
 
-  // Ensure agent has an ID
-  if (!agentConfig.id) {
-    throw new Error('Agent config must have an ID for processing messages');
+  // Ensure agent has a name
+  if (!agentConfig.name) {
+    throw new Error('Agent config must have a name for processing messages');
   }
 
   try {
@@ -97,7 +97,7 @@ export async function processAgentMessage(
 
     // Load conversation history for context (import function from world.ts)
     const { getAgentConversationHistory, addToAgentMemory } = await import('./world');
-    const conversationHistory = await getAgentConversationHistory(worldId || 'default', agentConfig.name, 10);
+    const conversationHistory = await getAgentConversationHistory(worldName || 'default', agentConfig.name, 10);
 
     // Prepare messages for LLM (including system prompt, history, and current message)
     const messages = prepareMessagesForLLM(agentConfig, messageData, conversationHistory);
@@ -106,7 +106,6 @@ export async function processAgentMessage(
     const chatOptions: ChatOptions = {
       temperature: agentConfig.temperature,
       maxTokens: agentConfig.maxTokens,
-      agentId: agentConfig.id,
       agentName: agentConfig.name
     };
 
@@ -118,7 +117,7 @@ export async function processAgentMessage(
     );
 
     // Save all new messages to memory (system, user, assistant, tool messages)
-    await saveMessagesToMemory(worldId || 'default', agentConfig.name, messages, response);
+    await saveMessagesToMemory(worldName || 'default', agentConfig.name, messages, response);
 
     // Note: Using memory persistence to separate memory.json files
 
@@ -140,18 +139,18 @@ export async function processAgentMessage(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     agentLogger.error({
-      agentId: agentConfig.id!,
+      agentName: agentConfig.name,
       messageId: msgId,
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined
     }, 'Agent message processing failed');
 
     // Also log to console for immediate visibility
-    console.error(`Agent ${agentConfig.name} (${agentConfig.id}) failed to process message:`, errorMessage);
+    console.error(`Agent ${agentConfig.name} failed to process message:`, errorMessage);
 
     // Emit error SSE event
     await publishSSE({
-      agentId: agentConfig.id!,
+      agentName: agentConfig.name,
       type: 'error',
       messageId: msgId,
       error: errorMessage
@@ -169,7 +168,7 @@ export function shouldRespondToMessage(
   messageData: MessageData
 ): boolean {
   // Never respond to own messages
-  if (messageData.sender === agentConfig.id) {
+  if (messageData.sender === agentConfig.name) {
     return false;
   }
 
@@ -180,22 +179,20 @@ export function shouldRespondToMessage(
     return true;
   }
 
-  // For HUMAN/user messages, respond to all or check basic @name/@id mentions
+  // For HUMAN/user messages, respond to all or check basic @name mentions
   if (messageData.sender === 'HUMAN' || messageData.sender === 'human') {
-    // Simple check for @name or @id mention
+    // Simple check for @name mention
     const agentName = agentConfig.name.toLowerCase();
-    const agentId = agentConfig.id?.toLowerCase() || '';
     const contentLower = content.toLowerCase();
     const hasNameMention = contentLower.includes(`@${agentName}`);
-    const hasIdMention = agentId && contentLower.includes(`@${agentId}`);
 
     // If no mentions at all, respond to all (broadcast)
     if (!content.includes('@')) {
       return true;
     }
 
-    // If there are mentions, only respond if this agent is mentioned (by name or ID)
-    return hasNameMention || hasIdMention;
+    // If there are mentions, only respond if this agent is mentioned by name
+    return hasNameMention;
   }
 
   // For agent messages, only respond if mentioned
@@ -271,7 +268,7 @@ import { addToAgentMemory } from './world';
  * Saves only the new user message and assistant response - excludes system messages and history
  */
 async function saveMessagesToMemory(
-  worldId: string,
+  worldName: string,
   agentName: string,
   messages: ChatMessage[],
   assistantResponse: string
@@ -290,7 +287,7 @@ async function saveMessagesToMemory(
     };
 
     // Use agent name for memory storage
-    await addToAgentMemory(worldId, agentName, userMessageToSave);
+    await addToAgentMemory(worldName, agentName, userMessageToSave);
   }
 
   // Add the assistant response
@@ -301,5 +298,5 @@ async function saveMessagesToMemory(
   };
 
   // Use agent name for memory storage
-  await addToAgentMemory(worldId, agentName, assistantMessage);
+  await addToAgentMemory(worldName, agentName, assistantMessage);
 }

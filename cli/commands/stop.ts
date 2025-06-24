@@ -20,10 +20,10 @@
 import * as World from '../../src/world';
 import { colors } from '../utils/colors';
 
-export async function stopCommand(args: string[], worldId: string): Promise<void> {
+export async function stopCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Please specify an agent ID, name, or "all".'));
-    console.log(colors.gray('Usage: /stop <agent-id-or-name> or /stop all'));
+    console.log(colors.yellow('Please specify an agent name or "all".'));
+    console.log(colors.gray('Usage: /stop <agent-name> or /stop all'));
     return;
   }
 
@@ -31,7 +31,7 @@ export async function stopCommand(args: string[], worldId: string): Promise<void
 
   try {
     if (identifier.toLowerCase() === 'all') {
-      const agents = World.getAgents(worldId);
+      const agents = World.getAgents(worldName);
 
       if (agents.length === 0) {
         console.log(colors.yellow('No agents to stop.'));
@@ -43,7 +43,7 @@ export async function stopCommand(args: string[], worldId: string): Promise<void
       for (const agent of agents) {
         try {
           // Update agent status to inactive
-          const updatedAgent = World.updateAgent(worldId, agent.id, {
+          const updatedAgent = await World.updateAgent(worldName, agent.name, {
             status: 'inactive',
             lastActive: new Date()
           });
@@ -61,26 +61,21 @@ export async function stopCommand(args: string[], worldId: string): Promise<void
     }
 
     // Stop specific agent
-    const agents = World.getAgents(worldId);
+    const agents = World.getAgents(worldName);
 
-    // Try to find by exact ID first
-    let agent = agents.find((a: any) => a.id === identifier);
+    // Try to find by exact name first
+    let agent = agents.find((a: any) => a.name === identifier);
 
-    // If not found, try partial ID match
-    if (!agent) {
-      agent = agents.find((a: any) => a.id.startsWith(identifier));
-    }
-
-    // If still not found, try name match
+    // If not found, try partial name match
     if (!agent) {
       agent = agents.find((a: any) => a.name.toLowerCase().includes(identifier.toLowerCase()));
     }
 
     if (agent) {
       console.log(colors.blue(`Stopping agent: ${agent.name}...`));
-      
+
       // Update agent status to inactive
-      const updatedAgent = World.updateAgent(worldId, agent.id, {
+      const updatedAgent = await World.updateAgent(worldName, agent.name, {
         status: 'inactive',
         lastActive: new Date()
       });

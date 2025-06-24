@@ -32,7 +32,6 @@ describe('Agent Message Processing', () => {
     clearEventHistory();
 
     mockAgentConfig = {
-      id: 'test-agent-1',
       name: 'TestAgent',
       type: 'ai',
       provider: 'openai' as any,
@@ -82,9 +81,9 @@ describe('Agent Message Processing', () => {
   describe('Message Filtering Logic', () => {
     it('should process broadcast messages from users', () => {
       const messageData: MessageData = {
+        id: 'msg-1',
         name: 'user_message',
         payload: { broadcast: true },
-        id: 'msg-1',
         sender: 'HUMAN',
         content: 'Hello everyone!'
       };
@@ -95,10 +94,10 @@ describe('Agent Message Processing', () => {
 
     it('should not process messages from themselves', () => {
       const messageData: MessageData = {
+        id: 'msg-2',
         name: 'agent_message',
         payload: {},
-        id: 'msg-2',
-        sender: 'test-agent-1', // same as mockAgentConfig.id
+        sender: 'TestAgent', // same as mockAgentConfig.name
         content: 'My own message'
       };
 
@@ -108,9 +107,9 @@ describe('Agent Message Processing', () => {
 
     it('should process system messages', () => {
       const messageData: MessageData = {
+        id: 'msg-3',
         name: 'system_message',
         payload: {},
-        id: 'msg-3',
         sender: 'system',
         content: 'System announcement'
       };
@@ -121,9 +120,9 @@ describe('Agent Message Processing', () => {
 
     it('should process human messages without mentions', () => {
       const messageData: MessageData = {
+        id: 'msg-4',
         name: 'user_message',
         payload: {},
-        id: 'msg-4',
         sender: 'human',
         content: 'Hello everyone, how are you?'
       };
@@ -134,9 +133,9 @@ describe('Agent Message Processing', () => {
 
     it('should not process human messages with mentions when not mentioned', () => {
       const messageData: MessageData = {
+        id: 'msg-5',
         name: 'user_message',
         payload: {},
-        id: 'msg-5',
         sender: 'human',
         content: 'Hey @OtherAgent, can you help me?'
       };
@@ -147,9 +146,9 @@ describe('Agent Message Processing', () => {
 
     it('should process human messages when mentioned by name', () => {
       const messageData: MessageData = {
+        id: 'msg-6',
         name: 'user_message',
         payload: {},
-        id: 'msg-6',
         sender: 'human',
         content: 'Hey @TestAgent, can you help me?'
       };
@@ -158,24 +157,11 @@ describe('Agent Message Processing', () => {
       expect(result).toBe(true);
     });
 
-    it('should process human messages when mentioned by ID', () => {
-      const messageData: MessageData = {
-        name: 'user_message',
-        payload: {},
-        id: 'msg-7',
-        sender: 'human',
-        content: 'Hey @test-agent-1, can you help me?'
-      };
-
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
-      expect(result).toBe(true);
-    });
-
     it('should only process agent messages when mentioned', () => {
       const messageData: MessageData = {
+        id: 'msg-8',
         name: 'agent_message',
         payload: {},
-        id: 'msg-8',
         sender: 'other-agent',
         content: 'Just talking to myself'
       };
@@ -186,9 +172,9 @@ describe('Agent Message Processing', () => {
 
     it('should process agent messages when mentioned', () => {
       const messageData: MessageData = {
+        id: 'msg-9',
         name: 'agent_message',
         payload: {},
-        id: 'msg-9',
         sender: 'other-agent',
         content: '@TestAgent what do you think about this?'
       };

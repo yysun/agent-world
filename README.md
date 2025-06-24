@@ -179,10 +179,10 @@ The system uses a hierarchical file structure with clear separation of concerns:
 ```
 data/
 └── worlds/
-    └── {worldId}/
+    └── {worldName}/
         ├── config.json                    # World metadata and configuration
         └── agents/
-            └── {agentId}/
+            └── {agentName}/
                 ├── config.json            # Agent configuration
                 ├── system-prompt.md       # Editable system prompt
                 └── memory.json            # Conversation history

@@ -55,7 +55,6 @@ export interface LLMConfig {
 export interface ChatOptions {
   temperature?: number;
   maxTokens?: number;
-  agentId?: string;
   agentName?: string;
 }
 
@@ -123,7 +122,6 @@ export async function chatWithLLM(
     return text;
   } catch (error) {
     agentLogger.error({
-      agentId: options.agentId,
       agentName: options.agentName,
       error
     }, 'Direct LLM chat failed');
@@ -149,7 +147,7 @@ export async function streamChatWithLLM(
   try {
     // Emit SSE start event
     await publishSSE({
-      agentId: options.agentId || 'unknown',
+      agentName: options.agentName || 'unknown',
       type: 'start',
       messageId: messageId,
       content: ''
@@ -169,7 +167,6 @@ export async function streamChatWithLLM(
 
   } catch (error) {
     agentLogger.error({
-      agentId: options.agentId,
       agentName: options.agentName,
       messageId,
       error
@@ -177,7 +174,7 @@ export async function streamChatWithLLM(
 
     // Emit SSE error event
     await publishSSE({
-      agentId: options.agentId || 'unknown',
+      agentName: options.agentName || 'unknown',
       type: 'error',
       messageId: messageId,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -216,7 +213,7 @@ async function handleStreamingRequest(
 
       // Emit SSE chunk event
       await publishSSE({
-        agentId: options.agentId || 'unknown',
+        agentName: options.agentName || 'unknown',
         type: 'chunk',
         messageId: messageId,
         content: textPart
@@ -225,7 +222,7 @@ async function handleStreamingRequest(
 
     // Emit SSE end event (from LLMQueue)
     await publishSSE({
-      agentId: options.agentId || 'unknown',
+      agentName: options.agentName || 'unknown',
       type: 'end',
       messageId: messageId,
       content: fullResponse
@@ -235,7 +232,6 @@ async function handleStreamingRequest(
 
   } catch (error) {
     agentLogger.error({
-      agentId: options.agentId,
       agentName: options.agentName,
       messageId,
       error

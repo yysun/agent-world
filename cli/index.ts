@@ -47,18 +47,18 @@ function debug(...args: any[]) {
 }
 
 // Load agents function (merged from loader.ts)
-async function loadAgents(worldId: string): Promise<void> {
+async function loadAgents(worldName: string): Promise<void> {
   try {
     // Try to load world from disk if it exists
     try {
-      await World.loadWorld(worldId);
+      await World.loadWorld(worldName);
     } catch (error) {
       // World doesn't exist on disk yet, that's okay
     }
 
-    const agents = World.getAgents(worldId);
+    const agents = World.getAgents(worldName);
 
-    await listCommand([], worldId); // Call agents command to display loaded agents
+    await listCommand([], worldName); // Call agents command to display loaded agents
     if (agents.length === 0) {
       // Don't print anything if no agents - will be shown by agents command
     }
@@ -72,14 +72,13 @@ async function loadAgents(worldId: string): Promise<void> {
 }
 
 // Quit command implementation
-async function quitCommand(args: string[], worldId: string): Promise<void> {
+async function quitCommand(args: string[], worldName: string): Promise<void> {
   console.log(colors.cyan('Goodbye! 👋'));
   process.exit(0);
 }
 
 // Agent response management for real-time streaming
 interface StreamingAgent {
-  agentId: string;
   agentName: string;
   isStreaming: boolean;
   hasStarted: boolean;
@@ -97,8 +96,8 @@ const completedAgents = new Map<string, StreamingAgent>(); // Store completed ag
 let streamingStartLine = 0; // The line where streaming block starts
 let nextLineOffset = 0; // Next available line offset for new agents
 
-function startStreaming(agentId: string, agentName: string): void {
-  if (!activeStreams.has(agentId)) {
+function startStreaming(agentName: string, displayName: string): void {
+  if (!activeStreams.has(agentName)) {
     // If this is the first agent, mark the starting line
     if (activeStreams.size === 0) {
       console.log(); // Add newline before streaming block starts
@@ -109,8 +108,7 @@ function startStreaming(agentId: string, agentName: string): void {
     // Assign this agent the next available line
     const lineOffset = nextLineOffset++;
 
-    activeStreams.set(agentId, {
-      agentId,
+    activeStreams.set(agentName, {
       agentName,
       isStreaming: true,
       hasStarted: false,
@@ -122,7 +120,7 @@ function startStreaming(agentId: string, agentName: string): void {
     });
   }
 
-  const stream = activeStreams.get(agentId)!;
+  const stream = activeStreams.get(agentName)!;
   if (!stream.hasStarted) {
     // Create a new line for this agent if needed
     if (stream.lineOffset > 0) {
@@ -134,17 +132,17 @@ function startStreaming(agentId: string, agentName: string): void {
 
     // Show initial flashing emoji preview for this agent (start with empty content)
     const initialEmoji = colors.cyan('●');
-    const initialPreview = `${initialEmoji} ${agentName}: ... (0 tokens)`;
+    const initialPreview = `${initialEmoji} ${displayName}: ... (0 tokens)`;
     process.stdout.write(initialPreview);
     stream.hasStarted = true;
 
     // Start flashing emoji animation
-    startEmojiFlashing(agentId);
+    startEmojiFlashing(agentName);
   }
 }
 
-function addStreamingContent(agentId: string, content: string): void {
-  const stream = activeStreams.get(agentId);
+function addStreamingContent(agentName: string, content: string): void {
+  const stream = activeStreams.get(agentName);
   if (stream && stream.isStreaming) {
     // Add content to buffer
     stream.contentBuffer += content;
@@ -155,23 +153,23 @@ function addStreamingContent(agentId: string, content: string): void {
       .filter(token => token.length > 0).length;
 
     // Update preview immediately with current content
-    updateStreamingPreview(agentId);
+    updateStreamingPreview(agentName);
   }
 }
 
-function endStreaming(agentId: string): void {
-  const stream = activeStreams.get(agentId);
+function endStreaming(agentName: string): void {
+  const stream = activeStreams.get(agentName);
   if (stream) {
     stream.isStreaming = false;
 
     // Stop emoji flashing animation
-    stopEmojiFlashing(agentId);
+    stopEmojiFlashing(agentName);
 
     // Store completed agent data for final display
-    completedAgents.set(agentId, stream);
+    completedAgents.set(agentName, stream);
 
     // Remove this agent from active streams
-    activeStreams.delete(agentId);
+    activeStreams.delete(agentName);
 
     // If this is the last active stream, show all final content
     if (activeStreams.size === 0) {
@@ -217,15 +215,15 @@ function endStreaming(agentId: string): void {
   }
 }
 
-function markStreamingError(agentId: string): void {
-  const stream = activeStreams.get(agentId);
+function markStreamingError(agentName: string): void {
+  const stream = activeStreams.get(agentName);
   if (stream) {
     // Mark as error and stop emoji flashing animation
     stream.hasError = true;
-    stopEmojiFlashing(agentId);
+    stopEmojiFlashing(agentName);
 
     // Store completed agent data for final display (with error status)
-    completedAgents.set(agentId, stream);
+    completedAgents.set(agentName, stream);
 
     // Save current cursor position
     process.stdout.write(terminal.saveCursor());
@@ -246,7 +244,7 @@ function markStreamingError(agentId: string): void {
     process.stdout.write(terminal.restoreCursor());
 
     // Remove this agent from active streams
-    activeStreams.delete(agentId);
+    activeStreams.delete(agentName);
 
     // If no more active streams, clean up and reset
     if (activeStreams.size === 0) {
@@ -265,8 +263,8 @@ function isStreamingActive(): boolean {
 const FLASH_EMOJIS = ['●', '○']; // Filled and empty circles for flashing effect
 let emojiFlashIndex = 0;
 
-function startEmojiFlashing(agentId: string): void {
-  const stream = activeStreams.get(agentId);
+function startEmojiFlashing(agentName: string): void {
+  const stream = activeStreams.get(agentName);
   if (!stream) return;
 
   // Clear any existing timer
@@ -276,18 +274,18 @@ function startEmojiFlashing(agentId: string): void {
 
   // Start flashing animation (500ms interval)
   stream.emojiFlashTimer = setInterval(() => {
-    if (!activeStreams.has(agentId)) {
+    if (!activeStreams.has(agentName)) {
       // Agent is no longer streaming, stop the timer
       clearInterval(stream.emojiFlashTimer!);
       return;
     }
 
-    updateStreamingPreview(agentId);
+    updateStreamingPreview(agentName);
   }, 500);
 }
 
-function stopEmojiFlashing(agentId: string): void {
-  const stream = activeStreams.get(agentId) || completedAgents.get(agentId);
+function stopEmojiFlashing(agentName: string): void {
+  const stream = activeStreams.get(agentName) || completedAgents.get(agentName);
   if (stream?.emojiFlashTimer) {
     clearInterval(stream.emojiFlashTimer);
     stream.emojiFlashTimer = undefined;
@@ -313,8 +311,8 @@ function getStatusEmoji(hasError?: boolean): string {
   }
 }
 
-function updateStreamingPreview(agentId: string): void {
-  const stream = activeStreams.get(agentId);
+function updateStreamingPreview(agentName: string): void {
+  const stream = activeStreams.get(agentName);
   if (!stream || !stream.isStreaming) return;
 
   // Create preview content (50 characters max)
@@ -403,7 +401,7 @@ function createBorderedContent(agentName: string, content: string, hasError?: bo
 }
 
 // Command registry
-const commands: Record<string, (args: string[], worldId: string) => Promise<void>> = {
+const commands: Record<string, (args: string[], worldName: string) => Promise<void>> = {
   add: addCommand,
   agents: listCommand,
   clear: clearCommand,
@@ -416,7 +414,7 @@ const commands: Record<string, (args: string[], worldId: string) => Promise<void
 
 async function main() {
   // Load worlds with smart selection (also initializes file storage)
-  const worldId = await World.loadWorldsWithSelection();
+  const worldName = await World.loadWorldsWithSelection();
 
   // Streaming manager is now function-based (no initialization needed)
 
@@ -431,7 +429,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   // Load all agents from our sample world
-  await loadAgents(worldId);
+  await loadAgents(worldName);
 
   // Handle input from piped input or command line arguments
   let hasExternalInput = false;
@@ -517,7 +515,7 @@ async function main() {
   if (hasExternalInput && externalMessage) {
     console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
     try {
-      await World.broadcastMessage(worldId, externalMessage, 'HUMAN');
+      await World.broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
       console.log(colors.red(`Error broadcasting message: ${error}`));
     }
@@ -545,18 +543,18 @@ async function main() {
 
       if (commands[commandName]) {
         try {
-          await commands[commandName](commandArgs, worldId);
+          await commands[commandName](commandArgs, worldName);
         } catch (error) {
           console.log(colors.red(`Error executing command: ${error}`));
         }
       } else {
         console.log(colors.yellow(`Unknown command: /${commandName}`));
-        await helpCommand([], worldId);
+        await helpCommand([], worldName);
       }
     } else {
       // Broadcast message to all agents
       try {
-        await World.broadcastMessage(worldId, trimmedInput, 'HUMAN');
+        await World.broadcastMessage(worldName, trimmedInput, 'HUMAN');
       } catch (error) {
         console.log(colors.red(`Error broadcasting message: ${error}`));
       }
@@ -567,25 +565,26 @@ async function main() {
 
   rl.on('close', shutdown);
 
-  // Subscribe to world events for agent streaming responses
-  const unsubscribe = World.subscribeToWorldEvents(worldId, async (event) => {
+  // Subscribe to SSE events for agent streaming responses
+  const unsubscribe = World.subscribeToSSEEvents(worldName, async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
       const sseData = event.payload;
 
       // Get agent name for display
-      const agent = World.getAgent(worldId, sseData.agentId);
+      const agents = World.getAgents(worldName);
+      const agent = agents.find(a => a.name === sseData.agentName);
       const agentName = agent?.name || 'Unknown Agent';
 
       switch (sseData.type) {
         case 'start':
-          startStreaming(sseData.agentId, agentName);
+          startStreaming(sseData.agentName, agentName);
           break;
         case 'chunk':
-          addStreamingContent(sseData.agentId, sseData.content || '');
+          addStreamingContent(sseData.agentName, sseData.content || '');
           break;
         case 'end':
-          endStreaming(sseData.agentId);
+          endStreaming(sseData.agentName);
           // Show prompt again after response completes
           setTimeout(() => {
             if (!isStreamingActive()) {
@@ -594,7 +593,7 @@ async function main() {
           }, 100);
           break;
         case 'error':
-          markStreamingError(sseData.agentId);
+          markStreamingError(sseData.agentName);
           setTimeout(() => {
             if (!isStreamingActive()) {
               rl.prompt();

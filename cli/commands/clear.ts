@@ -27,10 +27,10 @@
 import * as World from '../../src/world';
 import { colors } from '../utils/colors';
 
-export async function clearCommand(args: string[], worldId: string): Promise<void> {
+export async function clearCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Please specify an agent ID, name, or "all".'));
-    console.log(colors.gray('Usage: /clear <agent-id-or-name> or /clear all'));
+    console.log(colors.yellow('Please specify an agent name or "all".'));
+    console.log(colors.gray('Usage: /clear <agent-name> or /clear all'));
     return;
   }
 
@@ -38,7 +38,7 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
 
   try {
     if (identifier.toLowerCase() === 'all') {
-      const agents = World.getAgents(worldId);
+      const agents = World.getAgents(worldName);
 
       if (agents.length === 0) {
         console.log(colors.yellow('No agents to clear.'));
@@ -50,7 +50,7 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
       for (const agent of agents) {
         try {
           // Clear agent's memory using the proper clearAgentMemory function
-          const success = await World.clearAgentMemory(worldId, agent.id);
+          const success = await World.clearAgentMemory(worldName, agent.name);
 
           if (success) {
             console.log(colors.green(`✓ Cleared memory: ${agent.name}`));
@@ -65,17 +65,8 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
       console.log(colors.green(`\nMemory cleared for all agents.`));
     } else {
       // Clear memory for specific agent
-      let agent = World.getAgent(worldId, identifier);
-
-      if (!agent) {
-        // Try to find by name
-        const agents = World.getAgents(worldId);
-        const foundAgent = agents.find(a => a.name.toLowerCase() === identifier.toLowerCase());
-
-        if (foundAgent) {
-          agent = foundAgent;
-        }
-      }
+      const agents = World.getAgents(worldName);
+      const agent = agents.find(a => a.name.toLowerCase() === identifier.toLowerCase());
 
       if (!agent) {
         console.log(colors.red(`Agent not found: ${identifier}`));
@@ -84,7 +75,7 @@ export async function clearCommand(args: string[], worldId: string): Promise<voi
       }
 
       // Clear memory for specific agent using the proper clearAgentMemory function
-      const success = await World.clearAgentMemory(worldId, agent.id);
+      const success = await World.clearAgentMemory(worldName, agent.name);
 
       if (success) {
         console.log(colors.green(`✓ Memory cleared for agent: ${agent.name}`));

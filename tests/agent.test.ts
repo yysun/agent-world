@@ -23,7 +23,6 @@ const mockEventBus = eventBus as jest.Mocked<typeof eventBus>;
 
 describe('Agent Functions', () => {
   const mockAgentConfig: AgentConfig = {
-    id: 'test-agent',
     name: 'TestAgent',
     type: 'ai',
     provider: LLMProvider.OPENAI,
@@ -37,9 +36,9 @@ describe('Agent Functions', () => {
 
     it('should respond to human messages without mentions', () => {
       const messageData: MessageData = {
+        id: 'msg-1',
         name: 'human-message',
         payload: { content: 'Hello everyone' },
-        id: 'msg-1',
         sender: 'human',
         content: 'Hello everyone'
       };
@@ -49,9 +48,9 @@ describe('Agent Functions', () => {
 
     it('should respond to human messages with mentions', () => {
       const messageData: MessageData = {
+        id: 'msg-1',
         name: 'human-message',
         payload: { content: 'Hello @TestAgent' },
-        id: 'msg-1',
         sender: 'human',
         content: 'Hello @TestAgent'
       };
@@ -61,10 +60,10 @@ describe('Agent Functions', () => {
 
     it('should not respond to own messages', () => {
       const messageData: MessageData = {
+        id: 'msg-1',
         name: 'agent-message',
         payload: { content: 'I said something' },
-        id: 'msg-1',
-        sender: 'test-agent',
+        sender: 'TestAgent',
         content: 'I said something'
       };
 
@@ -73,17 +72,17 @@ describe('Agent Functions', () => {
 
     it('should only respond to agent messages when mentioned', () => {
       const mentionedMessage: MessageData = {
+        id: 'msg-1',
         name: 'agent-message',
         payload: { content: 'Hey @TestAgent, help!' },
-        id: 'msg-1',
         sender: 'other-agent',
         content: 'Hey @TestAgent, help!'
       };
 
       const unmentionedMessage: MessageData = {
+        id: 'msg-2',
         name: 'agent-message',
         payload: { content: 'Just talking to myself' },
-        id: 'msg-2',
         sender: 'other-agent',
         content: 'Just talking to myself'
       };
@@ -94,9 +93,9 @@ describe('Agent Functions', () => {
 
     it('should always respond to system messages', () => {
       const systemMessage: MessageData = {
+        id: 'msg-1',
         name: 'system-message',
         payload: { content: 'System announcement' },
-        id: 'msg-1',
         sender: 'system',
         content: 'System announcement'
       };
@@ -126,8 +125,8 @@ describe('Agent Functions', () => {
       mockLlm.streamChatWithLLM.mockResolvedValue(mockResponse);
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'msg-1',
+        name: 'user-message',
         content: 'Hello agent!',
         sender: 'human',
         payload: { content: 'Hello agent!' }
@@ -154,7 +153,6 @@ describe('Agent Functions', () => {
         expect.objectContaining({
           temperature: 0.7,
           maxTokens: 1000,
-          agentId: 'test-agent',
           agentName: 'TestAgent'
         })
       );
@@ -165,8 +163,8 @@ describe('Agent Functions', () => {
       mockLlm.streamChatWithLLM.mockResolvedValue(mockResponse);
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'msg-1',
+        name: 'user-message',
         content: 'Test message',
         sender: 'human',
         payload: { content: 'Test message' }
@@ -183,8 +181,8 @@ describe('Agent Functions', () => {
       mockLlm.streamChatWithLLM.mockResolvedValue(mockResponse);
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'msg-1',
+        name: 'user-message',
         content: 'Test without ID',
         sender: 'human',
         payload: { content: 'Test without ID' }
@@ -205,10 +203,10 @@ describe('Agent Functions', () => {
 
     it('should skip processing if agent should not respond', async () => {
       const messageData: MessageData = {
-        name: 'agent-message',
         id: 'msg-1',
+        name: 'agent-message',
         content: 'Message from self',
-        sender: 'test-agent', // Same as agent ID
+        sender: 'TestAgent', // Same as agent name
         payload: { content: 'Message from self' }
       };
 
@@ -228,8 +226,8 @@ describe('Agent Functions', () => {
       console.error = errorMock;
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'msg-1',
+        name: 'user-message',
         content: 'Test message',
         sender: 'human',
         payload: { content: 'Test message' }
@@ -239,7 +237,7 @@ describe('Agent Functions', () => {
         .rejects.toThrow('Streaming failed');
 
       expect(mockEventBus.publishSSE).toHaveBeenCalledWith({
-        agentId: 'test-agent',
+        agentName: 'TestAgent',
         type: 'error',
         messageId: 'error-msg-id',
         error: 'Streaming failed'
@@ -251,8 +249,8 @@ describe('Agent Functions', () => {
       mockLlm.streamChatWithLLM.mockResolvedValue(mockResponse);
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'msg-1',
+        name: 'user-message',
         content: 'Test message',
         sender: 'human',
         payload: { content: 'Test message' }
@@ -273,8 +271,8 @@ describe('Agent Functions', () => {
       mockLlm.streamChatWithLLM.mockResolvedValue(mockResponse);
 
       const messageData: MessageData = {
-        name: 'user-message',
         id: 'new-msg',
+        name: 'user-message',
         content: 'New message',
         sender: 'human',
         payload: { content: 'New message' }

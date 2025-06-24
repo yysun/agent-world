@@ -147,7 +147,7 @@ describe('Event Bus', () => {
 
       await publishWorldEvent({
         action: 'agent-created',
-        agentId: 'agent-1'
+        agentName: 'Agent1'
       });
 
       expect(worldEvents).toHaveLength(1);
@@ -165,7 +165,7 @@ describe('Event Bus', () => {
       });
 
       await publishSSE({
-        agentId: 'agent-1',
+        agentName: 'Agent1',
         type: 'chunk',
         content: 'Hello world',
         messageId: 'msg-1'
@@ -174,7 +174,7 @@ describe('Event Bus', () => {
       expect(sseEvents).toHaveLength(1);
       expect(sseEvents[0].type).toBe(EventType.SSE);
       expect(sseEvents[0].payload.content).toBe('Hello world');
-      expect(sseEvents[0].payload.agentId).toBe('agent-1');
+      expect(sseEvents[0].payload.agentName).toBe('Agent1');
 
       unsubscribe();
     });
@@ -185,18 +185,18 @@ describe('Event Bus', () => {
       const agent1Events: any[] = [];
       const agent2Events: any[] = [];
 
-      const unsub1 = subscribeToAgent('agent-1', (event) => agent1Events.push(event));
-      const unsub2 = subscribeToAgent('agent-2', (event) => agent2Events.push(event));
+      const unsub1 = subscribeToAgent('Agent1', (event) => agent1Events.push(event));
+      const unsub2 = subscribeToAgent('Agent2', (event) => agent2Events.push(event));
 
-      // Send message from agent-1
+      // Send message from Agent1
       await publishMessageEvent({
         content: 'test message',
-        sender: 'agent-1'
+        sender: 'Agent1'
       });
 
-      // Send SSE to agent-2
+      // Send SSE to Agent2
       await publishSSE({
-        agentId: 'agent-2',
+        agentName: 'Agent2',
         type: 'chunk',
         content: 'hello'
       });
@@ -204,8 +204,8 @@ describe('Event Bus', () => {
       expect(agent1Events).toHaveLength(1);
       expect(agent2Events).toHaveLength(1);
 
-      expect(agent1Events[0].payload.sender).toBe('agent-1');
-      expect(agent2Events[0].payload.agentId).toBe('agent-2');
+      expect(agent1Events[0].payload.sender).toBe('Agent1');
+      expect(agent2Events[0].payload.agentName).toBe('Agent2');
 
       unsub1();
       unsub2();
@@ -232,15 +232,15 @@ describe('Event Bus', () => {
     it('should filter events by agent', async () => {
       const agentEvents: any[] = [];
 
-      const unsubscribe = subscribeToMessages((event) => {
+      const unsubscribe = subscribeToAgent('Agent1', (event) => {
         agentEvents.push(event);
-      }, { agentId: 'agent-1' });
+      });
 
-      await publishMessageEvent({ content: 'test message 1', sender: 'agent-1' });
-      await publishMessageEvent({ content: 'test message 2', sender: 'agent-2' });
+      await publishMessageEvent({ content: 'test message 1', sender: 'Agent1' });
+      await publishMessageEvent({ content: 'test message 2', sender: 'Agent2' });
 
       expect(agentEvents).toHaveLength(1);
-      expect(agentEvents[0].payload.sender).toBe('agent-1');
+      expect(agentEvents[0].payload.sender).toBe('Agent1');
 
       unsubscribe();
     });
@@ -248,9 +248,9 @@ describe('Event Bus', () => {
 
   describe('Event History', () => {
     it('should maintain event history', async () => {
-      await publishMessageEvent({ content: 'test message 1', sender: 'agent-1' });
+      await publishMessageEvent({ content: 'test message 1', sender: 'Agent1' });
       await publishWorldEvent({ action: 'test1' });
-      await publishSSE({ agentId: 'agent-1', type: 'chunk' });
+      await publishSSE({ agentName: 'Agent1', type: 'chunk' });
 
       const history = getEventHistory();
       expect(history).toHaveLength(3);
@@ -313,9 +313,9 @@ describe('Event Bus', () => {
         allEvents.push(event);
       });
 
-      await publishMessageEvent({ content: 'test message', sender: 'agent-1' });
+      await publishMessageEvent({ content: 'test message', sender: 'Agent1' });
       await publishWorldEvent({ action: 'test' });
-      await publishSSE({ agentId: 'agent-1', type: 'chunk' });
+      await publishSSE({ agentName: 'Agent1', type: 'chunk' });
 
       expect(allEvents).toHaveLength(3);
       expect(allEvents[0].type).toBe(EventType.MESSAGE);
