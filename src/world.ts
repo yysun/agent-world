@@ -103,7 +103,7 @@ function getWorldsDir(): string {
 }
 
 // Default world configuration
-const DEFAULT_WORLD_NAME = 'Default World';
+export const DEFAULT_WORLD_NAME = 'Default World';
 
 /**
  * Get world directory path using kebab-case of world name
@@ -192,6 +192,33 @@ export async function ensureDefaultWorld(): Promise<string> {
   // Create default world
   const defaultWorldName = await createWorld({ name: DEFAULT_WORLD_NAME });
   return defaultWorldName;
+}
+
+/**
+ * Load worlds with basic logic - returns world list and suggests action
+ */
+export async function loadWorlds(): Promise<{ worlds: string[]; action: 'create' | 'use' | 'select'; defaultWorld?: string }> {
+  // Initialize event bus with local provider
+  initializeEventBus({ provider: 'local', enableLogging: true });
+
+  await initializeFileStorage();
+  await ensureDataDirectories();
+
+  // Check if any worlds exist on disk
+  const existingWorlds = await listWorldsFromDisk();
+
+  if (existingWorlds.length === 0) {
+    // No worlds found - suggest creating default world
+    return { worlds: existingWorlds, action: 'create' };
+  }
+
+  if (existingWorlds.length === 1) {
+    // One world found - suggest using it automatically
+    return { worlds: existingWorlds, action: 'use', defaultWorld: existingWorlds[0] };
+  }
+
+  // Multiple worlds found - suggest interactive selection
+  return { worlds: existingWorlds, action: 'select' };
 }
 
 /**
@@ -413,7 +440,7 @@ export async function loadWorld(worldName: string): Promise<void> {
 /**
  * Load world configuration and agents from disk
  */
-async function loadWorldFromDisk(worldName: string): Promise<void> {
+export async function loadWorldFromDisk(worldName: string): Promise<void> {
   // Find the actual world directory
   const actualWorldDir = await findWorldDir(worldName);
   if (!actualWorldDir) {

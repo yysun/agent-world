@@ -12,7 +12,7 @@
  * 
  * Architecture:
  * - Function-based streaming display manager in separate module (streaming/streaming-display.ts)
- * - Command routing system with World object pattern
+ * - Command routing system with direct World function imports
  * - External input processing for both piped input and CLI arguments
  * - SSE event subscription for real-time agent response streaming
  * - Terminal control integration via imported streaming display module
@@ -23,6 +23,7 @@
  * - Enhanced shutdown handling with proper streaming resource cleanup
  * - Simplified main CLI logic by delegating streaming management to dedicated module
  * - Removed web server integration (now handled by separate launcher)
+ * - Refactored to use direct function imports from World module instead of namespace import
  */
 
 // npm run dev || echo "Test completed"
@@ -37,7 +38,16 @@ import { listCommand } from './commands/list';
 import { showCommand } from './commands/show';
 import { stopCommand } from './commands/stop';
 import { useCommand } from './commands/use';
-import * as World from '../src/world';
+import {
+  loadWorlds,
+  loadWorld,
+  loadWorldFromDisk,
+  createWorld,
+  getAgents,
+  broadcastMessage,
+  subscribeToSSEEvents,
+  DEFAULT_WORLD_NAME
+} from '../src/world';
 import { colors, terminal } from './utils/colors';
 import { EventType } from '../src/types';
 import * as StreamingDisplay from './streaming/streaming-display';
@@ -53,12 +63,12 @@ async function loadAgents(worldName: string): Promise<void> {
   try {
     // Try to load world from disk if it exists
     try {
-      await World.loadWorld(worldName);
+      await loadWorld(worldName);
     } catch (error) {
       // World doesn't exist on disk yet, that's okay
     }
 
-    const agents = World.getAgents(worldName);
+    const agents = getAgents(worldName);
 
     await listCommand([], worldName); // Call agents command to display loaded agents
     if (agents.length === 0) {
@@ -91,9 +101,66 @@ const commands: Record<string, (args: string[], worldName: string) => Promise<vo
   quit: quitCommand,
 };
 
+// Interactive world selection when multiple worlds exist
+async function selectWorldInteractively(worlds: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    console.log(colors.cyan('\nMultiple worlds found:'));
+    worlds.forEach((world, index) => {
+      console.log(colors.gray(`  ${index + 1}. ${world}`));
+    });
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    const askForSelection = () => {
+      rl.question(colors.cyan(`\nSelect a world (1-${worlds.length}): `), (answer) => {
+        const selection = parseInt(answer.trim());
+
+        if (isNaN(selection) || selection < 1 || selection > worlds.length) {
+          console.log(colors.yellow('Invalid selection. Please try again.'));
+          askForSelection();
+          return;
+        }
+
+        rl.close();
+        resolve(worlds[selection - 1]);
+      });
+    };
+
+    askForSelection();
+  });
+}
+
 async function main() {
   // Load worlds with smart selection (also initializes file storage)
-  const worldName = await World.loadWorldsWithSelection();
+  const { worlds, action, defaultWorld } = await loadWorlds();
+
+  let worldName: string;
+
+  switch (action) {
+    case 'create':
+      // No worlds found - create default world
+      worldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+      break;
+
+    case 'use':
+      // One world found - use it automatically
+      await loadWorldFromDisk(defaultWorld!);
+      worldName = defaultWorld!;
+      break;
+
+    case 'select':
+      // Multiple worlds found - let user pick
+      const selectedWorld = await selectWorldInteractively(worlds);
+      await loadWorldFromDisk(selectedWorld);
+      worldName = selectedWorld;
+      break;
+
+    default:
+      throw new Error('Unexpected world loading action');
+  }
 
   // Streaming manager is now function-based (no initialization needed)
 
@@ -195,7 +262,7 @@ async function main() {
   if (hasExternalInput && externalMessage) {
     console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
     try {
-      await World.broadcastMessage(worldName, externalMessage, 'HUMAN');
+      await broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
       console.log(colors.red(`Error broadcasting message: ${error}`));
     }
@@ -234,7 +301,7 @@ async function main() {
     } else {
       // Broadcast message to all agents
       try {
-        await World.broadcastMessage(worldName, trimmedInput, 'HUMAN');
+        await broadcastMessage(worldName, trimmedInput, 'HUMAN');
       } catch (error) {
         console.log(colors.red(`Error broadcasting message: ${error}`));
       }
@@ -246,13 +313,13 @@ async function main() {
   rl.on('close', shutdown);
 
   // Subscribe to SSE events for agent streaming responses
-  const unsubscribe = World.subscribeToSSEEvents(worldName, async (event) => {
+  const unsubscribe = subscribeToSSEEvents(worldName, async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
       const sseData = event.payload;
 
       // Get agent name for display
-      const agents = World.getAgents(worldName);
+      const agents = getAgents(worldName);
       const agent = agents.find(a => a.name === sseData.agentName);
       const agentName = agent?.name || 'Unknown Agent';
 

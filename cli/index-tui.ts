@@ -28,12 +28,15 @@
  */
 
 import {
-  loadWorldsWithSelection,
+  loadWorlds,
+  loadWorldFromDisk,
+  createWorld,
   loadWorld,
   getAgents,
   getAgent,
   broadcastMessage,
-  subscribeToSSEEvents
+  subscribeToSSEEvents,
+  DEFAULT_WORLD_NAME
 } from '../src/world';
 import { createTerminalKitUI, isTerminalCompatible } from './ui/terminal-kit-ui';
 import { helpCommand } from './commands/help';
@@ -46,7 +49,32 @@ import { createStreamingManager } from './streaming/streaming-manager';
 
 async function main() {
   // Initialize the world system
-  const worldName = await loadWorldsWithSelection();
+  const { worlds, action, defaultWorld } = await loadWorlds();
+
+  let worldName: string;
+
+  switch (action) {
+    case 'create':
+      // No worlds found - create default world
+      worldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+      break;
+
+    case 'use':
+      // One world found - use it automatically
+      await loadWorldFromDisk(defaultWorld!);
+      worldName = defaultWorld!;
+      break;
+
+    case 'select':
+      // Multiple worlds found - for TUI, just use the first one
+      // (TUI doesn't support interactive selection yet)
+      await loadWorldFromDisk(worlds[0]);
+      worldName = worlds[0];
+      break;
+
+    default:
+      throw new Error('Unexpected world loading action');
+  }
 
   // Load all agents from our world (same as index.ts)
   await loadAgents(worldName);
