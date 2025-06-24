@@ -41,6 +41,7 @@ export const colors = {
   cyan: (text: string) => `\x1b[36m${text}\x1b[0m`,
   white: (text: string) => `\x1b[37m${text}\x1b[0m`,
   gray: (text: string) => `\x1b[90m${text}\x1b[0m`,
+  orange: (text: string) => `\x1b[38;5;208m${text}\x1b[0m`,
 
   // Styles
   bold: (text: string) => `\x1b[1m${text}\x1b[0m`,

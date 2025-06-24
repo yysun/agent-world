@@ -77,17 +77,7 @@ async function main() {
         // World doesn't exist on disk yet, that's okay
       }
 
-      const agents = getAgents(worldId);
-
-      // Show agents using the list command approach
-      if (agents.length === 0) {
-        console.log(colors.gray('No agents found. Use /add to create your first agent.'));
-      } else {
-        console.log(colors.cyan(`Found ${agents.length} agent(s):`));
-        agents.forEach(agent => {
-          console.log(colors.gray(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`));
-        });
-      }
+      // Don't console.log here, will use /agents command instead
     } catch (error) {
       console.log(colors.red(`Failed to load agents: ${error}`));
       throw error;
@@ -108,11 +98,11 @@ async function main() {
     agents: async (args: string[], worldId: string) => {
       const allAgents = getAgents(worldId);
       if (allAgents.length === 0) {
-        console.log('No agents found. Use /add to create your first agent.');
+        console.log(colors.gray('No agents found. Use /add to create your first agent.'));
       } else {
-        console.log(`Found ${allAgents.length} agent(s):`);
+        console.log(colors.gray(`Found ${allAgents.length} agent(s):`));
         allAgents.forEach(agent => {
-          console.log(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`);
+          console.log(colors.gray(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`));
         });
       }
     },
@@ -154,6 +144,12 @@ async function main() {
       // Handle regular input/messages - broadcast to all agents
       if (input.trim()) {
         try {
+          // Display the user's input first
+          ui.displayUserInput(input.trim());
+
+          // Small delay to ensure display completes before broadcasting
+          await new Promise(resolve => setTimeout(resolve, 25));
+
           await broadcastMessage(worldId, input.trim(), 'HUMAN');
         } catch (error) {
           ui.displayError(`Failed to broadcast message: ${error instanceof Error ? error.message : String(error)}`);
@@ -239,7 +235,28 @@ async function main() {
     ui.setCurrentWorld(worldId);
 
     // Show welcome message similar to index.ts
-    ui.displaySystem(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
+    ui.displaySystem('Type a message to broadcast to all agents, or use /help for commands.');
+
+    // Automatically show agents list in gray
+    const agentsCmd = commands.agents;
+    if (agentsCmd) {
+      // Capture console output for the agents command
+      const originalLog = console.log;
+      let commandOutput = '';
+      console.log = (message: string) => {
+        commandOutput += message + '\n';
+      };
+
+      try {
+        await agentsCmd([], worldId);
+        if (commandOutput.trim()) {
+          ui.displaySystem(commandOutput.trim());
+        }
+      } finally {
+        console.log = originalLog;
+      }
+    }
+
     ui.setMode('chat' as any);
   } catch (error) {
     ui.displayError(`Failed to load agents: ${error instanceof Error ? error.message : String(error)}`);

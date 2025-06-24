@@ -81,6 +81,7 @@ interface TerminalKitUIInterface {
   displayMessage: (agentName: string, message: string) => void;
   displayError: (error: string) => void;
   displaySystem: (message: string) => void;
+  displayUserInput: (input: string) => void;
   updateStreamingPreview: (agentId: string, preview: string) => void;
   clearStreamingPreview: (agentId: string) => void;
   cleanup: () => void;
@@ -199,6 +200,15 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     const inputStartY = 4 + state.contentAreaHeight;
     const inputEndY = inputStartY + state.inputAreaHeight - 1;
 
+    // Clear the input area completely first
+    for (let y = inputStartY; y <= inputEndY; y++) {
+      term.moveTo(1, y);
+      term.eraseLineAfter();
+      // Add a space to fully clear the line
+      term(' '.repeat(term.width - 1));
+      term.moveTo(1, y);
+    }
+
     // Draw input box border
     term.moveTo(1, inputStartY);
     term.gray('┌' + '─'.repeat(term.width - 2) + '┐');
@@ -255,7 +265,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     // Clear any streaming preview for this agent first
     clearStreamingPreviewForAgent(agentName);
 
-    const formattedMessage = `🤖 ${agentName}: ${message}`;
+    const formattedMessage = `\x1b[32m●\x1b[0m ${agentName}: ${message}`;
     state.responseBuffer.push(formattedMessage);
 
     // Auto-scroll to show latest messages
@@ -298,7 +308,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
 
   // Display system message
   function displaySystem(message: string): void {
-    const formattedSystem = `ℹ️  System: ${message}`;
+    const formattedSystem = `\x1b[34m●\x1b[0m ${message}`;
     state.responseBuffer.push(formattedSystem);
 
     if (state.responseBuffer.length > state.contentAreaHeight) {
@@ -306,6 +316,22 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     }
 
     drawContentArea();
+    ensureInputFocus();
+  }
+
+  // Display user input message
+  function displayUserInput(input: string): void {
+    const formattedInput = `\x1b[38;5;208m●\x1b[0m You: ${input}`;
+    state.responseBuffer.push(formattedInput);
+
+    if (state.responseBuffer.length > state.contentAreaHeight) {
+      state.scrollOffset = state.responseBuffer.length - state.contentAreaHeight;
+    }
+
+    // More targeted refresh to prevent text mixing without full screen clear
+    drawContentArea();
+    drawSeparator();
+    drawInputArea();
     ensureInputFocus();
   }
 
@@ -422,6 +448,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
         // Restart input field
         if (state.inputFieldActive) {
           setTimeout(() => {
+            drawInputArea();
             createInputField();
             ensureInputFocus();
           }, 100);
@@ -430,6 +457,16 @@ function createTerminalKitUI(): TerminalKitUIInterface {
       }
 
       if (input && input.trim()) {
+        // Clear the entire input area to prevent mixing
+        const inputStartY = 4 + state.contentAreaHeight;
+        const inputEndY = inputStartY + state.inputAreaHeight - 1;
+
+        // Clear all input area lines
+        for (let y = inputStartY; y <= inputEndY; y++) {
+          term.moveTo(1, y);
+          term.eraseLineAfter();
+        }
+
         // Process the command
         processCommand(input.trim()).then(() => {
           // Redraw the input area and restart input field
@@ -438,7 +475,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
             setTimeout(() => {
               createInputField();
               ensureInputFocus();
-            }, 100);
+            }, 50);
           }
         }).catch(error => {
           displayError(`Command processing error: ${error.message}`);
@@ -530,6 +567,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     displayMessage,
     displayError,
     displaySystem,
+    displayUserInput,
     updateStreamingPreview,
     clearStreamingPreview,
     cleanup,
