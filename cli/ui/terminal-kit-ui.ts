@@ -8,6 +8,7 @@
  * - Enhanced bordered input area with multiline support
  * - Text editing with cursor movement and proper positioning
  * - Familiar CLI experience with improved input handling
+ * - Multi-agent streaming support with individual preview lines
  * 
  * Architecture:
  * - Function-based UI with simplified state management
@@ -21,6 +22,19 @@
  * - Top area preserves all existing CLI functionality
  * - Bottom area provides enhanced text editing experience
  * - Maintains backward compatibility with all commands
+ * 
+ * Streaming Features:
+ * - Individual streaming preview lines for each agent
+ * - Real-time update of streaming content with proper line management
+ * - Automatic cleanup of streaming previews when responses complete
+ * - Support for multiple agents streaming simultaneously
+ * - Consistent input focus management after all operations
+ * 
+ * Input Focus Management:
+ * - Automatically returns focus to input area after command execution
+ * - Maintains input focus during streaming updates and completions
+ * - Ensures cursor positioning and visibility after all UI updates
+ * - Proper input field restart with focus restoration
  */
 
 import termkit from 'terminal-kit';
@@ -67,6 +81,8 @@ interface TerminalKitUIInterface {
   displayMessage: (agentName: string, message: string) => void;
   displayError: (error: string) => void;
   displaySystem: (message: string) => void;
+  updateStreamingPreview: (agentId: string, preview: string) => void;
+  clearStreamingPreview: (agentId: string) => void;
   cleanup: () => void;
   setMode: (mode: UIMode) => void;
   getCurrentMode: () => UIMode;
@@ -94,6 +110,9 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     inputAreaHeight: 5, // Fixed height for input area
     scrollOffset: 0
   };
+
+  // Track streaming previews for in-place updates
+  const streamingPreviews = new Map<string, { line: string; displayed: boolean }>();
 
   let onInput: InputHandler | undefined;
   let onCommand: CommandHandler | undefined;
@@ -204,6 +223,15 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     term.hideCursor(false); // Make cursor visible
   }
 
+  // Helper function to ensure input focus is set
+  function ensureInputFocus(): void {
+    if (state.inputFieldActive) {
+      const inputY = 4 + state.contentAreaHeight + 1;
+      term.moveTo(5, inputY);
+      term.hideCursor(false);
+    }
+  }
+
   // Initialize UI
   function initialize(handlers: TerminalKitUIHandlers): void {
     onInput = handlers.onInput;
@@ -224,6 +252,9 @@ function createTerminalKitUI(): TerminalKitUIInterface {
 
   // Display agent message
   function displayMessage(agentName: string, message: string): void {
+    // Clear any streaming preview for this agent first
+    clearStreamingPreviewForAgent(agentName);
+
     const formattedMessage = `🤖 ${agentName}: ${message}`;
     state.responseBuffer.push(formattedMessage);
 
@@ -233,6 +264,23 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     }
 
     drawContentArea();
+    ensureInputFocus();
+  }
+
+  // Clear streaming preview for a specific agent
+  function clearStreamingPreviewForAgent(agentName: string): void {
+    // Find and remove streaming preview for this agent
+    for (const [agentId, preview] of streamingPreviews) {
+      if (preview.line.includes(`● ${agentName}:`)) {
+        // Remove from buffer if it's the last entry
+        const lastIndex = state.responseBuffer.length - 1;
+        if (lastIndex >= 0 && state.responseBuffer[lastIndex] === preview.line) {
+          state.responseBuffer.splice(lastIndex, 1);
+        }
+        streamingPreviews.delete(agentId);
+        break;
+      }
+    }
   }
 
   // Display error message
@@ -245,6 +293,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     }
 
     drawContentArea();
+    ensureInputFocus();
   }
 
   // Display system message
@@ -257,6 +306,56 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     }
 
     drawContentArea();
+    ensureInputFocus();
+  }
+
+  // Update streaming preview for an agent (single-line in-place updates)
+  function updateStreamingPreview(agentId: string, preview: string): void {
+    const currentPreview = streamingPreviews.get(agentId);
+
+    if (currentPreview && currentPreview.displayed) {
+      // Find and replace the existing streaming preview for this agent
+      const existingIndex = state.responseBuffer.findIndex(line => line === currentPreview.line);
+      if (existingIndex !== -1) {
+        state.responseBuffer[existingIndex] = preview;
+      } else {
+        // If not found, add the new preview
+        state.responseBuffer.push(preview);
+      }
+    } else {
+      // First preview for this agent, add to buffer
+      state.responseBuffer.push(preview);
+    }
+
+    // Update streaming preview tracking
+    streamingPreviews.set(agentId, { line: preview, displayed: true });
+
+    // Handle scrolling
+    if (state.responseBuffer.length > state.contentAreaHeight) {
+      state.scrollOffset = state.responseBuffer.length - state.contentAreaHeight;
+    }
+
+    drawContentArea();
+    ensureInputFocus();
+  }
+
+  // Clear streaming preview for a specific agent by ID
+  function clearStreamingPreview(agentId: string): void {
+    const currentPreview = streamingPreviews.get(agentId);
+    if (currentPreview && currentPreview.displayed) {
+      // Find and remove the streaming preview line from the buffer
+      const existingIndex = state.responseBuffer.findIndex(line => line === currentPreview.line);
+      if (existingIndex !== -1) {
+        state.responseBuffer.splice(existingIndex, 1);
+      }
+
+      // Remove from streaming previews tracking
+      streamingPreviews.delete(agentId);
+
+      // Redraw content area and ensure input focus
+      drawContentArea();
+      ensureInputFocus();
+    }
   }
 
   // Cleanup and exit
@@ -322,7 +421,10 @@ function createTerminalKitUI(): TerminalKitUIInterface {
         displayError(`Input error: ${error.message}`);
         // Restart input field
         if (state.inputFieldActive) {
-          setTimeout(() => createInputField(), 100);
+          setTimeout(() => {
+            createInputField();
+            ensureInputFocus();
+          }, 100);
         }
         return;
       }
@@ -333,20 +435,29 @@ function createTerminalKitUI(): TerminalKitUIInterface {
           // Redraw the input area and restart input field
           if (state.inputFieldActive) {
             drawInputArea();
-            setTimeout(() => createInputField(), 100);
+            setTimeout(() => {
+              createInputField();
+              ensureInputFocus();
+            }, 100);
           }
         }).catch(error => {
           displayError(`Command processing error: ${error.message}`);
           if (state.inputFieldActive) {
             drawInputArea();
-            setTimeout(() => createInputField(), 100);
+            setTimeout(() => {
+              createInputField();
+              ensureInputFocus();
+            }, 100);
           }
         });
       } else {
         // Restart input field for next input
         if (state.inputFieldActive) {
           drawInputArea();
-          setTimeout(() => createInputField(), 50);
+          setTimeout(() => {
+            createInputField();
+            ensureInputFocus();
+          }, 50);
         }
       }
     });
@@ -375,16 +486,24 @@ function createTerminalKitUI(): TerminalKitUIInterface {
         state.responseBuffer = [];
         state.scrollOffset = 0;
         drawContentArea();
+        ensureInputFocus();
         break;
       case '/quit':
       case '/exit':
         cleanup();
         break;
       default:
-        if (onCommand) {
-          onCommand(cmd, args);
-        } else if (onInput) {
-          onInput(command);
+        if (cmd.startsWith('/')) {
+          // Remove the '/' prefix for external command handlers
+          const cleanCmd = cmd.substring(1);
+          if (onCommand) {
+            onCommand(cleanCmd, args);
+          }
+        } else {
+          // Regular input, not a command
+          if (onInput) {
+            onInput(command);
+          }
         }
         break;
     }
@@ -411,6 +530,8 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     displayMessage,
     displayError,
     displaySystem,
+    updateStreamingPreview,
+    clearStreamingPreview,
     cleanup,
     setMode,
     getCurrentMode,
