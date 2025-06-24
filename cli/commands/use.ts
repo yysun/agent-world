@@ -32,29 +32,23 @@ export async function useCommand(args: string[], worldId: string): Promise<void>
   try {
     const agents = World.getAgents(worldId);
 
-    // Try to find by exact ID first
-    let agent = agents.find((a: any) => a.id === identifier);
+    // Try to find by exact name first
+    let agent = agents.find((a: any) => a.name === identifier);
 
-    // If not found, try partial ID match
-    if (!agent) {
-      agent = agents.find((a: any) => a.id.startsWith(identifier));
-    }
-
-    // If still not found, try name match
+    // If not found, try partial name match
     if (!agent) {
       agent = agents.find((a: any) => a.name.toLowerCase().includes(identifier.toLowerCase()));
     }
 
     if (agent) {
       // Update agent status to active
-      const updatedAgent = World.updateAgent(worldId, agent.id, {
+      const updatedAgent = await World.updateAgent(worldId, agent.id, {
         status: 'active',
         lastActive: new Date()
       });
 
       if (updatedAgent) {
         console.log(colors.green(`✓ Activated agent: ${colors.white(agent.name)}`));
-        console.log(colors.gray(`  ID: ${agent.id}`));
         console.log(colors.gray(`  Status: ${updatedAgent.status}`));
       } else {
         console.log(colors.red(`Failed to activate agent: ${agent.name}`));

@@ -49,7 +49,7 @@ interface UIState {
   selectedAgents: string[];
   inputHistory: string[];
   historyIndex: number;
-  agents: Array<{ id: string; name: string; model: string; provider: string; status: string }>;
+  agents: Array<{ name: string; model: string; provider: string; status: string }>;
   currentWorld: string;
   inputFieldActive: boolean;
   contentAreaHeight: number;
@@ -88,7 +88,7 @@ interface TerminalKitUIInterface {
   getCurrentMode: () => UIMode;
   startInputMode: () => void;
   processCommand: (command: string) => Promise<void>;
-  updateAgents: (agents: Array<{ id: string; name: string; model: string; provider: string; status: string }>) => void;
+  updateAgents: (agents: Array<{ name: string; model: string; provider: string; status: string }>) => void;
   setCurrentWorld: (world: string) => void;
 }
 
@@ -381,7 +381,7 @@ function createTerminalKitUI(): TerminalKitUIInterface {
     return state.mode;
   }
 
-  function updateAgents(agents: Array<{ id: string; name: string; model: string; provider: string; status: string }>): void {
+  function updateAgents(agents: Array<{ name: string; model: string; provider: string; status: string }>): void {
     state.agents = agents;
   }
 

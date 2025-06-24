@@ -128,7 +128,7 @@ async function main() {
             } else {
               ui.displaySystem(`Found ${allAgents.length} agent(s):`);
               allAgents.forEach(agent => {
-                ui.displaySystem(`  • ${agent.name} (${agent.id}) - Status: ${agent.status || 'inactive'}`);
+                ui.displaySystem(`  • ${agent.name} - Status: ${agent.status || 'inactive'}`);
               });
             }
             break;
@@ -166,7 +166,7 @@ async function main() {
             }
 
             const agentName = args[0];
-            const agent = getAgents(worldId).find(a => a.name === agentName || a.id === agentName);
+            const agent = getAgents(worldId).find(a => a.name === agentName);
 
             if (!agent) {
               ui.displayError(`Agent '${agentName}' not found.`);
@@ -185,7 +185,7 @@ async function main() {
             }
 
             const agentToStop = args[0];
-            const targetAgent = getAgents(worldId).find(a => a.name === agentToStop || a.id === agentToStop);
+            const targetAgent = getAgents(worldId).find(a => a.name === agentToStop);
 
             if (!targetAgent) {
               ui.displayError(`Agent '${agentToStop}' not found.`);
@@ -356,7 +356,6 @@ async function main() {
   try {
     const agents = getAgents(worldId);
     ui.updateAgents(agents.map(agent => ({
-      id: agent.id,
       name: agent.name,
       model: agent.config.model || 'unknown',
       provider: String(agent.config.provider) || 'unknown',

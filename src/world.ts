@@ -28,6 +28,8 @@
  * - Agent memory/history system with separate memory.json files per agent
  * - System prompt separation into individual system-prompt.md files per agent
  * - Subscription tracking to prevent double subscriptions during create/load operations
+ * - FIXED: Consistent ID vs name usage with clear function naming convention
+ * - ADDED: Helper functions for agent lookup by ID, name, or smart detection
  *
  * Logic:
  * - All agent, event, and message storage is now per-world; no global agent/event/message folders
@@ -38,6 +40,7 @@
  * - Agent memory stored separately for better organization and performance
  * - System prompts stored as editable markdown files
  * - Complete event-driven message flow: CLI → MESSAGE → Agent → LLM → SSE → CLI
+ * - Consistent agent lookup: getAgent() for ID-only, getAgentByName() for name-only, findAgent() for smart lookup
  *
  * Changes:
  * - Refactored to use per-world persistent storage for agents, events, and messages
@@ -51,6 +54,9 @@
  * - IMPLEMENTED: clearAgentMemory function for simplified memory reset with archiving (LLM messages only)
  * - VERIFIED: Complete event-driven message processing flow  
  * - FIXED: Duplicate agent subscriptions prevented with subscription tracking
+ * - IMPLEMENTED: Consistent ID vs name handling with helper functions
+ * - STANDARDIZED: Agent lookup functions with clear naming convention
+ * - UPDATED: Memory functions to use smart agent detection instead of heuristics
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -79,7 +85,6 @@ import {
 import { processAgentMessage } from './agent';
 import { initializeFileStorage, getStorageOptions, ensureDirectory } from './storage';
 import { toKebabCase } from './utils';
-import { worldLogger } from './logger'; // (if not already imported)
 
 // Global world storage
 const worlds: Map<string, WorldState> = new Map();
@@ -413,7 +418,7 @@ async function saveWorldToDisk(worldId: string): Promise<void> {
       lastActive: agent.lastActive?.toISOString()
     };
 
-    const agentPath = getAgentPath(worldId, agentId);
+    const agentPath = getAgentPath(worldId, agent.name);
     const agentDir = path.dirname(agentPath);
 
     // Ensure agent directory exists
@@ -506,6 +511,48 @@ async function loadWorldFromDisk(worldId: string): Promise<void> {
   } catch (error) {
     throw new Error(`Failed to load world ${worldId}: ${error}`);
   }
+}
+
+// ===== AGENT LOOKUP HELPERS =====
+
+/**
+ * Get a specific agent from a world by ID only
+ */
+export function getAgent(worldId: string, agentId: string): Agent | null {
+  const world = worlds.get(worldId);
+  if (!world) return null;
+
+  return world.agents.get(agentId) || null;
+}
+
+/**
+ * Get a specific agent from a world by name only
+ */
+export function getAgentByName(worldId: string, agentName: string): Agent | null {
+  const world = worlds.get(worldId);
+  if (!world) return null;
+
+  for (const agent of world.agents.values()) {
+    if (agent.name === agentName) {
+      return agent;
+    }
+  }
+  return null;
+}
+
+/**
+ * Smart agent lookup helper - finds agent by ID or name
+ * Uses heuristic: if input contains hyphens and is long, assume it's an ID
+ */
+export function findAgent(worldId: string, idOrName: string): Agent | null {
+  // Try ID first if it looks like a UUID
+  if (idOrName.includes('-') && idOrName.length > 10) {
+    const agent = getAgent(worldId, idOrName);
+    if (agent) return agent;
+  }
+
+  // Try name lookup
+  return getAgentByName(worldId, idOrName);
 }
 
 // ===== AGENT MANAGEMENT =====
@@ -660,11 +707,7 @@ async function loadAgentMemory(worldId: string, agentName: string): Promise<Agen
  * Add message to agent's conversation history using LLM-compatible schema
  */
 export async function addToAgentMemory(worldId: string, agentIdOrName: string, message: ChatMessage): Promise<void> {
-  // Check if agentIdOrName is an ID (UUID format) or a name
-  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
-    ? getAgent(worldId, agentIdOrName)  // Likely an ID
-    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
-
+  const agent = findAgent(worldId, agentIdOrName);
   if (!agent) return;
 
   // Load current memory using agent name
@@ -695,11 +738,7 @@ export async function addToAgentMemory(worldId: string, agentIdOrName: string, m
  * Get agent's conversation history for LLM context
  */
 export async function getAgentConversationHistory(worldId: string, agentIdOrName: string, limit: number = 20): Promise<ChatMessage[]> {
-  // Check if agentIdOrName is an ID (UUID format) or a name
-  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
-    ? getAgent(worldId, agentIdOrName)  // Likely an ID
-    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
-
+  const agent = findAgent(worldId, agentIdOrName);
   if (!agent) return [];
 
   const memory = await loadAgentMemory(worldId, agent.name);
@@ -791,16 +830,6 @@ export function getAgents(worldId: string): Agent[] {
   if (!world) return [];
 
   return Array.from(world.agents.values());
-}
-
-/**
- * Get a specific agent from a world
- */
-export function getAgent(worldId: string, agentId: string): Agent | null {
-  const world = worlds.get(worldId);
-  if (!world) return null;
-
-  return world.agents.get(agentId) || null;
 }
 
 /**
@@ -933,11 +962,7 @@ export function subscribeToAgentMessages(worldId: string, agentId: string, callb
  * Clear agent's memory - archives existing memory.json then creates fresh simplified memory
  */
 export async function clearAgentMemory(worldId: string, agentIdOrName: string): Promise<boolean> {
-  // Check if agentIdOrName is an ID (UUID format) or a name
-  const agent = agentIdOrName.includes('-') && agentIdOrName.length > 10
-    ? getAgent(worldId, agentIdOrName)  // Likely an ID
-    : getAgents(worldId).find(a => a.name === agentIdOrName); // Likely a name
-
+  const agent = findAgent(worldId, agentIdOrName);
   if (!agent) return false;
 
   try {
@@ -962,7 +987,6 @@ export async function clearAgentMemory(worldId: string, agentIdOrName: string): 
 
         // Copy the existing memory to archive
         await fs.copyFile(memoryPath, archivePath);
-        console.log(`📦 Archived agent memory: ${path.basename(archivePath)}`);
       }
     } catch (error) {
       // File might not exist or be invalid JSON, which is fine - continue with clear

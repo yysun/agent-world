@@ -58,8 +58,7 @@ export async function addCommand(args: string[], worldId: string): Promise<void>
       type: type,
       provider: LLMProvider.OLLAMA,
       model: 'llama3.2:3b',
-      personality: `You are a helpful ${type} agent. ${description}`,
-      instructions: `You are a helpful ${type} agent. ${description}`,
+      systemPrompt: `You are a helpful ${type} agent. ${description}`,
       temperature: 0.7,
       maxTokens: 1000
     };
@@ -72,7 +71,6 @@ export async function addCommand(args: string[], worldId: string): Promise<void>
 
     console.log(colors.green(`✓ Successfully created agent:`));
     console.log(colors.gray(`  Name: ${agent.name}`));
-    console.log(colors.gray(`  ID: ${agent.id}`));
     console.log(colors.gray(`  Status: ${agent.status}`));
 
   } catch (error) {

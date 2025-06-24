@@ -37,8 +37,7 @@ export async function showCommand(args: string[], worldId: string): Promise<void
   const agentName = args[0];
 
   // Get all agents to find the one with matching name
-  const agents = World.getAgents(worldId);
-  const agent = agents.find(a => a.name === agentName || a.id === agentName);
+  const agent = World.findAgent(worldId, agentName);
 
   if (!agent) {
     console.log(colors.red(`❌ Agent "${agentName}" not found.`));
