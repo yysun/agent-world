@@ -22,6 +22,7 @@
  * - Maintained function-based approach with clean module separation
  * - Enhanced shutdown handling with proper streaming resource cleanup
  * - Simplified main CLI logic by delegating streaming management to dedicated module
+ * - Removed web server integration (now handled by separate launcher)
  */
 
 // npm run dev || echo "Test completed"

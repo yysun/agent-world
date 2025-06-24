@@ -18,7 +18,7 @@
 - Break into smaller, actionable steps with context/dependencies
 
 ## Project Instructions
-- `npm run dev` - Start the CLI
+- `npm run dev` - Start the dev
 - `npm test` - Run tests
 - use `tsx` for TypeScript execution
 - use function based approach instead of class based

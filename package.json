@@ -4,9 +4,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "nodemon --watch src --watch cli --ext ts,js,json --exec \"npx tsx cli/index.ts\"",
-    "dev:tui": "tsx cli/index-tui.ts",
-    "start": "tsx cli/index-tui.ts",
+    "cli": "npx tsx cli/index.ts",
+    "server": "npx tsx server.ts",
+    "start": "npx tsx index.ts",
+    "dev": "nodemon --watch src --watch cli --watch server.ts --watch index.ts --ext ts,js,json --exec \"npx tsx index.ts\"",
     "test": "jest --config jest.config.js",
     "build": "tsc --noEmit",
     "check": "tsc --noEmit"
@@ -26,6 +27,7 @@
     "chalk": "^4.1.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
+    "express": "^4.21.2",
     "ollama-ai-provider": "^1.2.0",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent World - Web API</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      line-height: 1.6;
+      background: #f8f9fa;
+      color: #333;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .api-section {
+      background: white;
+      margin: 20px 0;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .endpoint {
+      background: #f6f8fa;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-family: monospace;
+      border-left: 4px solid #0066cc;
+    }
+
+    .method {
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+      margin-right: 10px;
+    }
+
+    .get {
+      background: #28a745;
+    }
+
+    .post {
+      background: #007bff;
+    }
+
+    .patch {
+      background: #ffc107;
+      color: #000;
+    }
+
+    h1 {
+      color: #0066cc;
+    }
+
+    h2 {
+      color: #333;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>🌐 Agent World Web API</h1>
+    <p>REST API endpoints for world and agent management with real-time chat capabilities</p>
+  </div>
+
+  <div class="api-section">
+    <h2>World Management</h2>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <strong>/worlds</strong> - List all available worlds
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <strong>/worlds/{worldName}/agents</strong> - List all agents in a specific world
+    </div>
+    <div class="endpoint">
+      <span class="method get">GET</span>
+      <strong>/worlds/{worldName}/agents/{agentName}</strong> - Get details of a specific agent
+    </div>
+  </div>
+
+  <div class="api-section">
+    <h2>Agent Management</h2>
+    <div class="endpoint">
+      <span class="method post">POST</span>
+      <strong>/worlds/{worldName}/agents</strong> - Create a new agent (coming soon)
+    </div>
+    <div class="endpoint">
+      <span class="method patch">PATCH</span>
+      <strong>/worlds/{worldName}/agents/{agentName}</strong> - Update agent (status, config, memory)
+    </div>
+  </div>
+
+  <div class="api-section">
+    <h2>Real-time Communication</h2>
+    <div class="endpoint">
+      <span class="method post">POST</span>
+      <strong>/worlds/{worldName}/chat</strong> - Send message and receive SSE stream of events
+    </div>
+  </div>
+
+  <div class="api-section">
+    <h2>Features</h2>
+    <ul>
+      <li>✅ RESTful API design with proper HTTP status codes</li>
+      <li>✅ Zod validation for all request bodies</li>
+      <li>✅ Server-Sent Events (SSE) for real-time chat streaming</li>
+      <li>✅ CORS support for cross-origin requests</li>
+      <li>✅ Integration with existing world and agent management</li>
+      <li>✅ Comprehensive error handling and logging</li>
+    </ul>
+  </div>
+
+  <div class="api-section">
+    <h2>Getting Started</h2>
+    <p>The server is running and ready to handle API requests. Use your preferred HTTP client or the CLI interface to
+      interact with the system.</p>
+    <p><strong>Base URL:</strong> <code id="baseUrl">http://localhost:3000</code></p>
+  </div>
+
+  <script>
+    // Update base URL to current host
+    document.getElementById('baseUrl').textContent = window.location.origin;
+  </script>
+</body>
+
+</html>

@@ -12,6 +12,7 @@ A flexible AI agent simulation system with a CLI interface for creating, managin
 - **System Prompt Management**: Editable system prompts stored as separate `system-prompt.md` files
 - **Real-time Streaming**: Character-by-character streaming responses via SSE events
 - **CLI Interface**: Command-based interface with real-time agent response streaming
+- **Web API Server**: REST API with Server-Sent Events for web integration
 - **Mention-Based Communication**: Agents respond to @mentions to prevent infinite loops
 - **Organized File Structure**: Clean separation of configuration, prompts, and memory data
 
@@ -55,6 +56,7 @@ data/worlds/{worldId}/agents/{agentId}/
 - **LLM Integration** (`src/llm.ts`): Multi-provider LLM support with streaming and context management
 - **Storage** (`src/storage.ts`): Unified file operations for configuration, prompts, and memory
 - **CLI Interface** (`src/cli/`): Interactive command-line interface with real-time streaming
+- **Web Server** (`server.ts`): REST API with SSE endpoints for web integration
 
 ## Installation
 
@@ -72,11 +74,66 @@ npm run build
 
 ## Usage
 
+### Quick Start
+
+```bash
+# Start full system (web server + CLI)
+npm start
+
+# Start individual components
+npm run cli                 # CLI only (interactive terminal)
+npm run server              # Web server only (http://localhost:3000)
+```
+
 ### Development Mode
 
 ```bash
-# Start in development mode with hot reload
+# Development with hot reload (both server + CLI)
 npm run dev
+```
+
+## Web API
+
+The system includes a REST API server with the following endpoints:
+
+### World Management
+- `GET /worlds` - List all available worlds
+- `GET /worlds/{worldName}/agents` - List all agents in a specific world
+- `GET /worlds/{worldName}/agents/{agentName}` - Get details of a specific agent
+
+### Agent Management
+- `POST /worlds/{worldName}/agents` - Create a new agent (coming soon)
+- `PATCH /worlds/{worldName}/agents/{agentName}` - Update agent (status, config, memory)
+
+### Real-time Communication
+- `POST /worlds/{worldName}/chat` - Send message and receive SSE stream of events
+
+The web server automatically starts when running the CLI and is available at `http://localhost:3000`.
+
+#### Example API Usage
+
+```bash
+# List all worlds
+curl http://localhost:3000/worlds
+
+# Get agents in a world
+curl http://localhost:3000/worlds/default-world/agents
+
+# Update agent status
+curl -X PATCH http://localhost:3000/worlds/default-world/agents/agent1 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "inactive"}'
+
+# Clear agent memory
+curl -X PATCH http://localhost:3000/worlds/default-world/agents/agent1 \
+  -H "Content-Type: application/json" \
+  -d '{"clearMemory": true}'
+
+# Chat with SSE streaming
+curl -X POST http://localhost:3000/worlds/default-world/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello world!", "sender": "API_USER"}' \
+  --no-buffer
 ```
 
 ### CLI Commands
@@ -238,10 +295,12 @@ src/
 ### Available Scripts
 
 ```bash
-npm run dev         # Start development server with hot reload
+npm run cli         # Start CLI interface only
+npm run server      # Start web server only
+npm start           # Start both server and CLI
+npm run dev         # Development mode with hot reload (both server + CLI)
 npm run build       # Build for production
-npm run start       # Run built application
-npm run test        # Run Jest tests
+npm test            # Run Jest tests
 ```
 
 ### Testing
