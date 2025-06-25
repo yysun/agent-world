@@ -95,9 +95,16 @@ export async function processAgentMessage(
 
     const provider = loadLLMProvider(llmConfig);
 
-    // Load conversation history for context (import function from world.ts)
-    const { getAgentConversationHistory, addToAgentMemory } = await import('./world');
-    const conversationHistory = await getAgentConversationHistory(worldName || 'default', agentConfig.name, 10);
+    // Load conversation history for context
+    let conversationHistory: any[] = [];
+    try {
+      const worldModule = await import('./world');
+      if (worldModule.getAgentConversationHistory) {
+        conversationHistory = await worldModule.getAgentConversationHistory(worldName || 'default', agentConfig.name, 10);
+      }
+    } catch (error) {
+      console.warn(`Could not load conversation history: ${error}`);
+    }
 
     // Prepare messages for LLM (including system prompt, history, and current message)
     const messages = prepareMessagesForLLM(agentConfig, messageData, conversationHistory);
@@ -119,11 +126,51 @@ export async function processAgentMessage(
     // Save all new messages to memory (system, user, assistant, tool messages)
     await saveMessagesToMemory(worldName || 'default', agentConfig.name, messages, response);
 
-    // Note: Using memory persistence to separate memory.json files
+    // Check for pass command in response
+    const passCommandRegex = /<world>pass<\/world>/i;
+    if (passCommandRegex.test(response)) {
+      console.log(`[Pass Command] Agent ${agentConfig.name} is passing control to human`);
+
+      // Replace response with @human redirect
+      const passMessage = `@human ${agentConfig.name} is passing control to you`;
+
+      // Publish pass message instead of original response
+      await publishMessageEvent({
+        content: passMessage,
+        sender: 'system'
+      });
+
+      // Reset turn counter (import dynamically to avoid circular dependency)
+      try {
+        const worldModule = await import('./world');
+        worldModule.resetTurnCounter(worldName || 'default');
+      } catch (error) {
+        console.warn('Could not reset turn counter:', error);
+      }
+
+      return passMessage;
+    }
+
+    // Auto-add @mention when replying to other agents
+    let finalResponse = response;
+    if (messageData.sender &&
+      messageData.sender !== 'HUMAN' &&
+      messageData.sender !== 'human' &&
+      messageData.sender !== 'system' &&
+      messageData.sender !== agentConfig.name) {
+      // Check if response already contains @mention for the sender
+      const senderMention = `@${messageData.sender}`;
+      if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
+        finalResponse = `${senderMention} ${finalResponse}`;
+        console.log(`[Auto-Mention] Added @${messageData.sender} to ${agentConfig.name}'s response`);
+      } else {
+        console.log(`[Auto-Mention] ${agentConfig.name}'s response already contains @${messageData.sender}`);
+      }
+    }
 
     // Publish response message
     await publishMessageEvent({
-      content: response,
+      content: finalResponse,
       sender: agentConfig.name
     });
 
@@ -161,7 +208,29 @@ export async function processAgentMessage(
 }
 
 /**
- * Check if agent should respond to a message (simplified)
+ * Extract @mentions from message content
+ */
+function extractMentions(content: string): string[] {
+  // Match @agentName pattern - must start with letter, then word characters, hyphens, underscores
+  // Negative lookbehind to avoid @@mentions
+  const mentionRegex = /(?<!@)@([a-zA-Z]\w*(?:[-_]\w*)*)/g;
+  const mentions: string[] = [];
+  let match;
+
+  while ((match = mentionRegex.exec(content)) !== null) {
+    const mention = match[1];
+    // Skip malformed mentions (empty, just symbols)
+    if (mention && mention.length > 0) {
+      mentions.push(mention.toLowerCase());
+    }
+  }
+
+  console.log(`[Mention Detection] Found mentions: [${mentions.join(', ')}] in: "${content}"`);
+  return mentions;
+}
+
+/**
+ * Check if agent should respond to a message (enhanced)
  */
 export function shouldRespondToMessage(
   agentConfig: AgentConfig,
@@ -173,31 +242,34 @@ export function shouldRespondToMessage(
   }
 
   const content = messageData.content || messageData.payload?.content || '';
+  const agentName = agentConfig.name.toLowerCase();
 
   // Always respond to system messages
   if (!messageData.sender || messageData.sender === 'system') {
     return true;
   }
 
-  // For HUMAN/user messages, respond to all or check basic @name mentions
-  if (messageData.sender === 'HUMAN' || messageData.sender === 'human') {
-    // Simple check for @name mention
-    const agentName = agentConfig.name.toLowerCase();
-    const contentLower = content.toLowerCase();
-    const hasNameMention = contentLower.includes(`@${agentName}`);
+  // Extract @mentions from content
+  const mentions = extractMentions(content);
 
-    // If no mentions at all, respond to all (broadcast)
-    if (!content.includes('@')) {
+  // For HUMAN/user messages
+  if (messageData.sender === 'HUMAN' || messageData.sender === 'human') {
+    // If no mentions at all, respond to all (public message)
+    if (mentions.length === 0) {
+      console.log(`[Message Routing] Public message from ${messageData.sender} - ${agentName} will respond`);
       return true;
     }
 
     // If there are mentions, only respond if this agent is mentioned by name
-    return hasNameMention;
+    const shouldRespond = mentions.includes(agentName);
+    console.log(`[Message Routing] Private message from ${messageData.sender} - ${agentName} ${shouldRespond ? 'will' : 'will not'} respond`);
+    return shouldRespond;
   }
 
-  // For agent messages, only respond if mentioned
-  const agentName = agentConfig.name.toLowerCase();
-  return content.toLowerCase().includes(`@${agentName}`);
+  // For agent messages, only respond if explicitly mentioned
+  const shouldRespond = mentions.includes(agentName);
+  console.log(`[Message Routing] Agent message from ${messageData.sender} - ${agentName} ${shouldRespond ? 'will' : 'will not'} respond`);
+  return shouldRespond;
 }
 
 /**
@@ -260,9 +332,6 @@ function buildPrompt(agentConfig: AgentConfig, messageData: MessageData, convers
   return prompt;
 }
 
-// Import functions from world.ts
-import { addToAgentMemory } from './world';
-
 /**
  * Save new conversation messages to agent memory
  * Saves only the new user message and assistant response - excludes system messages and history
@@ -273,30 +342,40 @@ async function saveMessagesToMemory(
   messages: ChatMessage[],
   assistantResponse: string
 ): Promise<void> {
-  const currentTimestamp = new Date().toISOString();
+  try {
+    const currentTimestamp = new Date().toISOString();
 
-  // Find the last user message (the new message we're responding to)
-  // This is the most recent non-system message in the messages array
-  const newUserMessage = messages.filter(msg => msg.role !== 'system').slice(-1)[0];
+    // Find the last user message (the new message we're responding to)
+    // This is the most recent non-system message in the messages array
+    const newUserMessage = messages.filter(msg => msg.role !== 'system').slice(-1)[0];
 
-  if (newUserMessage) {
-    // Save the new user message with timestamp
-    const userMessageToSave: ChatMessage = {
-      ...newUserMessage,
+    const worldModule = await import('./world');
+    if (!worldModule.addToAgentMemory) {
+      console.warn('addToAgentMemory function not available');
+      return;
+    }
+
+    if (newUserMessage) {
+      // Save the new user message with timestamp
+      const userMessageToSave: ChatMessage = {
+        ...newUserMessage,
+        timestamp: currentTimestamp
+      };
+
+      // Use agent name for memory storage
+      await worldModule.addToAgentMemory(worldName, agentName, userMessageToSave);
+    }
+
+    // Add the assistant response
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: assistantResponse,
       timestamp: currentTimestamp
     };
 
     // Use agent name for memory storage
-    await addToAgentMemory(worldName, agentName, userMessageToSave);
+    await worldModule.addToAgentMemory(worldName, agentName, assistantMessage);
+  } catch (error) {
+    console.warn(`Could not save messages to memory: ${error}`);
   }
-
-  // Add the assistant response
-  const assistantMessage: ChatMessage = {
-    role: 'assistant',
-    content: assistantResponse,
-    timestamp: currentTimestamp
-  };
-
-  // Use agent name for memory storage
-  await addToAgentMemory(worldName, agentName, assistantMessage);
 }

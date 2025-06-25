@@ -91,6 +91,43 @@ const worlds: Map<string, WorldState> = new Map();
 // Track agent message subscriptions to prevent double subscription
 const agentSubscriptions: Map<string, () => void> = new Map();
 
+// Turn counter storage for conversation management
+const worldConversationCounters: Map<string, number> = new Map();
+
+/**
+ * Get turn counter for a world
+ */
+function getTurnCounter(worldName: string): number {
+  return worldConversationCounters.get(worldName) || 0;
+}
+
+/**
+ * Increment turn counter for a world
+ */
+function incrementTurnCounter(worldName: string): number {
+  const current = getTurnCounter(worldName);
+  const newCount = current + 1;
+  worldConversationCounters.set(worldName, newCount);
+  console.log(`[Turn Counter] World ${worldName}: ${current} → ${newCount}`);
+  return newCount;
+}
+
+/**
+ * Reset turn counter for a world
+ */
+export function resetTurnCounter(worldName: string): void {
+  const current = getTurnCounter(worldName);
+  worldConversationCounters.set(worldName, 0);
+  console.log(`[Turn Counter] World ${worldName}: ${current} → 0 (reset)`);
+}
+
+/**
+ * Check if turn limit is reached
+ */
+function isTurnLimitReached(worldName: string): boolean {
+  return getTurnCounter(worldName) >= 20;
+}
+
 // Get data directory from storage configuration
 function getWorldsDir(): string {
   try {
@@ -269,6 +306,9 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
   };
 
   worlds.set(worldName, worldState);
+
+  // Initialize turn counter for this world
+  worldConversationCounters.set(worldName, 0);
 
   // Save to disk immediately
   try {
@@ -509,6 +549,9 @@ export async function loadWorldFromDisk(worldName: string): Promise<void> {
     }
 
     worlds.set(worldName, worldState);
+
+    // Initialize turn counter for this world
+    worldConversationCounters.set(worldName, 0);
   } catch (error) {
     throw new Error(`Failed to load world ${worldName}: ${error}`);
   }
@@ -545,8 +588,24 @@ function subscribeAgentToMessages(worldName: string, agent: Agent): void {
     if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
       const payload = event.payload as MessageEventPayload;
 
+      // Reset turn counter for human or system messages
+      if (payload.sender === 'HUMAN' || payload.sender === 'human' || payload.sender === 'system') {
+        resetTurnCounter(worldName);
+      }
+
       // Don't process messages from this agent itself
       if (payload.sender !== agent.name) {
+        // Check turn limit before processing agent message
+        if (isTurnLimitReached(worldName)) {
+          console.log(`[Turn Limit] Blocking agent ${agent.name} - limit reached`);
+          // Inject @human redirect message
+          await publishMessageEvent({
+            content: '@human Turn limit reached (20 consecutive agent messages). Please take control of the conversation.',
+            sender: 'system'
+          });
+          return;
+        }
+
         try {
           // Ensure agent config has name field
           const agentConfigWithName = {
@@ -560,6 +619,11 @@ function subscribeAgentToMessages(worldName: string, agent: Agent): void {
             sender: payload.sender,
             payload: payload
           }, undefined, worldName);
+
+          // Increment turn counter after successful agent message processing
+          if (payload.sender !== 'HUMAN' && payload.sender !== 'human' && payload.sender !== 'system') {
+            incrementTurnCounter(worldName);
+          }
         } catch (error) {
           console.error(`Agent ${agent.name} failed to process message:`, error);
         }
