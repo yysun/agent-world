@@ -3,15 +3,15 @@
 - Create before editing if missing; update after changes
 
 ## Command Keywords
-- **AA**: Create a detailed functional implementation plan (no optimization) as check list → save the list to `docs/plan/`;
-- **AP**: Review plan with steps → think hard ensure no flaw → provide suggestions → wait for confirmation;
+- **AA**: Create a detailed functional implementation plan (no optimization) as check list → save the list to `docs/plan/plan-{name}.md` → wait for confirmation;
+- **AP**: Review requirements → think hard ensure no flaw → provide suggestions → wait for confirmation;
 - **AS**: Execute plan → implement step-by-step → mark done → git stage changed and commit;
 - **CC**: Consolidate comments block → remove redundant;
 - **OO**: Present options → wait for confirmation before proceeding;
 - **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step;
 - **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed);
-- **!!**: Save my requirements a file to `docs/requirements`, no plan;
-- **!!!**: Update the requirements, plan, and code to implement;
+- **!!**: Create requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation;
+- **!!!**: Update the requirements, plan, and implement;
 ## Planning Rules
 - Large changes or "AA" → always create plan first, get confirmation
 - Focus on functionality/logic, not optimizations
