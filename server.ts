@@ -31,9 +31,9 @@ import {
   getAgent,
   updateAgent,
   clearAgentMemory,
-  broadcastMessage,
-  subscribeToWorldEvents
+  broadcastMessage
 } from './src/world.js';
+import { subscribeToWorld } from './src/event-bus.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -255,7 +255,7 @@ app.post('/worlds/:worldName/chat', async (req, res) => {
     });
 
     // Subscribe to world events for SSE streaming
-    const unsubscribe = subscribeToWorldEvents(worldName, (event) => {
+    const unsubscribe = subscribeToWorld((event) => {
       try {
         const sseData = JSON.stringify({
           type: event.type || 'event',

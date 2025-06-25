@@ -45,7 +45,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AgentMemory, Event, EventType, ChatMessage } from './types';
 import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
-import { publishSSE, publishMessageEvent } from './event-bus';
+import { publishSSE, publishMessageEvent, publishDebugEvent } from './event-bus';
 import { agentLogger } from './logger';
 
 // Types moved to types.ts
@@ -71,12 +71,30 @@ export async function processAgentMessage(
   try {
     // Check if agent should respond to this message
     if (!shouldRespondToMessage(agentConfig, messageData)) {
-      // agentLogger.debug({
-      //   agentId: agentConfig.id,
-      //   messageId: msgId,
-      //   sender: messageData.sender
-      // }, 'Agent skipping message (not mentioned or from self)');
       return '';
+    }
+
+    // Check turn limit before processing agent message
+    if (worldName) {
+      try {
+        const worldModule = await import('./world');
+        if (worldModule.isTurnLimitReached(worldName)) {
+          publishDebugEvent(`[Turn Limit] Blocking ${agentConfig.name} - limit reached`, {
+            agentName: agentConfig.name,
+            worldName
+          });
+
+          // Inject @human redirect message
+          await publishMessageEvent({
+            content: '@human Turn limit reached (5 consecutive agent messages). Please take control of the conversation.',
+            sender: 'system'
+          });
+
+          return '';
+        }
+      } catch (error) {
+        console.warn('Could not check turn limit:', error);
+      }
     }
 
     // Load LLM provider
@@ -129,7 +147,10 @@ export async function processAgentMessage(
     // Check for pass command in response
     const passCommandRegex = /<world>pass<\/world>/i;
     if (passCommandRegex.test(response)) {
-      console.log(`[Pass Command] Agent ${agentConfig.name} is passing control to human`);
+      publishDebugEvent(`[Pass Command] Agent ${agentConfig.name} passing control`, {
+        agentName: agentConfig.name,
+        worldName
+      });
 
       // Replace response with @human redirect
       const passMessage = `@human ${agentConfig.name} is passing control to you`;
@@ -162,9 +183,15 @@ export async function processAgentMessage(
       const senderMention = `@${messageData.sender}`;
       if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
         finalResponse = `${senderMention} ${finalResponse}`;
-        console.log(`[Auto-Mention] Added @${messageData.sender} to ${agentConfig.name}'s response`);
+        publishDebugEvent(`[Auto-Mention] Added @${messageData.sender} to ${agentConfig.name}`, {
+          agentName: agentConfig.name,
+          sender: messageData.sender
+        });
       } else {
-        console.log(`[Auto-Mention] ${agentConfig.name}'s response already contains @${messageData.sender}`);
+        publishDebugEvent(`[Auto-Mention] ${agentConfig.name} already has @${messageData.sender}`, {
+          agentName: agentConfig.name,
+          sender: messageData.sender
+        });
       }
     }
 
@@ -184,6 +211,25 @@ export async function processAgentMessage(
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    // Handle LLM streaming timeout gracefully
+    if (errorMessage.includes('LLM streaming request timeout')) {
+      publishDebugEvent(`[Timeout] Agent ${agentConfig.name} - LLM request timed out`, {
+        agentName: agentConfig.name,
+        error: 'timeout'
+      });
+
+      // Emit error SSE event with timeout indication
+      await publishSSE({
+        agentName: agentConfig.name,
+        type: 'error',
+        messageId: msgId,
+        error: 'Request timed out'
+      });
+
+      // Return empty response instead of throwing
+      return '';
+    }
 
     agentLogger.error({
       agentName: agentConfig.name,
@@ -208,25 +254,59 @@ export async function processAgentMessage(
 }
 
 /**
- * Extract @mentions from message content
+ * Extract @mentions from message content - returns only first valid mention
  */
 function extractMentions(content: string): string[] {
   // Match @agentName pattern - must start with letter, then word characters, hyphens, underscores
   // Negative lookbehind to avoid @@mentions
   const mentionRegex = /(?<!@)@([a-zA-Z]\w*(?:[-_]\w*)*)/g;
-  const mentions: string[] = [];
+  const allMentions: string[] = [];
+  const skippedMentions: string[] = [];
+  let firstValidMention: string | null = null;
   let match;
 
+  // Collect all mentions for logging
   while ((match = mentionRegex.exec(content)) !== null) {
     const mention = match[1];
     // Skip malformed mentions (empty, just symbols)
     if (mention && mention.length > 0) {
-      mentions.push(mention.toLowerCase());
+      const lowerMention = mention.toLowerCase();
+      allMentions.push(lowerMention);
+
+      // Only keep the first valid mention
+      if (firstValidMention === null) {
+        firstValidMention = lowerMention;
+      } else {
+        skippedMentions.push(lowerMention);
+      }
     }
   }
 
-  console.log(`[Mention Detection] Found mentions: [${mentions.join(', ')}] in: "${content}"`);
-  return mentions;
+  // Build result array with first mention only
+  const result = firstValidMention ? [firstValidMention] : [];
+
+  // Enhanced debug logging
+  if (allMentions.length === 0) {
+    publishDebugEvent(`[Mention Detection] No mentions found`, {
+      mentions: [],
+      count: 0
+    });
+  } else if (allMentions.length === 1) {
+    publishDebugEvent(`[Mention Detection] First mention: ${firstValidMention}`, {
+      mentions: result,
+      count: 1
+    });
+  } else {
+    publishDebugEvent(`[Mention Detection] First mention: ${firstValidMention} (skipped: ${skippedMentions.join(', ')})`, {
+      mentions: result,
+      firstMention: firstValidMention,
+      skippedMentions: skippedMentions,
+      count: 1,
+      totalFound: allMentions.length
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -256,20 +336,33 @@ export function shouldRespondToMessage(
   if (messageData.sender === 'HUMAN' || messageData.sender === 'human') {
     // If no mentions at all, respond to all (public message)
     if (mentions.length === 0) {
-      console.log(`[Message Routing] Public message from ${messageData.sender} - ${agentName} will respond`);
+      publishDebugEvent(`[Message Routing] Public message - ${agentName} will respond`, {
+        agentName,
+        messageType: 'public'
+      });
       return true;
     }
 
-    // If there are mentions, only respond if this agent is mentioned by name
-    const shouldRespond = mentions.includes(agentName);
-    console.log(`[Message Routing] Private message from ${messageData.sender} - ${agentName} ${shouldRespond ? 'will' : 'will not'} respond`);
-    return shouldRespond;
+    // If there are mentions, only respond if this agent is the first mention
+    const isFirstMention = mentions.length > 0 && mentions[0] === agentName;
+    publishDebugEvent(`[Message Routing] Private message - ${agentName} ${isFirstMention ? 'will' : 'will not'} respond${isFirstMention ? ' (first mention)' : mentions.length > 0 ? ` (first mention: ${mentions[0]})` : ''}`, {
+      agentName,
+      messageType: 'private',
+      shouldRespond: isFirstMention,
+      firstMention: mentions[0] || null
+    });
+    return isFirstMention;
   }
 
-  // For agent messages, only respond if explicitly mentioned
-  const shouldRespond = mentions.includes(agentName);
-  console.log(`[Message Routing] Agent message from ${messageData.sender} - ${agentName} ${shouldRespond ? 'will' : 'will not'} respond`);
-  return shouldRespond;
+  // For agent messages, only respond if this agent is the first mention
+  const isFirstMention = mentions.length > 0 && mentions[0] === agentName;
+  publishDebugEvent(`[Message Routing] Agent message - ${agentName} ${isFirstMention ? 'will' : 'will not'} respond${isFirstMention ? ' (first mention)' : mentions.length > 0 ? ` (first mention: ${mentions[0]})` : ''}`, {
+    agentName,
+    messageType: 'agent',
+    shouldRespond: isFirstMention,
+    firstMention: mentions[0] || null
+  });
+  return isFirstMention;
 }
 
 /**

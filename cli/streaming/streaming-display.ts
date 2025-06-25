@@ -4,25 +4,30 @@
  * Features:
  * - Multi-agent concurrent streaming with dedicated line positioning
  * - Real-time emoji flashing indicators (●/○) with token counting
- * - Terminal cursor management for precise line targeting
+ * - Direct terminal control with ANSI escape sequences for precise line targeting
  * - Content buffering and preview updates during streaming
- * - Final content display with proper formatting and borders
+ * - Final content display with proper formatting and status indicators
  * - Error handling with visual feedback
  * 
  * Architecture:
  * - Function-based approach with Map-based state management
- * - Terminal control with cursor save/restore for multi-line updates
+ * - Direct ANSI escape sequences for cursor control and line updates
  * - Status emoji coloring: cyan (streaming), green (success), red (errors)
- * - Content formatting with gray text styling and proper newline preservation
+ * - Content formatting with gray text styling for final responses
  * 
  * Implementation:
  * - Each agent gets assigned a dedicated line offset for streaming display
- * - Emoji flashing animation runs independently per agent
- * - Final content display consolidates all agents when streaming completes
+ * - Emoji flashing animation runs independently per agent on the same line
+ * - Final content display updates each agent's line in place
  * - Graceful error handling with visual error indicators
+ * 
+ * Recent Changes:
+ * - Replaced terminal utility functions with direct ANSI escape sequences
+ * - Fixed cursor positioning to prevent creating multiple lines
+ * - Simplified line management to update content in place
  */
 
-import { colors, terminal } from '../utils/colors';
+import { colors } from '../utils/colors';
 
 // Agent response management for real-time streaming
 interface StreamingAgent {
@@ -31,7 +36,6 @@ interface StreamingAgent {
   hasStarted: boolean;
   contentBuffer: string;
   tokenCount: number;
-  previewLine: number;
   lineOffset: number; // Relative line position from start of streaming block
   emojiFlashTimer?: NodeJS.Timeout; // Timer for flashing emoji animation
   hasError?: boolean; // Track if streaming ended with error
@@ -40,7 +44,6 @@ interface StreamingAgent {
 // State management
 const activeStreams = new Map<string, StreamingAgent>();
 const completedAgents = new Map<string, StreamingAgent>(); // Store completed agents for final display
-let streamingStartLine = 0; // The line where streaming block starts
 let nextLineOffset = 0; // Next available line offset for new agents
 
 // Emoji flashing animation constants
@@ -52,10 +55,9 @@ let emojiFlashIndex = 0;
  */
 export function startStreaming(agentName: string, displayName: string): void {
   if (!activeStreams.has(agentName)) {
-    // If this is the first agent, mark the starting line
+    // If this is the first agent, mark the starting line and add initial spacing
     if (activeStreams.size === 0) {
       console.log(); // Add newline before streaming block starts
-      streamingStartLine = (process.stdout as any).rows || 0;
       nextLineOffset = 0;
     }
 
@@ -68,26 +70,16 @@ export function startStreaming(agentName: string, displayName: string): void {
       hasStarted: false,
       contentBuffer: '',
       tokenCount: 0,
-      previewLine: streamingStartLine + lineOffset,
       lineOffset,
       hasError: false
     });
-  }
 
-  const stream = activeStreams.get(agentName)!;
-  if (!stream.hasStarted) {
-    // Create a new line for this agent if needed
-    if (stream.lineOffset > 0) {
-      // Move to the agent's designated line
-      for (let i = 0; i < stream.lineOffset; i++) {
-        console.log(); // Create empty lines for agents above
-      }
-    }
-
-    // Show initial flashing emoji preview for this agent (start with empty content)
+    // Create a new line for this agent and show initial preview
     const initialEmoji = colors.cyan('●');
     const initialPreview = `${initialEmoji} ${displayName}: ... (0 tokens)`;
-    process.stdout.write(initialPreview);
+    console.log(initialPreview);
+
+    const stream = activeStreams.get(agentName)!;
     stream.hasStarted = true;
 
     // Start flashing emoji animation
@@ -151,23 +143,24 @@ export function markStreamingError(agentName: string): void {
     // Store completed agent data for final display (with error status)
     completedAgents.set(agentName, stream);
 
-    // Save current cursor position
-    process.stdout.write(terminal.saveCursor());
+    // Calculate how many lines to move up to reach this agent's line
+    const linesToMoveUp = activeStreams.size - stream.lineOffset;
 
-    // Move to this agent's specific line
-    const linesToMove = stream.lineOffset;
-    if (linesToMove > 0) {
-      process.stdout.write(terminal.cursorUp(linesToMove));
+    // Move cursor up to this agent's line
+    if (linesToMoveUp > 0) {
+      process.stdout.write(`\x1B[${linesToMoveUp}A`); // Move cursor up
     }
 
-    // Clear the preview line and show error with red emoji
-    process.stdout.write(terminal.clearToEnd());
-    process.stdout.write(terminal.cursorToColumn(0));
+    // Clear the line and show error
+    process.stdout.write('\x1B[2K'); // Clear entire line
+    process.stdout.write('\x1B[G');  // Move to beginning of line
     const errorEmoji = colors.red('✗');
-    process.stdout.write(`${errorEmoji}  ${stream.agentName}: ` + colors.red('[Response ended with error]'));
+    process.stdout.write(`${errorEmoji} ${stream.agentName}: ` + colors.red('[Response ended with error]'));
 
-    // Restore cursor position
-    process.stdout.write(terminal.restoreCursor());
+    // Move cursor back down to the bottom
+    if (linesToMoveUp > 0) {
+      process.stdout.write(`\x1B[${linesToMoveUp}B`); // Move cursor down
+    }
 
     // Remove this agent from active streams
     activeStreams.delete(agentName);
@@ -177,6 +170,20 @@ export function markStreamingError(agentName: string): void {
       console.log(); // Add spacing
       resetStreamingState();
     }
+  }
+}
+
+/**
+ * Display a debug message, handling streaming state properly
+ */
+export function displayDebugMessage(message: string): void {
+  if (activeStreams.size > 0) {
+    // If streaming is active, print the debug message and stay where we are
+    // This will naturally place the debug message after the last streaming line
+    console.log(message);
+  } else {
+    // No streaming active, normal display
+    console.log(message);
   }
 }
 
@@ -207,7 +214,6 @@ export function resetStreamingState(): void {
 
   activeStreams.clear();
   completedAgents.clear();
-  streamingStartLine = 0;
   nextLineOffset = 0;
 }
 
@@ -217,38 +223,42 @@ function displayFinalContent(): void {
   // Get all completed streams
   const completedStreams = Array.from(completedAgents.values()).sort((a, b) => a.lineOffset - b.lineOffset);
 
-  // Move cursor to start of streaming block and clear preview lines
-  const totalLines = completedStreams.length;
-  if (totalLines > 0) {
-    // Move up to the first agent's line
-    process.stdout.write(terminal.cursorUp(totalLines - 1));
+  // For each completed stream, move to its line and update with final content
+  for (let i = 0; i < completedStreams.length; i++) {
+    const finalStream = completedStreams[i];
 
-    // Clear all preview lines
-    for (let i = 0; i < totalLines; i++) {
-      process.stdout.write(terminal.clearLine());
-      process.stdout.write(terminal.cursorToColumn(0));
-      if (i < totalLines - 1) {
-        process.stdout.write(terminal.cursorDown(1));
-      }
+    // Calculate how many lines to move up to reach this agent's line
+    const linesToMoveUp = completedStreams.length - i;
+
+    // Move cursor up to this agent's line
+    if (linesToMoveUp > 0) {
+      process.stdout.write(`\x1B[${linesToMoveUp}A`); // Move cursor up
     }
 
-    // Move back to start of block
-    process.stdout.write(terminal.cursorUp(totalLines - 1));
-    process.stdout.write(terminal.cursorToColumn(0));
+    // Clear the line and show final content inline
+    process.stdout.write('\x1B[2K'); // Clear entire line
+    process.stdout.write('\x1B[G');  // Move to beginning of line
 
-    // Display final content for all agents with borders
-    for (const finalStream of completedStreams) {
-      const fullContent = finalStream.contentBuffer.trim();
-      if (fullContent) {
-        console.log(createBorderedContent(finalStream.agentName, fullContent, finalStream.hasError));
-      } else {
-        console.log(createBorderedContent(finalStream.agentName, '[no response]', finalStream.hasError));
-      }
-      console.log(); // Add spacing after each response
+    const fullContent = finalStream.contentBuffer.trim();
+    const statusEmoji = getStatusEmoji(finalStream.hasError);
+
+    if (fullContent) {
+      // Show final content on same line with green checkmark
+      const finalDisplay = `${statusEmoji} ${finalStream.agentName}: ${colors.gray(fullContent)}`;
+      process.stdout.write(finalDisplay);
+    } else {
+      const finalDisplay = `${statusEmoji} ${finalStream.agentName}: ${colors.gray('[no response]')}`;
+      process.stdout.write(finalDisplay);
+    }
+
+    // Move cursor back down
+    if (linesToMoveUp > 0) {
+      process.stdout.write(`\x1B[${linesToMoveUp}B`); // Move cursor down
     }
   }
 
-  // Reset streaming state
+  // Add final spacing and reset
+  console.log(); // Add spacing after final content
   resetStreamingState();
 }
 
@@ -320,26 +330,20 @@ function updateStreamingPreview(agentName: string): void {
     .split(/[\s\.,;:!?\-'"()\[\]{}]+/)
     .filter(token => token.length > 0).length;
 
-  // Format: ● agentName: [20 chars] ... (xxx tokens)
+  // Format: ● agentName: [content] ... (xxx tokens)
   const emoji = getCurrentEmoji(stream.hasError);
   const preview = `${emoji} ${stream.agentName}: ${displayContent} ... (${tokenCount} tokens)`;
 
-  // Save current cursor position
-  process.stdout.write(terminal.saveCursor());
+  // Find the line for this agent (count from 1, as line 0 is the first streaming line)
+  const targetLine = stream.lineOffset + 1;
 
-  // Move to this agent's specific line
-  const linesToMove = stream.lineOffset;
-  if (linesToMove > 0) {
-    process.stdout.write(terminal.cursorUp(linesToMove));
-  }
-
-  // Update the preview line by clearing and rewriting
-  process.stdout.write(terminal.clearToEnd());
-  process.stdout.write(terminal.cursorToColumn(0));
+  // Save current cursor position, move to target line, update, restore
+  process.stdout.write('\x1B[s'); // Save cursor position
+  process.stdout.write(`\x1B[${targetLine}A`); // Move up to target line
+  process.stdout.write('\x1B[2K'); // Clear entire line
+  process.stdout.write('\x1B[G');  // Move to beginning of line
   process.stdout.write(preview);
-
-  // Restore cursor position
-  process.stdout.write(terminal.restoreCursor());
+  process.stdout.write('\x1B[u'); // Restore cursor position
 }
 
 function createBorderedContent(agentName: string, content: string, hasError?: boolean): string {

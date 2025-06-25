@@ -45,9 +45,9 @@ import {
   createWorld,
   getAgents,
   broadcastMessage,
-  subscribeToSSEEvents,
   DEFAULT_WORLD_NAME
 } from '../src/world';
+import { subscribeToSSE, subscribeToSystem } from '../src/event-bus';
 import { colors, terminal } from './utils/colors';
 import { EventType } from '../src/types';
 import * as StreamingDisplay from './streaming/streaming-display';
@@ -313,10 +313,10 @@ async function main() {
   rl.on('close', shutdown);
 
   // Subscribe to SSE events for agent streaming responses
-  const unsubscribe = subscribeToSSEEvents(worldName, async (event) => {
+  const unsubscribe = subscribeToSSE(async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
-      const sseData = event.payload;
+      const sseData = event.payload as import('../src/types').SSEEventPayload;
 
       // Get agent name for display
       const agents = getAgents(worldName);
@@ -347,6 +347,17 @@ async function main() {
             }
           }, 100);
           break;
+      }
+    }
+  });
+
+  // Subscribe to SYSTEM events for debug messages
+  subscribeToSystem(async (event) => {
+    if (event.type === EventType.SYSTEM) {
+      const systemData = event.payload as import('../src/types').SystemEventPayload;
+      if (systemData.action === 'debug' && systemData.content) {
+        // Display debug messages properly during streaming
+        StreamingDisplay.displayDebugMessage(colors.gray(systemData.content));
       }
     }
   });

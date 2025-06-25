@@ -66,7 +66,8 @@ let eventBusConfig: EventBusConfig;
 export const TOPICS = {
   MESSAGES: 'messages',
   WORLD: 'world',
-  SSE: 'sse'
+  SSE: 'sse',
+  SYSTEM: 'system'
 } as const;
 
 /**
@@ -187,6 +188,24 @@ export async function publishSSE(payload: SSEEventPayload): Promise<Event> {
   });
 }
 
+// System events - debug and logging information
+export async function publishSystemEvent(payload: SystemEventPayload): Promise<Event> {
+  return publishEvent(TOPICS.SYSTEM, {
+    type: EventType.SYSTEM,
+    payload
+  });
+}
+
+// Helper function for debug events
+export async function publishDebugEvent(content: string, context?: { [key: string]: any }): Promise<Event> {
+  return publishSystemEvent({
+    action: 'debug',
+    content,
+    timestamp: new Date().toISOString(),
+    ...context
+  });
+}
+
 /**
  * Topic-specific subscription helpers
  */
@@ -213,6 +232,14 @@ export function subscribeToSSE(
   filter?: EventFilter
 ): () => void {
   return subscribeToTopic(TOPICS.SSE, handler, filter);
+}
+
+// Subscribe to SYSTEM events
+export function subscribeToSystem(
+  handler: (event: Event) => void,
+  filter?: EventFilter
+): () => void {
+  return subscribeToTopic(TOPICS.SYSTEM, handler, filter);
 }
 
 /**

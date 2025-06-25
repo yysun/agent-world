@@ -57,12 +57,10 @@ import {
   updateAgent,
   broadcastMessage,
   sendMessage,
-  subscribeToMessageEvents,
-  subscribeToWorldEvents,
-  subscribeToSSEEvents,
   subscribeToAgentMessages,
   _clearAllWorldsForTesting
 } from '../src/world';
+import { subscribeToMessages, subscribeToWorld, subscribeToSSE } from '../src/event-bus';
 import { AgentConfig, WorldOptions, LLMProvider, EventType } from '../src/types';
 
 // Setup test data path (for path construction only - no real file operations)
@@ -671,7 +669,7 @@ describe('World Management System', () => {
 
     it('should subscribe to message events', () => {
       const callback = jest.fn();
-      const unsubscribe = subscribeToMessageEvents(worldName, callback);
+      const unsubscribe = subscribeToMessages(callback);
 
       expect(unsubscribe).toBeDefined();
       expect(typeof unsubscribe).toBe('function');
@@ -679,7 +677,7 @@ describe('World Management System', () => {
 
     it('should subscribe to world events', () => {
       const callback = jest.fn();
-      const unsubscribe = subscribeToWorldEvents(worldName, callback);
+      const unsubscribe = subscribeToWorld(callback);
 
       expect(unsubscribe).toBeDefined();
       expect(typeof unsubscribe).toBe('function');
@@ -687,7 +685,7 @@ describe('World Management System', () => {
 
     it('should subscribe to SSE events', () => {
       const callback = jest.fn();
-      const unsubscribe = subscribeToSSEEvents(worldName, callback);
+      const unsubscribe = subscribeToSSE(callback);
 
       expect(unsubscribe).toBeDefined();
       expect(typeof unsubscribe).toBe('function');

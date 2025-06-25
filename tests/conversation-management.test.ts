@@ -1,5 +1,32 @@
 /**
- * Integration tests for message conversation management system
+ * Integration tests for message conversation management system with selective mocking
+ * 
+ * Features:
+ * - Tests real message filtering and @mention extraction logic
+ * - Tests real agent-to-agent message routing and conversation flows
+ * - Tests real turn counter functionality with world module
+ * - Tests message broadcasting integration with controlled LLM responses
+ * - Uses selective mocking: only file I/O and LLM operations are mocked
+ * - Real world, event bus, and agent modules run for true integration testing
+ * - Prevents infinite agent conversation loops through response limiting
+ * 
+ * Logic:
+ * - File system operations are mocked (fs/promises, storage module)
+ * - LLM processing is mocked to return controlled responses
+ * - Logger output is suppressed during tests
+ * - World, event bus, and agent modules run with real logic
+ * - Uses fake timers to control async behavior and prevent test hangs
+ * - Proper cleanup after each test to prevent async operation leaks
+ * - Limits mock LLM responses to prevent infinite agent conversations
+ * 
+ * Changes:
+ * - UPDATED: Reduced mocking scope to only file I/O and LLM operations
+ * - KEPT: Mock implementations for storage and LLM modules
+ * - REMOVED: World module mocking to test real conversation logic
+ * - ADDED: Fake timer usage to control async operations
+ * - ADDED: Response limiting to prevent infinite agent conversations
+ * - ADDED: Proper test cleanup to prevent async leaks
+ * - ENHANCED: True integration testing with real module interactions
  */
 
 import { jest } from '@jest/globals';
@@ -14,8 +41,68 @@ import { shouldRespondToMessage } from '../src/agent';
 import { AgentConfig, MessageData, LLMProvider } from '../src/types';
 import { initializeEventBus, clearEventHistory } from '../src/event-bus';
 
+// Mock all file system operations
+jest.mock('fs/promises');
+
+// Mock storage module to prevent real file I/O
+jest.mock('../src/storage');
+
+// Mock LLM module to prevent actual API calls
+jest.mock('../src/llm');
+
+// Mock logger to suppress output during tests
+jest.mock('../src/logger');
+
+// Use fake timers to control async behavior
+jest.useFakeTimers();
+
 describe('Message Conversation Management', () => {
   let worldName: string;
+
+  beforeAll(() => {
+    // Mock fs/promises operations to prevent real file I/O
+    const mockFs = require('fs/promises');
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.writeFile.mockResolvedValue(undefined);
+    mockFs.readFile.mockResolvedValue('{}');
+    mockFs.rename.mockResolvedValue(undefined);
+    mockFs.rm.mockResolvedValue(undefined);
+    mockFs.readdir.mockResolvedValue([]);
+    mockFs.stat.mockResolvedValue({
+      isDirectory: () => false,
+      isFile: () => true
+    });
+    mockFs.access.mockResolvedValue(undefined);
+
+    // Set up mock implementations for file I/O operations only
+    const mockStorage = require('../src/storage');
+    mockStorage.initializeFileStorage.mockResolvedValue(undefined);
+    mockStorage.getStorageOptions.mockReturnValue({
+      dataDirectory: './data',
+      enableLogging: false
+    });
+    mockStorage.getStoragePaths.mockReturnValue({
+      dataDir: './data',
+      worldsDir: './data/worlds',
+      eventsDir: './data/events',
+      messagesDir: './data/messages'
+    });
+    mockStorage.ensureDirectory.mockResolvedValue(undefined);
+    mockStorage.saveEventData.mockResolvedValue(undefined);
+    mockStorage.loadEventData.mockResolvedValue([]);
+    mockStorage.saveEvent.mockResolvedValue(undefined);
+    mockStorage.loadEvents.mockResolvedValue([]);
+    mockStorage.loadMessages.mockResolvedValue([]);
+    mockStorage.loadRecentMessages.mockResolvedValue([]);
+
+    // Mock LLM to prevent network calls and control responses
+    const mockLLM = require('../src/llm');
+    mockLLM.loadLLMProvider.mockReturnValue({
+      // Mock provider object
+      name: 'mock-provider'
+    });
+    mockLLM.streamChatWithLLM.mockResolvedValue('Mock agent response');
+  });
 
   beforeEach(async () => {
     // Clear state
@@ -25,6 +112,21 @@ describe('Message Conversation Management', () => {
 
     // Create test world
     worldName = await createWorld({ name: 'conversation-test-world' });
+  });
+
+  afterEach(async () => {
+    // Cleanup to prevent async leaks
+    _clearAllWorldsForTesting();
+    clearEventHistory();
+
+    // Clear all timers and intervals
+    jest.clearAllTimers();
+    jest.runOnlyPendingTimers();
+  });
+
+  afterAll(() => {
+    // Restore real timers
+    jest.useRealTimers();
   });
 
   describe('Enhanced Message Filtering', () => {
@@ -111,7 +213,18 @@ describe('Message Conversation Management', () => {
 
   describe('Message Broadcasting Integration', () => {
     it('should broadcast messages without errors', async () => {
-      // Create some test agents
+      // Create some test agents with mocked streamChatWithLLM to prevent infinite conversations
+      const mockLLM = require('../src/llm');
+      let messageCount = 0;
+      mockLLM.streamChatWithLLM.mockImplementation(() => {
+        messageCount++;
+        // Prevent infinite conversation by returning non-mentioning responses after first few
+        if (messageCount > 2) {
+          return Promise.resolve('I understand.');
+        }
+        return Promise.resolve('Mock response from agent.');
+      });
+
       const agent1Config: AgentConfig = {
         name: 'Agent1',
         type: 'ai',
@@ -135,8 +248,11 @@ describe('Message Conversation Management', () => {
       // Test private message with mentions
       await expect(broadcastMessage(worldName, 'Hello @Agent1, can you help?', 'HUMAN')).resolves.not.toThrow();
 
-      // Test agent-to-agent message
+      // Test agent-to-agent message (but limit responses to prevent loops)
       await expect(broadcastMessage(worldName, '@Agent2 what do you think?', 'Agent1')).resolves.not.toThrow();
+
+      // Fast-forward any pending timers
+      jest.runAllTimers();
     });
   });
 });

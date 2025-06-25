@@ -35,9 +35,9 @@ import {
   getAgents,
   getAgent,
   broadcastMessage,
-  subscribeToSSEEvents,
   DEFAULT_WORLD_NAME
 } from '../src/world';
+import { subscribeToSSE } from '../src/event-bus';
 import { createTerminalKitUI, isTerminalCompatible } from './ui/terminal-kit-ui';
 import { helpCommand } from './commands/help';
 import { addCommand } from './commands/add';
@@ -235,7 +235,7 @@ async function main() {
   });
 
   // Subscribe to SSE events for agent streaming responses
-  unsubscribe = subscribeToSSEEvents(worldName, async (event) => {
+  unsubscribe = subscribeToSSE(async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
       const sseData = event.payload as import('../src/types').SSEEventPayload;

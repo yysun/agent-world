@@ -106,6 +106,8 @@ export interface SystemEventPayload {
   action: string;
   agentName?: string;
   worldName?: string;
+  content?: string;
+  timestamp?: string;
   [key: string]: any;
 }
 
@@ -127,7 +129,8 @@ export interface Event {
 export enum EventType {
   MESSAGE = 'message',
   WORLD = 'world',
-  SSE = 'sse'
+  SSE = 'sse',
+  SYSTEM = 'system'
 }
 
 export interface EventFilter {

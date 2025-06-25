@@ -11,17 +11,21 @@
 - **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step;
 - **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed);
 - **!!**: Create requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation;
-- **!!!**: Update the requirements, plan, and implement;
+- **!!!**: Update the requirements and plan, and implement;
+
 ## Planning Rules
 - Large changes or "AA" → always create plan first, get confirmation
 - Focus on functionality/logic, not optimizations
 - Break into smaller, actionable steps with context/dependencies
 
-## Project Instructions
-- `npm run dev` - Start the dev
-- `npm test` - Run tests
-- use `tsx` for TypeScript execution
-- use function based approach instead of class based
-
 ## Interaction Guidelines
 - When you are done or need my input → play sound :`afplay /System/Library/Sounds/Glass.aiff`
+
+## Project Instructions
+- use function based approach instead of class based
+- use `tsx` for TypeScript execution
+- `npm run dev` - Start the dev
+- `npm test` - Run tests
+- unit tests should only mock file io and LLM, do not mock world, event bus or agent
+- write debug code and use `tsx` for debugging if needed
+

@@ -30,6 +30,8 @@
  * - Subscription tracking to prevent double subscriptions during create/load operations
  * - FIXED: Consistent ID vs name usage with clear function naming convention
  * - ADDED: Helper functions for agent lookup by ID, name, or smart detection
+ * - FIXED: Centralized turn counter reset to prevent duplication (moved from individual agent subscriptions to broadcast/send functions)
+ * - REPLACED: Console.log with event-based debug system using publishDebugEvent for better architecture
  *
  * Logic:
  * - All agent, event, and message storage is now per-world; no global agent/event/message folders
@@ -79,7 +81,17 @@ import {
   subscribeToMessages,
   subscribeToWorld,
   subscribeToSSE,
-  initializeEventBus
+  subscribeToSystem,
+  initializeEventBus,
+  publishDebugEvent
+} from './event-bus';
+
+// Re-export event subscription functions for backward compatibility
+export {
+  subscribeToMessages as subscribeToMessageEvents,
+  subscribeToWorld as subscribeToWorldEvents,
+  subscribeToSSE as subscribeToSSEEvents,
+  subscribeToSystem as subscribeToSystemEvents
 } from './event-bus';
 import { processAgentMessage } from './agent';
 import { initializeFileStorage, getStorageOptions, ensureDirectory } from './storage';
@@ -95,38 +107,49 @@ const agentSubscriptions: Map<string, () => void> = new Map();
 const worldConversationCounters: Map<string, number> = new Map();
 
 /**
- * Get turn counter for a world
+ * Turn Management - consolidated turn counter operations
  */
-function getTurnCounter(worldName: string): number {
-  return worldConversationCounters.get(worldName) || 0;
-}
+export const TurnManager = {
+  /**
+   * Get turn counter for a world
+   */
+  getCount: (worldName: string): number => {
+    return worldConversationCounters.get(worldName) || 0;
+  },
 
-/**
- * Increment turn counter for a world
- */
-function incrementTurnCounter(worldName: string): number {
-  const current = getTurnCounter(worldName);
-  const newCount = current + 1;
-  worldConversationCounters.set(worldName, newCount);
-  console.log(`[Turn Counter] World ${worldName}: ${current} → ${newCount}`);
-  return newCount;
-}
+  /**
+   * Increment turn counter for a world
+   */
+  increment: (worldName: string): number => {
+    const current = TurnManager.getCount(worldName);
+    const newCount = current + 1;
+    worldConversationCounters.set(worldName, newCount);
+    publishDebugEvent(`[Turn Counter] ${worldName}: ${current} → ${newCount}`, { worldName, current, newCount });
+    return newCount;
+  },
 
-/**
- * Reset turn counter for a world
- */
-export function resetTurnCounter(worldName: string): void {
-  const current = getTurnCounter(worldName);
-  worldConversationCounters.set(worldName, 0);
-  console.log(`[Turn Counter] World ${worldName}: ${current} → 0 (reset)`);
-}
+  /**
+   * Reset turn counter for a world
+   */
+  reset: (worldName: string): void => {
+    const current = TurnManager.getCount(worldName);
+    worldConversationCounters.set(worldName, 0);
+    publishDebugEvent(`[Turn Counter] ${worldName}: ${current} → 0 (reset)`, { worldName, current, reset: true });
+  },
 
-/**
- * Check if turn limit is reached
- */
-function isTurnLimitReached(worldName: string): boolean {
-  return getTurnCounter(worldName) >= 20;
-}
+  /**
+   * Check if turn limit is reached
+   */
+  isLimitReached: (worldName: string): boolean => {
+    return TurnManager.getCount(worldName) >= 5;
+  }
+};
+
+// Legacy function exports for backward compatibility
+export const getTurnCounter = TurnManager.getCount;
+export const incrementTurnCounter = TurnManager.increment;
+export const resetTurnCounter = TurnManager.reset;
+export const isTurnLimitReached = TurnManager.isLimitReached;
 
 // Get data directory from storage configuration
 function getWorldsDir(): string {
@@ -588,24 +611,8 @@ function subscribeAgentToMessages(worldName: string, agent: Agent): void {
     if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
       const payload = event.payload as MessageEventPayload;
 
-      // Reset turn counter for human or system messages
-      if (payload.sender === 'HUMAN' || payload.sender === 'human' || payload.sender === 'system') {
-        resetTurnCounter(worldName);
-      }
-
       // Don't process messages from this agent itself
       if (payload.sender !== agent.name) {
-        // Check turn limit before processing agent message
-        if (isTurnLimitReached(worldName)) {
-          console.log(`[Turn Limit] Blocking agent ${agent.name} - limit reached`);
-          // Inject @human redirect message
-          await publishMessageEvent({
-            content: '@human Turn limit reached (20 consecutive agent messages). Please take control of the conversation.',
-            sender: 'system'
-          });
-          return;
-        }
-
         try {
           // Ensure agent config has name field
           const agentConfigWithName = {
@@ -622,7 +629,7 @@ function subscribeAgentToMessages(worldName: string, agent: Agent): void {
 
           // Increment turn counter after successful agent message processing
           if (payload.sender !== 'HUMAN' && payload.sender !== 'human' && payload.sender !== 'system') {
-            incrementTurnCounter(worldName);
+            TurnManager.increment(worldName);
           }
         } catch (error) {
           console.error(`Agent ${agent.name} failed to process message:`, error);
@@ -913,10 +920,21 @@ export async function broadcastMessage(worldName: string, message: string, sende
     throw new Error(`World ${worldName} not found`);
   }
 
+  const senderName = sender || 'HUMAN';
+
+  // Reset turn counter for human or system messages (centralized - happens once per message)
+  if (senderName === 'HUMAN' || senderName === 'human' || senderName === 'system') {
+    publishDebugEvent(`[Centralized Reset] Turn counter reset for ${senderName} broadcast message`, {
+      worldName,
+      sender: senderName
+    });
+    TurnManager.reset(worldName);
+  }
+
   // Create simple message payload with flat structure
   const messageEventPayload: MessageEventPayload = {
     content: message,
-    sender: sender || 'HUMAN'
+    sender: senderName
   };
 
   // Publish MESSAGE event with flat payload structure
@@ -937,36 +955,29 @@ export async function sendMessage(worldName: string, targetName: string, message
     throw new Error(`Agent not found`);
   }
 
+  const senderName = sender || 'system';
+
+  // Reset turn counter for human or system messages (centralized - happens once per message)
+  if (senderName === 'HUMAN' || senderName === 'human' || senderName === 'system') {
+    publishDebugEvent(`[Centralized Reset] Turn counter reset for ${senderName} direct message`, {
+      worldName,
+      sender: senderName,
+      targetName
+    });
+    TurnManager.reset(worldName);
+  }
+
   // Create simple message payload with flat structure
   const messageEventPayload: MessageEventPayload = {
     content: message,
-    sender: sender || 'system'
+    sender: senderName
   };
 
   // Publish direct message event
   await publishMessageEvent(messageEventPayload);
 }
 
-/**
- * Subscribe to message events for a world
- */
-export function subscribeToMessageEvents(worldName: string, callback: (event: any) => void): () => void {
-  return subscribeToMessages(callback);
-}
 
-/**
- * Subscribe to world events for a world
- */
-export function subscribeToWorldEvents(worldName: string, callback: (event: any) => void): () => void {
-  return subscribeToWorld(callback);
-}
-
-/**
- * Subscribe to SSE events for a world
- */
-export function subscribeToSSEEvents(worldName: string, callback: (event: any) => void): () => void {
-  return subscribeToSSE(callback);
-}
 
 /**
  * Subscribe to messages for a specific agent in a world
