@@ -6,28 +6,22 @@
  * - Real-time emoji flashing indicators (●/○) with token counting
  * - Direct terminal control with ANSI escape sequences for precise line targeting
  * - Content buffering and preview updates during streaming
- * - Final content display with proper formatting and status indicators
- * - Error handling with visual feedback
- * 
- * Architecture:
- * - Function-based approach with Map-based state management
- * - Direct ANSI escape sequences for cursor control and line updates
- * - Status emoji coloring: cyan (streaming), green (success), red (errors)
- * - Content formatting with gray text styling for final responses
+ * - Final content logging with proper formatting after streaming completion
+ * - Error handling with visual feedback and graceful cleanup
  * 
  * Implementation:
+ * - Function-based approach with Map-based state management
+ * - Direct ANSI escape sequences for cursor control and line updates
  * - Each agent gets assigned a dedicated line offset for streaming display
  * - Emoji flashing animation runs independently per agent on the same line
- * - Final content display updates each agent's line in place
- * - Graceful error handling with visual error indicators
- * 
- * Recent Changes:
- * - Replaced terminal utility functions with direct ANSI escape sequences
- * - Fixed cursor positioning to prevent creating multiple lines
- * - Simplified line management to update content in place
+ * - Completed streams are hidden and logged as final content
+ * - Status emoji coloring: cyan (streaming), green (success), red (errors)
  */
 
 import { colors } from '../utils/colors';
+
+// Debug configuration
+const DEBUG_OUTPUT_ENABLED = false; // Set to true to show debug messages during streaming
 
 // Agent response management for real-time streaming
 interface StreamingAgent {
@@ -43,8 +37,10 @@ interface StreamingAgent {
 
 // State management
 const activeStreams = new Map<string, StreamingAgent>();
-const completedAgents = new Map<string, StreamingAgent>(); // Store completed agents for final display
 let nextLineOffset = 0; // Next available line offset for new agents
+
+// Callback for when all streaming ends
+let onAllStreamingEndCallback: (() => void) | null = null;
 
 // Emoji flashing animation constants
 const FLASH_EMOJIS = ['●', '○']; // Filled and empty circles for flashing effect
@@ -117,15 +113,31 @@ export function endStreaming(agentName: string): void {
     // Stop emoji flashing animation
     stopEmojiFlashing(agentName);
 
-    // Store completed agent data for final display
-    completedAgents.set(agentName, stream);
+    // Clear the streaming line first
+    clearStreamingLine(agentName);
+
+    // Log the final message content with newline
+    const finalContent = stream.contentBuffer.trim();
+    if (finalContent) {
+      console.log(`${colors.green('✓')} ${stream.agentName}: ${colors.gray(finalContent)}`);
+      console.log(); // Add newline after final content
+    } else {
+      console.log(`${colors.green('✓')} ${stream.agentName}: ${colors.gray('[no response]')}`);
+      console.log(); // Add newline after final content
+    }
 
     // Remove this agent from active streams
     activeStreams.delete(agentName);
 
-    // If this is the last active stream, show all final content
+    // If this is the last active stream, do final cleanup
     if (activeStreams.size === 0) {
       displayFinalContent();
+      // Call the callback if set, with a small delay to ensure output is complete
+      if (onAllStreamingEndCallback) {
+        setTimeout(() => {
+          onAllStreamingEndCallback!();
+        }, 50);
+      }
     }
   }
 }
@@ -139,9 +151,6 @@ export function markStreamingError(agentName: string): void {
     // Mark as error and stop emoji flashing animation
     stream.hasError = true;
     stopEmojiFlashing(agentName);
-
-    // Store completed agent data for final display (with error status)
-    completedAgents.set(agentName, stream);
 
     // Calculate how many lines to move up to reach this agent's line
     const linesToMoveUp = activeStreams.size - stream.lineOffset;
@@ -169,14 +178,31 @@ export function markStreamingError(agentName: string): void {
     if (activeStreams.size === 0) {
       console.log(); // Add spacing
       resetStreamingState();
+      // Call the callback if set, with a small delay to ensure output is complete
+      if (onAllStreamingEndCallback) {
+        setTimeout(() => {
+          onAllStreamingEndCallback!();
+        }, 50);
+      }
     }
   }
+}
+
+/**
+ * Set callback to be called when all streaming ends
+ */
+export function setOnAllStreamingEndCallback(callback: (() => void) | null): void {
+  onAllStreamingEndCallback = callback;
 }
 
 /**
  * Display a debug message, handling streaming state properly
  */
 export function displayDebugMessage(message: string): void {
+  if (!DEBUG_OUTPUT_ENABLED) {
+    return; // Debug output is disabled
+  }
+
   if (activeStreams.size > 0) {
     // If streaming is active, print the debug message and stay where we are
     // This will naturally place the debug message after the last streaming line
@@ -185,6 +211,14 @@ export function displayDebugMessage(message: string): void {
     // No streaming active, normal display
     console.log(message);
   }
+}
+
+/**
+ * Display user input that's being sent to agents
+ */
+export function displayUserInput(message: string): void {
+  const orangeDot = colors.orange('●');
+  console.log(`${orangeDot} you: ${message}`);
 }
 
 /**
@@ -205,61 +239,88 @@ export function resetStreamingState(): void {
     }
   }
 
-  // Clear all completed timers
-  for (const stream of completedAgents.values()) {
-    if (stream.emojiFlashTimer) {
-      clearInterval(stream.emojiFlashTimer);
-    }
+  activeStreams.clear();
+  nextLineOffset = 0;
+}
+
+/**
+ * Clear the streaming line for a specific agent
+ */
+function clearStreamingLine(agentName: string): void {
+  const stream = activeStreams.get(agentName);
+  if (!stream) return;
+
+  // Calculate how many lines to move up to reach this agent's line
+  const linesToMoveUp = nextLineOffset - stream.lineOffset;
+
+  if (linesToMoveUp > 0) {
+    // Move cursor up to this agent's line
+    process.stdout.write(`\x1B[${linesToMoveUp}A`);
   }
 
-  activeStreams.clear();
-  completedAgents.clear();
-  nextLineOffset = 0;
+  // Clear the entire line
+  process.stdout.write('\x1B[2K'); // Clear entire line
+  process.stdout.write('\x1B[G');  // Move to beginning of line
+
+  if (linesToMoveUp > 0) {
+    // Move cursor back down to the bottom
+    process.stdout.write(`\x1B[${linesToMoveUp}B`);
+  }
 }
 
 // Private helper functions
 
 function displayFinalContent(): void {
-  // Get all completed streams
-  const completedStreams = Array.from(completedAgents.values()).sort((a, b) => a.lineOffset - b.lineOffset);
+  // Reset streaming state
+  resetStreamingState();
+}
 
-  // For each completed stream, move to its line and update with final content
-  for (let i = 0; i < completedStreams.length; i++) {
-    const finalStream = completedStreams[i];
+/**
+ * Refresh the streaming display by clearing all lines and redrawing only active streams
+ */
+function refreshStreamingDisplay(): void {
+  const totalLines = nextLineOffset;
 
-    // Calculate how many lines to move up to reach this agent's line
-    const linesToMoveUp = completedStreams.length - i;
+  if (totalLines === 0) return;
 
-    // Move cursor up to this agent's line
-    if (linesToMoveUp > 0) {
-      process.stdout.write(`\x1B[${linesToMoveUp}A`); // Move cursor up
-    }
+  // Move cursor up to first streaming line and clear all lines
+  process.stdout.write(`\x1B[${totalLines}A`);
 
-    // Clear the line and show final content inline
+  // Clear all streaming lines
+  for (let i = 0; i < totalLines; i++) {
     process.stdout.write('\x1B[2K'); // Clear entire line
-    process.stdout.write('\x1B[G');  // Move to beginning of line
-
-    const fullContent = finalStream.contentBuffer.trim();
-    const statusEmoji = getStatusEmoji(finalStream.hasError);
-
-    if (fullContent) {
-      // Show final content on same line with green checkmark
-      const finalDisplay = `${statusEmoji} ${finalStream.agentName}: ${colors.gray(fullContent)}`;
-      process.stdout.write(finalDisplay);
-    } else {
-      const finalDisplay = `${statusEmoji} ${finalStream.agentName}: ${colors.gray('[no response]')}`;
-      process.stdout.write(finalDisplay);
-    }
-
-    // Move cursor back down
-    if (linesToMoveUp > 0) {
-      process.stdout.write(`\x1B[${linesToMoveUp}B`); // Move cursor down
+    if (i < totalLines - 1) {
+      process.stdout.write('\x1B[B'); // Move down to next line
     }
   }
 
-  // Add final spacing and reset
-  console.log(); // Add spacing after final content
-  resetStreamingState();
+  // Move cursor back to first line
+  process.stdout.write(`\x1B[${totalLines - 1}A`);
+
+  // Redraw only active streams
+  const activeStreamsList = Array.from(activeStreams.values()).sort((a, b) => a.lineOffset - b.lineOffset);
+
+  // Update line offsets for remaining active streams
+  for (let i = 0; i < activeStreamsList.length; i++) {
+    const stream = activeStreamsList[i];
+    stream.lineOffset = i;
+
+    // Display this stream
+    const statusEmoji = stream.isStreaming ? '●' : '○';
+    const truncatedContent = stream.contentBuffer.length > 60
+      ? stream.contentBuffer.substring(0, 57) + '...'
+      : stream.contentBuffer;
+
+    const display = `${statusEmoji} ${stream.agentName}: ${truncatedContent} (${stream.tokenCount} tokens)`;
+    process.stdout.write(display);
+
+    if (i < activeStreamsList.length - 1) {
+      process.stdout.write('\n');
+    }
+  }
+
+  // Update nextLineOffset to match current active streams
+  nextLineOffset = activeStreamsList.length;
 }
 
 function startEmojiFlashing(agentName: string): void {
@@ -284,7 +345,7 @@ function startEmojiFlashing(agentName: string): void {
 }
 
 function stopEmojiFlashing(agentName: string): void {
-  const stream = activeStreams.get(agentName) || completedAgents.get(agentName);
+  const stream = activeStreams.get(agentName);
   if (stream?.emojiFlashTimer) {
     clearInterval(stream.emojiFlashTimer);
     stream.emojiFlashTimer = undefined;
@@ -297,17 +358,6 @@ function getCurrentEmoji(hasError?: boolean): string {
 
   // Use cyan for streaming (different from final status colors)
   return colors.cyan(emoji);
-}
-
-function getStatusEmoji(hasError?: boolean): string {
-  const emoji = '●'; // Use filled circle for final display
-
-  // Color the emoji based on status
-  if (hasError) {
-    return colors.red(emoji);
-  } else {
-    return colors.green(emoji);
-  }
 }
 
 function updateStreamingPreview(agentName: string): void {
@@ -346,48 +396,3 @@ function updateStreamingPreview(agentName: string): void {
   process.stdout.write('\x1B[u'); // Restore cursor position
 }
 
-function createBorderedContent(agentName: string, content: string, hasError?: boolean): string {
-  const statusEmoji = getStatusEmoji(hasError);
-
-  // Prepare the first line with emoji and agent name (single space)
-  const firstLine = `${statusEmoji} ${agentName}: `;
-
-  // Split content into lines first to preserve newlines
-  const contentLines = content.trim().split('\n');
-  const lines: string[] = [];
-  let isFirstLine = true;
-
-  for (const contentLine of contentLines) {
-    if (contentLine.trim() === '') {
-      // Empty line - add empty line
-      lines.push('');
-      continue;
-    }
-
-    // Use full line without any border or artificial length limits
-    const words = contentLine.trim().split(/\s+/);
-    let currentLine = isFirstLine ? firstLine : '  '; // Add two spaces for indentation on subsequent lines
-
-    // Simply add all words to the line (terminal will handle natural wrapping)
-    for (const word of words) {
-      const wordToAdd = (currentLine === firstLine || currentLine === '  ' ? '' : ' ') + word;
-      // Apply gray color to content words (not to the emoji and agent name)
-      if (currentLine === firstLine) {
-        // First line: add gray color to content after agent name
-        currentLine += colors.gray(wordToAdd);
-      } else {
-        // Subsequent lines: entire line should be gray with indentation
-        currentLine += colors.gray(wordToAdd);
-      }
-    }
-
-    if (currentLine.trim()) {
-      lines.push(currentLine);
-    }
-
-    isFirstLine = false;
-  }
-
-  // Return lines without any border
-  return lines.join('\n');
-}

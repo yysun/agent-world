@@ -178,6 +178,13 @@ async function main() {
   // Load all agents from our sample world
   await loadAgents(worldName);
 
+  // Set up callback to show prompt when streaming ends
+  StreamingDisplay.setOnAllStreamingEndCallback(() => {
+    if (rl) {
+      rl.prompt();
+    }
+  });
+
   // Handle input from piped input or command line arguments
   let hasExternalInput = false;
   let externalMessage = '';
@@ -260,7 +267,7 @@ async function main() {
 
   // If we have external input, broadcast it
   if (hasExternalInput && externalMessage) {
-    console.log(colors.gray(`> ${externalMessage}`)); // Show as user input
+    StreamingDisplay.displayUserInput(externalMessage);
     try {
       await broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
@@ -300,6 +307,7 @@ async function main() {
       }
     } else {
       // Broadcast message to all agents
+      StreamingDisplay.displayUserInput(trimmedInput);
       try {
         await broadcastMessage(worldName, trimmedInput, 'HUMAN');
       } catch (error) {
@@ -307,7 +315,12 @@ async function main() {
       }
     }
 
-    rl.prompt();
+    // Wait a short moment for potential streaming to start, then show prompt if no streaming
+    setTimeout(() => {
+      if (!StreamingDisplay.isStreamingActive()) {
+        rl.prompt();
+      }
+    }, 50);
   });
 
   rl.on('close', shutdown);
@@ -332,20 +345,9 @@ async function main() {
           break;
         case 'end':
           StreamingDisplay.endStreaming(sseData.agentName);
-          // Show prompt again after response completes
-          setTimeout(() => {
-            if (!StreamingDisplay.isStreamingActive()) {
-              rl.prompt();
-            }
-          }, 100);
           break;
         case 'error':
           StreamingDisplay.markStreamingError(sseData.agentName);
-          setTimeout(() => {
-            if (!StreamingDisplay.isStreamingActive()) {
-              rl.prompt();
-            }
-          }, 100);
           break;
       }
     }
