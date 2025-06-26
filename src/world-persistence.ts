@@ -320,6 +320,14 @@ export async function loadAgentMemory(worldName: string, agentName: string): Pro
     const memoryData = await fs.readFile(memoryPath, 'utf8');
     const memory = JSON.parse(memoryData);
 
+    // Convert createdAt strings back to Date objects for AI SDK compatibility
+    if (memory.messages) {
+      memory.messages = memory.messages.map((msg: any) => ({
+        ...msg,
+        createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date()
+      }));
+    }
+
     return memory;
   } catch (error) {
     // Return new LLM-compatible default memory structure

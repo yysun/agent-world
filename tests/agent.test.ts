@@ -145,8 +145,8 @@ describe('Agent Functions', () => {
           }),
           expect.objectContaining({
             role: 'user',
-            content: 'Hello agent!',
-            name: 'human'
+            content: 'Hello agent!'
+            // sender field should be stripped before LLM call
           })
         ]), // messages array
         'test-msg-id', // message ID for streaming
@@ -196,7 +196,7 @@ describe('Agent Functions', () => {
           expect.objectContaining({ role: 'system' }),
           expect.objectContaining({ role: 'user', content: 'Test without ID' })
         ]),
-        expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/), // UUID pattern
+        expect.stringMatching(/^msg_\d+_[a-z0-9]+$/), // New message ID pattern
         expect.anything()
       );
     });

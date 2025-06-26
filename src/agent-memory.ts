@@ -20,6 +20,7 @@
  * - Implements memory limit (50 messages) for performance
  * - Archives old memory before clearing with timestamped backups
  * - Updates agent activity timestamps on memory operations
+ * - Stores messages as-is with proper sender information populated upstream
  */
 
 import * as path from 'path';
@@ -45,9 +46,10 @@ export async function addToAgentMemory(worldName: string, agentName: string, mes
     memory.messages = [];
   }
 
+  // Store message as-is with timestamp
   memory.messages.push({
     ...message,
-    timestamp: message.timestamp || new Date().toISOString()
+    createdAt: message.createdAt || new Date()
   });
 
   // Keep only last 50 messages for performance

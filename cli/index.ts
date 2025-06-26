@@ -394,9 +394,10 @@ async function main() {
   subscribeToMessages(async (event) => {
     if (event.type === EventType.MESSAGE) {
       const messageData = event.payload as MessageEventPayload;
-      if (messageData.sender === 'system') {
-        // Display system messages with red dot
-        StreamingDisplay.displaySystemMessage(messageData.content);
+      // Display @human messages from system OR agents (for turn limit notifications)
+      if (messageData.content.startsWith('@human')) {
+        // Display @human messages with red dot, showing who sent it
+        StreamingDisplay.displayMessage(messageData);
       }
     }
   });

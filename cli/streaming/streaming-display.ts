@@ -8,6 +8,7 @@
  * - Content buffering and preview updates during streaming
  * - Final content logging with proper formatting after streaming completion
  * - Error handling with visual feedback and graceful cleanup
+ * - Message display with structured formatting for sender and content
  * 
  * Implementation:
  * - Function-based approach with Map-based state management
@@ -16,6 +17,11 @@
  * - Emoji flashing animation runs independently per agent on the same line
  * - Completed streams are hidden and logged as final content
  * - Status emoji coloring: cyan (streaming), green (success), red (errors)
+ * - Message objects with sender and content properties for proper formatting
+ * 
+ * Changes:
+ * - Renamed displaySystemMessage to displayMessage for generic message handling
+ * - Updated to accept message objects with sender and content properties
  */
 
 import { colors } from '../utils/colors';
@@ -245,11 +251,11 @@ export function displayUserInput(message: string): void {
 }
 
 /**
- * Display system messages with a red dot
+ * Display messages with a red dot
  */
-export function displaySystemMessage(message: string): void {
-  const redDot = colors.red('●');
-  console.log(`${redDot} world: ${message}`);
+export function displayMessage(messageData: { content: string; sender: string }): void {
+  const redDot = colors.red('\n●');
+  console.log(`${redDot} ${messageData.sender}: ${messageData.content}`);
 }
 
 /**

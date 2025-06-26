@@ -35,7 +35,7 @@
  * - Maintains all existing functionality in simpler form
  */
 
-import { Event, EventType, MessageEventPayload, SystemEventPayload, SSEEventPayload } from './types';
+import { Event, EventType, MessageEventPayload, SystemEventPayload, SSEEventPayload, SenderType } from './types';
 import {
   EventBusProvider,
   EventFilter,
@@ -161,49 +161,74 @@ export function clearEventHistory(): void {
 }
 
 /**
+ * Determine sender type based on sender name
+ */
+function determineSenderType(sender: string): SenderType {
+  if (sender === 'HUMAN' || sender === 'human' || sender === 'user') {
+    return SenderType.HUMAN;
+  }
+  if (sender === 'system' || sender === 'world') {
+    return SenderType.WORLD;
+  }
+  return SenderType.AGENT;
+}
+
+/**
  * Topic-specific helper functions
  */
 
 // MESSAGE events - structured message objects
-export async function publishMessageEvent(payload: MessageEventPayload): Promise<Event> {
+export async function publishMessageEvent(payload: MessageEventPayload, sender?: string): Promise<Event> {
   return publishEvent(TOPICS.MESSAGES, {
     type: EventType.MESSAGE,
+    sender: sender || payload.sender,
+    senderType: determineSenderType(sender || payload.sender),
     payload: payload
   });
 }
 
 // WORLD events - system events, agent lifecycle, etc.
-export async function publishWorldEvent(payload: SystemEventPayload): Promise<Event> {
+export async function publishWorldEvent(payload: SystemEventPayload, sender?: string): Promise<Event> {
+  const senderName = sender || payload.agentName || 'world';
   return publishEvent(TOPICS.WORLD, {
     type: EventType.WORLD,
+    sender: senderName,
+    senderType: determineSenderType(senderName),
     payload
   });
 }
 
 // SSE events - streaming data for real-time updates
-export async function publishSSE(payload: SSEEventPayload): Promise<Event> {
+export async function publishSSE(payload: SSEEventPayload, sender?: string): Promise<Event> {
+  const senderName = sender || payload.agentName || 'world';
   return publishEvent(TOPICS.SSE, {
     type: EventType.SSE,
+    sender: senderName,
+    senderType: determineSenderType(senderName),
     payload
   });
 }
 
 // System events - debug and logging information
-export async function publishSystemEvent(payload: SystemEventPayload): Promise<Event> {
+export async function publishSystemEvent(payload: SystemEventPayload, sender?: string): Promise<Event> {
+  const senderName = sender || payload.agentName || 'system';
   return publishEvent(TOPICS.SYSTEM, {
     type: EventType.SYSTEM,
+    sender: senderName,
+    senderType: determineSenderType(senderName),
     payload
   });
 }
 
 // Helper function for debug events
 export async function publishDebugEvent(content: string, context?: { [key: string]: any }): Promise<Event> {
+  const agentName = context?.agentName;
   return publishSystemEvent({
     action: 'debug',
     content,
     timestamp: new Date().toISOString(),
     ...context
-  });
+  }, agentName || 'system');
 }
 
 /**

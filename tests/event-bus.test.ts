@@ -40,7 +40,7 @@ import {
   clearEventHistory,
   TOPICS
 } from '../src/event-bus';
-import { EventType } from '../src/types';
+import { EventType, SenderType } from '../src/types';
 
 describe('Event Bus', () => {
   beforeEach(() => {
@@ -65,6 +65,8 @@ describe('Event Bus', () => {
 
       const testEvent = {
         type: EventType.MESSAGE,
+        sender: 'test-agent',
+        senderType: 'agent' as SenderType,
         payload: { content: 'test data', sender: 'test-agent' }
       };
 
@@ -330,6 +332,8 @@ describe('Event Bus', () => {
     it('should handle invalid event data', async () => {
       const invalidEvent = {
         type: 'INVALID_TYPE' as any,
+        sender: 'test-sender',
+        senderType: 'agent' as SenderType,
         payload: { invalidField: 'test' } as any // Invalid payload structure
       };
 

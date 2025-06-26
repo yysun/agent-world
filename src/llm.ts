@@ -33,7 +33,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { v4 as uuidv4 } from 'uuid';
-import { LLMProvider, ChatMessage } from './types';
+import { LLMProvider, ChatMessage, stripCustomFieldsFromMessages } from './types';
 import { publishSSE } from './event-bus';
 import { agentLogger } from './logger';
 
@@ -112,9 +112,12 @@ export async function chatWithLLM(
   options: ChatOptions = {}
 ): Promise<string> {
   try {
+    // Strip custom fields before sending to LLM
+    const llmMessages = stripCustomFieldsFromMessages(messages);
+
     const { text } = await generateText({
       model: provider,
-      messages: messages,
+      messages: llmMessages,
       temperature: options.temperature || 0.7,
       maxTokens: options.maxTokens || 1000,
     });
@@ -199,10 +202,13 @@ async function handleStreamingRequest(
   let fullResponse = '';
 
   try {
+    // Strip custom fields before sending to LLM
+    const llmMessages = stripCustomFieldsFromMessages(messages);
+
     // Generate response using streaming AI (from LLMQueue)
     const result = await streamText({
       model: provider,
-      messages: messages,
+      messages: llmMessages,
       temperature: options.temperature || 0.7,
       maxTokens: options.maxTokens || 1000,
     });

@@ -17,14 +17,15 @@
  * - saveMessagesToMemory: Persist conversation to agent memory files
  * 
  * Turn Limit Logic:
- * - Checks last 5 conversation messages in shouldRespondToMessage
- * - If all 5 are from agents (not HUMAN/system), sends turn limit message
+ * - Checks last TURN_LIMIT conversation messages in shouldRespondToMessage
+ * - Uses senderType logic to identify human (HUMAN/human/user) or system (system/world) messages
+ * - If no human or system input found in last TURN_LIMIT messages, sends turn limit message
+ * - Turn limit message sent with agentName as sender for proper attribution
  * - Prevents endless agent loops without maintaining state counters
  * - Turn limit messages are ignored by all agents to prevent loops
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import { AgentMemory, Event, EventType, ChatMessage } from './types';
+import { AgentMemory, Event, EventType, ChatMessage, SenderType, stripCustomFields } from './types';
 import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
 import { publishSSE, publishMessageEvent, publishDebugEvent } from './event-bus';
 import { agentLogger } from './logger';
@@ -32,6 +33,9 @@ import { getAgentConversationHistory, addToAgentMemory } from './world';
 
 // Types moved to types.ts
 import type { AgentConfig, MessageData } from './types';
+
+// Turn limit configuration
+const TURN_LIMIT = 5;
 
 /**
  * Main agent message processing function
@@ -42,7 +46,7 @@ export async function processAgentMessage(
   messageId?: string,
   worldName?: string
 ): Promise<string> {
-  const msgId = messageId || uuidv4();
+  const msgId = messageId || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   // Ensure agent has a name
   if (!agentConfig.name) {
@@ -91,9 +95,12 @@ export async function processAgentMessage(
       agentName: agentConfig.name
     };
 
+    // Strip custom fields before sending to LLM
+    const llmMessages = messages.map(stripCustomFields);
+
     const response = await streamChatWithLLM(
       provider,
-      messages,
+      llmMessages,
       msgId,
       chatOptions
     );
@@ -283,30 +290,33 @@ export async function shouldRespondToMessage(
     return false;
   }
 
-  // Check turn limit by examining last 5 messages from conversation history
+  // Check turn limit by examining last TURN_LIMIT messages from conversation history
   if (worldName) {
     try {
       if (getAgentConversationHistory) {
-        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, 5);
+        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, TURN_LIMIT);
 
-        // Check if last 5 messages are all from agents (not HUMAN/human/system)
-        if (recentHistory.length >= 5) {
-          const lastFiveMessages = recentHistory.slice(-5);
-          const allFromAgents = lastFiveMessages.every(msg => {
-            const sender = msg.name || 'unknown';
-            return sender !== 'HUMAN' && sender !== 'human' && sender !== 'system';
+        // Check if last TURN_LIMIT messages contain any human or system input using senderType logic
+        if (recentHistory.length >= TURN_LIMIT) {
+          const lastMessages = recentHistory.slice(-TURN_LIMIT);
+          // Use senderType logic to determine if any message is from human or system
+          const hasHumanOrSystemInput = lastMessages.some(msg => {
+            const sender = msg.sender || 'unknown';
+            const senderType = determineSenderType(sender);
+            return senderType === SenderType.HUMAN || senderType === SenderType.WORLD;
           });
 
-          if (allFromAgents) {
-            publishDebugEvent(`[Turn Limit] ${agentConfig.name} detected 5 consecutive agent messages`, {
+          // If no human or system input in last TURN_LIMIT messages, turn limit reached
+          if (!hasHumanOrSystemInput) {
+            publishDebugEvent(`[Turn Limit] ${agentConfig.name} detected ${TURN_LIMIT} consecutive agent messages with no human/system input`, {
               agentName: agentConfig.name,
               worldName,
-              lastFiveSenders: lastFiveMessages.map(msg => msg.name || 'unknown')
+              lastSenders: lastMessages.map(msg => msg.sender || 'unknown')
             });
 
-            // Send turn limit message with this agent's name as sender
+            // Send turn limit message with agentName as sender
             await publishMessageEvent({
-              content: '@human Turn limit reached (5 consecutive agent messages). Please take control of the conversation.',
+              content: `@human Turn limit reached (${TURN_LIMIT} consecutive agent messages). Please take control of the conversation.`,
               sender: agentConfig.name
             });
 
@@ -370,7 +380,8 @@ function prepareMessagesForLLM(agentConfig: AgentConfig, messageData: MessageDat
   if (agentConfig.systemPrompt) {
     messages.push({
       role: 'system',
-      content: agentConfig.systemPrompt
+      content: agentConfig.systemPrompt,
+      createdAt: new Date()
     });
   }
 
@@ -384,7 +395,8 @@ function prepareMessagesForLLM(agentConfig: AgentConfig, messageData: MessageDat
   messages.push({
     role: 'user',
     content: content,
-    name: sender !== 'user' ? sender : undefined
+    createdAt: new Date(),
+    sender: sender !== 'user' ? sender : undefined
   });
 
   return messages;
@@ -428,7 +440,7 @@ async function saveMessagesToMemory(
   assistantResponse: string
 ): Promise<void> {
   try {
-    const currentTimestamp = new Date().toISOString();
+    const currentTimestamp = new Date();
 
     // Find the last user message (the new message we're responding to)
     // This is the most recent non-system message in the messages array
@@ -443,7 +455,7 @@ async function saveMessagesToMemory(
       // Save the new user message with timestamp
       const userMessageToSave: ChatMessage = {
         ...newUserMessage,
-        timestamp: currentTimestamp
+        createdAt: currentTimestamp
       };
 
       // Use agent name for memory storage
@@ -454,7 +466,7 @@ async function saveMessagesToMemory(
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: assistantResponse,
-      timestamp: currentTimestamp
+      createdAt: currentTimestamp
     };
 
     // Use agent name for memory storage
@@ -462,4 +474,17 @@ async function saveMessagesToMemory(
   } catch (error) {
     console.warn(`Could not save messages to memory: ${error}`);
   }
+}
+
+/**
+ * Determine sender type based on sender name (matches event-bus.ts logic)
+ */
+function determineSenderType(sender: string): SenderType {
+  if (sender === 'HUMAN' || sender === 'human' || sender === 'user') {
+    return SenderType.HUMAN;
+  }
+  if (sender === 'system' || sender === 'world') {
+    return SenderType.WORLD;
+  }
+  return SenderType.AGENT;
 }
