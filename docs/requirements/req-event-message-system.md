@@ -37,8 +37,9 @@ Create a robust, event-driven communication system that enables seamless interac
 
 **R2.3 Conversation Quality Control**
 - The system SHALL prevent endless agent-to-agent conversations through turn limiting
-- Turn limits SHALL be configurable with a default maximum of 5 consecutive agent messages
+- Turn limits SHALL be based on LLM call count per agent with a default maximum of 5 consecutive LLM calls
 - When turn limits are reached, the system SHALL automatically redirect control to humans
+- Turn limits SHALL reset automatically when human or system messages are received
 - Agents SHALL be able to explicitly pass control to humans using pass commands
 
 ### 3. Real-Time Streaming System
@@ -79,7 +80,8 @@ Create a robust, event-driven communication system that enables seamless interac
 - Agents SHALL automatically add @mentions when replying to other agents
 - The system SHALL detect pass commands in agent responses and hand control to humans
 - Turn counters SHALL reset automatically when humans or system send messages
-- The system SHALL prevent agent responses when turn limits are exceeded
+- The system SHALL prevent agent responses when LLM call limits are exceeded
+- LLM call counts SHALL be tracked per agent and incremented before each LLM invocation
 
 ### 5. Memory and Persistence
 
@@ -89,11 +91,19 @@ Create a robust, event-driven communication system that enables seamless interac
 - The system SHALL automatically save new conversation turns to agent memory
 - Memory SHALL be accessible for context loading and conversation history display
 
-**R5.2 System State Management**
+**R5.2 Passive Memory Collection**
+- All agents SHALL save all incoming messages to their memory regardless of mention status
+- Message saving SHALL be independent of LLM processing decisions
+- Agents SHALL maintain complete conversation context for better future responses
+- Own messages SHALL NOT be saved to prevent memory duplication
+- Passive memory SHALL use standard user message format with sender attribution
+
+**R5.3 System State Management**
 - The system SHALL maintain world state and agent configurations persistently
 - Event history SHALL be preserved for debugging and system monitoring
 - Configuration changes SHALL be persisted across system restarts
 - The system SHALL support backup and recovery of conversation data
+- Agent LLM call counts and timestamps SHALL be persisted and tracked
 
 ### 6. User Experience
 
@@ -160,9 +170,11 @@ Create a robust, event-driven communication system that enables seamless interac
 ### Functional Success
 - Users can naturally direct conversations to specific agents using @mentions
 - Agents collaborate effectively without creating conversation chaos
-- System automatically prevents runaway agent conversations
+- System automatically prevents runaway agent conversations through LLM call limiting
 - Real-time streaming provides immediate feedback on agent responses
 - Turn limits and pass commands provide reliable human control mechanisms
+- All agents maintain complete conversation context through passive memory
+- Agent responses show improved context awareness from conversation history
 
 ### Performance Success
 - Sub-100ms response time for streaming content updates
@@ -181,6 +193,9 @@ Create a robust, event-driven communication system that enables seamless interac
 - Standard LLM message format ensures provider compatibility
 - Comprehensive test coverage validates all core functionality
 - System architecture supports extensibility and maintenance
+- LLM call-based turn limiting provides accurate conversation control
+- Passive memory system maintains agent context without performance impact
+- Agent state persistence includes LLM usage tracking for monitoring
 
 ## Out of Scope
 
@@ -218,7 +233,9 @@ Create a robust, event-driven communication system that enables seamless interac
 - Users prefer natural language interaction over complex command structures
 - Agent responses should be immediate and visible to maintain engagement
 - Conversation privacy can be achieved through mention-based routing
-- Turn limits are necessary to prevent agent conversation loops
+- LLM call-based turn limits are more accurate than message pattern analysis
 - Standard LLM message formats provide sufficient conversation context
+- Passive memory collection improves agent context without affecting performance
+- All agents benefit from observing complete conversation history
 
 This requirements specification defines the essential functionality needed for a robust event-driven agent communication system while maintaining flexibility for future enhancements and scalability.

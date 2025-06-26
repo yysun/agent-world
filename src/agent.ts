@@ -39,6 +39,45 @@ import type { AgentConfig, MessageData } from './types';
 const TURN_LIMIT = 5;
 
 /**
+ * Save incoming message to agent memory (independent of LLM processing)
+ */
+async function saveIncomingMessageToMemory(
+  agentName: string,
+  messageData: MessageData,
+  worldName?: string
+): Promise<void> {
+  try {
+    // Skip saving agent's own messages
+    if (messageData.sender === agentName) {
+      return;
+    }
+
+    // Create user message for memory storage
+    const content = messageData.content || messageData.payload?.content || '';
+    const sender = messageData.sender || 'unknown';
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: content,
+      createdAt: new Date(),
+      sender: sender
+    };
+
+    // Save to agent memory
+    if (addToAgentMemory) {
+      await addToAgentMemory(worldName || 'default', agentName, userMessage);
+      publishDebugEvent(`[Memory Save] ${agentName} saved message from ${sender}`, {
+        agentName,
+        sender,
+        worldName: worldName || 'default'
+      });
+    }
+  } catch (error) {
+    console.warn(`Could not save incoming message to memory for ${agentName}:`, error);
+  }
+}
+
+/**
  * Main agent message processing function
  */
 export async function processAgentMessage(
@@ -55,6 +94,9 @@ export async function processAgentMessage(
   }
 
   try {
+    // Always save incoming message to memory (regardless of mention status)
+    await saveIncomingMessageToMemory(agentConfig.name, messageData, worldName);
+
     // Check if agent should respond to this message (includes turn limit check)
     if (!(await shouldRespondToMessage(agentConfig, messageData, worldName))) {
       return '';
@@ -465,7 +507,7 @@ function buildPrompt(agentConfig: AgentConfig, messageData: MessageData, convers
 
 /**
  * Save new conversation messages to agent memory
- * Saves only the new user message and assistant response - excludes system messages and history
+ * Saves only the assistant response - user message is already saved by saveIncomingMessageToMemory
  */
 async function saveMessagesToMemory(
   worldName: string,
@@ -476,27 +518,12 @@ async function saveMessagesToMemory(
   try {
     const currentTimestamp = new Date();
 
-    // Find the last user message (the new message we're responding to)
-    // This is the most recent non-system message in the messages array
-    const newUserMessage = messages.filter(msg => msg.role !== 'system').slice(-1)[0];
-
     if (!addToAgentMemory) {
       console.warn('addToAgentMemory function not available');
       return;
     }
 
-    if (newUserMessage) {
-      // Save the new user message with timestamp
-      const userMessageToSave: ChatMessage = {
-        ...newUserMessage,
-        createdAt: currentTimestamp
-      };
-
-      // Use agent name for memory storage
-      await addToAgentMemory(worldName, agentName, userMessageToSave);
-    }
-
-    // Add the assistant response
+    // Only save the assistant response - user message already saved by saveIncomingMessageToMemory
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: assistantResponse,
