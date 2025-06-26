@@ -10,7 +10,7 @@
 - **OO**: Present options → wait for confirmation before proceeding;
 - **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step;
 - **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed);
-- **!!**: Create requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation;
+- **!!**: Save requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation;
 - **!!!**: Update the requirements and plan, and implement;
 
 ## Planning Rules
