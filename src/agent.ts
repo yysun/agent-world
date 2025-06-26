@@ -1,45 +1,26 @@
 /**
- * Simplified Function-Based Agent - Combines AIAgent and BaseAgent
+ * Simplified Function-Based Agent
  * 
  * Features:
- * - Function-based architecture (no classes or inheritance)
- * - Uses existing llm.ts module for all LLM operations
- * - Uses existing event-bus.ts module for all event handling
- * - Simplified mention-based message filtering for loop prevention
- * - Direct LLM response generation with conversation history context
- * - Agent memory persistence in separate memory.json files per agent
- * - Basic agent configuration and lifecycle management
- * - Support for both @name and @id mention detection
+ * - Function-based architecture with static imports
+ * - LLM integration via llm.ts module
+ * - Event-driven messaging via event-bus.ts
+ * - Stateless turn limit detection (checks last 5 messages)
+ * - Mention-based message routing (@name support)
+ * - Agent memory persistence (memory.json per agent)
+ * - Auto-mention replies and pass command support
  * 
- * Recent Changes:
- * - Updated message filtering to work with new flat event payload structure
- * - Added support for both @name and @id mentions in shouldRespondToMessage
- * - Changed sender recognition from "CLI" to "HUMAN"
- * - Updated event publishing to use MessageEventPayload type
- * - Improved mention detection with case-insensitive matching
- * - Fixed agent response publishing with proper flat payload structure
- * - Updated to use LLM chat message schema consistently
- * - Fixed memory saving to include all conversation messages (user, assistant, tool) but exclude system messages
+ * Core Functions:
+ * - processAgentMessage: Main message handling with LLM response generation
+ * - shouldRespondToMessage: Response decision logic including turn limit check
+ * - prepareMessagesForLLM: Convert to LLM chat format with history context
+ * - saveMessagesToMemory: Persist conversation to agent memory files
  * 
- * Logic:
- * - processAgentMessage: Main function for handling agent messages with memory
- * - shouldRespondToMessage: Simple mention-based filtering logic with @name and @id support
- * - buildPrompt: Unified prompt building with conversation history context
- * - Direct integration with llm.ts and event-bus.ts modules
- * - Memory stored separately in data/worlds/{world}/agents/{agent}/memory.json
- * - Conversation history included in LLM context for contextual responses
- * 
- * Changes:
- * - Initial implementation combining AIAgent and BaseAgent functionality
- * - Removed class-based architecture in favor of pure functions
- * - Eliminated tool system, fallback logic, and monitoring complexity
- * - Uses existing modules instead of duplicating LLM/event functionality
- * - Maintains core functionality: message handling, LLM integration
- * - SIMPLIFIED: Mention detection to basic @name matching
- * - MERGED: buildSystemPrompt and buildUserPrompt into single buildPrompt function
- * - IMPLEMENTED: Agent memory/history system with separate file storage
- * - ENHANCED: LLM context includes conversation history for better responses
- * - STREAMLINED: Response message publishing and processing
+ * Turn Limit Logic:
+ * - Checks last 5 conversation messages in shouldRespondToMessage
+ * - If all 5 are from agents (not HUMAN/system), sends turn limit message
+ * - Prevents endless agent loops without maintaining state counters
+ * - Turn limit messages are ignored by all agents to prevent loops
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -47,13 +28,13 @@ import { AgentMemory, Event, EventType, ChatMessage } from './types';
 import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './llm';
 import { publishSSE, publishMessageEvent, publishDebugEvent } from './event-bus';
 import { agentLogger } from './logger';
+import { getAgentConversationHistory, addToAgentMemory } from './world';
 
 // Types moved to types.ts
 import type { AgentConfig, MessageData } from './types';
 
 /**
  * Main agent message processing function
- * Combines functionality from AIAgent and BaseAgent
  */
 export async function processAgentMessage(
   agentConfig: AgentConfig,
@@ -69,32 +50,9 @@ export async function processAgentMessage(
   }
 
   try {
-    // Check if agent should respond to this message
-    if (!shouldRespondToMessage(agentConfig, messageData)) {
+    // Check if agent should respond to this message (includes turn limit check)
+    if (!(await shouldRespondToMessage(agentConfig, messageData, worldName))) {
       return '';
-    }
-
-    // Check turn limit before processing agent message
-    if (worldName) {
-      try {
-        const worldModule = await import('./world');
-        if (worldModule.isTurnLimitReached(worldName)) {
-          publishDebugEvent(`[Turn Limit] Blocking ${agentConfig.name} - limit reached`, {
-            agentName: agentConfig.name,
-            worldName
-          });
-
-          // Inject @human redirect message
-          await publishMessageEvent({
-            content: '@human Turn limit reached (5 consecutive agent messages). Please take control of the conversation.',
-            sender: 'system'
-          });
-
-          return '';
-        }
-      } catch (error) {
-        console.warn('Could not check turn limit:', error);
-      }
     }
 
     // Load LLM provider
@@ -116,9 +74,8 @@ export async function processAgentMessage(
     // Load conversation history for context
     let conversationHistory: any[] = [];
     try {
-      const worldModule = await import('./world');
-      if (worldModule.getAgentConversationHistory) {
-        conversationHistory = await worldModule.getAgentConversationHistory(worldName || 'default', agentConfig.name, 10);
+      if (getAgentConversationHistory) {
+        conversationHistory = await getAgentConversationHistory(worldName || 'default', agentConfig.name, 10);
       }
     } catch (error) {
       console.warn(`Could not load conversation history: ${error}`);
@@ -160,14 +117,6 @@ export async function processAgentMessage(
         content: passMessage,
         sender: 'system'
       });
-
-      // Reset turn counter (import dynamically to avoid circular dependency)
-      try {
-        const worldModule = await import('./world');
-        worldModule.resetTurnCounter(worldName || 'default');
-      } catch (error) {
-        console.warn('Could not reset turn counter:', error);
-      }
 
       return passMessage;
     }
@@ -310,12 +259,13 @@ function extractMentions(content: string): string[] {
 }
 
 /**
- * Check if agent should respond to a message (enhanced)
+ * Check if agent should respond to a message (enhanced with turn limit check)
  */
-export function shouldRespondToMessage(
+export async function shouldRespondToMessage(
   agentConfig: AgentConfig,
-  messageData: MessageData
-): boolean {
+  messageData: MessageData,
+  worldName?: string
+): Promise<boolean> {
   // Never respond to own messages
   if (messageData.sender === agentConfig.name) {
     return false;
@@ -324,7 +274,52 @@ export function shouldRespondToMessage(
   const content = messageData.content || messageData.payload?.content || '';
   const agentName = agentConfig.name.toLowerCase();
 
-  // Always respond to system messages
+  // Never respond to turn limit messages (prevents endless loops)
+  if (content.includes('Turn limit reached')) {
+    publishDebugEvent(`[Turn Limit] ${agentName} ignoring turn limit message`, {
+      agentName,
+      sender: messageData.sender
+    });
+    return false;
+  }
+
+  // Check turn limit by examining last 5 messages from conversation history
+  if (worldName) {
+    try {
+      if (getAgentConversationHistory) {
+        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, 5);
+
+        // Check if last 5 messages are all from agents (not HUMAN/human/system)
+        if (recentHistory.length >= 5) {
+          const lastFiveMessages = recentHistory.slice(-5);
+          const allFromAgents = lastFiveMessages.every(msg => {
+            const sender = msg.name || 'unknown';
+            return sender !== 'HUMAN' && sender !== 'human' && sender !== 'system';
+          });
+
+          if (allFromAgents) {
+            publishDebugEvent(`[Turn Limit] ${agentConfig.name} detected 5 consecutive agent messages`, {
+              agentName: agentConfig.name,
+              worldName,
+              lastFiveSenders: lastFiveMessages.map(msg => msg.name || 'unknown')
+            });
+
+            // Send turn limit message with this agent's name as sender
+            await publishMessageEvent({
+              content: '@human Turn limit reached (5 consecutive agent messages). Please take control of the conversation.',
+              sender: agentConfig.name
+            });
+
+            return false; // Don't respond when turn limit is reached
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Could not check turn limit:', error);
+    }
+  }
+
+  // Always respond to system messages (except turn limit messages handled above)
   if (!messageData.sender || messageData.sender === 'system') {
     return true;
   }
@@ -365,9 +360,6 @@ export function shouldRespondToMessage(
   return isFirstMention;
 }
 
-/**
- * Build complete prompt for the agent with conversation history
- */
 /**
  * Prepare messages array for LLM using standard chat message format
  */
@@ -442,8 +434,7 @@ async function saveMessagesToMemory(
     // This is the most recent non-system message in the messages array
     const newUserMessage = messages.filter(msg => msg.role !== 'system').slice(-1)[0];
 
-    const worldModule = await import('./world');
-    if (!worldModule.addToAgentMemory) {
+    if (!addToAgentMemory) {
       console.warn('addToAgentMemory function not available');
       return;
     }
@@ -456,7 +447,7 @@ async function saveMessagesToMemory(
       };
 
       // Use agent name for memory storage
-      await worldModule.addToAgentMemory(worldName, agentName, userMessageToSave);
+      await addToAgentMemory(worldName, agentName, userMessageToSave);
     }
 
     // Add the assistant response
@@ -467,7 +458,7 @@ async function saveMessagesToMemory(
     };
 
     // Use agent name for memory storage
-    await worldModule.addToAgentMemory(worldName, agentName, assistantMessage);
+    await addToAgentMemory(worldName, agentName, assistantMessage);
   } catch (error) {
     console.warn(`Could not save messages to memory: ${error}`);
   }

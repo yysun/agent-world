@@ -5,6 +5,7 @@
  * - Interactive agent creation with customizable parameters
  * - Accepts optional [name] argument: `/add [name]` (e.g., `/add a2`)
  * - Support for different agent types and configurations
+ * - Static imports for better performance and tree-shaking
  * - Validation and error handling for agent creation
  * - Automatic message subscription during agent creation
  *
@@ -16,15 +17,9 @@
  * - Agent automatically gets subscribed to messages during creation
  * - Provides default values for missing parameters
  * - Reports creation status and agent details
- *
- * Changes:
- * - Updated to use World object instead of direct AgentManager access
- * - Uses CreateAgentRequest interface for proper type safety
- * - Agent properties accessed through agent.config structure
- * - Now supports `/add [name]` for direct agent creation with name
- * - Fixed duplicate subscription issue by ensuring single subscription per agent
  */
 
+import * as readline from 'readline';
 import * as World from '../../src/world';
 import { colors } from '../utils/colors';
 import { AgentConfig, LLMProvider } from '../../src/types';
@@ -37,7 +32,6 @@ export async function addCommand(args: string[], worldName: string): Promise<voi
     const description = `A ${type} agent`;
 
     if (!agentName) {
-      const readline = await import('readline');
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout

@@ -22,37 +22,37 @@ describe('Simplified LLM Wrapper', () => {
   });
 
   describe('loadLLMProvider', () => {
-    it('should load OpenAI provider correctly', () => {
+    it('should load OpenAI provider correctly', async () => {
       const provider = loadLLMProvider(config);
       expect(provider).toBeDefined();
     });
 
-    it('should load Anthropic provider correctly', () => {
+    it('should load Anthropic provider correctly', async () => {
       config.provider = LLMProvider.ANTHROPIC;
       const provider = loadLLMProvider(config);
       expect(provider).toBeDefined();
     });
 
-    it('should load Google provider correctly', () => {
+    it('should load Google provider correctly', async () => {
       config.provider = LLMProvider.GOOGLE;
       const provider = loadLLMProvider(config);
       expect(provider).toBeDefined();
     });
 
-    it('should load xAI provider correctly', () => {
+    it('should load xAI provider correctly', async () => {
       config.provider = LLMProvider.XAI;
       const provider = loadLLMProvider(config);
       expect(provider).toBeDefined();
     });
 
-    it('should load Ollama provider correctly', () => {
+    it('should load Ollama provider correctly', async () => {
       config.provider = LLMProvider.OLLAMA;
       config.ollamaBaseUrl = 'http://localhost:11434/api';
       const provider = loadLLMProvider(config);
       expect(provider).toBeDefined();
     });
 
-    it('should throw error for unsupported provider', () => {
+    it('should throw error for unsupported provider', async () => {
       config.provider = 'unsupported' as LLMProvider;
       expect(() => loadLLMProvider(config)).toThrow('Unsupported LLM provider');
     });
@@ -80,14 +80,14 @@ describe('Simplified LLM Wrapper', () => {
   });
 
   describe('Function interfaces', () => {
-    it('should have correct function signatures', () => {
+    it('should have correct function signatures', async () => {
       expect(typeof loadLLMProvider).toBe('function');
       expect(typeof chatWithLLM).toBe('function');
       expect(typeof streamChatWithLLM).toBe('function');
       expect(typeof singleRequest).toBe('function');
     });
 
-    it('should accept correct configuration interface', () => {
+    it('should accept correct configuration interface', async () => {
       const validConfig: LLMConfig = {
         provider: LLMProvider.OPENAI,
         model: 'gpt-4',
@@ -106,7 +106,7 @@ describe('Simplified LLM Wrapper', () => {
   });
 
   describe('Extracted LLMQueue functionality', () => {
-    it('should preserve streaming functionality structure', () => {
+    it('should preserve streaming functionality structure', async () => {
       // Verify streamChatWithLLM has the expected signature (updated for messages array)
       expect(streamChatWithLLM.length).toBe(3); // 3 parameters (options is optional)
 
@@ -124,7 +124,7 @@ describe('Simplified LLM Wrapper', () => {
       }).not.toThrow();
     });
 
-    it('should maintain timeout and error handling structure', () => {
+    it('should maintain timeout and error handling structure', async () => {
       // The streamChatWithLLM should handle timeouts (tested by structure, not actual timeout)
       const provider = loadLLMProvider(config);
       expect(typeof streamChatWithLLM).toBe('function');

@@ -71,7 +71,7 @@ describe('Agent Message Processing', () => {
       expect(publishMessageEvent).toHaveBeenCalledWith(messagePayload);
     });
 
-    it('should allow agents to subscribe to MESSAGE events', () => {
+    it('should allow agents to subscribe to MESSAGE events', async () => {
       subscribeToMessages(mockSubscriptionCallback);
 
       expect(subscribeToMessages).toHaveBeenCalledWith(mockSubscriptionCallback);
@@ -79,7 +79,7 @@ describe('Agent Message Processing', () => {
   });
 
   describe('Message Filtering Logic', () => {
-    it('should process broadcast messages from users', () => {
+    it('should process broadcast messages from users', async () => {
       const messageData: MessageData = {
         id: 'msg-1',
         name: 'user_message',
@@ -88,11 +88,11 @@ describe('Agent Message Processing', () => {
         content: 'Hello everyone!'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(true);
     });
 
-    it('should not process messages from themselves', () => {
+    it('should not process messages from themselves', async () => {
       const messageData: MessageData = {
         id: 'msg-2',
         name: 'agent_message',
@@ -101,11 +101,11 @@ describe('Agent Message Processing', () => {
         content: 'My own message'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(false);
     });
 
-    it('should process system messages', () => {
+    it('should process system messages', async () => {
       const messageData: MessageData = {
         id: 'msg-3',
         name: 'system_message',
@@ -114,11 +114,11 @@ describe('Agent Message Processing', () => {
         content: 'System announcement'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(true);
     });
 
-    it('should process human messages without mentions', () => {
+    it('should process human messages without mentions', async () => {
       const messageData: MessageData = {
         id: 'msg-4',
         name: 'user_message',
@@ -127,11 +127,11 @@ describe('Agent Message Processing', () => {
         content: 'Hello everyone, how are you?'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(true);
     });
 
-    it('should not process human messages with mentions when not mentioned', () => {
+    it('should not process human messages with mentions when not mentioned', async () => {
       const messageData: MessageData = {
         id: 'msg-5',
         name: 'user_message',
@@ -140,11 +140,11 @@ describe('Agent Message Processing', () => {
         content: 'Hey @OtherAgent, can you help me?'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(false);
     });
 
-    it('should process human messages when mentioned by name', () => {
+    it('should process human messages when mentioned by name', async () => {
       const messageData: MessageData = {
         id: 'msg-6',
         name: 'user_message',
@@ -153,11 +153,11 @@ describe('Agent Message Processing', () => {
         content: 'Hey @TestAgent, can you help me?'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(true);
     });
 
-    it('should only process agent messages when mentioned', () => {
+    it('should only process agent messages when mentioned', async () => {
       const messageData: MessageData = {
         id: 'msg-8',
         name: 'agent_message',
@@ -166,11 +166,11 @@ describe('Agent Message Processing', () => {
         content: 'Just talking to myself'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(false);
     });
 
-    it('should process agent messages when mentioned', () => {
+    it('should process agent messages when mentioned', async () => {
       const messageData: MessageData = {
         id: 'msg-9',
         name: 'agent_message',
@@ -179,7 +179,7 @@ describe('Agent Message Processing', () => {
         content: '@TestAgent what do you think about this?'
       };
 
-      const result = shouldRespondToMessage(mockAgentConfig, messageData);
+      const result = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(result).toBe(true);
     });
   });
@@ -230,7 +230,7 @@ describe('Agent Message Processing', () => {
         content: broadcastMessage.content
       };
 
-      const shouldProcess = shouldRespondToMessage(mockAgentConfig, messageData);
+      const shouldProcess = await shouldRespondToMessage(mockAgentConfig, messageData);
       expect(shouldProcess).toBe(true); // Agent should respond since it's mentioned
     });
   });

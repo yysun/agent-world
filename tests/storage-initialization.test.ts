@@ -144,7 +144,7 @@ describe('Storage Core Functionality', () => {
       expect(options.enableLogging).toBe(false);
     });
 
-    it('should throw error when accessing options before initialization', () => {
+    it('should throw error when accessing options before initialization', async () => {
       const { getStorageOptions } = require('../src/storage');
 
       expect(() => getStorageOptions()).toThrow(
@@ -195,7 +195,7 @@ describe('Storage Core Functionality', () => {
   });
 
   describe('Migration guidance', () => {
-    it('should provide clear documentation about agent storage migration', () => {
+    it('should provide clear documentation about agent storage migration', async () => {
       // This test documents that agent storage functions have been moved
       const storageModule = require('../src/storage');
 
@@ -208,7 +208,7 @@ describe('Storage Core Functionality', () => {
       expect(storageModule.loadAgentMemory).toBeUndefined();
     });
 
-    it('should still export core storage functions', () => {
+    it('should still export core storage functions', async () => {
       const storageModule = require('../src/storage');
 
       // Verify that core storage functions are still available

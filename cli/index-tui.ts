@@ -43,7 +43,7 @@ import { helpCommand } from './commands/help';
 import { addCommand } from './commands/add';
 import { showCommand } from './commands/show';
 import { clearCommand } from './commands/clear';
-import { EventType } from '../src/types';
+import { EventType, SSEEventPayload } from '../src/types';
 import { colors, terminal } from './utils/colors';
 import { createStreamingManager } from './streaming/streaming-manager';
 
@@ -238,7 +238,7 @@ async function main() {
   unsubscribe = subscribeToSSE(async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
-      const sseData = event.payload as import('../src/types').SSEEventPayload;
+      const sseData = event.payload as SSEEventPayload;
 
       // Get agent name for display
       const agents = getAgents(worldName);

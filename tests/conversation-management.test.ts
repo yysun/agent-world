@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Tests real message filtering and @mention extraction logic
- * - Tests real agent-to-agent message routing and conversation flows
+ * - Tests real agent-to-agen  });routing and conversation flows
  * - Tests real turn counter functionality with world module
  * - Tests message broadcasting integration with controlled LLM responses
  * - Uses selective mocking: only file I/O and LLM operations are mocked
@@ -34,7 +34,6 @@ import {
   createWorld,
   createAgent,
   broadcastMessage,
-  resetTurnCounter,
   _clearAllWorldsForTesting
 } from '../src/world';
 import { shouldRespondToMessage } from '../src/agent';
@@ -141,7 +140,7 @@ describe('Message Conversation Management', () => {
       };
     });
 
-    it('should extract @mentions correctly', () => {
+    it('should extract @mentions correctly', async () => {
       const testCases = [
         { content: 'Hello @testagent how are you?', expected: true },
         { content: 'Hey @TestAgent can you help?', expected: true }, // case insensitive
@@ -153,42 +152,42 @@ describe('Message Conversation Management', () => {
         { content: 'Hello @', expected: true }, // empty mention ignored = public
       ];
 
-      testCases.forEach(({ content, expected }, index) => {
+      for (const { content, expected } of testCases) {
         const messageData: MessageData = {
-          id: `msg-${index}`,
+          id: `msg-${testCases.indexOf({ content, expected })}`,
           name: 'test_message',
           sender: 'HUMAN',
           content,
           payload: {}
         };
 
-        const result = shouldRespondToMessage(agentConfig, messageData);
+        const result = await shouldRespondToMessage(agentConfig, messageData);
         expect(result).toBe(expected);
-      });
+      }
     });
 
-    it('should handle agent-to-agent messages correctly', () => {
+    it('should handle agent-to-agent messages correctly', async () => {
       const testCases = [
         { content: 'Hello @testagent can you help?', sender: 'OtherAgent', expected: true },
         { content: 'Hello @someone-else can you help?', sender: 'OtherAgent', expected: false },
         { content: 'Hello everyone!', sender: 'OtherAgent', expected: false }, // agent broadcasts need mentions
       ];
 
-      testCases.forEach(({ content, sender, expected }, index) => {
+      for (const { content, sender, expected } of testCases) {
         const messageData: MessageData = {
-          id: `msg-${index}`,
+          id: `msg-${testCases.indexOf({ content, sender, expected })}`,
           name: 'agent_message',
           sender,
           content,
           payload: {}
         };
 
-        const result = shouldRespondToMessage(agentConfig, messageData);
+        const result = await shouldRespondToMessage(agentConfig, messageData);
         expect(result).toBe(expected);
-      });
+      }
     });
 
-    it('should never respond to own messages', () => {
+    it('should never respond to own messages', async () => {
       const messageData: MessageData = {
         id: 'msg-self',
         name: 'agent_message',
@@ -197,17 +196,8 @@ describe('Message Conversation Management', () => {
         payload: {}
       };
 
-      const result = shouldRespondToMessage(agentConfig, messageData);
+      const result = await shouldRespondToMessage(agentConfig, messageData);
       expect(result).toBe(false);
-    });
-  });
-
-  describe('Turn Counter Management', () => {
-    it('should provide resetTurnCounter function', () => {
-      expect(typeof resetTurnCounter).toBe('function');
-
-      // Should not throw when called
-      expect(() => resetTurnCounter(worldName)).not.toThrow();
     });
   });
 

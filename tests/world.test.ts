@@ -387,7 +387,7 @@ describe('World Management System', () => {
       expect(worldInfo!.agentCount).toBe(0);
     });
 
-    it('should return null for non-existent world info', () => {
+    it('should return null for non-existent world info', async () => {
       const worldInfo = getWorldInfo('non-existent-world');
       expect(worldInfo).toBeNull();
     });
@@ -539,12 +539,12 @@ describe('World Management System', () => {
       expect(agents.some(a => a.name === 'Agent 2')).toBe(true);
     });
 
-    it('should return empty array for world with no agents', () => {
+    it('should return empty array for world with no agents', async () => {
       const agents = getAgents(worldName);
       expect(agents).toEqual([]);
     });
 
-    it('should return empty array for non-existent world', () => {
+    it('should return empty array for non-existent world', async () => {
       const agents = getAgents('non-existent-world');
       expect(agents).toEqual([]);
     });
@@ -566,7 +566,7 @@ describe('World Management System', () => {
       expect(agent!.name).toBe('Specific Agent');
     });
 
-    it('should return undefined for non-existent agent', () => {
+    it('should return undefined for non-existent agent', async () => {
       const agents = getAgents(worldName);
       const agent = agents.find(a => a.name === 'non-existent-agent');
       expect(agent).toBeUndefined();
@@ -667,7 +667,7 @@ describe('World Management System', () => {
         .rejects.toThrow('World not found');
     });
 
-    it('should subscribe to message events', () => {
+    it('should subscribe to message events', async () => {
       const callback = jest.fn();
       const unsubscribe = subscribeToMessages(callback);
 
@@ -675,7 +675,7 @@ describe('World Management System', () => {
       expect(typeof unsubscribe).toBe('function');
     });
 
-    it('should subscribe to world events', () => {
+    it('should subscribe to world events', async () => {
       const callback = jest.fn();
       const unsubscribe = subscribeToWorld(callback);
 
@@ -683,7 +683,7 @@ describe('World Management System', () => {
       expect(typeof unsubscribe).toBe('function');
     });
 
-    it('should subscribe to SSE events', () => {
+    it('should subscribe to SSE events', async () => {
       const callback = jest.fn();
       const unsubscribe = subscribeToSSE(callback);
 
@@ -691,7 +691,7 @@ describe('World Management System', () => {
       expect(typeof unsubscribe).toBe('function');
     });
 
-    it('should subscribe to agent messages', () => {
+    it('should subscribe to agent messages', async () => {
       const callback = jest.fn();
       const unsubscribe = subscribeToAgentMessages(worldName, 'agent-name', callback);
 

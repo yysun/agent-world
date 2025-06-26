@@ -47,9 +47,9 @@ import {
   broadcastMessage,
   DEFAULT_WORLD_NAME
 } from '../src/world';
-import { subscribeToSSE, subscribeToSystem } from '../src/event-bus';
+import { subscribeToSSE, subscribeToSystem, subscribeToMessages } from '../src/event-bus';
 import { colors, terminal } from './utils/colors';
-import { EventType } from '../src/types';
+import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload } from '../src/types';
 import * as StreamingDisplay from './streaming/streaming-display';
 
 // Debug utility: prints debug data in gray
@@ -247,16 +247,16 @@ async function main() {
   let rl: readline.Interface;
 
   if (hasPipedInput) {
-    // For piped input, we need to create readline interface differently
-    // since stdin was already consumed
+    // For piped input, we can still create the interface but it won't be interactive
+    // This is a fundamental limitation of Node.js - once stdin is consumed by piping, 
+    // it can't be restored to interactive mode
+    console.log(colors.yellow('\nNote: Interactive mode not available after piped input.'));
+
     rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       prompt: colors.cyan('> ')
     });
-
-    // Ensure stdin is properly set up for interactive use after piped input
-    process.stdin.resume();
   } else {
     rl = readline.createInterface({
       input: process.stdin,
@@ -329,7 +329,7 @@ async function main() {
   const unsubscribe = subscribeToSSE(async (event) => {
     if (event.type === EventType.SSE) {
       // Handle streaming LLM responses
-      const sseData = event.payload as import('../src/types').SSEEventPayload;
+      const sseData = event.payload as SSEEventPayload;
 
       // Get agent name for display
       const agents = getAgents(worldName);
@@ -356,10 +356,21 @@ async function main() {
   // Subscribe to SYSTEM events for debug messages
   subscribeToSystem(async (event) => {
     if (event.type === EventType.SYSTEM) {
-      const systemData = event.payload as import('../src/types').SystemEventPayload;
+      const systemData = event.payload as SystemEventPayload;
       if (systemData.action === 'debug' && systemData.content) {
         // Display debug messages properly during streaming
         StreamingDisplay.displayDebugMessage(colors.gray(systemData.content));
+      }
+    }
+  });
+
+  // Subscribe to MESSAGE events for system messages (like turn limit notifications)
+  subscribeToMessages(async (event) => {
+    if (event.type === EventType.MESSAGE) {
+      const messageData = event.payload as MessageEventPayload;
+      if (messageData.sender === 'system') {
+        // Display system messages with red dot
+        StreamingDisplay.displaySystemMessage(messageData.content);
       }
     }
   });
@@ -368,8 +379,21 @@ async function main() {
   console.log(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
   console.log(); // Add extra spacing before prompt
 
-  // If we had external input, wait a bit for potential streaming to start before showing prompt
-  if (hasExternalInput) {
+  // If we had piped input, wait a bit for potential streaming to start and then exit gracefully
+  if (hasExternalInput && hasPipedInput) {
+    setTimeout(() => {
+      if (!StreamingDisplay.isStreamingActive()) {
+        console.log(colors.cyan('\nPiped input processed. Exiting...'));
+        process.exit(0);
+      } else {
+        // Wait for streaming to complete
+        StreamingDisplay.setOnAllStreamingEndCallback(() => {
+          console.log(colors.cyan('\nStreaming completed. Exiting...'));
+          process.exit(0);
+        });
+      }
+    }, 100);
+  } else if (hasExternalInput) {
     setTimeout(() => {
       if (!StreamingDisplay.isStreamingActive()) {
         rl.prompt();

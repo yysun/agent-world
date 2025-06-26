@@ -222,6 +222,14 @@ export function displayUserInput(message: string): void {
 }
 
 /**
+ * Display system messages with a red dot
+ */
+export function displaySystemMessage(message: string): void {
+  const redDot = colors.red('●');
+  console.log(`${redDot} world: ${message}`);
+}
+
+/**
  * Check if any agent is currently streaming
  */
 export function isStreamingActive(): boolean {

@@ -34,7 +34,7 @@ describe('Agent Functions', () => {
 
   describe('Message Filtering (Simplified)', () => {
 
-    it('should respond to human messages without mentions', () => {
+    it('should respond to human messages without mentions', async () => {
       const messageData: MessageData = {
         id: 'msg-1',
         name: 'human-message',
@@ -43,10 +43,10 @@ describe('Agent Functions', () => {
         content: 'Hello everyone'
       };
 
-      expect(shouldRespondToMessage(mockAgentConfig, messageData)).toBe(true);
+      expect(await shouldRespondToMessage(mockAgentConfig, messageData)).toBe(true);
     });
 
-    it('should respond to human messages with mentions', () => {
+    it('should respond to human messages with mentions', async () => {
       const messageData: MessageData = {
         id: 'msg-1',
         name: 'human-message',
@@ -55,10 +55,10 @@ describe('Agent Functions', () => {
         content: 'Hello @TestAgent'
       };
 
-      expect(shouldRespondToMessage(mockAgentConfig, messageData)).toBe(true);
+      expect(await shouldRespondToMessage(mockAgentConfig, messageData)).toBe(true);
     });
 
-    it('should not respond to own messages', () => {
+    it('should not respond to own messages', async () => {
       const messageData: MessageData = {
         id: 'msg-1',
         name: 'agent-message',
@@ -67,10 +67,10 @@ describe('Agent Functions', () => {
         content: 'I said something'
       };
 
-      expect(shouldRespondToMessage(mockAgentConfig, messageData)).toBe(false);
+      expect(await shouldRespondToMessage(mockAgentConfig, messageData)).toBe(false);
     });
 
-    it('should only respond to agent messages when mentioned', () => {
+    it('should only respond to agent messages when mentioned', async () => {
       const mentionedMessage: MessageData = {
         id: 'msg-1',
         name: 'agent-message',
@@ -87,11 +87,11 @@ describe('Agent Functions', () => {
         content: 'Just talking to myself'
       };
 
-      expect(shouldRespondToMessage(mockAgentConfig, mentionedMessage)).toBe(true);
-      expect(shouldRespondToMessage(mockAgentConfig, unmentionedMessage)).toBe(false);
+      expect(await shouldRespondToMessage(mockAgentConfig, mentionedMessage)).toBe(true);
+      expect(await shouldRespondToMessage(mockAgentConfig, unmentionedMessage)).toBe(false);
     });
 
-    it('should always respond to system messages', () => {
+    it('should always respond to system messages', async () => {
       const systemMessage: MessageData = {
         id: 'msg-1',
         name: 'system-message',
@@ -100,7 +100,7 @@ describe('Agent Functions', () => {
         content: 'System announcement'
       };
 
-      expect(shouldRespondToMessage(mockAgentConfig, systemMessage)).toBe(true);
+      expect(await shouldRespondToMessage(mockAgentConfig, systemMessage)).toBe(true);
     });
   });
 

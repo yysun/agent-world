@@ -23,7 +23,8 @@
 
 ## Project Instructions
 - use function based approach instead of class based
-- use `tsx` for TypeScript execution
+- do not use dynamic module imports
+- use `npx tsx` for TypeScript execution
 - `npm run dev` - Start the dev
 - `npm test` - Run tests
 - unit tests should only mock file io and LLM, do not mock world, event bus or agent
