@@ -362,10 +362,18 @@ export function displayFormattedMessage(message: DisplayMessage): void {
   // Display the message
   if (activeStreams.size > 0) {
     // If streaming is active, print the message and stay where we are
-    console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+    if (isHumanMessage) {
+      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n\n`);
+    } else {
+      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+    }
   } else {
     // No streaming active, normal display
-    console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+    if (isHumanMessage) {
+      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n\n`);
+    } else {
+      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+    }
   }
 
   // Store message in CLI session memory
