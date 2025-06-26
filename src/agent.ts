@@ -128,25 +128,34 @@ export async function processAgentMessage(
       return passMessage;
     }
 
-    // Auto-add @mention when replying to other agents
+    // Auto-add @mention when replying to other agents (only for agent-to-agent replies)
     let finalResponse = response;
-    if (messageData.sender &&
-      messageData.sender !== 'HUMAN' &&
-      messageData.sender !== 'human' &&
-      messageData.sender !== 'system' &&
-      messageData.sender !== agentConfig.name) {
-      // Check if response already contains @mention for the sender
-      const senderMention = `@${messageData.sender}`;
-      if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
-        finalResponse = `${senderMention} ${finalResponse}`;
-        publishDebugEvent(`[Auto-Mention] Added @${messageData.sender} to ${agentConfig.name}`, {
-          agentName: agentConfig.name,
-          sender: messageData.sender
-        });
+    if (messageData.sender && messageData.sender !== agentConfig.name) {
+      const senderType = determineSenderType(messageData.sender);
+
+      // Only auto-mention when replying to agents (not humans or system)
+      if (senderType === SenderType.AGENT) {
+        // Check if response already contains @mention for the sender
+        const senderMention = `@${messageData.sender}`;
+        if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
+          finalResponse = `${senderMention} ${finalResponse}`;
+          publishDebugEvent(`[Auto-Mention] Added @${messageData.sender} to ${agentConfig.name}`, {
+            agentName: agentConfig.name,
+            sender: messageData.sender,
+            senderType: 'agent'
+          });
+        } else {
+          publishDebugEvent(`[Auto-Mention] ${agentConfig.name} already has @${messageData.sender}`, {
+            agentName: agentConfig.name,
+            sender: messageData.sender,
+            senderType: 'agent'
+          });
+        }
       } else {
-        publishDebugEvent(`[Auto-Mention] ${agentConfig.name} already has @${messageData.sender}`, {
+        publishDebugEvent(`[Auto-Mention] Skipping auto-mention for non-agent sender`, {
           agentName: agentConfig.name,
-          sender: messageData.sender
+          sender: messageData.sender,
+          senderType: senderType === SenderType.HUMAN ? 'human' : 'system'
         });
       }
     }
@@ -291,14 +300,19 @@ export async function shouldRespondToMessage(
   }
 
   // Check turn limit by examining last TURN_LIMIT messages from conversation history
+  // Include the current message in the analysis
   if (worldName) {
     try {
       if (getAgentConversationHistory) {
-        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, TURN_LIMIT);
+        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, TURN_LIMIT - 1);
 
-        // Check if last TURN_LIMIT messages contain any human or system input using senderType logic
-        if (recentHistory.length >= TURN_LIMIT) {
-          const lastMessages = recentHistory.slice(-TURN_LIMIT);
+        // Add current message to the analysis
+        const currentSenderType = determineSenderType(messageData.sender || 'unknown');
+        const allMessages = [...recentHistory, { sender: messageData.sender }];
+
+        // Check if we have TURN_LIMIT consecutive agent messages with no human/system input
+        if (allMessages.length >= TURN_LIMIT) {
+          const lastMessages = allMessages.slice(-TURN_LIMIT);
           // Use senderType logic to determine if any message is from human or system
           const hasHumanOrSystemInput = lastMessages.some(msg => {
             const sender = msg.sender || 'unknown';
@@ -311,7 +325,9 @@ export async function shouldRespondToMessage(
             publishDebugEvent(`[Turn Limit] ${agentConfig.name} detected ${TURN_LIMIT} consecutive agent messages with no human/system input`, {
               agentName: agentConfig.name,
               worldName,
-              lastSenders: lastMessages.map(msg => msg.sender || 'unknown')
+              lastSenders: lastMessages.map(msg => msg.sender || 'unknown'),
+              currentSender: messageData.sender,
+              currentSenderType: currentSenderType === SenderType.HUMAN ? 'human' : currentSenderType === SenderType.WORLD ? 'system' : 'agent'
             });
 
             // Send turn limit message with agentName as sender

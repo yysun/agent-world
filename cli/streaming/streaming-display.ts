@@ -247,7 +247,7 @@ export function displayDebugMessage(message: string): void {
  */
 export function displayUserInput(message: string): void {
   const orangeDot = colors.orange('●');
-  console.log(`${orangeDot} you: ${message}`);
+  console.log(`\n${orangeDot} you: ${message}\n`);
 }
 
 /**
@@ -255,7 +255,7 @@ export function displayUserInput(message: string): void {
  */
 export function displayMessage(messageData: { content: string; sender: string }): void {
   const redDot = colors.red('\n●');
-  console.log(`${redDot} ${messageData.sender}: ${messageData.content}`);
+  console.log(`${redDot} ${messageData.sender}: ${messageData.content}\n`);
 }
 
 /**
