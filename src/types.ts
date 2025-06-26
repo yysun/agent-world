@@ -184,15 +184,20 @@ export const EventSchema = z.object({
   sender: z.string(),
   senderType: z.nativeEnum(SenderType),
   payload: z.union([
+    // MessageEventPayload
     z.object({
       content: z.string(),
       sender: z.string()
     }),
+    // SystemEventPayload  
     z.object({
       action: z.string(),
       agentName: z.string().optional(),
-      worldName: z.string().optional()
+      worldName: z.string().optional(),
+      content: z.string().optional(),
+      timestamp: z.string().optional()
     }).and(z.record(z.any())),
+    // SSEEventPayload
     z.object({
       agentName: z.string(),
       type: z.enum(['start', 'chunk', 'end', 'error']),

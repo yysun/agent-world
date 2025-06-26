@@ -179,6 +179,11 @@ function determineSenderType(sender: string): SenderType {
 
 // MESSAGE events - structured message objects
 export async function publishMessageEvent(payload: MessageEventPayload, sender?: string): Promise<Event> {
+  // Validate payload to prevent ZodError
+  if (!payload || typeof payload.content !== 'string' || typeof payload.sender !== 'string') {
+    throw new Error(`Invalid MessageEventPayload: content and sender must be strings`);
+  }
+
   return publishEvent(TOPICS.MESSAGES, {
     type: EventType.MESSAGE,
     sender: sender || payload.sender,
@@ -200,6 +205,11 @@ export async function publishWorldEvent(payload: SystemEventPayload, sender?: st
 
 // SSE events - streaming data for real-time updates
 export async function publishSSE(payload: SSEEventPayload, sender?: string): Promise<Event> {
+  // Validate payload to prevent ZodError
+  if (!payload || typeof payload.agentName !== 'string' || !['start', 'chunk', 'end', 'error'].includes(payload.type)) {
+    throw new Error(`Invalid SSEEventPayload: agentName must be string and type must be start|chunk|end|error`);
+  }
+
   const senderName = sender || payload.agentName || 'world';
   return publishEvent(TOPICS.SSE, {
     type: EventType.SSE,
@@ -211,6 +221,11 @@ export async function publishSSE(payload: SSEEventPayload, sender?: string): Pro
 
 // System events - debug and logging information
 export async function publishSystemEvent(payload: SystemEventPayload, sender?: string): Promise<Event> {
+  // Validate payload to prevent ZodError
+  if (!payload || typeof payload.action !== 'string') {
+    throw new Error(`Invalid SystemEventPayload: action must be a string`);
+  }
+
   const senderName = sender || payload.agentName || 'system';
   return publishEvent(TOPICS.SYSTEM, {
     type: EventType.SYSTEM,

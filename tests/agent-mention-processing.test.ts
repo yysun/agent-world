@@ -384,8 +384,13 @@ describe('Agent @Mention-Based Message Processing', () => {
 
         mockLlm.streamChatWithLLM.mockRejectedValue(new Error('API key invalid'));
 
+        // Suppress console.error output for this expected error test
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
+
         await expect(processAgentMessage(testAgent, message, 'msg-1', 'test-world'))
           .rejects.toThrow('API key invalid');
+
+        consoleSpy.mockRestore();
       });
     });
   });

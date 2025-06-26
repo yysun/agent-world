@@ -195,11 +195,11 @@ export async function processAgentMessage(
 
     // Auto-add @mention when replying to other agents (only for agent-to-agent replies)
     let finalResponse = response;
-    if (messageData.sender && messageData.sender.toLowerCase() !== agentConfig.name.toLowerCase()) {
+    if (messageData.sender && typeof messageData.sender === 'string' && messageData.sender.toLowerCase() !== agentConfig.name.toLowerCase()) {
       const senderType = determineSenderType(messageData.sender);
 
       // Only auto-mention when replying to agents (not humans or system)
-      if (senderType === SenderType.AGENT) {
+      if (senderType === SenderType.AGENT && finalResponse && typeof finalResponse === 'string') {
         // Check if response already contains @mention for the sender
         const senderMention = `@${messageData.sender}`;
         if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
@@ -226,10 +226,19 @@ export async function processAgentMessage(
     }
 
     // Publish response message
-    await publishMessageEvent({
-      content: finalResponse,
-      sender: agentConfig.name
-    });
+    if (finalResponse && typeof finalResponse === 'string' && agentConfig.name && typeof agentConfig.name === 'string') {
+      await publishMessageEvent({
+        content: finalResponse,
+        sender: agentConfig.name
+      });
+    } else {
+      // Log the issue but don't publish malformed event
+      agentLogger.warn({
+        agentName: agentConfig.name,
+        finalResponse: typeof finalResponse,
+        agentConfigName: typeof agentConfig.name
+      }, 'Skipping message publish due to invalid data');
+    }
 
     // agentLogger.info({
     //   agentId: agentConfig.id,
@@ -390,7 +399,7 @@ export async function shouldRespondToMessage(
   }
 
   // Reset LLM call count when receiving human or system messages
-  const senderType = determineSenderType(messageData.sender || 'unknown');
+  const senderType = determineSenderType(messageData.sender);
   if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
     try {
       const currentAgent = await getAgent(worldName || 'default', agentConfig.name);
@@ -545,7 +554,10 @@ async function saveMessagesToMemory(
 /**
  * Determine sender type based on sender name (matches event-bus.ts logic)
  */
-function determineSenderType(sender: string): SenderType {
+function determineSenderType(sender: string | undefined): SenderType {
+  if (!sender) {
+    return SenderType.WORLD; // Default to world for undefined senders
+  }
   if (sender === 'HUMAN' || sender === 'human' || sender === 'user') {
     return SenderType.HUMAN;
   }
