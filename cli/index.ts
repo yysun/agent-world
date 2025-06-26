@@ -49,6 +49,8 @@ import {
   broadcastMessage,
   DEFAULT_WORLD_NAME
 } from '../src/world';
+import { loadSystemPrompt } from '../src/world-persistence';
+import { getAgentConversationHistory } from '../src/agent-memory';
 import { subscribeToSSE, subscribeToSystem, subscribeToMessages } from '../src/event-bus';
 import { colors, terminal } from './utils/colors';
 import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload } from '../src/types';
@@ -137,17 +139,29 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
 }
 
 // Function to estimate input tokens from conversation history
-function estimateInputTokens(agentName: string, worldName: string): number {
+async function estimateInputTokens(agentName: string, worldName: string): Promise<number> {
   try {
     const agent = getAgent(worldName, agentName);
     if (!agent) return 50; // Default estimate if agent not found
 
-    // Get recent conversation context (rough estimate)
-    // System prompt + recent conversation history
-    const systemPromptTokens = (agent.config.systemPrompt || '').split(/\s+/).length;
-    const conversationEstimate = 100; // Rough estimate for recent conversation
+    // Load actual system prompt and recent conversation history
+    const [systemPrompt, conversationHistory] = await Promise.all([
+      loadSystemPrompt(worldName, agentName).catch(() => ''),
+      getAgentConversationHistory(worldName, agentName, 10).catch(() => [])
+    ]);
 
-    return Math.max(50, systemPromptTokens + conversationEstimate);
+    // Rough token estimation: ~0.75 tokens per word
+    const systemPromptTokens = Math.ceil(systemPrompt.split(/\s+/).length * 0.75);
+
+    // Estimate tokens from recent conversation (last 10 messages)
+    const conversationTokens = conversationHistory.reduce((total, msg) => {
+      return total + Math.ceil(msg.content.split(/\s+/).length * 0.75);
+    }, 0);
+
+    // Add buffer for instruction formatting and context
+    const totalEstimate = systemPromptTokens + conversationTokens + 50;
+
+    return Math.max(50, totalEstimate);
   } catch (error) {
     return 50; // Default fallback
   }
@@ -370,7 +384,7 @@ async function main() {
       switch (sseData.type) {
         case 'start':
           // Estimate input tokens from message context
-          const estimatedInputTokens = estimateInputTokens(sseData.agentName, worldName);
+          const estimatedInputTokens = await estimateInputTokens(sseData.agentName, worldName);
           StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
           break;
         case 'chunk':
