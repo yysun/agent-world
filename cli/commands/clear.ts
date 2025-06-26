@@ -1,16 +1,18 @@
 /*
- * Clear Command - Agent Memory Management
+ * Clear Command - Agent Memory Management and Turn Limit Reset
  * 
  * Features:
  * - Clear memory of individual agents or all agents
+ * - Reset turn limits (LLM call count) for agents
  * - Support for agent selection by ID or name
- * - Bulk memory clearing operation
+ * - Bulk memory clearing and turn limit reset operation
  * - Complete memory reset with simplified structure and archiving (LLM messages only)
  * 
  * Logic:
  * - Handles agent selection by ID or name
  * - Provides system-wide clear option with "all" keyword
  * - Uses clearAgentMemory function to archive existing memory then reset to simplified structure
+ * - Turn limit reset is handled automatically by clearAgentMemory function
  * - Archives memory files with conversation history before clearing
  * - Resets only conversationHistory and lastActivity timestamp
  * - Preserves agent ID and basic configuration
@@ -22,6 +24,7 @@
  * - Replaced complex memory structure with simplified structure and archive preservation
  * - Now properly archives memory.json before clearing to contain only conversationHistory and lastActivity
  * - Enhanced error handling and user feedback
+ * - Added turn limit reset functionality (handled automatically by clearAgentMemory)
  */
 
 import * as World from '../../src/world';
@@ -49,11 +52,11 @@ export async function clearCommand(args: string[], worldName: string): Promise<v
 
       for (const agent of agents) {
         try {
-          // Clear agent's memory using the proper clearAgentMemory function
+          // Clear agent's memory (also resets turn limit automatically)
           const success = await World.clearAgentMemory(worldName, agent.name);
 
           if (success) {
-            console.log(colors.green(`✓ Cleared memory: ${agent.name}`));
+            console.log(colors.green(`✓ Cleared memory and reset turn limit: ${agent.name}`));
           } else {
             console.log(colors.red(`✗ Failed to clear memory for ${agent.name}`));
           }
@@ -62,7 +65,7 @@ export async function clearCommand(args: string[], worldName: string): Promise<v
         }
       }
 
-      console.log(colors.green(`\nMemory cleared for all agents.`));
+      console.log(colors.green(`\nMemory cleared and turn limits reset for all agents.`));
     } else {
       // Clear memory for specific agent
       const agents = World.getAgents(worldName);
@@ -74,11 +77,11 @@ export async function clearCommand(args: string[], worldName: string): Promise<v
         return;
       }
 
-      // Clear memory for specific agent using the proper clearAgentMemory function
+      // Clear memory for specific agent (also resets turn limit automatically)
       const success = await World.clearAgentMemory(worldName, agent.name);
 
       if (success) {
-        console.log(colors.green(`✓ Memory cleared for agent: ${agent.name}`));
+        console.log(colors.green(`✓ Memory cleared and turn limit reset for agent: ${agent.name}`));
       } else {
         console.log(colors.red(`Failed to clear memory for agent: ${agent.name}`));
       }

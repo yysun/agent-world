@@ -327,8 +327,8 @@ export function displayFormattedMessage(message: DisplayMessage): void {
   let dotColor = message.dotColor;
   if (!dotColor) {
     if (isHumanMessage) {
-      // @human messages get yellow checkmark
-      dotColor = colors.yellow('✓');
+      // @human messages get yellow question mark
+      dotColor = colors.yellow('?');
     } else {
       switch (senderType) {
         case SenderType.HUMAN:

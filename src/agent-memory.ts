@@ -11,7 +11,7 @@
  * Core Functions:
  * - addToAgentMemory: Add chat message to agent's conversation history
  * - getAgentConversationHistory: Retrieve agent's recent conversation messages
- * - clearAgentMemory: Archive existing memory and create fresh simplified structure
+ * - clearAgentMemory: Archive existing memory and create fresh simplified structure, reset turn limit
  *
  * Implementation:
  * - Uses shared world state for agent lookup
@@ -78,7 +78,7 @@ export async function getAgentConversationHistory(worldName: string, agentName: 
 }
 
 /**
- * Clear agent's memory - archives existing memory.json then creates fresh simplified memory
+ * Clear agent's memory - archives existing memory.json then creates fresh simplified memory and resets turn limit
  */
 export async function clearAgentMemory(worldName: string, agentName: string): Promise<boolean> {
   const agent = getAgent(worldName, agentName);
@@ -127,12 +127,13 @@ export async function clearAgentMemory(worldName: string, agentName: string): Pr
     // Save the simplified empty memory to the agent's memory file
     await saveAgentMemory(worldName, agent.name, emptyMemory);
 
-    // Update agent's last active timestamp
+    // Update agent's last active timestamp and reset turn limit
     const agents = getAgents(worldName);
     const agentForUpdate = agents.find(a => a.name === agent.name);
     if (agentForUpdate) {
       await updateAgent(worldName, agentForUpdate.name, {
-        lastActive: new Date()
+        lastActive: new Date(),
+        llmCallCount: 0  // Reset turn limit when clearing memory
       });
     }
 
