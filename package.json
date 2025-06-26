@@ -7,7 +7,7 @@
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server.ts",
     "start": "npx tsx index.ts",
-    "dev": "nodemon --watch src --watch cli --watch server.ts --watch index.ts --ext ts,js,json --exec \"npx tsx index.ts\"",
+    "dev": "nodemon --watch src --watch cli --watch server.ts --watch index.ts --ext ts,js,json --exec \"npx tsx cli/index.ts\"",
     "test": "jest --config jest.config.js",
     "build": "tsc --noEmit",
     "check": "tsc --noEmit"

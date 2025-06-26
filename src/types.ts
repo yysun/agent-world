@@ -117,6 +117,11 @@ export interface SSEEventPayload {
   content?: string;
   error?: string;
   messageId?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
 export interface Event {

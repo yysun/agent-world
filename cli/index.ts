@@ -44,6 +44,7 @@ import {
   loadWorldFromDisk,
   createWorld,
   getAgents,
+  getAgent,
   broadcastMessage,
   DEFAULT_WORLD_NAME
 } from '../src/world';
@@ -131,6 +132,23 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
 
     askForSelection();
   });
+}
+
+// Function to estimate input tokens from conversation history
+function estimateInputTokens(agentName: string, worldName: string): number {
+  try {
+    const agent = getAgent(worldName, agentName);
+    if (!agent) return 50; // Default estimate if agent not found
+
+    // Get recent conversation context (rough estimate)
+    // System prompt + recent conversation history
+    const systemPromptTokens = (agent.config.systemPrompt || '').split(/\s+/).length;
+    const conversationEstimate = 100; // Rough estimate for recent conversation
+
+    return Math.max(50, systemPromptTokens + conversationEstimate);
+  } catch (error) {
+    return 50; // Default fallback
+  }
 }
 
 async function main() {
@@ -338,12 +356,20 @@ async function main() {
 
       switch (sseData.type) {
         case 'start':
-          StreamingDisplay.startStreaming(sseData.agentName, agentName);
+          // Estimate input tokens from message context
+          const estimatedInputTokens = estimateInputTokens(sseData.agentName, worldName);
+          StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
           break;
         case 'chunk':
           StreamingDisplay.addStreamingContent(sseData.agentName, sseData.content || '');
           break;
         case 'end':
+          // Set usage information if available BEFORE ending streaming
+          if (sseData.usage) {
+            StreamingDisplay.setStreamingUsage(sseData.agentName, sseData.usage);
+            // Trigger one final preview update to show the actual token counts
+            StreamingDisplay.updateFinalPreview(sseData.agentName);
+          }
           StreamingDisplay.endStreaming(sseData.agentName);
           break;
         case 'error':

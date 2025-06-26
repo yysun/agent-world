@@ -33,10 +33,16 @@ interface StreamingAgent {
   lineOffset: number; // Relative line position from start of streaming block
   emojiFlashTimer?: NodeJS.Timeout; // Timer for flashing emoji animation
   hasError?: boolean; // Track if streaming ended with error
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
 // State management
 const activeStreams = new Map<string, StreamingAgent>();
+const completedStreams = new Map<string, StreamingAgent>(); // Store completed streams
 let nextLineOffset = 0; // Next available line offset for new agents
 
 // Callback for when all streaming ends
@@ -49,7 +55,7 @@ let emojiFlashIndex = 0;
 /**
  * Start streaming for a specific agent
  */
-export function startStreaming(agentName: string, displayName: string): void {
+export function startStreaming(agentName: string, displayName: string, estimatedInputTokens?: number): void {
   if (!activeStreams.has(agentName)) {
     // If this is the first agent, mark the starting line and add initial spacing
     if (activeStreams.size === 0) {
@@ -67,12 +73,19 @@ export function startStreaming(agentName: string, displayName: string): void {
       contentBuffer: '',
       tokenCount: 0,
       lineOffset,
-      hasError: false
+      hasError: false,
+      usage: estimatedInputTokens ? {
+        inputTokens: estimatedInputTokens,
+        outputTokens: 0,
+        totalTokens: estimatedInputTokens
+      } : undefined
     });
 
     // Create a new line for this agent and show initial preview
     const initialEmoji = colors.cyan('●');
-    const initialPreview = `${initialEmoji} ${displayName}: ... (0 tokens)`;
+    const initialPreview = estimatedInputTokens
+      ? `${initialEmoji} ${displayName}: ... (↑${estimatedInputTokens} ↓0 tokens)`
+      : `${initialEmoji} ${displayName}: ... (0 tokens)`;
     console.log(initialPreview);
 
     const stream = activeStreams.get(agentName)!;
@@ -113,24 +126,34 @@ export function endStreaming(agentName: string): void {
     // Stop emoji flashing animation
     stopEmojiFlashing(agentName);
 
-    // Clear the streaming line first
-    clearStreamingLine(agentName);
-
-    // Log the final message content with newline
-    const finalContent = stream.contentBuffer.trim();
-    if (finalContent) {
-      console.log(`${colors.green('✓')} ${stream.agentName}: ${colors.gray(finalContent)}`);
-      console.log(); // Add newline after final content
-    } else {
-      console.log(`${colors.green('✓')} ${stream.agentName}: ${colors.gray('[no response]')}`);
-      console.log(); // Add newline after final content
-    }
+    // Store completed agent data for final display
+    completedStreams.set(agentName, stream);
 
     // Remove this agent from active streams
     activeStreams.delete(agentName);
 
-    // If this is the last active stream, do final cleanup
+    // If this is the last active stream, clear all previews and show final content
     if (activeStreams.size === 0) {
+      // Clear all streaming preview lines first
+      clearAllStreamingLines();
+
+      // Display final content for all completed agents in order
+      const sortedStreams = Array.from(completedStreams.values()).sort((a, b) => a.lineOffset - b.lineOffset);
+
+      for (const completedStream of sortedStreams) {
+        const finalContent = completedStream.contentBuffer.trim();
+        if (finalContent) {
+          console.log(`${colors.green('✓')} ${completedStream.agentName}: ${colors.gray(finalContent)}`);
+          console.log(); // Add newline after final content
+        } else {
+          console.log(`${colors.green('✓')} ${completedStream.agentName}: ${colors.gray('[no response]')}`);
+          console.log(); // Add newline after final content
+        }
+      }
+
+      // Clean up completed streams
+      completedStreams.clear();
+
       displayFinalContent();
       // Call the callback if set, with a small delay to ensure output is complete
       if (onAllStreamingEndCallback) {
@@ -248,6 +271,7 @@ export function resetStreamingState(): void {
   }
 
   activeStreams.clear();
+  completedStreams.clear();
   nextLineOffset = 0;
 }
 
@@ -274,6 +298,28 @@ function clearStreamingLine(agentName: string): void {
     // Move cursor back down to the bottom
     process.stdout.write(`\x1B[${linesToMoveUp}B`);
   }
+}
+
+/**
+ * Clear all streaming preview lines
+ */
+function clearAllStreamingLines(): void {
+  if (nextLineOffset === 0) return;
+
+  // Move cursor up to the first streaming line
+  process.stdout.write(`\x1B[${nextLineOffset}A`);
+
+  // Clear all streaming lines
+  for (let i = 0; i < nextLineOffset; i++) {
+    process.stdout.write('\x1B[2K'); // Clear entire line
+    if (i < nextLineOffset - 1) {
+      process.stdout.write('\x1B[B'); // Move down to next line
+    }
+  }
+
+  // Move cursor back to beginning of first line
+  process.stdout.write(`\x1B[${nextLineOffset - 1}A`);
+  process.stdout.write('\x1B[G'); // Move to beginning of line
 }
 
 // Private helper functions
@@ -369,8 +415,8 @@ function getCurrentEmoji(hasError?: boolean): string {
 }
 
 function updateStreamingPreview(agentName: string): void {
-  const stream = activeStreams.get(agentName);
-  if (!stream || !stream.isStreaming) return;
+  const stream = activeStreams.get(agentName) || completedStreams.get(agentName);
+  if (!stream) return;
 
   // Create preview content (50 characters max)
   const previewContent = stream.contentBuffer
@@ -383,14 +429,27 @@ function updateStreamingPreview(agentName: string): void {
     displayContent = displayContent.substring(0, 50);
   }
 
-  // Count tokens (approximate: split by spaces and punctuation)
-  const tokenCount = stream.contentBuffer
-    .split(/[\s\.,;:!?\-'"()\[\]{}]+/)
-    .filter(token => token.length > 0).length;
+  // Count tokens (approximate: split by spaces and punctuation, unless we have actual usage)
+  let tokenDisplay: string;
+  if (stream.usage) {
+    // Update output token count based on current content
+    const outputTokens = stream.contentBuffer
+      .split(/[\s\.,;:!?\-'"()\[\]{}]+/)
+      .filter(token => token.length > 0).length;
+    stream.usage.outputTokens = outputTokens;
+    stream.usage.totalTokens = stream.usage.inputTokens + outputTokens;
+
+    tokenDisplay = `↑${stream.usage.inputTokens} ↓${stream.usage.outputTokens} tokens`;
+  } else {
+    const tokenCount = stream.contentBuffer
+      .split(/[\s\.,;:!?\-'"()\[\]{}]+/)
+      .filter(token => token.length > 0).length;
+    tokenDisplay = `${tokenCount} tokens`;
+  }
 
   // Format: ● agentName: [content] ... (xxx tokens)
   const emoji = getCurrentEmoji(stream.hasError);
-  const preview = `${emoji} ${stream.agentName}: ${displayContent} ... (${tokenCount} tokens)`;
+  const preview = `${emoji} ${stream.agentName}: ${displayContent} ... (${tokenDisplay})`;
 
   // Find the line for this agent (count from 1, as line 0 is the first streaming line)
   const targetLine = stream.lineOffset + 1;
@@ -402,5 +461,22 @@ function updateStreamingPreview(agentName: string): void {
   process.stdout.write('\x1B[G');  // Move to beginning of line
   process.stdout.write(preview);
   process.stdout.write('\x1B[u'); // Restore cursor position
+}
+
+/**
+ * Update the final preview for an agent (used when usage info becomes available)
+ */
+export function updateFinalPreview(agentName: string): void {
+  updateStreamingPreview(agentName);
+}
+
+/**
+ * Set token usage information for an agent
+ */
+export function setStreamingUsage(agentName: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }): void {
+  const stream = activeStreams.get(agentName) || completedStreams.get(agentName);
+  if (stream) {
+    stream.usage = usage;
+  }
 }
 

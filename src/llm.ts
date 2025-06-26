@@ -200,7 +200,7 @@ async function handleStreamingRequest(
 
   try {
     // Generate response using streaming AI (from LLMQueue)
-    const { textStream } = await streamText({
+    const result = await streamText({
       model: provider,
       messages: messages,
       temperature: options.temperature || 0.7,
@@ -208,7 +208,7 @@ async function handleStreamingRequest(
     });
 
     // Stream the response and emit SSE events (from LLMQueue)
-    for await (const textPart of textStream) {
+    for await (const textPart of result.textStream) {
       fullResponse += textPart;
 
       // Emit SSE chunk event
@@ -220,12 +220,20 @@ async function handleStreamingRequest(
       });
     }
 
-    // Emit SSE end event (from LLMQueue)
+    // Get final usage information
+    const usage = await result.usage;
+
+    // Emit SSE end event with token usage (from LLMQueue)
     await publishSSE({
       agentName: options.agentName || 'unknown',
       type: 'end',
       messageId: messageId,
-      content: fullResponse
+      content: fullResponse,
+      usage: usage ? {
+        inputTokens: usage.promptTokens,
+        outputTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens
+      } : undefined
     });
 
     return fullResponse;
