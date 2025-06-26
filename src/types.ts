@@ -70,16 +70,6 @@ export interface AgentMemory {
   lastActivity: string; // ISO timestamp
 }
 
-// Legacy message type for migration
-export interface LegacyMessage {
-  type: 'incoming' | 'outgoing';
-  sender: string;
-  content: string;
-  messageId: string;
-  timestamp: string;
-  inResponseTo?: string;
-}
-
 export interface Agent {
   name: string;
   type: string;
@@ -87,7 +77,8 @@ export interface Agent {
   config: AgentConfig;
   createdAt?: Date;
   lastActive?: Date;
-  metadata?: Record<string, any>;
+  llmCallCount: number;
+  lastLLMCall?: Date;
 }
 
 

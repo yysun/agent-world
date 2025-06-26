@@ -330,11 +330,11 @@ describe('Agent Lifecycle and Persistence', () => {
     // Update agent configuration
     const updatedAgent = await updateAgent(worldName, createdAgent!.name, {
       status: 'inactive',
-      metadata: { updatedAt: new Date().toISOString() }
+      llmCallCount: 3
     });
     expect(updatedAgent).toBeTruthy();
     expect(updatedAgent!.status).toBe('inactive');
-    expect(updatedAgent!.metadata?.updatedAt).toBeTruthy();
+    expect(updatedAgent!.llmCallCount).toBe(3);
 
     // Verify persistence by retrieving agent
     const retrievedAgent = getAgent(worldName, createdAgent!.name);

@@ -184,6 +184,16 @@ export async function loadWorldFromDisk(worldName: string): Promise<WorldState> 
         // Restore Date objects
         if (agent.createdAt) agent.createdAt = new Date(agent.createdAt);
         if (agent.lastActive) agent.lastActive = new Date(agent.lastActive);
+        if (agent.lastLLMCall) agent.lastLLMCall = new Date(agent.lastLLMCall);
+
+        // Add backward compatibility for new fields
+        if (agent.llmCallCount === undefined) agent.llmCallCount = 0;
+        if (agent.lastLLMCall === undefined) agent.lastLLMCall = undefined;
+
+        // Remove deprecated metadata field if it exists
+        if (agent.metadata !== undefined) {
+          delete agent.metadata;
+        }
 
         // Load system prompt from separate file and add it to config
         const systemPrompt = await loadSystemPromptDirect(actualWorldDir, agent.name);

@@ -27,6 +27,6 @@
 - use `npx tsx` for TypeScript execution
 - `npm run dev` - Start the dev
 - `npm test` - Run tests
-- unit tests should only mock file io and LLM, do not mock world, event bus or agent
+- when creating unit tests - only mock file io and LLM, do not mock world, event bus or agent
 - write debug code and use `tsx` for debugging if needed
 

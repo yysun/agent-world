@@ -30,6 +30,7 @@ import { loadLLMProvider, streamChatWithLLM, ChatOptions, LLMConfig } from './ll
 import { publishSSE, publishMessageEvent, publishDebugEvent } from './event-bus';
 import { agentLogger } from './logger';
 import { getAgentConversationHistory, addToAgentMemory } from './world';
+import { updateAgent, getAgent } from './agent-manager';
 
 // Types moved to types.ts
 import type { AgentConfig, MessageData } from './types';
@@ -97,6 +98,23 @@ export async function processAgentMessage(
 
     // Strip custom fields before sending to LLM
     const llmMessages = messages.map(stripCustomFields);
+
+    // Increment LLM call count and update timestamp before making the call
+    try {
+      const currentAgent = await getAgent(worldName || 'default', agentConfig.name);
+      if (currentAgent) {
+        await updateAgent(worldName || 'default', agentConfig.name, {
+          llmCallCount: currentAgent.llmCallCount + 1,
+          lastLLMCall: new Date()
+        });
+        publishDebugEvent(`[LLM Call] ${agentConfig.name} call #${currentAgent.llmCallCount + 1}`, {
+          agentName: agentConfig.name,
+          callCount: currentAgent.llmCallCount + 1
+        });
+      }
+    } catch (error) {
+      console.warn(`Could not update agent LLM call count: ${error}`);
+    }
 
     const response = await streamChatWithLLM(
       provider,
@@ -299,49 +317,49 @@ export async function shouldRespondToMessage(
     return false;
   }
 
-  // Check turn limit by examining last TURN_LIMIT messages from conversation history
-  // Include the current message in the analysis
+  // Check turn limit based on LLM call count
   if (worldName) {
     try {
-      if (getAgentConversationHistory) {
-        const recentHistory = await getAgentConversationHistory(worldName, agentConfig.name, TURN_LIMIT - 1);
+      const currentAgent = await getAgent(worldName, agentConfig.name);
+      if (currentAgent && currentAgent.llmCallCount >= TURN_LIMIT) {
+        publishDebugEvent(`[Turn Limit] ${agentConfig.name} reached LLM call limit (${currentAgent.llmCallCount}/${TURN_LIMIT})`, {
+          agentName: agentConfig.name,
+          worldName,
+          llmCallCount: currentAgent.llmCallCount,
+          turnLimit: TURN_LIMIT
+        });
 
-        // Add current message to the analysis
-        const currentSenderType = determineSenderType(messageData.sender || 'unknown');
-        const allMessages = [...recentHistory, { sender: messageData.sender }];
+        // Send turn limit message with agentName as sender
+        await publishMessageEvent({
+          content: `@human Turn limit reached (${TURN_LIMIT} LLM calls). Please take control of the conversation.`,
+          sender: agentConfig.name
+        });
 
-        // Check if we have TURN_LIMIT consecutive agent messages with no human/system input
-        if (allMessages.length >= TURN_LIMIT) {
-          const lastMessages = allMessages.slice(-TURN_LIMIT);
-          // Use senderType logic to determine if any message is from human or system
-          const hasHumanOrSystemInput = lastMessages.some(msg => {
-            const sender = msg.sender || 'unknown';
-            const senderType = determineSenderType(sender);
-            return senderType === SenderType.HUMAN || senderType === SenderType.WORLD;
-          });
-
-          // If no human or system input in last TURN_LIMIT messages, turn limit reached
-          if (!hasHumanOrSystemInput) {
-            publishDebugEvent(`[Turn Limit] ${agentConfig.name} detected ${TURN_LIMIT} consecutive agent messages with no human/system input`, {
-              agentName: agentConfig.name,
-              worldName,
-              lastSenders: lastMessages.map(msg => msg.sender || 'unknown'),
-              currentSender: messageData.sender,
-              currentSenderType: currentSenderType === SenderType.HUMAN ? 'human' : currentSenderType === SenderType.WORLD ? 'system' : 'agent'
-            });
-
-            // Send turn limit message with agentName as sender
-            await publishMessageEvent({
-              content: `@human Turn limit reached (${TURN_LIMIT} consecutive agent messages). Please take control of the conversation.`,
-              sender: agentConfig.name
-            });
-
-            return false; // Don't respond when turn limit is reached
-          }
-        }
+        return false; // Don't respond when turn limit is reached
       }
     } catch (error) {
       console.warn('Could not check turn limit:', error);
+    }
+  }
+
+  // Reset LLM call count when receiving human or system messages
+  const senderType = determineSenderType(messageData.sender || 'unknown');
+  if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
+    try {
+      const currentAgent = await getAgent(worldName || 'default', agentConfig.name);
+      if (currentAgent && currentAgent.llmCallCount > 0) {
+        await updateAgent(worldName || 'default', agentConfig.name, {
+          llmCallCount: 0
+        });
+        publishDebugEvent(`[Turn Limit Reset] ${agentConfig.name} LLM call count reset by ${senderType === SenderType.HUMAN ? 'human' : 'system'} message`, {
+          agentName: agentConfig.name,
+          resetBy: senderType === SenderType.HUMAN ? 'human' : 'system',
+          sender: messageData.sender,
+          previousCount: currentAgent.llmCallCount
+        });
+      }
+    } catch (error) {
+      console.warn('Could not reset agent LLM call count:', error);
     }
   }
 

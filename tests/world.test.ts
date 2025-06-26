@@ -585,23 +585,23 @@ describe('World Management System', () => {
       expect(agent).toBeDefined();
 
       const updates = {
-        metadata: { updated: true },
+        llmCallCount: 10,
         status: 'inactive' as const
       };
 
       const updatedAgent = await updateAgent(worldName, agent!.name, updates);
       expect(updatedAgent).toBeDefined();
-      expect(updatedAgent?.metadata?.updated).toBe(true);
+      expect(updatedAgent?.llmCallCount).toBe(10);
       expect(updatedAgent?.status).toBe('inactive');
     });
 
     it('should return null when updating non-existent agent', async () => {
-      const result = await updateAgent(worldName, 'non-existent-agent', { metadata: {} });
+      const result = await updateAgent(worldName, 'non-existent-agent', { llmCallCount: 0 });
       expect(result).toBeNull();
     });
 
     it('should return null when updating agent in non-existent world', async () => {
-      const result = await updateAgent('non-existent-world', 'some-agent', { metadata: {} });
+      const result = await updateAgent('non-existent-world', 'some-agent', { llmCallCount: 0 });
       expect(result).toBeNull();
     });
 

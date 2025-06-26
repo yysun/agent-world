@@ -64,7 +64,8 @@ export async function createAgent(worldName: string, config: AgentConfig): Promi
     config: agentConfig,
     createdAt: new Date(),
     lastActive: new Date(),
-    metadata: {}
+    llmCallCount: 0,
+    lastLLMCall: undefined
   };
 
   world.agents.set(agent.name, agent);
