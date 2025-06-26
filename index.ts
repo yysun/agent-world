@@ -19,7 +19,7 @@
  * - npm run dev: CLI only
  */
 
-import { colors } from './cli/utils/colors.js';
+import { colors } from './cli/ui/colors.js';
 
 async function startWebServer() {
   try {
@@ -42,7 +42,7 @@ async function startCLI() {
     console.log(); // Add spacing before CLI starts
 
     // Import and run the CLI
-    await import('./cli/index.js');
+    await import('./cli/index-tui.js');
   } catch (error) {
     console.error(colors.red('❌ Failed to start CLI:'), error);
     throw error;

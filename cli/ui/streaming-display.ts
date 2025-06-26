@@ -24,9 +24,15 @@
  * - Updated to accept message objects with sender and content properties
  */
 
-import { colors } from '../utils/colors';
+import { colors } from './colors';
 import { addMessageToStore, createStoredMessage, determineSenderType } from '../message-store';
 import { SenderType } from '../../src/types';
+import {
+  displayUnifiedMessage,
+  displayStreamingMessage,
+  setCurrentWorldName as setUnifiedWorldName,
+  setStreamingActive
+} from './unified-display';
 
 // Debug configuration
 const DEBUG_OUTPUT_ENABLED = false; // Set to true to show debug messages during streaming
@@ -69,6 +75,8 @@ export function startStreaming(agentName: string, displayName: string, estimated
     if (activeStreams.size === 0) {
       console.log(); // Add newline before streaming block starts
       nextLineOffset = 0;
+      // Notify unified display system that streaming is active
+      setStreamingActive(true);
     }
 
     // Assign this agent the next available line
@@ -145,31 +153,32 @@ export function endStreaming(agentName: string): void {
       // Clear all streaming preview lines first
       clearAllStreamingLines();
 
+      // Notify unified display system that streaming is no longer active
+      setStreamingActive(false);
+
       // Display final content for all completed agents in order using unified display
       const sortedStreams = Array.from(completedStreams.values()).sort((a, b) => a.lineOffset - b.lineOffset);
 
       for (const completedStream of sortedStreams) {
         const finalContent = completedStream.contentBuffer.trim();
         if (finalContent) {
-          // Use unified display function for agent responses
-          displayFormattedMessage({
-            sender: completedStream.agentName,
-            senderType: SenderType.AGENT,
+          // Use unified display system for final agent responses
+          displayUnifiedMessage({
+            type: 'agent',
             content: finalContent,
-            dotColor: colors.green('✓'),
+            sender: completedStream.agentName,
             metadata: {
               source: 'streaming',
               messageType: 'response',
-              tokenCount: completedStream.usage?.outputTokens
+              tokenCount: completedStream.usage?.outputTokens || completedStream.tokenCount
             }
           });
         } else {
-          // Use unified display for empty responses
-          displayFormattedMessage({
-            sender: completedStream.agentName,
-            senderType: SenderType.AGENT,
+          // Use unified display for empty responses  
+          displayUnifiedMessage({
+            type: 'agent',
             content: '[no response]',
-            dotColor: colors.green('✓'),
+            sender: completedStream.agentName,
             metadata: {
               source: 'streaming',
               messageType: 'response'
@@ -253,14 +262,13 @@ export function displayDebugMessage(message: string): void {
     return; // Debug output is disabled
   }
 
-  if (activeStreams.size > 0) {
-    // If streaming is active, print the debug message and stay where we are
-    // This will naturally place the debug message after the last streaming line
-    console.log(message);
-  } else {
-    // No streaming active, normal display
-    console.log(message);
-  }
+  // Use unified display system for debug messages
+  displayUnifiedMessage({
+    type: 'debug',
+    content: message,
+    skipSpacing: activeStreams.size > 0, // Skip spacing during streaming
+    metadata: { source: 'streaming' }
+  });
 }
 
 /**
@@ -296,6 +304,8 @@ let currentWorldName: string = 'default';
  */
 export function setCurrentWorldName(worldName: string): void {
   currentWorldName = worldName;
+  // Sync with unified display system
+  setUnifiedWorldName(worldName);
 }
 
 // Unified message display interface
@@ -315,75 +325,26 @@ export interface DisplayMessage {
 /**
  * Unified display function for all message types
  * This is the single capture point for all messages to be stored and displayed
+ * @deprecated Use unified display system instead
  */
 export function displayFormattedMessage(message: DisplayMessage): void {
-  // Determine sender type if not provided
-  const senderType = message.senderType || determineSenderType(message.sender);
+  // Determine message type based on sender and content
+  let messageType: 'human' | 'agent' | 'system' = 'system';
 
-  // Check if this is a @human message (special case)
-  const isHumanMessage = message.content.startsWith('@human');
-
-  // Determine dot color based on sender type if not overridden
-  let dotColor = message.dotColor;
-  if (!dotColor) {
-    if (isHumanMessage) {
-      // @human messages get yellow question mark
-      dotColor = colors.yellow('?');
-    } else {
-      switch (senderType) {
-        case SenderType.HUMAN:
-          dotColor = colors.orange('●');
-          break;
-        case SenderType.AGENT:
-          dotColor = colors.green('●');
-          break;
-        case SenderType.WORLD:
-          dotColor = colors.red('●');
-          break;
-        default:
-          dotColor = colors.gray('●');
-      }
-    }
+  if (message.senderType === SenderType.HUMAN || message.sender === 'HUMAN' || message.sender === 'you') {
+    messageType = 'human';
+  } else if (message.senderType === SenderType.AGENT || (message.sender && message.sender !== 'system' && !message.content.startsWith('@human'))) {
+    messageType = 'agent';
   }
 
-  // Format sender name
-  const senderName = message.sender === 'HUMAN' ? 'you' : message.sender;
-
-  // Color the sender name to match the dot color when it's a special indicator
-  let coloredSenderName = senderName;
-  if (message.dotColor && message.dotColor.includes('✓')) {
-    // If using green checkmark, color the agent name green too
-    coloredSenderName = colors.green(senderName);
-  } else if (isHumanMessage) {
-    // If @human message with yellow checkmark, color the sender name yellow too
-    coloredSenderName = colors.yellow(senderName);
-  }
-
-  // Display the message
-  if (activeStreams.size > 0) {
-    // If streaming is active, print the message and stay where we are
-    if (isHumanMessage) {
-      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n\n`);
-    } else {
-      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
-    }
-  } else {
-    // No streaming active, normal display
-    if (isHumanMessage) {
-      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n\n`);
-    } else {
-      console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
-    }
-  }
-
-  // Store message in CLI session memory
-  const storedMessage = createStoredMessage(
-    message.sender,
-    message.content,
-    currentWorldName,
-    message.metadata
-  );
-  addMessageToStore(storedMessage);
+  // Convert to unified display message
+  displayUnifiedMessage({
+    type: messageType,
+    content: message.content,
+    sender: message.sender,
+    skipSpacing: activeStreams.size > 0, // Skip spacing during streaming for real-time display
+    metadata: message.metadata
+  });
 }
 
 /**

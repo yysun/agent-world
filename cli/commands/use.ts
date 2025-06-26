@@ -18,12 +18,15 @@
  */
 
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { colors } from '../ui/colors';
 
 export async function useCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Please specify an agent name.'));
-    console.log(colors.gray('Usage: /use <agent-name>'));
+    displayUnifiedMessage({
+      content: 'Please specify an agent name.\nUsage: /use <agent-name>',
+      type: 'help'
+    });
     return;
   }
 
@@ -48,17 +51,23 @@ export async function useCommand(args: string[], worldName: string): Promise<voi
       });
 
       if (updatedAgent) {
-        console.log(colors.green(`✓ Activated agent: ${colors.white(agent.name)}`));
-        console.log(colors.gray(`  Status: ${updatedAgent.status}`));
+        displaySuccess(`Activated agent: ${agent.name}`);
+        displayUnifiedMessage({
+          content: `  Status: ${updatedAgent.status}`,
+          type: 'status'
+        });
       } else {
-        console.log(colors.red(`Failed to activate agent: ${agent.name}`));
+        displayError(`Failed to activate agent: ${agent.name}`);
       }
     } else {
-      console.log(colors.red(`Agent not found: ${agentName}`));
-      console.log(colors.gray('Use /list to see available agents.'));
+      displayError(`Agent not found: ${agentName}`);
+      displayUnifiedMessage({
+        content: 'Use /list to see available agents.',
+        type: 'instruction'
+      });
     }
 
   } catch (error) {
-    console.log(colors.red(`Failed to activate agent: ${error}`));
+    displayError(`Failed to activate agent: ${error}`);
   }
 }

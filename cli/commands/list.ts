@@ -25,23 +25,35 @@
  */
 
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { colors } from '../ui/colors';
+import { displayUnifiedMessage } from '../ui/unified-display';
 
 export async function listCommand(args: string[], worldName: string): Promise<void> {
   const agents = World.getAgents(worldName);
 
   if (agents.length === 0) {
-    console.log(colors.yellow('📭 No agents found. Use /add to create your first agent.'));
+    displayUnifiedMessage({
+      type: 'status',
+      content: '📭 No agents found. Use /add to create your first agent.',
+      color: colors.yellow('📭 No agents found. Use /add to create your first agent.'),
+      metadata: { source: 'cli', messageType: 'command' }
+    });
     return;
   }
 
-  agents.forEach((agent: any, i: number) => {
+  // Format agent list
+  const agentList = agents.map((agent: any) => {
     const status = agent.status === 'active' ? colors.green('●') : colors.red('●');
     const name = colors.white(agent.name || 'Unnamed Agent');
     const model = agent.config?.model || 'unknown';
     const modelInfo = colors.gray(`- ${model}`);
+    return `${status} ${name} ${modelInfo}`;
+  }).join('\n');
 
-    console.log(`${status} ${name} ${modelInfo}`);
+  // Display using unified display system
+  displayUnifiedMessage({
+    type: 'status',
+    content: agentList,
+    metadata: { source: 'cli', messageType: 'command' }
   });
-  console.log();
 }

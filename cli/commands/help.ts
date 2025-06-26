@@ -21,7 +21,8 @@
  * - Renamed /list command to /agents for better clarity
  */
 
-import { colors } from '../utils/colors';
+import { colors } from '../ui/colors';
+import { displayUnifiedMessage } from '../ui/unified-display';
 
 export async function helpCommand(args: string[], worldName: string): Promise<void> {
   const commands = [
@@ -36,9 +37,15 @@ export async function helpCommand(args: string[], worldName: string): Promise<vo
     { command: '/quit', description: 'Exit the CLI' }
   ];
 
-  commands.forEach(cmd => {
-    console.log(colors.green(cmd.command) + colors.gray(` - ${cmd.description}`));
-  });
+  // Format help content with proper coloring
+  const helpContent = commands
+    .map(cmd => colors.green(cmd.command) + colors.gray(` - ${cmd.description}`))
+    .join('\n');
 
-  console.log();
+  // Display using unified display system
+  displayUnifiedMessage({
+    type: 'help',
+    content: helpContent,
+    metadata: { source: 'cli', messageType: 'command' }
+  });
 }

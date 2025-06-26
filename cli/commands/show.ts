@@ -33,14 +33,15 @@
  */
 
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { colors } from '../ui/colors';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
 export async function showCommand(args: string[], worldName: string): Promise<void> {
   // Check if agent name is provided
   if (args.length === 0) {
-    console.log(colors.yellow('❌ Please specify an agent name: /show <agent-name> [filename]'));
+    displayError('Please specify an agent name: /show <agent-name> [filename]');
     return;
   }
 
@@ -49,10 +50,12 @@ export async function showCommand(args: string[], worldName: string): Promise<vo
 
   // Get agent by name
   const agent = World.getAgent(worldName, agentName);
-
   if (!agent) {
-    console.log(colors.red(`❌ Agent "${agentName}" not found.`));
-    console.log(colors.gray('Use /list to see available agents.'));
+    displayError(`Agent "${agentName}" not found.`);
+    displayUnifiedMessage({
+      content: 'Use /list to see available agents.',
+      type: 'instruction'
+    });
     return;
   }
 
@@ -69,7 +72,7 @@ export async function showCommand(args: string[], worldName: string): Promise<vo
     }
 
   } catch (error) {
-    console.log(colors.red(`❌ Error loading conversation history: ${error}`));
+    displayError(`Error loading conversation history: ${error}`);
   }
 }
 
@@ -78,26 +81,28 @@ export async function showCommand(args: string[], worldName: string): Promise<vo
  */
 async function displayConversationInTerminal(agentName: string, history: any[]): Promise<void> {
   // Display agent header
-  console.log(`${colors.green('●')} ${colors.white(agentName)}`);
+  displayUnifiedMessage({
+    content: `● ${agentName}`,
+    type: 'agent'
+  });
 
   if (history.length === 0) {
-    console.log(colors.gray('  No conversation history found.'));
-    console.log();
+    displayUnifiedMessage({
+      content: '  No conversation history found.',
+      type: 'status'
+    });
     return;
   }
 
   // Format and display conversation history
   const questionAnswerPairs = formatConversationPairs(history, true);
 
-  // Display all pairs with blank lines between them
-  questionAnswerPairs.forEach((pair, index) => {
-    console.log(pair);
-    if (index < questionAnswerPairs.length - 1) {
-      console.log(); // Add blank line between pairs
-    }
+  // Display all pairs as a single block with consistent spacing
+  const conversationContent = questionAnswerPairs.join('\n\n');
+  displayUnifiedMessage({
+    content: conversationContent,
+    type: 'agent'
   });
-
-  console.log();
 }
 
 /**
@@ -105,7 +110,10 @@ async function displayConversationInTerminal(agentName: string, history: any[]):
  */
 async function saveConversationToMarkdown(agentName: string, history: any[], fileName: string): Promise<void> {
   if (history.length === 0) {
-    console.log(colors.yellow(`No conversation history found for ${agentName}. No file created.`));
+    displayUnifiedMessage({
+      content: `No conversation history found for ${agentName}. No file created.`,
+      type: 'status'
+    });
     return;
   }
 
@@ -118,9 +126,9 @@ async function saveConversationToMarkdown(agentName: string, history: any[], fil
   try {
     // Write to file
     await fs.writeFile(finalFileName, markdownContent, 'utf8');
-    console.log(colors.green(`✅ Conversation history saved to: ${finalFileName}`));
+    displaySuccess(`Conversation history saved to: ${finalFileName}`);
   } catch (error) {
-    console.log(colors.red(`❌ Error saving file: ${error}`));
+    displayError(`Error saving file: ${error}`);
   }
 }
 

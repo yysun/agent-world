@@ -21,8 +21,10 @@
 
 import * as readline from 'readline';
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { colors } from '../ui/colors';
 import { AgentConfig, LLMProvider } from '../../src/types';
+import { displayUnifiedMessage } from '../ui/unified-display';
+
 export async function addCommand(args: string[], worldName: string): Promise<void> {
   try {
     // Accepts: /add [name]
@@ -44,7 +46,12 @@ export async function addCommand(args: string[], worldName: string): Promise<voi
       });
     }
 
-    console.log(colors.blue(`Creating ${type} agent: ${agentName}...`));
+    displayUnifiedMessage({
+      type: 'command',
+      content: `Creating ${type} agent: ${agentName}...`,
+      commandSubtype: 'info',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
 
     const agentConfig: AgentConfig = {
       name: agentName,
@@ -62,11 +69,21 @@ export async function addCommand(args: string[], worldName: string): Promise<voi
       throw new Error('Failed to create agent');
     }
 
-    console.log(colors.green(`✓ Successfully created agent:`));
-    console.log(colors.gray(`  Name: ${agent.name}`));
-    console.log(colors.gray(`  Status: ${agent.status}`));
+    // Format success message with agent details
+    const successMessage = `Successfully created agent:\n  Name: ${agent.name}\n  Status: ${agent.status}`;
+
+    displayUnifiedMessage({
+      type: 'command',
+      content: successMessage,
+      commandSubtype: 'success',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
 
   } catch (error) {
-    console.log(colors.red(`Failed to create agent: ${error}`));
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Failed to create agent: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
   }
 }

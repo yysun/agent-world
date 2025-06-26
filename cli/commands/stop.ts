@@ -18,12 +18,15 @@
  */
 
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { colors } from '../ui/colors';
 
 export async function stopCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Please specify an agent name or "all".'));
-    console.log(colors.gray('Usage: /stop <agent-name> or /stop all'));
+    displayUnifiedMessage({
+      content: 'Please specify an agent name or "all".\nUsage: /stop <agent-name> or /stop all',
+      type: 'help'
+    });
     return;
   }
 
@@ -34,11 +37,20 @@ export async function stopCommand(args: string[], worldName: string): Promise<vo
       const agents = World.getAgents(worldName);
 
       if (agents.length === 0) {
-        console.log(colors.yellow('No agents to stop.'));
+        displayUnifiedMessage({
+          content: 'No agents to stop.',
+          type: 'status'
+        });
         return;
       }
 
-      console.log(colors.blue(`Deactivating all ${agents.length} agents...`));
+      displayUnifiedMessage({
+        content: `Deactivating all ${agents.length} agents...`,
+        type: 'command'
+      });
+
+      let successCount = 0;
+      let failureCount = 0;
 
       for (const agent of agents) {
         try {
@@ -49,14 +61,19 @@ export async function stopCommand(args: string[], worldName: string): Promise<vo
           });
 
           if (updatedAgent) {
-            console.log(colors.green(`✓ Stopped: ${agent.name}`));
+            successCount++;
+          } else {
+            failureCount++;
           }
         } catch (error) {
-          console.log(colors.red(`✗ Failed to stop ${agent.name}: ${error}`));
+          failureCount++;
         }
       }
 
-      console.log(colors.cyan('All agents stopped.'));
+      const summary = `Stopped ${successCount} agents successfully.` +
+        (failureCount > 0 ? ` ${failureCount} failed.` : '');
+
+      displaySuccess(summary);
       return;
     }
 
@@ -72,7 +89,10 @@ export async function stopCommand(args: string[], worldName: string): Promise<vo
     }
 
     if (agent) {
-      console.log(colors.blue(`Stopping agent: ${agent.name}...`));
+      displayUnifiedMessage({
+        content: `Stopping agent: ${agent.name}...`,
+        type: 'command'
+      });
 
       // Update agent status to inactive
       const updatedAgent = await World.updateAgent(worldName, agent.name, {
@@ -81,16 +101,19 @@ export async function stopCommand(args: string[], worldName: string): Promise<vo
       });
 
       if (updatedAgent) {
-        console.log(colors.green(`✓ Successfully stopped: ${agent.name}`));
+        displaySuccess(`Successfully stopped: ${agent.name}`);
       } else {
-        console.log(colors.red(`Failed to stop agent: ${agent.name}`));
+        displayError(`Failed to stop agent: ${agent.name}`);
       }
     } else {
-      console.log(colors.red(`Agent not found: ${identifier}`));
-      console.log(colors.gray('Use /list to see available agents.'));
+      displayError(`Agent not found: ${identifier}`);
+      displayUnifiedMessage({
+        content: 'Use /list to see available agents.',
+        type: 'instruction'
+      });
     }
 
   } catch (error) {
-    console.log(colors.red(`Failed to stop agent: ${error}`));
+    displayError(`Failed to stop agent: ${error}`);
   }
 }

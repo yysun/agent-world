@@ -23,15 +23,18 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getMessagesForWorld, getMessageCount, StoredMessage } from '../message-store';
 import { SenderType } from '../../src/types';
-import { colors } from '../utils/colors';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { colors } from '../ui/colors';
 
 /**
  * Export command implementation
  */
 export async function exportCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Usage: /export <filename>'));
-    console.log(colors.gray('Example: /export my-conversation'));
+    displayUnifiedMessage({
+      content: 'Usage: /export <filename>\nExample: /export my-conversation',
+      type: 'help'
+    });
     return;
   }
 
@@ -39,16 +42,19 @@ export async function exportCommand(args: string[], worldName: string): Promise<
   const messageCount = getMessageCount(worldName);
 
   if (messageCount === 0) {
-    console.log(colors.yellow('No messages to export for this world.'));
+    displayUnifiedMessage({
+      content: 'No messages to export for this world.',
+      type: 'status'
+    });
     return;
   }
 
   try {
     const exportPath = await exportConversation(worldName, filename);
-    console.log(colors.green(`✓ Exported ${messageCount} messages to: ${exportPath}`));
+    displaySuccess(`Exported ${messageCount} messages to: ${exportPath}`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.log(colors.red(`✗ Export failed: ${errorMessage}`));
+    displayError(`Export failed: ${errorMessage}`);
   }
 }
 

@@ -28,12 +28,17 @@
  */
 
 import * as World from '../../src/world';
-import { colors } from '../utils/colors';
+import { colors } from '../ui/colors';
+import { displayUnifiedMessage } from '../ui/unified-display';
 
 export async function clearCommand(args: string[], worldName: string): Promise<void> {
   if (args.length === 0) {
-    console.log(colors.yellow('Please specify an agent name or "all".'));
-    console.log(colors.gray('Usage: /clear <agent-name> or /clear all'));
+    displayUnifiedMessage({
+      type: 'command',
+      content: 'Please specify an agent name or "all".\nUsage: /clear <agent-name> or /clear all',
+      commandSubtype: 'usage',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
     return;
   }
 
@@ -44,36 +49,58 @@ export async function clearCommand(args: string[], worldName: string): Promise<v
       const agents = World.getAgents(worldName);
 
       if (agents.length === 0) {
-        console.log(colors.yellow('No agents to clear.'));
+        displayUnifiedMessage({
+          type: 'command',
+          content: 'No agents to clear.',
+          commandSubtype: 'warning',
+          metadata: { source: 'cli', messageType: 'command' }
+        });
         return;
       }
 
-      console.log(colors.blue(`Clearing memory for all ${agents.length} agents...`));
+      displayUnifiedMessage({
+        type: 'command',
+        content: `Clearing memory for all ${agents.length} agents...`,
+        commandSubtype: 'info',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
 
+      const results: string[] = [];
       for (const agent of agents) {
         try {
           // Clear agent's memory (also resets turn limit automatically)
           const success = await World.clearAgentMemory(worldName, agent.name);
 
           if (success) {
-            console.log(colors.green(`✓ Cleared memory and reset turn limit: ${agent.name}`));
+            results.push(colors.green(`✓ Cleared memory and reset turn limit: ${agent.name}`));
           } else {
-            console.log(colors.red(`✗ Failed to clear memory for ${agent.name}`));
+            results.push(colors.red(`✗ Failed to clear memory for ${agent.name}`));
           }
         } catch (error) {
-          console.log(colors.red(`✗ Failed to clear memory for ${agent.name}: ${error}`));
+          results.push(colors.red(`✗ Failed to clear memory for ${agent.name}: ${error}`));
         }
       }
 
-      console.log(colors.green(`\nMemory cleared and turn limits reset for all agents.`));
+      // Display results and completion message
+      const allResults = results.join('\n') + '\n\n' + colors.green('Memory cleared and turn limits reset for all agents.');
+
+      displayUnifiedMessage({
+        type: 'command',
+        content: allResults,
+        commandSubtype: 'success',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
     } else {
       // Clear memory for specific agent
       const agents = World.getAgents(worldName);
       const agent = agents.find(a => a.name.toLowerCase() === identifier.toLowerCase());
 
       if (!agent) {
-        console.log(colors.red(`Agent not found: ${identifier}`));
-        console.log(colors.gray('Use /list to see available agents.'));
+        displayUnifiedMessage({
+          type: 'error',
+          content: `Agent not found: ${identifier}\nUse /list to see available agents.`,
+          metadata: { source: 'cli', messageType: 'error' }
+        });
         return;
       }
 
@@ -81,12 +108,25 @@ export async function clearCommand(args: string[], worldName: string): Promise<v
       const success = await World.clearAgentMemory(worldName, agent.name);
 
       if (success) {
-        console.log(colors.green(`✓ Memory cleared and turn limit reset for agent: ${agent.name}`));
+        displayUnifiedMessage({
+          type: 'command',
+          content: `Memory cleared and turn limit reset for agent: ${agent.name}`,
+          commandSubtype: 'success',
+          metadata: { source: 'cli', messageType: 'command' }
+        });
       } else {
-        console.log(colors.red(`Failed to clear memory for agent: ${agent.name}`));
+        displayUnifiedMessage({
+          type: 'error',
+          content: `Failed to clear memory for agent: ${agent.name}`,
+          metadata: { source: 'cli', messageType: 'error' }
+        });
       }
     }
   } catch (error) {
-    console.log(colors.red(`Error clearing memory: ${error}`));
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Error clearing memory: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
   }
 }

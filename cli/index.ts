@@ -52,14 +52,18 @@ import {
 import { loadSystemPrompt } from '../src/world-persistence';
 import { getAgentConversationHistory } from '../src/agent-memory';
 import { subscribeToSSE, subscribeToSystem, subscribeToMessages } from '../src/event-bus';
-import { colors, terminal } from './utils/colors';
+import { displayUnifiedMessage, displayError } from './ui/unified-display';
+import { colors, terminal } from './ui/colors';
 import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload } from '../src/types';
-import * as StreamingDisplay from './streaming/streaming-display';
+import * as StreamingDisplay from './ui/streaming-display';
 
 // Debug utility: prints debug data in gray
 function debug(...args: any[]) {
   // Print debug output in gray color
-  console.log(colors.gray('[debug]'), ...args);
+  displayUnifiedMessage({
+    content: `[debug] ${args.join(' ')}`,
+    type: 'debug'
+  });
 }
 
 // Load agents function (merged from loader.ts)
@@ -79,7 +83,7 @@ async function loadAgents(worldName: string): Promise<void> {
       // Don't print anything if no agents - will be shown by agents command
     }
   } catch (error) {
-    console.log(colors.red(`Failed to load agents: ${error}`));
+    displayError(`Failed to load agents: ${error}`);
     cliLogger.error({ error }, 'Failed to load agents during CLI startup');
     throw error;
   }
@@ -89,7 +93,10 @@ async function loadAgents(worldName: string): Promise<void> {
 
 // Quit command implementation
 async function quitCommand(args: string[], worldName: string): Promise<void> {
-  console.log(colors.cyan('Goodbye! 👋'));
+  displayUnifiedMessage({
+    content: 'Goodbye! 👋',
+    type: 'system'
+  });
   process.exit(0);
 }
 
@@ -109,9 +116,9 @@ const commands: Record<string, (args: string[], worldName: string) => Promise<vo
 // Interactive world selection when multiple worlds exist
 async function selectWorldInteractively(worlds: string[]): Promise<string> {
   return new Promise((resolve) => {
-    console.log(colors.cyan('\nMultiple worlds found:'));
-    worlds.forEach((world, index) => {
-      console.log(colors.gray(`  ${index + 1}. ${world}`));
+    displayUnifiedMessage({
+      content: 'Multiple worlds found:\n' + worlds.map((world, index) => `  ${index + 1}. ${world}`).join('\n'),
+      type: 'instruction'
     });
 
     const rl = readline.createInterface({
@@ -124,7 +131,10 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
         const selection = parseInt(answer.trim());
 
         if (isNaN(selection) || selection < 1 || selection > worlds.length) {
-          console.log(colors.yellow('Invalid selection. Please try again.'));
+          displayUnifiedMessage({
+            content: 'Invalid selection. Please try again.',
+            type: 'error'
+          });
           askForSelection();
           return;
         }
@@ -204,7 +214,10 @@ async function main() {
   // Handle graceful shutdown
   const shutdown = async () => {
     StreamingDisplay.resetStreamingState(); // Clean up streaming resources
-    console.log(colors.cyan('\nGoodbye! 👋'));
+    displayUnifiedMessage({
+      content: 'Goodbye! 👋',
+      type: 'system'
+    });
     process.exit(0);
   };
 
@@ -287,7 +300,10 @@ async function main() {
     // For piped input, we can still create the interface but it won't be interactive
     // This is a fundamental limitation of Node.js - once stdin is consumed by piping, 
     // it can't be restored to interactive mode
-    console.log(colors.yellow('\nNote: Interactive mode not available after piped input.'));
+    displayUnifiedMessage({
+      content: 'Note: Interactive mode not available after piped input.',
+      type: 'instruction'
+    });
 
     rl = readline.createInterface({
       input: process.stdin,
@@ -312,7 +328,7 @@ async function main() {
     try {
       await broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
-      console.log(colors.red(`Error broadcasting message: ${error}`));
+      displayError(`Error broadcasting message: ${error}`);
     }
   }
 
@@ -340,10 +356,13 @@ async function main() {
         try {
           await commands[commandName](commandArgs, worldName);
         } catch (error) {
-          console.log(colors.red(`Error executing command: ${error}`));
+          displayError(`Error executing command: ${error}`);
         }
       } else {
-        console.log(colors.yellow(`Unknown command: /${commandName}`));
+        displayUnifiedMessage({
+          content: `Unknown command: /${commandName}`,
+          type: 'error'
+        });
         await helpCommand([], worldName);
       }
     } else {
@@ -356,7 +375,7 @@ async function main() {
       try {
         await broadcastMessage(worldName, trimmedInput, 'HUMAN');
       } catch (error) {
-        console.log(colors.red(`Error broadcasting message: ${error}`));
+        displayError(`Error broadcasting message: ${error}`);
       }
     }
 
@@ -430,19 +449,27 @@ async function main() {
   });
 
   // Show initial prompt
-  console.log(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
-  console.log(); // Add extra spacing before prompt
+  displayUnifiedMessage({
+    content: 'Type a message to broadcast to all agents, or use /help for commands.',
+    type: 'instruction'
+  });
 
   // If we had piped input, wait a bit for potential streaming to start and then exit gracefully
   if (hasExternalInput && hasPipedInput) {
     setTimeout(() => {
       if (!StreamingDisplay.isStreamingActive()) {
-        console.log(colors.cyan('\nPiped input processed. Exiting...'));
+        displayUnifiedMessage({
+          content: 'Piped input processed. Exiting...',
+          type: 'system'
+        });
         process.exit(0);
       } else {
         // Wait for streaming to complete
         StreamingDisplay.setOnAllStreamingEndCallback(() => {
-          console.log(colors.cyan('\nStreaming completed. Exiting...'));
+          displayUnifiedMessage({
+            content: 'Streaming completed. Exiting...',
+            type: 'system'
+          });
           process.exit(0);
         });
       }
@@ -460,7 +487,7 @@ async function main() {
 
 // Run the CLI
 main().catch((error) => {
-  console.error(colors.red('Fatal error:'), error);
+  displayError(`Fatal error: ${error}`);
   cliLogger.error({ error }, 'Fatal CLI error occurred');
   process.exit(1);
 });

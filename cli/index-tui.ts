@@ -6,21 +6,31 @@
  * - External input handling (piped input and CLI args as broadcast messages)
  * - Real-time streaming with visual indicators and token tracking
  * - Multi-agent concurrent streaming with dedicated display management
- * - Terminal-kit UI with bordered input box for enhanced user experience
+ * - Modular terminal UI with separated display, lifecycle, and coordination concerns
  * - World integration for agent loading, persistence, and message broadcasting
  * - Graceful shutdown and cleanup handling
  * 
  * Architecture:
- * - Function-based design with modular streaming display (streaming/streaming-display.ts)
- * - Terminal-kit integration for enhanced terminal UI with input box borders
+ * - Function-based design with modular UI components (ui/terminal-display.ts, ui/terminal-lifecycle.ts, ui/display-manager.ts)
+ * - Terminal-kit integration with dynamic import for ES module compatibility
  * - Command routing with direct World module function imports
  * - SSE event subscription for real-time agent response streaming
  * - External input processing for both piped and CLI argument inputs
+ * - Separated concerns: display logic, terminal lifecycle, and display coordination
  * 
- * UI Enhancements:
- * - Bordered input area using terminal-kit for improved visual clarity
- * - Clean terminal management with proper cursor handling
- * - Maintains compatibility with piped input for automation
+ * UI Architecture:
+ * - terminal-display.ts: Input box drawing, positioning, and visibility management
+ * - terminal-lifecycle.ts: Terminal setup, shutdown, signal handling, and piped input detection
+ * - display-manager.ts: Coordination between streaming, input prompts, and exit timing
+ * - streaming-display.ts: Real-time streaming content and agent response management
+ * - unified-display.ts: Consistent message formatting and spacing across all display types
+ * 
+ * Refactoring Changes:
+ * - Extracted terminal UI state and functions into dedicated modules
+ * - Centralized terminal lifecycle management for consistent initialization/cleanup
+ * - Separated display coordination logic for better maintainability
+ * - Maintained all existing functionality while improving code organization
+ * - Preserved function-based approach following project guidelines
  */
 
 // npm run dev || echo "Test completed"
@@ -48,79 +58,31 @@ import {
 import { loadSystemPrompt } from '../src/world-persistence';
 import { getAgentConversationHistory } from '../src/agent-memory';
 import { subscribeToSSE, subscribeToSystem, subscribeToMessages } from '../src/event-bus';
-import { colors } from './utils/colors';
+import { colors } from './ui/colors';
 import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload } from '../src/types';
-import * as StreamingDisplay from './streaming/streaming-display';
-import termkit from 'terminal-kit';
-
-const term = termkit.terminal;
-
-// Terminal UI utilities for input box
-let inputBoxY = 0; // Track the Y position of the input box
-let isFirstDraw = true; // Track if this is the first time drawing the box
-let isInputBoxVisible = false; // Track if input box is currently visible
-
-function hideInputBox() {
-  if (isInputBoxVisible && inputBoxY > 0) {
-    // Move to the input box position and clear it
-    term.moveTo(1, inputBoxY);
-    term.eraseDisplayBelow(); // Clear from cursor to end of screen
-    isInputBoxVisible = false;
-    isFirstDraw = true; // Reset for next draw to capture new position
-  }
-}
-
-// Clear the current input line without moving cursor vertically
-function clearInputArea() {
-  term.column(3); // Move to position after left border and space (where prompt starts)
-  term.eraseLineAfter();
-}
-
-function showInputPrompt(boxY: number = 0, prompt: string = '> ', userInput: string = '') {
-  const width = term.width;
-  const innerWidth = width - 4; // 2 for borders + 2 for padding
-
-  // Calculate remaining width after prompt and user input
-  const contentLength = prompt.length + userInput.length;
-  const remainingWidth = Math.max(0, innerWidth - contentLength);
-
-  if (isFirstDraw) {
-    // First time drawing - save current position where output ended
-    if (boxY > 0) {
-      // Use provided position (for initial setup)
-      inputBoxY = boxY;
-    } else {
-      // Capture current cursor position after screen output
-      // Add some spacing and position input box appropriately
-      console.log(); // Add one line of spacing after content
-      // Position input box at current location, ensuring it fits on screen
-      const currentLine = term.height - 5; // Conservative positioning
-      inputBoxY = Math.max(3, Math.min(currentLine, term.height - 5));
-    }
-    isFirstDraw = false;
-
-    // Move to desired position and draw the box
-    term.moveTo(1, inputBoxY);
-    term.cyan('┌' + '─'.repeat(width - 2) + '┐\n');
-    term.cyan('│ ' + prompt + userInput + ' '.repeat(remainingWidth) + ' │\n');
-    term.cyan('└' + '─'.repeat(width - 2) + '┘\n');
-  } else {
-    // Subsequent draws - go to the remembered position and redraw
-    term.moveTo(1, inputBoxY);
-
-    // Redraw the box with updated content
-    term.cyan('┌' + '─'.repeat(width - 2) + '┐\n');
-    term.cyan('│ ' + prompt + userInput + ' '.repeat(remainingWidth) + ' │\n');
-    term.cyan('└' + '─'.repeat(width - 2) + '┘\n');
-  }
-
-  // Move cursor back up to the middle line, positioned after the prompt and user input
-  term.up(2);
-  term.right(2 + contentLength); // Position after the left border, space, prompt, and user input
-
-  isInputBoxVisible = true;
-  return { x: 2 + contentLength, y: inputBoxY + 1 };
-}
+import * as StreamingDisplay from './ui/streaming-display';
+import { displayUnifiedMessage, setCurrentWorldName } from './ui/unified-display';
+import {
+  initializeTerminalDisplay,
+  hideInputBox,
+  showInputPrompt
+} from './ui/terminal-display';
+import {
+  initializeTerminal,
+  setupShutdownHandlers,
+  getTerminal,
+  detectPipedInput,
+  readPipedInput,
+  performShutdown,
+  hasPipedInput
+} from './ui/terminal-lifecycle';
+import {
+  setupStreamingEndCallback,
+  handleExternalInputDisplay,
+  showInitialPrompt,
+  handlePostCommandDisplay,
+  handlePostBroadcastDisplay
+} from './ui/display-manager';
 
 // Load agents and display current state
 async function loadAgents(worldName: string): Promise<void> {
@@ -134,17 +96,23 @@ async function loadAgents(worldName: string): Promise<void> {
 
     await listCommand([], worldName); // Display loaded agents
   } catch (error) {
-    console.log(colors.red(`Failed to load agents: ${error}`));
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Failed to load agents: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
     cliLogger.error({ error }, 'Failed to load agents during CLI startup');
     throw error;
   }
-
-  console.log(); // Add spacing
 }
 
 // Quit command implementation
 async function quitCommand(args: string[], worldName: string): Promise<void> {
-  console.log(colors.cyan('Goodbye! 👋'));
+  displayUnifiedMessage({
+    type: 'instruction',
+    content: 'Goodbye! 👋',
+    metadata: { source: 'cli', messageType: 'command' }
+  });
   process.exit(0);
 }
 
@@ -163,10 +131,12 @@ const commands: Record<string, (args: string[], worldName: string) => Promise<vo
 
 // Interactive world selection
 async function selectWorldInteractively(worlds: string[]): Promise<string> {
+  const term = getTerminal();
   return new Promise((resolve) => {
-    console.log(colors.cyan('\nMultiple worlds found:'));
-    worlds.forEach((world, index) => {
-      console.log(colors.gray(`  ${index + 1}. ${world}`));
+    displayUnifiedMessage({
+      type: 'instruction',
+      content: 'Multiple worlds found:\n' + worlds.map((world, index) => `  ${index + 1}. ${world}`).join('\n'),
+      metadata: { source: 'cli', messageType: 'command' }
     });
 
     let input = '';
@@ -176,7 +146,12 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
         const selection = parseInt(input.trim());
 
         if (isNaN(selection) || selection < 1 || selection > worlds.length) {
-          console.log(colors.yellow('Invalid selection. Please try again.'));
+          displayUnifiedMessage({
+            type: 'command',
+            content: 'Invalid selection. Please try again.',
+            commandSubtype: 'warning',
+            metadata: { source: 'cli', messageType: 'command' }
+          });
           console.log(colors.cyan(`\nSelect a world (1-${worlds.length}): `));
           input = '';
           return;
@@ -214,9 +189,9 @@ async function estimateInputTokens(agentName: string, worldName: string): Promis
 
     // Token estimation: ~0.75 tokens per word
     const systemPromptTokens = Math.ceil(systemPrompt.split(/\s+/).length * 0.75);
-    const conversationTokens = conversationHistory.reduce((total, msg) => {
+    const conversationTokens = conversationHistory.reduce((total: number, msg) => {
       return total + Math.ceil(msg.content.split(/\s+/).length * 0.75);
-    }, 0);
+    }, 0 as number);
 
     // Add buffer for formatting and context
     return Math.max(50, systemPromptTokens + conversationTokens + 50);
@@ -226,6 +201,16 @@ async function estimateInputTokens(agentName: string, worldName: string): Promis
 }
 
 async function main() {
+  // Detect piped input first
+  const hasPipedInputDetected = await detectPipedInput();
+
+  // Initialize terminal
+  const term = await initializeTerminal(hasPipedInputDetected);
+  initializeTerminalDisplay(term);
+
+  // Setup graceful shutdown handlers
+  setupShutdownHandlers();
+
   // Load worlds with smart selection (also initializes file storage)
   const { worlds, action, defaultWorld } = await loadWorlds();
 
@@ -255,63 +240,21 @@ async function main() {
   }
 
   // Set world name in streaming display
-  StreamingDisplay.setCurrentWorldName(worldName);
+  setCurrentWorldName(worldName);
 
   // Load agents and display current state
   await loadAgents(worldName);
 
   // Set up callback to show prompt when streaming ends
-  StreamingDisplay.setOnAllStreamingEndCallback(() => {
-    if (!hasPipedInput) {
-      showInputPrompt(0, '> ', ''); // Always show empty input after streaming ends
-    }
-  });
+  setupStreamingEndCallback();
 
   // Handle external input (piped or CLI arguments)
   let hasExternalInput = false;
   let externalMessage = '';
-  let hasPipedInput = false;
 
-  // Check for piped input
-  let hasPotentialPipedInput = false;
-
-  if (process.stdin.isTTY === false) {
-    hasPotentialPipedInput = true;
-  } else if (process.stdin.isTTY === undefined) {
-    // For tsx/nodemon, check if data is immediately available
-    try {
-      const hasData = await new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => resolve(false), 10);
-
-        process.stdin.once('readable', () => {
-          clearTimeout(timeout);
-          resolve(true);
-        });
-
-        if (process.stdin.readable && process.stdin.readableLength > 0) {
-          clearTimeout(timeout);
-          resolve(true);
-        }
-      });
-
-      hasPotentialPipedInput = hasData;
-    } catch (error) {
-      hasPotentialPipedInput = false;
-    }
-  }
-
-  if (hasPotentialPipedInput) {
+  if (hasPipedInputDetected) {
     hasExternalInput = true;
-    hasPipedInput = true;
-    // Read all piped input
-    let pipedContent = '';
-    process.stdin.setEncoding('utf8');
-
-    for await (const chunk of process.stdin) {
-      pipedContent += chunk;
-    }
-
-    externalMessage = pipedContent.trim();
+    externalMessage = await readPipedInput();
   } else {
     // Check for command line arguments
     const args = process.argv.slice(2);
@@ -321,17 +264,9 @@ async function main() {
     }
   }
 
-  // Setup graceful shutdown (after hasPipedInput is defined)
+  // Setup graceful shutdown (after hasPipedInputDetected is defined)
   const shutdown = async () => {
-    StreamingDisplay.resetStreamingState();
-    if (!hasPipedInput) {
-      term.grabInput(false);
-      term.clear();
-      term('\x1b[?25h'); // Show cursor
-      term.moveTo(1, 1);
-    }
-    console.log(colors.cyan('\nGoodbye! 👋'));
-    process.exit(0);
+    await performShutdown();
   };
 
   process.on('SIGINT', shutdown);
@@ -341,15 +276,14 @@ async function main() {
   let inputHandler: any;
   let currentInput = '';
 
-  if (hasPipedInput) {
-    console.log(colors.yellow('\nNote: Interactive mode not available after piped input.'));
+  if (hasPipedInputDetected) {
+    displayUnifiedMessage({
+      type: 'instruction',
+      content: 'Note: Interactive mode not available after piped input.',
+      metadata: { source: 'cli', messageType: 'notification' }
+    });
   } else {
-    // Initialize terminal for interactive mode
-    term.grabInput(true);
-    term.hideCursor();
-
-    // Don't clear terminal - let content flow naturally
-    term('\x1b[?25h'); // Show cursor using ANSI escape
+    // Terminal is already initialized for interactive mode in initializeTerminal()
   }
 
   // If we have external input, broadcast it
@@ -362,12 +296,17 @@ async function main() {
     try {
       await broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
-      console.log(colors.red(`Error broadcasting message: ${error}`));
+      displayUnifiedMessage({
+        type: 'error',
+        content: `Error broadcasting message: ${error}`,
+        metadata: { source: 'cli', messageType: 'error' }
+      });
     }
   }
 
   // Handle input with terminal-kit
-  if (!hasPipedInput) {
+  if (!hasPipedInputDetected) {
+    const term = getTerminal();
     term.on('key', async (name: string, matches: any, data: any) => {
       if (name === 'CTRL_C') {
         await shutdown();
@@ -379,7 +318,7 @@ async function main() {
         currentInput = '';
 
         if (!trimmedInput) {
-          showInputPrompt(0, '> ', '');
+          showInputPrompt('> ', '');
           return;
         }
 
@@ -396,15 +335,24 @@ async function main() {
             try {
               await commands[commandName](commandArgs, worldName);
             } catch (error) {
-              console.log(colors.red(`Error executing command: ${error}`));
+              displayUnifiedMessage({
+                type: 'error',
+                content: `Error executing command: ${error}`,
+                metadata: { source: 'cli', messageType: 'error' }
+              });
             }
           } else {
-            console.log(colors.yellow(`Unknown command: /${commandName}`));
+            displayUnifiedMessage({
+              type: 'command',
+              content: `Unknown command: /${commandName}`,
+              commandSubtype: 'warning',
+              metadata: { source: 'cli', messageType: 'command' }
+            });
             await helpCommand([], worldName);
           }
 
-          // Show input prompt immediately after command execution for commands
-          showInputPrompt(0, '> ', '');
+          // Reset position and show input prompt immediately after command execution
+          handlePostCommandDisplay();
         } else {
           // Broadcast message to all agents
           StreamingDisplay.displayFormattedMessage({
@@ -415,25 +363,25 @@ async function main() {
           try {
             await broadcastMessage(worldName, trimmedInput, 'HUMAN');
           } catch (error) {
-            console.log(colors.red(`Error broadcasting message: ${error}`));
+            displayUnifiedMessage({
+              type: 'error',
+              content: `Error broadcasting message: ${error}`,
+              metadata: { source: 'cli', messageType: 'error' }
+            });
           }
 
           // For broadcast messages, wait for streaming to complete or show prompt if no streaming
-          setTimeout(() => {
-            if (!StreamingDisplay.isStreamingActive()) {
-              showInputPrompt(0, '> ', '');
-            }
-          }, 50);
+          handlePostBroadcastDisplay();
         }
 
       } else if (name === 'BACKSPACE') {
         if (currentInput.length > 0) {
           currentInput = currentInput.slice(0, -1);
-          showInputPrompt(0, '> ', currentInput);
+          showInputPrompt('> ', currentInput);
         }
       } else if (data.isCharacter) {
         currentInput += String.fromCharCode(data.codepoint);
-        showInputPrompt(0, '> ', currentInput);
+        showInputPrompt('> ', currentInput);
       }
     });
   }
@@ -493,34 +441,13 @@ async function main() {
   });
 
   // Handle piped input exit or show prompt
-  if (hasExternalInput && hasPipedInput) {
-    setTimeout(() => {
-      if (!StreamingDisplay.isStreamingActive()) {
-        console.log(colors.cyan('\nPiped input processed. Exiting...'));
-        process.exit(0);
-      } else {
-        StreamingDisplay.setOnAllStreamingEndCallback(() => {
-          console.log(colors.cyan('\nStreaming completed. Exiting...'));
-          process.exit(0);
-        });
-      }
-    }, 100);
-  } else if (hasExternalInput) {
-    setTimeout(() => {
-      if (!StreamingDisplay.isStreamingActive()) {
-        if (!hasPipedInput) {
-          showInputPrompt(0, '> ', '');
-        }
-      }
-    }, 100);
-  } else {
-    if (!hasPipedInput) {
-      // Show instructions first, then draw input box
-      console.log(colors.gray('Type a message to broadcast to all agents, or use /help for commands.'));
-      console.log(); // Add spacing
-      showInputPrompt(0, '> ', '');
+  handleExternalInputDisplay(hasExternalInput, hasPipedInputDetected);
 
-      // Keep the process alive for interactive mode
+  if (!hasExternalInput) {
+    showInitialPrompt();
+
+    // Keep the process alive for interactive mode
+    if (!hasPipedInputDetected) {
       setInterval(() => { }, 1000);
     }
   }
@@ -528,7 +455,11 @@ async function main() {
 
 // Run the CLI
 main().catch((error) => {
-  console.error(colors.red('Fatal error:'), error);
+  displayUnifiedMessage({
+    type: 'error',
+    content: `Fatal error: ${error}`,
+    metadata: { source: 'cli', messageType: 'error' }
+  });
   cliLogger.error({ error }, 'Fatal CLI error occurred');
   process.exit(1);
 });
