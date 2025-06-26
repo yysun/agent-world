@@ -33,6 +33,7 @@ import * as readline from 'readline';
 import { cliLogger } from '../src/logger';
 import { addCommand } from './commands/add';
 import { clearCommand } from './commands/clear';
+import { exportCommand } from './commands/export';
 import { helpCommand } from './commands/help';
 import { listCommand } from './commands/list';
 import { showCommand } from './commands/show';
@@ -95,6 +96,7 @@ const commands: Record<string, (args: string[], worldName: string) => Promise<vo
   add: addCommand,
   agents: listCommand,
   clear: clearCommand,
+  export: exportCommand,
   help: helpCommand,
   show: showCommand,
   stop: stopCommand,
@@ -179,6 +181,9 @@ async function main() {
     default:
       throw new Error('Unexpected world loading action');
   }
+
+  // Set world name in streaming display for message storage
+  StreamingDisplay.setCurrentWorldName(worldName);
 
   // Streaming manager is now function-based (no initialization needed)
 
@@ -285,7 +290,11 @@ async function main() {
 
   // If we have external input, broadcast it
   if (hasExternalInput && externalMessage) {
-    StreamingDisplay.displayUserInput(externalMessage);
+    StreamingDisplay.displayFormattedMessage({
+      sender: 'you',
+      content: externalMessage,
+      metadata: { source: 'cli', messageType: 'command' }
+    });
     try {
       await broadcastMessage(worldName, externalMessage, 'HUMAN');
     } catch (error) {
@@ -325,7 +334,11 @@ async function main() {
       }
     } else {
       // Broadcast message to all agents
-      StreamingDisplay.displayUserInput(trimmedInput);
+      StreamingDisplay.displayFormattedMessage({
+        sender: 'you',
+        content: trimmedInput,
+        metadata: { source: 'cli', messageType: 'command' }
+      });
       try {
         await broadcastMessage(worldName, trimmedInput, 'HUMAN');
       } catch (error) {

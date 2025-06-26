@@ -25,6 +25,8 @@
  */
 
 import { colors } from '../utils/colors';
+import { addMessageToStore, createStoredMessage, determineSenderType } from '../message-store';
+import { SenderType } from '../../src/types';
 
 // Debug configuration
 const DEBUG_OUTPUT_ENABLED = false; // Set to true to show debug messages during streaming
@@ -143,17 +145,36 @@ export function endStreaming(agentName: string): void {
       // Clear all streaming preview lines first
       clearAllStreamingLines();
 
-      // Display final content for all completed agents in order
+      // Display final content for all completed agents in order using unified display
       const sortedStreams = Array.from(completedStreams.values()).sort((a, b) => a.lineOffset - b.lineOffset);
 
       for (const completedStream of sortedStreams) {
         const finalContent = completedStream.contentBuffer.trim();
         if (finalContent) {
-          console.log(`${colors.green('✓')} ${completedStream.agentName}: ${colors.gray(finalContent)}`);
-          console.log(); // Add newline after final content
+          // Use unified display function for agent responses
+          displayFormattedMessage({
+            sender: completedStream.agentName,
+            senderType: SenderType.AGENT,
+            content: finalContent,
+            dotColor: colors.green('✓'),
+            metadata: {
+              source: 'streaming',
+              messageType: 'response',
+              tokenCount: completedStream.usage?.outputTokens
+            }
+          });
         } else {
-          console.log(`${colors.green('✓')} ${completedStream.agentName}: ${colors.gray('[no response]')}`);
-          console.log(); // Add newline after final content
+          // Use unified display for empty responses
+          displayFormattedMessage({
+            sender: completedStream.agentName,
+            senderType: SenderType.AGENT,
+            content: '[no response]',
+            dotColor: colors.green('✓'),
+            metadata: {
+              source: 'streaming',
+              messageType: 'response'
+            }
+          });
         }
       }
 
@@ -244,18 +265,117 @@ export function displayDebugMessage(message: string): void {
 
 /**
  * Display user input that's being sent to agents
+ * @deprecated Use displayFormattedMessage instead
  */
 export function displayUserInput(message: string): void {
-  const orangeDot = colors.orange('●');
-  console.log(`\n${orangeDot} you: ${message}\n`);
+  displayFormattedMessage({
+    sender: 'you',
+    senderType: SenderType.HUMAN,
+    content: message,
+    metadata: { source: 'cli', messageType: 'command' }
+  });
 }
 
 /**
  * Display messages with a red dot
+ * @deprecated Use displayFormattedMessage instead
  */
 export function displayMessage(messageData: { content: string; sender: string }): void {
-  const redDot = colors.red('\n●');
-  console.log(`${redDot} ${messageData.sender}: ${messageData.content}\n`);
+  displayFormattedMessage({
+    sender: messageData.sender,
+    content: messageData.content,
+    metadata: { source: 'system', messageType: 'notification' }
+  });
+}
+
+// Global world name for message storage
+let currentWorldName: string = 'default';
+
+/**
+ * Set the current world name for message storage
+ */
+export function setCurrentWorldName(worldName: string): void {
+  currentWorldName = worldName;
+}
+
+// Unified message display interface
+export interface DisplayMessage {
+  sender: string;
+  senderType?: SenderType;
+  content: string;
+  dotColor?: string;
+  metadata?: {
+    source?: 'cli' | 'streaming' | 'system';
+    messageType?: 'response' | 'command' | 'notification' | 'error';
+    agentModel?: string;
+    tokenCount?: number;
+  };
+}
+
+/**
+ * Unified display function for all message types
+ * This is the single capture point for all messages to be stored and displayed
+ */
+export function displayFormattedMessage(message: DisplayMessage): void {
+  // Determine sender type if not provided
+  const senderType = message.senderType || determineSenderType(message.sender);
+
+  // Check if this is a @human message (special case)
+  const isHumanMessage = message.content.startsWith('@human');
+
+  // Determine dot color based on sender type if not overridden
+  let dotColor = message.dotColor;
+  if (!dotColor) {
+    if (isHumanMessage) {
+      // @human messages get yellow checkmark
+      dotColor = colors.yellow('✓');
+    } else {
+      switch (senderType) {
+        case SenderType.HUMAN:
+          dotColor = colors.orange('●');
+          break;
+        case SenderType.AGENT:
+          dotColor = colors.green('●');
+          break;
+        case SenderType.WORLD:
+          dotColor = colors.red('●');
+          break;
+        default:
+          dotColor = colors.gray('●');
+      }
+    }
+  }
+
+  // Format sender name
+  const senderName = message.sender === 'HUMAN' ? 'you' : message.sender;
+
+  // Color the sender name to match the dot color when it's a special indicator
+  let coloredSenderName = senderName;
+  if (message.dotColor && message.dotColor.includes('✓')) {
+    // If using green checkmark, color the agent name green too
+    coloredSenderName = colors.green(senderName);
+  } else if (isHumanMessage) {
+    // If @human message with yellow checkmark, color the sender name yellow too
+    coloredSenderName = colors.yellow(senderName);
+  }
+
+  // Display the message
+  if (activeStreams.size > 0) {
+    // If streaming is active, print the message and stay where we are
+    console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+  } else {
+    // No streaming active, normal display
+    console.log(`\n${dotColor} ${coloredSenderName}: ${message.content}\n`);
+  }
+
+  // Store message in CLI session memory
+  const storedMessage = createStoredMessage(
+    message.sender,
+    message.content,
+    currentWorldName,
+    message.metadata
+  );
+  addMessageToStore(storedMessage);
 }
 
 /**

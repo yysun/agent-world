@@ -32,6 +32,7 @@ export async function helpCommand(args: string[], worldName: string): Promise<vo
     { command: '/stop <agent-name> | all', description: 'Deactivate an agent' },
     { command: '/show <agent-name>', description: 'Display conversation history for an agent' },
     { command: '/clear <agent-name> | all', description: 'Clear agent memory' },
+    { command: '/export <filename>', description: 'Export conversation to markdown file' },
     { command: '/quit', description: 'Exit the CLI' }
   ];
 
