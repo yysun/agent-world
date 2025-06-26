@@ -12,6 +12,7 @@
 - **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed)
 - **!!**: Save requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation
 - **!!!**: Update the requirements and plan, and implement
+- **SP**: consolidate, remove redundant, keep all ideas, make it concise and easy for LLM to understand
 
 ## Planning Rules
 - Large changes or "AA" → always create plan first, get confirmation

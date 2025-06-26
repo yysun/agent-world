@@ -36,12 +36,10 @@ import { publishSSE, publishMessageEvent, publishDebugEvent } from './event-bus'
 import { agentLogger } from './logger';
 import { getAgentConversationHistory, addToAgentMemory } from './world';
 import { updateAgent, getAgent } from './agent-manager';
+import { getWorldTurnLimit } from './world-manager';
 
 // Types moved to types.ts
 import type { AgentConfig, MessageData } from './types';
-
-// Turn limit configuration
-const TURN_LIMIT = 5;
 
 /**
  * Save incoming message to agent memory (independent of LLM processing)
@@ -373,21 +371,23 @@ export async function shouldRespondToMessage(
     return false;
   }
 
-  // Check turn limit based on LLM call count
+  // Check turn limit based on LLM call count using world-specific turn limit
   if (worldName) {
     try {
       const currentAgent = await getAgent(worldName, agentConfig.name);
-      if (currentAgent && currentAgent.llmCallCount >= TURN_LIMIT) {
-        publishDebugEvent(`[Turn Limit] ${agentConfig.name} reached LLM call limit (${currentAgent.llmCallCount}/${TURN_LIMIT})`, {
+      const worldTurnLimit = getWorldTurnLimit(worldName);
+      
+      if (currentAgent && currentAgent.llmCallCount >= worldTurnLimit) {
+        publishDebugEvent(`[Turn Limit] ${agentConfig.name} reached LLM call limit (${currentAgent.llmCallCount}/${worldTurnLimit})`, {
           agentName: agentConfig.name,
           worldName,
           llmCallCount: currentAgent.llmCallCount,
-          turnLimit: TURN_LIMIT
+          turnLimit: worldTurnLimit
         });
 
         // Send turn limit message with agentName as sender
         await publishMessageEvent({
-          content: `@human Turn limit reached (${TURN_LIMIT} LLM calls). Please take control of the conversation.`,
+          content: `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`,
           sender: agentConfig.name
         });
 

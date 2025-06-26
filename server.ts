@@ -31,8 +31,12 @@ import {
   getAgent,
   updateAgent,
   clearAgentMemory,
-  broadcastMessage
+  broadcastMessage,
+  loadWorld,
+  createWorld,
+  DEFAULT_WORLD_NAME
 } from './src/world.js';
+import { listWorldsFromDisk } from './src/world-persistence.js';
 import { subscribeToWorld } from './src/event-bus.js';
 
 // Get current directory for ES modules
@@ -73,10 +77,16 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // GET /worlds - List all available worlds
-app.get('/worlds', (req, res) => {
+app.get('/worlds', async (req, res) => {
   try {
-    const worlds = listWorlds();
-    res.json(worlds.map(worldName => ({ name: worldName })));
+    const worlds = await listWorldsFromDisk();
+    if (!worlds || worlds.length === 0) {
+      // No worlds found - create default world
+      const worldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+      res.json([{ name: worldName }]);
+    } else {
+      res.json(worlds.map(worldName => ({ name: worldName })));
+    }
   } catch (error) {
     console.error('Error listing worlds:', error);
     res.status(500).json({
@@ -87,15 +97,29 @@ app.get('/worlds', (req, res) => {
 });
 
 // GET /worlds/:worldName/agents - List all agents in a specific world
-app.get('/worlds/:worldName/agents', (req, res) => {
+app.get('/worlds/:worldName/agents', async (req, res) => {
   try {
     const { worldName } = req.params;
 
-    if (!listWorlds().includes(worldName)) {
+    const availableWorlds = await listWorldsFromDisk();
+    if (!availableWorlds.includes(worldName)) {
       return res.status(404).json({
         error: 'World not found',
         code: 'WORLD_NOT_FOUND'
       });
+    }
+
+    // Check if world is loaded in memory, if not load it
+    if (!listWorlds().includes(worldName)) {
+      try {
+        await loadWorld(worldName);
+      } catch (error) {
+        console.error(`Failed to load world ${worldName}:`, error);
+        return res.status(500).json({
+          error: 'Failed to load world',
+          code: 'WORLD_LOAD_ERROR'
+        });
+      }
     }
 
     const agents = getAgents(worldName);
@@ -110,15 +134,29 @@ app.get('/worlds/:worldName/agents', (req, res) => {
 });
 
 // GET /worlds/:worldName/agents/:agentName - Get details of a specific agent
-app.get('/worlds/:worldName/agents/:agentName', (req, res) => {
+app.get('/worlds/:worldName/agents/:agentName', async (req, res) => {
   try {
     const { worldName, agentName } = req.params;
 
-    if (!listWorlds().includes(worldName)) {
+    const availableWorlds = await listWorldsFromDisk();
+    if (!availableWorlds.includes(worldName)) {
       return res.status(404).json({
         error: 'World not found',
         code: 'WORLD_NOT_FOUND'
       });
+    }
+
+    // Check if world is loaded in memory, if not load it
+    if (!listWorlds().includes(worldName)) {
+      try {
+        await loadWorld(worldName);
+      } catch (error) {
+        console.error(`Failed to load world ${worldName}:`, error);
+        return res.status(500).json({
+          error: 'Failed to load world',
+          code: 'WORLD_LOAD_ERROR'
+        });
+      }
     }
 
     const agent = getAgent(worldName, agentName);
@@ -164,11 +202,25 @@ app.patch('/worlds/:worldName/agents/:agentName', async (req, res) => {
 
     const { status, config, systemPrompt, clearMemory } = validation.data;
 
-    if (!listWorlds().includes(worldName)) {
+    const availableWorlds = await listWorldsFromDisk();
+    if (!availableWorlds.includes(worldName)) {
       return res.status(404).json({
         error: 'World not found',
         code: 'WORLD_NOT_FOUND'
       });
+    }
+
+    // Check if world is loaded in memory, if not load it
+    if (!listWorlds().includes(worldName)) {
+      try {
+        await loadWorld(worldName);
+      } catch (error) {
+        console.error(`Failed to load world ${worldName}:`, error);
+        return res.status(500).json({
+          error: 'Failed to load world',
+          code: 'WORLD_LOAD_ERROR'
+        });
+      }
     }
 
     const existingAgent = getAgent(worldName, agentName);
@@ -238,11 +290,25 @@ app.post('/worlds/:worldName/chat', async (req, res) => {
 
     const { message, sender } = validation.data;
 
-    if (!listWorlds().includes(worldName)) {
+    const availableWorlds = await listWorldsFromDisk();
+    if (!availableWorlds.includes(worldName)) {
       return res.status(404).json({
         error: 'World not found',
         code: 'WORLD_NOT_FOUND'
       });
+    }
+
+    // Check if world is loaded in memory, if not load it
+    if (!listWorlds().includes(worldName)) {
+      try {
+        await loadWorld(worldName);
+      } catch (error) {
+        console.error(`Failed to load world ${worldName}:`, error);
+        return res.status(500).json({
+          error: 'Failed to load world',
+          code: 'WORLD_LOAD_ERROR'
+        });
+      }
     }
 
     // Set up Server-Sent Events (SSE) response headers
