@@ -6,7 +6,7 @@
  * - LLM integration via llm.ts module
  * - Event-driven messaging via event-bus.ts
  * - Stateless turn limit detection (checks last 5 messages)
- * - Mention-based message routing (@name support)
+ * - Case-insensitive mention-based message routing (@name support)
  * - Agent memory persistence (memory.json per agent)
  * - Auto-mention replies and pass command support
  * 
@@ -23,6 +23,11 @@
  * - Turn limit message sent with agentName as sender for proper attribution
  * - Prevents endless agent loops without maintaining state counters
  * - Turn limit messages are ignored by all agents to prevent loops
+ * 
+ * Case-Insensitive Mention Detection:
+ * - All @mention matching is case-insensitive
+ * - Agent name comparisons use toLowerCase() for consistency
+ * - Supports @A1, @a1, @Agent1, @agent1 variations
  */
 
 import { AgentMemory, Event, EventType, ChatMessage, SenderType, stripCustomFields } from './types';
@@ -48,7 +53,7 @@ async function saveIncomingMessageToMemory(
 ): Promise<void> {
   try {
     // Skip saving agent's own messages
-    if (messageData.sender === agentName) {
+    if (messageData.sender?.toLowerCase() === agentName.toLowerCase()) {
       return;
     }
 
@@ -190,7 +195,7 @@ export async function processAgentMessage(
 
     // Auto-add @mention when replying to other agents (only for agent-to-agent replies)
     let finalResponse = response;
-    if (messageData.sender && messageData.sender !== agentConfig.name) {
+    if (messageData.sender && messageData.sender.toLowerCase() !== agentConfig.name.toLowerCase()) {
       const senderType = determineSenderType(messageData.sender);
 
       // Only auto-mention when replying to agents (not humans or system)
@@ -343,7 +348,7 @@ export async function shouldRespondToMessage(
   worldName?: string
 ): Promise<boolean> {
   // Never respond to own messages
-  if (messageData.sender === agentConfig.name) {
+  if (messageData.sender?.toLowerCase() === agentConfig.name.toLowerCase()) {
     return false;
   }
 
