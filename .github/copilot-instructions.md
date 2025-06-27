@@ -11,7 +11,7 @@
 - **SS**: Step-by-step with approval → implement from plan, wait for confirmation each step
 - **GG**: Document features → create/update markdown in `docs/` (use mermaid if needed)
 - **!!**: Save requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation
-- **!!!**: Update the requirements and plan, and implement
+- **@!**: Update the requirements and plan, and implement
 - **SP**: consolidate, remove redundant, keep all ideas, make it concise and easy for LLM to understand
 
 ## Planning Rules

@@ -389,3 +389,18 @@ export function destroyEventBusForWorld(worldName: string): boolean {
 export function hasEventBusForWorld(worldName: string): boolean {
   return getWorldEventBusOrNull(worldName) !== null;
 }
+
+/**
+ * Cleanup all event bus resources for testing
+ */
+export function cleanupEventBus(): void {
+  // Clean up global event bus provider
+  if (eventBusProvider) {
+    eventBusProvider.clearHistory();
+    // If it's a local provider, clean up the EventEmitter
+    if (eventBusConfig?.provider === 'local') {
+      const { cleanupAllLocalProviders } = require('./providers/local-provider');
+      cleanupAllLocalProviders();
+    }
+  }
+}

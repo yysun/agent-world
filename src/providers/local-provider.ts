@@ -36,6 +36,7 @@ export interface EventBusProvider {
   getHistory(filter?: EventFilter): Event[];
   getStats(): EventStats;
   clearHistory(): void;
+  destroy(): void;
 }
 
 export interface EventFilter {
@@ -273,7 +274,8 @@ export function createLocalProvider(providerOptions: LocalProviderOptions = {}):
     subscribeToAgent: (agentName: string, handler: (event: Event) => void) => subscribeToLocalAgent(agentName, handler, providerId),
     getHistory: (filter?: EventFilter) => getLocalHistory(filter, providerId),
     getStats: () => getLocalStats(providerId),
-    clearHistory: () => clearLocalHistory(providerId)
+    clearHistory: () => clearLocalHistory(providerId),
+    destroy: () => cleanupLocalProvider(providerId)
   };
 }
 
@@ -287,4 +289,40 @@ function addToHistory(event: Event, instance: LocalProviderState): void {
   if (instance.eventHistory.length > instance.options.maxEventHistory) {
     instance.eventHistory = instance.eventHistory.slice(-instance.options.maxEventHistory);
   }
+}
+
+/**
+ * Cleanup provider instance and remove all listeners
+ */
+export function cleanupLocalProvider(providerId?: string): void {
+  const targetProviderId = providerId || defaultProviderId;
+  const instance = providerInstances.get(targetProviderId);
+
+  if (instance) {
+    // Remove all listeners first
+    instance.emitter.removeAllListeners();
+
+    // Set max listeners to 0 to ensure no new listeners can be added
+    instance.emitter.setMaxListeners(0);
+
+    // Clear history
+    instance.eventHistory = [];
+
+    // Reset stats
+    instance.eventStats.totalEvents = 0;
+    Object.values(EventType).forEach(type => {
+      instance.eventStats.eventsByType[type] = 0;
+    });
+
+    // Remove from instances map
+    providerInstances.delete(targetProviderId);
+  }
+}
+
+/**
+ * Cleanup all provider instances
+ */
+export function cleanupAllLocalProviders(): void {
+  const providerIds = Array.from(providerInstances.keys());
+  providerIds.forEach(id => cleanupLocalProvider(id));
 }

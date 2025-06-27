@@ -126,6 +126,18 @@ export interface EventFilter {
 }
 
 // World Management Types
+export interface WorldConfig {
+  name: string;
+  description?: string;
+  turnLimit?: number;
+  metadata?: {
+    originalTemplate?: string;
+    clonedFor?: string;
+    clonedAt?: string;
+    [key: string]: any;
+  };
+}
+
 export interface WorldState {
   name: string;
   agents: Map<string, Agent>;
@@ -224,5 +236,8 @@ export function stripCustomFields(message: ChatMessage): LLMCompatibleMessage {
 export function stripCustomFieldsFromMessages(messages: ChatMessage[]): LLMCompatibleMessage[] {
   return messages.map(stripCustomFields);
 }
+
+// Re-export WebSocket types
+export * from '../server/websocket-types';
 
 

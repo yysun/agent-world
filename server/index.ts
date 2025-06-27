@@ -3,6 +3,7 @@
  * 
  * Features:
  * - Express.js server with REST API endpoints
+ * - WebSocket server for real-time communication
  * - Static file serving from public directory
  * - Server-Sent Events (SSE) for real-time chat
  * - Zod validation for all endpoints
@@ -16,6 +17,7 @@
  * - POST /worlds/:worldName/agents - Create agent (placeholder)
  * - PATCH /worlds/:worldName/agents/:agentName - Update agent
  * - POST /worlds/:worldName/chat - Chat with SSE streaming
+ * - WebSocket /ws - Real-time WebSocket communication
  */
 
 import express from 'express';
@@ -38,6 +40,11 @@ import {
 } from '../src/world.js';
 import { listWorldsFromDisk } from '../src/world-persistence.js';
 import { subscribeToWorld } from '../src/event-bus.js';
+import {
+  attachWebSocketServer,
+  getServerHealth,
+  isWebSocketServerRunning
+} from './websocket-server.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -92,6 +99,29 @@ app.get('/worlds', async (req, res) => {
     res.status(500).json({
       error: 'Failed to list worlds',
       code: 'WORLD_LIST_ERROR'
+    });
+  }
+});
+
+// GET /health - Server health check including WebSocket status
+app.get('/health', (req, res) => {
+  try {
+    const serverHealth = getServerHealth();
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      services: {
+        express: 'running',
+        websocket: serverHealth.isRunning ? 'running' : 'stopped'
+      },
+      websocket: serverHealth
+    });
+  } catch (error) {
+    console.error('Error getting server health:', error);
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      error: 'Failed to get server health'
     });
   }
 });
@@ -393,12 +423,24 @@ export function startWebServer(port = PORT, host = HOST) {
       console.log(`🌐 Web server running at http://${host}:${port}`);
       console.log(`📁 Serving static files from: ${path.join(__dirname, 'public')}`);
       console.log(`🔗 API endpoints available:`);
+      console.log(`   GET  /health`);
       console.log(`   GET  /worlds`);
       console.log(`   GET  /worlds/:worldName/agents`);
       console.log(`   GET  /worlds/:worldName/agents/:agentName`);
       console.log(`   POST /worlds/:worldName/agents (coming soon)`);
       console.log(`   PATCH /worlds/:worldName/agents/:agentName`);
       console.log(`   POST /worlds/:worldName/chat (SSE streaming)`);
+
+      // Attach WebSocket server to HTTP server
+      try {
+        attachWebSocketServer(server);
+        console.log(`🔌 WebSocket server attached at /ws`);
+        console.log(`🚀 Full server stack running - HTTP + WebSocket`);
+      } catch (wsError) {
+        console.error('Failed to attach WebSocket server:', wsError);
+        // Continue without WebSocket if it fails
+      }
+
       resolve(server);
     });
 

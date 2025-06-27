@@ -145,6 +145,18 @@ export function clearDaprHistory(): void {
 }
 
 /**
+ * Destroy Dapr provider and cleanup resources
+ */
+export function destroyDaprProvider(): void {
+  // TODO: Implement Dapr connection cleanup
+  // Example implementation:
+  // const daprClient = new DaprClient(daprOptions);
+  // daprClient.close();
+
+  throw new Error('DaprEventBusProvider not yet implemented. Use LocalEventBusProvider for now.');
+}
+
+/**
  * Create a Dapr provider instance (for compatibility with provider pattern)
  */
 export function createDaprProvider(providerOptions: DaprProviderOptions = {}): EventBusProvider {
@@ -159,6 +171,7 @@ export function createDaprProvider(providerOptions: DaprProviderOptions = {}): E
     subscribeToAgent: subscribeToDaprAgent,
     getHistory: getDaprHistory,
     getStats: getDaprStats,
-    clearHistory: clearDaprHistory
+    clearHistory: clearDaprHistory,
+    destroy: destroyDaprProvider
   };
 }

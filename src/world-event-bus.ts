@@ -1,32 +1,20 @@
 /**
- * World Event Bus Manager - Per-World Event Bus Management
+ * World Event Bus Management - Per-World Event Bus Isolation
+ *
+ * Provides isolated event buses for each world with resource management and cleanup.
+ * Uses function-based approach for better testability and modularity.
  *
  * Features:
- * - Creates and manages isolated event buses for each world
- * - Ensures complete event isolation between worlds
- * - Handles resource cleanup when worlds are deleted
- * - Thread-safe event bus creation and destruction
- * - Memory management for event bus instances
+ * - Complete event isolation between worlds
+ * - Thread-safe creation/destruction with Map storage
+ * - Automatic resource cleanup and memory management
+ * - Supports both local and Dapr providers
+ * - Defensive programming for missing contexts
  *
- * Core Functions:
- * - createEventBus: Initialize new event bus for a world
- * - getEventBus: Retrieve existing event bus for a world
- * - destroyEventBus: Clean up event bus resources for a world
- * - hasEventBus: Check if world has an event bus
- * - listEventBuses: Get all active event bus world names
- *
- * Architecture:
- * - Map-based storage for event bus instances keyed by world name
- * - Each world gets its own EventBusProvider instance
- * - Automatic cleanup prevents memory leaks
- * - Defensive programming for missing world contexts
- * - Singleton pattern for global access while maintaining per-world isolation
- *
- * Implementation:
- * - Uses existing EventBusProvider from local-provider or dapr-provider
- * - Maintains same configuration pattern as global event bus
- * - Provides world-scoped access to all event bus functionality
- * - Handles concurrent access safely with Map operations
+ * Core API:
+ * - create/get/destroy/has/list world event buses
+ * - Statistics and configuration management
+ * - Test helpers for cleanup
  */
 
 import {
@@ -51,173 +39,163 @@ export interface WorldEventBusConfig {
   pubsubName?: string;
 }
 
+// Module state and configuration
+let eventBuses: Map<string, EventBusProvider> = new Map();
+let defaultConfig: WorldEventBusConfig = { provider: 'local', enableLogging: true };
+
+// Core event bus management functions
+
 /**
- * World Event Bus Manager - Manages isolated event buses per world
+ * Create or get event bus for a world with provider selection
  */
-class WorldEventBusManager {
-  private eventBuses: Map<string, EventBusProvider> = new Map();
-  private defaultConfig: WorldEventBusConfig = { provider: 'local', enableLogging: true };
-
-  /**
-   * Create or get event bus for a world
-   */
-  public createEventBus(worldName: string, config?: WorldEventBusConfig): EventBusProvider {
-    // Return existing if already created
-    const existing = this.eventBuses.get(worldName);
-    if (existing) {
-      return existing;
-    }
-
-    const eventBusConfig = { ...this.defaultConfig, ...config };
-    let provider: EventBusProvider;
-
-    if (eventBusConfig.provider === 'dapr') {
-      provider = createDaprProvider({
-        daprHost: eventBusConfig.daprHost,
-        daprPort: eventBusConfig.daprPort,
-        pubsubName: eventBusConfig.pubsubName,
-        enableLogging: eventBusConfig.enableLogging
-      });
-    } else {
-      provider = createLocalProvider({
-        maxEventHistory: eventBusConfig.maxEventHistory,
-        enableLogging: eventBusConfig.enableLogging
-      });
-    }
-
-    this.eventBuses.set(worldName, provider);
-    return provider;
+function createEventBusForWorld(worldName: string, config?: WorldEventBusConfig): EventBusProvider {
+  // Return existing if already created
+  const existing = eventBuses.get(worldName);
+  if (existing) {
+    return existing;
   }
 
-  /**
-   * Get event bus for a world (throws if not found)
-   */
-  public getEventBus(worldName: string): EventBusProvider {
-    const provider = this.eventBuses.get(worldName);
-    if (!provider) {
-      throw new Error(`No event bus found for world: ${worldName}`);
-    }
-    return provider;
+  const eventBusConfig = { ...defaultConfig, ...config };
+  let provider: EventBusProvider;
+
+  if (eventBusConfig.provider === 'dapr') {
+    provider = createDaprProvider({
+      daprHost: eventBusConfig.daprHost,
+      daprPort: eventBusConfig.daprPort,
+      pubsubName: eventBusConfig.pubsubName,
+      enableLogging: eventBusConfig.enableLogging
+    });
+  } else {
+    provider = createLocalProvider({
+      maxEventHistory: eventBusConfig.maxEventHistory,
+      enableLogging: eventBusConfig.enableLogging
+    });
   }
 
-  /**
-   * Get event bus for a world (returns null if not found)
-   */
-  public getEventBusOrNull(worldName: string): EventBusProvider | null {
-    return this.eventBuses.get(worldName) || null;
-  }
-
-  /**
-   * Check if world has an event bus
-   */
-  public hasEventBus(worldName: string): boolean {
-    return this.eventBuses.has(worldName);
-  }
-
-  /**
-   * Destroy event bus for a world and clean up resources
-   */
-  public destroyEventBus(worldName: string): boolean {
-    const provider = this.eventBuses.get(worldName);
-    if (!provider) {
-      return false;
-    }
-
-    // Clean up provider resources if it has a cleanup method
-    if ('destroy' in provider && typeof provider.destroy === 'function') {
-      (provider as any).destroy();
-    }
-
-    // Clear event history to free memory
-    if ('clearHistory' in provider && typeof provider.clearHistory === 'function') {
-      provider.clearHistory();
-    }
-
-    this.eventBuses.delete(worldName);
-    return true;
-  }
-
-  /**
-   * Get all world names that have event buses
-   */
-  public listEventBuses(): string[] {
-    return Array.from(this.eventBuses.keys());
-  }
-
-  /**
-   * Get statistics for all event buses
-   */
-  public getAllStats(): Map<string, EventStats> {
-    const stats = new Map<string, EventStats>();
-    for (const [worldName, provider] of this.eventBuses) {
-      if ('getStats' in provider && typeof provider.getStats === 'function') {
-        stats.set(worldName, provider.getStats());
-      }
-    }
-    return stats;
-  }
-
-  /**
-   * Clear all event buses (for testing only)
-   * @internal
-   */
-  public _clearAllForTesting(): void {
-    for (const [worldName] of this.eventBuses) {
-      this.destroyEventBus(worldName);
-    }
-    this.eventBuses.clear();
-  }
-
-  /**
-   * Set default configuration for new event buses
-   */
-  public setDefaultConfig(config: WorldEventBusConfig): void {
-    this.defaultConfig = { ...config };
-  }
+  eventBuses.set(worldName, provider);
+  return provider;
 }
 
-// Global singleton instance
-const worldEventBusManager = new WorldEventBusManager();
+/**
+ * Get event bus for a world (throws if not found)
+ */
+function getEventBusForWorld(worldName: string): EventBusProvider {
+  const provider = eventBuses.get(worldName);
+  if (!provider) {
+    throw new Error(`No event bus found for world: ${worldName}`);
+  }
+  return provider;
+}
 
-export { worldEventBusManager };
+/**
+ * Get event bus for a world (safe version returns null if not found)
+ */
+function getEventBusForWorldOrNull(worldName: string): EventBusProvider | null {
+  return eventBuses.get(worldName) || null;
+}
 
-// Export convenience functions
+/**
+ * Check if world has an event bus
+ */
+function hasEventBusForWorld(worldName: string): boolean {
+  return eventBuses.has(worldName);
+}
+
+/**
+ * Destroy event bus and clean up all resources
+ */
+function destroyEventBusForWorld(worldName: string): boolean {
+  const provider = eventBuses.get(worldName);
+  if (!provider) {
+    return false;
+  }
+
+  // Clean up provider resources
+  try {
+    if (typeof provider.destroy === 'function') {
+      provider.destroy();
+    }
+  } catch (error) {
+    console.warn(`Error destroying event bus for world ${worldName}:`, error);
+  }
+
+  eventBuses.delete(worldName);
+  return true;
+}
+
+/**
+ * Get all world names that have event buses
+ */
+function listAllEventBuses(): string[] {
+  return Array.from(eventBuses.keys());
+}
+
+/**
+ * Get statistics for all event buses
+ */
+function getAllEventBusStats(): Map<string, EventStats> {
+  const stats = new Map<string, EventStats>();
+  for (const [worldName, provider] of eventBuses) {
+    if ('getStats' in provider && typeof provider.getStats === 'function') {
+      stats.set(worldName, provider.getStats());
+    }
+  }
+  return stats;
+}
+
+/**
+ * Clear all event buses - testing utility
+ */
+function clearAllEventBusesForTesting(): void {
+  for (const [worldName] of eventBuses) {
+    destroyEventBusForWorld(worldName);
+  }
+  eventBuses.clear();
+}
+
+/**
+ * Set default configuration for new event buses
+ */
+function setDefaultEventBusConfig(config: WorldEventBusConfig): void {
+  defaultConfig = { ...config };
+}
+
+// Public API exports with convenience naming
 export function createWorldEventBus(worldName: string, config?: WorldEventBusConfig): EventBusProvider {
-  return worldEventBusManager.createEventBus(worldName, config);
+  return createEventBusForWorld(worldName, config);
 }
 
 export function getWorldEventBus(worldName: string): EventBusProvider {
-  return worldEventBusManager.getEventBus(worldName);
+  return getEventBusForWorld(worldName);
 }
 
 export function getWorldEventBusOrNull(worldName: string): EventBusProvider | null {
-  return worldEventBusManager.getEventBusOrNull(worldName);
+  return getEventBusForWorldOrNull(worldName);
 }
 
 export function hasWorldEventBus(worldName: string): boolean {
-  return worldEventBusManager.hasEventBus(worldName);
+  return hasEventBusForWorld(worldName);
 }
 
 export function destroyWorldEventBus(worldName: string): boolean {
-  return worldEventBusManager.destroyEventBus(worldName);
+  return destroyEventBusForWorld(worldName);
 }
 
 export function listWorldEventBuses(): string[] {
-  return worldEventBusManager.listEventBuses();
+  return listAllEventBuses();
 }
 
 export function getAllWorldEventBusStats(): Map<string, EventStats> {
-  return worldEventBusManager.getAllStats();
+  return getAllEventBusStats();
 }
 
 export function setDefaultWorldEventBusConfig(config: WorldEventBusConfig): void {
-  worldEventBusManager.setDefaultConfig(config);
+  setDefaultEventBusConfig(config);
 }
 
 /**
- * Test helper: Clear all world event buses (for testing only)
- * @internal
+ * Test utility: Clear all world event buses
  */
 export function _clearAllWorldEventBusesForTesting(): void {
-  worldEventBusManager._clearAllForTesting();
+  clearAllEventBusesForTesting();
 }

@@ -28,6 +28,7 @@
   },
   "include": [
     "src/**/*",
+    "server/**/*",
     "tests/**/*"
   ],
   "exclude": [
