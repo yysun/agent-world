@@ -1,75 +1,37 @@
 /**
  * Core type definitions for the Agent World system.
  * 
- * This file defines all the core types, interfaces, and schemas used throughout
- * the system for agents, events, storage, and configuration.
- * 
  * Features:
- * - Agent configuration and stateexport const ChatMessageSchema = z.object({
-  role: z.enum(['system', 'user', 'assistant']),
-  content: z.string(),
-  createdAt: z.date().optional(),
-  sender: z.string().optional(),
-}); * - Event system types with strict payload typing
- * - Storage provider interfaces
+ * - Agent configuration and state management with LLM provider support
+ * - Event system with strict payload typing (MESSAGE, WORLD, SSE, SYSTEM)
+ * - AI SDK compatible chat messages with utility functions for LLM integration
+ * - Storage provider interfaces and file management
  * - Zod schemas for runtime validation
- * - LLM provider configuration
- * - AI SDK compatible chat message schema for consistent memory storage
  * 
- * Recent Changes:
- * - Updated ChatMessage interface to be compatible with AI SDK
- * - Added required 'id' field for UI components (useChat) and changed createdAt to Date type
- * - Added 'sender' as custom field that should be removed before sending to LLM
- * - Updated utility functions to strip both 'id' and 'sender' fields for LLM compatibility
- * - Note: AI SDK Core functions expect messages without 'id' field (CoreMessage format)
- * - Updated ChatMessageSchema to match new interface
- * - Added strict typing for event payloads (MessageEventPayload, SystemEventPayload, SSEEventPayload)
- * - Updated Event interface to use union types for payload
- * - Refactored event structure to remove nested payload nesting
- * - Changed sender terminology from "CLI" to "HUMAN"
- * - Updated Zod schemas for new event structure validation
- * - Added AgentMemory interface for new memory structure
- * - Removed unused types (ChatRole, CreateAgentRequest, unused Zod schemas)
+ * Implementation:
+ * - ChatMessage interface compatible with AI SDK (Date objects, optional sender field)
+ * - Event system using union types for type-safe payloads
+ * - Agent memory structure with message history and activity tracking
+ * - Utility functions to strip custom fields before LLM calls
+ * - Comprehensive LLM provider support (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  */
 
 import { z } from 'zod';
 
-// LLM Chat Message Types - Compatible with AI SDK CoreMessage format
+// Chat Message Types - AI SDK Compatible
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
-  createdAt?: Date; // AI SDK uses Date objects
-  sender?: string; // Custom field - remove before sending to LLM
+  createdAt?: Date;
+  sender?: string; // Custom field - removed before LLM calls
 }
-
-/**
- * Example usage:
- * 
- * // Creating a message with custom sender field for internal use
- * const message: ChatMessage = {
- *   id: uuidv4(),
- *   role: 'user',
- *   content: 'Hello!',
- *   createdAt: new Date(),
- *   sender: 'alice'
- * };
- * 
- * // Before sending to LLM, strip UI-specific fields (id, sender):
- * const llmMessage = stripCustomFields(message);
- * // Result: { role: 'user', content: 'Hello!', createdAt: Date }
- * 
- * // For multiple messages:
- * const llmMessages = stripCustomFieldsFromMessages([message]);
- * 
- * // Note: AI SDK Core functions (streamText, generateText) expect messages 
- * // without 'id' field, while useChat requires 'id' for UI state management
- */
 
 export interface AgentMemory {
   messages: ChatMessage[];
   lastActivity: string; // ISO timestamp
 }
 
+// Agent Types
 export interface Agent {
   name: string;
   type: string;
@@ -81,14 +43,6 @@ export interface Agent {
   lastLLMCall?: Date;
 }
 
-
-
-// Agent Types
-/**
- * AgentConfig - Configuration for an AI agent
- * Combines LLM provider, model, and agent-specific options
- * (Moved from agent.ts, reconciled fields)
- */
 export interface AgentConfig {
   name: string;
   type: string;
@@ -106,10 +60,6 @@ export interface AgentConfig {
   ollamaBaseUrl?: string;
 }
 
-/**
- * MessageData - Structure for agent message events
- * (Moved from agent.ts)
- */
 export interface MessageData {
   name: string;
   payload: any;
@@ -119,7 +69,7 @@ export interface MessageData {
   agentName?: string;
 }
 
-// Event Types
+// Event System Types
 export interface MessageEventPayload {
   content: string;
   sender: string;
@@ -156,8 +106,6 @@ export interface Event {
   payload: MessageEventPayload | SystemEventPayload | SSEEventPayload;
 }
 
-
-// Event Types a.k.a. Event Channels
 export enum EventType {
   MESSAGE = 'message',
   WORLD = 'world',
@@ -177,53 +125,25 @@ export interface EventFilter {
   since?: Date;
 }
 
-export const EventSchema = z.object({
-  id: z.string(),
-  type: z.nativeEnum(EventType),
-  timestamp: z.string().datetime(),
-  sender: z.string(),
-  senderType: z.nativeEnum(SenderType),
-  payload: z.union([
-    // MessageEventPayload
-    z.object({
-      content: z.string(),
-      sender: z.string()
-    }),
-    // SystemEventPayload  
-    z.object({
-      action: z.string(),
-      agentName: z.string().optional(),
-      worldName: z.string().optional(),
-      content: z.string().optional(),
-      timestamp: z.string().optional()
-    }).and(z.record(z.any())),
-    // SSEEventPayload
-    z.object({
-      agentName: z.string(),
-      type: z.enum(['start', 'chunk', 'end', 'error']),
-      content: z.string().optional(),
-      error: z.string().optional(),
-      messageId: z.string().optional()
-    })
-  ])
-});
-
-// World Types
+// World Management Types
 export interface WorldState {
   name: string;
   agents: Map<string, Agent>;
+  turnLimit?: number;
 }
 
 export interface WorldOptions {
   name?: string;
+  turnLimit?: number;
 }
 
 export interface WorldInfo {
   name: string;
   agentCount: number;
+  turnLimit: number;
 }
 
-// LLM Types (for future use)
+// LLM Provider Types
 export enum LLMProvider {
   OPENAI = 'openai',
   ANTHROPIC = 'anthropic',
@@ -234,13 +154,12 @@ export enum LLMProvider {
   OLLAMA = 'ollama'
 }
 
-// Message Types
 export interface MessagePayload {
   content: string;
   sender: string;
 }
 
-// File Storage Types
+// Storage Types
 export interface FileStorageOptions {
   dataPath?: string;
   enableLogging?: boolean;
@@ -252,13 +171,12 @@ export interface StoragePaths {
   events: string;
 }
 
-// Zod Schemas for Validation
+// Zod Validation Schemas
 export const ChatMessageSchema = z.object({
-  id: z.string(),
   role: z.enum(['system', 'user', 'assistant']),
   content: z.string(),
   createdAt: z.date().optional(),
-  sender: z.string().optional(), // Custom field
+  sender: z.string().optional(),
 });
 
 export const LegacyMessageSchema = z.object({
@@ -270,25 +188,39 @@ export const LegacyMessageSchema = z.object({
   inResponseTo: z.string().optional(),
 });
 
-// Utility Types for LLM Integration
-/**
- * ChatMessage without UI-specific fields - safe to send to LLM providers
- * The AI SDK expects CoreMessage format without 'id' field for streamText/generateText calls
- */
+export const EventSchema = z.object({
+  id: z.string(),
+  type: z.nativeEnum(EventType),
+  timestamp: z.string().datetime(),
+  sender: z.string(),
+  senderType: z.nativeEnum(SenderType),
+  payload: z.union([
+    z.object({ content: z.string(), sender: z.string() }), // MessageEventPayload
+    z.object({
+      action: z.string(),
+      agentName: z.string().optional(),
+      worldName: z.string().optional(),
+      content: z.string().optional(),
+      timestamp: z.string().optional()
+    }).and(z.record(z.any())), // SystemEventPayload
+    z.object({
+      agentName: z.string(),
+      type: z.enum(['start', 'chunk', 'end', 'error']),
+      content: z.string().optional(),
+      error: z.string().optional(),
+      messageId: z.string().optional()
+    }) // SSEEventPayload
+  ])
+});
+
+// LLM Integration Utilities
 export type LLMCompatibleMessage = Omit<ChatMessage, 'sender'>;
 
-/**
- * Utility function to strip UI-specific fields from ChatMessage before sending to LLM
- * Removes custom 'sender' field as required by AI SDK Core functions
- */
 export function stripCustomFields(message: ChatMessage): LLMCompatibleMessage {
   const { sender, ...llmMessage } = message;
   return llmMessage;
 }
 
-/**
- * Utility function to strip UI-specific fields from multiple ChatMessages
- */
 export function stripCustomFieldsFromMessages(messages: ChatMessage[]): LLMCompatibleMessage[] {
   return messages.map(stripCustomFields);
 }

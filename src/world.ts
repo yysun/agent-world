@@ -2,16 +2,18 @@
  * World Integration Layer - High-Level World and Agent Operations
  *
  * Features:
- * - World system initialization and startup logic
+ * - World system initialization and startup logic with configurable turn limits
  * - Event system integration (message broadcasting, subscriptions)
  * - World and agent CRUD operations (re-exported from specialized modules)
  * - Backward compatibility layer for existing imports
  * - Agent subscription management for event-driven message processing
+ * - Per-world turn limit configuration for agent LLM call management
  *
  * Core Functions:
  * - Initialization: ensureDefaultWorld, loadWorlds, initializeWorldSystem
  * - Message broadcasting: broadcastMessage, sendMessage
  * - Agent subscriptions: subscribeToAgentMessages with world-specific filtering
+ * - Turn Limit Management: getWorldTurnLimit for per-world turn limit enforcement
  * - Re-exports: All CRUD operations from world-manager, agent-manager, agent-memory
  *
  * Architecture:
@@ -19,6 +21,7 @@
  * - Delegates CRUD operations to focused modules (world-manager, agent-manager, agent-memory)
  * - Maintains event system integration and message broadcasting
  * - Preserves all existing function signatures for backward compatibility
+ * - Supports per-world turn limit configuration (default: 5 LLM calls)
  *
  * Module Organization:
  * - world-manager.ts: World CRUD operations (create, delete, list, save, load)
@@ -57,7 +60,8 @@ export {
   listWorlds,
   saveWorld,
   loadWorld,
-  loadWorldFromDisk
+  loadWorldFromDisk,
+  getWorldTurnLimit
 } from './world-manager';
 
 export {

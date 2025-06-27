@@ -34,7 +34,9 @@ import {
   createAgent,
   getAgent,
   updateAgent,
-  _clearAllWorldsForTesting
+  _clearAllWorldsForTesting,
+  getWorldInfo,
+  getWorldTurnLimit
 } from '../src/world';
 import { initializeFileStorage } from '../src/storage';
 import { LLMProvider, AgentConfig, MessageData } from '../src/types';
@@ -83,6 +85,7 @@ describe('Turn Limit Functionality', () => {
       if (path.includes('config.json') && !path.includes('agents')) {
         return JSON.stringify({
           name: worldName,
+          turnLimit: TURN_LIMIT,
           createdAt: new Date().toISOString()
         });
       }
@@ -502,5 +505,61 @@ describe('Turn Limit Functionality', () => {
 
       expect(shouldRespond).toBe(true);
     });
+  });
+
+  describe('Per-World Turn Limit Functionality', () => {
+    it('should use different turn limits for different worlds', async () => {
+      // Create two worlds with different turn limits
+      const world1 = await createWorld({ name: 'World1', turnLimit: 3 });
+      const world2 = await createWorld({ name: 'World2', turnLimit: 7 });
+
+      const agent1 = await createAgent(world1, { ...baseAgentConfig, name: 'Agent1' });
+      const agent2 = await createAgent(world2, { ...baseAgentConfig, name: 'Agent2' });
+
+      // Agent1 should reach limit at 3 calls
+      await updateAgent(world1, 'Agent1', { llmCallCount: 3 });
+      const shouldRespond1 = await shouldRespondToMessage(
+        { ...baseAgentConfig, name: 'Agent1' },
+        { name: 'test', payload: { content: '@Agent1 hello' }, id: '1', sender: 'user', content: '@Agent1 hello' },
+        world1
+      );
+      expect(shouldRespond1).toBe(false);
+
+      // Agent2 should still respond at 3 calls (limit is 7)
+      await updateAgent(world2, 'Agent2', { llmCallCount: 3 });
+      const shouldRespond2 = await shouldRespondToMessage(
+        { ...baseAgentConfig, name: 'Agent2' },
+        { name: 'test', payload: { content: '@Agent2 hello' }, id: '2', sender: 'user', content: '@Agent2 hello' },
+        world2
+      );
+      expect(shouldRespond2).toBe(true);
+
+      // Agent2 should reach limit at 7 calls
+      await updateAgent(world2, 'Agent2', { llmCallCount: 7 });
+      const shouldRespond3 = await shouldRespondToMessage(
+        { ...baseAgentConfig, name: 'Agent2' },
+        { name: 'test', payload: { content: '@Agent2 hello' }, id: '3', sender: 'user', content: '@Agent2 hello' },
+        world2
+      );
+      expect(shouldRespond3).toBe(false);
+    });
+
+    it('should default to 5 if no turn limit specified', async () => {
+      // Create world without specifying turn limit
+      const worldName = await createWorld({ name: 'DefaultTurnLimitWorld' });
+      const worldInfo = getWorldInfo(worldName);
+
+      expect(worldInfo?.turnLimit).toBe(5);
+    });
+
+    it('should get correct turn limit from getWorldTurnLimit function', async () => {
+      const world1 = await createWorld({ name: 'CustomWorld1', turnLimit: 10 });
+      const world2 = await createWorld({ name: 'CustomWorld2', turnLimit: 2 });
+
+      expect(getWorldTurnLimit(world1)).toBe(10);
+      expect(getWorldTurnLimit(world2)).toBe(2);
+      expect(getWorldTurnLimit('NonExistentWorld')).toBe(5); // Default fallback
+    });
+
   });
 });

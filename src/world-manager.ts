@@ -45,7 +45,8 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
   const worldName = options.name || `world-${Date.now()}`;
   const worldState: WorldState = {
     name: worldName,
-    agents: new Map()
+    agents: new Map(),
+    turnLimit: options.turnLimit || 5 // Default turn limit of 5
   };
 
   worlds.set(worldName, worldState);
@@ -79,8 +80,17 @@ export function getWorldInfo(worldName: string): WorldInfo | null {
 
   return {
     name: world.name,
-    agentCount: world.agents.size
+    agentCount: world.agents.size,
+    turnLimit: world.turnLimit || 5 // Default to 5 if not set
   };
+}
+
+/**
+ * Get turn limit for a specific world
+ */
+export function getWorldTurnLimit(worldName: string): number {
+  const world = worlds.get(worldName);
+  return world?.turnLimit || 5; // Default to 5 if world not found or turn limit not set
 }
 
 /**

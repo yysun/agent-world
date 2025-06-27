@@ -116,7 +116,8 @@ export async function saveWorldToDisk(worldName: string, worldState: WorldState)
 
   // Save world config (without agents)
   const worldConfig = {
-    name: worldState.name
+    name: worldState.name,
+    turnLimit: worldState.turnLimit || 5
   };
 
   await fs.writeFile(
@@ -151,7 +152,8 @@ export async function loadWorldFromDisk(worldName: string): Promise<WorldState> 
     // Create world state
     const worldState: WorldState = {
       name: worldConfig.name,
-      agents: new Map()
+      agents: new Map(),
+      turnLimit: worldConfig.turnLimit || 5 // Default to 5 if not set
     };
 
     // Find all config.json files in agent subdirectories (kebab-case folders)
