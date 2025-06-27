@@ -45,12 +45,12 @@
 - use `app.run` to publish events
   ```js
   document.addEventListener('click', (e) => {
-    app.run('@document-click', e);
+    app.run('document-click', e);
   });
   ```
 - use `app.on` to subscribe - when no component refresh
   ```js
-  app.on('@document-click', (state, e) => {
+  app.on('document-click', (state, e) => {
     console.log('Document clicked:', e);
   });
   ```
@@ -59,9 +59,9 @@
   const state = 0;
   const view = () => html``;
   const update = {
-    '@document-click': (state, e) => {
+    'document-click': (state, e) => {
       console.log('Document clicked:', e);
     }
   };
-  export default new Component(state, view, update);
+  export default new Component(state, view, update, {global_event: true});
   ```

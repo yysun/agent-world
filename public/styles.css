@@ -210,6 +210,68 @@ body {
   background-color: var(--accent-primary);
   border-color: var(--accent-primary);
   color: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-status {
+  font-size: 0.75rem;
+  line-height: 1;
+  margin-left: 0.25rem;
+}
+
+.connection-status.connected {
+  color: #22c55e;
+  animation: pulse-green 2s infinite;
+}
+
+.connection-status.connecting {
+  color: #f59e0b;
+  animation: spin 1s linear infinite;
+}
+
+.connection-status.error {
+  color: #ef4444;
+  animation: pulse-red 1s infinite;
+}
+
+.connection-status.disconnected {
+  color: #94a3b8;
+}
+
+@keyframes pulse-green {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes pulse-red {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .add-world-tab {

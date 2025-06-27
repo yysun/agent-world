@@ -76,7 +76,7 @@ interface WebSocketServerConfig {
  */
 export function createWebSocketServer(config: WebSocketServerConfig = {}): WebSocketServer {
   const {
-    port = 3001,
+    port = 3000,
     host = 'localhost',
     path = '/ws',
     heartbeatInterval = 30000, // 30 seconds

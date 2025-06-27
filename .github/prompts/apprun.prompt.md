@@ -67,7 +67,8 @@ const update = {
   '/,#': state => state
 };
 
-export default new Component(state, view, update);
+// Exporting the component instance with global event handling
+export default new Component(state, view, update, {global_event: true});
 ```
 
 ## Event Handling Patterns

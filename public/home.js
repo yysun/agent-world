@@ -24,6 +24,7 @@ import * as api from './api.js';
 import { getAvatarInitials, getAvatarColor } from './utils.js';
 import { AgentModal } from './agent.js';
 import { toggleTheme, applyTheme, getThemeIcon } from './theme.js';
+import wsApi from './ws-api.js';
 
 // Initial state
 const state = async () => {
@@ -31,16 +32,81 @@ const state = async () => {
   const worldName = worlds.length > 0 ? worlds[0].name : null;
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
-  return selectWorld({ worlds, theme }, worldName);
+
+  // Initialize WebSocket state properties (no connection yet)
+  const initialState = {
+    worlds,
+    theme,
+    connectionStatus: 'disconnected',
+    messages: [],
+    currentMessage: '',
+    wsError: null
+  };
+
+  return selectWorld(initialState, worldName);
 };
 
 
 // Event handlers
 const selectWorld = async (state, worldName) => {
   if (worldName === state.worldName) return state;
+
+  // Disconnect from previous world
+  if (state.worldName && wsApi.isConnected()) {
+    wsApi.disconnect();
+  }
+
+  // Clear messages when switching worlds
+  const newState = {
+    ...state,
+    worldName,
+    messages: [],
+    connectionStatus: 'disconnected'
+  };
+
+  if (worldName) setTimeout(() => {
+    // Connect to new world
+    newState.connectionStatus = 'connecting';
+    wsApi.connect();
+  }, 500)
+
   const agents = await api.getAgents(worldName);
-  return ({ ...state, worldName, agents });
-}
+  return { ...newState, agents };
+};
+
+// WebSocket event handlers
+const handleWebSocketMessage = (state, messageData) => {
+  const message = {
+    id: Date.now() + Math.random(),
+    type: messageData.type || 'agent',
+    sender: messageData.sender || messageData.agentName || 'system',
+    text: messageData.message || messageData.text || '',
+    timestamp: messageData.timestamp || new Date().toISOString(),
+    worldName: state.worldName
+  };
+
+  return {
+    ...state,
+    messages: [...state.messages, message]
+  };
+};
+
+const handleConnectionStatus = (state, status) => {
+  return {
+    ...state,
+    connectionStatus: status,
+    wsError: status === 'error' ? state.wsError : null
+  };
+};
+
+const handleWebSocketError = (state, error) => {
+  console.error('WebSocket error:', error);
+  return {
+    ...state,
+    connectionStatus: 'error',
+    wsError: error.message || 'WebSocket connection error'
+  };
+};
 
 const openAgentModal = (state, agent = null) => {
   return ({
@@ -67,6 +133,56 @@ const closeAgentModal = (state, save) => {
 };
 
 
+const sendMessage = (state) => {
+  const message = state.currentMessage?.trim();
+
+  // Validate message input
+  if (!message) {
+    return state; // Don't send empty messages
+  }
+
+  if (!state.worldName) {
+    console.warn('No world selected');
+    return state;
+  }
+
+  if (!wsApi.isConnected()) {
+    console.warn('WebSocket not connected');
+    return {
+      ...state,
+      wsError: 'Not connected to server'
+    };
+  }
+
+  // Send message via WebSocket
+  const success = wsApi.sendChatMessage(state.worldName, message);
+
+  if (success) {
+    // Add user message to local state immediately for better UX
+    const userMessage = {
+      id: Date.now() + Math.random(),
+      type: 'user',
+      sender: 'user1',
+      text: message,
+      timestamp: new Date().toISOString(),
+      worldName: state.worldName
+    };
+
+    return {
+      ...state,
+      messages: [...state.messages, userMessage],
+      currentMessage: '', // Clear input field
+      wsError: null
+    };
+  } else {
+    return {
+      ...state,
+      wsError: 'Failed to send message'
+    };
+  }
+};
+
+
 // view function
 const view = (state) => {
   return html`
@@ -85,7 +201,7 @@ const view = (state) => {
 
         <main class="main-content">
           <!-- World tabs -->
-          ${state.worlds.length > 0 ? html`
+          ${state.worlds?.length > 0 ? html`
             <div class="world-tabs">
               ${state.worlds.map(world => html`
                 <button 
@@ -94,6 +210,13 @@ const view = (state) => {
                   data-world="${world.name}"
                 >
                   ${world.name}
+                  ${state.worldName === world.name ? html`
+                    <span class="connection-status ${state.connectionStatus}">
+                      ${state.connectionStatus === 'connected' ? '●' :
+        state.connectionStatus === 'connecting' ? '◐' :
+          state.connectionStatus === 'error' ? '✕' : '○'}
+                    </span>
+                  ` : ''}
                 </button>
               `)}
               <button class="world-tab add-world-tab" @click="addNewWorld">
@@ -124,7 +247,7 @@ const view = (state) => {
               <p class="agent-role">create new agent</p>
             </div>
             
-            ${state.agents.map(agent => html`
+            ${state.agents?.map(agent => html`
               <div class="agent-card" @click=${run(openAgentModal, agent)}>
                 <div class="avatar-container">
                   <div class="avatar" style="background-color: ${getAvatarColor(agent.name)}">
@@ -136,22 +259,22 @@ const view = (state) => {
               </div>
             `)}
           </div>
-
-          <!-- Agent Modal -->
-
           <!-- Conversation area -->
           <div class="conversation-area">
+
+            
             <div class="conversation-content">
               ${state.messages && state.messages.length > 0 ? html`
                 ${state.messages.map(message => html`
-                  <div class="conversation-message">
+                  <div class="conversation-message ${message.type}">
                     <div class="message-sender">${message.sender}</div>
                     <div class="message-text">${message.text}</div>
+                    <div class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</div>
                   </div>
                 `)}
               ` : html`
                 <div class="conversation-placeholder">
-                  Start a conversation by typing a message below
+                  ${state.worldName ? 'Start a conversation by typing a message below' : 'Select a world to start chatting'}
                 </div>
               `}
             </div>
@@ -162,12 +285,15 @@ const view = (state) => {
               <input 
                 type="text" 
                 class="message-input" 
-                placeholder="How can I help you today?"
-                value="${state.message}"
-                oninput="@updateMessage"
-                onkeypress="event.key === 'Enter' && app.run('sendMessage')"
+                placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
+                value="${state.currentMessage || ''}"
+                @keypress=${(e) => e.key === 'Enter' && run(sendMessage)}
               >
-              <button class="send-button" @click="sendMessage">
+              <button 
+                class="send-button" 
+                @click=${run(sendMessage)}
+                ?disabled=${!state.worldName || state.connectionStatus !== 'connected' || !state.currentMessage?.trim()}
+              >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="m5 12 7-7 7 7M12 19V5"/>
                 </svg>
@@ -182,7 +308,12 @@ const view = (state) => {
 };
 
 const update = {
-  '/,#': state => state
+  '/,#': state => state,
+  handleWebSocketMessage,
+  handleConnectionStatus,
+  handleWebSocketError
 }
 
-export default new Component(state, view, update);
+
+
+export default new Component(state, view, update, { global_event: true });
