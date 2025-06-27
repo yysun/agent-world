@@ -21,7 +21,7 @@
 ## Interaction Guidelines
 - When you are done or need my input → play sound :`afplay /System/Library/Sounds/Glass.aiff`
 
-## Project Instructions
+## Development Instructions
 - use function based approach instead of class based
 - do not use dynamic module imports
 - use `npx tsx` for TypeScript execution

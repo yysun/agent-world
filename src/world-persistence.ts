@@ -195,6 +195,10 @@ export async function loadWorldFromDisk(worldName: string): Promise<WorldState> 
           delete agent.metadata;
         }
 
+        // Restore name and type to config for backwards compatibility (they are stored at top level)
+        if (!agent.config.name) agent.config.name = agent.name;
+        if (!agent.config.type) agent.config.type = agent.type;
+
         // Load system prompt from separate file and add it to config
         const systemPrompt = await loadSystemPromptDirect(actualWorldDir, agent.name);
         agent.config.systemPrompt = systemPrompt;
@@ -259,11 +263,11 @@ export async function saveAgentToDisk(worldName: string, agent: Agent): Promise<
   const systemPromptContent = agent.config.systemPrompt || `You are ${agent.name}, an AI agent.`;
   await fs.writeFile(systemPromptPath, systemPromptContent, 'utf8');
 
-  // Save config without system prompt content
-  const { systemPrompt, ...configWithoutPrompt } = agent.config;
+  // Save config without system prompt content and remove duplicate name/type fields
+  const { systemPrompt, name, type, ...configWithoutDuplicates } = agent.config;
   const agentData = {
     ...agent,
-    config: configWithoutPrompt,
+    config: configWithoutDuplicates,
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString()
   };
