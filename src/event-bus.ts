@@ -1,38 +1,44 @@
 /**
- * Event Bus - Simplified Function-Based Event System
+ * Event Bus - World-Scoped Event System
  * 
  * Features:
- * - Function-based API replacing class-based EventManager
+ * - Per-world event bus isolation for complete event scoping
+ * - Function-based API with world context support
  * - 3 event types: MESSAGE, WORLD, SSE with dedicated topics
  * - Provider pattern for local (EventEmitter) vs future Dapr modes
- * - Maintains all EventManager functionality with simpler API
+ * - Backward compatibility for functions without world context
  * - Topic-based publishing: messages, world, sse
- * - Agent-specific event routing and filtering
- * - Event history and statistics tracking
+ * - Agent-specific event routing and filtering within worlds
+ * - Event history and statistics tracking per world
  * - Structured logging with pino
  * - Strict typing for event payloads with TypeScript interfaces
  * 
+ * Architecture Changes:
+ * - Each world has its own isolated event bus instance
+ * - Events are scoped to specific worlds, preventing cross-world pollution
+ * - World context required for most operations (with fallbacks for compatibility)
+ * - Automatic event bus creation for worlds when needed
+ * - Resource cleanup when worlds are destroyed
+ * 
  * Recent Changes:
- * - Updated event publishing functions to use flat payload structure
- * - Added support for MessageEventPayload, SystemEventPayload, and SSEEventPayload types
- * - Refactored publishMessage to use HUMAN as default sender
- * - Removed nested payload.payload structure from all event publishing
- * - Updated event filtering and routing logic for new payload format
+ * - Added world-scoped event bus support via WorldEventBusManager
+ * - Updated all functions to accept optional worldName parameter
+ * - Maintained backward compatibility for global event bus usage
+ * - Added automatic world event bus creation and management
+ * - Updated event filtering and routing for world-specific contexts
  * 
  * Logic:
- * - Uses provider pattern to abstract local vs distributed event handling
- * - Local provider uses EventEmitter (current behavior)
- * - Dapr provider ready for future distributed events
- * - Topic naming: messages, world, sse (maps to dapr-world-* in Dapr mode)
+ * - Uses WorldEventBusManager to route operations to correct world event bus
+ * - Falls back to global event bus for backward compatibility when no world specified
+ * - Topic naming remains the same but scoped per world
  * - All functions are async for consistency with future Dapr integration
- * - Maintains backward compatibility through simple function API
+ * - Maintains all existing functionality in world-scoped form
  * 
- * Changes:
- * - Created as simplified replacement for EventManager class
- * - Function-based API instead of class methods
- * - Provider abstraction for easy Dapr migration
- * - Topic-specific helper functions for common operations
- * - Maintains all existing functionality in simpler form
+ * Migration:
+ * - Functions now accept optional worldName parameter
+ * - When worldName provided, operations are scoped to that world
+ * - When worldName not provided, falls back to global behavior (deprecated)
+ * - Existing code continues to work but should be migrated to world-scoped usage
  */
 
 import { Event, EventType, MessageEventPayload, SystemEventPayload, SSEEventPayload, SenderType } from './types';
@@ -47,6 +53,13 @@ import {
   DaprProviderOptions,
   createDaprProvider
 } from './providers/dapr-provider';
+import {
+  createWorldEventBus,
+  getWorldEventBusOrNull,
+  getWorldEventBus,
+  destroyWorldEventBus,
+  WorldEventBusConfig
+} from './world-event-bus';
 
 // Event bus configuration
 export interface EventBusConfig {
@@ -92,9 +105,20 @@ export function initializeEventBus(config: EventBusConfig = { provider: 'local' 
 }
 
 /**
- * Get the current event bus provider (initialize if needed)
+ * Get the event bus provider for a specific world or fall back to global
  */
-function getProvider(): EventBusProvider {
+function getProvider(worldName?: string): EventBusProvider {
+  if (worldName) {
+    // Try to get world-specific event bus
+    let worldProvider = getWorldEventBusOrNull(worldName);
+    if (!worldProvider) {
+      // Create world event bus if it doesn't exist
+      worldProvider = createWorldEventBus(worldName, { provider: 'local', enableLogging: true });
+    }
+    return worldProvider;
+  }
+
+  // Fall back to global event bus for backward compatibility
   if (!eventBusProvider) {
     initializeEventBus();
   }
@@ -102,21 +126,22 @@ function getProvider(): EventBusProvider {
 }
 
 /**
- * Core event publishing function
+ * Core event publishing function with world context
  */
-export async function publishEvent(topic: string, eventData: Omit<Event, 'id' | 'timestamp'>): Promise<Event> {
-  return getProvider().publish(topic, eventData);
+export async function publishEvent(topic: string, eventData: Omit<Event, 'id' | 'timestamp'>, worldName?: string): Promise<Event> {
+  return getProvider(worldName).publish(topic, eventData);
 }
 
 /**
- * Subscribe to events on a specific topic
+ * Subscribe to events on a specific topic with world context
  */
 export function subscribeToTopic(
   topic: string,
   handler: (event: Event) => void,
-  filter?: EventFilter
+  filter?: EventFilter,
+  worldName?: string
 ): () => void {
-  const provider = getProvider();
+  const provider = getProvider(worldName);
 
   if (!filter) {
     return provider.subscribe(topic, handler);
@@ -133,31 +158,31 @@ export function subscribeToTopic(
 }
 
 /**
- * Subscribe to events for a specific agent
+ * Subscribe to events for a specific agent with world context
  */
-export function subscribeToAgent(agentName: string, handler: (event: Event) => void): () => void {
-  return getProvider().subscribeToAgent(agentName, handler);
+export function subscribeToAgent(agentName: string, handler: (event: Event) => void, worldName?: string): () => void {
+  return getProvider(worldName).subscribeToAgent(agentName, handler);
 }
 
 /**
- * Get event history with optional filtering
+ * Get event history with optional filtering and world context
  */
-export function getEventHistory(filter?: EventFilter): Event[] {
-  return getProvider().getHistory(filter);
+export function getEventHistory(filter?: EventFilter, worldName?: string): Event[] {
+  return getProvider(worldName).getHistory(filter);
 }
 
 /**
- * Get event statistics
+ * Get event statistics for a specific world
  */
-export function getEventStats(): EventStats {
-  return getProvider().getStats();
+export function getEventStats(worldName?: string): EventStats {
+  return getProvider(worldName).getStats();
 }
 
 /**
- * Clear event history
+ * Clear event history for a specific world
  */
-export function clearEventHistory(): void {
-  getProvider().clearHistory();
+export function clearEventHistory(worldName?: string): void {
+  getProvider(worldName).clearHistory();
 }
 
 /**
@@ -178,7 +203,7 @@ function determineSenderType(sender: string): SenderType {
  */
 
 // MESSAGE events - structured message objects
-export async function publishMessageEvent(payload: MessageEventPayload, sender?: string): Promise<Event> {
+export async function publishMessageEvent(payload: MessageEventPayload, sender?: string, worldName?: string): Promise<Event> {
   // Validate payload to prevent ZodError
   if (!payload || typeof payload.content !== 'string' || typeof payload.sender !== 'string') {
     throw new Error(`Invalid MessageEventPayload: content and sender must be strings`);
@@ -189,22 +214,22 @@ export async function publishMessageEvent(payload: MessageEventPayload, sender?:
     sender: sender || payload.sender,
     senderType: determineSenderType(sender || payload.sender),
     payload: payload
-  });
+  }, worldName);
 }
 
 // WORLD events - system events, agent lifecycle, etc.
-export async function publishWorldEvent(payload: SystemEventPayload, sender?: string): Promise<Event> {
+export async function publishWorldEvent(payload: SystemEventPayload, sender?: string, worldName?: string): Promise<Event> {
   const senderName = sender || payload.agentName || 'world';
   return publishEvent(TOPICS.WORLD, {
     type: EventType.WORLD,
     sender: senderName,
     senderType: determineSenderType(senderName),
     payload
-  });
+  }, worldName);
 }
 
 // SSE events - streaming data for real-time updates
-export async function publishSSE(payload: SSEEventPayload, sender?: string): Promise<Event> {
+export async function publishSSE(payload: SSEEventPayload, sender?: string, worldName?: string): Promise<Event> {
   // Validate payload to prevent ZodError
   if (!payload || typeof payload.agentName !== 'string' || !['start', 'chunk', 'end', 'error'].includes(payload.type)) {
     throw new Error(`Invalid SSEEventPayload: agentName must be string and type must be start|chunk|end|error`);
@@ -216,11 +241,11 @@ export async function publishSSE(payload: SSEEventPayload, sender?: string): Pro
     sender: senderName,
     senderType: determineSenderType(senderName),
     payload
-  });
+  }, worldName);
 }
 
 // System events - debug and logging information
-export async function publishSystemEvent(payload: SystemEventPayload, sender?: string): Promise<Event> {
+export async function publishSystemEvent(payload: SystemEventPayload, sender?: string, worldName?: string): Promise<Event> {
   // Validate payload to prevent ZodError
   if (!payload || typeof payload.action !== 'string') {
     throw new Error(`Invalid SystemEventPayload: action must be a string`);
@@ -232,18 +257,18 @@ export async function publishSystemEvent(payload: SystemEventPayload, sender?: s
     sender: senderName,
     senderType: determineSenderType(senderName),
     payload
-  });
+  }, worldName);
 }
 
 // Helper function for debug events
-export async function publishDebugEvent(content: string, context?: { [key: string]: any }): Promise<Event> {
+export async function publishDebugEvent(content: string, context?: { [key: string]: any }, worldName?: string): Promise<Event> {
   const agentName = context?.agentName;
   return publishSystemEvent({
     action: 'debug',
     content,
     timestamp: new Date().toISOString(),
     ...context
-  }, agentName || 'system');
+  }, agentName || 'system', worldName);
 }
 
 /**
@@ -253,40 +278,44 @@ export async function publishDebugEvent(content: string, context?: { [key: strin
 // Subscribe to MESSAGE events
 export function subscribeToMessages(
   handler: (event: Event) => void,
-  filter?: EventFilter
+  filter?: EventFilter,
+  worldName?: string
 ): () => void {
-  return subscribeToTopic(TOPICS.MESSAGES, handler, filter);
+  return subscribeToTopic(TOPICS.MESSAGES, handler, filter, worldName);
 }
 
 // Subscribe to WORLD events  
 export function subscribeToWorld(
   handler: (event: Event) => void,
-  filter?: EventFilter
+  filter?: EventFilter,
+  worldName?: string
 ): () => void {
-  return subscribeToTopic(TOPICS.WORLD, handler, filter);
+  return subscribeToTopic(TOPICS.WORLD, handler, filter, worldName);
 }
 
 // Subscribe to SSE events
 export function subscribeToSSE(
   handler: (event: Event) => void,
-  filter?: EventFilter
+  filter?: EventFilter,
+  worldName?: string
 ): () => void {
-  return subscribeToTopic(TOPICS.SSE, handler, filter);
+  return subscribeToTopic(TOPICS.SSE, handler, filter, worldName);
 }
 
 // Subscribe to SYSTEM events
 export function subscribeToSystem(
   handler: (event: Event) => void,
-  filter?: EventFilter
+  filter?: EventFilter,
+  worldName?: string
 ): () => void {
-  return subscribeToTopic(TOPICS.SYSTEM, handler, filter);
+  return subscribeToTopic(TOPICS.SYSTEM, handler, filter, worldName);
 }
 
 /**
- * Subscribe to all events (for backward compatibility)
+ * Subscribe to all events (for backward compatibility) with world context
  */
-export function subscribeToAll(handler: (event: Event) => void): () => void {
-  const provider = getProvider();
+export function subscribeToAll(handler: (event: Event) => void, worldName?: string): () => void {
+  const provider = getProvider(worldName);
   const unsubscribers = [
     provider.subscribe(TOPICS.MESSAGES, handler),
     provider.subscribe(TOPICS.WORLD, handler),
@@ -334,4 +363,29 @@ function matchesFilter(event: Event, filter: EventFilter): boolean {
   }
 
   return true;
+}
+
+/**
+ * World Event Bus Management Functions
+ */
+
+/**
+ * Create event bus for a world with specific configuration
+ */
+export function createEventBusForWorld(worldName: string, config?: WorldEventBusConfig): void {
+  createWorldEventBus(worldName, config);
+}
+
+/**
+ * Destroy event bus for a world and clean up resources
+ */
+export function destroyEventBusForWorld(worldName: string): boolean {
+  return destroyWorldEventBus(worldName);
+}
+
+/**
+ * Check if a world has an event bus
+ */
+export function hasEventBusForWorld(worldName: string): boolean {
+  return getWorldEventBusOrNull(worldName) !== null;
 }

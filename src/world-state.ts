@@ -6,7 +6,8 @@
  * - Agent subscription tracking for event system integration
  * - Shared state access for world and agent management modules
  * - Clean separation of state from business logic
- * - Agent message subscription management
+ * - Agent message subscription management with world-scoped event buses
+ * - Per-world event bus isolation preventing cross-world event pollution
  *
  * Core State:
  * - worlds: Map<string, WorldState> - In-memory world storage keyed by world name
@@ -16,11 +17,13 @@
  * - Import worlds Map and agentSubscriptions from other modules
  * - Provides centralized access to shared application state
  * - Enables clean separation between state management and business logic
+ * - Each world uses its own isolated event bus for complete event isolation
  */
 
 import { WorldState, Agent, EventType, MessageEventPayload } from './types';
 import { subscribeToMessages } from './event-bus';
 import { processAgentMessage } from './agent';
+import { _clearAllWorldEventBusesForTesting } from './world-event-bus';
 
 // Global world storage - keyed by world name
 export const worlds: Map<string, WorldState> = new Map();
@@ -30,6 +33,7 @@ export const agentSubscriptions: Map<string, () => void> = new Map();
 
 /**
  * Subscribe an agent to message events if not already subscribed
+ * Uses the world-specific event bus for complete isolation
  */
 export function subscribeAgentToMessages(worldName: string, agent: Agent): void {
   const subscriptionKey = `${worldName}:${agent.name}`;
@@ -39,7 +43,7 @@ export function subscribeAgentToMessages(worldName: string, agent: Agent): void 
     return; // Already subscribed, skip
   }
 
-  // Subscribe agent to MESSAGE events from event bus
+  // Subscribe agent to MESSAGE events from world-specific event bus
   const unsubscribe = subscribeToMessages(async (event) => {
     // Only process MESSAGE events with MessageEventPayload
     if (event.type === EventType.MESSAGE && event.payload && 'content' in event.payload && 'sender' in event.payload) {
@@ -66,7 +70,7 @@ export function subscribeAgentToMessages(worldName: string, agent: Agent): void 
         }
       }
     }
-  });
+  }, undefined, worldName); // Pass worldName to subscribe to world-specific event bus
 
   // Store the unsubscribe function
   agentSubscriptions.set(subscriptionKey, unsubscribe);
@@ -99,4 +103,7 @@ export function _clearAllWorldsForTesting(): void {
   agentSubscriptions.clear();
 
   worlds.clear();
+
+  // Clear all world event buses
+  _clearAllWorldEventBusesForTesting();
 }

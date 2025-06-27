@@ -2,31 +2,34 @@
  * World Manager - World CRUD Operations
  *
  * Features:
- * - World creation, deletion, and listing operations
+ * - World creation, deletion, and listing operations with per-world event buses
  * - World information retrieval and state management
  * - World persistence operations (save/load from disk)
  * - Integration with world-persistence module for file I/O
- * - Event system integration for world lifecycle events
+ * - Event system integration for world lifecycle events with world-scoped isolation
+ * - Automatic event bus creation and cleanup for complete world isolation
  *
  * Core Functions:
- * - createWorld: Create new world with optional configuration
- * - deleteWorld: Remove world and cleanup all associated data
+ * - createWorld: Create new world with isolated event bus and optional configuration
+ * - deleteWorld: Remove world and cleanup all associated data including event bus
  * - getWorldInfo: Get world metadata and agent count
  * - listWorlds: List all available world names
  * - saveWorld/loadWorld: Persistence operations for world state
- * - loadWorldFromDisk: Load world configuration and agents from disk
+ * - loadWorldFromDisk: Load world configuration and agents from disk with event bus setup
  *
  * Implementation:
  * - Uses shared world state from world-state.ts
  * - Delegates file I/O operations to world-persistence.ts
- * - Publishes world lifecycle events via event-bus
+ * - Publishes world lifecycle events via world-scoped event-bus
  * - Handles error cases with proper rollback on failures
  * - Maintains separation of concerns between state and persistence
+ * - Creates isolated event bus for each world preventing cross-world event pollution
  */
 
 import { WorldState, WorldOptions, WorldInfo } from './types';
 import { worlds, agentSubscriptions, subscribeAgentToMessages } from './world-state';
-import { publishWorldEvent, initializeEventBus } from './event-bus';
+import { publishWorldEvent } from './event-bus';
+import { createWorldEventBus, destroyWorldEventBus } from './world-event-bus';
 import {
   saveWorldToDisk as saveWorldToDiskPersistence,
   loadWorldFromDisk as loadWorldFromDiskPersistence,
@@ -36,13 +39,14 @@ import {
 import fs from 'fs/promises';
 
 /**
- * Create a new world
+ * Create a new world with isolated event bus
  */
 export async function createWorld(options: WorldOptions = {}): Promise<string> {
-  // Initialize event bus with local provider (defensive)
-  initializeEventBus({ provider: 'local', enableLogging: true });
-
   const worldName = options.name || `world-${Date.now()}`;
+
+  // Create isolated event bus for this world
+  createWorldEventBus(worldName, { provider: 'local', enableLogging: true });
+
   const worldState: WorldState = {
     name: worldName,
     agents: new Map(),
@@ -55,18 +59,19 @@ export async function createWorld(options: WorldOptions = {}): Promise<string> {
   try {
     await saveWorldToDisk(worldName);
   } catch (error) {
-    // Rollback memory change on disk error
+    // Rollback memory change and event bus on disk error
     worlds.delete(worldName);
+    destroyWorldEventBus(worldName);
     throw error;
   }
 
-  // Publish world creation event
+  // Publish world creation event to world-specific event bus
   await publishWorldEvent({
     action: 'WORLD_CREATED',
     worldName,
     name: worldState.name,
     timestamp: new Date().toISOString()
-  });
+  }, undefined, worldName);
 
   return worldName;
 }
@@ -94,7 +99,7 @@ export function getWorldTurnLimit(worldName: string): number {
 }
 
 /**
- * Delete a world and cleanup
+ * Delete a world and cleanup including event bus
  */
 export async function deleteWorld(worldName: string): Promise<boolean> {
   const world = worlds.get(worldName);
@@ -116,12 +121,17 @@ export async function deleteWorld(worldName: string): Promise<boolean> {
   // Remove from memory first
   worlds.delete(worldName);
 
+  // Destroy the world's event bus and clean up resources
+  destroyWorldEventBus(worldName);
+
   // Remove world directory from disk
   try {
     await fs.rm(worldDir, { recursive: true, force: true });
   } catch (error) {
     // Rollback memory change if disk operation fails
     worlds.set(worldName, world);
+    // Recreate event bus on rollback
+    createWorldEventBus(worldName, { provider: 'local', enableLogging: true });
     throw error;
   }
 
@@ -171,14 +181,17 @@ export async function loadWorld(worldName: string): Promise<void> {
 }
 
 /**
- * Load world configuration and agents from disk
+ * Load world configuration and agents from disk with event bus setup
  */
 export async function loadWorldFromDisk(worldName: string): Promise<void> {
   const worldState = await loadWorldFromDiskPersistence(worldName);
 
+  // Create isolated event bus for this world
+  createWorldEventBus(worldName, { provider: 'local', enableLogging: true });
+
   worlds.set(worldName, worldState);
 
-  // Subscribe loaded agents to MESSAGE events
+  // Subscribe loaded agents to MESSAGE events on world-specific event bus
   for (const [agentName, agent] of worldState.agents) {
     subscribeAgentToMessages(worldName, agent);
   }

@@ -40,8 +40,7 @@ import {
   subscribeToMessages,
   subscribeToWorld,
   subscribeToSSE,
-  subscribeToSystem,
-  initializeEventBus
+  subscribeToSystem
 } from './event-bus';
 
 // Re-export event subscription functions for backward compatibility
@@ -97,9 +96,6 @@ export const DEFAULT_WORLD_NAME = 'Default World';
  * Create default world if no worlds exist
  */
 export async function ensureDefaultWorld(): Promise<string> {
-  // Initialize event bus with local provider
-  initializeEventBus({ provider: 'local', enableLogging: true });
-
   await initializeFileStorage();
   await ensureDataDirectories();
 
@@ -118,7 +114,7 @@ export async function ensureDefaultWorld(): Promise<string> {
     return existingWorlds[0]; // Return first world name
   }
 
-  // Create default world
+  // Create default world (this will automatically create its event bus)
   const defaultWorldName = await createWorld({ name: DEFAULT_WORLD_NAME });
   return defaultWorldName;
 }
@@ -127,9 +123,6 @@ export async function ensureDefaultWorld(): Promise<string> {
  * Load worlds with basic logic - returns world list and suggests action
  */
 export async function loadWorlds(): Promise<{ worlds: string[]; action: 'create' | 'use' | 'select'; defaultWorld?: string }> {
-  // Initialize event bus with local provider
-  initializeEventBus({ provider: 'local', enableLogging: true });
-
   await initializeFileStorage();
   await ensureDataDirectories();
 
@@ -154,9 +147,6 @@ export async function loadWorlds(): Promise<{ worlds: string[]; action: 'create'
  * Simple world loading - loads first available world or creates default
  */
 export async function loadWorldsWithSelection(): Promise<string> {
-  // Initialize event bus with local provider
-  initializeEventBus({ provider: 'local', enableLogging: true });
-
   await initializeFileStorage();
   await ensureDataDirectories();
 
@@ -164,12 +154,12 @@ export async function loadWorldsWithSelection(): Promise<string> {
   const existingWorlds = await listWorldsFromDisk();
 
   if (existingWorlds.length === 0) {
-    // No worlds found - create default world
+    // No worlds found - create default world (automatically creates event bus)
     const defaultWorldName = await createWorld({ name: DEFAULT_WORLD_NAME });
     return defaultWorldName;
   }
 
-  // Load first available world
+  // Load first available world (automatically creates event bus)
   const worldName = existingWorlds[0];
   await loadWorldFromDisk(worldName);
   return worldName;
@@ -185,7 +175,7 @@ export async function initializeWorldSystem(): Promise<string> {
 // ===== EVENT SYSTEM =====
 
 /**
- * Broadcast a message to all agents in a world
+ * Broadcast a message to all agents in a world using world-scoped event bus
  */
 export async function broadcastMessage(worldName: string, message: string, sender?: string): Promise<void> {
   const worlds = listWorlds();
@@ -201,12 +191,12 @@ export async function broadcastMessage(worldName: string, message: string, sende
     sender: senderName
   };
 
-  // Publish MESSAGE event with flat payload structure
-  await publishMessageEvent(messageEventPayload);
+  // Publish MESSAGE event to world-specific event bus
+  await publishMessageEvent(messageEventPayload, undefined, worldName);
 }
 
 /**
- * Send a direct message to a specific agent
+ * Send a direct message to a specific agent using world-scoped event bus
  */
 export async function sendMessage(worldName: string, targetName: string, message: string, sender?: string): Promise<void> {
   const worlds = listWorlds();
@@ -227,12 +217,12 @@ export async function sendMessage(worldName: string, targetName: string, message
     sender: senderName
   };
 
-  // Publish direct message event
-  await publishMessageEvent(messageEventPayload);
+  // Publish direct message event to world-specific event bus
+  await publishMessageEvent(messageEventPayload, undefined, worldName);
 }
 
 /**
- * Subscribe to messages for a specific agent in a world
+ * Subscribe to messages for a specific agent in a world using world-scoped event bus
  */
 export function subscribeToAgentMessages(worldName: string, agentName: string, callback: (event: any) => void): () => void {
   return subscribeToMessages((event: any) => {
@@ -240,5 +230,5 @@ export function subscribeToAgentMessages(worldName: string, agentName: string, c
       (event.payload?.recipient === agentName || event.payload?.targetName === agentName)) {
       callback(event);
     }
-  });
+  }, undefined, worldName); // Use world-specific event bus
 }
