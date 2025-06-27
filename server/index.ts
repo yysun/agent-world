@@ -35,9 +35,9 @@ import {
   loadWorld,
   createWorld,
   DEFAULT_WORLD_NAME
-} from './src/world.js';
-import { listWorldsFromDisk } from './src/world-persistence.js';
-import { subscribeToWorld } from './src/event-bus.js';
+} from '../src/world.js';
+import { listWorldsFromDisk } from '../src/world-persistence.js';
+import { subscribeToWorld } from '../src/event-bus.js';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -74,7 +74,7 @@ app.use((req, res, next) => {
 });
 
 // Serve static files from public directory
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '../public')));
 
 // GET /worlds - List all available worlds
 app.get('/worlds', async (req, res) => {
