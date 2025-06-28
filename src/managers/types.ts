@@ -20,7 +20,7 @@
 
 import { EventEmitter } from 'events';
 
-export interface ChatMessage  {
+export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   createdAt?: Date;
@@ -53,6 +53,7 @@ export interface AgentConfig {
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
+  autoSyncMemory?: boolean; // Auto-sync memory to file after LLM responses
   // Provider-specific configs
   azureEndpoint?: string;
   azureApiVersion?: string;
@@ -127,10 +128,11 @@ export interface WorldConfig {
   turnLimit?: number;
 }
 
-export interface World extends EventEmitter {
+export interface World {
   id: string; // kebab-case of world name
   agents: Map<string, Agent>;
   config: WorldConfig;
+  eventEmitter: EventEmitter;
 }
 
 // Storage Types

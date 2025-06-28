@@ -20,13 +20,13 @@
  * - Each world uses its own isolated event bus for complete event isolation
  */
 
-import { WorldState, Agent, EventType, MessageEventPayload } from './types';
+import { World, Agent, EventType, MessageEventPayload } from './types';
 import { subscribeToMessages } from './event-bus';
 import { processAgentMessage } from './agent';
 import { _clearAllWorldEventBusesForTesting } from './world-event-bus';
 
 // Global world storage - keyed by world name
-export const worlds: Map<string, WorldState> = new Map();
+export const worlds: Map<string, World> = new Map();
 
 // Track agent message subscriptions to prevent double subscription
 export const agentSubscriptions: Map<string, () => void> = new Map();
@@ -36,7 +36,7 @@ export const agentSubscriptions: Map<string, () => void> = new Map();
  * Uses the world-specific event bus for complete isolation
  */
 export function subscribeAgentToMessages(worldName: string, agent: Agent): void {
-  const subscriptionKey = `${worldName}:${agent.name}`;
+  const subscriptionKey = `${worldName}:${agent.id}`;
 
   // Check if already subscribed
   if (agentSubscriptions.has(subscriptionKey)) {
@@ -50,12 +50,12 @@ export function subscribeAgentToMessages(worldName: string, agent: Agent): void 
       const payload = event.payload as MessageEventPayload;
 
       // Don't process messages from this agent itself
-      if (payload.sender !== agent.name) {
+      if (payload.sender !== agent.id) {
         try {
           // Ensure agent config has name field
           const agentConfigWithName = {
             ...agent.config,
-            name: agent.name
+            name: agent.id
           };
           await processAgentMessage(agentConfigWithName, {
             name: 'message',
@@ -66,7 +66,7 @@ export function subscribeAgentToMessages(worldName: string, agent: Agent): void 
           }, undefined, worldName);
 
         } catch (error) {
-          console.error(`Agent ${agent.name} failed to process message:`, error);
+          console.error(`Agent ${agent.id} failed to process message:`, error);
         }
       }
     }
