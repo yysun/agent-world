@@ -26,8 +26,8 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { WorldConfig } from '../types.js';
-import { toKebabCase } from '../utils.js';
+import { WorldConfig } from './types.js';
+import { toKebabCase } from './utils.js';
 
 /**
  * Serializable world data for storage (no EventEmitter, no agents Map)

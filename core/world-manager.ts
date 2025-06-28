@@ -24,7 +24,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { World, WorldConfig } from '../src/types.js';
+import { World, WorldConfig } from './types.js';
 import {
   WorldData,
   saveWorldToDisk,

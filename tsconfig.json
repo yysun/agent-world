@@ -24,12 +24,16 @@
     "noUncheckedIndexedAccess": false,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false,
-    "types": ["node", "jest"]
+    "types": [
+      "node",
+      "jest"
+    ]
   },
   "include": [
     "src/**/*",
     "server/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "core/**/*"
   ],
   "exclude": [
     "node_modules",

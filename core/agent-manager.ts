@@ -26,7 +26,7 @@
  * - Ready for EventBus integration in Phase 3
  */
 
-import { Agent, AgentMessage, AgentConfig, LLMProvider } from '../src/types.js';
+import { Agent, AgentMessage, AgentConfig, LLMProvider } from './types.js';
 import {
   saveAgentToDisk,
   loadAgentFromDisk,

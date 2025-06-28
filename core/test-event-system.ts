@@ -5,8 +5,7 @@
 import { createWorld } from './world-manager.js';
 import { createAgent } from './agent-manager.js';
 import { broadcastMessage } from './message-manager.js';
-import { LLMProvider } from '../types.js';
-
+import { LLMProvider } from './types.js';
 async function testNewEventSystem() {
   try {
     console.log('🧪 Testing new event system implementation...');

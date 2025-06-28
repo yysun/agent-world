@@ -21,11 +21,11 @@
  * - Zero dependencies on existing agent.ts or event systems
  */
 
-import { World, Agent, AgentMessage } from '../types.js';
+import { World, Agent, AgentMessage } from './types.js';
 import { subscribeToMessages, publishMessage, publishSSE } from './world-events.js';
-import { saveAgentToDisk } from './agent-storage';
-import { streamAgentResponse } from './llm-manager';
-import { WorldMessageEvent } from './utils';
+import { saveAgentToDisk } from './agent-storage.js';
+import { streamAgentResponse } from './llm-manager.js';
+import { WorldMessageEvent } from './utils.js';
 
 /**
  * Agent subscription with automatic processing

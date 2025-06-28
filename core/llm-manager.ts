@@ -26,7 +26,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 // Import other AI SDK providers as needed
-import { World, Agent, AgentMessage, AgentConfig, LLMProvider, stripCustomFieldsFromMessages } from '../types.js';
+import { World, Agent, AgentMessage, AgentConfig, LLMProvider, stripCustomFieldsFromMessages } from './types.js';
 import { publishSSE } from './world-events.js';
 import { generateId, WorldSSEEvent } from './utils.js';
 

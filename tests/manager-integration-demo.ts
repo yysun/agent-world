@@ -8,8 +8,8 @@
  */
 
 import { LLMProvider } from '../src/types.js';
-import { createAgent, getAgent, updateAgent, deleteAgent, listAgents, updateAgentMemory, getAgentConfig } from '../src/managers/agent-manager.js';
-import { createWorld, getWorld, updateWorld, deleteWorld, listWorlds } from '../src/managers/world-manager.js';
+import { createAgent, getAgent, updateAgent, deleteAgent, listAgents, updateAgentMemory, getAgentConfig } from '../core/agent-manager.js';
+import { createWorld, getWorld, updateWorld, deleteWorld, listWorlds } from '../core/world-manager.js';
 
 async function runDemo() {
   console.log('🧪 Manager Modules Integration Demo\n');

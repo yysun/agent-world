@@ -22,7 +22,7 @@
  * - Ready for agent subscription and LLM integration
  */
 
-import { World, Agent } from '../types.js';
+import { World, Agent } from './types.js';
 import { generateId, WorldMessageEvent, WorldSSEEvent } from './utils.js';
 
 /**
