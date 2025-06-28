@@ -27,7 +27,7 @@ const connect = () => {
     ws.onopen = () => {
       reconnectAttempts = 0;
       app.run('handleConnectionStatus', 'connected');
-      send({
+      sendMessage({
         type: 'user_connect',
         userId: userId,
         timestamp: new Date().toISOString()
@@ -65,7 +65,7 @@ const disconnect = () => {
   }
 };
 
-const send = (message) => {
+const sendMessage = (message) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify(message));
@@ -91,16 +91,6 @@ const attemptReconnect = () => {
   }
 };
 
-const sendChatMessage = (worldName, message) => {
-  return send({
-    type: 'chat_message',
-    worldName: worldName,
-    userId: userId,
-    message: message,
-    timestamp: new Date().toISOString()
-  });
-};
-
 // Utility functions
 const isConnected = () => ws && ws.readyState === WebSocket.OPEN;
 
@@ -120,8 +110,7 @@ export default {
   connect,
   disconnect,
   attemptReconnect,
-  send,
-  sendChatMessage,
+  sendMessage,
   isConnected,
   getConnectionState
 };

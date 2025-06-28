@@ -288,9 +288,10 @@ async function main() {
 
   // If we have external input, broadcast it
   if (hasExternalInput && externalMessage) {
-    StreamingDisplay.displayFormattedMessage({
-      sender: 'you',
+    displayUnifiedMessage({
+      type: 'human',
       content: externalMessage,
+      sender: 'you',
       metadata: { source: 'cli', messageType: 'command' }
     });
     try {
@@ -355,9 +356,10 @@ async function main() {
           handlePostCommandDisplay();
         } else {
           // Broadcast message to all agents
-          StreamingDisplay.displayFormattedMessage({
-            sender: 'you',
+          displayUnifiedMessage({
+            type: 'human',
             content: trimmedInput,
+            sender: 'you',
             metadata: { source: 'cli', messageType: 'command' }
           });
           try {

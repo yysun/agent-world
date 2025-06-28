@@ -26,6 +26,8 @@ import { AgentModal } from './agent.js';
 import { toggleTheme, applyTheme, getThemeIcon } from './theme.js';
 import wsApi from './ws-api.js';
 
+const USER_ID = 'user1'; // Placeholder for user ID, can be replaced with actual user management
+
 // Initial state
 const state = async () => {
   const worlds = await api.getWorlds();
@@ -132,6 +134,13 @@ const closeAgentModal = (state, save) => {
   }
 };
 
+const onKeypress = (state, e) => {
+  const value = e.target.value;
+  state.currentMessage = value;
+  if (e.key === 'Enter') {
+    sendMessage(state, e);
+  }
+};
 
 const sendMessage = (state) => {
   const message = state.currentMessage?.trim();
@@ -155,16 +164,20 @@ const sendMessage = (state) => {
   }
 
   // Send message via WebSocket
-  const success = wsApi.sendChatMessage(state.worldName, message);
+  const success = wsApi.sendMessage({
+    id: Date.now() + Math.random(),
+    sender: USER_ID,
+    worldName: state.worldName,
+    content: message,
+    type: 'message',
+  });
 
   if (success) {
     // Add user message to local state immediately for better UX
     const userMessage = {
-      id: Date.now() + Math.random(),
-      type: 'user',
-      sender: 'user1',
-      text: message,
-      timestamp: new Date().toISOString(),
+      type: 'message',
+      sender: USER_ID,
+      content: message,
       worldName: state.worldName
     };
 
@@ -287,12 +300,12 @@ const view = (state) => {
                 class="message-input" 
                 placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
                 value="${state.currentMessage || ''}"
-                @keypress=${(e) => e.key === 'Enter' && run(sendMessage)}
+                @keypress=${run(onKeypress)}
               >
               <button 
                 class="send-button" 
                 @click=${run(sendMessage)}
-                ?disabled=${!state.worldName || state.connectionStatus !== 'connected' || !state.currentMessage?.trim()}
+                
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="m5 12 7-7 7 7M12 19V5"/>
