@@ -24,7 +24,7 @@ import { colors } from './cli/ui/colors.js';
 async function startWebServer() {
   try {
     console.log(colors.cyan('🌐 Starting web server...'));
-    const { startWebServer: startServer } = await import('./server.js');
+    const { startWebServer: startServer } = await import('./server');
     const server = await startServer();
     console.log(colors.green('✅ Web server started on http://localhost:3000'));
     console.log(colors.gray('   API Documentation: http://localhost:3000'));
@@ -42,7 +42,7 @@ async function startCLI() {
     console.log(); // Add spacing before CLI starts
 
     // Import and run the CLI
-    await import('./cli/index-tui.js');
+    await import('./cli/index-tui');
   } catch (error) {
     console.error(colors.red('❌ Failed to start CLI:'), error);
     throw error;

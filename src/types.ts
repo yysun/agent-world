@@ -237,7 +237,5 @@ export function stripCustomFieldsFromMessages(messages: ChatMessage[]): LLMCompa
   return messages.map(stripCustomFields);
 }
 
-// Re-export WebSocket types
-export * from '../server/websocket-types';
 
 

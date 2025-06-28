@@ -34,16 +34,6 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
-import {
-  UserSession,
-  UserSessionOptions,
-  CloneWorldOptions,
-  CloneWorldResult,
-  UserStorageInfo,
-  UserWorldInfo,
-  WebSocketError,
-  WebSocketErrorCode
-} from '../server/websocket-types';
 import { WorldState } from './types';
 import {
   createUserDirectory,
@@ -61,6 +51,46 @@ import {
   saveUserWorld as saveUserWorldToDisk
 } from './world-cloning';
 
+// Type definitions
+interface UserSessionOptions {
+  persistent?: boolean;
+}
+
+interface UserSession {
+  userId: string;
+  sessionId: string;
+  worldName: string;
+  templateName: string;
+  worldPath: string;
+  isPersistent: boolean;
+  createdAt: Date;
+  lastAccessed: Date;
+  connectionCount: number;
+}
+
+interface UserWorldInfo {
+  userId: string;
+  worldName: string;
+  templateName: string;
+  worldPath: string;
+  exists: boolean;
+  lastModified: Date;
+}
+
+interface CloneWorldOptions {
+  overwrite?: boolean;
+}
+
+interface CloneWorldResult {
+  worldPath: string;
+  success: boolean;
+}
+
+interface UserStorageInfo {
+  exists: boolean;
+  path: string;
+}
+
 // In-memory session storage
 const userSessions = new Map<string, UserSession>();
 const sessionsByUserId = new Map<string, Set<string>>();
@@ -77,7 +107,7 @@ export async function createUserSession(
   try {
     // Validate template exists
     if (!(await templateWorldExists(templateName))) {
-      throw new WebSocketError(`Template '${templateName}' not found`);
+      throw new Error(`Template '${templateName}' not found`);
     }
 
     // Generate session ID
@@ -124,7 +154,7 @@ export async function createUserSession(
 
   } catch (error) {
     if (error instanceof Error) {
-      throw new WebSocketError(`Failed to create user session: ${error.message}`);
+      throw new Error(`Failed to create user session: ${error.message}`);
     }
     throw error;
   }
@@ -249,7 +279,7 @@ export async function saveUserWorld(
   try {
     await saveUserWorldToDisk(userId, worldName, worldState);
   } catch (error) {
-    throw new WebSocketError(`Failed to save user world: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Failed to save user world: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
@@ -269,10 +299,7 @@ export async function cloneWorldForUser(
     return worldState;
 
   } catch (error) {
-    if (error instanceof WebSocketError) {
-      throw error;
-    }
-    throw new WebSocketError(`Failed to clone world for user: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Failed to clone world for user: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
