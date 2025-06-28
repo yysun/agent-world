@@ -41,6 +41,7 @@ export interface Agent {
   llmCallCount: number;
   lastLLMCall?: Date;
   memory: AgentMessage[];
+  world?: World;
 }
 
 export interface AgentConfig {

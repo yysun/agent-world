@@ -1,0 +1,99 @@
+/**
+ * Unit Tests for Core Utilities
+ * 
+ * Features:
+ * - Tests for generateId function
+ * - Tests for toKebabCase function
+ * - Tests for type definitions
+ * - Pure unit tests with no external dependencies
+ * 
+ * Implementation:
+ * - Tests utility functions in isolation
+ * - No file I/O or LLM dependencies
+ * - Tests edge cases and error conditions
+ * - Validates utility function behavior
+ */
+
+import { describe, test, expect } from '@jest/globals';
+import { generateId, toKebabCase } from '../../core/utils.js';
+
+describe('Core Utilities', () => {
+  describe('generateId', () => {
+    test('should generate a valid UUID', () => {
+      const id = generateId();
+      expect(id).toBeDefined();
+      expect(typeof id).toBe('string');
+      // UUID v4 format: 8-4-4-4-12 characters separated by hyphens
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    });
+
+    test('should generate unique IDs', () => {
+      const id1 = generateId();
+      const id2 = generateId();
+      expect(id1).not.toBe(id2);
+    });
+
+    test('should generate multiple unique IDs', () => {
+      const ids = new Set();
+      for (let i = 0; i < 100; i++) {
+        ids.add(generateId());
+      }
+      expect(ids.size).toBe(100);
+    });
+  });
+
+  describe('toKebabCase', () => {
+    test('should convert camelCase to kebab-case', () => {
+      expect(toKebabCase('camelCase')).toBe('camel-case');
+      expect(toKebabCase('myVariableName')).toBe('my-variable-name');
+      expect(toKebabCase('someComplexVariableNameHere')).toBe('some-complex-variable-name-here');
+    });
+
+    test('should convert spaces to hyphens', () => {
+      expect(toKebabCase('hello world')).toBe('hello-world');
+      expect(toKebabCase('multiple   spaces   here')).toBe('multiple-spaces-here');
+      expect(toKebabCase('  leading and trailing  ')).toBe('leading-and-trailing');
+    });
+
+    test('should handle PascalCase', () => {
+      expect(toKebabCase('PascalCase')).toBe('pascal-case');
+      expect(toKebabCase('MyClassName')).toBe('my-class-name');
+    });
+
+    test('should handle special characters', () => {
+      expect(toKebabCase('hello@world')).toBe('hello-world');
+      expect(toKebabCase('test_with_underscores')).toBe('test-with-underscores');
+      expect(toKebabCase('name.with.dots')).toBe('name-with-dots');
+      expect(toKebabCase('mixed@#$%special')).toBe('mixed-special');
+    });
+
+    test('should handle numbers', () => {
+      expect(toKebabCase('version2Name')).toBe('version2name');
+      expect(toKebabCase('test123variable')).toBe('test123variable');
+      expect(toKebabCase('var2ableWith3Numbers')).toBe('var2able-with3numbers');
+    });
+
+    test('should handle multiple consecutive hyphens', () => {
+      expect(toKebabCase('test---multiple---hyphens')).toBe('test-multiple-hyphens');
+      expect(toKebabCase('a----b----c')).toBe('a-b-c');
+    });
+
+    test('should handle empty and edge cases', () => {
+      expect(toKebabCase('')).toBe('');
+      expect(toKebabCase('a')).toBe('a');
+      expect(toKebabCase('A')).toBe('a');
+      expect(toKebabCase('-')).toBe('');
+      expect(toKebabCase('---')).toBe('');
+    });
+
+    test('should handle already kebab-case strings', () => {
+      expect(toKebabCase('already-kebab-case')).toBe('already-kebab-case');
+      expect(toKebabCase('simple-test')).toBe('simple-test');
+    });
+
+    test('should handle mixed formats', () => {
+      expect(toKebabCase('mixedFormat With_Spaces@And.Dots')).toBe('mixed-format-with-spaces-and-dots');
+      expect(toKebabCase('ComplexMixed_case@With123Numbers')).toBe('complex-mixed-case-with123numbers');
+    });
+  });
+});

@@ -7,6 +7,9 @@
  * - System prompt management with markdown file support
  * - Configuration persistence with Date serialization
  * - Isolated operations using agent-storage.ts
+ * - Enhanced runtime agent registration and world synchronization
+ * - Batch operations for performance optimization
+ * - Automatic world-agent relationship maintenance
  * - Clean separation from internal event systems
  *
  * Core Functions:
@@ -18,11 +21,16 @@
  * - updateAgentMemory: Add messages to agent memory
  * - clearAgentMemory: Reset agent memory to empty state
  * - getAgentConfig: Get agent configuration without memory
+ * - loadAgentsIntoWorld: Load all agents from disk into world runtime
+ * - syncWorldAgents: Synchronize world agents Map with disk state
+ * - createAgentsBatch: Create multiple agents atomically
+ * - registerAgentRuntime: Register agent in world runtime without persistence
  *
  * Implementation:
  * - Wraps agent-storage.ts with business logic
  * - Uses only types.ts, utils.ts, and agent-storage.ts
  * - No direct file system dependencies
+ * - Enhanced world-agent relationship management
  * - Ready for EventBus integration in Phase 3
  */
 
@@ -30,9 +38,15 @@ import { Agent, AgentMessage, AgentConfig, LLMProvider } from './types.js';
 import {
   saveAgentToDisk,
   loadAgentFromDisk,
+  loadAgentFromDiskWithRetry,
   deleteAgentFromDisk,
   loadAllAgentsFromDisk,
-  agentExistsOnDisk
+  loadAllAgentsFromDiskBatch,
+  agentExistsOnDisk,
+  validateAgentIntegrity,
+  repairAgentData,
+  type AgentLoadOptions,
+  type BatchLoadResult
 } from './agent-storage.js';
 import { subscribeAgentToMessages } from './agent-events.js';
 import { getWorld } from './world-manager.js';
@@ -78,6 +92,45 @@ export interface AgentInfo {
 }
 
 /**
+ * Batch agent creation parameters
+ */
+export interface BatchCreateParams {
+  agents: CreateAgentParams[];
+  failOnError?: boolean;
+  maxConcurrency?: number;
+}
+
+/**
+ * Batch creation result
+ */
+export interface BatchCreateResult {
+  successful: Agent[];
+  failed: Array<{ params: CreateAgentParams; error: string }>;
+  totalCount: number;
+  successCount: number;
+  failureCount: number;
+}
+
+/**
+ * Agent runtime registration options
+ */
+export interface RuntimeRegistrationOptions {
+  subscribeToEvents?: boolean;
+  updateWorldMap?: boolean;
+  validateAgent?: boolean;
+}
+
+/**
+ * World synchronization result
+ */
+export interface WorldSyncResult {
+  loadedCount: number;
+  errorCount: number;
+  repairedCount: number;
+  errors: Array<{ agentId: string; error: string }>;
+}
+
+/**
  * Get world ID from environment variable or default
  */
 function getWorldId(): string {
@@ -88,6 +141,224 @@ function getWorldId(): string {
  * Track agent subscriptions for cleanup
  */
 const agentSubscriptions = new Map<string, () => void>();
+
+/**
+ * Register agent in world runtime without persistence
+ */
+export async function registerAgentRuntime(
+  agent: Agent,
+  options: RuntimeRegistrationOptions = {}
+): Promise<boolean> {
+  const {
+    subscribeToEvents = true,
+    updateWorldMap = true,
+    validateAgent = false
+  } = options;
+
+  try {
+    const worldId = getWorldId();
+
+    // Validate agent if requested
+    if (validateAgent) {
+      if (!agent.id || !agent.type || !agent.config) {
+        throw new Error('Invalid agent structure for runtime registration');
+      }
+    }
+
+    // Get world for registration
+    const world = await getWorld(worldId);
+    if (!world) {
+      throw new Error(`World '${worldId}' not found for agent runtime registration`);
+    }
+
+    // Update world agents Map
+    if (updateWorldMap) {
+      world.agents.set(agent.id, agent);
+    }
+
+    // Subscribe to events
+    if (subscribeToEvents) {
+      const subscriptionKey = `${worldId}:${agent.id}`;
+
+      // Clean up existing subscription if any
+      const existingUnsubscribe = agentSubscriptions.get(subscriptionKey);
+      if (existingUnsubscribe) {
+        existingUnsubscribe();
+      }
+
+      // Create new subscription
+      const unsubscribe = subscribeAgentToMessages(world, agent);
+      agentSubscriptions.set(subscriptionKey, unsubscribe);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Load all agents from disk into world runtime
+ */
+export async function loadAgentsIntoWorld(
+  options: AgentLoadOptions & { repairCorrupted?: boolean } = {}
+): Promise<WorldSyncResult> {
+  const { repairCorrupted = true, ...loadOptions } = options;
+  const worldId = getWorldId();
+
+  const result: WorldSyncResult = {
+    loadedCount: 0,
+    errorCount: 0,
+    repairedCount: 0,
+    errors: []
+  };
+
+  try {
+    // Get world
+    const world = await getWorld(worldId);
+    if (!world) {
+      result.errors.push({ agentId: 'SYSTEM', error: `World '${worldId}' not found` });
+      result.errorCount++;
+      return result;
+    }
+
+    // Clear existing agents from world Map
+    world.agents.clear();
+
+    // Load agents using batch loading
+    const batchResult = await loadAllAgentsFromDiskBatch(worldId, loadOptions);
+
+    // Register successful agents in runtime
+    for (const agent of batchResult.successful) {
+      const registered = await registerAgentRuntime(agent, {
+        subscribeToEvents: true,
+        updateWorldMap: true,
+        validateAgent: false // Already validated during loading
+      });
+
+      if (registered) {
+        result.loadedCount++;
+      } else {
+        result.errors.push({
+          agentId: agent.id,
+          error: 'Failed to register agent in runtime'
+        });
+        result.errorCount++;
+      }
+    }
+
+    // Handle failed loads
+    for (const failure of batchResult.failed) {
+      if (repairCorrupted && failure.agentId !== 'SYSTEM') {
+        // Attempt to repair the agent
+        const repaired = await repairAgentData(worldId, failure.agentId);
+        if (repaired) {
+          result.repairedCount++;
+
+          // Try loading again after repair
+          const agent = await loadAgentFromDiskWithRetry(worldId, failure.agentId, loadOptions);
+          if (agent) {
+            const registered = await registerAgentRuntime(agent);
+            if (registered) {
+              result.loadedCount++;
+            } else {
+              result.errors.push({
+                agentId: failure.agentId,
+                error: 'Failed to register repaired agent in runtime'
+              });
+              result.errorCount++;
+            }
+          } else {
+            result.errors.push({
+              agentId: failure.agentId,
+              error: 'Failed to load agent after repair'
+            });
+            result.errorCount++;
+          }
+        } else {
+          result.errors.push({
+            agentId: failure.agentId,
+            error: `Repair failed: ${failure.error}`
+          });
+          result.errorCount++;
+        }
+      } else {
+        result.errors.push(failure);
+        result.errorCount++;
+      }
+    }
+
+  } catch (error) {
+    result.errors.push({
+      agentId: 'SYSTEM',
+      error: error instanceof Error ? error.message : 'Unknown error during world sync'
+    });
+    result.errorCount++;
+  }
+
+  return result;
+}
+
+/**
+ * Synchronize world agents Map with disk state
+ */
+export async function syncWorldAgents(): Promise<WorldSyncResult> {
+  return loadAgentsIntoWorld({
+    includeMemory: true,
+    allowPartialLoad: true,
+    validateIntegrity: true,
+    repairCorrupted: true
+  });
+}
+
+/**
+ * Create multiple agents atomically
+ */
+export async function createAgentsBatch(params: BatchCreateParams): Promise<BatchCreateResult> {
+  const { agents, failOnError = false, maxConcurrency = 5 } = params;
+
+  const result: BatchCreateResult = {
+    successful: [],
+    failed: [],
+    totalCount: agents.length,
+    successCount: 0,
+    failureCount: 0
+  };
+
+  // Process agents in batches to avoid overwhelming the system
+  const batches: CreateAgentParams[][] = [];
+  for (let i = 0; i < agents.length; i += maxConcurrency) {
+    batches.push(agents.slice(i, i + maxConcurrency));
+  }
+
+  for (const batch of batches) {
+    const batchPromises = batch.map(async (agentParams) => {
+      try {
+        const agent = await createAgent(agentParams);
+        result.successful.push(agent);
+        result.successCount++;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        result.failed.push({ params: agentParams, error: errorMessage });
+        result.failureCount++;
+
+        if (failOnError) {
+          throw error;
+        }
+      }
+    });
+
+    try {
+      await Promise.all(batchPromises);
+    } catch (error) {
+      if (failOnError) {
+        throw error;
+      }
+    }
+  }
+
+  return result;
+}
 
 /**
  * Create new agent with configuration and system prompt
@@ -124,17 +395,20 @@ export async function createAgent(params: CreateAgentParams): Promise<Agent> {
     memory: []
   };
 
+  // Save to disk first
   await saveAgentToDisk(worldId, agent);
 
-  // Get world for event subscription
-  const world = await getWorld(worldId);
-  if (world) {
-    // Add agent to world
-    world.agents.set(agent.id, agent);
+  // Register in runtime
+  const registered = await registerAgentRuntime(agent, {
+    subscribeToEvents: true,
+    updateWorldMap: true,
+    validateAgent: false
+  });
 
-    // Automatically subscribe agent to world messages
-    const unsubscribe = subscribeAgentToMessages(world, agent);
-    agentSubscriptions.set(`${worldId}:${agent.id}`, unsubscribe);
+  if (!registered) {
+    // Clean up if runtime registration failed
+    await deleteAgentFromDisk(worldId, agent.id);
+    throw new Error('Failed to register agent in world runtime');
   }
 
   return agent;

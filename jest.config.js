@@ -36,10 +36,13 @@ export default {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/core/setup.ts'], // Add setup file for core tests
   collectCoverageFrom: [
     'src/**/*.ts',
+    'core/**/*.ts', // Include core folder in coverage
     '!src/**/*.d.ts',
-    '!src/cli/**'  // Exclude CLI
+    '!src/cli/**',  // Exclude CLI
+    '!core/**/*.d.ts'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],

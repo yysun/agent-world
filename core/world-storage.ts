@@ -125,6 +125,11 @@ export async function loadWorldFromDisk(root: string, worldId: string): Promise<
 export async function deleteWorldFromDisk(root: string, worldId: string): Promise<boolean> {
   try {
     const worldDir = getWorldDir(root, worldId);
+
+    // Check if directory exists first
+    await fs.access(worldDir);
+
+    // If we get here, directory exists, so delete it
     await fs.rm(worldDir, { recursive: true, force: true });
     return true;
   } catch {
