@@ -1,31 +1,41 @@
 /**
- * Agent Events Module - Agent Message Processing and Subscriptions
+ * Agent Events Module - World-Aware Agent Message Processing and Subscriptions
  *
  * Features:
  * - Automatic agent subscription to World.eventEmitter messages
- * - Agent message processing logic without existing event dependencies
- * - Message filtering and response logic
+ * - Agent message processing logic with world-specific turn limits
+ * - Message filtering and response logic using world context
  * - Memory auto-sync integration
- * - LLM streaming integration with SSE events
+ * - LLM streaming integration with world's eventEmitter SSE events
+ * - World-specific event emitter usage (agents use their world's eventEmitter)
  *
  * Core Functions:
  * - subscribeAgentToMessages: Auto-subscribe agent to world messages
- * - processAgentMessage: Handle agent message processing and LLM calls
- * - shouldAgentRespond: Message filtering logic for agent responses
+ * - processAgentMessage: Handle agent message processing with world context
+ * - shouldAgentRespond: Message filtering logic with world-specific turn limits
  *
  * Implementation:
  * - Uses World.eventEmitter for all event operations
- * - Reimplements agent processing logic from scratch
- * - Integrates with new LLM manager for streaming
- * - Supports configurable memory auto-sync
+ * - Implements agent processing logic with world awareness
+ * - Integrates with LLM manager using world context
+ * - Supports configurable world-specific turn limits
  * - Zero dependencies on existing agent.ts or event systems
+ * - All operations scoped to specific world instance
  */
 
-import { World, Agent, AgentMessage } from './types.js';
+import { World, Agent, AgentMessage, MessageData, SenderType } from './types.js';
 import { subscribeToMessages, publishMessage, publishSSE } from './world-events.js';
-import { saveAgentToDisk } from './agent-storage.js';
+import { saveAgentToDisk, loadAgentFromDisk } from './agent-storage.js';
 import { streamAgentResponse } from './llm-manager.js';
-import { WorldMessageEvent } from './utils.js';
+import {
+  WorldMessageEvent,
+  getWorldTurnLimit,
+  extractMentions,
+  determineSenderType,
+  messageDataToAgentMessage,
+  prepareMessagesForLLM,
+  generateId
+} from './utils.js';
 
 /**
  * Agent subscription with automatic processing
@@ -36,7 +46,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     if (messageEvent.sender === agent.id) return;
 
     // Automatic message processing
-    if (shouldAgentRespond(agent, messageEvent)) {
+    if (await shouldAgentRespond(world, agent, messageEvent)) {
       await processAgentMessage(world, agent, messageEvent);
     }
   };
@@ -45,33 +55,116 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
 }
 
 /**
- * Agent message processing logic (reimplemented from src/agent.ts)
+ * Save incoming message to agent memory (independent of LLM processing)
  */
-async function processAgentMessage(
+async function saveIncomingMessageToMemory(
   world: World,
   agent: Agent,
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   try {
-    // Add message to agent memory
-    const agentMessage: AgentMessage = {
+    // Skip saving agent's own messages
+    if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
+      return;
+    }
+
+    // Create user message for memory storage
+    const userMessage: AgentMessage = {
       role: 'user',
       content: messageEvent.content,
       sender: messageEvent.sender,
       createdAt: messageEvent.timestamp
     };
 
-    agent.memory.push(agentMessage);
+    // Add to agent memory
+    agent.memory.push(userMessage);
 
-    // Call LLM for response
-    const response = await streamAgentResponse(world, agent, agent.memory);
+    // Auto-sync memory to file (if enabled)
+    if (agent.config.autoSyncMemory !== false) {
+      await saveAgentToDisk(world.id, agent);
+    }
+  } catch (error) {
+    console.warn(`Could not save incoming message to memory for ${agent.id}:`, error);
+  }
+}
+
+/**
+ * Agent message processing logic (enhanced from src/agent.ts)
+ */
+async function processAgentMessage(
+  world: World,
+  agent: Agent,
+  messageEvent: WorldMessageEvent
+): Promise<void> {
+  const messageId = generateId();
+
+  try {
+    // Always save incoming message to memory (regardless of response decision)
+    await saveIncomingMessageToMemory(world, agent, messageEvent);
+
+    // Load conversation history for context (last 10 messages)
+    let conversationHistory: AgentMessage[] = [];
+    try {
+      // Get last 10 messages from agent memory
+      conversationHistory = agent.memory.slice(-10);
+    } catch (error) {
+      console.warn(`Could not load conversation history for ${agent.id}:`, error);
+    }
+
+    // Create MessageData for compatibility with utility functions
+    const messageData: MessageData = {
+      id: messageId,
+      name: 'message',
+      sender: messageEvent.sender,
+      content: messageEvent.content,
+      payload: {}
+    };
+
+    // Prepare messages for LLM (including system prompt, history, and current message)
+    const messages = prepareMessagesForLLM(agent.config, messageData, conversationHistory);
+
+    // Increment LLM call count before making the call
+    agent.llmCallCount++;
+    agent.lastLLMCall = new Date();
+
+    // Call LLM for response with streaming
+    const response = await streamAgentResponse(world, agent, messages);
 
     // Add response to memory
-    agent.memory.push({
+    const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: response,
       createdAt: new Date()
-    });
+    };
+
+    agent.memory.push(assistantMessage);
+
+    // Check for pass command in response
+    const passCommandRegex = /<world>pass<\/world>/i;
+    if (passCommandRegex.test(response)) {
+      // Replace response with @human redirect
+      const passMessage = `@human ${agent.id} is passing control to you`;
+
+      publishMessage(world, passMessage, 'system');
+      return;
+    }
+
+    // Auto-add @mention when replying to other agents (only for agent-to-agent replies)
+    let finalResponse = response;
+    if (messageEvent.sender && typeof messageEvent.sender === 'string' &&
+      messageEvent.sender.toLowerCase() !== agent.id.toLowerCase()) {
+
+      const senderType = determineSenderType(messageEvent.sender);
+
+      // Only auto-mention when replying to agents (not humans or system)
+      if (senderType === SenderType.AGENT && finalResponse && typeof finalResponse === 'string') {
+        // Check if response already contains @mention for the sender
+        const senderMention = `@${messageEvent.sender}`;
+        if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
+          finalResponse = `${senderMention} ${finalResponse}`;
+        }
+      }
+    }
 
     // Auto-sync memory to file (if enabled)
     if (agent.config.autoSyncMemory !== false) {
@@ -79,22 +172,88 @@ async function processAgentMessage(
     }
 
     // Publish agent response
-    publishMessage(world, response, agent.id);
+    if (finalResponse && typeof finalResponse === 'string') {
+      publishMessage(world, finalResponse, agent.id);
+    }
 
   } catch (error) {
     console.error(`Agent ${agent.id} failed to process message:`, error);
+
+    // Publish error event via world's eventEmitter
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'error',
+      error: (error as Error).message,
+      messageId
+    });
   }
 }
 
 /**
- * Message filtering logic
+ * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
  */
-function shouldAgentRespond(agent: Agent, messageEvent: WorldMessageEvent): boolean {
-  // Check for direct mentions (@agentName)
-  if (messageEvent.content.includes(`@${agent.id}`)) return true;
+async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
+  // Never respond to own messages
+  if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
+    return false;
+  }
 
-  // Check for direct messages (implement direct message logic)
-  // Add other filtering criteria as needed
+  const content = messageEvent.content || '';
+  const agentName = agent.id.toLowerCase();
 
-  return false; // Default: don't respond unless mentioned
+  // Never respond to turn limit messages (prevents endless loops)
+  if (content.includes('Turn limit reached')) {
+    return false;
+  }
+
+  // Check turn limit based on LLM call count using world-specific turn limit
+  const worldTurnLimit = getWorldTurnLimit(world);
+
+  if (agent.llmCallCount >= worldTurnLimit) {
+    // Send turn limit message with agentName as sender
+    const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
+
+    publishMessage(world, turnLimitMessage, agent.id);
+
+    return false; // Don't respond when turn limit is reached
+  }
+
+  // Reset LLM call count when receiving human or system messages
+  const senderType = determineSenderType(messageEvent.sender);
+  if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
+    if (agent.llmCallCount > 0) {
+      agent.llmCallCount = 0;
+
+      // Auto-sync to disk if enabled
+      if (agent.config.autoSyncMemory !== false) {
+        try {
+          await saveAgentToDisk(world.id, agent);
+        } catch (error) {
+          console.warn('Could not save agent LLM call count reset:', error);
+        }
+      }
+    }
+  }
+
+  // Always respond to system messages (except turn limit messages handled above)
+  if (!messageEvent.sender || messageEvent.sender === 'system') {
+    return true;
+  }
+
+  // Extract @mentions from content
+  const mentions = extractMentions(content);
+
+  // For HUMAN/user messages
+  if (messageEvent.sender === 'HUMAN' || messageEvent.sender === 'human') {
+    // If no mentions at all, respond to all (public message)
+    if (mentions.length === 0) {
+      return true;
+    }
+
+    // If there are mentions, only respond if this agent is the first mention
+    return mentions.length > 0 && mentions[0] === agentName;
+  }
+
+  // For agent messages, only respond if this agent is the first mention
+  return mentions.length > 0 && mentions[0] === agentName;
 }

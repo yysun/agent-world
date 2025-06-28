@@ -1,24 +1,26 @@
 /**
- * LLM Manager Module - LLM Integration with World.eventEmitter SSE Events
+ * LLM Manager Module - LLM Integration with World-Specific EventEmitter SSE Events
  *
  * Features:
  * - LLM integration using AI SDK without existing event dependencies
- * - Streaming responses with SSE events via World.eventEmitter
+ * - Streaming responses with SSE events via World.eventEmitter specifically
  * - Support for all LLM providers (OpenAI, Anthropic, Google, etc.)
  * - Agent activity tracking and token usage
- * - Error handling with SSE error events
+ * - Error handling with SSE error events via world's eventEmitter
+ * - World-aware event publishing (uses world.eventEmitter, not global events)
  *
  * Core Functions:
- * - streamAgentResponse: Streaming LLM calls with SSE events
+ * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter
  * - generateAgentResponse: Non-streaming LLM calls
  * - loadLLMProvider: Provider loading logic
  *
  * Implementation:
  * - Uses AI SDK for LLM integration
- * - Publishes SSE events via World.eventEmitter
+ * - Publishes SSE events via world.eventEmitter.emit('sse', event)
  * - Updates agent activity metrics
  * - Zero dependencies on existing llm.ts
  * - Complete provider support extraction
+ * - All events scoped to specific world instance
  */
 
 import { generateText, streamText } from 'ai';
@@ -43,7 +45,7 @@ export interface LLMConfig {
 }
 
 /**
- * Streaming agent response with SSE events
+ * Streaming agent response with SSE events via world's eventEmitter
  */
 export async function streamAgentResponse(
   world: World,
@@ -53,7 +55,7 @@ export async function streamAgentResponse(
   const messageId = generateId();
 
   try {
-    // Publish SSE start event
+    // Publish SSE start event via world's eventEmitter
     publishSSE(world, {
       agentName: agent.id,
       type: 'start',
@@ -66,17 +68,26 @@ export async function streamAgentResponse(
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
 
-    // Stream response
-    const { textStream } = await streamText({
+    // Stream response with timeout handling
+    const timeoutMs = 30000; // 30 second timeout
+
+    const streamPromise = streamText({
       model,
       messages: llmMessages,
       temperature: agent.config.temperature,
       maxTokens: agent.config.maxTokens
     });
 
+    // Add timeout wrapper
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('LLM streaming request timeout')), timeoutMs);
+    });
+
+    const { textStream } = await Promise.race([streamPromise, timeoutPromise]);
+
     let fullResponse = '';
 
-    // Stream chunks and emit SSE events
+    // Stream chunks and emit SSE events via world's eventEmitter
     for await (const chunk of textStream) {
       fullResponse += chunk;
 
@@ -88,7 +99,7 @@ export async function streamAgentResponse(
       });
     }
 
-    // Publish SSE end event
+    // Publish SSE end event via world's eventEmitter
     publishSSE(world, {
       agentName: agent.id,
       type: 'end',
@@ -98,13 +109,11 @@ export async function streamAgentResponse(
 
     // Update agent activity
     agent.lastActive = new Date();
-    agent.llmCallCount++;
-    agent.lastLLMCall = new Date();
 
     return fullResponse;
 
   } catch (error) {
-    // Publish SSE error event
+    // Publish SSE error event via world's eventEmitter
     publishSSE(world, {
       agentName: agent.id,
       type: 'error',
