@@ -33,6 +33,14 @@ import { toKebabCase } from '../core/utils.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
+// Enhanced message schema to support Message Broker
+const MessageBrokerSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  data: z.record(z.any()),
+  timestamp: z.string()
+});
+
 // Zod validation schema for WebSocket messages
 const WebSocketMessageSchema = z.object({
   type: z.enum(["connect", "event"]),
@@ -97,6 +105,117 @@ function cleanupConnection(connectionId: string, ws: StatefulWebSocket) {
   console.log(`Connection ${connectionId} cleaned up. Active connections: ${connections.size}`);
 }
 
+/**
+ * Handle Message Broker messages 
+ */
+async function handleMessageBrokerMessage(
+  ws: StatefulWebSocket,
+  message: { id: string; type: string; data: any; timestamp: string },
+  connectionId: string
+) {
+  const { id, type, data } = message;
+
+  try {
+    let result;
+
+    switch (type) {
+      case 'agent_list':
+        // Mock agent list for now - this would integrate with core agent management
+        result = [
+          { id: 'agent-1', name: 'Assistant Agent 1', type: 'assistant', status: 'active' },
+          { id: 'agent-2', name: 'Assistant Agent 2', type: 'assistant', status: 'active' }
+        ];
+        break;
+
+      case 'agent_get':
+        const agentId = data.id;
+        result = {
+          id: agentId,
+          name: `Agent ${agentId}`,
+          type: 'assistant',
+          status: 'active',
+          memory: `Memory for ${agentId}`
+        };
+        break;
+
+      case 'world_list':
+        const worlds = await listWorlds(ROOT_PATH);
+        result = worlds.map(world => ({
+          id: world.id,
+          name: world.name,
+          agentCount: world.agentCount,
+          description: world.description,
+          turnLimit: world.turnLimit
+        }));
+        break;
+
+      case 'world_get':
+        const worldId = data.id;
+        const world = await getWorld(ROOT_PATH, worldId);
+        result = world ? {
+          id: world.id,
+          name: world.name,
+          description: world.description,
+          turnLimit: world.turnLimit,
+          agents: Array.from(world.agents.keys()) // Convert Map keys to array
+        } : null;
+        break;
+
+      case 'world_create':
+        const newWorld = await createWorld(ROOT_PATH, {
+          name: data.name || 'New World',
+          ...data
+        });
+        result = {
+          id: newWorld.id,
+          name: newWorld.name,
+          created: new Date().toISOString()
+        };
+        break;
+
+      case 'chat_message':
+        // Handle chat message through existing world system
+        if (!ws.worldInstance) {
+          throw new Error('No world connected. Connect to a world first.');
+        }
+
+        publishMessage(
+          ws.worldInstance,
+          data.message || 'Hello from Message Broker',
+          data.sender || 'HUMAN'
+        );
+
+        result = {
+          messageId: `msg-${Date.now()}`,
+          sent: true,
+          message: data.message,
+          sender: data.sender || 'HUMAN'
+        };
+        break;
+
+      default:
+        throw new Error(`Unsupported message type: ${type}`);
+    }
+
+    // Send success response
+    ws.send(JSON.stringify({
+      requestId: id,
+      type: 'response',
+      data: result,
+      timestamp: new Date().toISOString()
+    }));
+
+  } catch (error) {
+    // Send error response
+    ws.send(JSON.stringify({
+      requestId: id,
+      type: 'response',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    }));
+  }
+}
+
 export function createWebSocketServer(server: Server): WebSocketServer {
   wss = new WebSocketServer({ server });
 
@@ -118,6 +237,15 @@ export function createWebSocketServer(server: Server): WebSocketServer {
     ws.on('message', async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString());
+
+        // Check if it's a Message Broker message
+        const brokerValidation = MessageBrokerSchema.safeParse(message);
+        if (brokerValidation.success) {
+          await handleMessageBrokerMessage(ws, brokerValidation.data, connectionId);
+          return;
+        }
+
+        // Fall back to legacy WebSocket message format
         const validation = WebSocketMessageSchema.safeParse(message);
 
         if (!validation.success) {

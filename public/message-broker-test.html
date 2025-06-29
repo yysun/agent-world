@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Message Broker Integration Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+
+    .button {
+      background: #007cba;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .button:hover {
+      background: #005a87;
+    }
+
+    .button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
+    .status.connected {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+    }
+
+    .status.disconnected {
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+    }
+
+    .status.connecting {
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      color: #856404;
+    }
+
+    .log {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .log-entry {
+      margin: 2px 0;
+      padding: 2px;
+    }
+
+    .log-entry.info {
+      color: #007cba;
+    }
+
+    .log-entry.success {
+      color: #28a745;
+    }
+
+    .log-entry.error {
+      color: #dc3545;
+    }
+
+    .log-entry.warning {
+      color: #ffc107;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    .mode-selector label {
+      margin-left: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Message Broker Integration Test</h1>
+    <p>Test the Message Broker module functionality in both static and server modes.</p>
+
+    <div class="section">
+      <h3>Configuration</h3>
+      <div class="mode-selector">
+        <label>Operation Mode:</label>
+        <input type="radio" id="static-mode" name="mode" value="static" checked>
+        <label for="static-mode">Static (Local Core)</label>
+        <input type="radio" id="server-mode" name="mode" value="server">
+        <label for="server-mode">Server (WebSocket)</label>
+      </div>
+      <div class="mode-selector">
+        <label for="ws-url">WebSocket URL:</label>
+        <input type="text" id="ws-url" value="ws://localhost:3000/ws" style="margin-left: 10px; padding: 4px;">
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Connection Status</h3>
+      <div id="status" class="status disconnected">Disconnected</div>
+      <button id="connect-btn" class="button">Initialize Broker</button>
+      <button id="disconnect-btn" class="button" disabled>Disconnect</button>
+    </div>
+
+    <div class="section">
+      <h3>Message Tests</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+        <button class="button test-btn" data-action="agent-list">List Agents</button>
+        <button class="button test-btn" data-action="world-list">List Worlds</button>
+        <button class="button test-btn" data-action="agent-get">Get Agent</button>
+        <button class="button test-btn" data-action="world-get">Get World</button>
+        <button class="button test-btn" data-action="chat-message">Send Message</button>
+        <button class="button test-btn" data-action="invalid-message">Invalid Message</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Test Results</h3>
+      <div id="results" class="log"></div>
+      <button id="clear-log" class="button">Clear Log</button>
+    </div>
+
+    <div class="section">
+      <h3>Performance Tests</h3>
+      <button class="button" id="performance-test">Run Performance Test</button>
+      <div id="performance-results"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { MessageBroker, MESSAGE_TYPES, OPERATION_MODES, CONNECTION_STATES } from './message-broker.js';
+
+    let broker = null;
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const connectBtn = document.getElementById('connect-btn');
+    const disconnectBtn = document.getElementById('disconnect-btn');
+
+    // Mock Core bundle for testing static mode
+    window.AgentWorldCore = {
+      listAgents: async () => {
+        await new Promise(resolve => setTimeout(resolve, 100)); // Simulate async
+        return [
+          { id: 'agent-1', name: 'Test Agent 1', type: 'assistant' },
+          { id: 'agent-2', name: 'Test Agent 2', type: 'assistant' }
+        ];
+      },
+      getAgent: async (id) => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        return { id, name: `Agent ${id}`, type: 'assistant', status: 'active' };
+      },
+      listWorlds: async () => {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        return [
+          { id: 'world-1', name: 'Test World 1' },
+          { id: 'world-2', name: 'Test World 2' }
+        ];
+      },
+      getWorld: async (id) => {
+        await new Promise(resolve => setTimeout(resolve, 60));
+        return { id, name: `World ${id}`, agents: ['agent-1', 'agent-2'] };
+      },
+      sendMessage: async (data) => {
+        await new Promise(resolve => setTimeout(resolve, 120));
+        return {
+          messageId: 'msg-' + Date.now(),
+          sent: true,
+          message: data.message,
+          agent: data.agent || 'agent-1'
+        };
+      }
+    };
+
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${timestamp}] ${message}`;
+      resultsEl.appendChild(entry);
+      resultsEl.scrollTop = resultsEl.scrollHeight;
+    }
+
+    function updateStatus(state, mode = null) {
+      statusEl.className = `status ${state.toLowerCase()}`;
+      const modeText = mode ? ` (${mode} mode)` : '';
+      statusEl.textContent = `${state}${modeText}`;
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        connectBtn.disabled = true;
+        log('Initializing Message Broker...', 'info');
+
+        broker = new MessageBroker();
+
+        // Set up event listeners
+        broker.on('broker_ready', (data) => {
+          log(`Broker ready in ${data.mode} mode`, 'success');
+          updateStatus('Connected', data.mode);
+          connectBtn.disabled = true;
+          disconnectBtn.disabled = false;
+          document.querySelectorAll('.test-btn').forEach(btn => btn.disabled = false);
+        });
+
+        broker.on('broker_error', (data) => {
+          log(`Broker error: ${data.error}`, 'error');
+          updateStatus('Error');
+          connectBtn.disabled = false;
+        });
+
+        broker.on('connection_open', () => {
+          log('WebSocket connection opened', 'success');
+        });
+
+        broker.on('connection_closed', (data) => {
+          log(`WebSocket connection closed: ${data.reason}`, 'warning');
+          updateStatus('Disconnected');
+        });
+
+        broker.on('message_received', (data) => {
+          log(`Received: ${JSON.stringify(data)}`, 'info');
+        });
+
+        broker.on('message_error', (data) => {
+          log(`Message error: ${data.error}`, 'error');
+        });
+
+        // Get configuration
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        const wsUrl = document.getElementById('ws-url').value;
+
+        const config = {
+          mode: mode === 'static' ? OPERATION_MODES.STATIC : OPERATION_MODES.SERVER,
+          websocketUrl: wsUrl
+        };
+
+        updateStatus('Connecting');
+        await broker.init(config);
+
+      } catch (error) {
+        log(`Initialization failed: ${error.message}`, 'error');
+        updateStatus('Error');
+        connectBtn.disabled = false;
+      }
+    });
+
+    disconnectBtn.addEventListener('click', () => {
+      if (broker) {
+        broker.disconnect();
+        broker = null;
+      }
+      updateStatus('Disconnected');
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      document.querySelectorAll('.test-btn').forEach(btn => btn.disabled = true);
+      log('Broker disconnected', 'info');
+    });
+
+    // Test message handlers
+    document.querySelectorAll('.test-btn').forEach(btn => {
+      btn.disabled = true;
+      btn.addEventListener('click', async () => {
+        if (!broker) return;
+
+        const action = btn.dataset.action;
+        btn.disabled = true;
+
+        try {
+          let result;
+          const startTime = performance.now();
+
+          switch (action) {
+            case 'agent-list':
+              result = await broker.sendMessage(MESSAGE_TYPES.AGENT_LIST, {});
+              break;
+            case 'world-list':
+              result = await broker.sendMessage(MESSAGE_TYPES.WORLD_LIST, {});
+              break;
+            case 'agent-get':
+              result = await broker.sendMessage(MESSAGE_TYPES.AGENT_GET, { id: 'agent-1' });
+              break;
+            case 'world-get':
+              result = await broker.sendMessage(MESSAGE_TYPES.WORLD_GET, { id: 'world-1' });
+              break;
+            case 'chat-message':
+              result = await broker.sendMessage(MESSAGE_TYPES.CHAT_MESSAGE, {
+                message: 'Hello from test!',
+                agent: 'agent-1'
+              });
+              break;
+            case 'invalid-message':
+              try {
+                result = await broker.sendMessage('INVALID_TYPE', {});
+              } catch (error) {
+                log(`Expected error: ${error.message}`, 'warning');
+                btn.disabled = false;
+                return;
+              }
+              break;
+          }
+
+          const endTime = performance.now();
+          const duration = Math.round(endTime - startTime);
+
+          log(`${action} completed in ${duration}ms: ${JSON.stringify(result.data)}`, 'success');
+
+        } catch (error) {
+          log(`${action} failed: ${error.message}`, 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    document.getElementById('clear-log').addEventListener('click', () => {
+      resultsEl.innerHTML = '';
+    });
+
+    // Performance test
+    document.getElementById('performance-test').addEventListener('click', async () => {
+      if (!broker) {
+        log('Please connect broker first', 'error');
+        return;
+      }
+
+      const resultsDiv = document.getElementById('performance-results');
+      resultsDiv.innerHTML = '<p>Running performance test...</p>';
+
+      const tests = [
+        { name: 'Agent List', type: MESSAGE_TYPES.AGENT_LIST, data: {} },
+        { name: 'World List', type: MESSAGE_TYPES.WORLD_LIST, data: {} },
+        { name: 'Agent Get', type: MESSAGE_TYPES.AGENT_GET, data: { id: 'agent-1' } }
+      ];
+
+      const results = {};
+
+      for (const test of tests) {
+        const times = [];
+        log(`Running ${test.name} performance test...`, 'info');
+
+        for (let i = 0; i < 10; i++) {
+          const start = performance.now();
+          try {
+            await broker.sendMessage(test.type, test.data);
+            const end = performance.now();
+            times.push(end - start);
+          } catch (error) {
+            log(`Performance test error: ${error.message}`, 'error');
+            break;
+          }
+        }
+
+        if (times.length > 0) {
+          const avg = times.reduce((a, b) => a + b, 0) / times.length;
+          const min = Math.min(...times);
+          const max = Math.max(...times);
+
+          results[test.name] = { avg: Math.round(avg), min: Math.round(min), max: Math.round(max) };
+          log(`${test.name} avg: ${Math.round(avg)}ms, min: ${Math.round(min)}ms, max: ${Math.round(max)}ms`, 'success');
+        }
+      }
+
+      resultsDiv.innerHTML = `
+                <h4>Performance Results:</h4>
+                <pre>${JSON.stringify(results, null, 2)}</pre>
+            `;
+    });
+
+    // Initialize UI
+    updateStatus('Disconnected');
+    log('Message Broker Test Page Ready', 'info');
+    log('Select operation mode and click "Initialize Broker" to start', 'info');
+  </script>
+</body>
+
+</html>
