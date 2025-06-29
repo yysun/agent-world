@@ -4,13 +4,13 @@
   "main": "index.ts",
   "type": "module",
   "bin": {
-    "agent-world": "./bin/cli.ts",
-    "agent-world-server": "./bin/server.ts"
+    "agent-world": "./cli/index.ts",
+    "agent-world-server": "./server/index.ts"
   },
   "scripts": {
     "start": "npm run cli",
-    "cli": "npx tsx bin/cli.ts",
-    "server": "npx tsx bin/server.ts",
+    "cli": "npx tsx cli/index.ts",
+    "server": "npx tsx server/index.ts",
     "dev": "npx tsx --watch index.ts",
     "test": "jest --config jest.config.js",
     "test:integration": "jest --config jest.integration.config.js",
@@ -19,7 +19,7 @@
     "build": "node esbuild.config.js",
     "build:core": "esbuild core/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/core.esm.js --sourcemap --define:__IS_BROWSER__=true",
     "build:server": "esbuild server/index.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/server.js --external:tsx --sourcemap",
-    "build:cli": "esbuild bin/cli.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/cli.js --external:tsx --sourcemap --banner:js='#!/usr/bin/env node'",
+    "build:cli": "esbuild cli/index.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/cli.js --external:tsx --sourcemap --banner:js='#!/usr/bin/env node'",
     "build:watch": "npm run build:core -- --watch"
   },
   "description": "World-mediated agent management system with clean API surface",
