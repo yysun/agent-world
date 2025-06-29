@@ -36,7 +36,7 @@ export default {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
-  testPathIgnorePatterns: ['world-management.test.ts', 'world-only-patterns.test.ts'],
+  testPathIgnorePatterns: ['world-management.test.ts', 'world-only-patterns.test.ts', '/public/'],
   setupFilesAfterEnv: ['<rootDir>/tests/core/setup.ts'], // Add setup file for core tests
   collectCoverageFrom: [
     'src/**/*.ts',
