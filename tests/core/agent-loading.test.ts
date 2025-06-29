@@ -169,7 +169,6 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
       baseUrl: agent.baseUrl,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
-      autoSyncMemory: agent.autoSyncMemory,
       azureEndpoint: agent.azureEndpoint,
       azureApiVersion: agent.azureApiVersion,
       azureDeployment: agent.azureDeployment,

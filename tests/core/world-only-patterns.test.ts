@@ -63,7 +63,6 @@ export class TestWorldManager {
       name: 'test-world-' + randomBytes(4).toString('hex'),
       description: 'A test world for unit testing',
       turnLimit: 5,
-      autoSave: true,
       ...overrides
     };
 
@@ -120,7 +119,6 @@ describe('World-Only Patterns Test Infrastructure', () => {
       expect(world.name).toMatch(/^test-world-[a-f0-9]{8}$/);
       expect(world.description).toBe('A test world for unit testing');
       expect(world.turnLimit).toBe(5);
-      expect(world.autoSave).toBe(true);
       expect(world.eventEmitter).toBeDefined();
       expect(world.agents).toBeInstanceOf(Map);
     });
@@ -128,13 +126,11 @@ describe('World-Only Patterns Test Infrastructure', () => {
     test('should create test world with overrides', async () => {
       const world = await testManager.createTestWorld(rootPath, {
         name: 'custom-test-world',
-        turnLimit: 10,
-        autoSave: false
+        turnLimit: 10
       });
 
       expect(world.name).toBe('custom-test-world');
       expect(world.turnLimit).toBe(10);
-      expect(world.autoSave).toBe(false);
     });
 
     test('should generate test agent parameters', () => {
@@ -203,14 +199,16 @@ describe('World-Only Patterns Test Infrastructure', () => {
       expect(world.agents.has(agent.id)).toBe(false);
     });
 
-    test('should handle agent operations with autoSave enabled', async () => {
-      const world = await testManager.createTestWorld(rootPath, { autoSave: true });
+    test('should handle agent operations with manual save', async () => {
+      const world = await testManager.createTestWorld(rootPath);
       const agentParams = testManager.createTestAgentParams();
 
-      // Create agent (should auto-save)
+      // Create agent (requires manual save)
       const agent = await world.createAgent(agentParams);
 
       // Note: This test will be updated once new API is implemented
+      // Manual save would be required
+      // await world.saveAgentToDisk(agent);
       // Reload world to verify persistence
       // const reloadedWorld = await getWorld(rootPath, world.id);
       // expect(reloadedWorld).toBeDefined();
@@ -222,11 +220,11 @@ describe('World-Only Patterns Test Infrastructure', () => {
       expect(world.agents.has(agent.id)).toBe(true);
     });
 
-    test('should handle agent operations with autoSave disabled', async () => {
-      const world = await testManager.createTestWorld(rootPath, { autoSave: false });
+    test('should handle agent operations without auto-save', async () => {
+      const world = await testManager.createTestWorld(rootPath);
       const agentParams = testManager.createTestAgentParams();
 
-      // Create agent (should not auto-save)
+      // Create agent (no auto-save - manual save required)
       const agent = await world.createAgent(agentParams);
 
       // Note: This test will be updated once new API is implemented

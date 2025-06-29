@@ -6,11 +6,11 @@
  * - Test flattened World structure (no nested config)
  * - Test World creation, loading, updating, deletion
  * - Test World listing functionality  
- * - Test autoSave flag behavior
+ * - NO AUTO-SAVE: Auto-save functionality completely removed in Phase 1
  * 
  * Implementation:
  * - Tests the new API signatures: createWorld(rootPath, params)
- * - Validates flattened World properties (name, description, turnLimit, autoSave)
+ * - Validates flattened World properties (name, description, turnLimit)
  * - Ensures World objects contain rootPath and necessary methods
  * - Tests flat persistence format
  */
@@ -51,7 +51,6 @@ describe('World Management API', () => {
       expect(world.id).toBe('minimal-world');
       expect(world.name).toBe('minimal-world');
       expect(world.turnLimit).toBe(5); // Default value
-      expect(world.autoSave).toBe(true); // Default value
       expect(world.eventEmitter).toBeDefined();
       expect(world.agents).toBeInstanceOf(Map);
       expect(world.agents.size).toBe(0);
@@ -61,8 +60,7 @@ describe('World Management API', () => {
       const params: CreateWorldParams = {
         name: 'full-world',
         description: 'A complete test world',
-        turnLimit: 10,
-        autoSave: false
+        turnLimit: 10
       };
 
       // Updated to new API signature
@@ -72,7 +70,6 @@ describe('World Management API', () => {
       expect(world.name).toBe('full-world');
       expect(world.description).toBe('A complete test world');
       expect(world.turnLimit).toBe(10);
-      expect(world.autoSave).toBe(false);
     });
 
     test('should handle kebab-case conversion for world ID', async () => {
@@ -108,8 +105,7 @@ describe('World Management API', () => {
       const params: CreateWorldParams = {
         name: 'loadable-world',
         description: 'World for loading test',
-        turnLimit: 7,
-        autoSave: false
+        turnLimit: 7
       };
 
       // Note: Will be updated to new API signature
@@ -124,7 +120,6 @@ describe('World Management API', () => {
       expect(loadedWorld!.name).toBe('loadable-world');
       expect(loadedWorld!.description).toBe('World for loading test');
       expect(loadedWorld!.turnLimit).toBe(7);
-      expect(loadedWorld!.autoSave).toBe(false);
       expect(loadedWorld!.eventEmitter).toBeDefined();
       expect(loadedWorld!.agents).toBeInstanceOf(Map);
     });
@@ -151,8 +146,7 @@ describe('World Management API', () => {
       const params: CreateWorldParams = {
         name: 'updatable-world',
         description: 'Original description',
-        turnLimit: 5,
-        autoSave: true
+        turnLimit: 5
       };
 
       // Note: Will be updated to new API signature
@@ -161,8 +155,7 @@ describe('World Management API', () => {
       // Update the world
       const updates: UpdateWorldParams = {
         description: 'Updated description',
-        turnLimit: 15,
-        autoSave: false
+        turnLimit: 15
       };
 
       // Note: Will be updated to new API signature
@@ -173,7 +166,6 @@ describe('World Management API', () => {
       expect(updatedWorld!.name).toBe('updatable-world'); // Unchanged
       expect(updatedWorld!.description).toBe('Updated description');
       expect(updatedWorld!.turnLimit).toBe(15);
-      expect(updatedWorld!.autoSave).toBe(false);
     });
 
     test('should handle partial updates', async () => {
@@ -181,8 +173,7 @@ describe('World Management API', () => {
       const params: CreateWorldParams = {
         name: 'partial-update-world',
         description: 'Original description',
-        turnLimit: 5,
-        autoSave: true
+        turnLimit: 5
       };
 
       await createWorld(tempDir, params);
@@ -196,7 +187,6 @@ describe('World Management API', () => {
 
       expect(updatedWorld!.description).toBe('Original description'); // Unchanged
       expect(updatedWorld!.turnLimit).toBe(20); // Updated
-      expect(updatedWorld!.autoSave).toBe(true); // Unchanged
     });
 
     test('should return null for non-existent world', async () => {
@@ -321,8 +311,7 @@ describe('World Management API', () => {
       const params: CreateWorldParams = {
         name: 'flat-persistence-world',
         description: 'Testing flat format',
-        turnLimit: 8,
-        autoSave: false
+        turnLimit: 8
       };
 
       await createWorld(tempDir, params);
@@ -333,7 +322,6 @@ describe('World Management API', () => {
       expect(world).toBeDefined();
       expect(world!.description).toBe('Testing flat format');
       expect(world!.turnLimit).toBe(8);
-      expect(world!.autoSave).toBe(false);
     });
   });
 });
