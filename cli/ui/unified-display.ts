@@ -24,10 +24,10 @@
 
 import { colors } from './colors';
 import { addMessageToStore, createStoredMessage, determineSenderType } from '../message-store';
-import { SenderType } from '../../src/types';
+import { SenderType } from '../../core/types.js';
 
 // Message type definitions for unified display
-export type MessageType = 
+export type MessageType =
   | 'help'        // Command help and usage information
   | 'command'     // Command execution results (success, error, warning, info)
   | 'human'       // User input messages
@@ -85,20 +85,20 @@ export function setStreamingActive(active: boolean): void {
 export function displayUnifiedMessage(message: UnifiedDisplayMessage): void {
   // Format the message content based on type
   const formattedContent = formatMessageContent(message);
-  
+
   // Apply spacing rule: blank line before (unless explicitly skipped)
   if (!message.skipSpacing) {
     console.log(); // Blank line before
   }
-  
+
   // Display the formatted message
   console.log(formattedContent);
-  
+
   // Apply spacing rule: blank line after (unless explicitly skipped)
   if (!message.skipSpacing) {
     console.log(); // Blank line after
   }
-  
+
   // Store message in CLI session memory if it's a conversational message
   if (shouldStoreMessage(message)) {
     storeMessage(message);
@@ -110,38 +110,38 @@ export function displayUnifiedMessage(message: UnifiedDisplayMessage): void {
  */
 function formatMessageContent(message: UnifiedDisplayMessage): string {
   const { type, content, sender, commandSubtype, emoji, color } = message;
-  
+
   switch (type) {
     case 'help':
       return formatHelpMessage(content);
-      
+
     case 'command':
       return formatCommandMessage(content, commandSubtype, emoji, color);
-      
+
     case 'human':
       return formatHumanMessage(content, sender);
-      
+
     case 'agent':
       return formatAgentMessage(content, sender);
-      
+
     case 'system':
       return formatSystemMessage(content, sender);
-      
+
     case 'debug':
       return formatDebugMessage(content);
-      
+
     case 'error':
       return formatErrorMessage(content);
-      
+
     case 'status':
       return formatStatusMessage(content, emoji, color);
-      
+
     case 'file':
       return formatFileMessage(content, commandSubtype);
-      
+
     case 'instruction':
       return formatInstructionMessage(content);
-      
+
     default:
       // Fallback for unknown types
       return colors.gray(content);
@@ -160,15 +160,15 @@ function formatHelpMessage(content: string): string {
  * Format command execution messages with appropriate icons and colors
  */
 function formatCommandMessage(
-  content: string, 
-  subtype?: CommandSubtype, 
-  customEmoji?: string, 
+  content: string,
+  subtype?: CommandSubtype,
+  customEmoji?: string,
   customColor?: string
 ): string {
   if (customEmoji && customColor) {
     return `${customEmoji} ${customColor}`;
   }
-  
+
   switch (subtype) {
     case 'success':
       return colors.green(`✓ ${content}`);
@@ -209,7 +209,7 @@ function formatSystemMessage(content: string, sender?: string): string {
     // Special formatting for @human messages
     return `${colors.yellow('?')} ${colors.yellow(sender || 'system')}: ${content}`;
   }
-  
+
   return `${colors.red('●')} ${sender || 'system'}: ${content}`;
 }
 
@@ -237,7 +237,7 @@ function formatStatusMessage(content: string, emoji?: string, color?: string): s
   if (emoji && color) {
     return `${emoji} ${color}`;
   }
-  
+
   // Default status formatting
   return content;
 }
@@ -277,14 +277,14 @@ function shouldStoreMessage(message: UnifiedDisplayMessage): boolean {
  */
 function storeMessage(message: UnifiedDisplayMessage): void {
   if (!message.sender) return;
-  
+
   const storedMessage = createStoredMessage(
     message.sender,
     message.content,
     currentWorldName,
     message.metadata
   );
-  
+
   addMessageToStore(storedMessage);
 }
 
@@ -293,7 +293,7 @@ function storeMessage(message: UnifiedDisplayMessage): void {
  */
 export function displayMessage(content: string, sender?: string, type?: MessageType): void {
   const messageType = type || detectMessageType(content, sender);
-  
+
   displayUnifiedMessage({
     type: messageType,
     content,
@@ -311,7 +311,7 @@ function detectMessageType(content: string, sender?: string): MessageType {
   if (content.startsWith('@human')) return 'system';
   if (content.includes('✓') || content.includes('✗')) return 'command';
   if (content.includes('Error:')) return 'error';
-  
+
   return 'status'; // Default fallback
 }
 
@@ -361,7 +361,7 @@ export function displayInstruction(content: string): void {
  */
 export function displayStreamingMessage(content: string, sender: string, skipSpacing: boolean = false): void {
   const messageType = sender === 'HUMAN' || sender === 'you' ? 'human' : 'agent';
-  
+
   displayUnifiedMessage({
     type: messageType,
     content,

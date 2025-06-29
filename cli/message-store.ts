@@ -20,7 +20,7 @@
  * - Call clearMessagesForWorld() for memory management
  */
 
-import { SenderType } from '../src/types';
+import { SenderType } from '../core/types.js';
 
 // Message interface for stored conversations
 export interface StoredMessage {

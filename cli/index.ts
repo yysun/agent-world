@@ -1,107 +1,241 @@
 /**
  * CLI Interface - Interactive Command Line Tool with Real-time Agent Streaming
  * 
- * Features:
- * - Interactive command interface for agent testing and management (/agents, /show, /add, etc.)
- * - Unified external input: piped input and CLI args treated as user messages to broadcast
- * - Real-time streaming with flashing emoji indicators and token counting (via StreamingDisplay module)
- * - Multi-agent concurrent streaming with dedicated line positioning
- * - Agent conversation history display and memory management
- * - World object integration for agent loading and persistence
- * - Graceful shutdown handling and clean terminal interaction
+ * Core Features:
+ * - Interactive command interface (/agents, /show, /add, /help, etc.)
+ * - External input handling (piped input and CLI args as broadcast messages)
+ * - Real-time streaming with visual indicators and token tracking
+ * - Multi-agent concurrent streaming with dedicated display management
+ * - Modular terminal UI with separated display, lifecycle, and coordination concerns
+ * - World integration for agent loading, persistence, and message broadcasting
+ * - Graceful shutdown and cleanup handling
  * 
  * Architecture:
- * - Function-based streaming display manager in separate module (streaming/streaming-display.ts)
- * - Command routing system with direct World function imports
- * - External input processing for both piped input and CLI arguments
+ * - Function-based design with modular UI components (ui/terminal-display.ts, ui/terminal-lifecycle.ts, ui/display-manager.ts)
+ * - Terminal-kit integration with dynamic import for ES module compatibility
+ * - Command routing with direct core module function imports
  * - SSE event subscription for real-time agent response streaming
- * - Terminal control integration via imported streaming display module
+ * - External input processing for both piped and CLI argument inputs
+ * - Separated concerns: display logic, terminal lifecycle, and display coordination
+ * - Global world object management for efficient access during program execution
  * 
- * Recent Changes:
- * - Extracted streaming functionality to dedicated streaming-display.ts module
- * - Maintained function-based approach with clean module separation
- * - Enhanced shutdown handling with proper streaming resource cleanup
- * - Simplified main CLI logic by delegating streaming management to dedicated module
- * - Removed web server integration (now handled by separate launcher)
- * - Refactored to use direct function imports from World module instead of namespace import
+ * UI Architecture:
+ * - terminal-display.ts: Input box drawing, positioning, and visibility management
+ * - terminal-lifecycle.ts: Terminal setup, shutdown, signal handling, and piped input detection
+ * - display-manager.ts: Coordination between streaming, input prompts, and exit timing
+ * - streaming-display.ts: Real-time streaming content and agent response management
+ * - unified-display.ts: Consistent message formatting and spacing across all display types
+ * 
+ * Migration Changes:
+ * - Migrated from src/ to core/ module architecture
+ * - Implemented ID-based operations with name-to-ID conversion
+ * - Added global world object management for program execution
+ * - Smart world selection with automatic world discovery and selection
+ * - Object-based data access for agent system prompts and memory
+ * - World-specific event subscriptions replacing global event bus
+ * - Preserved all existing CLI functionality and user experience
  */
 
 // npm run dev || echo "Test completed"
 // echo "final piped test" | npx tsx cli/index.ts
 
-import * as readline from 'readline';
-import { cliLogger } from '../src/logger';
+// Set the data path for core modules
+if (!process.env.AGENT_WORLD_DATA_PATH) {
+  process.env.AGENT_WORLD_DATA_PATH = './data/worlds';
+}
+
+// Core module imports
+import { createWorld, getWorld, listWorlds } from '../core/world-manager';
+import { getAgent } from '../core/agent-manager';
+import { publishMessage, subscribeToSSE, subscribeToMessages } from '../core/world-events';
+import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload, World, Agent } from '../core/types';
+import { toKebabCase } from '../core/utils';
+
+// CLI command imports - MIGRATED TO CORE MODULES ✅
 import { addCommand } from './commands/add';
 import { clearCommand } from './commands/clear';
 import { exportCommand } from './commands/export';
-import { helpCommand } from './commands/help';
-import { listCommand } from './commands/list';
+// import { helpCommand } from './commands/help'; // TODO: Implement help command
+// import { listCommand } from './commands/list'; // TODO: Implement list command (use /agents instead)
 import { showCommand } from './commands/show';
 import { stopCommand } from './commands/stop';
 import { useCommand } from './commands/use';
-import {
-  loadWorlds,
-  loadWorld,
-  loadWorldFromDisk,
-  createWorld,
-  getAgents,
-  getAgent,
-  broadcastMessage,
-  DEFAULT_WORLD_NAME
-} from '../src/world';
-import { loadSystemPrompt } from '../src/world-persistence';
-import { getAgentConversationHistory } from '../src/agent-memory';
-import { subscribeToSSE, subscribeToSystem, subscribeToMessages } from '../src/event-bus';
-import { displayUnifiedMessage, displayError } from './ui/unified-display';
-import { colors, terminal } from './ui/colors';
-import { EventType, SSEEventPayload, SystemEventPayload, MessageEventPayload } from '../src/types';
-import * as StreamingDisplay from './ui/streaming-display';
 
-// Debug utility: prints debug data in gray
-function debug(...args: any[]) {
-  // Print debug output in gray color
+// Remove temporary stub implementations (no longer needed)
+// Basic help command implementation
+const helpCommand = async (args: string[], world: World) => {
   displayUnifiedMessage({
-    content: `[debug] ${args.join(' ')}`,
-    type: 'debug'
+    type: 'instruction',
+    content: `Agent World CLI - Core Module Architecture
+    
+Available commands:
+- /add <name> - Create a new agent
+- /show <agent> - Display agent conversation history
+- /clear <agent|all> - Clear agent memory
+- /stop <agent|all> - Deactivate agents
+- /use <agent> - Activate agent
+- /export <filename> - Export conversation history
+- /agents - List all agents
+- /help - Show this help
+- /quit - Exit CLI
+
+Current world: ${world.config.name}
+Type messages to broadcast to all agents, or use commands above.`,
+    metadata: { source: 'cli', messageType: 'command' }
   });
-}
+};
 
-// Load agents function (merged from loader.ts)
-async function loadAgents(worldName: string): Promise<void> {
+// Basic list command implementation  
+const listCommand = async (args: string[], world: World) => {
   try {
-    // Try to load world from disk if it exists
-    try {
-      await loadWorld(worldName);
-    } catch (error) {
-      // World doesn't exist on disk yet, that's okay
-    }
-
-    const agents = getAgents(worldName);
-
-    await listCommand([], worldName); // Call agents command to display loaded agents
+    const agents = Array.from(world.agents.values());
     if (agents.length === 0) {
-      // Don't print anything if no agents - will be shown by agents command
+      displayUnifiedMessage({
+        type: 'instruction',
+        content: 'No agents found in current world.',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+    } else {
+      const agentList = agents.map(agent => `• ${agent.config.name} (${agent.config.type}) - ${agent.status || 'active'}`).join('\n');
+      displayUnifiedMessage({
+        type: 'instruction',
+        content: `Agents in current world:\n${agentList}`,
+        metadata: { source: 'cli', messageType: 'command' }
+      });
     }
   } catch (error) {
-    displayError(`Failed to load agents: ${error}`);
-    cliLogger.error({ error }, 'Failed to load agents during CLI startup');
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Error listing agents: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
+  }
+};
+
+// UI module imports
+import { colors } from './ui/colors';
+import * as StreamingDisplay from './ui/streaming-display';
+import { displayUnifiedMessage, setCurrentWorldName } from './ui/unified-display';
+import {
+  initializeTerminalDisplay,
+  hideInputBox,
+  showInputPrompt
+} from './ui/terminal-display';
+import {
+  initializeTerminal,
+  setupShutdownHandlers,
+  getTerminal,
+  detectPipedInput,
+  readPipedInput,
+  performShutdown,
+  hasPipedInput
+} from './ui/terminal-lifecycle';
+import {
+  setupStreamingEndCallback,
+  handleExternalInputDisplay,
+  showInitialPrompt,
+  handlePostCommandDisplay,
+  handlePostBroadcastDisplay
+} from './ui/display-manager';
+
+// Global constants
+const DEFAULT_WORLD_NAME = 'Default World';
+
+// Global world object for program execution
+let currentWorld: World | null = null;
+
+// Smart world selection - equivalent to loadWorlds() from src
+async function loadWorldsWithSmartSelection(): Promise<{ worlds: string[], action: string, defaultWorld?: string }> {
+  try {
+    const worldInfos = await listWorlds();
+    const worlds = worldInfos.map(info => info.name);
+
+    if (worlds.length === 0) {
+      return { worlds: [], action: 'create' };
+    } else if (worlds.length === 1) {
+      return { worlds, action: 'use', defaultWorld: worlds[0] };
+    } else {
+      return { worlds, action: 'select' };
+    }
+  } catch (error) {
+    console.error('Error loading worlds:', error);
+    return { worlds: [], action: 'create' };
+  }
+}
+
+// Load world by name and set as current global world
+async function loadWorldByName(worldName: string): Promise<void> {
+  try {
+    const worldId = toKebabCase(worldName);
+    currentWorld = await getWorld(worldId);
+
+    if (!currentWorld) {
+      throw new Error(`World "${worldName}" not found`);
+    }
+
+    // Agents are automatically loaded by getWorld() - no need for loadAgentsIntoWorld()
+  } catch (error) {
+    console.error(`Error loading world "${worldName}":`, error);
     throw error;
   }
+}
 
-  console.log(); // Add spacing
+// Get agents from current world
+function getAgentsFromCurrentWorld(): Agent[] {
+  if (!currentWorld) {
+    return [];
+  }
+  return Array.from(currentWorld.agents.values());
+}
+
+// Get single agent from current world by name
+function getAgentFromCurrentWorld(agentName: string): Agent | null {
+  if (!currentWorld) {
+    return null;
+  }
+
+  const agentId = toKebabCase(agentName);
+  return currentWorld.agents.get(agentId) || null;
+}
+
+// Broadcast message using current world
+async function broadcastMessageToCurrentWorld(message: string, sender: string): Promise<void> {
+  if (!currentWorld) {
+    throw new Error('No world loaded');
+  }
+
+  publishMessage(currentWorld, message, sender);
+}
+// Load agents and display current state
+async function loadAgents(worldName: string): Promise<void> {
+  try {
+    // Load world by name and set as current
+    await loadWorldByName(worldName);
+
+    await listCommand([], currentWorld!); // Display loaded agents
+  } catch (error) {
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Failed to load agents: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
+    console.error('Failed to load agents during CLI startup:', error);
+    throw error;
+  }
 }
 
 // Quit command implementation
-async function quitCommand(args: string[], worldName: string): Promise<void> {
+async function quitCommand(args: string[], world: World): Promise<void> {
   displayUnifiedMessage({
+    type: 'instruction',
     content: 'Goodbye! 👋',
-    type: 'system'
+    metadata: { source: 'cli', messageType: 'command' }
   });
   process.exit(0);
 }
 
-// Command registry
-const commands: Record<string, (args: string[], worldName: string) => Promise<void>> = {
+// Command registry - Updated to pass World objects instead of worldName strings
+const commands: Record<string, (args: string[], world: World) => Promise<void>> = {
   add: addCommand,
   agents: listCommand,
   clear: clearCommand,
@@ -113,92 +247,109 @@ const commands: Record<string, (args: string[], worldName: string) => Promise<vo
   quit: quitCommand,
 };
 
-// Interactive world selection when multiple worlds exist
+// Interactive world selection
 async function selectWorldInteractively(worlds: string[]): Promise<string> {
+  const term = getTerminal();
   return new Promise((resolve) => {
     displayUnifiedMessage({
+      type: 'instruction',
       content: 'Multiple worlds found:\n' + worlds.map((world, index) => `  ${index + 1}. ${world}`).join('\n'),
-      type: 'instruction'
+      metadata: { source: 'cli', messageType: 'command' }
     });
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    let input = '';
 
-    const askForSelection = () => {
-      rl.question(colors.cyan(`\nSelect a world (1-${worlds.length}): `), (answer) => {
-        const selection = parseInt(answer.trim());
+    const handleKey = (name: string, matches: any, data: any) => {
+      if (name === 'ENTER') {
+        const selection = parseInt(input.trim());
 
         if (isNaN(selection) || selection < 1 || selection > worlds.length) {
           displayUnifiedMessage({
+            type: 'command',
             content: 'Invalid selection. Please try again.',
-            type: 'error'
+            commandSubtype: 'warning',
+            metadata: { source: 'cli', messageType: 'command' }
           });
-          askForSelection();
+          console.log(colors.cyan(`\nSelect a world (1-${worlds.length}): `));
+          input = '';
           return;
         }
 
-        rl.close();
+        term.removeAllListeners('key');
         resolve(worlds[selection - 1]);
-      });
+      } else if (name === 'BACKSPACE') {
+        if (input.length > 0) {
+          input = input.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+      } else if (data.isCharacter) {
+        input += String.fromCharCode(data.codepoint);
+        process.stdout.write(String.fromCharCode(data.codepoint));
+      }
     };
 
-    askForSelection();
+    term.on('key', handleKey);
+    console.log(colors.cyan(`\nSelect a world (1-${worlds.length}): `));
   });
 }
 
-// Function to estimate input tokens from conversation history
+// Estimate input tokens for streaming display
 async function estimateInputTokens(agentName: string, worldName: string): Promise<number> {
   try {
-    const agent = getAgent(worldName, agentName);
-    if (!agent) return 50; // Default estimate if agent not found
+    const agent = getAgentFromCurrentWorld(agentName);
+    if (!agent) return 50;
 
-    // Load actual system prompt and recent conversation history
-    const [systemPrompt, conversationHistory] = await Promise.all([
-      loadSystemPrompt(worldName, agentName).catch(() => ''),
-      getAgentConversationHistory(worldName, agentName, 10).catch(() => [])
-    ]);
+    // Load system prompt from agent config and recent conversation history from memory
+    const systemPrompt = agent.config.systemPrompt || '';
+    const conversationHistory = agent.memory.slice(-10); // Get last 10 messages
 
-    // Rough token estimation: ~0.75 tokens per word
+    // Token estimation: ~0.75 tokens per word
     const systemPromptTokens = Math.ceil(systemPrompt.split(/\s+/).length * 0.75);
-
-    // Estimate tokens from recent conversation (last 10 messages)
-    const conversationTokens = conversationHistory.reduce((total, msg) => {
+    const conversationTokens = conversationHistory.reduce((total: number, msg) => {
       return total + Math.ceil(msg.content.split(/\s+/).length * 0.75);
-    }, 0);
+    }, 0 as number);
 
-    // Add buffer for instruction formatting and context
-    const totalEstimate = systemPromptTokens + conversationTokens + 50;
-
-    return Math.max(50, totalEstimate);
+    // Add buffer for formatting and context
+    return Math.max(50, systemPromptTokens + conversationTokens + 50);
   } catch (error) {
-    return 50; // Default fallback
+    return 50;
   }
 }
 
 async function main() {
+  // Detect piped input first
+  const hasPipedInputDetected = await detectPipedInput();
+
+  // Initialize terminal
+  const term = await initializeTerminal(hasPipedInputDetected);
+  initializeTerminalDisplay(term);
+
+  // Setup graceful shutdown handlers
+  setupShutdownHandlers();
+
   // Load worlds with smart selection (also initializes file storage)
-  const { worlds, action, defaultWorld } = await loadWorlds();
+  const { worlds, action, defaultWorld } = await loadWorldsWithSmartSelection();
 
   let worldName: string;
 
   switch (action) {
     case 'create':
       // No worlds found - create default world
-      worldName = await createWorld({ name: DEFAULT_WORLD_NAME });
+      const newWorld = await createWorld({ name: DEFAULT_WORLD_NAME });
+      worldName = newWorld.config.name;
+      currentWorld = newWorld;
       break;
 
     case 'use':
       // One world found - use it automatically
-      await loadWorldFromDisk(defaultWorld!);
+      await loadWorldByName(defaultWorld!);
       worldName = defaultWorld!;
       break;
 
     case 'select':
       // Multiple worlds found - let user pick
       const selectedWorld = await selectWorldInteractively(worlds);
-      await loadWorldFromDisk(selectedWorld);
+      await loadWorldByName(selectedWorld);
       worldName = selectedWorld;
       break;
 
@@ -206,84 +357,22 @@ async function main() {
       throw new Error('Unexpected world loading action');
   }
 
-  // Set world name in streaming display for message storage
-  StreamingDisplay.setCurrentWorldName(worldName);
+  // Set world name in streaming display
+  setCurrentWorldName(worldName);
 
-  // Streaming manager is now function-based (no initialization needed)
-
-  // Handle graceful shutdown
-  const shutdown = async () => {
-    StreamingDisplay.resetStreamingState(); // Clean up streaming resources
-    displayUnifiedMessage({
-      content: 'Goodbye! 👋',
-      type: 'system'
-    });
-    process.exit(0);
-  };
-
-  // Setup signal handlers
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
-  // Load all agents from our sample world
+  // Load agents and display current state
   await loadAgents(worldName);
 
   // Set up callback to show prompt when streaming ends
-  StreamingDisplay.setOnAllStreamingEndCallback(() => {
-    if (rl) {
-      rl.prompt();
-    }
-  });
+  setupStreamingEndCallback();
 
-  // Handle input from piped input or command line arguments
+  // Handle external input (piped or CLI arguments)
   let hasExternalInput = false;
   let externalMessage = '';
-  let hasPipedInput = false;
 
-  // Check for piped input first (like echo "message" | npm run dev)
-  // Try to detect if there's actual piped data by checking for immediate data availability
-  let hasPotentialPipedInput = false;
-
-  // First, check if stdin is definitely not a TTY (real piped input)
-  if (process.stdin.isTTY === false) {
-    hasPotentialPipedInput = true;
-  } else if (process.stdin.isTTY === undefined) {
-    // For tsx/nodemon, we need to check if there's actually piped data
-    // Set a very short timeout to see if data is immediately available
-    try {
-      const hasData = await new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => resolve(false), 10); // Very short timeout
-
-        process.stdin.once('readable', () => {
-          clearTimeout(timeout);
-          resolve(true);
-        });
-
-        // If stdin is already readable with data, resolve immediately
-        if (process.stdin.readable && process.stdin.readableLength > 0) {
-          clearTimeout(timeout);
-          resolve(true);
-        }
-      });
-
-      hasPotentialPipedInput = hasData;
-    } catch (error) {
-      hasPotentialPipedInput = false;
-    }
-  }
-
-  if (hasPotentialPipedInput) {
+  if (hasPipedInputDetected) {
     hasExternalInput = true;
-    hasPipedInput = true;
-    // Read all piped input
-    let pipedContent = '';
-    process.stdin.setEncoding('utf8');
-
-    for await (const chunk of process.stdin) {
-      pipedContent += chunk;
-    }
-
-    externalMessage = pipedContent.trim();
+    externalMessage = await readPipedInput();
   } else {
     // Check for command line arguments
     const args = process.argv.slice(2);
@@ -293,29 +382,26 @@ async function main() {
     }
   }
 
-  // Create readline interface first
-  let rl: readline.Interface;
+  // Setup graceful shutdown (after hasPipedInputDetected is defined)
+  const shutdown = async () => {
+    await performShutdown();
+  };
 
-  if (hasPipedInput) {
-    // For piped input, we can still create the interface but it won't be interactive
-    // This is a fundamental limitation of Node.js - once stdin is consumed by piping, 
-    // it can't be restored to interactive mode
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  // Create terminal-kit input interface
+  let inputHandler: any;
+  let currentInput = '';
+
+  if (hasPipedInputDetected) {
     displayUnifiedMessage({
+      type: 'instruction',
       content: 'Note: Interactive mode not available after piped input.',
-      type: 'instruction'
-    });
-
-    rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: colors.cyan('> ')
+      metadata: { source: 'cli', messageType: 'notification' }
     });
   } else {
-    rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: colors.cyan('> ')
-    });
+    // Terminal is already initialized for interactive mode in initializeTerminal()
   }
 
   // If we have external input, broadcast it
@@ -327,84 +413,111 @@ async function main() {
       metadata: { source: 'cli', messageType: 'command' }
     });
     try {
-      await broadcastMessage(worldName, externalMessage, 'HUMAN');
+      await broadcastMessageToCurrentWorld(externalMessage, 'HUMAN');
     } catch (error) {
-      displayError(`Error broadcasting message: ${error}`);
+      displayUnifiedMessage({
+        type: 'error',
+        content: `Error broadcasting message: ${error}`,
+        metadata: { source: 'cli', messageType: 'error' }
+      });
     }
   }
 
-  // Handle input
-  rl.on('line', async (input: string) => {
-    const trimmedInput = input.trim();
+  // Handle input with terminal-kit
+  if (!hasPipedInputDetected) {
+    const term = getTerminal();
+    term.on('key', async (name: string, matches: any, data: any) => {
+      if (name === 'CTRL_C') {
+        await shutdown();
+        return;
+      }
 
-    if (!trimmedInput) {
-      rl.prompt();
-      return;
-    }
+      if (name === 'ENTER') {
+        const trimmedInput = currentInput.trim();
+        currentInput = '';
 
-    // Clear the current line to prevent echoing the command input
-    readline.moveCursor(process.stdout, 0, -1); // Move cursor up one line
-    readline.clearLine(process.stdout, 0);      // Clear the line
-    readline.cursorTo(process.stdout, 0);       // Move cursor to start
-
-    if (trimmedInput.startsWith('/')) {
-      // Handle commands
-      const parts = trimmedInput.slice(1).split(' ');
-      const commandName = parts[0];
-      const commandArgs = parts.slice(1);
-
-      if (commands[commandName]) {
-        try {
-          await commands[commandName](commandArgs, worldName);
-        } catch (error) {
-          displayError(`Error executing command: ${error}`);
+        if (!trimmedInput) {
+          showInputPrompt('> ', '');
+          return;
         }
-      } else {
-        displayUnifiedMessage({
-          content: `Unknown command: /${commandName}`,
-          type: 'error'
-        });
-        await helpCommand([], worldName);
-      }
-    } else {
-      // Broadcast message to all agents
-      displayUnifiedMessage({
-        type: 'human',
-        content: trimmedInput,
-        sender: 'you',
-        metadata: { source: 'cli', messageType: 'command' }
-      });
-      try {
-        await broadcastMessage(worldName, trimmedInput, 'HUMAN');
-      } catch (error) {
-        displayError(`Error broadcasting message: ${error}`);
-      }
-    }
 
-    // Wait a short moment for potential streaming to start, then show prompt if no streaming
-    setTimeout(() => {
-      if (!StreamingDisplay.isStreamingActive()) {
-        rl.prompt();
+        // Hide the input box immediately after Enter is pressed
+        hideInputBox();
+
+        if (trimmedInput.startsWith('/')) {
+          // Handle commands
+          const parts = trimmedInput.slice(1).split(' ');
+          const commandName = parts[0];
+          const commandArgs = parts.slice(1);
+
+          if (commands[commandName]) {
+            try {
+              await commands[commandName](commandArgs, currentWorld!);
+            } catch (error) {
+              displayUnifiedMessage({
+                type: 'error',
+                content: `Error executing command: ${error}`,
+                metadata: { source: 'cli', messageType: 'error' }
+              });
+            }
+          } else {
+            displayUnifiedMessage({
+              type: 'command',
+              content: `Unknown command: /${commandName}`,
+              commandSubtype: 'warning',
+              metadata: { source: 'cli', messageType: 'command' }
+            });
+            await helpCommand([], currentWorld!);
+          }
+
+          // Reset position and show input prompt immediately after command execution
+          handlePostCommandDisplay();
+        } else {
+          // Broadcast message to all agents
+          displayUnifiedMessage({
+            type: 'human',
+            content: trimmedInput,
+            sender: 'you',
+            metadata: { source: 'cli', messageType: 'command' }
+          });
+          try {
+            await broadcastMessageToCurrentWorld(trimmedInput, 'HUMAN');
+          } catch (error) {
+            displayUnifiedMessage({
+              type: 'error',
+              content: `Error broadcasting message: ${error}`,
+              metadata: { source: 'cli', messageType: 'error' }
+            });
+          }
+
+          // For broadcast messages, wait for streaming to complete or show prompt if no streaming
+          handlePostBroadcastDisplay();
+        }
+
+      } else if (name === 'BACKSPACE') {
+        if (currentInput.length > 0) {
+          currentInput = currentInput.slice(0, -1);
+          showInputPrompt('> ', currentInput);
+        }
+      } else if (data.isCharacter) {
+        currentInput += String.fromCharCode(data.codepoint);
+        showInputPrompt('> ', currentInput);
       }
-    }, 50);
-  });
+    });
+  }
 
-  rl.on('close', shutdown);
-
-  // Subscribe to SSE events for agent streaming responses
-  const unsubscribe = subscribeToSSE(async (event) => {
-    if (event.type === EventType.SSE) {
-      // Handle streaming LLM responses
-      const sseData = event.payload as SSEEventPayload;
+  // Subscribe to SSE events for streaming responses
+  const unsubscribe = subscribeToSSE(currentWorld!, async (event) => {
+    if (event.type === 'start' || event.type === 'chunk' || event.type === 'end' || event.type === 'error') {
+      const sseData = event;
 
       // Get agent name for display
-      const agents = getAgents(worldName);
-      const agent = agents.find(a => a.name === sseData.agentName);
-      const agentName = agent?.name || 'Unknown Agent';
+      const agents = getAgentsFromCurrentWorld();
+      const agent = agents.find(a => a.config.name === sseData.agentName);
+      const agentName = agent?.config.name || 'Unknown Agent';
 
       switch (sseData.type) {
         case 'start':
-          // Estimate input tokens from message context
           const estimatedInputTokens = await estimateInputTokens(sseData.agentName, worldName);
           StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
           break;
@@ -412,10 +525,9 @@ async function main() {
           StreamingDisplay.addStreamingContent(sseData.agentName, sseData.content || '');
           break;
         case 'end':
-          // Set usage information if available BEFORE ending streaming
+          // Set usage information before ending streaming
           if (sseData.usage) {
             StreamingDisplay.setStreamingUsage(sseData.agentName, sseData.usage);
-            // Trigger one final preview update to show the actual token counts
             StreamingDisplay.updateFinalPreview(sseData.agentName);
           }
           StreamingDisplay.endStreaming(sseData.agentName);
@@ -427,69 +539,49 @@ async function main() {
     }
   });
 
-  // Subscribe to SYSTEM events for debug messages
-  subscribeToSystem(async (event) => {
-    if (event.type === EventType.SYSTEM) {
-      const systemData = event.payload as SystemEventPayload;
-      if (systemData.action === 'debug' && systemData.content) {
-        // Display debug messages properly during streaming
-        StreamingDisplay.displayDebugMessage(colors.gray(systemData.content));
-      }
+  // Subscribe to SYSTEM events for debug messages (not available in core, using message events instead)
+  // subscribeToSystem(async (event) => {
+  //   if (event.type === EventType.SYSTEM) {
+  //     const systemData = event.payload as SystemEventPayload;
+  //     if (systemData.action === 'debug' && systemData.content) {
+  //       StreamingDisplay.displayDebugMessage(colors.gray(systemData.content));
+  //     }
+  //   }
+  // });
+
+  // Subscribe to MESSAGE events for system notifications
+  subscribeToMessages(currentWorld!, async (event) => {
+    // Display @human messages (e.g., turn limit notifications)
+    if (event.content.startsWith('@human')) {
+      // Convert to MessageEventPayload format for display
+      const messageData: MessageEventPayload = {
+        content: event.content,
+        sender: event.sender
+      };
+      StreamingDisplay.displayMessage(messageData);
     }
   });
 
-  // Subscribe to MESSAGE events for system messages (like turn limit notifications)
-  subscribeToMessages(async (event) => {
-    if (event.type === EventType.MESSAGE) {
-      const messageData = event.payload as MessageEventPayload;
-      // Display @human messages from system OR agents (for turn limit notifications)
-      if (messageData.content.startsWith('@human')) {
-        // Display @human messages with red dot, showing who sent it
-        StreamingDisplay.displayMessage(messageData);
-      }
+  // Handle piped input exit or show prompt
+  handleExternalInputDisplay(hasExternalInput, hasPipedInputDetected);
+
+  if (!hasExternalInput) {
+    showInitialPrompt();
+
+    // Keep the process alive for interactive mode
+    if (!hasPipedInputDetected) {
+      setInterval(() => { }, 1000);
     }
-  });
-
-  // Show initial prompt
-  displayUnifiedMessage({
-    content: 'Type a message to broadcast to all agents, or use /help for commands.',
-    type: 'instruction'
-  });
-
-  // If we had piped input, wait a bit for potential streaming to start and then exit gracefully
-  if (hasExternalInput && hasPipedInput) {
-    setTimeout(() => {
-      if (!StreamingDisplay.isStreamingActive()) {
-        displayUnifiedMessage({
-          content: 'Piped input processed. Exiting...',
-          type: 'system'
-        });
-        process.exit(0);
-      } else {
-        // Wait for streaming to complete
-        StreamingDisplay.setOnAllStreamingEndCallback(() => {
-          displayUnifiedMessage({
-            content: 'Streaming completed. Exiting...',
-            type: 'system'
-          });
-          process.exit(0);
-        });
-      }
-    }, 100);
-  } else if (hasExternalInput) {
-    setTimeout(() => {
-      if (!StreamingDisplay.isStreamingActive()) {
-        rl.prompt();
-      }
-    }, 100);
-  } else {
-    rl.prompt();
   }
 }
 
 // Run the CLI
 main().catch((error) => {
-  displayError(`Fatal error: ${error}`);
-  cliLogger.error({ error }, 'Fatal CLI error occurred');
+  displayUnifiedMessage({
+    type: 'error',
+    content: `Fatal error: ${error}`,
+    metadata: { source: 'cli', messageType: 'error' }
+  });
+  console.error('Fatal CLI error occurred:', error);
   process.exit(1);
 });

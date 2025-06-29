@@ -26,7 +26,7 @@
 
 import { colors } from './colors';
 import { addMessageToStore, createStoredMessage, determineSenderType } from '../message-store';
-import { SenderType } from '../../src/types';
+import { SenderType } from '../../core/types.js';
 import {
   displayUnifiedMessage,
   displayStreamingMessage,
