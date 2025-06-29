@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent World - Dual Mode Frontend</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .app-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            height: fit-content;
+        }
+
+        .content-area {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            min-height: 600px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e1e5e9;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+
+        .section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-connected {
+            background: #28a745;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+        }
+
+        .status-connecting {
+            background: #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .mode-option {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .mode-option.active {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .world-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .world-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .world-item:hover {
+            background: #f8f9fa;
+        }
+
+        .world-item.selected {
+            background: rgba(102, 126, 234, 0.1);
+            border-left: 3px solid #667eea;
+        }
+
+        .world-item:last-child {
+            border-bottom: none;
+        }
+
+        .world-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .world-meta {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .chat-area {
+            height: 400px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            overflow-y: auto;
+            background: #fafafa;
+            margin-bottom: 15px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background: #667eea;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .message.agent {
+            background: white;
+            border: 1px solid #ddd;
+        }
+
+        .message-input {
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-input input {
+            flex: 1;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h1>Agent World</h1>
+            <p>Dual Mode Frontend - Chat with AI Agents</p>
+        </div>
+
+        <div class="main-content">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Mode Selection -->
+                <div class="section">
+                    <h3>Operation Mode</h3>
+                    <div class="mode-toggle">
+                        <div class="mode-option active" data-mode="static">
+                            <strong>Static</strong><br>
+                            <small>Local Core</small>
+                        </div>
+                        <div class="mode-option" data-mode="server">
+                            <strong>Server</strong><br>
+                            <small>WebSocket</small>
+                        </div>
+                    </div>
+                    <div class="form-group" id="websocket-config" style="display: none;">
+                        <label for="ws-url">WebSocket URL:</label>
+                        <input type="text" id="ws-url" class="form-control" value="ws://localhost:3000/ws">
+                    </div>
+                </div>
+
+                <!-- Connection Status -->
+                <div class="section">
+                    <h3>Connection Status</h3>
+                    <div id="connection-status">
+                        <span class="status-indicator status-disconnected"></span>
+                        <span id="status-text">Disconnected</span>
+                    </div>
+                    <button id="connect-btn" class="btn btn-primary" style="margin-top: 10px;">Connect</button>
+                </div>
+
+                <!-- World Selection -->
+                <div class="section" id="world-section" style="display: none;">
+                    <h3>World Selection</h3>
+                    <div id="world-list" class="world-list">
+                        <!-- Worlds will be populated here -->
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="new-world-name" class="form-control" placeholder="New world name">
+                    </div>
+                    <button id="create-world-btn" class="btn btn-success">Create World</button>
+                </div>
+
+                <!-- App Key Management (Static Mode) -->
+                <div class="section" id="app-key-section" style="display: none;">
+                    <h3>App Key Configuration</h3>
+                    <div class="form-group">
+                        <label for="api-provider">Provider:</label>
+                        <select id="api-provider" class="form-control">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="google">Google</option>
+                            <option value="azure">Azure OpenAI</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="api-key">API Key:</label>
+                        <input type="password" id="api-key" class="form-control" placeholder="Enter your API key">
+                    </div>
+                    <button id="save-key-btn" class="btn btn-primary">Save Key</button>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="content-area">
+                <div id="welcome-screen">
+                    <h2>Welcome to Agent World</h2>
+                    <p>Please connect and select a world to start chatting with AI agents.</p>
+                    <ol>
+                        <li>Choose your operation mode (Static or Server)</li>
+                        <li>Click "Connect" to initialize the system</li>
+                        <li>Select or create a world</li>
+                        <li>Start chatting with agents!</li>
+                    </ol>
+                </div>
+
+                <div id="chat-interface" class="hidden">
+                    <div id="world-info">
+                        <h2 id="current-world-name">World Name</h2>
+                        <p id="current-world-description">World description and agent information</p>
+                    </div>
+
+                    <div id="chat-area" class="chat-area">
+                        <!-- Messages will appear here -->
+                    </div>
+
+                    <div class="message-input">
+                        <input type="text" id="message-input" class="form-control" placeholder="Type your message...">
+                        <button id="send-btn" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+
+                <div id="error-display"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { MessageBroker, MESSAGE_TYPES, OPERATION_MODES, CONNECTION_STATES } from './message-broker.js';
+        import { UnifiedStorage, STORES, STORAGE_LEVELS } from './storage.js';
+
+        class AgentWorldApp {
+            constructor() {
+                this.broker = null;
+                this.storage = null;
+                this.selectedWorld = null;
+                this.currentMode = 'static';
+                this.worlds = [];
+                
+                this.initializeApp();
+            }
+
+            async initializeApp() {
+                // Initialize storage
+                this.storage = new UnifiedStorage();
+                await this.storage.init();
+                
+                // Set up event listeners
+                this.setupEventListeners();
+                
+                // Load saved settings
+                await this.loadSettings();
+                
+                console.log('AgentWorld App initialized');
+            }
+
+            setupEventListeners() {
+                // Mode toggle
+                document.querySelectorAll('.mode-option').forEach(option => {
+                    option.addEventListener('click', (e) => {
+                        this.switchMode(e.target.closest('.mode-option').dataset.mode);
+                    });
+                });
+
+                // Connect button
+                document.getElementById('connect-btn').addEventListener('click', () => {
+                    this.handleConnect();
+                });
+
+                // Create world button
+                document.getElementById('create-world-btn').addEventListener('click', () => {
+                    this.handleCreateWorld();
+                });
+
+                // Save API key
+                document.getElementById('save-key-btn').addEventListener('click', () => {
+                    this.handleSaveApiKey();
+                });
+
+                // Send message
+                document.getElementById('send-btn').addEventListener('click', () => {
+                    this.handleSendMessage();
+                });
+
+                document.getElementById('message-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.handleSendMessage();
+                    }
+                });
+            }
+
+            switchMode(mode) {
+                this.currentMode = mode;
+                
+                // Update UI
+                document.querySelectorAll('.mode-option').forEach(option => {
+                    option.classList.toggle('active', option.dataset.mode === mode);
+                });
+
+                // Show/hide WebSocket config
+                const wsConfig = document.getElementById('websocket-config');
+                wsConfig.style.display = mode === 'server' ? 'block' : 'none';
+
+                // Show/hide app key section
+                const appKeySection = document.getElementById('app-key-section');
+                appKeySection.style.display = mode === 'static' ? 'block' : 'none';
+
+                this.saveSettings();
+            }
+
+            async handleConnect() {
+                try {
+                    this.setLoading(true);
+                    this.updateStatus('connecting', 'Connecting...');
+
+                    // Initialize message broker
+                    this.broker = new MessageBroker();
+                    this.setupBrokerEvents();
+
+                    const config = {
+                        mode: this.currentMode === 'static' ? OPERATION_MODES.STATIC : OPERATION_MODES.SERVER
+                    };
+
+                    if (this.currentMode === 'server') {
+                        config.websocketUrl = document.getElementById('ws-url').value;
+                    }
+
+                    await this.broker.init(config);
+
+                } catch (error) {
+                    this.showError(`Connection failed: ${error.message}`);
+                    this.updateStatus('disconnected', 'Connection failed');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            setupBrokerEvents() {
+                this.broker.on('broker_ready', (data) => {
+                    this.updateStatus('connected', `Connected (${data.mode} mode)`);
+                    this.loadWorlds();
+                    document.getElementById('world-section').style.display = 'block';
+                });
+
+                this.broker.on('broker_error', (data) => {
+                    this.showError(`Broker error: ${data.error}`);
+                });
+
+                this.broker.on('connection_closed', () => {
+                    this.updateStatus('disconnected', 'Connection lost');
+                    document.getElementById('world-section').style.display = 'none';
+                    this.hideChat();
+                });
+            }
+
+            async loadWorlds() {
+                try {
+                    const response = await this.broker.sendMessage(MESSAGE_TYPES.WORLD_LIST, {});
+                    this.worlds = response.data || [];
+                    this.renderWorldList();
+                } catch (error) {
+                    this.showError(`Failed to load worlds: ${error.message}`);
+                }
+            }
+
+            renderWorldList() {
+                const worldList = document.getElementById('world-list');
+                worldList.innerHTML = '';
+
+                if (this.worlds.length === 0) {
+                    worldList.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No worlds found. Create your first world!</div>';
+                    return;
+                }
+
+                this.worlds.forEach(world => {
+                    const worldItem = document.createElement('div');
+                    worldItem.className = 'world-item';
+                    worldItem.dataset.worldId = world.id;
+                    
+                    worldItem.innerHTML = `
+                        <div class="world-name">${world.name}</div>
+                        <div class="world-meta">${world.agentCount || 0} agents</div>
+                    `;
+
+                    worldItem.addEventListener('click', () => {
+                        this.selectWorld(world);
+                    });
+
+                    worldList.appendChild(worldItem);
+                });
+            }
+
+            async selectWorld(world) {
+                this.selectedWorld = world;
+                
+                // Update UI
+                document.querySelectorAll('.world-item').forEach(item => {
+                    item.classList.toggle('selected', item.dataset.worldId === world.id);
+                });
+
+                // Show chat interface
+                this.showChat();
+                
+                // Save selected world
+                await this.saveSettings();
+            }
+
+            async handleCreateWorld() {
+                const worldName = document.getElementById('new-world-name').value.trim();
+                if (!worldName) {
+                    this.showError('Please enter a world name');
+                    return;
+                }
+
+                try {
+                    const response = await this.broker.sendMessage(MESSAGE_TYPES.WORLD_CREATE, {
+                        name: worldName
+                    });
+
+                    document.getElementById('new-world-name').value = '';
+                    this.showSuccess('World created successfully!');
+                    
+                    // Reload worlds
+                    await this.loadWorlds();
+                } catch (error) {
+                    this.showError(`Failed to create world: ${error.message}`);
+                }
+            }
+
+            async handleSaveApiKey() {
+                const provider = document.getElementById('api-provider').value;
+                const apiKey = document.getElementById('api-key').value.trim();
+
+                if (!apiKey) {
+                    this.showError('Please enter an API key');
+                    return;
+                }
+
+                try {
+                    await this.storage.setItem(STORES.config, `apiKey_${provider}`, {
+                        provider,
+                        key: apiKey,
+                        saved: new Date().toISOString()
+                    });
+
+                    this.showSuccess('API key saved successfully!');
+                    document.getElementById('api-key').value = '';
+                } catch (error) {
+                    this.showError(`Failed to save API key: ${error.message}`);
+                }
+            }
+
+            async handleSendMessage() {
+                const messageInput = document.getElementById('message-input');
+                const message = messageInput.value.trim();
+                
+                if (!message || !this.selectedWorld) return;
+
+                try {
+                    // Add user message to chat
+                    this.addMessageToChat(message, 'user');
+                    messageInput.value = '';
+
+                    // Send message through broker
+                    const response = await this.broker.sendMessage(MESSAGE_TYPES.CHAT_MESSAGE, {
+                        message,
+                        worldId: this.selectedWorld.id
+                    });
+
+                    // Add agent response (mock for now)
+                    setTimeout(() => {
+                        this.addMessageToChat('Message received and processed successfully!', 'agent');
+                    }, 1000);
+
+                } catch (error) {
+                    this.showError(`Failed to send message: ${error.message}`);
+                }
+            }
+
+            addMessageToChat(message, type) {
+                const chatArea = document.getElementById('chat-area');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.textContent = message;
+                
+                chatArea.appendChild(messageDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+
+            showChat() {
+                document.getElementById('welcome-screen').classList.add('hidden');
+                document.getElementById('chat-interface').classList.remove('hidden');
+                
+                if (this.selectedWorld) {
+                    document.getElementById('current-world-name').textContent = this.selectedWorld.name;
+                    document.getElementById('current-world-description').textContent = 
+                        `Connected to ${this.selectedWorld.name} with ${this.selectedWorld.agentCount || 0} agents`;
+                }
+            }
+
+            hideChat() {
+                document.getElementById('chat-interface').classList.add('hidden');
+                document.getElementById('welcome-screen').classList.remove('hidden');
+            }
+
+            updateStatus(status, text) {
+                const indicator = document.querySelector('.status-indicator');
+                const statusText = document.getElementById('status-text');
+                
+                indicator.className = `status-indicator status-${status}`;
+                statusText.textContent = text;
+
+                const connectBtn = document.getElementById('connect-btn');
+                connectBtn.disabled = status === 'connected' || status === 'connecting';
+            }
+
+            setLoading(loading) {
+                const app = document.querySelector('.app-container');
+                app.classList.toggle('loading', loading);
+            }
+
+            showError(message) {
+                this.showMessage(message, 'error');
+            }
+
+            showSuccess(message) {
+                this.showMessage(message, 'success');
+            }
+
+            showMessage(message, type) {
+                const errorDisplay = document.getElementById('error-display');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `${type}-message`;
+                messageDiv.textContent = message;
+                
+                errorDisplay.appendChild(messageDiv);
+                
+                setTimeout(() => {
+                    messageDiv.remove();
+                }, 5000);
+            }
+
+            async saveSettings() {
+                try {
+                    await this.storage.setItem(STORES.config, 'appSettings', {
+                        mode: this.currentMode,
+                        selectedWorld: this.selectedWorld,
+                        websocketUrl: document.getElementById('ws-url').value
+                    });
+                } catch (error) {
+                    console.error('Failed to save settings:', error);
+                }
+            }
+
+            async loadSettings() {
+                try {
+                    const settings = await this.storage.getItem(STORES.config, 'appSettings');
+                    if (settings) {
+                        if (settings.mode) {
+                            this.switchMode(settings.mode);
+                        }
+                        if (settings.websocketUrl) {
+                            document.getElementById('ws-url').value = settings.websocketUrl;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to load settings:', error);
+                }
+            }
+        }
+
+        // Initialize the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            window.agentWorldApp = new AgentWorldApp();
+        });
+    </script>
+</body>
+</html>

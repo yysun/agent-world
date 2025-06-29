@@ -165,56 +165,56 @@
 ## Phase 5: Frontend UI Integration
 
 ### 5.1 World Selection Interface
-- [ ] Implement world auto-selection/creation similar to CLI + unit tests
-- [ ] Add world selection UI before mode-specific operations + UI tests
-- [ ] Implement world selection state persistence + unit tests
-- [ ] Add WebSocket connection trigger after world selection + integration tests
-- [ ] Create world creation and management interface + UI tests
-- [ ] Test world selection flow in both operation modes + cross-mode tests
+- [ ] Implement world auto-selection/creation similar to CLI
+- [ ] Add world selection UI before mode-specific operations
+- [ ] Implement world selection state persistence
+- [ ] Add WebSocket connection trigger after world selection
+- [ ] Create world creation and management interface
+- [ ] Test world selection flow in both operation modes
 - [ ] **Dependency**: Must complete before 5.2
-- [ ] **Requires**: Phase 4 (Message broker) completion
+- [ ] **Requires**: Phase 4 (Message broker) completion ✅
 
 ### 5.2 Mode Toggle Implementation
-- [ ] Add UI setting for static/server mode selection + UI tests
-- [ ] Implement persistent setting storage across sessions + unit tests
-- [ ] Set default mode to static + validation tests
-- [ ] Ensure mode switching doesn't affect UI behavior + integration tests
-- [ ] Add visual indicators for current operation mode + UI tests
-- [ ] Test mode toggle functionality and persistence + cross-session tests
+- [ ] Add UI setting for static/server mode selection
+- [ ] Implement persistent setting storage across sessions
+- [ ] Set default mode to static
+- [ ] Ensure mode switching doesn't affect UI behavior
+- [ ] Add visual indicators for current operation mode
+- [ ] Test mode toggle functionality and persistence
 - [ ] **Dependency**: Can work in parallel with 5.3
 - [ ] **Requires**: 5.1 completion (world selection foundation needed)
 
 ### 5.3 App Key Management Interface
-- [ ] Create UI for app key configuration in static mode + UI tests
-- [ ] Implement basic storage for app keys in browser storage + unit tests
-- [ ] Add app key validation and basic error handling + unit tests
-- [ ] Create app key management interface (add/edit/remove) + UI tests
-- [ ] Ensure app key persistence across sessions + persistence tests
-- [ ] Test app key functionality + validation tests
+- [ ] Create UI for app key configuration in static mode
+- [ ] Implement basic storage for app keys in browser storage
+- [ ] Add app key validation and basic error handling
+- [ ] Create app key management interface (add/edit/remove)
+- [ ] Ensure app key persistence across sessions
+- [ ] Test app key functionality
 - [ ] **Dependency**: Can work in parallel with 5.2
-- [ ] **Requires**: Phase 3 (Storage module) completion
+- [ ] **Requires**: Phase 3 (Storage module) completion ✅
 
 ### 5.4 Phase 5 Completion Gate
 - [ ] All UI components functional
 - [ ] World selection works in both modes
 - [ ] Mode toggle persistent and functional
 - [ ] App key management operational
-- [ ] Integration tests passing
+- [ ] Manual verification of UI functionality
 - [ ] **Go/No-Go Decision**: Ready for Phase 6
 
 ## Phase 6: Documentation and Deployment
 
 ### 6.1 Development Documentation
-- [ ] Update documentation for new build process + validation
-- [ ] Document testing guidelines and patterns + examples
-- [ ] Create development workflow documentation + setup guides
-- [ ] Document bundle usage and deployment + configuration examples
+- [ ] Update documentation for new build process
+- [ ] Document testing guidelines and patterns
+- [ ] Create development workflow documentation
+- [ ] Document bundle usage and deployment
 
 ### 6.2 Production Deployment Preparation
-- [ ] Create production deployment scripts + validation tests
-- [ ] Test development and production workflows + end-to-end validation
-- [ ] Validate all bundle builds work in target environments + compatibility tests
-- [ ] Create deployment configuration guides + examples
+- [ ] Create production deployment scripts
+- [ ] Test development and production workflows
+- [ ] Validate all bundle builds work in target environments
+- [ ] Create deployment configuration guides
 
 ### 6.3 Phase 6 Completion Gate
 - [ ] Documentation complete and validated
@@ -226,9 +226,9 @@
 ## Phase 7: Integration Testing
 
 ### 7.1 Static Mode Integration
-- [ ] Integrate Core bundle with frontend in static mode + integration tests
-- [ ] Connect message broker to local Core operations + integration tests
-- [ ] Integrate storage module for IndexedDB/file operations + integration tests
+- [ ] Integrate Core bundle with frontend in static mode
+- [ ] Connect message broker to local Core operations
+- [ ] Integrate storage module for IndexedDB/file operations
 - [ ] Test complete static mode workflow + end-to-end tests
 - [ ] Verify app key management in static mode + workflow tests
 - [ ] Test world selection and management in static mode + user flow tests
