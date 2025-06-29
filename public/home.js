@@ -268,7 +268,7 @@ const view = (state) => {
                   </div>
                 </div>
                 <h3 class="agent-name">${`${agent.name}`}</h3>
-                <p class="agent-role">${agent.config.model} ${agent.status || 'Agent'}</p>
+                <p class="agent-role">${agent.model} ${agent.status || 'Agent'}</p>
               </div>
             `)}
           </div>
