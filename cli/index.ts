@@ -147,7 +147,8 @@ let currentWorld: World | null = null;
 // Smart world selection - equivalent to loadWorlds() from src
 async function loadWorldsWithSmartSelection(): Promise<{ worlds: string[], action: string, defaultWorld?: string }> {
   try {
-    const worldInfos = await listWorlds();
+    const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+    const worldInfos = await listWorlds(rootPath);
     const worlds = worldInfos.map(info => info.name);
 
     if (worlds.length === 0) {
@@ -167,7 +168,8 @@ async function loadWorldsWithSmartSelection(): Promise<{ worlds: string[], actio
 async function loadWorldByName(worldName: string): Promise<void> {
   try {
     const worldId = toKebabCase(worldName);
-    currentWorld = await getWorld(worldId);
+    const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+    currentWorld = await getWorld(rootPath, worldId);
 
     if (!currentWorld) {
       throw new Error(`World "${worldName}" not found`);
@@ -331,12 +333,13 @@ async function main() {
   const { worlds, action, defaultWorld } = await loadWorldsWithSmartSelection();
 
   let worldName: string;
+  const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
   switch (action) {
     case 'create':
       // No worlds found - create default world
-      const newWorld = await createWorld({ name: DEFAULT_WORLD_NAME });
-      worldName = newWorld.config.name;
+      const newWorld = await createWorld(rootPath, { name: DEFAULT_WORLD_NAME });
+      worldName = newWorld.name;
       currentWorld = newWorld;
       break;
 

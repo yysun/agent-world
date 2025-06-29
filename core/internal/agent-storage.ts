@@ -34,8 +34,8 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, AgentMessage } from './types';
-import { toKebabCase } from './utils';
+import { Agent, AgentMessage } from '../types.js';
+import { toKebabCase } from '../utils.js';
 
 /**
  * Agent loading options for enhanced control

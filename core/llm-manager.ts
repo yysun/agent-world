@@ -30,9 +30,9 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types.js';
-import { publishSSE } from './world-events.js';
-import { generateId } from './utils.js';
+import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types';
+import { publishSSE } from './world-events';
+import { generateId } from './utils';
 
 /**
  * LLM configuration interface

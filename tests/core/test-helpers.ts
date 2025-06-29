@@ -16,8 +16,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, World, AgentMessage, LLMProvider, CreateAgentParams } from '../../core/types.js';
-import { CreateWorldParams } from '../../core/world-manager.js';
+import { Agent, World, AgentMessage, LLMProvider, CreateAgentParams, CreateWorldParams } from '../../core/types.js';
 import { toKebabCase } from '../../core/utils.js';
 import { getAgentDir } from '../../core/agent-storage.js';
 
@@ -358,7 +357,7 @@ export async function writeTestAgent(worldId: string, agentOrParams: Agent | Cre
   }
 
   const agentId = toKebabCase(agent.id);
-  const agentDir = getAgentDir(worldId, agentId);
+  const agentDir = getAgentDir(TEST_CONFIG.testDataPath, worldId, agentId);
   await fs.mkdir(agentDir, { recursive: true });
 
   // Save system prompt

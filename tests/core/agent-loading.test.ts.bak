@@ -380,12 +380,12 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
       await writeMockAgent(testWorldId, agent1);
       await writeMockAgent(testWorldId, agent2);
 
-      const result: BatchLoadResult = await loadAllAgentsFromDiskBatch('test-data/worlds', testWorldId);
+      const result: BatchLoadResult = await loadAllAgentsFromDiskBatch(testWorldId);
 
       expect(result.successful).toHaveLength(2);
       expect(result.failed).toHaveLength(0);
-      expect(result.successful.map((a: any) => a.id)).toContain('batch-agent-1');
-      expect(result.successful.map((a: any) => a.id)).toContain('batch-agent-2');
+      expect(result.successful.map(a => a.id)).toContain('batch-agent-1');
+      expect(result.successful.map(a => a.id)).toContain('batch-agent-2');
     });
 
     it('should handle partial failures in batch loading', async () => {
@@ -397,7 +397,7 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
       // Corrupt one agent's config
       mockFileSystem[`test-data/worlds/${testWorldId}/agents/batch-agent-4/config.json`] = 'invalid json{';
 
-      const result: BatchLoadResult = await loadAllAgentsFromDiskBatch('test-data/worlds', testWorldId);
+      const result: BatchLoadResult = await loadAllAgentsFromDiskBatch(testWorldId);
 
       expect(result.successful).toHaveLength(1);
       expect(result.failed).toHaveLength(1);

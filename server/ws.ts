@@ -35,6 +35,8 @@ import { loadAllWorldsFromDisk } from '../core/world-storage.js';
 import { publishMessage } from '../core/world-events.js';
 import { toKebabCase } from '../core/utils.js';
 
+const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+
 // Zod validation schema for WebSocket messages
 const WebSocketMessageSchema = z.object({
   type: z.enum(["event", "subscribe", "unsubscribe"]),
@@ -89,7 +91,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
           case 'subscribe':
             if (worldName) {
               // Check if world exists
-              const availableWorlds = await listWorlds();
+              const availableWorlds = await listWorlds(ROOT_PATH);
               const worldExists = availableWorlds.some(world => world.name === worldName);
               if (!worldExists) {
                 ws.send(JSON.stringify({
@@ -125,7 +127,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             }
 
             // Check if world exists
-            const availableWorlds = await listWorlds();
+            const availableWorlds = await listWorlds(ROOT_PATH);
             const worldExists = availableWorlds.some(world => world.name === worldName);
             if (!worldExists) {
               ws.send(JSON.stringify({
@@ -137,7 +139,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
 
             // Get world and send message
             const worldId = toKebabCase(worldName);
-            const world = await getWorld(worldId);
+            const world = await getWorld(ROOT_PATH, worldId);
             if (!world) {
               ws.send(JSON.stringify({
                 type: 'error',

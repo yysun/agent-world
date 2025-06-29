@@ -44,7 +44,7 @@ import { World, Agent, SenderType, MessageData, AgentMessage, ChatMessage } from
  * Get world-specific turn limit or default value
  */
 export function getWorldTurnLimit(world: World): number {
-  return world.config.turnLimit || 5; // Default to 5 if not configured
+  return world.turnLimit || 5; // Default to 5 if not configured
 }
 
 /**

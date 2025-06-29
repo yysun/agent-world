@@ -20,15 +20,15 @@
  * - Ready for message history implementation
  */
 
-import { publishMessage } from './world-events.js';
-import { getWorld } from './world-manager.js';
-import { WorldMessageEvent } from './types.js';
+import { publishMessage } from './world-events';
+import { getWorld } from './world-manager';
+import { WorldMessageEvent } from './types';
 
 /**
  * Broadcast message to all agents in a world
  */
-export async function broadcastMessage(worldId: string, message: string, sender?: string): Promise<void> {
-  const world = await getWorld(worldId);
+export async function broadcastMessage(rootPath: string, worldId: string, message: string, sender?: string): Promise<void> {
+  const world = await getWorld(rootPath, worldId);
   if (!world) {
     throw new Error(`World ${worldId} not found`);
   }
@@ -40,12 +40,13 @@ export async function broadcastMessage(worldId: string, message: string, sender?
  * Send direct message to specific agent
  */
 export async function sendDirectMessage(
+  rootPath: string,
   worldId: string,
   targetAgentId: string,
   message: string,
   sender?: string
 ): Promise<void> {
-  const world = await getWorld(worldId);
+  const world = await getWorld(rootPath, worldId);
   if (!world) {
     throw new Error(`World ${worldId} not found`);
   }

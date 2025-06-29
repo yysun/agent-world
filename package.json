@@ -1,21 +1,35 @@
 {
   "name": "agent-world",
-  "version": "1.0.0",
-  "main": "index.js",
+  "version": "2.0.0",
+  "main": "index.ts",
   "type": "module",
+  "bin": {
+    "agent-world": "./bin/cli.ts",
+    "agent-world-server": "./bin/server.ts"
+  },
   "scripts": {
-    "cli": "npx tsx cli/index.ts",
-    "server": "npx tsx server/index.ts",
-    "start": "npx tsx index.ts",
-    "dev": "nodemon --watch core --watch cli --watch server --watch index.ts --ext ts,js,json --exec \"npx tsx index.ts\"",
+    "start": "npm run cli",
+    "cli": "npx tsx bin/cli.ts",
+    "server": "npx tsx bin/server.ts",
+    "dev": "npx tsx --watch index.ts",
     "test": "jest --config jest.config.js",
-    "build": "tsc --noEmit",
     "check": "tsc --noEmit"
   },
-  "keywords": [],
+  "description": "World-mediated agent management system with clean API surface",
+  "keywords": [
+    "agents",
+    "ai",
+    "llm",
+    "world",
+    "typescript",
+    "api"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "exports": {
+    ".": "./index.ts",
+    "./package.json": "./package.json"
+  },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.12",
     "@ai-sdk/azure": "^1.3.23",

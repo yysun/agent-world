@@ -2,14 +2,15 @@
  * World Storage Module - File I/O Operations for World Data
  *
  * Features:
- * - World configuration persistence to config.json
+ * - World configuration persistence to config.json with flattened structure
  * - Kebab-case directory naming from world names
  * - Clean separation of storage data from runtime objects
  * - Handles World serialization without EventEmitter and agents Map
  * - Complete isolation from other internal modules
+ * - Explicit rootPath parameter handling (no environment variables)
  *
  * Core Functions:
- * - saveWorldToDisk: Save world config.json (excludes eventEmitter and agents)
+ * - saveWorldToDisk: Save world config.json with flat structure (excludes eventEmitter and agents)
  * - loadWorldFromDisk: Load world configuration from file
  * - deleteWorldFromDisk: Remove world directory and all contents
  * - loadAllWorldsFromDisk: Scan and load all worlds in root directory
@@ -18,37 +19,34 @@
  * - ensureWorldDirectory: Create world directory structure
  *
  * Implementation:
- * - Extracted from world-persistence.ts functions
+ * - All functions now require explicit rootPath parameter
+ * - No environment variable dependencies (AGENT_WORLD_DATA_PATH removed)
  * - Uses only fs/promises, path, types.ts, and utils.ts
- * - Storage layer works with plain WorldData (no EventEmitter)
+ * - Storage layer works with plain WorldData using flat structure
  * - Manager layer handles EventEmitter reconstruction
+ * - Internal-only module (not for direct external import)
  */
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { WorldConfig } from './types.js';
-import { toKebabCase } from './utils.js';
+import { toKebabCase } from './utils';
 
 /**
- * Serializable world data for storage (no EventEmitter, no agents Map)
+ * Serializable world data for storage (flat structure, no EventEmitter, no agents Map)
  */
 export interface WorldData {
   id: string;
-  config: WorldConfig;
-}
-
-/**
- * Get root directory from environment variable or default
- */
-function getRootDirectory(): string {
-  return process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+  name: string;
+  description?: string;
+  turnLimit: number;
+  autoSave: boolean;
 }
 
 /**
  * Get world directory path using kebab-case world name
  */
-export function getWorldDir(root: string, worldId: string): string {
-  return path.join(root, worldId);
+export function getWorldDir(rootPath: string, worldId: string): string {
+  return path.join(rootPath, worldId);
 }
 
 /**
@@ -84,11 +82,13 @@ export async function saveWorldToDisk(root: string, worldData: WorldData): Promi
   const worldDir = getWorldDir(root, worldId);
   const configPath = path.join(worldDir, 'config.json');
 
-  // Save only serializable world data
+  // Save flat world data structure
   const configData = {
-    name: worldData.config.name,
-    description: worldData.config.description,
-    turnLimit: worldData.config.turnLimit || 5
+    id: worldData.id,
+    name: worldData.name,
+    description: worldData.description,
+    turnLimit: worldData.turnLimit,
+    autoSave: worldData.autoSave
   };
 
   await writeJsonFile(configPath, configData);
@@ -105,12 +105,11 @@ export async function loadWorldFromDisk(root: string, worldId: string): Promise<
     const configData = await readJsonFile<any>(configPath);
 
     const worldData: WorldData = {
-      id: configData.name,
-      config: {
-        name: configData.name,
-        description: configData.description,
-        turnLimit: configData.turnLimit || 5
-      }
+      id: configData.id || configData.name, // Support migration from old format
+      name: configData.name,
+      description: configData.description,
+      turnLimit: configData.turnLimit || 5,
+      autoSave: configData.autoSave !== undefined ? configData.autoSave : true
     };
 
     return worldData;

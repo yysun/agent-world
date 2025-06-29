@@ -34,7 +34,7 @@
  * - Ready for EventBus integration in Phase 3
  */
 
-import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types';
+import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from '../types.js';
 import {
   saveAgentToDisk,
   loadAgentFromDisk,
@@ -47,8 +47,8 @@ import {
   repairAgentData,
   type AgentLoadOptions,
   type BatchLoadResult
-} from './agent-storage';
-import { subscribeAgentToMessages } from './agent-events';
+} from './agent-storage.js';
+import { subscribeAgentToMessages } from './agent-events.js';
 
 /**
  * Batch agent creation parameters

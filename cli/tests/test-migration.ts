@@ -16,28 +16,30 @@ console.log(`📁 Data path set to: ${process.env.AGENT_WORLD_DATA_PATH}`);
 
 async function testCoreFunctionality() {
   try {
+    const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+
     // Test 1: Load worlds info
     console.log('\n🧪 Testing listWorlds...');
-    const worldsInfo = await listWorlds();
+    const worldsInfo = await listWorlds(rootPath);
     console.log(`✅ Found ${worldsInfo.length} worlds`);
 
     // Test 2: Create a test world if none exist
     console.log('\n🧪 Testing world creation...');
     let testWorld;
     if (worldsInfo.length === 0) {
-      testWorld = await createWorld({ name: 'test-world' });
-      console.log(`✅ Created test world: ${testWorld.config.name}`);
+      testWorld = await createWorld(rootPath, { name: 'test-world' });
+      console.log(`✅ Created test world: ${testWorld.name}`);
     } else {
       // Load existing world
       const worldInfo = worldsInfo[0];
       console.log(`📍 Attempting to load world ID: ${worldInfo.id}`);
-      testWorld = await getWorld(worldInfo.id);
+      testWorld = await getWorld(rootPath, worldInfo.id);
       if (!testWorld) {
         console.log('⚠️  World not found, creating new test world...');
-        testWorld = await createWorld({ name: 'test-world' });
-        console.log(`✅ Created test world: ${testWorld.config.name}`);
+        testWorld = await createWorld(rootPath, { name: 'test-world' });
+        console.log(`✅ Created test world: ${testWorld.name}`);
       } else {
-        console.log(`✅ Loaded existing world: ${testWorld.config.name}`);
+        console.log(`✅ Loaded existing world: ${testWorld.name}`);
       }
     }
 

@@ -165,17 +165,44 @@ export interface AgentInfo {
 }
 
 // World Management Types
-export interface WorldConfig {
+
+/**
+ * World creation parameters
+ */
+export interface CreateWorldParams {
   name: string;
   description?: string;
   turnLimit?: number;
+  autoSave?: boolean;
 }
 
+/**
+ * World update parameters (partial update support)
+ */
+export interface UpdateWorldParams {
+  name?: string;
+  description?: string;
+  turnLimit?: number;
+  autoSave?: boolean;
+}
+
+/**
+ * Enhanced World interface with flattened configuration and auto-save support
+ */
 export interface World {
+  // Identity & Storage
   id: string; // kebab-case of world name
-  agents: Map<string, Agent>;
-  config: WorldConfig;
+  rootPath: string;
+
+  // Flattened Configuration (no nested config object)
+  name: string;
+  description?: string;
+  turnLimit: number;
+  autoSave: boolean;
+
+  // Runtime Objects
   eventEmitter: EventEmitter;
+  agents: Map<string, Agent>;
 
   // Agent operation methods
   createAgent(params: CreateAgentParams): Promise<Agent>;
@@ -185,6 +212,24 @@ export interface World {
   clearAgentMemory(agentName: string): Promise<Agent | null>;
   listAgents(): Promise<AgentInfo[]>;
   updateAgentMemory(agentName: string, messages: AgentMessage[]): Promise<Agent | null>;
+  saveAgentConfig(agentName: string): Promise<void>;
+
+  // World operations
+  save(): Promise<void>;
+  delete(): Promise<boolean>;
+  reload(): Promise<void>;
+  enableAutoSave(): void;
+  disableAutoSave(): void;
+}
+
+/**
+ * @deprecated Use World interface directly
+ * WorldConfig is deprecated in favor of flattened World structure
+ */
+export interface WorldConfig {
+  name: string;
+  description?: string;
+  turnLimit?: number;
 }
 
 // Storage Types

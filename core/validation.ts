@@ -18,10 +18,10 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, World, WorldConfig } from '../core/types.js';
-import { loadAllAgentsFromDisk, agentExistsOnDisk, getAgentDir } from '../core/agent-storage.js';
-import { getWorld } from '../core/world-manager.js';
-import { toKebabCase } from '../core/utils.js';
+import { Agent, World, WorldConfig } from './types';
+import { loadAllAgentsFromDisk, agentExistsOnDisk, getAgentDir } from './agent-storage';
+import { getWorld } from './world-manager';
+import { toKebabCase } from './utils';
 
 /**
  * Validation result interface
@@ -196,7 +196,7 @@ export async function validateAgentDirectoryStructure(worldName: string, agentId
 
   try {
     const root = getRootDirectory();
-    const agentDir = getAgentDir(worldName, agentId);
+    const agentDir = getAgentDir(root, worldName, agentId);
 
     // Check if agent directory exists
     try {
@@ -352,8 +352,9 @@ export async function validateAgent(worldName: string, agentId: string): Promise
   // If directory is valid, validate agent configuration
   if (dirValidation.isValid) {
     try {
-      const agents = await loadAllAgentsFromDisk(worldName);
-      const agent = agents.find(a => a.id === agentId);
+      const root = getRootDirectory();
+      const agents = await loadAllAgentsFromDisk(root, worldName);
+      const agent = agents.find((a: any) => a.id === agentId);
 
       if (agent) {
         const configValidation = validateAgentConfig(agent);
@@ -400,9 +401,14 @@ export async function validateWorld(worldName: string): Promise<WorldValidationR
   if (dirValidation.isValid) {
     try {
       // Load and validate world
-      const world = await getWorld(worldName);
+      const root = getRootDirectory();
+      const world = await getWorld(root, worldName);
       if (world) {
-        const configValidation = validateWorldConfig(world.config);
+        const configValidation = validateWorldConfig({
+          name: world.name,
+          description: world.description,
+          turnLimit: world.turnLimit
+        });
         errors.push(...configValidation.errors);
         warnings.push(...configValidation.warnings);
 

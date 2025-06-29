@@ -11,14 +11,14 @@ async function testNewEventSystem() {
     console.log('🧪 Testing new event system implementation...');
 
     // Create a test world
-    const world = await createWorld({
+    const world = await createWorld(process.cwd() + '/data/worlds', {
       name: 'test-event-world',
       description: 'Test world for new event system'
     });
     console.log('✅ World created:', world.id);
 
     // Create a test agent
-    const agent = await createAgent({
+    const agent = await createAgent(world.rootPath, world.id, {
       id: 'test-agent',
       name: 'Test Agent',
       type: 'assistant',

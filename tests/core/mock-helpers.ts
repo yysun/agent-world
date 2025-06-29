@@ -15,8 +15,7 @@
  */
 
 import { jest } from '@jest/globals';
-import { Agent, AgentMessage, LLMProvider, CreateAgentParams } from '../../core/types.js';
-import { CreateWorldParams } from '../../core/world-manager.js';
+import { Agent, AgentMessage, LLMProvider, CreateAgentParams, CreateWorldParams } from '../../core/types.js';
 
 // Mock file system state
 interface MockFileSystem {

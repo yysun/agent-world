@@ -24,7 +24,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { World, WorldConfig } from './types.js';
+import { World, CreateWorldParams, UpdateWorldParams } from './types';
 import {
   WorldData,
   saveWorldToDisk,
@@ -32,10 +32,10 @@ import {
   deleteWorldFromDisk,
   loadAllWorldsFromDisk,
   worldExistsOnDisk
-} from './world-storage.js';
-import { loadAllAgentsFromDisk } from './agent-storage.js';
-import { subscribeAgentToMessages } from './agent-events.js';
-import { toKebabCase } from './utils.js';
+} from './world-storage';
+import { loadAllAgentsFromDisk, saveAgentConfigToDisk } from './agent-storage';
+import { subscribeAgentToMessages } from './agent-events';
+import { toKebabCase } from './utils';
 import {
   createAgent as createAgentCore,
   getAgent as getAgentCore,
@@ -44,25 +44,7 @@ import {
   clearAgentMemory as clearAgentMemoryCore,
   listAgents as listAgentsCore,
   updateAgentMemory as updateAgentMemoryCore
-} from './agent-manager.js';
-
-/**
- * World creation parameters
- */
-export interface CreateWorldParams {
-  name: string;
-  description?: string;
-  turnLimit?: number;
-}
-
-/**
- * World update parameters (partial update support)
- */
-export interface UpdateWorldParams {
-  name?: string;
-  description?: string;
-  turnLimit?: number;
-}
+} from './agent-manager';
 
 /**
  * World listing information
@@ -85,46 +67,42 @@ function getRootDirectory(): string {
 /**
  * Create new world with configuration
  */
-export async function createWorld(params: CreateWorldParams): Promise<World> {
-  const root = getRootDirectory();
-
+export async function createWorld(rootPath: string, params: CreateWorldParams): Promise<World> {
   // Check if world already exists
-  const exists = await worldExistsOnDisk(root, params.name);
+  const exists = await worldExistsOnDisk(rootPath, params.name);
   if (exists) {
     throw new Error(`World with name '${params.name}' already exists`);
   }
 
   const worldData: WorldData = {
     id: params.name,
-    config: {
-      name: params.name,
-      description: params.description,
-      turnLimit: params.turnLimit || 5
-    }
+    name: params.name,
+    description: params.description,
+    turnLimit: params.turnLimit || 5,
+    autoSave: params.autoSave !== false
   };
 
-  await saveWorldToDisk(root, worldData);
+  await saveWorldToDisk(rootPath, worldData);
 
   // Return runtime World object with EventEmitter and agents Map
-  return worldDataToWorld(worldData);
+  return worldDataToWorld(worldData, rootPath);
 }
 
 /**
  * Load world by ID with EventEmitter reconstruction
  */
-export async function getWorld(worldId: string): Promise<World | null> {
-  const root = getRootDirectory();
-  const worldData = await loadWorldFromDisk(root, worldId);
+export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
+  const worldData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!worldData) {
     return null;
   }
 
   // Create runtime World with fresh EventEmitter and methods
-  const world = worldDataToWorld(worldData, worldId);
+  const world = worldDataToWorld(worldData, rootPath);
 
   // Load agents and subscribe them to messages
-  const agents = await loadAllAgentsFromDisk(worldId);
+  const agents = await loadAllAgentsFromDisk(rootPath, worldId);
   for (const agent of agents) {
     world.agents.set(agent.id, agent);
     // Automatically subscribe agent to world messages
@@ -137,9 +115,8 @@ export async function getWorld(worldId: string): Promise<World | null> {
 /**
  * Update world configuration
  */
-export async function updateWorld(worldId: string, updates: UpdateWorldParams): Promise<World | null> {
-  const root = getRootDirectory();
-  const existingData = await loadWorldFromDisk(root, worldId);
+export async function updateWorld(rootPath: string, worldId: string, updates: UpdateWorldParams): Promise<World | null> {
+  const existingData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!existingData) {
     return null;
@@ -148,36 +125,31 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
   // Merge updates with existing configuration
   const updatedData: WorldData = {
     ...existingData,
-    config: {
-      ...existingData.config,
-      ...updates
-    }
+    ...updates
   };
 
-  await saveWorldToDisk(root, updatedData);
-  return worldDataToWorld(updatedData);
+  await saveWorldToDisk(rootPath, updatedData);
+  return worldDataToWorld(updatedData, rootPath);
 }
 
 /**
  * Delete world and all associated data
  */
-export async function deleteWorld(worldId: string): Promise<boolean> {
-  const root = getRootDirectory();
-  return await deleteWorldFromDisk(root, worldId);
+export async function deleteWorld(rootPath: string, worldId: string): Promise<boolean> {
+  return await deleteWorldFromDisk(rootPath, worldId);
 }
 
 /**
  * Get all world IDs and basic information
  */
-export async function listWorlds(): Promise<WorldInfo[]> {
-  const root = getRootDirectory();
-  const allWorldData = await loadAllWorldsFromDisk(root);
+export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
+  const allWorldData = await loadAllWorldsFromDisk(rootPath);
 
   return allWorldData.map(data => ({
     id: data.id,
-    name: data.config.name,
-    description: data.config.description,
-    turnLimit: data.config.turnLimit || 5,
+    name: data.name,
+    description: data.description,
+    turnLimit: data.turnLimit || 5,
     agentCount: 0 // TODO: Count agents in world directory when implemented
   }));
 }
@@ -185,75 +157,61 @@ export async function listWorlds(): Promise<WorldInfo[]> {
 /**
  * Get world configuration without runtime objects (lightweight operation)
  */
-export async function getWorldConfig(worldId: string): Promise<WorldConfig | null> {
-  const root = getRootDirectory();
-  const worldData = await loadWorldFromDisk(root, worldId);
+export async function getWorldConfig(rootPath: string, worldId: string): Promise<WorldData | null> {
+  const worldData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!worldData) {
     return null;
   }
 
-  return worldData.config;
+  return worldData;
 }
 
 /**
  * Convert storage WorldData to runtime World object
  * Reconstructs EventEmitter and agents Map for runtime use
  */
-function worldDataToWorld(data: WorldData, worldId?: string): World {
+function worldDataToWorld(data: WorldData, rootPath: string): World {
   const world: World = {
-    id: worldId || data.id, // Use provided worldId or fall back to data.id
-    config: data.config,
+    id: data.id,
+    rootPath: rootPath,
+    name: data.name,
+    description: data.description,
+    turnLimit: data.turnLimit,
+    autoSave: data.autoSave,
     eventEmitter: new EventEmitter(),
     agents: new Map(), // Empty agents map - to be populated by agent manager
 
     // Agent operation methods
     async createAgent(params) {
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
+      const agent = await createAgentCore(world.rootPath, world.id, params);
+      // Update runtime map
+      world.agents.set(agent.id, agent);
 
-      try {
-        const agent = await createAgentCore(params);
-        // Update runtime map
-        world.agents.set(agent.id, agent);
-        return agent;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      if (world.autoSave) {
+        await world.save();
       }
+
+      return agent;
     },
 
     async getAgent(agentName) {
       // Try to find agent by name or ID
       let agentId = agentName;
 
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
         // First try with the provided name as-is
-        let agent = await getAgentCore(agentId);
+        let agent = await getAgentCore(world.rootPath, world.id, agentId);
 
         // If not found, try with kebab-case conversion
         if (!agent) {
           agentId = toKebabCase(agentName);
-          agent = await getAgentCore(agentId);
+          agent = await getAgentCore(world.rootPath, world.id, agentId);
         }
 
         return agent;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      } catch (error) {
+        return null;
       }
     },
 
@@ -261,32 +219,27 @@ function worldDataToWorld(data: WorldData, worldId?: string): World {
       // Try to find agent by name or ID
       let agentId = agentName;
 
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
         // First try with the provided name as-is
-        let updatedAgent = await updateAgentCore(agentId, updates);
+        let updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
 
         // If not found, try with kebab-case conversion
         if (!updatedAgent) {
           agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgentCore(agentId, updates);
+          updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
         }
 
         if (updatedAgent) {
           // Update runtime map
           world.agents.set(updatedAgent.id, updatedAgent);
+
+          if (world.autoSave) {
+            await world.save();
+          }
         }
         return updatedAgent;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      } catch (error) {
+        return null;
       }
     },
 
@@ -294,32 +247,27 @@ function worldDataToWorld(data: WorldData, worldId?: string): World {
       // Try to find agent by name or ID
       let agentId = agentName;
 
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
         // First try with the provided name as-is
-        let success = await deleteAgentCore(agentId);
+        let success = await deleteAgentCore(world.rootPath, world.id, agentId);
 
         // If not found, try with kebab-case conversion
         if (!success) {
           agentId = toKebabCase(agentName);
-          success = await deleteAgentCore(agentId);
+          success = await deleteAgentCore(world.rootPath, world.id, agentId);
         }
 
         if (success) {
-          // Update runtime map
+          // Remove from runtime map
           world.agents.delete(agentId);
+
+          if (world.autoSave) {
+            await world.save();
+          }
         }
         return success;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      } catch (error) {
+        return false;
       }
     },
 
@@ -327,49 +275,35 @@ function worldDataToWorld(data: WorldData, worldId?: string): World {
       // Try to find agent by name or ID
       let agentId = agentName;
 
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
         // First try with the provided name as-is
-        let clearedAgent = await clearAgentMemoryCore(agentId);
+        let clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
 
         // If not found, try with kebab-case conversion
         if (!clearedAgent) {
           agentId = toKebabCase(agentName);
-          clearedAgent = await clearAgentMemoryCore(agentId);
+          clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
         }
 
         if (clearedAgent) {
           // Update runtime map
           world.agents.set(clearedAgent.id, clearedAgent);
+
+          if (world.autoSave) {
+            await world.save();
+          }
         }
         return clearedAgent;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      } catch (error) {
+        return null;
       }
     },
 
     async listAgents() {
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
-        return await listAgentsCore();
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+        return await listAgentsCore(world.rootPath, world.id);
+      } catch (error) {
+        return [];
       }
     },
 
@@ -377,33 +311,87 @@ function worldDataToWorld(data: WorldData, worldId?: string): World {
       // Try to find agent by name or ID
       let agentId = agentName;
 
-      // Set world context
-      const originalWorldId = process.env.AGENT_WORLD_ID;
-      process.env.AGENT_WORLD_ID = world.id;
-
       try {
         // First try with the provided name as-is
-        let updatedAgent = await updateAgentMemoryCore(agentId, messages);
+        let updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
 
         // If not found, try with kebab-case conversion
         if (!updatedAgent) {
           agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgentMemoryCore(agentId, messages);
+          updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
         }
 
         if (updatedAgent) {
           // Update runtime map
           world.agents.set(updatedAgent.id, updatedAgent);
+
+          if (world.autoSave) {
+            await world.save();
+          }
         }
         return updatedAgent;
-      } finally {
-        // Restore original context
-        if (originalWorldId) {
-          process.env.AGENT_WORLD_ID = originalWorldId;
-        } else {
-          delete process.env.AGENT_WORLD_ID;
-        }
+      } catch (error) {
+        return null;
       }
+    },
+
+    async saveAgentConfig(agentName) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      try {
+        // First try with the provided name as-is
+        let agent = await getAgentCore(world.rootPath, world.id, agentId);
+
+        // If not found, try with kebab-case conversion
+        if (!agent) {
+          agentId = toKebabCase(agentName);
+          agent = await getAgentCore(world.rootPath, world.id, agentId);
+        }
+
+        if (!agent) {
+          throw new Error(`Agent ${agentName} not found`);
+        }
+
+        // Save only agent configuration without memory
+        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+      } catch (error) {
+        throw error;
+      }
+    },
+
+    // World operation methods
+    async save() {
+      const worldData: WorldData = {
+        id: world.id,
+        name: world.name,
+        description: world.description,
+        turnLimit: world.turnLimit,
+        autoSave: world.autoSave
+      };
+      await saveWorldToDisk(world.rootPath, worldData);
+    },
+
+    async delete() {
+      return await deleteWorldFromDisk(world.rootPath, world.id);
+    },
+
+    async reload() {
+      const worldData = await loadWorldFromDisk(world.rootPath, world.id);
+      if (worldData) {
+        world.name = worldData.name;
+        world.description = worldData.description;
+        world.turnLimit = worldData.turnLimit;
+        world.autoSave = worldData.autoSave;
+      }
+    },
+
+    enableAutoSave() {
+      world.autoSave = true;
+    },
+
+    disableAutoSave() {
+      world.autoSave = false;
     }
   };
 

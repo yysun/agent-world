@@ -344,7 +344,7 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'existing-agent';
       createMockAgentFiles(agentId);
 
-      const exists = await agentExistsOnDisk('test-data/worlds', worldId, agentId);
+      const exists = await agentExistsOnDisk(worldId, agentId);
       expect(exists).toBe(true);
 
       // Verify access was called with config path

@@ -28,6 +28,7 @@ import { toKebabCase } from '../core/utils.js';
 import { publishMessage, subscribeToMessages } from '../core/world-events.js';
 
 const DEFAULT_WORLD_NAME = 'Default World';
+const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
 // Validation schemas
 const ChatMessageSchema = z.object({
@@ -47,10 +48,10 @@ const router = express.Router();
 // GET /worlds - List worlds or create default
 router.get('/worlds', async (req, res) => {
   try {
-    const worlds = await listWorlds();
+    const worlds = await listWorlds(ROOT_PATH);
     if (!worlds?.length) {
-      const world = await createWorld({ name: DEFAULT_WORLD_NAME });
-      res.json([{ name: world.config.name }]);
+      const world = await createWorld(ROOT_PATH, { name: DEFAULT_WORLD_NAME });
+      res.json([{ name: world.name }]);
     } else {
       res.json(worlds.map(world => ({ name: world.name })));
     }
@@ -64,7 +65,7 @@ router.get('/worlds', async (req, res) => {
 router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
     const worldId = toKebabCase(req.params.worldName);
-    const world = await getWorld(worldId);
+    const world = await getWorld(ROOT_PATH, worldId);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -84,7 +85,7 @@ router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Res
   try {
     const { worldName, agentName } = req.params;
     const worldId = toKebabCase(worldName);
-    const world = await getWorld(worldId);
+    const world = await getWorld(ROOT_PATH, worldId);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -126,7 +127,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
 
     const { status, config, systemPrompt, clearMemory } = validation.data;
     const worldId = toKebabCase(worldName);
-    const world = await getWorld(worldId);
+    const world = await getWorld(ROOT_PATH, worldId);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -190,7 +191,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     const { message, sender } = validation.data;
     const worldId = toKebabCase(worldName);
-    const world = await getWorld(worldId);
+    const world = await getWorld(ROOT_PATH, worldId);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
