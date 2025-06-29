@@ -312,6 +312,7 @@ export async function loadAgentFromDiskWithRetry(
       // Reconstruct agent with Date objects and system prompt
       const agent: Agent = {
         ...agentData,
+        id: agentId, // Ensure the id is always set correctly
         config: {
           ...agentData.config,
           systemPrompt

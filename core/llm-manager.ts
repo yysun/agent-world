@@ -4,7 +4,7 @@
  * Features:
  * - LLM integration using AI SDK without existing event dependencies
  * - Streaming responses with SSE events via World.eventEmitter specifically
- * - Support for all LLM providers (OpenAI, Anthropic, Google, etc.)
+ * - Support for all LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
  * - Agent activity tracking and token usage
  * - Error handling with SSE error events via world's eventEmitter
  * - World-aware event publishing (uses world.eventEmitter, not global events)
@@ -21,13 +21,15 @@
  * - Zero dependencies on existing llm.ts
  * - Complete provider support extraction
  * - All events scoped to specific world instance
+ * - Full LLM provider support matching src/llm.ts
  */
 
 import { generateText, streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-// Import other AI SDK providers as needed
+import { createOllama } from 'ollama-ai-provider';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, AgentConfig, LLMProvider, stripCustomFieldsFromMessages } from './types.js';
 import { publishSSE } from './world-events.js';
 import { generateId, WorldSSEEvent } from './utils.js';
@@ -42,6 +44,11 @@ export interface LLMConfig {
   baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
+  // Provider-specific options
+  ollamaBaseUrl?: string;
+  azureEndpoint?: string;
+  azureApiVersion?: string;
+  azureDeployment?: string;
 }
 
 /**
@@ -154,7 +161,6 @@ export async function generateAgentResponse(
  * LLM provider loading (extracted from existing llm.ts)
  */
 function loadLLMProvider(config: AgentConfig): any {
-  // Implementation similar to existing llm.ts but without event dependencies
   switch (config.provider) {
     case LLMProvider.OPENAI:
       return createOpenAI({
@@ -166,12 +172,34 @@ function loadLLMProvider(config: AgentConfig): any {
         apiKey: config.apiKey || process.env.ANTHROPIC_API_KEY || ''
       })(config.model);
 
+    case LLMProvider.AZURE:
+      return createOpenAI({
+        apiKey: config.apiKey || process.env.AZURE_OPENAI_API_KEY || '',
+        baseURL: `${config.azureEndpoint}/openai/deployments/${config.azureDeployment}`
+      })(config.model);
+
     case LLMProvider.GOOGLE:
       return createGoogleGenerativeAI({
         apiKey: config.apiKey || process.env.GOOGLE_API_KEY || ''
       })(config.model);
 
-    // Add other providers as needed...
+    case LLMProvider.XAI:
+      return createOpenAI({
+        apiKey: config.apiKey || process.env.XAI_API_KEY || '',
+        baseURL: 'https://api.x.ai/v1'
+      })(config.model);
+
+    case LLMProvider.OPENAI_COMPATIBLE:
+      return createOpenAICompatible({
+        name: 'custom-provider',
+        apiKey: config.apiKey || process.env.OPENAI_COMPATIBLE_API_KEY || '',
+        baseURL: config.baseUrl || process.env.OPENAI_COMPATIBLE_BASE_URL || ''
+      })(config.model);
+
+    case LLMProvider.OLLAMA:
+      return createOllama({
+        baseURL: config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api'
+      })(config.model);
 
     default:
       throw new Error(`Unsupported LLM provider: ${config.provider}`);

@@ -22,14 +22,14 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getMessagesForWorld, getMessageCount, StoredMessage } from '../message-store';
-import { SenderType } from '../../src/types';
+import { SenderType, World } from '../../core/types';
 import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
 
 /**
  * Export command implementation
  */
-export async function exportCommand(args: string[], worldName: string): Promise<void> {
+export async function exportCommand(args: string[], world: World): Promise<void> {
   if (args.length === 0) {
     displayUnifiedMessage({
       content: 'Usage: /export <filename>\nExample: /export my-conversation',
@@ -39,6 +39,7 @@ export async function exportCommand(args: string[], worldName: string): Promise<
   }
 
   const filename = args[0];
+  const worldName = world.config.name; // Get world name from world object
   const messageCount = getMessageCount(worldName);
 
   if (messageCount === 0) {

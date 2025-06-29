@@ -20,64 +20,90 @@
  */
 
 import * as readline from 'readline';
-import * as World from '../../src/world';
+import { createAgent, CreateAgentParams } from '../../core/agent-manager';
+import { toKebabCase } from '../../core/utils';
 import { colors } from '../ui/colors';
-import { AgentConfig, LLMProvider } from '../../src/types';
+import { AgentConfig, LLMProvider, World } from '../../core/types';
 import { displayUnifiedMessage } from '../ui/unified-display';
 
-export async function addCommand(args: string[], worldName: string): Promise<void> {
+export async function addCommand(args: string[], world: World): Promise<void> {
   try {
-    // Accepts: /add [name]
-    // If [name] is provided, use as agent name; otherwise prompt
-    let agentName = args[0];
-    const type = 'assistant';
-    const description = `A ${type} agent`;
+    // World is passed directly - set world context for core modules
+    const originalWorldId = process.env.AGENT_WORLD_ID;
+    process.env.AGENT_WORLD_ID = world.id;
 
-    if (!agentName) {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-      agentName = await new Promise<string>((resolve) => {
-        rl.question(colors.cyan('Enter agent name: '), (answer) => {
-          rl.close();
-          resolve(answer.trim() || `${type.charAt(0).toUpperCase() + type.slice(1)}-${Date.now()}`);
+    try {
+      // Accepts: /add [name]
+      // If [name] is provided, use as agent name; otherwise prompt
+      let agentName = args[0];
+      const type = 'assistant';
+      const description = `A ${type} agent`;
+
+      if (!agentName) {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
         });
+        agentName = await new Promise<string>((resolve) => {
+          rl.question(colors.cyan('Enter agent name: '), (answer) => {
+            rl.close();
+            resolve(answer.trim() || `${type.charAt(0).toUpperCase() + type.slice(1)}-${Date.now()}`);
+          });
+        });
+      }
+
+      displayUnifiedMessage({
+        type: 'command',
+        content: `Creating ${type} agent: ${agentName}...`,
+        commandSubtype: 'info',
+        metadata: { source: 'cli', messageType: 'command' }
       });
+
+      const agentConfig: AgentConfig = {
+        name: agentName,
+        type: type,
+        provider: LLMProvider.OLLAMA,
+        model: 'llama3.2:3b',
+        systemPrompt: `You are a helpful ${type} agent. ${description}`,
+        temperature: 0.7,
+        maxTokens: 1000
+      };
+
+      const createParams: CreateAgentParams = {
+        id: toKebabCase(agentName),
+        name: agentName,
+        type: type,
+        provider: agentConfig.provider,
+        model: agentConfig.model,
+        systemPrompt: agentConfig.systemPrompt,
+        temperature: agentConfig.temperature,
+        maxTokens: agentConfig.maxTokens
+      };
+
+      const agent = await createAgent(createParams);
+
+      if (!agent) {
+        throw new Error('Failed to create agent');
+      }
+
+      // Format success message with agent details
+      const successMessage = `Successfully created agent:\n  Name: ${agent.config.name}\n  Status: ${agent.status}`;
+
+      displayUnifiedMessage({
+        type: 'command',
+        content: successMessage,
+        commandSubtype: 'success',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+
+    } finally {
+      // Restore original world ID
+      if (originalWorldId) {
+        process.env.AGENT_WORLD_ID = originalWorldId;
+      } else {
+        delete process.env.AGENT_WORLD_ID;
+      }
     }
-
-    displayUnifiedMessage({
-      type: 'command',
-      content: `Creating ${type} agent: ${agentName}...`,
-      commandSubtype: 'info',
-      metadata: { source: 'cli', messageType: 'command' }
-    });
-
-    const agentConfig: AgentConfig = {
-      name: agentName,
-      type: type,
-      provider: LLMProvider.OLLAMA,
-      model: 'llama3.2:3b',
-      systemPrompt: `You are a helpful ${type} agent. ${description}`,
-      temperature: 0.7,
-      maxTokens: 1000
-    };
-
-    const agent = await World.createAgent(worldName, agentConfig);
-
-    if (!agent) {
-      throw new Error('Failed to create agent');
-    }
-
-    // Format success message with agent details
-    const successMessage = `Successfully created agent:\n  Name: ${agent.name}\n  Status: ${agent.status}`;
-
-    displayUnifiedMessage({
-      type: 'command',
-      content: successMessage,
-      commandSubtype: 'success',
-      metadata: { source: 'cli', messageType: 'command' }
-    });
 
   } catch (error) {
     displayUnifiedMessage({

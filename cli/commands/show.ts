@@ -32,13 +32,14 @@
  * - Added file export functionality with markdown formatting
  */
 
-import * as World from '../../src/world';
+import { toKebabCase } from '../../core/utils';
+import { World } from '../../core/types';
 import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-export async function showCommand(args: string[], worldName: string): Promise<void> {
+export async function showCommand(args: string[], world: World): Promise<void> {
   // Check if agent name is provided
   if (args.length === 0) {
     displayError('Please specify an agent name: /show <agent-name> [filename]');
@@ -48,8 +49,9 @@ export async function showCommand(args: string[], worldName: string): Promise<vo
   const agentName = args[0];
   const fileName = args[1]; // Optional filename parameter
 
-  // Get agent by name
-  const agent = World.getAgent(worldName, agentName);
+  // Get agent by name (world is passed directly)
+  const agentId = toKebabCase(agentName);
+  const agent = world.agents.get(agentId);
   if (!agent) {
     displayError(`Agent "${agentName}" not found.`);
     displayUnifiedMessage({
@@ -61,14 +63,14 @@ export async function showCommand(args: string[], worldName: string): Promise<vo
 
   try {
     // Load conversation history
-    const history = await World.getAgentConversationHistory(worldName, agent.name);
+    const history = agent.memory;
 
     if (fileName) {
       // Save to markdown file
-      await saveConversationToMarkdown(agent.name, history, fileName);
+      await saveConversationToMarkdown(agent.config.name, history, fileName);
     } else {
       // Display in terminal
-      await displayConversationInTerminal(agent.name, history);
+      await displayConversationInTerminal(agent.config.name, history);
     }
 
   } catch (error) {
