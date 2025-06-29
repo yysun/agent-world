@@ -3,96 +3,145 @@
 ## Overview
 Implement dual operation modes for the frontend to support both single-user static deployment and multi-user server deployment while maintaining a unified user experience and shared codebase.
 
+## Architecture Flow
+
+### Static Mode
+Frontend UI → Message Broker (.js module) → Core Bundle (ESM) → IndexedDB/Files
+
+### Server Mode  
+Frontend UI → Message Broker (.js module) → WebSocket → Server Core → Files
+
 ## Operation Modes
 
 ### 1. Static Mode (Single User)
-- Serve from static HTML/JS using Web File API and IndexedDB
-- Single user operation
-- Frontend creates objects directly from core modules
-- Messages sent to local objects
-- Auto-save to IndexedDB with localStorage fallback, memory-only as final fallback
-- Manual file operations (Open/Save) using .json format
-- No server communication required
+- Serve from static HTML/JS files
+- Single user operation with no server dependency
+- Use Core ESM bundle directly in browser
+- Auto-save to IndexedDB and optionally to files when folder access granted
+- App key configuration via UI (no environment variables available)
 
-### 2. Server Mode (Multiple Users)
-- Serve from backend with node:fs and WebSockets
-- Multiple users support
-- Objects created on server within WebSocket connections
-- Messages sent via WebSocket communication
-- Real-time multi-user collaboration
+### 2. Server Mode (Multi-User)
+- Real-time multi-user collaboration via WebSocket
+- Server handles Core operations
+- App key configuration via environment variables
 
 ## Frontend Requirements
 
-### Unified Message Interface
-- Create a unified send message interface that abstracts the communication layer
-- Interface decides whether to send messages to local objects or WebSockets based on current mode
-- Frontend UX remains identical across both modes
-- Maximum code sharing between static and server modes
-- Include setting/configuration to switch between static and server modes
+### UI Mode Toggle
+- Add setting in frontend UI to switch between static and server modes
+- Default mode: static
+- Setting persists across sessions
+- Mode switching affects message routing without changing UI behavior
 
-### Mode-Specific Implementation
-- **Static Mode**: Instantiate core objects directly in frontend, handle messaging locally, auto-save to IndexedDB
-- **Server Mode**: Communicate with server-side objects via WebSocket protocol
-- Seamless mode switching without changing core application logic
+### Message Broker Module
+- Standalone .js module that abstracts communication layer
+- Routes messages to local Core bundle (static mode) or WebSocket (server mode)
+- Provides unified interface regardless of deployment mode
+- Handles mode detection and message routing logic
 
-### Static Mode Storage Strategy
-- **Primary**: IndexedDB for auto-save of complete workspace (all worlds and agents)
-- **Fallback 1**: localStorage with JSON serialization if IndexedDB fails
-- **Fallback 2**: Memory-only mode with frequent export prompts if both storage methods fail
-- **File Operations**: Manual Open/Save using .json format via Web File API
-- **File Behavior**: Opening .json file completely replaces current workspace in IndexedDB
+### World Selection
+- Auto-select or create world similar to CLI behavior
+- Frontend connects to WebSocket only after world selection
+- World selection happens before mode-specific operations
+- Maintain world selection state across sessions
+
+### Storage Module
+- Separate storage module independent of UI and message broker
+- Handle IndexedDB operations with file system fallback
+- Provide unified storage interface for different persistence methods
+- Auto-save workspace data with format compatibility
+
+### Storage Strategy
+- **IndexedDB**: Primary auto-save storage for all workspace data
+- **File System**: When user grants folder access, also auto-save to files
+- **Format Compatibility**: Read/write same .json files that Node.js server uses
+- **Data Migration**: Opening .json file replaces current workspace in IndexedDB
+
+### App Key Management
+- **Static Mode**: UI-based configuration and secure storage
+- **Server Mode**: Environment variable configuration
+- **Persistence**: App keys stored securely in browser storage for static mode
 
 ## Core Module Requirements
 
-### Unified Storage Interface
-- World and agent storage must support both static and server modes
-- Create abstracted storage interface that handles both deployment scenarios
-- Storage operations should be transparent to the application logic
+### ESM Bundle Creation
+- Build core as single ESM bundle containing all public APIs
+- Bundle everything including dependencies for browser consumption
+- Maintain compatibility with existing .json data format
+- Support both static (browser) and server (Node.js) deployment scenarios
 
-### World Module Updates
-- Add static mode flag to modify storage behavior in static deployments
-- Root path configuration should support both static (browser) and server (Node.js) environments
-- Static mode uses IndexedDB auto-save instead of file system auto-save
-
-### Storage Abstraction
-- Implement unified storage interface that can handle:
-  - Browser-based storage (IndexedDB primary, localStorage fallback) for static mode
-  - Node.js file system operations for server mode
-- Maintain consistent API regardless of underlying storage mechanism
-- Support .json format compatibility between both modes
+### Auto-Save Enhancement
+- Add world-level autoSave flag to control agent memory persistence
+- When autoSave disabled, messages accumulate in memory without disk writes
+- Provide manual save capability for controlled persistence timing
+- Maintain backward compatibility with existing behavior
 
 ## Server Requirements
 
-### WebSocket Integration
-- Deprecate existing REST API in favor of WebSocket communication
-- Support `world` message protocol via WebSocket for world and agent operations
-- Handle object lifecycle within WebSocket connections
-- Manage per-user world and agent instances
+### Stateful WebSocket Connections
+- Server maintains one world instance per WebSocket connection
+- Server creates world instance upon new connection establishment
+- Server clears world instance when connection disconnects
+- Stateful connection required for LLM streaming operations
 
-### Message Protocol
-- Define WebSocket message format for world and agent operations
-- Support all existing world and agent functionality through WebSocket interface
-- Maintain message compatibility with local object interface for frontend abstraction
+### World Lifecycle Management
+- Create world instance on WebSocket connection
+- Load initial world data if available
+- Handle world operations during connection lifetime
+- Clean up world resources on disconnect
+
+### WebSocket-Only Communication
+- Remove REST API completely (no migration needed)
+- Server responds exclusively to world messages via WebSocket
+- Server operates directly on world objects
+- Maintain existing WebSocket message protocol
+
+### Auto-Save Control
+- Support world.autoSave flag to disable automatic agent memory persistence
+- When disabled, improves performance for high-throughput scenarios
+- Messages continue accumulating in agent.memory array in memory
+- Default behavior maintains backward compatibility
+
+## Build and Deployment Requirements
+
+### Bundle Strategy
+- **Core Bundle**: ESM bundle for browser consumption with all dependencies
+- **Server Bundle**: Bundle server code for production deployment
+- **CLI Bundle**: Bundle CLI code for distribution
+- **Package Bundle**: Bundle package code for deployment
+- **Development Only**: Use tsx only for development, not production
+
+### TypeScript Transition
+- Package no longer TypeScript native in production
+- Maintain TypeScript for development and building
+- All production artifacts are bundled JavaScript
+- Remove TypeScript runtime dependencies from production
+
+## Data Format Requirements
+
+### Cross-Platform Compatibility
+- Maintain identical .json data structure between static and server modes
+- Browser can read and write same files that Node.js server uses
+- Support seamless data migration between deployment types
+- Preserve existing file format for backward compatibility
 
 ## Technical Constraints
 
 ### Code Organization
-- Maintain separation between core logic and communication layer
-- Frontend code should be mode-agnostic at the application level
-- Storage interface should abstract away implementation details
-- WebSocket protocol should mirror local object interface for consistency
+- Core module changes limited to autoSave flag enhancement only
+- Message broker handles all mode-specific communication logic
+- Storage module separated from UI and communication layers
+- Frontend UI remains mode-agnostic at application level
+- Maximum code sharing between deployment modes
 
-### Browser Compatibility
-- IndexedDB wrapper for simplified API and error handling
-- Graceful degradation through storage fallback chain
-- Support for .json file format in both modes
+### Browser Capabilities
+- IndexedDB for primary browser storage with auto-save
+- File System Access API for optional local file persistence
+- Support for .json file import/export operations
+- Secure storage for app keys in static mode
 
 ### Configuration Management
-- Mode selection should be configurable (environment variable, config file, or runtime setting)
-- Support dynamic mode switching where feasible
-- Clear documentation for deployment in each mode
-
-### Data Format Requirements
-- Use .json file extension for import/export operations
-- Maintain identical data structure between static and server modes
-- Support version compatibility for data migration
+- UI-based mode selection with persistent setting storage
+- Static mode app key configuration via secure browser storage
+- Server mode app key configuration via environment variables
+- Clear separation between static and server configuration methods

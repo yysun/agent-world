@@ -1,0 +1,305 @@
+# Frontend Dual Mode Architecture Implementation Plan
+
+## Overview
+Sequential implementation plan for dual operation modes, built bottom-up from core functionality to frontend integration. Team works on phases sequentially to ensure proper foundation and dependencies.
+
+## Phase 1: Core Module Foundation
+
+### 1.0 Development Environment Setup (Prerequisites)
+- [ ] Set up esbuild for all bundling needs
+- [ ] Configure tsx for development workflow
+- [ ] Set up unit testing framework for `tests/core`
+- [ ] Create basic development scripts and tooling
+
+### 1.1 Auto-Save Enhancement (Core Logic)
+- [ ] Add `autoSave` flag to World interface/type + unit tests
+- [ ] Implement auto-save control logic in agent memory operations + unit tests
+- [ ] Add conditional checks before disk write operations + unit tests
+- [ ] Implement manual save methods for controlled persistence + unit tests
+- [ ] Ensure backward compatibility with existing behavior + unit tests
+- [ ] **Dependency**: Must complete before 1.2
+
+### 1.2 Core Bundle Creation (ESM Build)
+- [ ] Analyze current core module structure and dependencies
+- [ ] Set up esbuild configuration for Core ESM bundle
+- [ ] Include all public APIs in bundle export + unit tests
+- [ ] Bundle all dependencies for standalone browser usage
+- [ ] Test bundle compatibility with both browser and Node.js environments
+- [ ] Verify existing .json format compatibility is maintained + validation tests
+- [ ] **Requires**: 1.1 completion (auto-save logic must be in bundle)
+
+### 1.3 Phase 1 Completion Gate
+- [ ] All unit tests in `tests/core` passing
+- [ ] Core ESM bundle builds successfully
+- [ ] Bundle works in browser environment
+- [ ] Auto-save functionality validated
+- [ ] .json format compatibility confirmed
+- [ ] **Go/No-Go Decision**: Ready for Phase 2
+
+## Phase 2: Server Architecture Updates
+
+### 2.0 Server Development Setup
+- [ ] Set up unit testing framework for `tests/server`
+- [ ] Configure esbuild for server bundling
+
+### 2.1 WebSocket-Only Server (Remove REST)
+- [ ] Remove all REST API endpoints and middleware + unit tests
+- [ ] Update server to handle only WebSocket communication + unit tests
+- [ ] Ensure all world operations work via WebSocket messages + integration tests
+- [ ] Remove REST API dependencies and unused code
+- [ ] **Dependency**: Must complete before 2.2
+
+### 2.2 Stateful WebSocket World Management
+- [ ] Implement stateful WebSocket connection handling + unit tests
+- [ ] Create world instance per WebSocket connection + unit tests
+- [ ] Add world lifecycle management (create on connect, cleanup on disconnect) + unit tests
+- [ ] Implement connection state tracking for LLM streaming + unit tests
+- [ ] Add world instance isolation between connections + unit tests
+- [ ] **Requires**: 2.1 completion (WebSocket-only foundation needed)
+
+### 2.3 Server Bundle Configuration
+- [ ] Configure esbuild for server code bundling for production + validation tests
+- [ ] Configure esbuild for CLI code bundling for distribution + validation tests
+- [ ] Configure esbuild for package bundling for deployment + validation tests
+- [ ] Remove TypeScript runtime dependencies from production builds
+- [ ] Test all server bundle builds and functionality + compatibility tests
+
+### 2.4 Phase 2 Completion Gate
+- [ ] All unit tests in `tests/server` passing
+- [ ] REST API completely removed
+- [ ] WebSocket world management functional
+- [ ] Server bundles build successfully
+- [ ] World lifecycle validated
+- [ ] **Go/No-Go Decision**: Ready for Phase 3
+
+## Phase 3: Storage Module Development
+
+### 3.0 Storage Development Setup
+- [ ] Set up unit testing framework for `tests/public` (storage)
+- [ ] Configure browser testing environment for storage validation
+
+### 3.1 Storage Module Architecture
+- [ ] Design unified storage interface for different persistence methods + unit tests
+- [ ] Create separate storage module independent of UI components + unit tests
+- [ ] Implement IndexedDB wrapper with basic error handling + unit tests
+- [ ] Implement File System Access API integration + unit tests
+- [ ] Create storage fallback chain (IndexedDB → localStorage → memory) + unit tests
+- [ ] Add .json format compatibility for cross-platform data exchange + validation tests
+- [ ] **Dependency**: Must complete before 3.2
+
+### 3.2 Storage Operations Implementation
+- [ ] Implement auto-save functionality for workspace data + unit tests
+- [ ] Add manual import/export operations using .json format + validation tests
+- [ ] Implement workspace replacement logic when opening files + unit tests
+- [ ] Add storage state management and basic error recovery + unit tests
+- [ ] Create storage configuration and settings persistence + unit tests
+- [ ] Test storage operations across major browsers (Chrome, Firefox, Safari, Edge)
+- [ ] **Requires**: 3.1 completion (storage interface foundation needed)
+
+### 3.3 Phase 3 Completion Gate
+- [ ] All unit tests in `tests/public` (storage) passing
+- [ ] Storage module works independently
+- [ ] .json format compatibility validated across modes
+- [ ] Browser compatibility confirmed
+- [ ] Fallback chain functional
+- [ ] **Go/No-Go Decision**: Ready for Phase 4
+
+## Phase 4: Message Broker Module
+
+### 4.1 Message Broker Design
+- [ ] Create standalone .js module for communication abstraction + unit tests
+- [ ] Design unified message interface for both operation modes + unit tests
+- [ ] Implement mode detection and routing logic + unit tests
+- [ ] Create basic message validation and error handling + unit tests
+- [ ] Design WebSocket connection management for server mode + unit tests
+- [ ] Implement local Core bundle integration for static mode + unit tests
+- [ ] **Dependency**: Must complete before 4.2
+- [ ] **Requires**: Phase 1 (Core bundle) and Phase 3 (Storage module)
+
+### 4.2 Communication Layer Implementation
+- [ ] Implement static mode message routing to local Core bundle + integration tests
+- [ ] Implement server mode message routing via WebSocket + integration tests
+- [ ] Add connection state management and basic error recovery + unit tests
+- [ ] Implement consistent API regardless of underlying communication + unit tests
+- [ ] Test message broker with both operation modes + cross-mode tests
+- [ ] Verify message broker works with bundled Core in browser + validation tests
+- [ ] **Requires**: 4.1 completion (broker design foundation needed)
+
+### 4.3 Phase 4 Completion Gate
+- [ ] All unit tests in `tests/public` (message broker) passing
+- [ ] Message broker routes correctly in both modes
+- [ ] Integration with Core bundle validated
+- [ ] WebSocket communication functional
+- [ ] Static mode communication functional
+- [ ] **Go/No-Go Decision**: Ready for Phase 5
+
+## Phase 5: Frontend UI Integration
+
+### 5.1 World Selection Interface
+- [ ] Implement world auto-selection/creation similar to CLI + unit tests
+- [ ] Add world selection UI before mode-specific operations + UI tests
+- [ ] Implement world selection state persistence + unit tests
+- [ ] Add WebSocket connection trigger after world selection + integration tests
+- [ ] Create world creation and management interface + UI tests
+- [ ] Test world selection flow in both operation modes + cross-mode tests
+- [ ] **Dependency**: Must complete before 5.2
+- [ ] **Requires**: Phase 4 (Message broker) completion
+
+### 5.2 Mode Toggle Implementation
+- [ ] Add UI setting for static/server mode selection + UI tests
+- [ ] Implement persistent setting storage across sessions + unit tests
+- [ ] Set default mode to static + validation tests
+- [ ] Ensure mode switching doesn't affect UI behavior + integration tests
+- [ ] Add visual indicators for current operation mode + UI tests
+- [ ] Test mode toggle functionality and persistence + cross-session tests
+- [ ] **Dependency**: Can work in parallel with 5.3
+- [ ] **Requires**: 5.1 completion (world selection foundation needed)
+
+### 5.3 App Key Management Interface
+- [ ] Create UI for app key configuration in static mode + UI tests
+- [ ] Implement basic storage for app keys in browser storage + unit tests
+- [ ] Add app key validation and basic error handling + unit tests
+- [ ] Create app key management interface (add/edit/remove) + UI tests
+- [ ] Ensure app key persistence across sessions + persistence tests
+- [ ] Test app key functionality + validation tests
+- [ ] **Dependency**: Can work in parallel with 5.2
+- [ ] **Requires**: Phase 3 (Storage module) completion
+
+### 5.4 Phase 5 Completion Gate
+- [ ] All UI components functional
+- [ ] World selection works in both modes
+- [ ] Mode toggle persistent and functional
+- [ ] App key management operational
+- [ ] Integration tests passing
+- [ ] **Go/No-Go Decision**: Ready for Phase 6
+
+## Phase 6: Documentation and Deployment
+
+### 6.1 Development Documentation
+- [ ] Update documentation for new build process + validation
+- [ ] Document testing guidelines and patterns + examples
+- [ ] Create development workflow documentation + setup guides
+- [ ] Document bundle usage and deployment + configuration examples
+
+### 6.2 Production Deployment Preparation
+- [ ] Create production deployment scripts + validation tests
+- [ ] Test development and production workflows + end-to-end validation
+- [ ] Validate all bundle builds work in target environments + compatibility tests
+- [ ] Create deployment configuration guides + examples
+
+### 6.3 Phase 6 Completion Gate
+- [ ] Documentation complete and validated
+- [ ] Production deployment scripts functional
+- [ ] All workflows tested and documented
+- [ ] Ready for integration testing
+- [ ] **Go/No-Go Decision**: Ready for Phase 7
+
+## Phase 7: Integration Testing
+
+### 7.1 Static Mode Integration
+- [ ] Integrate Core bundle with frontend in static mode + integration tests
+- [ ] Connect message broker to local Core operations + integration tests
+- [ ] Integrate storage module for IndexedDB/file operations + integration tests
+- [ ] Test complete static mode workflow + end-to-end tests
+- [ ] Verify app key management in static mode + workflow tests
+- [ ] Test world selection and management in static mode + user flow tests
+- [ ] **Requires**: All previous phases complete
+
+### 7.2 Server Mode Integration
+- [ ] Integrate message broker with WebSocket communication + integration tests
+- [ ] Connect frontend to server via WebSocket after world selection + integration tests
+- [ ] Test server world instance creation and management + lifecycle tests
+- [ ] Verify LLM streaming functionality + streaming tests
+- [ ] Test connection lifecycle and basic error handling + resilience tests
+- [ ] Test multi-user scenarios + concurrency tests
+- [ ] **Requires**: All previous phases complete
+
+### 7.3 Cross-Mode Compatibility
+- [ ] Test data format compatibility between modes + validation tests
+- [ ] Test file import/export across both modes + compatibility tests
+- [ ] Ensure consistent user experience across modes + UX tests
+- [ ] Test mode switching functionality + transition tests
+- [ ] Verify configuration management across modes + persistence tests
+- [ ] **Requires**: 7.1 and 7.2 completion
+
+### 7.4 Phase 7 Completion Gate
+- [ ] All integration tests passing
+- [ ] Both modes fully functional
+- [ ] Cross-mode compatibility validated
+- [ ] User workflows tested end-to-end
+- [ ] Performance acceptable in both modes
+- [ ] **Go/No-Go Decision**: Ready for Phase 8
+
+## Phase 8: Final Validation and Release
+
+### 8.1 End-to-End Validation
+- [ ] Test complete static mode deployment in major browsers + compatibility matrix
+- [ ] Test complete server mode deployment + production validation
+- [ ] Verify all requirements are met + requirements traceability
+- [ ] Test basic error scenarios + error handling validation
+- [ ] Validate both modes work with ESM imports + import validation
+- [ ] **Requires**: Phase 7 completion
+
+### 8.2 Release Preparation
+- [ ] Update deployment documentation for both modes + user guides
+- [ ] Create configuration guides for static and server modes + setup instructions
+- [ ] Document new build process and bundle usage + developer guides
+- [ ] Update API documentation for changes + API reference
+- [ ] Prepare release notes and changelog + version documentation
+- [ ] **Requires**: 8.1 completion
+
+### 8.3 Final Release Gate
+- [ ] All validation tests passing
+- [ ] Documentation complete and accurate
+- [ ] Release artifacts prepared
+- [ ] Deployment guides validated
+- [ ] Ready for production release
+- [ ] **Final Go/No-Go Decision**: Release approved
+
+## Dependencies and Prerequisites
+
+### Technical Requirements
+- esbuild for all bundling needs
+- Major browser support (Chrome, Firefox, Safari, Edge) with ESM import capability
+- IndexedDB and File System Access API browser support
+- WebSocket server infrastructure
+- TypeScript build toolchain for development
+
+### Development Requirements
+- tsx for development environment
+- Unit testing framework for core, server, and public modules
+- Basic browser testing environment for validation
+
+## Simplified Risk Mitigation
+
+### Technical Risks
+- **Bundle Compatibility**: Test ESM bundles across major browsers
+- **WebSocket Reliability**: Implement basic reconnection mechanisms
+- **Data Migration**: Ensure .json format compatibility and validation
+
+### Implementation Risks
+- **Sequential Dependencies**: Each phase builds on previous phases
+- **Testing Coverage**: Unit tests created alongside implementation
+- **Integration Issues**: Address during dedicated integration phases
+
+## Success Criteria
+
+### Functional Requirements
+- ✅ Both static and server modes operational
+- ✅ Unified user experience across modes
+- ✅ Data format compatibility maintained
+- ✅ App key management working in both modes
+- ✅ World selection and management functional
+
+### Technical Requirements
+- ✅ Core bundle working as ESM in major browsers
+- ✅ Storage module providing unified interface
+- ✅ Message broker routing correctly in both modes
+- ✅ Server operating with WebSocket-only communication
+- ✅ All components properly bundled for production
+
+### Development Requirements
+- ✅ Unit tests created for core, server, and public modules
+- ✅ Development environment using tsx
+- ✅ Production builds using esbuild bundles
+- ✅ Documentation updated for new architecture
