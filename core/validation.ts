@@ -18,7 +18,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, World, AgentConfig, WorldConfig } from '../core/types.js';
+import { Agent, World, WorldConfig } from '../core/types.js';
 import { loadAllAgentsFromDisk, agentExistsOnDisk, getAgentDir } from '../core/agent-storage.js';
 import { getWorld } from '../core/world-manager.js';
 import { toKebabCase } from '../core/utils.js';
@@ -109,42 +109,42 @@ export function validateAgentId(agentId: string): ValidationResult {
 /**
  * Validate agent configuration
  */
-export function validateAgentConfig(config: AgentConfig): ValidationResult {
+export function validateAgentConfig(agent: Agent): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
   // Check required fields
-  if (!config.name || config.name.trim().length === 0) {
-    errors.push('Agent config missing required field: name');
+  if (!agent.name || agent.name.trim().length === 0) {
+    errors.push('Agent missing required field: name');
   }
 
-  if (!config.type || config.type.trim().length === 0) {
-    errors.push('Agent config missing required field: type');
+  if (!agent.type || agent.type.trim().length === 0) {
+    errors.push('Agent missing required field: type');
   }
 
-  if (!config.provider) {
-    errors.push('Agent config missing required field: provider');
+  if (!agent.provider) {
+    errors.push('Agent missing required field: provider');
   }
 
-  if (!config.model || config.model.trim().length === 0) {
-    errors.push('Agent config missing required field: model');
+  if (!agent.model || agent.model.trim().length === 0) {
+    errors.push('Agent missing required field: model');
   }
 
   // Check optional fields for reasonable values
-  if (config.temperature !== undefined) {
-    if (config.temperature < 0 || config.temperature > 2) {
-      warnings.push(`Temperature ${config.temperature} is outside typical range (0-2)`);
+  if (agent.temperature !== undefined) {
+    if (agent.temperature < 0 || agent.temperature > 2) {
+      warnings.push(`Temperature ${agent.temperature} is outside typical range (0-2)`);
     }
   }
 
-  if (config.maxTokens !== undefined) {
-    if (config.maxTokens < 1 || config.maxTokens > 100000) {
-      warnings.push(`MaxTokens ${config.maxTokens} is outside reasonable range (1-100000)`);
+  if (agent.maxTokens !== undefined) {
+    if (agent.maxTokens < 1 || agent.maxTokens > 100000) {
+      warnings.push(`MaxTokens ${agent.maxTokens} is outside reasonable range (1-100000)`);
     }
   }
 
   // Check system prompt
-  if (config.systemPrompt && config.systemPrompt.length > 10000) {
+  if (agent.systemPrompt && agent.systemPrompt.length > 10000) {
     warnings.push('System prompt is very long (>10000 chars). Consider shortening for better performance.');
   }
 
@@ -356,7 +356,7 @@ export async function validateAgent(worldName: string, agentId: string): Promise
       const agent = agents.find(a => a.id === agentId);
 
       if (agent) {
-        const configValidation = validateAgentConfig(agent.config);
+        const configValidation = validateAgentConfig(agent);
         errors.push(...configValidation.errors);
         warnings.push(...configValidation.warnings);
       } else {

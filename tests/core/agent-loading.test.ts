@@ -139,17 +139,14 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
   // Helper function to create mock agent data
   const createMockAgent = (agentId: string, name?: string): Agent => ({
     id: agentId,
+    name: name || `Test Agent ${agentId}`,
     type: 'assistant',
     status: 'active' as const,
-    config: {
-      name: name || `Test Agent ${agentId}`,
-      type: 'assistant',
-      provider: LLMProvider.OPENAI,
-      model: 'gpt-4',
-      systemPrompt: `System prompt for ${agentId}`,
-      temperature: 0.7,
-      maxTokens: 1000
-    },
+    provider: LLMProvider.OPENAI,
+    model: 'gpt-4',
+    systemPrompt: `System prompt for ${agentId}`,
+    temperature: 0.7,
+    maxTokens: 1000,
     createdAt: new Date('2023-01-01T00:00:00Z'),
     lastActive: new Date('2023-01-01T00:00:00Z'),
     llmCallCount: 0,
@@ -163,9 +160,20 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
     // Write config.json with full agent structure (what the loader expects)
     mockFileSystem[`${basePath}/config.json`] = JSON.stringify({
       id: agent.id,
+      name: agent.name,
       type: agent.type,
       status: agent.status,
-      config: agent.config,
+      provider: agent.provider,
+      model: agent.model,
+      apiKey: agent.apiKey,
+      baseUrl: agent.baseUrl,
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens,
+      autoSyncMemory: agent.autoSyncMemory,
+      azureEndpoint: agent.azureEndpoint,
+      azureApiVersion: agent.azureApiVersion,
+      azureDeployment: agent.azureDeployment,
+      ollamaBaseUrl: agent.ollamaBaseUrl,
       createdAt: agent.createdAt?.toISOString(),
       lastActive: agent.lastActive?.toISOString(),
       llmCallCount: agent.llmCallCount,
@@ -173,8 +181,8 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
     }, null, 2);
 
     // Write system-prompt.md
-    if (agent.config.systemPrompt) {
-      mockFileSystem[`${basePath}/system-prompt.md`] = agent.config.systemPrompt;
+    if (agent.systemPrompt) {
+      mockFileSystem[`${basePath}/system-prompt.md`] = agent.systemPrompt;
     }
 
     // Write memory.json
@@ -190,7 +198,7 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
 
       expect(loaded).not.toBeNull();
       expect(loaded!.id).toBe('retry-agent-1');
-      expect(loaded!.config.name).toBe('Test Agent retry-agent-1');
+      expect(loaded!.name).toBe('Test Agent retry-agent-1');
       expect(loaded!.memory).toHaveLength(0);
     });
 
@@ -271,8 +279,8 @@ describe('Enhanced Agent Loading (Phase 2) - With Mocks', () => {
 
       expect(loaded).not.toBeNull();
       expect(loaded!.id).toBe('partial-agent-1');
-      // The readTextFile function has a fallback that returns a default system prompt
-      expect(loaded!.config.systemPrompt).toBe('You are an AI agent.');
+      // The fallback creates a personalized system prompt with the agent ID
+      expect(loaded!.systemPrompt).toBe('You are partial-agent-1, an AI agent.');
     });
   });
 

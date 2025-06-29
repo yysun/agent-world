@@ -65,10 +65,10 @@ export async function showCommand(args: string[], world: World): Promise<void> {
 
     if (fileName) {
       // Save to markdown file
-      await saveConversationToMarkdown(agent.config.name, history, fileName);
+      await saveConversationToMarkdown(agent.name, history, fileName);
     } else {
       // Display in terminal
-      await displayConversationInTerminal(agent.config.name, history);
+      await displayConversationInTerminal(agent.name, history);
     }
 
   } catch (error) {

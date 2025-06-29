@@ -202,17 +202,14 @@ export function getLLMCallCount(): number {
 export function createMockAgent(overrides: Partial<Agent> = {}): Agent {
   return {
     id: 'mock-agent',
+    name: 'Mock Agent',
     type: 'test',
     status: 'active',
-    config: {
-      name: 'Mock Agent',
-      type: 'test',
-      provider: LLMProvider.OPENAI,
-      model: 'gpt-4',
-      systemPrompt: 'You are a mock agent for testing.',
-      temperature: 0.7,
-      maxTokens: 1000
-    },
+    provider: LLMProvider.OPENAI,
+    model: 'gpt-4',
+    systemPrompt: 'You are a mock agent for testing.',
+    temperature: 0.7,
+    maxTokens: 1000,
     createdAt: new Date('2023-01-01T00:00:00Z'),
     lastActive: new Date('2023-01-01T00:00:00Z'),
     llmCallCount: 0,
@@ -275,10 +272,9 @@ export function createMockAgentStructure(worldId: string, agentId: string, agent
   const basePath = `test-data/worlds/${worldId}/agents/${agentId}`;
 
   // Config file (without systemPrompt)
-  const { systemPrompt, ...configWithoutPrompt } = mockAgent.config;
+  const { systemPrompt, ...agentWithoutPrompt } = mockAgent;
   const configData = {
-    ...mockAgent,
-    config: configWithoutPrompt,
+    ...agentWithoutPrompt,
     createdAt: mockAgent.createdAt?.toISOString(),
     lastActive: mockAgent.lastActive?.toISOString(),
     lastLLMCall: mockAgent.lastLLMCall?.toISOString()

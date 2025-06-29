@@ -2,7 +2,7 @@
  * Core type definitions for the Agent World system.
  * 
  * Features:
- * - Agent configuration and state management with LLM provider support
+ * - Agent configuration and state management with LLM provider support (flattened structure)
  * - Event system with strict payload typing (MESSAGE, WORLD, SSE, SYSTEM)
  * - AI SDK compatible chat messages with utility functions for LLM integration
  * - Storage provider interfaces and file management
@@ -16,6 +16,7 @@
  * - Utility functions to strip custom fields before LLM calls
  * - Comprehensive LLM provider support (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  * - World event structures for World.eventEmitter integration
+ * - Flattened Agent interface for simplified property access
  */
 
 // Chat Message Types - AI SDK Compatible
@@ -35,20 +36,9 @@ export interface AgentMessage extends ChatMessage {
 // Agent Types
 export interface Agent {
   id: string; // kebab-case of agent name
-  type: string;
-  status?: 'active' | 'inactive' | 'error';
-  config: AgentConfig;
-  createdAt?: Date;
-  lastActive?: Date;
-  llmCallCount: number;
-  lastLLMCall?: Date;
-  memory: AgentMessage[];
-  world?: World;
-}
-
-export interface AgentConfig {
   name: string;
   type: string;
+  status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
   apiKey?: string;
@@ -62,6 +52,12 @@ export interface AgentConfig {
   azureApiVersion?: string;
   azureDeployment?: string;
   ollamaBaseUrl?: string;
+  createdAt?: Date;
+  lastActive?: Date;
+  llmCallCount: number;
+  lastLLMCall?: Date;
+  memory: AgentMessage[];
+  world?: World;
 }
 
 // deprecated
@@ -139,9 +135,21 @@ export interface CreateAgentParams {
 }
 
 export interface UpdateAgentParams {
+  name?: string;
   type?: string;
-  config?: Partial<AgentConfig>;
   status?: 'active' | 'inactive' | 'error';
+  provider?: LLMProvider;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  autoSyncMemory?: boolean;
+  azureEndpoint?: string;
+  azureApiVersion?: string;
+  azureDeployment?: string;
+  ollamaBaseUrl?: string;
 }
 
 export interface AgentInfo {

@@ -25,7 +25,7 @@ async function testAgentLookup() {
 
     // List agents in the runtime map
     for (const [id, agent] of world.agents.entries()) {
-      console.log(`  - Runtime Agent: ID="${id}", Name="${agent.config.name}"`);
+      console.log(`  - Runtime Agent: ID="${id}", Name="${agent.name}"`);
     }
 
     // Test agent lookup
@@ -36,7 +36,7 @@ async function testAgentLookup() {
       try {
         const agent = await world.getAgent(agentName);
         if (agent) {
-          console.log(`  ✅ Found: ID="${agent.id}", Name="${agent.config.name}"`);
+          console.log(`  ✅ Found: ID="${agent.id}", Name="${agent.name}"`);
         } else {
           console.log(`  ❌ Not found`);
         }

@@ -34,7 +34,7 @@
  * - Ready for EventBus integration in Phase 3
  */
 
-import { Agent, AgentMessage, AgentConfig, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types.js';
+import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types.js';
 import {
   saveAgentToDisk,
   loadAgentFromDisk,
@@ -120,7 +120,7 @@ export async function registerAgentRuntime(
 
     // Validate agent if requested
     if (validateAgent) {
-      if (!agent.id || !agent.type || !agent.config) {
+      if (!agent.id || !agent.type || !agent.name || !agent.provider || !agent.model) {
         throw new Error('Invalid agent structure for runtime registration');
       }
     }
@@ -335,20 +335,17 @@ export async function createAgent(params: CreateAgentParams): Promise<Agent> {
   const now = new Date();
   const agent: Agent = {
     id: params.id,
+    name: params.name,
     type: params.type,
     status: 'inactive',
-    config: {
-      name: params.name,
-      type: params.type,
-      provider: params.provider,
-      model: params.model,
-      apiKey: params.apiKey,
-      baseUrl: params.baseUrl,
-      systemPrompt: params.systemPrompt,
-      temperature: params.temperature,
-      maxTokens: params.maxTokens,
-      autoSyncMemory: true // ← Default: enable auto-sync
-    },
+    provider: params.provider,
+    model: params.model,
+    apiKey: params.apiKey,
+    baseUrl: params.baseUrl,
+    systemPrompt: params.systemPrompt,
+    temperature: params.temperature,
+    maxTokens: params.maxTokens,
+    autoSyncMemory: true, // ← Default: enable auto-sync
     createdAt: now,
     lastActive: now,
     llmCallCount: 0,
@@ -396,9 +393,21 @@ export async function updateAgent(agentId: string, updates: UpdateAgentParams): 
   // Merge updates with existing agent
   const updatedAgent: Agent = {
     ...existingAgent,
+    name: updates.name || existingAgent.name,
     type: updates.type || existingAgent.type,
     status: updates.status || existingAgent.status,
-    config: updates.config ? { ...existingAgent.config, ...updates.config } : existingAgent.config,
+    provider: updates.provider || existingAgent.provider,
+    model: updates.model || existingAgent.model,
+    apiKey: updates.apiKey !== undefined ? updates.apiKey : existingAgent.apiKey,
+    baseUrl: updates.baseUrl !== undefined ? updates.baseUrl : existingAgent.baseUrl,
+    systemPrompt: updates.systemPrompt !== undefined ? updates.systemPrompt : existingAgent.systemPrompt,
+    temperature: updates.temperature !== undefined ? updates.temperature : existingAgent.temperature,
+    maxTokens: updates.maxTokens !== undefined ? updates.maxTokens : existingAgent.maxTokens,
+    autoSyncMemory: updates.autoSyncMemory !== undefined ? updates.autoSyncMemory : existingAgent.autoSyncMemory,
+    azureEndpoint: updates.azureEndpoint !== undefined ? updates.azureEndpoint : existingAgent.azureEndpoint,
+    azureApiVersion: updates.azureApiVersion !== undefined ? updates.azureApiVersion : existingAgent.azureApiVersion,
+    azureDeployment: updates.azureDeployment !== undefined ? updates.azureDeployment : existingAgent.azureDeployment,
+    ollamaBaseUrl: updates.ollamaBaseUrl !== undefined ? updates.ollamaBaseUrl : existingAgent.ollamaBaseUrl,
     lastActive: new Date()
   };
 
@@ -438,9 +447,9 @@ export async function listAgents(): Promise<AgentInfo[]> {
 
   return allAgents.map(agent => ({
     id: agent.id,
-    name: agent.config.name,
+    name: agent.name,
     type: agent.type,
-    model: agent.config.model,
+    model: agent.model,
     status: agent.status,
     createdAt: agent.createdAt,
     lastActive: agent.lastActive,

@@ -30,7 +30,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { World, Agent, AgentMessage, AgentConfig, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types.js';
+import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types.js';
 import { publishSSE } from './world-events.js';
 import { generateId } from './utils.js';
 
@@ -70,7 +70,7 @@ export async function streamAgentResponse(
     });
 
     // Load LLM provider
-    const model = loadLLMProvider(agent.config);
+    const model = loadLLMProvider(agent);
 
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
@@ -81,8 +81,8 @@ export async function streamAgentResponse(
     const streamPromise = streamText({
       model,
       messages: llmMessages,
-      temperature: agent.config.temperature,
-      maxTokens: agent.config.maxTokens
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens
     });
 
     // Add timeout wrapper
@@ -139,14 +139,14 @@ export async function generateAgentResponse(
   agent: Agent,
   messages: AgentMessage[]
 ): Promise<string> {
-  const model = loadLLMProvider(agent.config);
+  const model = loadLLMProvider(agent);
   const llmMessages = stripCustomFieldsFromMessages(messages);
 
   const { text } = await generateText({
     model,
     messages: llmMessages,
-    temperature: agent.config.temperature,
-    maxTokens: agent.config.maxTokens
+    temperature: agent.temperature,
+    maxTokens: agent.maxTokens
   });
 
   // Update agent activity
@@ -160,48 +160,48 @@ export async function generateAgentResponse(
 /**
  * LLM provider loading (extracted from existing llm.ts)
  */
-function loadLLMProvider(config: AgentConfig): any {
-  switch (config.provider) {
+function loadLLMProvider(agent: Agent): any {
+  switch (agent.provider) {
     case LLMProvider.OPENAI:
       return createOpenAI({
-        apiKey: config.apiKey || process.env.OPENAI_API_KEY || ''
-      })(config.model);
+        apiKey: agent.apiKey || process.env.OPENAI_API_KEY || ''
+      })(agent.model);
 
     case LLMProvider.ANTHROPIC:
       return createAnthropic({
-        apiKey: config.apiKey || process.env.ANTHROPIC_API_KEY || ''
-      })(config.model);
+        apiKey: agent.apiKey || process.env.ANTHROPIC_API_KEY || ''
+      })(agent.model);
 
     case LLMProvider.AZURE:
       return createOpenAI({
-        apiKey: config.apiKey || process.env.AZURE_OPENAI_API_KEY || '',
-        baseURL: `${config.azureEndpoint}/openai/deployments/${config.azureDeployment}`
-      })(config.model);
+        apiKey: agent.apiKey || process.env.AZURE_OPENAI_API_KEY || '',
+        baseURL: `${agent.azureEndpoint}/openai/deployments/${agent.azureDeployment}`
+      })(agent.model);
 
     case LLMProvider.GOOGLE:
       return createGoogleGenerativeAI({
-        apiKey: config.apiKey || process.env.GOOGLE_API_KEY || ''
-      })(config.model);
+        apiKey: agent.apiKey || process.env.GOOGLE_API_KEY || ''
+      })(agent.model);
 
     case LLMProvider.XAI:
       return createOpenAI({
-        apiKey: config.apiKey || process.env.XAI_API_KEY || '',
+        apiKey: agent.apiKey || process.env.XAI_API_KEY || '',
         baseURL: 'https://api.x.ai/v1'
-      })(config.model);
+      })(agent.model);
 
     case LLMProvider.OPENAI_COMPATIBLE:
       return createOpenAICompatible({
         name: 'custom-provider',
-        apiKey: config.apiKey || process.env.OPENAI_COMPATIBLE_API_KEY || '',
-        baseURL: config.baseUrl || process.env.OPENAI_COMPATIBLE_BASE_URL || ''
-      })(config.model);
+        apiKey: agent.apiKey || process.env.OPENAI_COMPATIBLE_API_KEY || '',
+        baseURL: agent.baseUrl || process.env.OPENAI_COMPATIBLE_BASE_URL || ''
+      })(agent.model);
 
     case LLMProvider.OLLAMA:
       return createOllama({
-        baseURL: config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api'
-      })(config.model);
+        baseURL: agent.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api'
+      })(agent.model);
 
     default:
-      throw new Error(`Unsupported LLM provider: ${config.provider}`);
+      throw new Error(`Unsupported LLM provider: ${agent.provider}`);
   }
 }

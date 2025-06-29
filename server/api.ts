@@ -148,9 +148,12 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     // Prepare and apply updates
     const updates: any = {};
     if (status !== undefined) updates.status = status;
-    if (config !== undefined) updates.config = { ...existingAgent.config, ...config };
+    if (config !== undefined) {
+      // Spread config properties directly since Agent interface is flattened
+      Object.assign(updates, config);
+    }
     if (systemPrompt !== undefined) {
-      updates.config = { ...existingAgent.config, systemPrompt };
+      updates.systemPrompt = systemPrompt;
     }
 
     let updatedAgent = existingAgent;

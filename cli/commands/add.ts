@@ -21,7 +21,7 @@
 
 import * as readline from 'readline';
 import { colors } from '../ui/colors';
-import { AgentConfig, LLMProvider, World, CreateAgentParams } from '../../core/types';
+import { LLMProvider, World, CreateAgentParams } from '../../core/types';
 import { displayUnifiedMessage } from '../ui/unified-display';
 import { toKebabCase } from '../../core/utils';
 
@@ -53,7 +53,8 @@ export async function addCommand(args: string[], world: World): Promise<void> {
       metadata: { source: 'cli', messageType: 'command' }
     });
 
-    const agentConfig: AgentConfig = {
+    const createParams: CreateAgentParams = {
+      id: toKebabCase(agentName),
       name: agentName,
       type: type,
       provider: LLMProvider.OLLAMA,
@@ -63,23 +64,14 @@ export async function addCommand(args: string[], world: World): Promise<void> {
       maxTokens: 1000
     };
 
-    const createParams: CreateAgentParams = {
-      id: toKebabCase(agentName),
-      name: agentName,
-      type: type,
-      provider: agentConfig.provider,
-      model: agentConfig.model,
-      systemPrompt: agentConfig.systemPrompt,
-      temperature: agentConfig.temperature,
-      maxTokens: agentConfig.maxTokens
-    }; const agent = await world.createAgent(createParams);
+    const agent = await world.createAgent(createParams);
 
     if (!agent) {
       throw new Error('Failed to create agent');
     }
 
     // Format success message with agent details
-    const successMessage = `Successfully created agent:\n  Name: ${agent.config.name}\n  Status: ${agent.status}`;
+    const successMessage = `Successfully created agent:\n  Name: ${agent.name}\n  Status: ${agent.status}`;
 
     displayUnifiedMessage({
       type: 'command',

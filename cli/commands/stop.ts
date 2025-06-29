@@ -56,7 +56,7 @@ export async function stopCommand(args: string[], world: World): Promise<void> {
       for (const agent of agents) {
         try {
           // Update agent status to inactive using World method
-          const updatedAgent = await world.updateAgent(agent.config.name, {
+          const updatedAgent = await world.updateAgent(agent.name, {
             status: 'inactive'
           });
 
@@ -89,7 +89,7 @@ export async function stopCommand(args: string[], world: World): Promise<void> {
     });
 
     if (updatedAgent) {
-      displaySuccess(`Successfully stopped: ${updatedAgent.config.name}`);
+      displaySuccess(`Successfully stopped: ${updatedAgent.name}`);
     } else {
       displayError(`Agent not found: ${identifier}`);
       displayUnifiedMessage({

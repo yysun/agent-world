@@ -11,7 +11,7 @@
  * - Retrieves all agents from World.getAgentManager()
  * - Formats as list with status dot, name, model info, and truncated ID
  * - Shows agent status with minimal visual clutter
- * - Extracts model information from agent.config
+ * - Extracts model information from agent properties
  * 
  * Changes:
  * - Updated to use World object instead of direct AgentManager access
@@ -45,7 +45,7 @@ export async function listCommand(args: string[], worldName: string): Promise<vo
   const agentList = agents.map((agent: any) => {
     const status = agent.status === 'active' ? colors.green('●') : colors.red('●');
     const name = colors.white(agent.name || 'Unnamed Agent');
-    const model = agent.config?.model || 'unknown';
+    const model = agent.model || 'unknown';
     const modelInfo = colors.gray(`- ${model}`);
     return `${status} ${name} ${modelInfo}`;
   }).join('\n');

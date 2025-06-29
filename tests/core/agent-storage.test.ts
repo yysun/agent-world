@@ -118,14 +118,11 @@ describe('Core Agent Storage with Mocks', () => {
     // Config file
     mockFileSystem[`${basePath}/config.json`] = JSON.stringify({
       id: agentId,
+      name: 'Mock Agent',
       type: 'test',
       status: 'active',
-      config: {
-        name: 'Mock Agent',
-        type: 'test',
-        provider: 'openai',
-        model: 'gpt-4'
-      },
+      provider: 'openai',
+      model: 'gpt-4',
       createdAt: '2023-01-01T00:00:00.000Z',
       lastActive: '2023-01-01T00:00:00.000Z',
       llmCallCount: 5,
@@ -153,7 +150,7 @@ describe('Core Agent Storage with Mocks', () => {
 
       expect(loadedAgents).toHaveLength(1);
       expect(loadedAgents[0].id).toBe(agentId);
-      expect(loadedAgents[0].config.name).toBe('Mock Agent');
+      expect(loadedAgents[0].name).toBe('Mock Agent');
       expect(loadedAgents[0].createdAt).toBeInstanceOf(Date);
     });
 
@@ -170,7 +167,7 @@ describe('Core Agent Storage with Mocks', () => {
       // Verify all agents loaded correctly
       for (let i = 0; i < 3; i++) {
         expect(loadedAgents[i].id).toBe(`test-agent-${i + 1}`);
-        expect(loadedAgents[i].config.name).toBe('Mock Agent');
+        expect(loadedAgents[i].name).toBe('Mock Agent');
         expect(loadedAgents[i].createdAt).toBeInstanceOf(Date);
       }
     });
@@ -195,9 +192,11 @@ describe('Core Agent Storage with Mocks', () => {
       // Create agent with memory
       mockFileSystem[`${basePath}/config.json`] = JSON.stringify({
         id: agentId,
+        name: 'Memory Agent',
         type: 'test',
         status: 'active',
-        config: { name: 'Memory Agent', type: 'test', provider: 'openai', model: 'gpt-4' },
+        provider: 'openai',
+        model: 'gpt-4',
         createdAt: '2023-01-01T00:00:00.000Z',
         lastActive: '2023-01-01T00:00:00.000Z',
         llmCallCount: 0
@@ -232,7 +231,7 @@ describe('Core Agent Storage with Mocks', () => {
 
       expect(loadedAgent).not.toBeNull();
       expect(loadedAgent!.id).toBe('mock-agent');
-      expect(loadedAgent!.config.name).toBe('Mock Agent');
+      expect(loadedAgent!.name).toBe('Mock Agent');
       expect(loadedAgent!.llmCallCount).toBe(5);
     });
   });
@@ -242,15 +241,12 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'save-agent';
       const agent: Agent = {
         id: agentId,
+        name: 'Test Agent',
         type: 'test',
         status: 'active',
-        config: {
-          name: 'Test Agent',
-          type: 'test',
-          provider: LLMProvider.OPENAI,
-          model: 'gpt-4',
-          systemPrompt: 'You are a test agent'
-        },
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a test agent',
         createdAt: new Date(),
         lastActive: new Date(),
         llmCallCount: 0,
@@ -273,15 +269,12 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'complex-memory-agent';
       const agent: Agent = {
         id: agentId,
+        name: 'Test Agent',
         type: 'test',
         status: 'active',
-        config: {
-          name: 'Test Agent',
-          type: 'test',
-          provider: LLMProvider.OPENAI,
-          model: 'gpt-4',
-          systemPrompt: 'You are a test agent'
-        },
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a test agent',
         createdAt: new Date(),
         lastActive: new Date(),
         llmCallCount: 0,

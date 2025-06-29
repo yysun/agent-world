@@ -39,7 +39,7 @@ export async function useCommand(args: string[], world: World): Promise<void> {
     });
 
     if (updatedAgent) {
-      displaySuccess(`Activated agent: ${updatedAgent.config.name}`);
+      displaySuccess(`Activated agent: ${updatedAgent.name}`);
       displayUnifiedMessage({
         content: `  Status: ${updatedAgent.status}`,
         type: 'status'

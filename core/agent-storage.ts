@@ -131,7 +131,7 @@ export async function validateAgentIntegrity(worldId: string, agentId: string): 
 
       // Validate config content
       const configData = await readJsonFile<any>(configPath);
-      if (!configData.id || !configData.type || !configData.config) {
+      if (!configData.id || !configData.type || !configData.provider || !configData.model) {
         result.errors.push('Invalid config structure');
         result.isValid = false;
       }
@@ -220,18 +220,17 @@ export async function saveAgentToDisk(worldId: string, agent: Agent): Promise<vo
 
   // Save system prompt as markdown file
   const systemPromptPath = path.join(agentDir, 'system-prompt.md');
-  const systemPromptContent = agent.config.systemPrompt || `You are ${agent.id}, an AI agent.`;
+  const systemPromptContent = agent.systemPrompt || `You are ${agent.id}, an AI agent.`;
   await writeTextFile(systemPromptPath, systemPromptContent);
 
   // Save memory as JSON with Date serialization
   const memoryPath = path.join(agentDir, 'memory.json');
   await writeJsonFile(memoryPath, agent.memory || []);
 
-  // Save config without system prompt (stored separately) and with Date serialization
-  const { systemPrompt, ...configWithoutPrompt } = agent.config;
+  // Save agent data without system prompt (stored separately) and with Date serialization
+  const { systemPrompt, ...agentWithoutPrompt } = agent;
   const agentData = {
-    ...agent,
-    config: configWithoutPrompt,
+    ...agentWithoutPrompt,
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString(),
     lastLLMCall: agent.lastLLMCall?.toISOString()
@@ -282,7 +281,7 @@ export async function loadAgentFromDiskWithRetry(
       const systemPromptPath = path.join(agentDir, 'system-prompt.md');
       let systemPrompt: string;
       try {
-        systemPrompt = await readTextFile(systemPromptPath);
+        systemPrompt = await fs.readFile(systemPromptPath, 'utf8');
       } catch {
         systemPrompt = `You are ${agentId}, an AI agent.`;
         // Create missing system prompt file if allowing partial load
@@ -313,10 +312,7 @@ export async function loadAgentFromDiskWithRetry(
       const agent: Agent = {
         ...agentData,
         id: agentId, // Ensure the id is always set correctly
-        config: {
-          ...agentData.config,
-          systemPrompt
-        },
+        systemPrompt,
         memory,
         createdAt: agentData.createdAt ? new Date(agentData.createdAt) : new Date(),
         lastActive: agentData.lastActive ? new Date(agentData.lastActive) : new Date(),

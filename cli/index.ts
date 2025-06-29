@@ -96,7 +96,7 @@ const listCommand = async (args: string[], world: World) => {
         metadata: { source: 'cli', messageType: 'command' }
       });
     } else {
-      const agentList = agents.map(agent => `• ${agent.config.name} (${agent.config.type}) - ${agent.status || 'active'}`).join('\n');
+      const agentList = agents.map(agent => `• ${agent.name} (${agent.type}) - ${agent.status || 'active'}`).join('\n');
       displayUnifiedMessage({
         type: 'instruction',
         content: `Agents in current world:\n${agentList}`,
@@ -300,7 +300,7 @@ async function estimateInputTokens(agentName: string, worldName: string): Promis
     if (!agent) return 50;
 
     // Load system prompt from agent config and recent conversation history from memory
-    const systemPrompt = agent.config.systemPrompt || '';
+    const systemPrompt = agent.systemPrompt || '';
     const conversationHistory = agent.memory.slice(-10); // Get last 10 messages
 
     // Token estimation: ~0.75 tokens per word
@@ -513,8 +513,8 @@ async function main() {
 
       // Get agent name for display
       const agents = getAgentsFromCurrentWorld();
-      const agent = agents.find(a => a.config.name === sseData.agentName);
-      const agentName = agent?.config.name || 'Unknown Agent';
+      const agent = agents.find(a => a.name === sseData.agentName);
+      const agentName = agent?.name || 'Unknown Agent';
 
       switch (sseData.type) {
         case 'start':

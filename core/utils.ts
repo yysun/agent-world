@@ -13,7 +13,6 @@
  * - Ready for manager module integration
  * - All types moved to types.ts for better organization
  */
-
 /**
  * Generate unique ID for messages and events
  */
@@ -39,7 +38,7 @@ export function toKebabCase(str: string): string {
 }
 
 // Import types for utility functions
-import { World, SenderType, MessageData, AgentMessage, ChatMessage, AgentConfig } from './types.js';
+import { World, Agent, SenderType, MessageData, AgentMessage, ChatMessage } from './types.js';
 
 /**
  * Get world-specific turn limit or default value
@@ -110,17 +109,17 @@ export function messageDataToAgentMessage(messageData: MessageData): AgentMessag
  * Prepare messages array for LLM using standard chat message format
  */
 export function prepareMessagesForLLM(
-  agentConfig: AgentConfig,
+  agent: Agent,
   messageData: MessageData,
   conversationHistory: AgentMessage[] = []
 ): AgentMessage[] {
   const messages: AgentMessage[] = [];
 
   // Add system message if available
-  if (agentConfig.systemPrompt) {
+  if (agent.systemPrompt) {
     messages.push({
       role: 'system',
-      content: agentConfig.systemPrompt,
+      content: agent.systemPrompt,
       createdAt: new Date()
     });
   }

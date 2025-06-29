@@ -79,7 +79,7 @@ async function saveIncomingMessageToMemory(
     agent.memory.push(userMessage);
 
     // Auto-sync memory to file (if enabled)
-    if (agent.config.autoSyncMemory !== false) {
+    if (agent.autoSyncMemory !== false) {
       await saveAgentToDisk(world.id, agent);
     }
   } catch (error) {
@@ -120,7 +120,7 @@ async function processAgentMessage(
     };
 
     // Prepare messages for LLM (including system prompt, history, and current message)
-    const messages = prepareMessagesForLLM(agent.config, messageData, conversationHistory);
+    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
 
     // Increment LLM call count before making the call
     agent.llmCallCount++;
@@ -166,7 +166,7 @@ async function processAgentMessage(
     }
 
     // Auto-sync memory to file (if enabled)
-    if (agent.config.autoSyncMemory !== false) {
+    if (agent.autoSyncMemory !== false) {
       await saveAgentToDisk(world.id, agent);
     }
 
@@ -224,7 +224,7 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
       agent.llmCallCount = 0;
 
       // Auto-sync to disk if enabled
-      if (agent.config.autoSyncMemory !== false) {
+      if (agent.autoSyncMemory !== false) {
         try {
           await saveAgentToDisk(world.id, agent);
         } catch (error) {

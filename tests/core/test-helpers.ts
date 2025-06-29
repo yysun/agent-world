@@ -126,18 +126,15 @@ export function createTestAgent(agentId?: string, overrides: Partial<Agent> = {}
 
   return {
     id,
+    name: `Test Agent ${id}`,
     type: 'test',
     status: 'inactive',
-    config: {
-      name: `Test Agent ${id}`,
-      type: 'test',
-      provider: LLMProvider.OPENAI,
-      model: 'gpt-4',
-      systemPrompt: `You are ${id}, a test AI agent.`,
-      temperature: 0.7,
-      maxTokens: 1000,
-      autoSyncMemory: true
-    },
+    provider: LLMProvider.OPENAI,
+    model: 'gpt-4',
+    systemPrompt: `You are ${id}, a test AI agent.`,
+    temperature: 0.7,
+    maxTokens: 1000,
+    autoSyncMemory: true,
     createdAt: now,
     lastActive: now,
     llmCallCount: 0,
@@ -243,8 +240,8 @@ export async function validateWorldAgentRelationship(world: World): Promise<{
       }
 
       // Check required fields
-      if (!agent.config) {
-        errors.push(`Agent ${agentId} missing config`);
+      if (!agent.name || !agent.provider || !agent.model) {
+        errors.push(`Agent ${agentId} missing required fields (name, provider, model)`);
       }
 
       if (!agent.memory) {
@@ -300,14 +297,11 @@ export async function createPartialAgentFiles(worldName: string, agentId: string
   // Only create config file, missing system-prompt.md and memory.json
   const agentConfig = {
     id: agentId,
+    name: 'Partial Agent',
     type: 'test',
     status: 'active',
-    config: {
-      name: 'Partial Agent',
-      type: 'test',
-      provider: 'openai',
-      model: 'gpt-4'
-    },
+    provider: 'openai',
+    model: 'gpt-4',
     createdAt: new Date().toISOString(),
     lastActive: new Date().toISOString(),
     llmCallCount: 0
@@ -346,19 +340,16 @@ export async function writeTestAgent(worldId: string, agentOrParams: Agent | Cre
     const now = new Date();
     agent = {
       id: params.id,
+      name: params.name,
       type: params.type,
       status: 'inactive',
-      config: {
-        name: params.name,
-        type: params.type,
-        provider: params.provider,
-        model: params.model,
-        systemPrompt: params.systemPrompt,
-        temperature: params.temperature,
-        maxTokens: params.maxTokens,
-        apiKey: params.apiKey,
-        baseUrl: params.baseUrl
-      },
+      provider: params.provider,
+      model: params.model,
+      systemPrompt: params.systemPrompt,
+      temperature: params.temperature,
+      maxTokens: params.maxTokens,
+      apiKey: params.apiKey,
+      baseUrl: params.baseUrl,
       createdAt: now,
       lastActive: now,
       llmCallCount: 0,
@@ -372,18 +363,17 @@ export async function writeTestAgent(worldId: string, agentOrParams: Agent | Cre
 
   // Save system prompt
   const systemPromptPath = path.join(agentDir, 'system-prompt.md');
-  const systemPromptContent = agent.config.systemPrompt || `You are ${agent.id}, an AI agent.`;
+  const systemPromptContent = agent.systemPrompt || `You are ${agent.id}, an AI agent.`;
   await fs.writeFile(systemPromptPath, systemPromptContent, 'utf8');
 
   // Save memory
   const memoryPath = path.join(agentDir, 'memory.json');
   await fs.writeFile(memoryPath, JSON.stringify(agent.memory || [], null, 2), 'utf8');
 
-  // Save config without system prompt
-  const { systemPrompt, ...configWithoutPrompt } = agent.config;
+  // Save agent data without system prompt (it's saved separately as a file)
+  const { systemPrompt, ...agentWithoutPrompt } = agent;
   const agentData = {
-    ...agent,
-    config: configWithoutPrompt,
+    ...agentWithoutPrompt,
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString(),
     lastLLMCall: agent.lastLLMCall?.toISOString()
