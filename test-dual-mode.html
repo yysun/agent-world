@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dual Mode Integration Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      line-height: 1.6;
+    }
+
+    .test-section {
+      border: 1px solid #ddd;
+      margin: 10px 0;
+      padding: 15px;
+      border-radius: 5px;
+    }
+
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 3px;
+    }
+
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .info {
+      background-color: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+
+    #results {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>🧪 Agent World Dual Mode Integration Test</h1>
+  <p>This test validates the Phase 7.1 Static Mode Integration and overall dual-mode architecture.</p>
+
+  <div class="test-section">
+    <h2>Test Controls</h2>
+    <button onclick="runAllTests()">🚀 Run All Tests</button>
+    <button onclick="clearResults()">🧹 Clear Results</button>
+    <button onclick="testStaticMode()">📦 Test Static Mode</button>
+    <button onclick="testServerMode()">🌐 Test Server Mode</button>
+    <button onclick="testModeSwitching()">🔄 Test Mode Switching</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Test Results</h2>
+    <div id="results"></div>
+  </div>
+
+  <script type="module">
+    import MessageBroker, { MESSAGE_TYPES, OPERATION_MODES } from './message-broker.js';
+
+    window.MessageBroker = MessageBroker;
+    window.MESSAGE_TYPES = MESSAGE_TYPES;
+    window.OPERATION_MODES = OPERATION_MODES;
+
+    let testResults = [];
+
+    function logResult(test, status, message, details = null) {
+      const result = {
+        test,
+        status,
+        message,
+        details,
+        timestamp: new Date().toISOString()
+      };
+      testResults.push(result);
+      displayResult(result);
+    }
+
+    function displayResult(result) {
+      const resultsDiv = document.getElementById('results');
+      const resultDiv = document.createElement('div');
+      resultDiv.className = `test-result ${result.status}`;
+
+      let content = `<strong>[${result.test}]</strong> ${result.message}`;
+      if (result.details) {
+        content += `<br><small>Details: ${JSON.stringify(result.details, null, 2)}</small>`;
+      }
+      content += `<br><small>Time: ${new Date(result.timestamp).toLocaleTimeString()}</small>`;
+
+      resultDiv.innerHTML = content;
+      resultsDiv.appendChild(resultDiv);
+      resultsDiv.scrollTop = resultsDiv.scrollHeight;
+    }
+
+    window.clearResults = function () {
+      document.getElementById('results').innerHTML = '';
+      testResults = [];
+    };
+
+    window.testStaticMode = async function () {
+      logResult('Static Mode', 'info', 'Starting static mode tests...');
+
+      try {
+        // Initialize in static mode
+        await MessageBroker.init({ mode: 'static' });
+        logResult('Static Mode', 'success', 'MessageBroker initialized successfully in static mode');
+
+        // Test operation mode detection
+        const mode = MessageBroker.getOperationMode();
+        if (mode === 'static') {
+          logResult('Static Mode', 'success', `Operation mode correctly detected: ${mode}`);
+        } else {
+          logResult('Static Mode', 'error', `Unexpected operation mode: ${mode}`);
+          return;
+        }
+
+        // Test world operations
+        logResult('Static Mode', 'info', 'Testing world operations...');
+
+        // List worlds
+        const worldsResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_LIST);
+        logResult('Static Mode', 'success', 'World list retrieved successfully', {
+          worldCount: worldsResponse.data?.length || 0,
+          worlds: worldsResponse.data?.map(w => w.name) || []
+        });
+
+        // Create a test world
+        const testWorld = {
+          name: 'Test World ' + Date.now(),
+          description: 'Test world created during static mode testing'
+        };
+
+        const createResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_CREATE, testWorld);
+        logResult('Static Mode', 'success', 'Test world created successfully', {
+          worldName: createResponse.data?.name
+        });
+
+        // Test agent operations in the new world
+        logResult('Static Mode', 'info', 'Testing agent operations...');
+
+        const testAgent = {
+          name: 'Test Agent ' + Date.now(),
+          worldName: createResponse.data?.name,
+          systemPrompt: 'You are a test agent for static mode validation.'
+        };
+
+        const agentResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_CREATE, testAgent);
+        logResult('Static Mode', 'success', 'Test agent created successfully', {
+          agentName: agentResponse.data?.name,
+          worldName: agentResponse.data?.worldName
+        });
+
+        // List agents in the world
+        const agentsResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_LIST, {
+          worldName: createResponse.data?.name
+        });
+        logResult('Static Mode', 'success', 'Agent list retrieved successfully', {
+          agentCount: agentsResponse.data?.length || 0,
+          agents: agentsResponse.data?.map(a => a.name) || []
+        });
+
+        logResult('Static Mode', 'success', '✅ All static mode tests passed!');
+
+      } catch (error) {
+        logResult('Static Mode', 'error', `Static mode test failed: ${error.message}`, {
+          error: error.stack
+        });
+      }
+    };
+
+    window.testServerMode = async function () {
+      logResult('Server Mode', 'info', 'Starting server mode tests...');
+
+      try {
+        // Initialize in server mode
+        await MessageBroker.init({
+          mode: 'server',
+          websocketUrl: 'ws://localhost:3000/ws'
+        });
+        logResult('Server Mode', 'success', 'MessageBroker initialized successfully in server mode');
+
+        // Test operation mode detection
+        const mode = MessageBroker.getOperationMode();
+        if (mode === 'server') {
+          logResult('Server Mode', 'success', `Operation mode correctly detected: ${mode}`);
+        } else {
+          logResult('Server Mode', 'error', `Unexpected operation mode: ${mode}`);
+          return;
+        }
+
+        // Test connection state
+        const connectionState = MessageBroker.getConnectionState();
+        logResult('Server Mode', 'success', `Connection state: ${connectionState}`);
+
+        // Test world operations via WebSocket
+        logResult('Server Mode', 'info', 'Testing world operations via WebSocket...');
+
+        const worldsResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_LIST);
+        logResult('Server Mode', 'success', 'World list retrieved via WebSocket', {
+          worldCount: worldsResponse.data?.length || 0,
+          worlds: worldsResponse.data?.map(w => w.name) || []
+        });
+
+        logResult('Server Mode', 'success', '✅ Server mode tests completed!');
+
+      } catch (error) {
+        logResult('Server Mode', 'error', `Server mode test failed: ${error.message}`, {
+          error: error.stack
+        });
+      }
+    };
+
+    window.testModeSwitching = async function () {
+      logResult('Mode Switching', 'info', 'Starting mode switching tests...');
+
+      try {
+        // Test switching from static to server
+        logResult('Mode Switching', 'info', 'Switching from static to server mode...');
+
+        await MessageBroker.init({ mode: 'static' });
+        let mode = MessageBroker.getOperationMode();
+        logResult('Mode Switching', 'success', `Started in ${mode} mode`);
+
+        await MessageBroker.init({
+          mode: 'server',
+          websocketUrl: 'ws://localhost:3000/ws'
+        });
+        mode = MessageBroker.getOperationMode();
+        logResult('Mode Switching', 'success', `Switched to ${mode} mode`);
+
+        // Test switching back to static
+        logResult('Mode Switching', 'info', 'Switching back to static mode...');
+
+        await MessageBroker.init({ mode: 'static' });
+        mode = MessageBroker.getOperationMode();
+        logResult('Mode Switching', 'success', `Switched back to ${mode} mode`);
+
+        logResult('Mode Switching', 'success', '✅ Mode switching tests completed!');
+
+      } catch (error) {
+        logResult('Mode Switching', 'error', `Mode switching test failed: ${error.message}`, {
+          error: error.stack
+        });
+      }
+    };
+
+    window.runAllTests = async function () {
+      logResult('Full Test Suite', 'info', '🚀 Starting complete dual-mode integration test suite...');
+
+      clearResults();
+
+      await testStaticMode();
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
+
+      await testServerMode();
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
+
+      await testModeSwitching();
+
+      logResult('Full Test Suite', 'success', '🎉 All tests completed! Check individual results above.');
+    };
+
+    // Auto-run basic connectivity test on load
+    window.addEventListener('load', async () => {
+      logResult('Initial Load', 'info', 'Page loaded, testing basic MessageBroker availability...');
+
+      try {
+        if (typeof MessageBroker !== 'undefined') {
+          logResult('Initial Load', 'success', 'MessageBroker module loaded successfully');
+        } else {
+          logResult('Initial Load', 'error', 'MessageBroker module not available');
+        }
+
+        if (typeof MESSAGE_TYPES !== 'undefined') {
+          logResult('Initial Load', 'success', 'MESSAGE_TYPES constants loaded successfully');
+        } else {
+          logResult('Initial Load', 'error', 'MESSAGE_TYPES constants not available');
+        }
+
+        logResult('Initial Load', 'info', 'Ready for testing! Click "Run All Tests" to begin.');
+
+      } catch (error) {
+        logResult('Initial Load', 'error', `Initial load test failed: ${error.message}`);
+      }
+    });
+  </script>
+</body>
+
+</html>

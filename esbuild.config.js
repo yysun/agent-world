@@ -12,49 +12,21 @@ import { build } from 'esbuild';
 import { resolve } from 'path';
 
 const configurations = [
-  // Core ESM Bundle for Browser
+
+  // Core ESM Bundle for Browser (public folder for easy importing)
   {
     entryPoints: ['core/index.ts'],
     bundle: true,
     format: 'esm',
     platform: 'browser',
     target: 'es2020',
-    outfile: 'dist/core.esm.js',
+    outfile: 'public/core.js',
     external: ['events', 'fs', 'path', 'uuid'],
     minify: false,
     sourcemap: true,
     define: {
       'process.env.NODE_ENV': '"production"',
       '__IS_BROWSER__': 'true'
-    }
-  },
-
-  // Server Bundle
-  {
-    entryPoints: ['server/index.ts'],
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    target: 'node20',
-    outfile: 'dist/server.js',
-    external: ['tsx'],
-    minify: false,
-    sourcemap: true
-  },
-
-  // CLI Bundle
-  {
-    entryPoints: ['bin/cli.ts'],
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    target: 'node20',
-    outfile: 'dist/cli.js',
-    external: ['tsx', 'terminal-kit'],
-    minify: false,
-    sourcemap: true,
-    banner: {
-      js: '#!/usr/bin/env node'
     }
   },
 

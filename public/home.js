@@ -20,17 +20,60 @@
  * - Follows AppRun simplified event handling rules
  */
 
-import * as api from './api.js';
 import { getAvatarInitials, getAvatarColor } from './utils.js';
 import { AgentModal } from './agent.js';
 import { toggleTheme, applyTheme, getThemeIcon } from './theme.js';
-import wsApi from './ws-api.js';
+import MessageBroker, { MESSAGE_TYPES } from './message-broker.js';
 
+const { app, Component, html, run } = window.apprun;
 const USER_ID = 'user1'; // Placeholder for user ID, can be replaced with actual user management
+
+const DEFAULT_WORLD_NAME = 'Default World';
 
 // Initial state
 const state = async () => {
-  const worlds = await api.getWorlds();
+  // Initialize message broker
+  try {
+    await MessageBroker.init({
+      mode: localStorage.getItem('operationMode') || 'static',
+      websocketUrl: 'ws://localhost:3000/ws'
+    });
+  } catch (error) {
+    console.warn('Message broker initialization failed:', error);
+  }
+
+  let worlds = [];
+
+  try {
+    // Try to get worlds via message broker
+    const response = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_LIST);
+    worlds = response.data || [];
+  } catch (error) {
+    console.warn('Could not fetch worlds:', error);
+  }
+
+  // Auto-create default world if none exist - STATIC MODE ONLY
+  if ((!worlds || worlds.length === 0) && MessageBroker.getOperationMode() === 'static') {
+    try {
+      const defaultWorld = {
+        name: DEFAULT_WORLD_NAME,
+        description: 'Default world for Agent interactions'
+      };
+
+      const response = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_CREATE, defaultWorld);
+      if (response.data) {
+        worlds = [response.data];
+      } else {
+        // Fallback for static mode when creation fails
+        worlds = [{ id: 'default-world', name: DEFAULT_WORLD_NAME, agentCount: 0 }];
+      }
+    } catch (error) {
+      console.warn('Could not create default world in static mode:', error);
+      // Fallback state for static mode
+      worlds = [{ id: 'default-world', name: DEFAULT_WORLD_NAME, agentCount: 0 }];
+    }
+  }
+
   const worldName = worlds.length > 0 ? worlds[0].name : null;
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
@@ -39,11 +82,29 @@ const state = async () => {
   const initialState = {
     worlds,
     theme,
+    operationMode: localStorage.getItem('operationMode') || 'static',
     connectionStatus: 'disconnected',
     messages: [],
     currentMessage: '',
     wsError: null
   };
+
+  // Set up message broker event listeners
+  MessageBroker.on('message_received', (messageData) => {
+    app.run('handleWebSocketMessage', messageData);
+  });
+
+  MessageBroker.on('connection_open', () => {
+    app.run('handleConnectionStatus', 'connected');
+  });
+
+  MessageBroker.on('connection_closed', () => {
+    app.run('handleConnectionStatus', 'disconnected');
+  });
+
+  MessageBroker.on('connection_error', (errorData) => {
+    app.run('handleWebSocketError', errorData);
+  });
 
   return selectWorld(initialState, worldName);
 };
@@ -54,8 +115,12 @@ const selectWorld = async (state, worldName) => {
   if (worldName === state.worldName) return state;
 
   // Disconnect from previous world
-  if (state.worldName && wsApi.isConnected()) {
-    wsApi.disconnect();
+  if (state.worldName && MessageBroker.getConnectionState() === 'connected') {
+    try {
+      await MessageBroker.sendMessage(MESSAGE_TYPES.UNSUBSCRIBE, { worldName: state.worldName });
+    } catch (error) {
+      console.warn('Failed to unsubscribe from previous world:', error);
+    }
   }
 
   // Clear messages when switching worlds
@@ -66,23 +131,33 @@ const selectWorld = async (state, worldName) => {
     connectionStatus: 'disconnected'
   };
 
-  if (worldName) setTimeout(() => {
-    // Connect to new world
-    newState.connectionStatus = 'connecting';
-    wsApi.connect();
-  }, 500)
+  if (worldName) {
+    try {
+      // Subscribe to new world
+      await MessageBroker.sendMessage(MESSAGE_TYPES.SUBSCRIBE, { worldName });
+      newState.connectionStatus = 'connected';
 
-  const agents = await api.getAgents(worldName);
-  return { ...newState, agents };
+      // Get agents for the selected world
+      const response = await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_LIST, { worldName });
+      newState.agents = response.data || [];
+
+    } catch (error) {
+      console.warn('Failed to select world:', error);
+      newState.connectionStatus = 'error';
+      newState.agents = [];
+    }
+  }
+
+  return newState;
 };
 
-// WebSocket event handlers
+// WebSocket event handlers via message broker
 const handleWebSocketMessage = (state, messageData) => {
   const message = {
     id: Date.now() + Math.random(),
     type: messageData.type || 'agent',
     sender: messageData.sender || messageData.agentName || 'system',
-    text: messageData.message || messageData.text || '',
+    text: messageData.message || messageData.text || messageData.content || '',
     timestamp: messageData.timestamp || new Date().toISOString(),
     worldName: state.worldName
   };
@@ -102,11 +177,11 @@ const handleConnectionStatus = (state, status) => {
 };
 
 const handleWebSocketError = (state, error) => {
-  console.error('WebSocket error:', error);
+  console.error('Message broker error:', error);
   return {
     ...state,
     connectionStatus: 'error',
-    wsError: error.message || 'WebSocket connection error'
+    wsError: error.message || 'Communication error'
   };
 };
 
@@ -118,31 +193,137 @@ const openAgentModal = (state, agent = null) => {
   });
 };
 
-const closeAgentModal = (state, save) => {
+const closeAgentModal = async (state, save) => {
   try {
-    if (save) api.saveAgent(state.editingAgent);
-    return ({
+    if (save && state.editingAgent) {
+      if (state.editingAgent.id) {
+        // Update existing agent
+        await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_UPDATE, {
+          id: state.editingAgent.id,
+          ...state.editingAgent
+        });
+      } else {
+        // Create new agent
+        await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_CREATE, {
+          ...state.editingAgent,
+          worldName: state.worldName
+        });
+      }
+
+      // Refresh agents list
+      try {
+        const response = await MessageBroker.sendMessage(MESSAGE_TYPES.AGENT_LIST, { worldName: state.worldName });
+        const updatedAgents = response.data || [];
+        return {
+          ...state,
+          showAgentModel: false,
+          agents: updatedAgents
+        };
+      } catch (error) {
+        console.warn('Failed to refresh agents:', error);
+      }
+    }
+
+    return {
       ...state,
       showAgentModel: false
-    });
+    };
   } catch (error) {
     console.error('Error closing agent modal:', error);
-    return ({
+    return {
       ...state,
-      error
-    });
+      error: error.message
+    };
+  }
+};
+
+const handleThemeToggle = (state) => {
+  const newTheme = toggleTheme();
+  return { ...state, theme: newTheme };
+};
+
+const updateCurrentMessage = (state, value) => {
+  return { ...state, currentMessage: value };
+};
+
+const addNewWorld = async (state) => {
+  const worldName = prompt('Enter world name:');
+  if (!worldName || !worldName.trim()) {
+    return state;
+  }
+
+  try {
+    const newWorld = {
+      name: worldName.trim(),
+      description: `World created by user: ${worldName.trim()}`
+    };
+
+    const response = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_CREATE, newWorld);
+
+    if (response.data) {
+      // Refresh worlds list
+      const worldsResponse = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_LIST);
+      const updatedWorlds = worldsResponse.data || [];
+
+      return {
+        ...state,
+        worlds: updatedWorlds,
+        worldName: response.data.name // Auto-select the new world
+      };
+    }
+
+    return state;
+  } catch (error) {
+    console.error('Failed to create world:', error);
+    return {
+      ...state,
+      error: 'Failed to create world: ' + error.message
+    };
+  }
+};
+
+const createNewWorld = async (state, worldName = DEFAULT_WORLD_NAME) => {
+  try {
+    // Try to create world via message broker (works in both static and server modes)
+    const newWorld = {
+      id: worldName.toLowerCase().replace(/\s+/g, '-'),
+      name: worldName,
+      agentCount: 0
+    };
+
+    // Add to local state immediately for better UX
+    const updatedWorlds = [...state.worlds, newWorld];
+
+    // If this is the first world, automatically select it
+    const shouldAutoSelect = state.worlds.length === 0;
+
+    const newState = {
+      ...state,
+      worlds: updatedWorlds
+    };
+
+    if (shouldAutoSelect) {
+      return selectWorld(newState, worldName);
+    }
+
+    return newState;
+  } catch (error) {
+    console.error('Error creating world:', error);
+    return {
+      ...state,
+      wsError: `Failed to create world: ${error.message}`
+    };
   }
 };
 
 const onKeypress = (state, e) => {
-  const value = e.target.value;
-  state.currentMessage = value;
   if (e.key === 'Enter') {
-    sendMessage(state, e);
+    return sendMessage(state);
   }
+  return state; // No state change for other keys
 };
 
-const sendMessage = (state) => {
+const sendMessage = async (state) => {
   const message = state.currentMessage?.trim();
 
   // Validate message input
@@ -155,29 +336,32 @@ const sendMessage = (state) => {
     return state;
   }
 
-  if (!wsApi.isConnected()) {
-    console.warn('WebSocket not connected');
+  if (MessageBroker.getConnectionState() !== 'connected') {
+    console.warn('Message broker not connected');
     return {
       ...state,
       wsError: 'Not connected to server'
     };
   }
 
-  // Send message via WebSocket
-  const success = wsApi.sendMessage({
-    id: Date.now() + Math.random(),
-    sender: USER_ID,
-    worldName: state.worldName,
-    content: message,
-    type: 'message',
-  });
+  try {
+    // Send message via message broker
+    const messageData = {
+      sender: USER_ID,
+      worldName: state.worldName,
+      content: message,
+      type: 'message'
+    };
 
-  if (success) {
+    await MessageBroker.sendMessage(MESSAGE_TYPES.CHAT_MESSAGE, messageData);
+
     // Add user message to local state immediately for better UX
     const userMessage = {
+      id: Date.now() + Math.random(),
       type: 'message',
       sender: USER_ID,
-      content: message,
+      text: message,
+      timestamp: new Date().toISOString(),
       worldName: state.worldName
     };
 
@@ -187,10 +371,46 @@ const sendMessage = (state) => {
       currentMessage: '', // Clear input field
       wsError: null
     };
-  } else {
+  } catch (error) {
+    console.error('Failed to send message:', error);
     return {
       ...state,
-      wsError: 'Failed to send message'
+      wsError: 'Failed to send message: ' + error.message
+    };
+  }
+};
+
+const toggleOperationMode = async (state) => {
+  const currentMode = localStorage.getItem('operationMode') || 'static';
+  const newMode = currentMode === 'static' ? 'server' : 'static';
+
+  // Store the new mode preference
+  localStorage.setItem('operationMode', newMode);
+
+  try {
+    // Reinitialize message broker with new mode
+    await MessageBroker.init({
+      mode: newMode,
+      websocketUrl: 'ws://localhost:3000/ws'
+    });
+
+    // Refresh worlds list for new mode
+    const response = await MessageBroker.sendMessage(MESSAGE_TYPES.WORLD_LIST);
+    const worlds = response.data || [];
+
+    return {
+      ...state,
+      operationMode: newMode,
+      worlds,
+      worldName: worlds.length > 0 ? worlds[0].name : null,
+      connectionStatus: messageBroker.getConnectionState(),
+      messages: [] // Clear messages when switching modes
+    };
+  } catch (error) {
+    console.error('Failed to switch operation mode:', error);
+    return {
+      ...state,
+      error: 'Failed to switch to ' + newMode + ' mode: ' + error.message
     };
   }
 };
@@ -205,7 +425,13 @@ const view = (state) => {
             <span class="logo">Agent World</span>
           </div>
           <div class="header-right">
-            <button class="theme-toggle" @click=${run(toggleTheme)}>
+            <div class="operation-mode-toggle">
+              <button class="mode-toggle-btn" @click=${run(toggleOperationMode)} title="Switch between Static and Server modes">
+                <span class="mode-indicator ${state.operationMode}">${state.operationMode === 'static' ? '📱' : '🌐'}</span>
+                <span class="mode-text">${state.operationMode}</span>
+              </button>
+            </div>
+            <button class="theme-toggle" @click=${run(handleThemeToggle)}>
               ${getThemeIcon(state.theme || 'system')}
             </button>
             <button class="menu-btn">☰</button>
@@ -232,7 +458,7 @@ const view = (state) => {
                   ` : ''}
                 </button>
               `)}
-              <button class="world-tab add-world-tab" @click="addNewWorld">
+              <button class="world-tab add-world-tab" @click=${run(addNewWorld)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 5v14M5 12h14"/>
                 </svg>
@@ -300,6 +526,7 @@ const view = (state) => {
                 class="message-input" 
                 placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
                 value="${state.currentMessage || ''}"
+                @input=${(e) => app.run('updateCurrentMessage', e.target.value)}
                 @keypress=${run(onKeypress)}
               >
               <button 
@@ -316,7 +543,6 @@ const view = (state) => {
         </main>
       </div>
       ${state.showAgentModel ? AgentModal(state.editingAgent, closeAgentModal) : ''}
-    })}
   `;
 };
 
@@ -324,8 +550,10 @@ const update = {
   '/,#': state => state,
   handleWebSocketMessage,
   handleConnectionStatus,
-  handleWebSocketError
-}
+  handleWebSocketError,
+  updateCurrentMessage,
+  toggleOperationMode
+};
 
 
 

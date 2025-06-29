@@ -139,7 +139,34 @@ async function handleMessageBrokerMessage(
         break;
 
       case 'world_list':
-        const worlds = await listWorlds(ROOT_PATH);
+        let worlds = await listWorlds(ROOT_PATH);
+
+        // Auto-create default world if none exist (like CLI behavior)
+        if (!worlds || worlds.length === 0) {
+          try {
+            console.log('No worlds found, creating default world...');
+            const defaultWorld = await createWorld(ROOT_PATH, {
+              name: 'Default World',
+              description: 'Default world for Agent interactions'
+            });
+
+            // Convert World to WorldInfo format
+            const defaultWorldInfo: WorldInfo = {
+              id: defaultWorld.id,
+              name: defaultWorld.name,
+              description: defaultWorld.description,
+              turnLimit: defaultWorld.turnLimit,
+              agentCount: defaultWorld.agents.size
+            };
+
+            worlds = [defaultWorldInfo];
+            console.log('Default world created successfully');
+          } catch (error) {
+            console.error('Failed to create default world:', error);
+            worlds = [];
+          }
+        }
+
         result = worlds.map(world => ({
           id: world.id,
           name: world.name,

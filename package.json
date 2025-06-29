@@ -1,7 +1,7 @@
 {
   "name": "agent-world",
   "version": "2.0.0",
-  "main": "index.ts",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
     "agent-world": "./cli/index.ts",
@@ -16,11 +16,7 @@
     "test:integration": "jest --config jest.integration.config.js",
     "test:all": "npm run test && npm run test:integration",
     "check": "tsc --noEmit",
-    "build": "node esbuild.config.js",
-    "build:core": "esbuild core/index.ts --bundle --format=esm --platform=browser --target=es2020 --outfile=dist/core.esm.js --sourcemap --define:__IS_BROWSER__=true",
-    "build:server": "esbuild server/index.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/server.js --external:tsx --sourcemap",
-    "build:cli": "esbuild cli/index.ts --bundle --format=cjs --platform=node --target=node20 --outfile=dist/cli.js --external:tsx --sourcemap --banner:js='#!/usr/bin/env node'",
-    "build:watch": "npm run build:core -- --watch"
+    "build": "node esbuild.config.js"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [
