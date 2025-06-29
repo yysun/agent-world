@@ -63,7 +63,8 @@ export default {
         target: 'es2022',
         esModuleInterop: true,
         allowSyntheticDefaultImports: true,
-        moduleResolution: 'node'
+        moduleResolution: 'node',
+        allowImportingTsExtensions: true
       }
     }]
   },

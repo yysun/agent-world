@@ -20,7 +20,7 @@ const configurations = [
     platform: 'browser',
     target: 'es2020',
     outfile: 'dist/core.esm.js',
-    external: [],
+    external: ['events', 'fs', 'path', 'uuid'],
     minify: false,
     sourcemap: true,
     define: {
@@ -50,7 +50,7 @@ const configurations = [
     platform: 'node',
     target: 'node20',
     outfile: 'dist/cli.js',
-    external: ['tsx'],
+    external: ['tsx', 'terminal-kit'],
     minify: false,
     sourcemap: true,
     banner: {

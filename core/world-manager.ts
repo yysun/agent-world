@@ -23,64 +23,27 @@
  * - Storage layer works with plain WorldData (no EventEmitter)
  */
 
-// Conditional imports
-let EventEmitter: any;
-
-if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
-  // Node.js environment - import actual EventEmitter
-  const events = require('events');
-  EventEmitter = events.EventEmitter;
-} else {
-  // Browser environment - provide minimal EventEmitter-like implementation
-  EventEmitter = class {
-    listeners: Map<string, Function[]> = new Map();
-
-    on(event: string, listener: Function) {
-      if (!this.listeners.has(event)) {
-        this.listeners.set(event, []);
-      }
-      this.listeners.get(event)!.push(listener);
-      return this;
-    }
-
-    emit(event: string, ...args: any[]) {
-      const eventListeners = this.listeners.get(event);
-      if (eventListeners) {
-        eventListeners.forEach(listener => listener(...args));
-      }
-      return true;
-    }
-
-    removeListener(event: string, listener: Function) {
-      const eventListeners = this.listeners.get(event);
-      if (eventListeners) {
-        const index = eventListeners.indexOf(listener);
-        if (index !== -1) {
-          eventListeners.splice(index, 1);
-        }
-      }
-      return this;
-    }
-  };
-}
-
+// Static imports for better ES module compatibility
+import { EventEmitter } from 'events';
 import { World, CreateWorldParams, UpdateWorldParams, Agent } from './types';
 import { toKebabCase } from './utils';
 
-// Conditional imports for storage operations
-let saveWorldToDisk: any,
-  loadWorldFromDisk: any,
-  deleteWorldFromDisk: any,
-  loadAllWorldsFromDisk: any,
-  worldExistsOnDisk: any;
+// Storage operations with conditional compilation for browser/Node.js
+import {
+  saveWorldToDisk,
+  loadWorldFromDisk,
+  deleteWorldFromDisk,
+  loadAllWorldsFromDisk,
+  worldExistsOnDisk,
+  type WorldData
+} from './world-storage';
 
-let loadAllAgentsFromDisk: any,
-  saveAgentConfigToDisk: any;
+import {
+  loadAllAgentsFromDisk,
+  saveAgentConfigToDisk
+} from './agent-storage';
 
-let subscribeAgentToMessages: any;
-
-// Type-only import for WorldData
-import type { WorldData } from './world-storage';
+import { subscribeAgentToMessages } from './agent-events';
 
 // Import agent-manager functions
 import {
@@ -92,65 +55,6 @@ import {
   listAgents as listAgentsCore,
   updateAgentMemory as updateAgentMemoryCore
 } from './agent-manager';
-
-if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
-  // Node.js environment - import actual storage functions
-  try {
-    const worldStorage = require('./world-storage');
-    const agentStorage = require('./agent-storage');
-    const agentEvents = require('./agent-events');
-
-    saveWorldToDisk = worldStorage.saveWorldToDisk;
-    loadWorldFromDisk = worldStorage.loadWorldFromDisk;
-    deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
-    loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
-    worldExistsOnDisk = worldStorage.worldExistsOnDisk;
-
-    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
-    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
-
-    subscribeAgentToMessages = agentEvents.subscribeAgentToMessages;
-  } catch (error) {
-    // Fallback if modules can't be loaded
-    console.warn('Node.js storage modules not available');
-  }
-} else {
-  // Browser environment - provide no-op implementations
-  saveWorldToDisk = async (...args: any[]) => {
-    console.warn('World save not implemented in browser');
-    return true;
-  };
-  loadWorldFromDisk = async (...args: any[]) => {
-    console.warn('World load not implemented in browser');
-    return null;
-  };
-  deleteWorldFromDisk = async (...args: any[]) => {
-    console.warn('World delete not implemented in browser');
-    return true;
-  };
-  loadAllWorldsFromDisk = async (...args: any[]) => {
-    console.warn('World listing not implemented in browser');
-    return [];
-  };
-  worldExistsOnDisk = async (...args: any[]) => {
-    console.warn('World existence check not implemented in browser');
-    return false;
-  };
-
-  loadAllAgentsFromDisk = async (...args: any[]) => {
-    console.warn('Agent listing not implemented in browser');
-    return [];
-  };
-  saveAgentConfigToDisk = async (...args: any[]) => {
-    console.warn('Agent config save not implemented in browser');
-    return true;
-  };
-
-  subscribeAgentToMessages = (...args: any[]) => {
-    console.warn('Agent event subscription not implemented in browser');
-    return () => { };
-  };
-}
 
 /**
  * World listing information

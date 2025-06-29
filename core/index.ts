@@ -11,6 +11,45 @@
  * Browser gets types and structure, Node.js gets full storage functionality.
  */
 
+/**
+ * Core Module Exports - Public API for both Node.js and Browser
+ * 
+ * Exports:
+ * - World management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Type definitions and LLM provider enumeration (both environments)
+ * - Utility functions (both environments)
+ * - Package version metadata
+ * 
+ * Architecture: World-mediated access pattern with conditional compilation.
+ * Browser gets types and structure, Node.js gets full storage functionality.
+ */
+
+/**
+ * Core Module Exports - Public API for both Node.js and Browser
+ * 
+ * Exports:
+ * - World management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Type definitions and LLM provider enumeration (both environments)
+ * - Utility functions (both environments)
+ * - Package version metadata
+ * 
+ * Architecture: World-mediated access pattern with conditional compilation.
+ * Browser gets types and structure, Node.js gets full storage functionality.
+ */
+
+/**
+ * Core Module Exports - Public API for both Node.js and Browser
+ * 
+ * Exports:
+ * - World management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Type definitions and LLM provider enumeration (both environments)
+ * - Utility functions (both environments)
+ * - Package version metadata
+ * 
+ * Architecture: World-mediated access pattern with conditional compilation.
+ * Browser gets types and structure, Node.js gets full storage functionality.
+ */
+
 // World management functions - conditionally compiled
 export {
   createWorld,
@@ -20,7 +59,7 @@ export {
   listWorlds
 } from './world-manager';
 
-// Agent management functions - conditionally compiled
+// Agent management functions - conditionally compiled  
 export {
   createAgent,
   getAgent,

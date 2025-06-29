@@ -29,7 +29,8 @@
   },
   "include": [
     "index.ts",
-    "core/**/*"
+    "core/**/*",
+    "server/**/*"
   ],
   "exclude": [
     "node_modules",

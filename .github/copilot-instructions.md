@@ -29,6 +29,7 @@
 
 ## Development Instructions
 - use function based approach instead of class based.
-- do not use dynamic module imports.
+- use static module imports
+- remove `.js` and `.ts` extension from imports
 - when creating unit tests - only mock file io and LLM, do not mock world, event bus or agent.
 - execute script: use `npx tsx` 
