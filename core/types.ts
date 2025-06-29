@@ -122,6 +122,38 @@ export enum SenderType {
   HUMAN = 'human'
 }
 
+// Agent Operation Types
+export interface CreateAgentParams {
+  id: string;
+  name: string;
+  type: string;
+  provider: LLMProvider;
+  model: string;
+  systemPrompt?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface UpdateAgentParams {
+  type?: string;
+  config?: Partial<AgentConfig>;
+  status?: 'active' | 'inactive' | 'error';
+}
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  type: string;
+  model: string;
+  status?: string;
+  createdAt?: Date;
+  lastActive?: Date;
+  memorySize: number;
+  llmCallCount: number;
+}
+
 // World Management Types
 export interface WorldConfig {
   name: string;
@@ -134,6 +166,15 @@ export interface World {
   agents: Map<string, Agent>;
   config: WorldConfig;
   eventEmitter: EventEmitter;
+
+  // Agent operation methods
+  createAgent(params: CreateAgentParams): Promise<Agent>;
+  getAgent(agentName: string): Promise<Agent | null>;
+  updateAgent(agentName: string, updates: UpdateAgentParams): Promise<Agent | null>;
+  deleteAgent(agentName: string): Promise<boolean>;
+  clearAgentMemory(agentName: string): Promise<Agent | null>;
+  listAgents(): Promise<AgentInfo[]>;
+  updateAgentMemory(agentName: string, messages: AgentMessage[]): Promise<Agent | null>;
 }
 
 // Storage Types

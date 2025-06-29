@@ -17,17 +17,11 @@
  * - Accesses agents through world.getAgentManager()
  */
 
-import { updateAgent } from '../../core/agent-manager';
-import { toKebabCase } from '../../core/utils';
 import { World } from '../../core/types';
 import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
 
 export async function useCommand(args: string[], world: World): Promise<void> {
-  // Set world context for core modules
-  const originalWorldId = process.env.AGENT_WORLD_ID;
-  process.env.AGENT_WORLD_ID = world.id;
-
   try {
     if (args.length === 0) {
       displayUnifiedMessage({
@@ -39,32 +33,17 @@ export async function useCommand(args: string[], world: World): Promise<void> {
 
     const agentName = args[0];
 
-    // World is passed directly
-    const agents = Array.from(world.agents.values());
+    // Activate agent using World method
+    const updatedAgent = await world.updateAgent(agentName, {
+      status: 'active'
+    });
 
-    // Try to find by exact name first
-    let agent = agents.find(a => a.config.name === agentName);
-
-    // If not found, try partial name match
-    if (!agent) {
-      agent = agents.find(a => a.config.name.toLowerCase().includes(agentName.toLowerCase()));
-    }
-
-    if (agent) {
-      // Update agent status to active
-      const updatedAgent = await updateAgent(agent.id, {
-        status: 'active'
+    if (updatedAgent) {
+      displaySuccess(`Activated agent: ${updatedAgent.config.name}`);
+      displayUnifiedMessage({
+        content: `  Status: ${updatedAgent.status}`,
+        type: 'status'
       });
-
-      if (updatedAgent) {
-        displaySuccess(`Activated agent: ${agent.config.name}`);
-        displayUnifiedMessage({
-          content: `  Status: ${updatedAgent.status}`,
-          type: 'status'
-        });
-      } else {
-        displayError(`Failed to activate agent: ${agent.config.name}`);
-      }
     } else {
       displayError(`Agent not found: ${agentName}`);
       displayUnifiedMessage({
@@ -75,12 +54,5 @@ export async function useCommand(args: string[], world: World): Promise<void> {
 
   } catch (error) {
     displayError(`Failed to activate agent: ${error}`);
-  } finally {
-    // Restore original world ID
-    if (originalWorldId) {
-      process.env.AGENT_WORLD_ID = originalWorldId;
-    } else {
-      delete process.env.AGENT_WORLD_ID;
-    }
   }
 }

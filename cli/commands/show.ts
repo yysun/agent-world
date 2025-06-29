@@ -32,7 +32,6 @@
  * - Added file export functionality with markdown formatting
  */
 
-import { toKebabCase } from '../../core/utils';
 import { World } from '../../core/types';
 import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
@@ -49,9 +48,8 @@ export async function showCommand(args: string[], world: World): Promise<void> {
   const agentName = args[0];
   const fileName = args[1]; // Optional filename parameter
 
-  // Get agent by name (world is passed directly)
-  const agentId = toKebabCase(agentName);
-  const agent = world.agents.get(agentId);
+  // Get agent by name using World method
+  const agent = await world.getAgent(agentName);
   if (!agent) {
     displayError(`Agent "${agentName}" not found.`);
     displayUnifiedMessage({

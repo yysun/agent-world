@@ -17,17 +17,11 @@
  * - Accesses agents through world.getAgentManager()
  */
 
-import { updateAgent } from '../../core/agent-manager';
-import { toKebabCase } from '../../core/utils';
 import { World } from '../../core/types';
 import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
 
 export async function stopCommand(args: string[], world: World): Promise<void> {
-  // Set world context for core modules
-  const originalWorldId = process.env.AGENT_WORLD_ID;
-  process.env.AGENT_WORLD_ID = world.id;
-
   try {
     if (args.length === 0) {
       displayUnifiedMessage({
@@ -61,8 +55,8 @@ export async function stopCommand(args: string[], world: World): Promise<void> {
 
       for (const agent of agents) {
         try {
-          // Update agent status to inactive
-          const updatedAgent = await updateAgent(agent.id, {
+          // Update agent status to inactive using World method
+          const updatedAgent = await world.updateAgent(agent.config.name, {
             status: 'inactive'
           });
 
@@ -83,34 +77,19 @@ export async function stopCommand(args: string[], world: World): Promise<void> {
       return;
     }
 
-    // Stop specific agent
-    // World is passed directly
-    const agents = Array.from(world.agents.values());
+    // Stop specific agent using World method
+    displayUnifiedMessage({
+      content: `Stopping agent: ${identifier}...`,
+      type: 'command'
+    });
 
-    // Try to find by exact name first
-    let agent = agents.find(a => a.config.name === identifier);
+    // Update agent status to inactive using World method
+    const updatedAgent = await world.updateAgent(identifier, {
+      status: 'inactive'
+    });
 
-    // If not found, try partial name match
-    if (!agent) {
-      agent = agents.find(a => a.config.name.toLowerCase().includes(identifier.toLowerCase()));
-    }
-
-    if (agent) {
-      displayUnifiedMessage({
-        content: `Stopping agent: ${agent.config.name}...`,
-        type: 'command'
-      });
-
-      // Update agent status to inactive
-      const updatedAgent = await updateAgent(agent.id, {
-        status: 'inactive'
-      });
-
-      if (updatedAgent) {
-        displaySuccess(`Successfully stopped: ${agent.config.name}`);
-      } else {
-        displayError(`Failed to stop agent: ${agent.config.name}`);
-      }
+    if (updatedAgent) {
+      displaySuccess(`Successfully stopped: ${updatedAgent.config.name}`);
     } else {
       displayError(`Agent not found: ${identifier}`);
       displayUnifiedMessage({
@@ -121,12 +100,5 @@ export async function stopCommand(args: string[], world: World): Promise<void> {
 
   } catch (error) {
     displayError(`Failed to stop agent: ${error}`);
-  } finally {
-    // Restore original world ID
-    if (originalWorldId) {
-      process.env.AGENT_WORLD_ID = originalWorldId;
-    } else {
-      delete process.env.AGENT_WORLD_ID;
-    }
   }
 }

@@ -34,7 +34,7 @@
  * - Ready for EventBus integration in Phase 3
  */
 
-import { Agent, AgentMessage, AgentConfig, LLMProvider } from './types.js';
+import { Agent, AgentMessage, AgentConfig, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types.js';
 import {
   saveAgentToDisk,
   loadAgentFromDisk,
@@ -50,46 +50,6 @@ import {
 } from './agent-storage.js';
 import { subscribeAgentToMessages } from './agent-events.js';
 import { getWorld } from './world-manager.js';
-
-/**
- * Agent creation parameters
- */
-export interface CreateAgentParams {
-  id: string;
-  name: string;
-  type: string;
-  provider: LLMProvider;
-  model: string;
-  systemPrompt?: string;
-  apiKey?: string;
-  baseUrl?: string;
-  temperature?: number;
-  maxTokens?: number;
-}
-
-/**
- * Agent update parameters (partial update support)
- */
-export interface UpdateAgentParams {
-  type?: string;
-  config?: Partial<AgentConfig>;
-  status?: 'active' | 'inactive' | 'error';
-}
-
-/**
- * Agent listing information
- */
-export interface AgentInfo {
-  id: string;
-  name: string;
-  type: string;
-  model: string;
-  status?: string;
-  createdAt?: Date;
-  lastActive?: Date;
-  memorySize: number;
-  llmCallCount: number;
-}
 
 /**
  * Batch agent creation parameters

@@ -25,18 +25,15 @@
  * - Now properly archives memory.json before clearing to contain only conversationHistory and lastActivity
  * - Enhanced error handling and user feedback
  * - Added turn limit reset functionality (handled automatically by clearAgentMemory)
+ * - Fixed return value handling: clearAgentMemory returns Agent | null, not boolean
+ * - Improved error messages to indicate specific failure reasons
  */
 
-import { clearAgentMemory, listAgents } from '../../core/agent-manager';
-import { toKebabCase } from '../../core/utils';
 import { World } from '../../core/types';
 import { colors } from '../ui/colors';
 import { displayUnifiedMessage } from '../ui/unified-display';
 
 export async function clearCommand(args: string[], world: World): Promise<void> {
-  // Set world context for core modules
-  const originalWorldId = process.env.AGENT_WORLD_ID;
-  process.env.AGENT_WORLD_ID = world.id;
 
   try {
     if (args.length === 0) {
@@ -75,13 +72,13 @@ export async function clearCommand(args: string[], world: World): Promise<void> 
       const results: string[] = [];
       for (const agent of agents) {
         try {
-          // Clear agent's memory (also resets turn limit automatically)
-          const success = await clearAgentMemory(agent.id);
+          // Clear agent's memory using World method (agent name, not ID)
+          const clearedAgent = await world.clearAgentMemory(agent.config.name);
 
-          if (success) {
+          if (clearedAgent) {
             results.push(colors.green(`✓ Cleared memory and reset turn limit: ${agent.config.name}`));
           } else {
-            results.push(colors.red(`✗ Failed to clear memory for ${agent.config.name}`));
+            results.push(colors.red(`✗ Failed to clear memory for ${agent.config.name}: Agent not found`));
           }
         } catch (error) {
           results.push(colors.red(`✗ Failed to clear memory for ${agent.config.name}: ${error}`));
@@ -98,34 +95,20 @@ export async function clearCommand(args: string[], world: World): Promise<void> 
         metadata: { source: 'cli', messageType: 'command' }
       });
     } else {
-      // Clear memory for specific agent
-      // World is passed directly
-      const agents = Array.from(world.agents.values());
-      const agent = agents.find(a => a.config.name.toLowerCase() === identifier.toLowerCase());
+      // Clear memory for specific agent using World method
+      const clearedAgent = await world.clearAgentMemory(identifier);
 
-      if (!agent) {
-        displayUnifiedMessage({
-          type: 'error',
-          content: `Agent not found: ${identifier}\nUse /list to see available agents.`,
-          metadata: { source: 'cli', messageType: 'error' }
-        });
-        return;
-      }
-
-      // Clear memory for specific agent (also resets turn limit automatically)
-      const success = await clearAgentMemory(agent.id);
-
-      if (success) {
+      if (clearedAgent) {
         displayUnifiedMessage({
           type: 'command',
-          content: `Memory cleared and turn limit reset for agent: ${agent.config.name}`,
+          content: `Memory cleared and turn limit reset for agent: ${clearedAgent.config.name}`,
           commandSubtype: 'success',
           metadata: { source: 'cli', messageType: 'command' }
         });
       } else {
         displayUnifiedMessage({
           type: 'error',
-          content: `Failed to clear memory for agent: ${agent.config.name}`,
+          content: `Agent not found: ${identifier}\nUse /list to see available agents.`,
           metadata: { source: 'cli', messageType: 'error' }
         });
       }
@@ -136,12 +119,5 @@ export async function clearCommand(args: string[], world: World): Promise<void> 
       content: `Error clearing memory: ${error}`,
       metadata: { source: 'cli', messageType: 'error' }
     });
-  } finally {
-    // Restore original world ID
-    if (originalWorldId) {
-      process.env.AGENT_WORLD_ID = originalWorldId;
-    } else {
-      delete process.env.AGENT_WORLD_ID;
-    }
   }
 }

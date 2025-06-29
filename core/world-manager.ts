@@ -35,6 +35,16 @@ import {
 } from './world-storage.js';
 import { loadAllAgentsFromDisk } from './agent-storage.js';
 import { subscribeAgentToMessages } from './agent-events.js';
+import { toKebabCase } from './utils.js';
+import {
+  createAgent as createAgentCore,
+  getAgent as getAgentCore,
+  updateAgent as updateAgentCore,
+  deleteAgent as deleteAgentCore,
+  clearAgentMemory as clearAgentMemoryCore,
+  listAgents as listAgentsCore,
+  updateAgentMemory as updateAgentMemoryCore
+} from './agent-manager.js';
 
 /**
  * World creation parameters
@@ -110,13 +120,8 @@ export async function getWorld(worldId: string): Promise<World | null> {
     return null;
   }
 
-  // Create runtime World with fresh EventEmitter
-  const world: World = {
-    id: worldData.id,
-    config: worldData.config,
-    eventEmitter: new EventEmitter(), // ← Fresh EventEmitter
-    agents: new Map()
-  };
+  // Create runtime World with fresh EventEmitter and methods
+  const world = worldDataToWorld(worldData, worldId);
 
   // Load agents and subscribe them to messages
   const agents = await loadAllAgentsFromDisk(worldId);
@@ -195,11 +200,212 @@ export async function getWorldConfig(worldId: string): Promise<WorldConfig | nul
  * Convert storage WorldData to runtime World object
  * Reconstructs EventEmitter and agents Map for runtime use
  */
-function worldDataToWorld(data: WorldData): World {
-  return {
-    id: data.id,
+function worldDataToWorld(data: WorldData, worldId?: string): World {
+  const world: World = {
+    id: worldId || data.id, // Use provided worldId or fall back to data.id
     config: data.config,
     eventEmitter: new EventEmitter(),
-    agents: new Map() // Empty agents map - to be populated by agent manager
+    agents: new Map(), // Empty agents map - to be populated by agent manager
+
+    // Agent operation methods
+    async createAgent(params) {
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        const agent = await createAgentCore(params);
+        // Update runtime map
+        world.agents.set(agent.id, agent);
+        return agent;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async getAgent(agentName) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        // First try with the provided name as-is
+        let agent = await getAgentCore(agentId);
+
+        // If not found, try with kebab-case conversion
+        if (!agent) {
+          agentId = toKebabCase(agentName);
+          agent = await getAgentCore(agentId);
+        }
+
+        return agent;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async updateAgent(agentName, updates) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        // First try with the provided name as-is
+        let updatedAgent = await updateAgentCore(agentId, updates);
+
+        // If not found, try with kebab-case conversion
+        if (!updatedAgent) {
+          agentId = toKebabCase(agentName);
+          updatedAgent = await updateAgentCore(agentId, updates);
+        }
+
+        if (updatedAgent) {
+          // Update runtime map
+          world.agents.set(updatedAgent.id, updatedAgent);
+        }
+        return updatedAgent;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async deleteAgent(agentName) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        // First try with the provided name as-is
+        let success = await deleteAgentCore(agentId);
+
+        // If not found, try with kebab-case conversion
+        if (!success) {
+          agentId = toKebabCase(agentName);
+          success = await deleteAgentCore(agentId);
+        }
+
+        if (success) {
+          // Update runtime map
+          world.agents.delete(agentId);
+        }
+        return success;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async clearAgentMemory(agentName) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        // First try with the provided name as-is
+        let clearedAgent = await clearAgentMemoryCore(agentId);
+
+        // If not found, try with kebab-case conversion
+        if (!clearedAgent) {
+          agentId = toKebabCase(agentName);
+          clearedAgent = await clearAgentMemoryCore(agentId);
+        }
+
+        if (clearedAgent) {
+          // Update runtime map
+          world.agents.set(clearedAgent.id, clearedAgent);
+        }
+        return clearedAgent;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async listAgents() {
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        return await listAgentsCore();
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    },
+
+    async updateAgentMemory(agentName, messages) {
+      // Try to find agent by name or ID
+      let agentId = agentName;
+
+      // Set world context
+      const originalWorldId = process.env.AGENT_WORLD_ID;
+      process.env.AGENT_WORLD_ID = world.id;
+
+      try {
+        // First try with the provided name as-is
+        let updatedAgent = await updateAgentMemoryCore(agentId, messages);
+
+        // If not found, try with kebab-case conversion
+        if (!updatedAgent) {
+          agentId = toKebabCase(agentName);
+          updatedAgent = await updateAgentMemoryCore(agentId, messages);
+        }
+
+        if (updatedAgent) {
+          // Update runtime map
+          world.agents.set(updatedAgent.id, updatedAgent);
+        }
+        return updatedAgent;
+      } finally {
+        // Restore original context
+        if (originalWorldId) {
+          process.env.AGENT_WORLD_ID = originalWorldId;
+        } else {
+          delete process.env.AGENT_WORLD_ID;
+        }
+      }
+    }
   };
+
+  return world;
 }
