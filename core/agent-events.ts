@@ -23,12 +23,11 @@
  * - All operations scoped to specific world instance
  */
 
-import { World, Agent, AgentMessage, MessageData, SenderType } from './types.js';
+import { World, Agent, AgentMessage, MessageData, SenderType, WorldMessageEvent } from './types.js';
 import { subscribeToMessages, publishMessage, publishSSE } from './world-events.js';
 import { saveAgentToDisk, loadAgentFromDisk } from './agent-storage.js';
 import { streamAgentResponse } from './llm-manager.js';
 import {
-  WorldMessageEvent,
   getWorldTurnLimit,
   extractMentions,
   determineSenderType,

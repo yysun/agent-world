@@ -16,9 +16,8 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, World, AgentMessage, LLMProvider } from '../../core/types.js';
+import { Agent, World, AgentMessage, LLMProvider, CreateAgentParams } from '../../core/types.js';
 import { CreateWorldParams } from '../../core/world-manager.js';
-import { CreateAgentParams } from '../../core/agent-manager.js';
 import { toKebabCase } from '../../core/utils.js';
 import { getAgentDir } from '../../core/agent-storage.js';
 

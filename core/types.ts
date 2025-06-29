@@ -6,6 +6,7 @@
  * - Event system with strict payload typing (MESSAGE, WORLD, SSE, SYSTEM)
  * - AI SDK compatible chat messages with utility functions for LLM integration
  * - Storage provider interfaces and file management
+ * - World EventEmitter event data structures
  * - Zod schemas for runtime validation
  * 
  * Implementation:
@@ -14,6 +15,7 @@
  * - Agent memory structure with message history and activity tracking
  * - Utility functions to strip custom fields before LLM calls
  * - Comprehensive LLM provider support (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
+ * - World event structures for World.eventEmitter integration
  */
 
 // Chat Message Types - AI SDK Compatible
@@ -209,6 +211,34 @@ export function stripCustomFields(message: AgentMessage): ChatMessage {
 
 export function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
   return messages.map(stripCustomFields);
+}
+
+// World EventEmitter Types
+
+/**
+ * World message event data structure for World.eventEmitter
+ */
+export interface WorldMessageEvent {
+  content: string;
+  sender: string;
+  timestamp: Date;
+  messageId: string;
+}
+
+/**
+ * World SSE event data structure for World.eventEmitter
+ */
+export interface WorldSSEEvent {
+  agentName: string;
+  type: 'start' | 'chunk' | 'end' | 'error';
+  content?: string;
+  error?: string;
+  messageId: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
 

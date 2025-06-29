@@ -22,7 +22,7 @@
 
 import { publishMessage } from './world-events.js';
 import { getWorld } from './world-manager.js';
-import { WorldMessageEvent } from './utils.js';
+import { WorldMessageEvent } from './types.js';
 
 /**
  * Broadcast message to all agents in a world

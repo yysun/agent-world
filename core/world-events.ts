@@ -22,8 +22,8 @@
  * - Ready for agent subscription and LLM integration
  */
 
-import { World, Agent } from './types.js';
-import { generateId, WorldMessageEvent, WorldSSEEvent } from './utils.js';
+import { World, Agent, WorldMessageEvent, WorldSSEEvent } from './types.js';
+import { generateId } from './utils.js';
 
 /**
  * Message publishing using World.eventEmitter
