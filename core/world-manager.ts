@@ -23,19 +23,66 @@
  * - Storage layer works with plain WorldData (no EventEmitter)
  */
 
-import { EventEmitter } from 'events';
-import { World, CreateWorldParams, UpdateWorldParams } from './types';
-import {
-  WorldData,
-  saveWorldToDisk,
-  loadWorldFromDisk,
-  deleteWorldFromDisk,
-  loadAllWorldsFromDisk,
-  worldExistsOnDisk
-} from './world-storage';
-import { loadAllAgentsFromDisk, saveAgentConfigToDisk } from './agent-storage';
-import { subscribeAgentToMessages } from './agent-events';
+// Conditional imports
+let EventEmitter: any;
+
+if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+  // Node.js environment - import actual EventEmitter
+  const events = require('events');
+  EventEmitter = events.EventEmitter;
+} else {
+  // Browser environment - provide minimal EventEmitter-like implementation
+  EventEmitter = class {
+    listeners: Map<string, Function[]> = new Map();
+
+    on(event: string, listener: Function) {
+      if (!this.listeners.has(event)) {
+        this.listeners.set(event, []);
+      }
+      this.listeners.get(event)!.push(listener);
+      return this;
+    }
+
+    emit(event: string, ...args: any[]) {
+      const eventListeners = this.listeners.get(event);
+      if (eventListeners) {
+        eventListeners.forEach(listener => listener(...args));
+      }
+      return true;
+    }
+
+    removeListener(event: string, listener: Function) {
+      const eventListeners = this.listeners.get(event);
+      if (eventListeners) {
+        const index = eventListeners.indexOf(listener);
+        if (index !== -1) {
+          eventListeners.splice(index, 1);
+        }
+      }
+      return this;
+    }
+  };
+}
+
+import { World, CreateWorldParams, UpdateWorldParams, Agent } from './types';
 import { toKebabCase } from './utils';
+
+// Conditional imports for storage operations
+let saveWorldToDisk: any,
+  loadWorldFromDisk: any,
+  deleteWorldFromDisk: any,
+  loadAllWorldsFromDisk: any,
+  worldExistsOnDisk: any;
+
+let loadAllAgentsFromDisk: any,
+  saveAgentConfigToDisk: any;
+
+let subscribeAgentToMessages: any;
+
+// Type-only import for WorldData
+import type { WorldData } from './world-storage';
+
+// Import agent-manager functions
 import {
   createAgent as createAgentCore,
   getAgent as getAgentCore,
@@ -45,6 +92,65 @@ import {
   listAgents as listAgentsCore,
   updateAgentMemory as updateAgentMemoryCore
 } from './agent-manager';
+
+if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+  // Node.js environment - import actual storage functions
+  try {
+    const worldStorage = require('./world-storage');
+    const agentStorage = require('./agent-storage');
+    const agentEvents = require('./agent-events');
+
+    saveWorldToDisk = worldStorage.saveWorldToDisk;
+    loadWorldFromDisk = worldStorage.loadWorldFromDisk;
+    deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
+    loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
+    worldExistsOnDisk = worldStorage.worldExistsOnDisk;
+
+    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
+    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
+
+    subscribeAgentToMessages = agentEvents.subscribeAgentToMessages;
+  } catch (error) {
+    // Fallback if modules can't be loaded
+    console.warn('Node.js storage modules not available');
+  }
+} else {
+  // Browser environment - provide no-op implementations
+  saveWorldToDisk = async (...args: any[]) => {
+    console.warn('World save not implemented in browser');
+    return true;
+  };
+  loadWorldFromDisk = async (...args: any[]) => {
+    console.warn('World load not implemented in browser');
+    return null;
+  };
+  deleteWorldFromDisk = async (...args: any[]) => {
+    console.warn('World delete not implemented in browser');
+    return true;
+  };
+  loadAllWorldsFromDisk = async (...args: any[]) => {
+    console.warn('World listing not implemented in browser');
+    return [];
+  };
+  worldExistsOnDisk = async (...args: any[]) => {
+    console.warn('World existence check not implemented in browser');
+    return false;
+  };
+
+  loadAllAgentsFromDisk = async (...args: any[]) => {
+    console.warn('Agent listing not implemented in browser');
+    return [];
+  };
+  saveAgentConfigToDisk = async (...args: any[]) => {
+    console.warn('Agent config save not implemented in browser');
+    return true;
+  };
+
+  subscribeAgentToMessages = (...args: any[]) => {
+    console.warn('Agent event subscription not implemented in browser');
+    return () => { };
+  };
+}
 
 /**
  * World listing information
@@ -78,8 +184,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     id: params.name,
     name: params.name,
     description: params.description,
-    turnLimit: params.turnLimit || 5,
-    autoSave: params.autoSave !== false
+    turnLimit: params.turnLimit || 5
   };
 
   await saveWorldToDisk(rootPath, worldData);
@@ -145,7 +250,7 @@ export async function deleteWorld(rootPath: string, worldId: string): Promise<bo
 export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
   const allWorldData = await loadAllWorldsFromDisk(rootPath);
 
-  return allWorldData.map(data => ({
+  return allWorldData.map((data: WorldData) => ({
     id: data.id,
     name: data.name,
     description: data.description,
@@ -178,7 +283,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     name: data.name,
     description: data.description,
     turnLimit: data.turnLimit,
-    autoSave: data.autoSave,
     eventEmitter: new EventEmitter(),
     agents: new Map(), // Empty agents map - to be populated by agent manager
 
@@ -187,11 +291,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       const agent = await createAgentCore(world.rootPath, world.id, params);
       // Update runtime map
       world.agents.set(agent.id, agent);
-
-      if (world.autoSave) {
-        await world.save();
-      }
-
       return agent;
     },
 
@@ -232,10 +331,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         if (updatedAgent) {
           // Update runtime map
           world.agents.set(updatedAgent.id, updatedAgent);
-
-          if (world.autoSave) {
-            await world.save();
-          }
         }
         return updatedAgent;
       } catch (error) {
@@ -260,10 +355,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         if (success) {
           // Remove from runtime map
           world.agents.delete(agentId);
-
-          if (world.autoSave) {
-            await world.save();
-          }
         }
         return success;
       } catch (error) {
@@ -288,10 +379,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         if (clearedAgent) {
           // Update runtime map
           world.agents.set(clearedAgent.id, clearedAgent);
-
-          if (world.autoSave) {
-            await world.save();
-          }
         }
         return clearedAgent;
       } catch (error) {
@@ -324,10 +411,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         if (updatedAgent) {
           // Update runtime map
           world.agents.set(updatedAgent.id, updatedAgent);
-
-          if (world.autoSave) {
-            await world.save();
-          }
         }
         return updatedAgent;
       } catch (error) {
@@ -366,8 +449,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         id: world.id,
         name: world.name,
         description: world.description,
-        turnLimit: world.turnLimit,
-        autoSave: world.autoSave
+        turnLimit: world.turnLimit
       };
       await saveWorldToDisk(world.rootPath, worldData);
     },
@@ -382,16 +464,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         world.name = worldData.name;
         world.description = worldData.description;
         world.turnLimit = worldData.turnLimit;
-        world.autoSave = worldData.autoSave;
       }
-    },
-
-    enableAutoSave() {
-      world.autoSave = true;
-    },
-
-    disableAutoSave() {
-      world.autoSave = false;
     }
   };
 

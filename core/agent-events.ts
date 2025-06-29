@@ -5,7 +5,6 @@
  * - Automatic agent subscription to World.eventEmitter messages
  * - Agent message processing logic with world-specific turn limits
  * - Message filtering and response logic using world context
- * - Memory auto-sync integration
  * - LLM streaming integration with world's eventEmitter SSE events
  * - World-specific event emitter usage (agents use their world's eventEmitter)
  *
@@ -77,11 +76,6 @@ async function saveIncomingMessageToMemory(
 
     // Add to agent memory
     agent.memory.push(userMessage);
-
-    // Auto-sync memory to file (if enabled)
-    if (agent.autoSyncMemory !== false) {
-      await saveAgentToDisk(world.rootPath, world.id, agent);
-    }
   } catch (error) {
     console.warn(`Could not save incoming message to memory for ${agent.id}:`, error);
   }
@@ -165,11 +159,6 @@ async function processAgentMessage(
       }
     }
 
-    // Auto-sync memory to file (if enabled)
-    if (agent.autoSyncMemory !== false) {
-      await saveAgentToDisk(world.rootPath, world.id, agent);
-    }
-
     // Publish agent response
     if (finalResponse && typeof finalResponse === 'string') {
       publishMessage(world, finalResponse, agent.id);
@@ -222,15 +211,6 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
   if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
     if (agent.llmCallCount > 0) {
       agent.llmCallCount = 0;
-
-      // Auto-sync to disk if enabled
-      if (agent.autoSyncMemory !== false) {
-        try {
-          await saveAgentToDisk(world.rootPath, world.id, agent);
-        } catch (error) {
-          console.warn('Could not save agent LLM call count reset:', error);
-        }
-      }
     }
   }
 
@@ -240,7 +220,7 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
   }
 
   // Extract @mentions from content
-  const mentions = extractMentions(content);
+  const mentions = extractMentions(messageEvent.content);
 
   // For HUMAN/user messages
   if (messageEvent.sender === 'HUMAN' || messageEvent.sender === 'human') {
@@ -250,9 +230,9 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
     }
 
     // If there are mentions, only respond if this agent is the first mention
-    return mentions.length > 0 && mentions[0] === agentName;
+    return mentions.length > 0 && mentions[0] === agent.name;
   }
 
   // For agent messages, only respond if this agent is the first mention
-  return mentions.length > 0 && mentions[0] === agentName;
+  return mentions.length > 0 && mentions[0] === agent.name;
 }

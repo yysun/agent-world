@@ -39,7 +39,6 @@ export interface WorldData {
   name: string;
   description?: string;
   turnLimit: number;
-  autoSave: boolean;
 }
 
 /**
@@ -87,8 +86,7 @@ export async function saveWorldToDisk(root: string, worldData: WorldData): Promi
     id: worldData.id,
     name: worldData.name,
     description: worldData.description,
-    turnLimit: worldData.turnLimit,
-    autoSave: worldData.autoSave
+    turnLimit: worldData.turnLimit
   };
 
   await writeJsonFile(configPath, configData);
@@ -108,8 +106,7 @@ export async function loadWorldFromDisk(root: string, worldId: string): Promise<
       id: configData.id || configData.name, // Support migration from old format
       name: configData.name,
       description: configData.description,
-      turnLimit: configData.turnLimit || 5,
-      autoSave: configData.autoSave !== undefined ? configData.autoSave : true
+      turnLimit: configData.turnLimit || 5
     };
 
     return worldData;

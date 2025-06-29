@@ -46,7 +46,6 @@ export interface Agent {
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  autoSyncMemory?: boolean; // Auto-sync memory to file after LLM responses
   // Provider-specific configs
   azureEndpoint?: string;
   azureApiVersion?: string;
@@ -145,7 +144,6 @@ export interface UpdateAgentParams {
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  autoSyncMemory?: boolean;
   azureEndpoint?: string;
   azureApiVersion?: string;
   azureDeployment?: string;
@@ -173,7 +171,6 @@ export interface CreateWorldParams {
   name: string;
   description?: string;
   turnLimit?: number;
-  autoSave?: boolean;
 }
 
 /**
@@ -183,11 +180,10 @@ export interface UpdateWorldParams {
   name?: string;
   description?: string;
   turnLimit?: number;
-  autoSave?: boolean;
 }
 
 /**
- * Enhanced World interface with flattened configuration and auto-save support
+ * Enhanced World interface with flattened configuration
  */
 export interface World {
   // Identity & Storage
@@ -198,7 +194,6 @@ export interface World {
   name: string;
   description?: string;
   turnLimit: number;
-  autoSave: boolean;
 
   // Runtime Objects
   eventEmitter: EventEmitter;
@@ -218,8 +213,6 @@ export interface World {
   save(): Promise<void>;
   delete(): Promise<boolean>;
   reload(): Promise<void>;
-  enableAutoSave(): void;
-  disableAutoSave(): void;
 }
 
 /**

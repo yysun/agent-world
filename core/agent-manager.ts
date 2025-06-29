@@ -35,20 +35,87 @@
  */
 
 import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types';
-import {
-  saveAgentToDisk,
-  loadAgentFromDisk,
-  loadAgentFromDiskWithRetry,
-  deleteAgentFromDisk,
-  loadAllAgentsFromDisk,
-  loadAllAgentsFromDiskBatch,
-  agentExistsOnDisk,
-  validateAgentIntegrity,
-  repairAgentData,
-  type AgentLoadOptions,
-  type BatchLoadResult
-} from './agent-storage';
-import { subscribeAgentToMessages } from './agent-events';
+
+// Conditional imports for storage operations
+let saveAgentToDisk: any,
+  loadAgentFromDisk: any,
+  loadAgentFromDiskWithRetry: any,
+  deleteAgentFromDisk: any,
+  loadAllAgentsFromDisk: any,
+  loadAllAgentsFromDiskBatch: any,
+  agentExistsOnDisk: any,
+  validateAgentIntegrity: any,
+  repairAgentData: any;
+
+let subscribeAgentToMessages: any;
+
+// Type imports for conditional loading
+import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
+
+if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+  // Node.js environment - import actual storage functions
+  try {
+    const agentStorage = require('./agent-storage');
+    const agentEvents = require('./agent-events');
+
+    saveAgentToDisk = agentStorage.saveAgentToDisk;
+    loadAgentFromDisk = agentStorage.loadAgentFromDisk;
+    loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
+    deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
+    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
+    loadAllAgentsFromDiskBatch = agentStorage.loadAllAgentsFromDiskBatch;
+    agentExistsOnDisk = agentStorage.agentExistsOnDisk;
+    validateAgentIntegrity = agentStorage.validateAgentIntegrity;
+    repairAgentData = agentStorage.repairAgentData;
+
+    subscribeAgentToMessages = agentEvents.subscribeAgentToMessages;
+  } catch (error) {
+    // Fallback if modules can't be loaded
+    console.warn('Node.js storage modules not available');
+  }
+} else {
+  // Browser environment - provide no-op implementations
+  saveAgentToDisk = async (...args: any[]) => {
+    console.warn('Agent save not implemented in browser');
+    return true;
+  };
+  loadAgentFromDisk = async (...args: any[]) => {
+    console.warn('Agent load not implemented in browser');
+    return null;
+  };
+  loadAgentFromDiskWithRetry = async (...args: any[]) => {
+    console.warn('Agent load not implemented in browser');
+    return null;
+  };
+  deleteAgentFromDisk = async (...args: any[]) => {
+    console.warn('Agent delete not implemented in browser');
+    return true;
+  };
+  loadAllAgentsFromDisk = async (...args: any[]) => {
+    console.warn('Agent listing not implemented in browser');
+    return [];
+  };
+  loadAllAgentsFromDiskBatch = async (...args: any[]) => {
+    console.warn('Agent batch load not implemented in browser');
+    return { successful: [], failed: [] };
+  };
+  agentExistsOnDisk = async (...args: any[]) => {
+    console.warn('Agent existence check not implemented in browser');
+    return false;
+  };
+  validateAgentIntegrity = async (...args: any[]) => {
+    console.warn('Agent validation not implemented in browser');
+    return true;
+  };
+  repairAgentData = async (...args: any[]) => {
+    console.warn('Agent repair not implemented in browser');
+    return false;
+  };
+  subscribeAgentToMessages = (...args: any[]) => {
+    console.warn('Agent event subscription not implemented in browser');
+    return () => { };
+  };
+}
 
 /**
  * Batch agent creation parameters
@@ -328,7 +395,6 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     systemPrompt: params.systemPrompt,
     temperature: params.temperature,
     maxTokens: params.maxTokens,
-    autoSyncMemory: true, // ← Default: enable auto-sync
     createdAt: now,
     lastActive: now,
     llmCallCount: 0,
@@ -384,7 +450,6 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
     systemPrompt: updates.systemPrompt !== undefined ? updates.systemPrompt : existingAgent.systemPrompt,
     temperature: updates.temperature !== undefined ? updates.temperature : existingAgent.temperature,
     maxTokens: updates.maxTokens !== undefined ? updates.maxTokens : existingAgent.maxTokens,
-    autoSyncMemory: updates.autoSyncMemory !== undefined ? updates.autoSyncMemory : existingAgent.autoSyncMemory,
     azureEndpoint: updates.azureEndpoint !== undefined ? updates.azureEndpoint : existingAgent.azureEndpoint,
     azureApiVersion: updates.azureApiVersion !== undefined ? updates.azureApiVersion : existingAgent.azureApiVersion,
     azureDeployment: updates.azureDeployment !== undefined ? updates.azureDeployment : existingAgent.azureDeployment,
@@ -424,7 +489,7 @@ export async function deleteAgent(rootPath: string, worldId: string, agentId: st
 export async function listAgents(rootPath: string, worldId: string): Promise<AgentInfo[]> {
   const allAgents = await loadAllAgentsFromDisk(rootPath, worldId);
 
-  return allAgents.map(agent => ({
+  return allAgents.map((agent: Agent) => ({
     id: agent.id,
     name: agent.name,
     type: agent.type,

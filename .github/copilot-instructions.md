@@ -3,7 +3,7 @@
 - Create before editing, if missing update after changes.
 
 ## Command Keywords
-- **AA**: Create a detailed functional implementation plan (no optimization) with check boxes → save to `docs/plan/plan-{name}.md` → wait for confirmation.
+- **AA**: Create a implementation plan → save to `docs/plan/plan-{name}.md` → wait for confirmation.
 - **AP**: Review requirements → think hard ensure no flaw → provide suggestions → wait for confirmation.
 - **CC**: Consolidate code and comments block → remove redundant.
 - **OO**: Present options → wait for confirmation before proceeding.
@@ -15,9 +15,11 @@
 - **SP**: consolidate, remove redundant, keep all ideas, make it concise and easy for LLM to understand.
 
 ## Planning Rules
-- Large changes or "AA" → always create plan first, get confirmation.
-- Focus on functionality/logic, not optimizations.
-- Break into smaller, actionable steps with context/dependencies.
+- Large changes or "AA" → always create plan first → get confirmation.
+- Requirement analysis or plan → focus on functionality/logic, not optimizations.
+- Order the phases sequentially from basic to advanced.
+- Use checkboxes for each step in the plan.
+- Add go/no-go checkpoints after each phase.
 
 ## Execution Rules
 - All step-by-step execution follows: implement from plan → update document each step → mark as done → git commit.

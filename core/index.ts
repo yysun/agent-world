@@ -1,16 +1,17 @@
 /**
- * Core Module Exports - Public API Only
+ * Core Module Exports - Public API for both Node.js and Browser
  * 
  * Exports:
- * - World management functions (createWorld, getWorld, updateWorld, deleteWorld, listWorlds)
- * - Type definitions and LLM provider enumeration
+ * - World management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Type definitions and LLM provider enumeration (both environments)
+ * - Utility functions (both environments)
  * - Package version metadata
  * 
- * Architecture: World-mediated access pattern with clean separation between public and internal APIs.
- * All agent operations go through World interface. Internal modules not exposed.
+ * Architecture: World-mediated access pattern with conditional compilation.
+ * Browser gets types and structure, Node.js gets full storage functionality.
  */
 
-// World management functions
+// World management functions - conditionally compiled
 export {
   createWorld,
   getWorld,
@@ -19,7 +20,18 @@ export {
   listWorlds
 } from './world-manager';
 
-// Types and enums
+// Agent management functions - conditionally compiled
+export {
+  createAgent,
+  getAgent,
+  updateAgent,
+  deleteAgent,
+  listAgents,
+  updateAgentMemory,
+  clearAgentMemory
+} from './agent-manager';
+
+// Types and enums (safe for both Node.js and browser)
 export type {
   World,
   CreateWorldParams,
@@ -32,6 +44,9 @@ export type {
 } from './types';
 
 export { LLMProvider } from './types';
+
+// Utility functions (safe for both Node.js and browser)
+export { generateId, toKebabCase } from './utils';
 
 // Package metadata
 export const VERSION = '1.0.0';
