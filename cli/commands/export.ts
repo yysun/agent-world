@@ -23,7 +23,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getMessagesForWorld, getMessageCount, StoredMessage } from '../message-store';
 import { SenderType, World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/display';
 import { colors } from '../ui/colors';
 
 /**

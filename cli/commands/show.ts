@@ -33,7 +33,7 @@
  */
 
 import { World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/display';
 import { colors } from '../ui/colors';
 import * as fs from 'fs/promises';
 import * as path from 'path';

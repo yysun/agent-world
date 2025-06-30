@@ -22,7 +22,7 @@
  */
 
 import { colors } from '../ui/colors';
-import { displayUnifiedMessage } from '../ui/unified-display';
+import { displayUnifiedMessage } from '../ui/display';
 
 export async function helpCommand(args: string[], worldName: string): Promise<void> {
   const commands = [

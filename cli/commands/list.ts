@@ -26,7 +26,7 @@
 
 import * as World from '../../src/world';
 import { colors } from '../ui/colors';
-import { displayUnifiedMessage } from '../ui/unified-display';
+import { displayUnifiedMessage } from '../ui/display';
 
 export async function listCommand(args: string[], worldName: string): Promise<void> {
   const agents = World.getAgents(worldName);

@@ -21,8 +21,7 @@
  * - Cross-platform terminal compatibility
  */
 
-import { displayUnifiedMessage } from './unified-display';
-import * as StreamingDisplay from './streaming-display';
+import { displayUnifiedMessage, isStreamingActive, resetStreamingState } from './display';
 
 // Terminal lifecycle state
 interface TerminalLifecycleState {
@@ -115,7 +114,7 @@ export async function performShutdown(): Promise<void> {
   }
 
   // Reset streaming state
-  StreamingDisplay.resetStreamingState();
+  resetStreamingState();
 
   // Cleanup terminal state
   if (state.term && !state.hasPipedInput) {

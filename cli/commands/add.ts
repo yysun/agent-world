@@ -22,7 +22,7 @@
 import * as readline from 'readline';
 import { colors } from '../ui/colors';
 import { LLMProvider, World, CreateAgentParams } from '../../core/types';
-import { displayUnifiedMessage } from '../ui/unified-display';
+import { displayUnifiedMessage } from '../ui/display';
 import { toKebabCase } from '../../core/utils';
 
 export async function addCommand(args: string[], world: World): Promise<void> {

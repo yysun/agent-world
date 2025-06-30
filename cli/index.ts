@@ -79,7 +79,7 @@ Available commands:
 - /help - Show this help
 - /quit - Exit CLI
 
-Current world: ${world.config.name}
+Current world: ${world.name}
 Type messages to broadcast to all agents, or use commands above.`,
     metadata: { source: 'cli', messageType: 'command' }
   });
@@ -114,13 +114,36 @@ const listCommand = async (args: string[], world: World) => {
 
 // UI module imports
 import { colors } from './ui/colors';
-import * as StreamingDisplay from './ui/streaming-display';
-import { displayUnifiedMessage, setCurrentWorldName } from './ui/unified-display';
 import {
-  initializeTerminalDisplay,
+  // Main display functions
+  displayUnifiedMessage,
+  setCurrentWorldName,
+  initializeDisplay,
+
+  // Input box management
   hideInputBox,
-  showInputPrompt
-} from './ui/terminal-display';
+  drawInputBox,
+  updateInputText,
+  clearInputText,
+
+  // Streaming display
+  startStreaming,
+  addStreamingContent,
+  endStreaming,
+  markStreamingError,
+  setStreamingUsage,
+  updateFinalPreview,
+  isStreamingActive,
+  displayDebugMessage,
+
+  // Display coordination
+  setupStreamingEndCallback,
+  setOnAllStreamingEndCallback,
+  handleExternalInputDisplay,
+  showInitialPrompt,
+  handlePostCommandDisplay,
+  handlePostBroadcastDisplay
+} from './ui/display';
 import {
   initializeTerminal,
   setupShutdownHandlers,
@@ -130,13 +153,6 @@ import {
   performShutdown,
   hasPipedInput
 } from './ui/terminal-lifecycle';
-import {
-  setupStreamingEndCallback,
-  handleExternalInputDisplay,
-  showInitialPrompt,
-  handlePostCommandDisplay,
-  handlePostBroadcastDisplay
-} from './ui/display-manager';
 
 // Global constants
 const DEFAULT_WORLD_NAME = 'Default World';
@@ -324,7 +340,7 @@ async function main() {
 
   // Initialize terminal
   const term = await initializeTerminal(hasPipedInputDetected);
-  initializeTerminalDisplay(term);
+  initializeDisplay(term);
 
   // Setup graceful shutdown handlers
   setupShutdownHandlers();
@@ -429,6 +445,8 @@ async function main() {
   // Handle input with terminal-kit
   if (!hasPipedInputDetected) {
     const term = getTerminal();
+    let inputBoxDrawn = false; // Track if input box is already drawn
+
     term.on('key', async (name: string, matches: any, data: any) => {
       if (name === 'CTRL_C') {
         await shutdown();
@@ -438,14 +456,17 @@ async function main() {
       if (name === 'ENTER') {
         const trimmedInput = currentInput.trim();
         currentInput = '';
+        inputBoxDrawn = false; // Reset for next input cycle
 
         if (!trimmedInput) {
-          showInputPrompt('> ', '');
+          // For empty input, maintain sequential flow: content → blank line → input box
+          handlePostCommandDisplay(); // Use centralized sequencing
           return;
         }
 
-        // Hide the input box immediately after Enter is pressed
+        // Hide the input box immediately after Enter is pressed for clean display transition
         hideInputBox();
+        inputBoxDrawn = false; // Reset state for next input cycle;
 
         if (trimmedInput.startsWith('/')) {
           // Handle commands
@@ -473,7 +494,7 @@ async function main() {
             await helpCommand([], currentWorld!);
           }
 
-          // Reset position and show input prompt immediately after command execution
+          // Commands: sequential display pattern enforced by handlePostCommandDisplay()
           handlePostCommandDisplay();
         } else {
           // Broadcast message to all agents
@@ -493,18 +514,30 @@ async function main() {
             });
           }
 
-          // For broadcast messages, wait for streaming to complete or show prompt if no streaming
+          // Broadcast messages: wait for streaming to complete, then enforce sequential flow
           handlePostBroadcastDisplay();
         }
 
       } else if (name === 'BACKSPACE') {
         if (currentInput.length > 0) {
           currentInput = currentInput.slice(0, -1);
-          showInputPrompt('> ', currentInput);
+
+          // Draw input box if not already drawn, otherwise just update text
+          if (!inputBoxDrawn) {
+            drawInputBox('> ');
+            inputBoxDrawn = true;
+          }
+          updateInputText('> ', currentInput);
         }
       } else if (data.isCharacter) {
         currentInput += String.fromCharCode(data.codepoint);
-        showInputPrompt('> ', currentInput);
+
+        // Draw input box if not already drawn, otherwise just update text
+        if (!inputBoxDrawn) {
+          drawInputBox('> ');
+          inputBoxDrawn = true;
+        }
+        updateInputText('> ', currentInput);
       }
     });
   }
@@ -522,21 +555,21 @@ async function main() {
       switch (sseData.type) {
         case 'start':
           const estimatedInputTokens = await estimateInputTokens(sseData.agentName, worldName);
-          StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
+          startStreaming(sseData.agentName, agentName, estimatedInputTokens);
           break;
         case 'chunk':
-          StreamingDisplay.addStreamingContent(sseData.agentName, sseData.content || '');
+          addStreamingContent(sseData.agentName, sseData.content || '');
           break;
         case 'end':
           // Set usage information before ending streaming
           if (sseData.usage) {
-            StreamingDisplay.setStreamingUsage(sseData.agentName, sseData.usage);
-            StreamingDisplay.updateFinalPreview(sseData.agentName);
+            setStreamingUsage(sseData.agentName, sseData.usage);
+            updateFinalPreview(sseData.agentName);
           }
-          StreamingDisplay.endStreaming(sseData.agentName);
+          endStreaming(sseData.agentName);
           break;
         case 'error':
-          StreamingDisplay.markStreamingError(sseData.agentName);
+          markStreamingError(sseData.agentName);
           break;
       }
     }
@@ -556,12 +589,12 @@ async function main() {
   subscribeToMessages(currentWorld!, async (event) => {
     // Display @human messages (e.g., turn limit notifications)
     if (event.content.startsWith('@human')) {
-      // Convert to MessageEventPayload format for display
-      const messageData: MessageEventPayload = {
+      displayUnifiedMessage({
+        type: 'system',
         content: event.content,
-        sender: event.sender
-      };
-      StreamingDisplay.displayMessage(messageData);
+        sender: event.sender,
+        metadata: { source: 'system', messageType: 'notification' }
+      });
     }
   });
 

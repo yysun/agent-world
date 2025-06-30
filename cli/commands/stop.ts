@@ -18,7 +18,7 @@
  */
 
 import { World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/display';
 import { colors } from '../ui/colors';
 
 export async function stopCommand(args: string[], world: World): Promise<void> {
