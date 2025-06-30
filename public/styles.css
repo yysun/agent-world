@@ -165,7 +165,7 @@ body {
 
 /* Main content */
 .main-content {
-  padding: 2rem;
+  padding: 1rem 2rem;
   max-width: 1200px;
   margin: 0 auto;
   display: flex;
@@ -185,7 +185,6 @@ body {
   display: flex;
   justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 1rem;
   padding-bottom: 0.5rem;
 }
 
@@ -305,10 +304,9 @@ body {
 .agent-grid {
   display: flex;
   gap: 2rem;
-  margin-bottom: 1.5rem;
-  margin-top: 0.5rem;
+  margin-top: 0;
   overflow-x: auto;
-  padding: 1rem 2rem;
+  padding: 0.5rem 2rem;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   justify-content: center;
@@ -339,11 +337,11 @@ body {
   text-align: center;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.3s ease, border-color 0.3s ease;
-  padding: 1.5rem 1rem;
-  border-radius: 12px;
+  padding: 1rem 0.75rem;
+  border-radius: 10px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-primary);
-  width: 180px;
+  width: 140px;
   flex-shrink: 0;
 }
 
@@ -354,21 +352,21 @@ body {
 }
 
 .avatar-container {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   position: relative;
 }
 
 .avatar {
-  width: 80px;
-  height: 80px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   object-fit: cover;
-  border: 3px solid var(--border-primary);
+  border: 2px solid var(--border-primary);
   transition: border-color 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 600;
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
@@ -381,7 +379,7 @@ body {
 .add-avatar {
   background-color: var(--border-primary);
   color: var(--text-tertiary);
-  border: 3px dashed var(--border-secondary);
+  border: 2px dashed var(--border-secondary);
   transition: all 0.2s ease;
 }
 
@@ -392,7 +390,7 @@ body {
 }
 
 .agent-name {
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
   margin-bottom: 0.25rem;
   color: var(--text-primary);
@@ -409,7 +407,7 @@ body {
 /* Conversation area */
 .conversation-area {
   flex: 1;
-  margin: 2rem 0;
+  margin: 1rem 0;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: 16px;

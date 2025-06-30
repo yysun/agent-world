@@ -57,10 +57,11 @@ const state = async () => {
 
 // Local event handlers
 const onKeypress = (state, e) => {
-  const value = e.target.value;
-  state.currentMessage = value;
   if (e.key === 'Enter') {
     sendMessage(state, e);
+  } else {
+    const value = e.target.value;
+    state.currentMessage = value;
   }
 };
 
@@ -166,7 +167,7 @@ const view = (state) => {
             <div class="agent-card add-agent-card" @click=${run(openAgentModal)}>
               <div class="avatar-container">
                 <div class="avatar add-avatar">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 5v14M5 12h14"/>
                   </svg>
                 </div>
@@ -183,7 +184,7 @@ const view = (state) => {
                   </div>
                 </div>
                 <h3 class="agent-name">${`${agent.name}`}</h3>
-                <p class="agent-role">${agent.model} ${agent.status || 'Agent'}</p>
+                <p class="agent-role">${agent.memory?.length || 0} memories</p>
               </div>
             `)}
           </div>

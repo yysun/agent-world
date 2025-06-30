@@ -4,30 +4,10 @@
  * Features:
  * - Real-time WebSocket communication using core modules
  * - World object subscription management with event emitters
- * - Connection m          case 'event':
-            // Use attached world object if available
-            const worldSocket = ws as WorldSocket;
-            if (!worldSocket.world || worldSocket.world.name !== worldName) {
-              ws.send(JSON.stringify({
-                type: 'error',
-                error: 'Event requires worldName and message'
-              }));
-              return;
-            }
-
-            console.log(`Publishing event message to world: ${worldSocket.world.name}`, {
-              eventMessage,
-              sender,
-              worldAgents: Array.from(worldSocket.world.agents.values()).map(a => ({ id: a.id, active: a.active }))
-            });
-
-            eventMessage && publishMessage(worldSocket.world, eventMessage, sender || 'HUMAN'); console.log(`Publishing event message to world: ${worldSocket.world.name}`, {
-              eventMessage,
-              sender,
-              worldAgents: Array.from(worldSocket.world.agents.values()).map(a => ({ id: a.id, active: a.active }))
-            });r WebSocket clients with world cleanup
+ * - Connection management for WebSocket clients with world cleanup
  * - Simplified event broadcasting - forwards all world events with eventType added to payload
  * - Message validation with Zod schemas
+ * - Memory clearing commands: /clear (all agents) and /clear <name> (specific agent)
  * - World subscription lifecycle management with automatic cleanup
  *
  * WebSocket Events:
@@ -39,6 +19,10 @@
  * - unsubscribed: Unsubscription confirmation
  * - All world events: Forwarded with eventType field added (e.g., eventType: 'sse', type: 'chunk')
  * - error: Error messages
+ *
+ * Special Commands:
+ * - /clear: Clear memory for all agents in the world
+ * - /clear <agentName>: Clear memory for specific agent
  *
  * World Subscription System:
  * - Each WebSocket connection can have one world object attached
@@ -55,6 +39,7 @@
  * - Extended WorldSocket interface to track world references and event listeners
  * - Implements comprehensive cleanup lifecycle management
  * - Simplified event forwarding with generic handler
+ * - Added memory clearing functionality with /clear commands
  */
 
 import { Server } from 'http';
@@ -219,6 +204,53 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 error: 'Event requires worldName and message'
               }));
               return;
+            }
+
+            // Check for special commands
+            if (eventMessage) {
+              // Handle /clear command to clear all agent memories
+              if (eventMessage.trim() === '/clear') {
+                try {
+                  const agents = Array.from(worldSocket.world.agents.values());
+                  const clearPromises = agents.map(agent => worldSocket.world!.clearAgentMemory(agent.name));
+                  await Promise.all(clearPromises);
+
+                  ws.send(JSON.stringify({
+                    type: 'system',
+                    content: `Cleared memory for all ${agents.length} agents in ${worldSocket.world.name}`,
+                    timestamp: new Date().toISOString()
+                  }));
+                  return;
+                } catch (error) {
+                  ws.send(JSON.stringify({
+                    type: 'error',
+                    error: 'Failed to clear agent memories'
+                  }));
+                  return;
+                }
+              }
+
+              // Handle /clear <name> command to clear specific agent memory
+              const clearMatch = eventMessage.trim().match(/^\/clear\s+(.+)$/);
+              if (clearMatch) {
+                const agentName = clearMatch[1].trim();
+                try {
+                  await worldSocket.world.clearAgentMemory(agentName);
+
+                  ws.send(JSON.stringify({
+                    type: 'system',
+                    content: `Cleared memory for agent: ${agentName}`,
+                    timestamp: new Date().toISOString()
+                  }));
+                  return;
+                } catch (error) {
+                  ws.send(JSON.stringify({
+                    type: 'error',
+                    error: `Failed to clear memory for agent: ${agentName}`
+                  }));
+                  return;
+                }
+              }
             }
 
             // Normalize user senders to 'HUMAN' for public messages that agents should respond to
