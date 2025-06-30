@@ -30,9 +30,7 @@ export const AgentModal = (agent, close) => {
                 class="agent-name-input" 
                 placeholder="Agent Name"
                 value="${agent.name || ''}"
-                @input=${(e) => {
-        agent.name = e.target.value;
-      }}
+                @input=${(e) => agent.name = e.target.value}
               >
             </div>
           `}
@@ -50,9 +48,7 @@ export const AgentModal = (agent, close) => {
               class="form-textarea"
               rows="20"
               value="${agent?.systemPrompt || ''}"
-              @input=${(e) => {
-      agent.systemPrompt = e.target.value;
-    }}
+              @input=${(e) => agent.systemPrompt = e.target.value}
               placeholder="Define the agent's behavior and personality..."
             ></textarea>
           </div>

@@ -100,24 +100,6 @@ async function createAgent(worldName, agentData) {
 }
 
 /**
- * Create a new world
- * @param {string} worldName - Name of the world to create
- * @returns {Promise<Object>} Created world data
- */
-async function createWorld(worldName) {
-  if (!worldName) {
-    throw new Error('World name is required');
-  }
-
-  const response = await apiRequest('/worlds', {
-    method: 'POST',
-    body: JSON.stringify({ name: worldName }),
-  });
-
-  return response.json();
-}
-
-/**
  * Update an existing agent
  * @param {string} worldName - Name of the world
  * @param {string} agentName - Name of the agent
@@ -247,7 +229,6 @@ export {
   getAgents,
   getAgent,
   createAgent,
-  createWorld,
   updateAgent,
   startChat,
   createChatEventSource,

@@ -1223,54 +1223,6 @@ body {
   border-color: var(--border-secondary);
 }
 
-/* Operation Mode Toggle */
-.operation-mode-toggle {
-  display: flex;
-  align-items: center;
-  margin-right: 12px;
-}
-
-.mode-toggle-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: 20px;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.mode-toggle-btn:hover {
-  background: var(--bg-accent);
-  border-color: var(--border-accent);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.mode-indicator {
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-}
-
-.mode-indicator.static {
-  filter: hue-rotate(0deg);
-}
-
-.mode-indicator.server {
-  filter: hue-rotate(120deg);
-}
-
-.mode-text {
-  text-transform: capitalize;
-  font-weight: 600;
-}
-
 /* Responsive Modal */
 @media (max-width: 768px) {
   .modal-overlay {

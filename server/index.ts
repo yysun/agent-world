@@ -1,16 +1,17 @@
 /**
- * WebSocket-Only Server for Agent World
+ * Web Server for Agent World
  * 
  * Features:
- * - Express.js server with WebSocket communication only
+ * - Express.js server with REST API endpoints using core modules
  * - WebSocket server for real-time communication
  * - Static file serving from public directory
  * - CORS support for cross-origin requests
- * - WebSocket-only architecture (REST API removed)
+ * - Modular architecture with separate API and WebSocket modules
  * - Proper data path configuration for core modules
  * 
  * Main Endpoints:
  * - GET /health - Server health check
+ * - API routes handled by ./api.ts
  * - WebSocket communication handled by ./ws.ts
  * 
  * Data Path Configuration:
@@ -30,6 +31,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'http';
 
 // Import modular components
+import apiRouter from './api';
 import { createWebSocketServer, getWebSocketStats } from './ws';
 
 
@@ -56,6 +58,9 @@ app.use((req, res, next) => {
 
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Use API routes
+app.use('/', apiRouter);
 
 // GET /health - Server health check
 app.get('/health', (req, res) => {
@@ -103,13 +108,20 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
     const server = app.listen(port, host, () => {
       console.log(`🌐 Web server running at http://${host}:${port}`);
       console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-      console.log(`🔗 WebSocket-only server mode`);
+      console.log(`🔗 API endpoints available:`);
+      console.log(`   GET  /health`);
+      console.log(`   GET  /worlds`);
+      console.log(`   GET  /worlds/:worldName/agents`);
+      console.log(`   GET  /worlds/:worldName/agents/:agentName`);
+      console.log(`   POST /worlds/:worldName/agents (coming soon)`);
+      console.log(`   PATCH /worlds/:worldName/agents/:agentName`);
+      console.log(`   POST /worlds/:worldName/chat (SSE streaming)`);
 
       // Create WebSocket server
       const wss = createWebSocketServer(server);
       console.log(`🔌 WebSocket server running at ws://${host}:${port}/ws`);
       console.log(`📡 WebSocket events: subscribe, unsubscribe, chat`);
-      console.log(`🚀 WebSocket server ready`);
+      console.log(`🚀 Both HTTP and WebSocket servers running`);
 
       resolve(server);
     });
