@@ -9,8 +9,8 @@
  * - Isolated operations using agent-storage.ts
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
- * - Automatic world-agent relationship maintenance
- * - Clean separation from internal event systems
+ * - Clean separation from event systems (handled by world-manager)
+ * - Dynamic imports for browser/Node.js compatibility
  *
  * Core Functions:
  * - createAgent: Create new agent with configuration and system prompt
@@ -29,14 +29,16 @@
  * Implementation:
  * - Wraps agent-storage.ts with business logic
  * - Uses only types.ts, utils.ts, and agent-storage.ts
- * - No direct file system dependencies
+ * - Dynamic imports for storage functions only (browser compatibility)
+ * - Event subscriptions managed by world-manager during world loading
  * - Enhanced world-agent relationship management
  * - Ready for EventBus integration in Phase 3
  */
 
 import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types';
+import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
 
-// Conditional imports for storage operations
+// Dynamic function assignments for storage operations only
 let saveAgentToDisk: any,
   loadAgentFromDisk: any,
   loadAgentFromDiskWithRetry: any,
@@ -47,16 +49,11 @@ let saveAgentToDisk: any,
   validateAgentIntegrity: any,
   repairAgentData: any;
 
-let subscribeAgentToMessages: any;
-
-// Type imports for conditional loading
-import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
-
-if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
-  // Node.js environment - import actual storage functions
-  try {
-    const agentStorage = require('./agent-storage');
-    const agentEvents = require('./agent-events');
+// Initialize dynamic imports
+async function initializeModules() {
+  if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+    // Node.js environment - use dynamic imports for storage functions
+    const agentStorage = await import('./agent-storage');
 
     saveAgentToDisk = agentStorage.saveAgentToDisk;
     loadAgentFromDisk = agentStorage.loadAgentFromDisk;
@@ -67,55 +64,28 @@ if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
     agentExistsOnDisk = agentStorage.agentExistsOnDisk;
     validateAgentIntegrity = agentStorage.validateAgentIntegrity;
     repairAgentData = agentStorage.repairAgentData;
+  } else {
+    // Browser environment - provide no-op implementations for storage functions only
+    console.warn('Agent storage functions disabled in browser environment');
 
-    subscribeAgentToMessages = agentEvents.subscribeAgentToMessages;
-  } catch (error) {
-    // Fallback if modules can't be loaded
-    console.warn('Node.js storage modules not available');
+    const browserNoOp = () => {
+      throw new Error('This function is not available in browser environment');
+    };
+
+    saveAgentToDisk = browserNoOp;
+    loadAgentFromDisk = browserNoOp;
+    loadAgentFromDiskWithRetry = browserNoOp;
+    deleteAgentFromDisk = browserNoOp;
+    loadAllAgentsFromDisk = browserNoOp;
+    loadAllAgentsFromDiskBatch = browserNoOp;
+    agentExistsOnDisk = browserNoOp;
+    validateAgentIntegrity = browserNoOp;
+    repairAgentData = browserNoOp;
   }
-} else {
-  // Browser environment - provide no-op implementations
-  saveAgentToDisk = async (...args: any[]) => {
-    console.warn('Agent save not implemented in browser');
-    return true;
-  };
-  loadAgentFromDisk = async (...args: any[]) => {
-    console.warn('Agent load not implemented in browser');
-    return null;
-  };
-  loadAgentFromDiskWithRetry = async (...args: any[]) => {
-    console.warn('Agent load not implemented in browser');
-    return null;
-  };
-  deleteAgentFromDisk = async (...args: any[]) => {
-    console.warn('Agent delete not implemented in browser');
-    return true;
-  };
-  loadAllAgentsFromDisk = async (...args: any[]) => {
-    console.warn('Agent listing not implemented in browser');
-    return [];
-  };
-  loadAllAgentsFromDiskBatch = async (...args: any[]) => {
-    console.warn('Agent batch load not implemented in browser');
-    return { successful: [], failed: [] };
-  };
-  agentExistsOnDisk = async (...args: any[]) => {
-    console.warn('Agent existence check not implemented in browser');
-    return false;
-  };
-  validateAgentIntegrity = async (...args: any[]) => {
-    console.warn('Agent validation not implemented in browser');
-    return true;
-  };
-  repairAgentData = async (...args: any[]) => {
-    console.warn('Agent repair not implemented in browser');
-    return false;
-  };
-  subscribeAgentToMessages = (...args: any[]) => {
-    console.warn('Agent event subscription not implemented in browser');
-    return () => { };
-  };
 }
+
+// Initialize modules immediately
+const moduleInitialization = initializeModules();
 
 /**
  * Batch agent creation parameters
@@ -141,7 +111,6 @@ export interface BatchCreateResult {
  * Agent runtime registration options
  */
 export interface RuntimeRegistrationOptions {
-  subscribeToEvents?: boolean;
   updateWorldMap?: boolean;
   validateAgent?: boolean;
 }
@@ -157,11 +126,6 @@ export interface WorldSyncResult {
 }
 
 /**
- * Track agent subscriptions for cleanup
- */
-const agentSubscriptions = new Map<string, () => void>();
-
-/**
  * Register agent in world runtime without persistence
  */
 export async function registerAgentRuntime(
@@ -170,14 +134,15 @@ export async function registerAgentRuntime(
   agent: Agent,
   options: RuntimeRegistrationOptions = {}
 ): Promise<boolean> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const {
-    subscribeToEvents = true,
     updateWorldMap = true,
     validateAgent = false
   } = options;
 
   try {
-
     // Validate agent if requested
     if (validateAgent) {
       if (!agent.id || !agent.type || !agent.name || !agent.provider || !agent.model) {
@@ -185,22 +150,8 @@ export async function registerAgentRuntime(
       }
     }
 
-    // Agent created successfully - world registration handled by world-manager
-
-    // Subscribe to events
-    if (subscribeToEvents) {
-      const subscriptionKey = `${worldId}:${agent.id}`;
-
-      // Clean up existing subscription if any
-      const existingUnsubscribe = agentSubscriptions.get(subscriptionKey);
-      if (existingUnsubscribe) {
-        existingUnsubscribe();
-      }
-
-      // Create new subscription - handled by world-manager
-      // const unsubscribe = subscribeAgentToMessages(world, agent);
-      // agentSubscriptions.set(subscriptionKey, unsubscribe);
-    }
+    // Agent registration is handled by world-manager
+    // Event subscriptions are handled automatically when world loads agents
 
     return true;
   } catch {
@@ -216,6 +167,9 @@ export async function loadAgentsIntoWorld(
   worldId: string,
   options: AgentLoadOptions & { repairCorrupted?: boolean } = {}
 ): Promise<WorldSyncResult> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const { repairCorrupted = true, ...loadOptions } = options;
 
   const result: WorldSyncResult = {
@@ -243,7 +197,6 @@ export async function loadAgentsIntoWorld(
     // Register successful agents in runtime
     for (const agent of batchResult.successful) {
       const registered = await registerAgentRuntime(rootPath, worldId, agent, {
-        subscribeToEvents: true,
         updateWorldMap: true,
         validateAgent: false // Already validated during loading
       });
@@ -315,6 +268,9 @@ export async function loadAgentsIntoWorld(
  * Synchronize world agents Map with disk state
  */
 export async function syncWorldAgents(rootPath: string, worldId: string): Promise<WorldSyncResult> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   return loadAgentsIntoWorld(rootPath, worldId, {
     includeMemory: true,
     allowPartialLoad: true,
@@ -327,6 +283,9 @@ export async function syncWorldAgents(rootPath: string, worldId: string): Promis
  * Create multiple agents atomically
  */
 export async function createAgentsBatch(rootPath: string, worldId: string, params: BatchCreateParams): Promise<BatchCreateResult> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const { agents, failOnError = false, maxConcurrency = 5 } = params;
 
   const result: BatchCreateResult = {
@@ -376,6 +335,9 @@ export async function createAgentsBatch(rootPath: string, worldId: string, param
  * Create new agent with configuration and system prompt
  */
 export async function createAgent(rootPath: string, worldId: string, params: CreateAgentParams): Promise<Agent> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   // Check if agent already exists
   const exists = await agentExistsOnDisk(rootPath, worldId, params.id);
   if (exists) {
@@ -406,7 +368,6 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
 
   // Register in runtime
   const registered = await registerAgentRuntime(rootPath, worldId, agent, {
-    subscribeToEvents: true,
     updateWorldMap: true,
     validateAgent: false
   });
@@ -424,6 +385,9 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
  * Load agent by ID with full configuration and memory
  */
 export async function getAgent(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   return await loadAgentFromDisk(rootPath, worldId, agentId);
 }
 
@@ -431,6 +395,9 @@ export async function getAgent(rootPath: string, worldId: string, agentId: strin
  * Update agent configuration and/or memory
  */
 export async function updateAgent(rootPath: string, worldId: string, agentId: string, updates: UpdateAgentParams): Promise<Agent | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
 
   if (!existingAgent) {
@@ -465,20 +432,10 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
  * Delete agent and all associated data
  */
 export async function deleteAgent(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+  // Ensure modules are initialized
+  await moduleInitialization;
 
-  // Unsubscribe from events
-  const subscriptionKey = `${worldId}:${agentId}`;
-  const unsubscribe = agentSubscriptions.get(subscriptionKey);
-  if (unsubscribe) {
-    unsubscribe();
-    agentSubscriptions.delete(subscriptionKey);
-  }
-
-  // Remove from world agents Map - handled by world-manager
-  // const world = await getWorld(rootPath, worldId);
-  // if (world) {
-  //   world.agents.delete(agentId);
-  // }
+  // Cleanup is handled by world-manager when agents are removed from world.agents Map
 
   return await deleteAgentFromDisk(rootPath, worldId, agentId);
 }
@@ -487,6 +444,9 @@ export async function deleteAgent(rootPath: string, worldId: string, agentId: st
  * Get all agent IDs and basic information
  */
 export async function listAgents(rootPath: string, worldId: string): Promise<AgentInfo[]> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const allAgents = await loadAllAgentsFromDisk(rootPath, worldId);
 
   return allAgents.map((agent: Agent) => ({
@@ -506,6 +466,9 @@ export async function listAgents(rootPath: string, worldId: string): Promise<Age
  * Add messages to agent memory
  */
 export async function updateAgentMemory(rootPath: string, worldId: string, agentId: string, messages: AgentMessage[]): Promise<Agent | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
 
   if (!existingAgent) {
@@ -526,6 +489,9 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
  * Clear agent memory (reset to empty state)
  */
 export async function clearAgentMemory(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
 
   if (!existingAgent) {
@@ -546,6 +512,9 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
  * Get agent configuration without memory (lightweight operation)
  */
 export async function getAgentConfig(rootPath: string, worldId: string, agentId: string): Promise<Omit<Agent, 'memory'> | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const agent = await loadAgentFromDisk(rootPath, worldId, agentId);
 
   if (!agent) {

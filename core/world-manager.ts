@@ -4,13 +4,15 @@
  * Features:
  * - Complete world lifecycle management (create, read, update, delete)
  * - EventEmitter integration for runtime world instances
+ * - Agent event subscriptions handled automatically during world loading
  * - Clean separation of storage data from runtime objects
  * - Isolated operations using world-storage.ts
+ * - Dynamic imports for browser/Node.js compatibility
  * - Ready for EventBus integration in Phase 3
  *
  * Core Functions:
  * - createWorld: Create new world with configuration
- * - getWorld: Load world by ID with EventEmitter reconstruction
+ * - getWorld: Load world by ID with EventEmitter reconstruction and agent subscriptions
  * - updateWorld: Update world configuration
  * - deleteWorld: Remove world and all associated data
  * - listWorlds: Get all world IDs and basic info
@@ -20,41 +22,87 @@
  * - Wraps world-storage.ts with business logic
  * - Uses only types.ts, utils.ts, and world-storage.ts
  * - Reconstructs EventEmitter and agents Map for runtime World objects
+ * - Automatically subscribes agents to world messages during world loading
  * - Storage layer works with plain WorldData (no EventEmitter)
+ * - Dynamic imports for storage functions only (browser compatibility)
  */
 
-// Static imports for better ES module compatibility
-import { EventEmitter } from 'events';
-import { World, CreateWorldParams, UpdateWorldParams, Agent } from './types';
+// Type-only imports
+import type { World, CreateWorldParams, UpdateWorldParams, Agent } from './types';
+import type { WorldData } from './world-storage';
 import { toKebabCase } from './utils';
 
-// Storage operations with conditional compilation for browser/Node.js
-import {
-  saveWorldToDisk,
-  loadWorldFromDisk,
-  deleteWorldFromDisk,
-  loadAllWorldsFromDisk,
-  worldExistsOnDisk,
-  type WorldData
-} from './world-storage';
+// Dynamic imports for browser/Node.js compatibility
+import { EventEmitter } from 'events';
 
-import {
-  loadAllAgentsFromDisk,
-  saveAgentConfigToDisk
-} from './agent-storage';
-
+// Import event functions directly since they work in both environments
 import { subscribeAgentToMessages } from './agent-events';
 
-// Import agent-manager functions
-import {
-  createAgent as createAgentCore,
-  getAgent as getAgentCore,
-  updateAgent as updateAgentCore,
-  deleteAgent as deleteAgentCore,
-  clearAgentMemory as clearAgentMemoryCore,
-  listAgents as listAgentsCore,
-  updateAgentMemory as updateAgentMemoryCore
-} from './agent-manager';
+// Dynamic function assignments for storage operations only
+let saveWorldToDisk: any;
+let loadWorldFromDisk: any;
+let deleteWorldFromDisk: any;
+let loadAllWorldsFromDisk: any;
+let worldExistsOnDisk: any;
+let loadAllAgentsFromDisk: any;
+let saveAgentConfigToDisk: any;
+let createAgentCore: any;
+let getAgentCore: any;
+let updateAgentCore: any;
+let deleteAgentCore: any;
+let clearAgentMemoryCore: any;
+let listAgentsCore: any;
+let updateAgentMemoryCore: any;
+
+// Initialize dynamic imports
+async function initializeModules() {
+  if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+    // Node.js environment - use dynamic imports for storage functions
+    const worldStorage = await import('./world-storage');
+    const agentStorage = await import('./agent-storage');
+    const agentManager = await import('./agent-manager');
+
+    saveWorldToDisk = worldStorage.saveWorldToDisk;
+    loadWorldFromDisk = worldStorage.loadWorldFromDisk;
+    deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
+    loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
+    worldExistsOnDisk = worldStorage.worldExistsOnDisk;
+    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
+    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
+    createAgentCore = agentManager.createAgent;
+    getAgentCore = agentManager.getAgent;
+    updateAgentCore = agentManager.updateAgent;
+    deleteAgentCore = agentManager.deleteAgent;
+    clearAgentMemoryCore = agentManager.clearAgentMemory;
+    listAgentsCore = agentManager.listAgents;
+    updateAgentMemoryCore = agentManager.updateAgentMemory;
+  } else {
+    // Browser environment - provide no-op implementations for storage functions only
+    console.warn('World management functions disabled in browser environment');
+
+    const browserNoOp = () => {
+      throw new Error('This function is not available in browser environment');
+    };
+
+    saveWorldToDisk = browserNoOp;
+    loadWorldFromDisk = browserNoOp;
+    deleteWorldFromDisk = browserNoOp;
+    loadAllWorldsFromDisk = browserNoOp;
+    worldExistsOnDisk = browserNoOp;
+    loadAllAgentsFromDisk = browserNoOp;
+    saveAgentConfigToDisk = browserNoOp;
+    createAgentCore = browserNoOp;
+    getAgentCore = browserNoOp;
+    updateAgentCore = browserNoOp;
+    deleteAgentCore = browserNoOp;
+    clearAgentMemoryCore = browserNoOp;
+    listAgentsCore = browserNoOp;
+    updateAgentMemoryCore = browserNoOp;
+  }
+}
+
+// Initialize modules immediately
+const moduleInitialization = initializeModules();
 
 /**
  * World listing information
@@ -78,6 +126,9 @@ function getRootDirectory(): string {
  * Create new world with configuration
  */
 export async function createWorld(rootPath: string, params: CreateWorldParams): Promise<World> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   // Check if world already exists
   const exists = await worldExistsOnDisk(rootPath, params.name);
   if (exists) {
@@ -101,6 +152,9 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
  * Load world by ID with EventEmitter reconstruction
  */
 export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const worldData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!worldData) {
@@ -125,6 +179,9 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
  * Update world configuration
  */
 export async function updateWorld(rootPath: string, worldId: string, updates: UpdateWorldParams): Promise<World | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const existingData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!existingData) {
@@ -145,6 +202,9 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
  * Delete world and all associated data
  */
 export async function deleteWorld(rootPath: string, worldId: string): Promise<boolean> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   return await deleteWorldFromDisk(rootPath, worldId);
 }
 
@@ -152,6 +212,9 @@ export async function deleteWorld(rootPath: string, worldId: string): Promise<bo
  * Get all world IDs and basic information
  */
 export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const allWorldData = await loadAllWorldsFromDisk(rootPath);
 
   return allWorldData.map((data: WorldData) => ({
@@ -167,6 +230,9 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
  * Get world configuration without runtime objects (lightweight operation)
  */
 export async function getWorldConfig(rootPath: string, worldId: string): Promise<WorldData | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
   const worldData = await loadWorldFromDisk(rootPath, worldId);
 
   if (!worldData) {

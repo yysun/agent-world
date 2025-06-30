@@ -1,3 +1,26 @@
+<!--
+  Message Broker Integration Test HTML
+  
+  Features:
+  - Tests the Message Broker module functionality in both static and server modes
+  - Provides UI for testing various message types and operations
+  - Performance testing capabilities
+  - Connection state management and error handling
+  - Mock Core bundle for static mode testing
+  
+  Implementation:
+  - Function-based message broker API integration
+  - Event-driven architecture with proper cleanup
+  - Comprehensive test suite for all message types
+  - Real-time logging and status updates
+  - Mode switching between static and server operations
+  
+  Changes:
+  - Updated from class-based to function-based message broker API
+  - Enhanced mock Core bundle to match expected API
+  - Improved error handling and state management
+  - Added broker initialization state tracking
+-->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -171,9 +194,9 @@
   </div>
 
   <script type="module">
-    import { MessageBroker, MESSAGE_TYPES, OPERATION_MODES, CONNECTION_STATES } from './message-broker.js';
+    import MessageBroker, { init, sendMessage, on, off, emit, disconnect, getConnectionState, getOperationMode, MESSAGE_TYPES, OPERATION_MODES, CONNECTION_STATES } from './message-broker.js';
 
-    let broker = null;
+    let brokerInitialized = false;
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
     const connectBtn = document.getElementById('connect-btn');
@@ -181,16 +204,16 @@
 
     // Mock Core bundle for testing static mode
     window.AgentWorldCore = {
-      listAgents: async () => {
+      listAgents: async (worldName) => {
         await new Promise(resolve => setTimeout(resolve, 100)); // Simulate async
         return [
           { id: 'agent-1', name: 'Test Agent 1', type: 'assistant' },
           { id: 'agent-2', name: 'Test Agent 2', type: 'assistant' }
         ];
       },
-      getAgent: async (id) => {
+      getAgent: async (worldName, agentName) => {
         await new Promise(resolve => setTimeout(resolve, 50));
-        return { id, name: `Agent ${id}`, type: 'assistant', status: 'active' };
+        return { id: agentName, name: `Agent ${agentName}`, type: 'assistant', status: 'active' };
       },
       listWorlds: async () => {
         await new Promise(resolve => setTimeout(resolve, 80));
@@ -199,18 +222,52 @@
           { id: 'world-2', name: 'Test World 2' }
         ];
       },
-      getWorld: async (id) => {
+      getWorld: async (worldName) => {
         await new Promise(resolve => setTimeout(resolve, 60));
-        return { id, name: `World ${id}`, agents: ['agent-1', 'agent-2'] };
+        return { id: worldName, name: `World ${worldName}`, agents: ['agent-1', 'agent-2'] };
       },
-      sendMessage: async (data) => {
+      createAgent: async (config) => {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return {
+          id: config.name || 'new-agent',
+          name: config.name || 'New Agent',
+          type: 'assistant',
+          systemPrompt: config.systemPrompt || 'Default prompt'
+        };
+      },
+      updateAgent: async (worldName, agentName, config) => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return {
+          id: agentName,
+          name: agentName,
+          systemPrompt: config.systemPrompt,
+          updated: true
+        };
+      },
+      deleteAgent: async (worldName, agentName) => {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        return { deleted: true, agent: agentName };
+      },
+      createWorld: async (config) => {
         await new Promise(resolve => setTimeout(resolve, 120));
         return {
-          messageId: 'msg-' + Date.now(),
-          sent: true,
-          message: data.message,
-          agent: data.agent || 'agent-1'
+          id: config.name,
+          name: config.name,
+          description: config.description || 'Test world'
         };
+      },
+      updateWorld: async (worldName, config) => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return {
+          id: worldName,
+          name: worldName,
+          description: config.description,
+          updated: true
+        };
+      },
+      deleteWorld: async (worldName) => {
+        await new Promise(resolve => setTimeout(resolve, 90));
+        return { deleted: true, world: worldName };
       }
     };
 
@@ -234,37 +291,38 @@
         connectBtn.disabled = true;
         log('Initializing Message Broker...', 'info');
 
-        broker = new MessageBroker();
-
-        // Set up event listeners
-        broker.on('broker_ready', (data) => {
+        // Set up event listeners before initialization
+        on('broker_ready', (data) => {
           log(`Broker ready in ${data.mode} mode`, 'success');
           updateStatus('Connected', data.mode);
           connectBtn.disabled = true;
           disconnectBtn.disabled = false;
           document.querySelectorAll('.test-btn').forEach(btn => btn.disabled = false);
+          brokerInitialized = true;
         });
 
-        broker.on('broker_error', (data) => {
+        on('broker_error', (data) => {
           log(`Broker error: ${data.error}`, 'error');
           updateStatus('Error');
           connectBtn.disabled = false;
+          brokerInitialized = false;
         });
 
-        broker.on('connection_open', () => {
+        on('connection_open', () => {
           log('WebSocket connection opened', 'success');
         });
 
-        broker.on('connection_closed', (data) => {
+        on('connection_closed', (data) => {
           log(`WebSocket connection closed: ${data.reason}`, 'warning');
           updateStatus('Disconnected');
+          brokerInitialized = false;
         });
 
-        broker.on('message_received', (data) => {
+        on('message_received', (data) => {
           log(`Received: ${JSON.stringify(data)}`, 'info');
         });
 
-        broker.on('message_error', (data) => {
+        on('message_error', (data) => {
           log(`Message error: ${data.error}`, 'error');
         });
 
@@ -278,19 +336,20 @@
         };
 
         updateStatus('Connecting');
-        await broker.init(config);
+        await init(config);
 
       } catch (error) {
         log(`Initialization failed: ${error.message}`, 'error');
         updateStatus('Error');
         connectBtn.disabled = false;
+        brokerInitialized = false;
       }
     });
 
     disconnectBtn.addEventListener('click', () => {
-      if (broker) {
-        broker.disconnect();
-        broker = null;
+      if (brokerInitialized) {
+        disconnect();
+        brokerInitialized = false;
       }
       updateStatus('Disconnected');
       connectBtn.disabled = false;
@@ -303,7 +362,7 @@
     document.querySelectorAll('.test-btn').forEach(btn => {
       btn.disabled = true;
       btn.addEventListener('click', async () => {
-        if (!broker) return;
+        if (!brokerInitialized) return;
 
         const action = btn.dataset.action;
         btn.disabled = true;
@@ -314,26 +373,26 @@
 
           switch (action) {
             case 'agent-list':
-              result = await broker.sendMessage(MESSAGE_TYPES.AGENT_LIST, {});
+              result = await sendMessage(MESSAGE_TYPES.AGENT_LIST, {});
               break;
             case 'world-list':
-              result = await broker.sendMessage(MESSAGE_TYPES.WORLD_LIST, {});
+              result = await sendMessage(MESSAGE_TYPES.WORLD_LIST, {});
               break;
             case 'agent-get':
-              result = await broker.sendMessage(MESSAGE_TYPES.AGENT_GET, { id: 'agent-1' });
+              result = await sendMessage(MESSAGE_TYPES.AGENT_GET, { id: 'agent-1' });
               break;
             case 'world-get':
-              result = await broker.sendMessage(MESSAGE_TYPES.WORLD_GET, { id: 'world-1' });
+              result = await sendMessage(MESSAGE_TYPES.WORLD_GET, { id: 'world-1' });
               break;
             case 'chat-message':
-              result = await broker.sendMessage(MESSAGE_TYPES.CHAT_MESSAGE, {
+              result = await sendMessage(MESSAGE_TYPES.CHAT_MESSAGE, {
                 message: 'Hello from test!',
                 agent: 'agent-1'
               });
               break;
             case 'invalid-message':
               try {
-                result = await broker.sendMessage('INVALID_TYPE', {});
+                result = await sendMessage('INVALID_TYPE', {});
               } catch (error) {
                 log(`Expected error: ${error.message}`, 'warning');
                 btn.disabled = false;
@@ -361,7 +420,7 @@
 
     // Performance test
     document.getElementById('performance-test').addEventListener('click', async () => {
-      if (!broker) {
+      if (!brokerInitialized) {
         log('Please connect broker first', 'error');
         return;
       }
@@ -384,7 +443,7 @@
         for (let i = 0; i < 10; i++) {
           const start = performance.now();
           try {
-            await broker.sendMessage(test.type, test.data);
+            await sendMessage(test.type, test.data);
             const end = performance.now();
             times.push(end - start);
           } catch (error) {

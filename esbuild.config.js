@@ -2,10 +2,15 @@
  * ESBuild Configuration for Agent World
  * 
  * Builds:
- * - Core ESM bundle for browser consumption
+ * - Core ESM bundle for browser consumption (excludes Node.js built-ins, includes EventEmitter polyfill)
  * - Server bundle for production deployment  
  * - CLI bundle for distribution
  * - Package bundle for npm distribution
+ * 
+ * Browser Build Notes:
+ * - Excludes all Node.js built-in modules (fs, path, os, crypto, etc.)
+ * - Includes EventEmitter polyfill via 'events' package alias
+ * - Uses conditional compilation (__IS_BROWSER__) for environment-specific code
  */
 
 import { build } from 'esbuild';
@@ -21,9 +26,13 @@ const configurations = [
     platform: 'browser',
     target: 'es2020',
     outfile: 'public/core.js',
-    external: ['events', 'fs', 'path', 'uuid'],
     minify: false,
     sourcemap: true,
+    external: [
+      './agent-storage',  // Only exclude storage functions (file system operations)
+      'fs',
+      'path'
+    ],
     define: {
       'process.env.NODE_ENV': '"production"',
       '__IS_BROWSER__': 'true'

@@ -28,6 +28,375 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// node_modules/events/events.js
+var require_events = __commonJS({
+  "node_modules/events/events.js"(exports, module) {
+    "use strict";
+    var R = typeof Reflect === "object" ? Reflect : null;
+    var ReflectApply = R && typeof R.apply === "function" ? R.apply : function ReflectApply2(target, receiver, args) {
+      return Function.prototype.apply.call(target, receiver, args);
+    };
+    var ReflectOwnKeys;
+    if (R && typeof R.ownKeys === "function") {
+      ReflectOwnKeys = R.ownKeys;
+    } else if (Object.getOwnPropertySymbols) {
+      ReflectOwnKeys = function ReflectOwnKeys2(target) {
+        return Object.getOwnPropertyNames(target).concat(Object.getOwnPropertySymbols(target));
+      };
+    } else {
+      ReflectOwnKeys = function ReflectOwnKeys2(target) {
+        return Object.getOwnPropertyNames(target);
+      };
+    }
+    function ProcessEmitWarning(warning) {
+      if (console && console.warn) console.warn(warning);
+    }
+    var NumberIsNaN = Number.isNaN || function NumberIsNaN2(value) {
+      return value !== value;
+    };
+    function EventEmitter2() {
+      EventEmitter2.init.call(this);
+    }
+    module.exports = EventEmitter2;
+    module.exports.once = once;
+    EventEmitter2.EventEmitter = EventEmitter2;
+    EventEmitter2.prototype._events = void 0;
+    EventEmitter2.prototype._eventsCount = 0;
+    EventEmitter2.prototype._maxListeners = void 0;
+    var defaultMaxListeners = 10;
+    function checkListener(listener) {
+      if (typeof listener !== "function") {
+        throw new TypeError('The "listener" argument must be of type Function. Received type ' + typeof listener);
+      }
+    }
+    Object.defineProperty(EventEmitter2, "defaultMaxListeners", {
+      enumerable: true,
+      get: function() {
+        return defaultMaxListeners;
+      },
+      set: function(arg) {
+        if (typeof arg !== "number" || arg < 0 || NumberIsNaN(arg)) {
+          throw new RangeError('The value of "defaultMaxListeners" is out of range. It must be a non-negative number. Received ' + arg + ".");
+        }
+        defaultMaxListeners = arg;
+      }
+    });
+    EventEmitter2.init = function() {
+      if (this._events === void 0 || this._events === Object.getPrototypeOf(this)._events) {
+        this._events = /* @__PURE__ */ Object.create(null);
+        this._eventsCount = 0;
+      }
+      this._maxListeners = this._maxListeners || void 0;
+    };
+    EventEmitter2.prototype.setMaxListeners = function setMaxListeners(n) {
+      if (typeof n !== "number" || n < 0 || NumberIsNaN(n)) {
+        throw new RangeError('The value of "n" is out of range. It must be a non-negative number. Received ' + n + ".");
+      }
+      this._maxListeners = n;
+      return this;
+    };
+    function _getMaxListeners(that) {
+      if (that._maxListeners === void 0)
+        return EventEmitter2.defaultMaxListeners;
+      return that._maxListeners;
+    }
+    EventEmitter2.prototype.getMaxListeners = function getMaxListeners() {
+      return _getMaxListeners(this);
+    };
+    EventEmitter2.prototype.emit = function emit(type) {
+      var args = [];
+      for (var i = 1; i < arguments.length; i++) args.push(arguments[i]);
+      var doError = type === "error";
+      var events = this._events;
+      if (events !== void 0)
+        doError = doError && events.error === void 0;
+      else if (!doError)
+        return false;
+      if (doError) {
+        var er;
+        if (args.length > 0)
+          er = args[0];
+        if (er instanceof Error) {
+          throw er;
+        }
+        var err = new Error("Unhandled error." + (er ? " (" + er.message + ")" : ""));
+        err.context = er;
+        throw err;
+      }
+      var handler = events[type];
+      if (handler === void 0)
+        return false;
+      if (typeof handler === "function") {
+        ReflectApply(handler, this, args);
+      } else {
+        var len = handler.length;
+        var listeners = arrayClone(handler, len);
+        for (var i = 0; i < len; ++i)
+          ReflectApply(listeners[i], this, args);
+      }
+      return true;
+    };
+    function _addListener(target, type, listener, prepend) {
+      var m;
+      var events;
+      var existing;
+      checkListener(listener);
+      events = target._events;
+      if (events === void 0) {
+        events = target._events = /* @__PURE__ */ Object.create(null);
+        target._eventsCount = 0;
+      } else {
+        if (events.newListener !== void 0) {
+          target.emit(
+            "newListener",
+            type,
+            listener.listener ? listener.listener : listener
+          );
+          events = target._events;
+        }
+        existing = events[type];
+      }
+      if (existing === void 0) {
+        existing = events[type] = listener;
+        ++target._eventsCount;
+      } else {
+        if (typeof existing === "function") {
+          existing = events[type] = prepend ? [listener, existing] : [existing, listener];
+        } else if (prepend) {
+          existing.unshift(listener);
+        } else {
+          existing.push(listener);
+        }
+        m = _getMaxListeners(target);
+        if (m > 0 && existing.length > m && !existing.warned) {
+          existing.warned = true;
+          var w = new Error("Possible EventEmitter memory leak detected. " + existing.length + " " + String(type) + " listeners added. Use emitter.setMaxListeners() to increase limit");
+          w.name = "MaxListenersExceededWarning";
+          w.emitter = target;
+          w.type = type;
+          w.count = existing.length;
+          ProcessEmitWarning(w);
+        }
+      }
+      return target;
+    }
+    EventEmitter2.prototype.addListener = function addListener(type, listener) {
+      return _addListener(this, type, listener, false);
+    };
+    EventEmitter2.prototype.on = EventEmitter2.prototype.addListener;
+    EventEmitter2.prototype.prependListener = function prependListener(type, listener) {
+      return _addListener(this, type, listener, true);
+    };
+    function onceWrapper() {
+      if (!this.fired) {
+        this.target.removeListener(this.type, this.wrapFn);
+        this.fired = true;
+        if (arguments.length === 0)
+          return this.listener.call(this.target);
+        return this.listener.apply(this.target, arguments);
+      }
+    }
+    function _onceWrap(target, type, listener) {
+      var state = { fired: false, wrapFn: void 0, target, type, listener };
+      var wrapped = onceWrapper.bind(state);
+      wrapped.listener = listener;
+      state.wrapFn = wrapped;
+      return wrapped;
+    }
+    EventEmitter2.prototype.once = function once2(type, listener) {
+      checkListener(listener);
+      this.on(type, _onceWrap(this, type, listener));
+      return this;
+    };
+    EventEmitter2.prototype.prependOnceListener = function prependOnceListener(type, listener) {
+      checkListener(listener);
+      this.prependListener(type, _onceWrap(this, type, listener));
+      return this;
+    };
+    EventEmitter2.prototype.removeListener = function removeListener(type, listener) {
+      var list, events, position, i, originalListener;
+      checkListener(listener);
+      events = this._events;
+      if (events === void 0)
+        return this;
+      list = events[type];
+      if (list === void 0)
+        return this;
+      if (list === listener || list.listener === listener) {
+        if (--this._eventsCount === 0)
+          this._events = /* @__PURE__ */ Object.create(null);
+        else {
+          delete events[type];
+          if (events.removeListener)
+            this.emit("removeListener", type, list.listener || listener);
+        }
+      } else if (typeof list !== "function") {
+        position = -1;
+        for (i = list.length - 1; i >= 0; i--) {
+          if (list[i] === listener || list[i].listener === listener) {
+            originalListener = list[i].listener;
+            position = i;
+            break;
+          }
+        }
+        if (position < 0)
+          return this;
+        if (position === 0)
+          list.shift();
+        else {
+          spliceOne(list, position);
+        }
+        if (list.length === 1)
+          events[type] = list[0];
+        if (events.removeListener !== void 0)
+          this.emit("removeListener", type, originalListener || listener);
+      }
+      return this;
+    };
+    EventEmitter2.prototype.off = EventEmitter2.prototype.removeListener;
+    EventEmitter2.prototype.removeAllListeners = function removeAllListeners(type) {
+      var listeners, events, i;
+      events = this._events;
+      if (events === void 0)
+        return this;
+      if (events.removeListener === void 0) {
+        if (arguments.length === 0) {
+          this._events = /* @__PURE__ */ Object.create(null);
+          this._eventsCount = 0;
+        } else if (events[type] !== void 0) {
+          if (--this._eventsCount === 0)
+            this._events = /* @__PURE__ */ Object.create(null);
+          else
+            delete events[type];
+        }
+        return this;
+      }
+      if (arguments.length === 0) {
+        var keys = Object.keys(events);
+        var key;
+        for (i = 0; i < keys.length; ++i) {
+          key = keys[i];
+          if (key === "removeListener") continue;
+          this.removeAllListeners(key);
+        }
+        this.removeAllListeners("removeListener");
+        this._events = /* @__PURE__ */ Object.create(null);
+        this._eventsCount = 0;
+        return this;
+      }
+      listeners = events[type];
+      if (typeof listeners === "function") {
+        this.removeListener(type, listeners);
+      } else if (listeners !== void 0) {
+        for (i = listeners.length - 1; i >= 0; i--) {
+          this.removeListener(type, listeners[i]);
+        }
+      }
+      return this;
+    };
+    function _listeners(target, type, unwrap) {
+      var events = target._events;
+      if (events === void 0)
+        return [];
+      var evlistener = events[type];
+      if (evlistener === void 0)
+        return [];
+      if (typeof evlistener === "function")
+        return unwrap ? [evlistener.listener || evlistener] : [evlistener];
+      return unwrap ? unwrapListeners(evlistener) : arrayClone(evlistener, evlistener.length);
+    }
+    EventEmitter2.prototype.listeners = function listeners(type) {
+      return _listeners(this, type, true);
+    };
+    EventEmitter2.prototype.rawListeners = function rawListeners(type) {
+      return _listeners(this, type, false);
+    };
+    EventEmitter2.listenerCount = function(emitter, type) {
+      if (typeof emitter.listenerCount === "function") {
+        return emitter.listenerCount(type);
+      } else {
+        return listenerCount.call(emitter, type);
+      }
+    };
+    EventEmitter2.prototype.listenerCount = listenerCount;
+    function listenerCount(type) {
+      var events = this._events;
+      if (events !== void 0) {
+        var evlistener = events[type];
+        if (typeof evlistener === "function") {
+          return 1;
+        } else if (evlistener !== void 0) {
+          return evlistener.length;
+        }
+      }
+      return 0;
+    }
+    EventEmitter2.prototype.eventNames = function eventNames() {
+      return this._eventsCount > 0 ? ReflectOwnKeys(this._events) : [];
+    };
+    function arrayClone(arr, n) {
+      var copy = new Array(n);
+      for (var i = 0; i < n; ++i)
+        copy[i] = arr[i];
+      return copy;
+    }
+    function spliceOne(list, index) {
+      for (; index + 1 < list.length; index++)
+        list[index] = list[index + 1];
+      list.pop();
+    }
+    function unwrapListeners(arr) {
+      var ret = new Array(arr.length);
+      for (var i = 0; i < ret.length; ++i) {
+        ret[i] = arr[i].listener || arr[i];
+      }
+      return ret;
+    }
+    function once(emitter, name17) {
+      return new Promise(function(resolve2, reject) {
+        function errorListener(err) {
+          emitter.removeListener(name17, resolver);
+          reject(err);
+        }
+        function resolver() {
+          if (typeof emitter.removeListener === "function") {
+            emitter.removeListener("error", errorListener);
+          }
+          resolve2([].slice.call(arguments));
+        }
+        ;
+        eventTargetAgnosticAddListener(emitter, name17, resolver, { once: true });
+        if (name17 !== "error") {
+          addErrorHandlerIfEventEmitter(emitter, errorListener, { once: true });
+        }
+      });
+    }
+    function addErrorHandlerIfEventEmitter(emitter, handler, flags) {
+      if (typeof emitter.on === "function") {
+        eventTargetAgnosticAddListener(emitter, "error", handler, flags);
+      }
+    }
+    function eventTargetAgnosticAddListener(emitter, name17, listener, flags) {
+      if (typeof emitter.on === "function") {
+        if (flags.once) {
+          emitter.once(name17, listener);
+        } else {
+          emitter.on(name17, listener);
+        }
+      } else if (typeof emitter.addEventListener === "function") {
+        emitter.addEventListener(name17, function wrapListener(arg) {
+          if (flags.once) {
+            emitter.removeEventListener(name17, wrapListener);
+          }
+          listener(arg);
+        });
+      } else {
+        throw new TypeError('The "emitter" argument must be of type EventEmitter. Received type ' + typeof emitter);
+      }
+    }
+  }
+});
+
 // node_modules/secure-json-parse/index.js
 var require_secure_json_parse = __commonJS({
   "node_modules/secure-json-parse/index.js"(exports, module) {
@@ -368,9 +737,6 @@ var require_dist = __commonJS({
   }
 });
 
-// core/world-manager.ts
-import { EventEmitter } from "events";
-
 // core/types.ts
 var LLMProvider = /* @__PURE__ */ ((LLMProvider2) => {
   LLMProvider2["OPENAI"] = "openai";
@@ -452,337 +818,8 @@ function prepareMessagesForLLM(agent, messageData, conversationHistory = []) {
   return messages;
 }
 
-// core/world-storage.ts
-import { promises as fs } from "fs";
-import * as path from "path";
-function getWorldDir(rootPath, worldId) {
-  return path.join(rootPath, worldId);
-}
-async function ensureWorldDirectory(root, worldId) {
-  const worldDir = getWorldDir(root, worldId);
-  const agentsDir = path.join(worldDir, "agents");
-  await fs.mkdir(agentsDir, { recursive: true });
-}
-async function worldExistsOnDisk(root, worldId) {
-  try {
-    const worldDir = getWorldDir(root, worldId);
-    const configPath = path.join(worldDir, "config.json");
-    await fs.access(configPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function saveWorldToDisk(root, worldData) {
-  const worldId = toKebabCase(worldData.id);
-  await ensureWorldDirectory(root, worldId);
-  const worldDir = getWorldDir(root, worldId);
-  const configPath = path.join(worldDir, "config.json");
-  const configData = {
-    id: worldData.id,
-    name: worldData.name,
-    description: worldData.description,
-    turnLimit: worldData.turnLimit
-  };
-  await writeJsonFile(configPath, configData);
-}
-async function loadWorldFromDisk(root, worldId) {
-  try {
-    const worldDir = getWorldDir(root, worldId);
-    const configPath = path.join(worldDir, "config.json");
-    const configData = await readJsonFile(configPath);
-    const worldData = {
-      id: configData.id || configData.name,
-      // Support migration from old format
-      name: configData.name,
-      description: configData.description,
-      turnLimit: configData.turnLimit || 5
-    };
-    return worldData;
-  } catch {
-    return null;
-  }
-}
-async function deleteWorldFromDisk(root, worldId) {
-  try {
-    const worldDir = getWorldDir(root, worldId);
-    await fs.access(worldDir);
-    await fs.rm(worldDir, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function loadAllWorldsFromDisk(root) {
-  try {
-    const entries = await fs.readdir(root, { withFileTypes: true });
-    const worlds = [];
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const worldData = await loadWorldFromDisk(root, entry.name);
-        if (worldData) {
-          worlds.push(worldData);
-        }
-      }
-    }
-    return worlds;
-  } catch {
-    return [];
-  }
-}
-async function writeJsonFile(filePath, data) {
-  const tempPath = `${filePath}.tmp`;
-  const jsonData = JSON.stringify(data, null, 2);
-  await fs.writeFile(tempPath, jsonData, "utf8");
-  await fs.rename(tempPath, filePath);
-}
-async function readJsonFile(filePath) {
-  const data = await fs.readFile(filePath, "utf8");
-  return JSON.parse(data);
-}
-
-// core/agent-storage.ts
-import { promises as fs2 } from "fs";
-import * as path2 from "path";
-function getAgentDir(rootPath, worldId, agentId) {
-  return path2.join(rootPath, worldId, "agents", agentId);
-}
-async function ensureAgentDirectory(rootPath, worldId, agentId) {
-  const agentDir = getAgentDir(rootPath, worldId, agentId);
-  await fs2.mkdir(agentDir, { recursive: true });
-}
-async function validateAgentIntegrity(rootPath, worldId, agentId) {
-  const result = {
-    isValid: true,
-    hasConfig: false,
-    hasSystemPrompt: false,
-    hasMemory: false,
-    errors: [],
-    warnings: []
-  };
-  const agentDir = getAgentDir(rootPath, worldId, agentId);
-  try {
-    const configPath = path2.join(agentDir, "config.json");
-    try {
-      await fs2.access(configPath);
-      result.hasConfig = true;
-      const configData = await readJsonFile2(configPath);
-      if (!configData.id || !configData.type || !configData.provider || !configData.model) {
-        result.errors.push("Invalid config structure");
-        result.isValid = false;
-      }
-    } catch {
-      result.errors.push("Missing config.json file");
-      result.isValid = false;
-    }
-    const systemPromptPath = path2.join(agentDir, "system-prompt.md");
-    try {
-      await fs2.access(systemPromptPath);
-      result.hasSystemPrompt = true;
-    } catch {
-      result.warnings.push("Missing system-prompt.md file");
-    }
-    const memoryPath = path2.join(agentDir, "memory.json");
-    try {
-      await fs2.access(memoryPath);
-      result.hasMemory = true;
-      try {
-        const memoryData = await readJsonFile2(memoryPath);
-        if (!Array.isArray(memoryData)) {
-          result.errors.push("Invalid memory.json structure");
-          result.isValid = false;
-        }
-      } catch {
-        result.errors.push("Corrupted memory.json file");
-        result.isValid = false;
-      }
-    } catch {
-      result.warnings.push("Missing memory.json file");
-    }
-  } catch (error) {
-    result.errors.push(`Directory access error: ${error}`);
-    result.isValid = false;
-  }
-  return result;
-}
-async function repairAgentData(rootPath, worldId, agentId) {
-  try {
-    const integrity = await validateAgentIntegrity(rootPath, worldId, agentId);
-    const agentDir = getAgentDir(rootPath, worldId, agentId);
-    let repaired = false;
-    if (!integrity.hasSystemPrompt) {
-      const systemPromptPath = path2.join(agentDir, "system-prompt.md");
-      const defaultPrompt = `You are ${agentId}, an AI agent.`;
-      await writeTextFile(systemPromptPath, defaultPrompt);
-      repaired = true;
-    }
-    if (!integrity.hasMemory) {
-      const memoryPath = path2.join(agentDir, "memory.json");
-      await writeJsonFile2(memoryPath, []);
-      repaired = true;
-    }
-    return repaired;
-  } catch {
-    return false;
-  }
-}
-async function saveAgentConfigToDisk(rootPath, worldId, agent) {
-  const agentId = toKebabCase(agent.id);
-  await ensureAgentDirectory(rootPath, worldId, agentId);
-  const agentDir = getAgentDir(rootPath, worldId, agentId);
-  const systemPromptPath = path2.join(agentDir, "system-prompt.md");
-  const systemPromptContent = agent.systemPrompt || `You are ${agent.id}, an AI agent.`;
-  await writeTextFile(systemPromptPath, systemPromptContent);
-  const { systemPrompt, memory, ...agentWithoutPromptAndMemory } = agent;
-  const agentData = {
-    ...agentWithoutPromptAndMemory,
-    createdAt: agent.createdAt?.toISOString(),
-    lastActive: agent.lastActive?.toISOString(),
-    lastLLMCall: agent.lastLLMCall?.toISOString()
-  };
-  const configPath = path2.join(agentDir, "config.json");
-  await writeJsonFile2(configPath, agentData);
-}
-async function loadAgentFromDiskWithRetry(rootPath, worldId, agentId, options = {}) {
-  const {
-    includeMemory = true,
-    retryCount = 2,
-    retryDelay = 100,
-    allowPartialLoad = false,
-    validateIntegrity = false
-  } = options;
-  for (let attempt = 0; attempt <= retryCount; attempt++) {
-    try {
-      if (validateIntegrity) {
-        const integrity = await validateAgentIntegrity(rootPath, worldId, agentId);
-        if (!integrity.isValid && !allowPartialLoad) {
-          if (attempt === 0) {
-            await repairAgentData(rootPath, worldId, agentId);
-            continue;
-          }
-          throw new Error(`Agent integrity check failed: ${integrity.errors.join(", ")}`);
-        }
-      }
-      const agentDir = getAgentDir(rootPath, worldId, agentId);
-      const configPath = path2.join(agentDir, "config.json");
-      const agentData = await readJsonFile2(configPath);
-      const systemPromptPath = path2.join(agentDir, "system-prompt.md");
-      let systemPrompt;
-      try {
-        systemPrompt = await fs2.readFile(systemPromptPath, "utf8");
-      } catch {
-        systemPrompt = `You are ${agentId}, an AI agent.`;
-        if (allowPartialLoad) {
-          await writeTextFile(systemPromptPath, systemPrompt);
-        }
-      }
-      let memory = [];
-      if (includeMemory) {
-        const memoryPath = path2.join(agentDir, "memory.json");
-        try {
-          const rawMemory = await readJsonFile2(memoryPath);
-          memory = rawMemory.map((msg) => ({
-            ...msg,
-            createdAt: msg.createdAt ? new Date(msg.createdAt) : /* @__PURE__ */ new Date()
-          }));
-        } catch {
-          if (allowPartialLoad) {
-            await writeJsonFile2(memoryPath, []);
-          }
-        }
-      }
-      const agent = {
-        ...agentData,
-        id: agentId,
-        // Ensure the id is always set correctly
-        systemPrompt,
-        memory,
-        createdAt: agentData.createdAt ? new Date(agentData.createdAt) : /* @__PURE__ */ new Date(),
-        lastActive: agentData.lastActive ? new Date(agentData.lastActive) : /* @__PURE__ */ new Date(),
-        lastLLMCall: agentData.lastLLMCall ? new Date(agentData.lastLLMCall) : void 0
-      };
-      return agent;
-    } catch (error) {
-      if (attempt === retryCount) {
-        return null;
-      }
-      if (retryDelay > 0) {
-        await new Promise((resolve2) => setTimeout(resolve2, retryDelay));
-      }
-    }
-  }
-  return null;
-}
-async function loadAllAgentsFromDiskBatch(rootPath, worldId, options = {}) {
-  const result = {
-    successful: [],
-    failed: [],
-    totalCount: 0,
-    successCount: 0,
-    failureCount: 0
-  };
-  try {
-    const agentsDir = path2.join(rootPath, worldId, "agents");
-    const entries = await fs2.readdir(agentsDir, { withFileTypes: true });
-    const agentDirs = entries.filter((entry) => entry.isDirectory());
-    result.totalCount = agentDirs.length;
-    const batchSize = 10;
-    const batches = [];
-    for (let i = 0; i < agentDirs.length; i += batchSize) {
-      batches.push(agentDirs.slice(i, i + batchSize).map((entry) => entry.name));
-    }
-    for (const batch of batches) {
-      const batchPromises = batch.map(async (agentId) => {
-        try {
-          const agent = await loadAgentFromDiskWithRetry(rootPath, worldId, agentId, options);
-          if (agent) {
-            result.successful.push(agent);
-            result.successCount++;
-          } else {
-            result.failed.push({ agentId, error: "Failed to load agent data" });
-            result.failureCount++;
-          }
-        } catch (error) {
-          result.failed.push({
-            agentId,
-            error: error instanceof Error ? error.message : "Unknown error"
-          });
-          result.failureCount++;
-        }
-      });
-      await Promise.all(batchPromises);
-    }
-  } catch (error) {
-    result.failed.push({
-      agentId: "SYSTEM",
-      error: error instanceof Error ? error.message : "Failed to access agents directory"
-    });
-  }
-  return result;
-}
-async function loadAllAgentsFromDisk(rootPath, worldId) {
-  const result = await loadAllAgentsFromDiskBatch(rootPath, worldId, {
-    includeMemory: true,
-    allowPartialLoad: true,
-    validateIntegrity: false
-  });
-  return result.successful;
-}
-async function writeJsonFile2(filePath, data) {
-  const tempPath = `${filePath}.tmp`;
-  const jsonData = JSON.stringify(data, null, 2);
-  await fs2.writeFile(tempPath, jsonData, "utf8");
-  await fs2.rename(tempPath, filePath);
-}
-async function readJsonFile2(filePath) {
-  const data = await fs2.readFile(filePath, "utf8");
-  return JSON.parse(data);
-}
-async function writeTextFile(filePath, content) {
-  const tempPath = `${filePath}.tmp`;
-  await fs2.writeFile(tempPath, content, "utf8");
-  await fs2.rename(tempPath, filePath);
-}
+// core/world-manager.ts
+var import_events = __toESM(require_events(), 1);
 
 // core/world-events.ts
 function publishMessage(world, content, sender) {
@@ -2268,8 +2305,8 @@ function getErrorMap() {
 
 // node_modules/zod/dist/esm/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path3, errorMaps, issueData } = params;
-  const fullPath = [...path3, ...issueData.path || []];
+  const { data, path, errorMaps, issueData } = params;
+  const fullPath = [...path, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -2385,11 +2422,11 @@ var errorUtil;
 
 // node_modules/zod/dist/esm/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path3, key) {
+  constructor(parent, value, path, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path3;
+    this._path = path;
     this._key = key;
   }
   get path() {
@@ -15122,39 +15159,39 @@ function createOpenAI(options = {}) {
   });
   const createChatModel = (modelId, settings = {}) => new OpenAIChatLanguageModel(modelId, settings, {
     provider: `${providerName}.chat`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     compatibility,
     fetch: options.fetch
   });
   const createCompletionModel = (modelId, settings = {}) => new OpenAICompletionLanguageModel(modelId, settings, {
     provider: `${providerName}.completion`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     compatibility,
     fetch: options.fetch
   });
   const createEmbeddingModel = (modelId, settings = {}) => new OpenAIEmbeddingModel(modelId, settings, {
     provider: `${providerName}.embedding`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     fetch: options.fetch
   });
   const createImageModel = (modelId, settings = {}) => new OpenAIImageModel(modelId, settings, {
     provider: `${providerName}.image`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     fetch: options.fetch
   });
   const createTranscriptionModel = (modelId) => new OpenAITranscriptionModel(modelId, {
     provider: `${providerName}.transcription`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     fetch: options.fetch
   });
   const createSpeechModel = (modelId) => new OpenAISpeechModel(modelId, {
     provider: `${providerName}.speech`,
-    url: ({ path: path3 }) => `${baseURL}${path3}`,
+    url: ({ path }) => `${baseURL}${path}`,
     headers: getHeaders,
     fetch: options.fetch
   });
@@ -15175,7 +15212,7 @@ function createOpenAI(options = {}) {
   const createResponsesModel = (modelId) => {
     return new OpenAIResponsesLanguageModel(modelId, {
       provider: `${providerName}.responses`,
-      url: ({ path: path3 }) => `${baseURL}${path3}`,
+      url: ({ path }) => `${baseURL}${path}`,
       headers: getHeaders,
       fetch: options.fetch
     });
@@ -19255,8 +19292,8 @@ function createOpenAICompatible(options) {
   });
   const getCommonModelConfig = (modelType) => ({
     provider: `${providerName}.${modelType}`,
-    url: ({ path: path3 }) => {
-      const url = new URL(`${baseURL}${path3}`);
+    url: ({ path }) => {
+      const url = new URL(`${baseURL}${path}`);
       if (options.queryParams) {
         url.search = new URLSearchParams(options.queryParams).toString();
       }
@@ -19499,218 +19536,64 @@ async function shouldAgentRespond(world, agent, messageEvent) {
   return mentions.length > 0 && mentions[0] === agent.name;
 }
 
-// core/agent-manager.ts
-var saveAgentToDisk;
-var loadAgentFromDisk;
-var loadAgentFromDiskWithRetry2;
-var deleteAgentFromDisk;
-var loadAllAgentsFromDisk2;
-var loadAllAgentsFromDiskBatch2;
-var agentExistsOnDisk;
-var validateAgentIntegrity2;
-var repairAgentData2;
-var subscribeAgentToMessages2;
-if (false) {
-  try {
-    const agentStorage = null;
-    const agentEvents = null;
-    saveAgentToDisk = agentStorage.saveAgentToDisk;
-    loadAgentFromDisk = agentStorage.loadAgentFromDisk;
-    loadAgentFromDiskWithRetry2 = agentStorage.loadAgentFromDiskWithRetry;
-    deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
-    loadAllAgentsFromDisk2 = agentStorage.loadAllAgentsFromDisk;
-    loadAllAgentsFromDiskBatch2 = agentStorage.loadAllAgentsFromDiskBatch;
-    agentExistsOnDisk = agentStorage.agentExistsOnDisk;
-    validateAgentIntegrity2 = agentStorage.validateAgentIntegrity;
-    repairAgentData2 = agentStorage.repairAgentData;
-    subscribeAgentToMessages2 = agentEvents.subscribeAgentToMessages;
-  } catch (error) {
-    console.warn("Node.js storage modules not available");
-  }
-} else {
-  saveAgentToDisk = async (...args) => {
-    console.warn("Agent save not implemented in browser");
-    return true;
-  };
-  loadAgentFromDisk = async (...args) => {
-    console.warn("Agent load not implemented in browser");
-    return null;
-  };
-  loadAgentFromDiskWithRetry2 = async (...args) => {
-    console.warn("Agent load not implemented in browser");
-    return null;
-  };
-  deleteAgentFromDisk = async (...args) => {
-    console.warn("Agent delete not implemented in browser");
-    return true;
-  };
-  loadAllAgentsFromDisk2 = async (...args) => {
-    console.warn("Agent listing not implemented in browser");
-    return [];
-  };
-  loadAllAgentsFromDiskBatch2 = async (...args) => {
-    console.warn("Agent batch load not implemented in browser");
-    return { successful: [], failed: [] };
-  };
-  agentExistsOnDisk = async (...args) => {
-    console.warn("Agent existence check not implemented in browser");
-    return false;
-  };
-  validateAgentIntegrity2 = async (...args) => {
-    console.warn("Agent validation not implemented in browser");
-    return true;
-  };
-  repairAgentData2 = async (...args) => {
-    console.warn("Agent repair not implemented in browser");
-    return false;
-  };
-  subscribeAgentToMessages2 = (...args) => {
-    console.warn("Agent event subscription not implemented in browser");
-    return () => {
-    };
-  };
-}
-var agentSubscriptions = /* @__PURE__ */ new Map();
-async function registerAgentRuntime(rootPath, worldId, agent, options = {}) {
-  const {
-    subscribeToEvents = true,
-    updateWorldMap = true,
-    validateAgent = false
-  } = options;
-  try {
-    if (validateAgent) {
-      if (!agent.id || !agent.type || !agent.name || !agent.provider || !agent.model) {
-        throw new Error("Invalid agent structure for runtime registration");
-      }
-    }
-    if (subscribeToEvents) {
-      const subscriptionKey = `${worldId}:${agent.id}`;
-      const existingUnsubscribe = agentSubscriptions.get(subscriptionKey);
-      if (existingUnsubscribe) {
-        existingUnsubscribe();
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function createAgent(rootPath, worldId, params) {
-  const exists = await agentExistsOnDisk(rootPath, worldId, params.id);
-  if (exists) {
-    throw new Error(`Agent with ID '${params.id}' already exists`);
-  }
-  const now2 = /* @__PURE__ */ new Date();
-  const agent = {
-    id: params.id,
-    name: params.name,
-    type: params.type,
-    status: "inactive",
-    provider: params.provider,
-    model: params.model,
-    apiKey: params.apiKey,
-    baseUrl: params.baseUrl,
-    systemPrompt: params.systemPrompt,
-    temperature: params.temperature,
-    maxTokens: params.maxTokens,
-    createdAt: now2,
-    lastActive: now2,
-    llmCallCount: 0,
-    memory: []
-  };
-  await saveAgentToDisk(rootPath, worldId, agent);
-  const registered = await registerAgentRuntime(rootPath, worldId, agent, {
-    subscribeToEvents: true,
-    updateWorldMap: true,
-    validateAgent: false
-  });
-  if (!registered) {
-    await deleteAgentFromDisk(rootPath, worldId, agent.id);
-    throw new Error("Failed to register agent in world runtime");
-  }
-  return agent;
-}
-async function getAgent(rootPath, worldId, agentId) {
-  return await loadAgentFromDisk(rootPath, worldId, agentId);
-}
-async function updateAgent(rootPath, worldId, agentId, updates) {
-  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
-  if (!existingAgent) {
-    return null;
-  }
-  const updatedAgent = {
-    ...existingAgent,
-    name: updates.name || existingAgent.name,
-    type: updates.type || existingAgent.type,
-    status: updates.status || existingAgent.status,
-    provider: updates.provider || existingAgent.provider,
-    model: updates.model || existingAgent.model,
-    apiKey: updates.apiKey !== void 0 ? updates.apiKey : existingAgent.apiKey,
-    baseUrl: updates.baseUrl !== void 0 ? updates.baseUrl : existingAgent.baseUrl,
-    systemPrompt: updates.systemPrompt !== void 0 ? updates.systemPrompt : existingAgent.systemPrompt,
-    temperature: updates.temperature !== void 0 ? updates.temperature : existingAgent.temperature,
-    maxTokens: updates.maxTokens !== void 0 ? updates.maxTokens : existingAgent.maxTokens,
-    azureEndpoint: updates.azureEndpoint !== void 0 ? updates.azureEndpoint : existingAgent.azureEndpoint,
-    azureApiVersion: updates.azureApiVersion !== void 0 ? updates.azureApiVersion : existingAgent.azureApiVersion,
-    azureDeployment: updates.azureDeployment !== void 0 ? updates.azureDeployment : existingAgent.azureDeployment,
-    ollamaBaseUrl: updates.ollamaBaseUrl !== void 0 ? updates.ollamaBaseUrl : existingAgent.ollamaBaseUrl,
-    lastActive: /* @__PURE__ */ new Date()
-  };
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
-  return updatedAgent;
-}
-async function deleteAgent(rootPath, worldId, agentId) {
-  const subscriptionKey = `${worldId}:${agentId}`;
-  const unsubscribe = agentSubscriptions.get(subscriptionKey);
-  if (unsubscribe) {
-    unsubscribe();
-    agentSubscriptions.delete(subscriptionKey);
-  }
-  return await deleteAgentFromDisk(rootPath, worldId, agentId);
-}
-async function listAgents(rootPath, worldId) {
-  const allAgents = await loadAllAgentsFromDisk2(rootPath, worldId);
-  return allAgents.map((agent) => ({
-    id: agent.id,
-    name: agent.name,
-    type: agent.type,
-    model: agent.model,
-    status: agent.status,
-    createdAt: agent.createdAt,
-    lastActive: agent.lastActive,
-    memorySize: agent.memory.length,
-    llmCallCount: agent.llmCallCount
-  }));
-}
-async function updateAgentMemory(rootPath, worldId, agentId, messages) {
-  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
-  if (!existingAgent) {
-    return null;
-  }
-  const updatedAgent = {
-    ...existingAgent,
-    memory: [...existingAgent.memory, ...messages],
-    lastActive: /* @__PURE__ */ new Date()
-  };
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
-  return updatedAgent;
-}
-async function clearAgentMemory(rootPath, worldId, agentId) {
-  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
-  if (!existingAgent) {
-    return null;
-  }
-  const updatedAgent = {
-    ...existingAgent,
-    memory: [],
-    lastActive: /* @__PURE__ */ new Date()
-  };
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
-  return updatedAgent;
-}
-
 // core/world-manager.ts
+var saveWorldToDisk;
+var loadWorldFromDisk;
+var deleteWorldFromDisk;
+var loadAllWorldsFromDisk;
+var worldExistsOnDisk;
+var loadAllAgentsFromDisk;
+var saveAgentConfigToDisk;
+var createAgentCore;
+var getAgentCore;
+var updateAgentCore;
+var deleteAgentCore;
+var clearAgentMemoryCore;
+var listAgentsCore;
+var updateAgentMemoryCore;
+async function initializeModules() {
+  if (false) {
+    const worldStorage = await null;
+    const agentStorage = await null;
+    const agentManager = await null;
+    saveWorldToDisk = worldStorage.saveWorldToDisk;
+    loadWorldFromDisk = worldStorage.loadWorldFromDisk;
+    deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
+    loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
+    worldExistsOnDisk = worldStorage.worldExistsOnDisk;
+    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
+    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
+    createAgentCore = agentManager.createAgent;
+    getAgentCore = agentManager.getAgent;
+    updateAgentCore = agentManager.updateAgent;
+    deleteAgentCore = agentManager.deleteAgent;
+    clearAgentMemoryCore = agentManager.clearAgentMemory;
+    listAgentsCore = agentManager.listAgents;
+    updateAgentMemoryCore = agentManager.updateAgentMemory;
+  } else {
+    console.warn("World management functions disabled in browser environment");
+    const browserNoOp = () => {
+      throw new Error("This function is not available in browser environment");
+    };
+    saveWorldToDisk = browserNoOp;
+    loadWorldFromDisk = browserNoOp;
+    deleteWorldFromDisk = browserNoOp;
+    loadAllWorldsFromDisk = browserNoOp;
+    worldExistsOnDisk = browserNoOp;
+    loadAllAgentsFromDisk = browserNoOp;
+    saveAgentConfigToDisk = browserNoOp;
+    createAgentCore = browserNoOp;
+    getAgentCore = browserNoOp;
+    updateAgentCore = browserNoOp;
+    deleteAgentCore = browserNoOp;
+    clearAgentMemoryCore = browserNoOp;
+    listAgentsCore = browserNoOp;
+    updateAgentMemoryCore = browserNoOp;
+  }
+}
+var moduleInitialization = initializeModules();
 async function createWorld(rootPath, params) {
+  await moduleInitialization;
   const exists = await worldExistsOnDisk(rootPath, params.name);
   if (exists) {
     throw new Error(`World with name '${params.name}' already exists`);
@@ -19725,6 +19608,7 @@ async function createWorld(rootPath, params) {
   return worldDataToWorld(worldData, rootPath);
 }
 async function getWorld(rootPath, worldId) {
+  await moduleInitialization;
   const worldData = await loadWorldFromDisk(rootPath, worldId);
   if (!worldData) {
     return null;
@@ -19738,6 +19622,7 @@ async function getWorld(rootPath, worldId) {
   return world;
 }
 async function updateWorld(rootPath, worldId, updates) {
+  await moduleInitialization;
   const existingData = await loadWorldFromDisk(rootPath, worldId);
   if (!existingData) {
     return null;
@@ -19750,9 +19635,11 @@ async function updateWorld(rootPath, worldId, updates) {
   return worldDataToWorld(updatedData, rootPath);
 }
 async function deleteWorld(rootPath, worldId) {
+  await moduleInitialization;
   return await deleteWorldFromDisk(rootPath, worldId);
 }
 async function listWorlds(rootPath) {
+  await moduleInitialization;
   const allWorldData = await loadAllWorldsFromDisk(rootPath);
   return allWorldData.map((data) => ({
     id: data.id,
@@ -19770,22 +19657,22 @@ function worldDataToWorld(data, rootPath) {
     name: data.name,
     description: data.description,
     turnLimit: data.turnLimit,
-    eventEmitter: new EventEmitter(),
+    eventEmitter: new import_events.EventEmitter(),
     agents: /* @__PURE__ */ new Map(),
     // Empty agents map - to be populated by agent manager
     // Agent operation methods
     async createAgent(params) {
-      const agent = await createAgent(world.rootPath, world.id, params);
+      const agent = await createAgentCore(world.rootPath, world.id, params);
       world.agents.set(agent.id, agent);
       return agent;
     },
     async getAgent(agentName) {
       let agentId = agentName;
       try {
-        let agent = await getAgent(world.rootPath, world.id, agentId);
+        let agent = await getAgentCore(world.rootPath, world.id, agentId);
         if (!agent) {
           agentId = toKebabCase(agentName);
-          agent = await getAgent(world.rootPath, world.id, agentId);
+          agent = await getAgentCore(world.rootPath, world.id, agentId);
         }
         return agent;
       } catch (error) {
@@ -19795,10 +19682,10 @@ function worldDataToWorld(data, rootPath) {
     async updateAgent(agentName, updates) {
       let agentId = agentName;
       try {
-        let updatedAgent = await updateAgent(world.rootPath, world.id, agentId, updates);
+        let updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
         if (!updatedAgent) {
           agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgent(world.rootPath, world.id, agentId, updates);
+          updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
         }
         if (updatedAgent) {
           world.agents.set(updatedAgent.id, updatedAgent);
@@ -19811,10 +19698,10 @@ function worldDataToWorld(data, rootPath) {
     async deleteAgent(agentName) {
       let agentId = agentName;
       try {
-        let success = await deleteAgent(world.rootPath, world.id, agentId);
+        let success = await deleteAgentCore(world.rootPath, world.id, agentId);
         if (!success) {
           agentId = toKebabCase(agentName);
-          success = await deleteAgent(world.rootPath, world.id, agentId);
+          success = await deleteAgentCore(world.rootPath, world.id, agentId);
         }
         if (success) {
           world.agents.delete(agentId);
@@ -19827,10 +19714,10 @@ function worldDataToWorld(data, rootPath) {
     async clearAgentMemory(agentName) {
       let agentId = agentName;
       try {
-        let clearedAgent = await clearAgentMemory(world.rootPath, world.id, agentId);
+        let clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
         if (!clearedAgent) {
           agentId = toKebabCase(agentName);
-          clearedAgent = await clearAgentMemory(world.rootPath, world.id, agentId);
+          clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
         }
         if (clearedAgent) {
           world.agents.set(clearedAgent.id, clearedAgent);
@@ -19842,7 +19729,7 @@ function worldDataToWorld(data, rootPath) {
     },
     async listAgents() {
       try {
-        return await listAgents(world.rootPath, world.id);
+        return await listAgentsCore(world.rootPath, world.id);
       } catch (error) {
         return [];
       }
@@ -19850,10 +19737,10 @@ function worldDataToWorld(data, rootPath) {
     async updateAgentMemory(agentName, messages) {
       let agentId = agentName;
       try {
-        let updatedAgent = await updateAgentMemory(world.rootPath, world.id, agentId, messages);
+        let updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
         if (!updatedAgent) {
           agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgentMemory(world.rootPath, world.id, agentId, messages);
+          updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
         }
         if (updatedAgent) {
           world.agents.set(updatedAgent.id, updatedAgent);
@@ -19866,10 +19753,10 @@ function worldDataToWorld(data, rootPath) {
     async saveAgentConfig(agentName) {
       let agentId = agentName;
       try {
-        let agent = await getAgent(world.rootPath, world.id, agentId);
+        let agent = await getAgentCore(world.rootPath, world.id, agentId);
         if (!agent) {
           agentId = toKebabCase(agentName);
-          agent = await getAgent(world.rootPath, world.id, agentId);
+          agent = await getAgentCore(world.rootPath, world.id, agentId);
         }
         if (!agent) {
           throw new Error(`Agent ${agentName} not found`);
@@ -19902,6 +19789,176 @@ function worldDataToWorld(data, rootPath) {
     }
   };
   return world;
+}
+
+// core/agent-manager.ts
+var saveAgentToDisk;
+var loadAgentFromDisk;
+var loadAgentFromDiskWithRetry;
+var deleteAgentFromDisk;
+var loadAllAgentsFromDisk2;
+var loadAllAgentsFromDiskBatch;
+var agentExistsOnDisk;
+var validateAgentIntegrity;
+var repairAgentData;
+async function initializeModules2() {
+  if (false) {
+    const agentStorage = await null;
+    saveAgentToDisk = agentStorage.saveAgentToDisk;
+    loadAgentFromDisk = agentStorage.loadAgentFromDisk;
+    loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
+    deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
+    loadAllAgentsFromDisk2 = agentStorage.loadAllAgentsFromDisk;
+    loadAllAgentsFromDiskBatch = agentStorage.loadAllAgentsFromDiskBatch;
+    agentExistsOnDisk = agentStorage.agentExistsOnDisk;
+    validateAgentIntegrity = agentStorage.validateAgentIntegrity;
+    repairAgentData = agentStorage.repairAgentData;
+  } else {
+    console.warn("Agent storage functions disabled in browser environment");
+    const browserNoOp = () => {
+      throw new Error("This function is not available in browser environment");
+    };
+    saveAgentToDisk = browserNoOp;
+    loadAgentFromDisk = browserNoOp;
+    loadAgentFromDiskWithRetry = browserNoOp;
+    deleteAgentFromDisk = browserNoOp;
+    loadAllAgentsFromDisk2 = browserNoOp;
+    loadAllAgentsFromDiskBatch = browserNoOp;
+    agentExistsOnDisk = browserNoOp;
+    validateAgentIntegrity = browserNoOp;
+    repairAgentData = browserNoOp;
+  }
+}
+var moduleInitialization2 = initializeModules2();
+async function registerAgentRuntime(rootPath, worldId, agent, options = {}) {
+  await moduleInitialization2;
+  const {
+    updateWorldMap = true,
+    validateAgent = false
+  } = options;
+  try {
+    if (validateAgent) {
+      if (!agent.id || !agent.type || !agent.name || !agent.provider || !agent.model) {
+        throw new Error("Invalid agent structure for runtime registration");
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function createAgent(rootPath, worldId, params) {
+  await moduleInitialization2;
+  const exists = await agentExistsOnDisk(rootPath, worldId, params.id);
+  if (exists) {
+    throw new Error(`Agent with ID '${params.id}' already exists`);
+  }
+  const now2 = /* @__PURE__ */ new Date();
+  const agent = {
+    id: params.id,
+    name: params.name,
+    type: params.type,
+    status: "inactive",
+    provider: params.provider,
+    model: params.model,
+    apiKey: params.apiKey,
+    baseUrl: params.baseUrl,
+    systemPrompt: params.systemPrompt,
+    temperature: params.temperature,
+    maxTokens: params.maxTokens,
+    createdAt: now2,
+    lastActive: now2,
+    llmCallCount: 0,
+    memory: []
+  };
+  await saveAgentToDisk(rootPath, worldId, agent);
+  const registered = await registerAgentRuntime(rootPath, worldId, agent, {
+    updateWorldMap: true,
+    validateAgent: false
+  });
+  if (!registered) {
+    await deleteAgentFromDisk(rootPath, worldId, agent.id);
+    throw new Error("Failed to register agent in world runtime");
+  }
+  return agent;
+}
+async function getAgent(rootPath, worldId, agentId) {
+  await moduleInitialization2;
+  return await loadAgentFromDisk(rootPath, worldId, agentId);
+}
+async function updateAgent(rootPath, worldId, agentId, updates) {
+  await moduleInitialization2;
+  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
+  if (!existingAgent) {
+    return null;
+  }
+  const updatedAgent = {
+    ...existingAgent,
+    name: updates.name || existingAgent.name,
+    type: updates.type || existingAgent.type,
+    status: updates.status || existingAgent.status,
+    provider: updates.provider || existingAgent.provider,
+    model: updates.model || existingAgent.model,
+    apiKey: updates.apiKey !== void 0 ? updates.apiKey : existingAgent.apiKey,
+    baseUrl: updates.baseUrl !== void 0 ? updates.baseUrl : existingAgent.baseUrl,
+    systemPrompt: updates.systemPrompt !== void 0 ? updates.systemPrompt : existingAgent.systemPrompt,
+    temperature: updates.temperature !== void 0 ? updates.temperature : existingAgent.temperature,
+    maxTokens: updates.maxTokens !== void 0 ? updates.maxTokens : existingAgent.maxTokens,
+    azureEndpoint: updates.azureEndpoint !== void 0 ? updates.azureEndpoint : existingAgent.azureEndpoint,
+    azureApiVersion: updates.azureApiVersion !== void 0 ? updates.azureApiVersion : existingAgent.azureApiVersion,
+    azureDeployment: updates.azureDeployment !== void 0 ? updates.azureDeployment : existingAgent.azureDeployment,
+    ollamaBaseUrl: updates.ollamaBaseUrl !== void 0 ? updates.ollamaBaseUrl : existingAgent.ollamaBaseUrl,
+    lastActive: /* @__PURE__ */ new Date()
+  };
+  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  return updatedAgent;
+}
+async function deleteAgent(rootPath, worldId, agentId) {
+  await moduleInitialization2;
+  return await deleteAgentFromDisk(rootPath, worldId, agentId);
+}
+async function listAgents(rootPath, worldId) {
+  await moduleInitialization2;
+  const allAgents = await loadAllAgentsFromDisk2(rootPath, worldId);
+  return allAgents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    type: agent.type,
+    model: agent.model,
+    status: agent.status,
+    createdAt: agent.createdAt,
+    lastActive: agent.lastActive,
+    memorySize: agent.memory.length,
+    llmCallCount: agent.llmCallCount
+  }));
+}
+async function updateAgentMemory(rootPath, worldId, agentId, messages) {
+  await moduleInitialization2;
+  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
+  if (!existingAgent) {
+    return null;
+  }
+  const updatedAgent = {
+    ...existingAgent,
+    memory: [...existingAgent.memory, ...messages],
+    lastActive: /* @__PURE__ */ new Date()
+  };
+  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  return updatedAgent;
+}
+async function clearAgentMemory(rootPath, worldId, agentId) {
+  await moduleInitialization2;
+  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
+  if (!existingAgent) {
+    return null;
+  }
+  const updatedAgent = {
+    ...existingAgent,
+    memory: [],
+    lastActive: /* @__PURE__ */ new Date()
+  };
+  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  return updatedAgent;
 }
 
 // core/index.ts
