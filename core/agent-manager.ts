@@ -40,6 +40,7 @@ import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
 
 // Dynamic function assignments for storage operations only
 let saveAgentToDisk: any,
+  saveAgentMemoryToDisk: any,
   loadAgentFromDisk: any,
   loadAgentFromDiskWithRetry: any,
   deleteAgentFromDisk: any,
@@ -56,6 +57,7 @@ async function initializeModules() {
     const agentStorage = await import('./agent-storage');
 
     saveAgentToDisk = agentStorage.saveAgentToDisk;
+    saveAgentMemoryToDisk = agentStorage.saveAgentMemoryToDisk;
     loadAgentFromDisk = agentStorage.loadAgentFromDisk;
     loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
     deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
@@ -73,6 +75,7 @@ async function initializeModules() {
     };
 
     saveAgentToDisk = browserNoOp;
+    saveAgentMemoryToDisk = browserNoOp;
     loadAgentFromDisk = browserNoOp;
     loadAgentFromDiskWithRetry = browserNoOp;
     deleteAgentFromDisk = browserNoOp;
@@ -523,4 +526,33 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
 
   const { memory, ...config } = agent;
   return config;
+}
+
+/**
+ * Update agent memory and save to disk atomically (memory-only save for performance)
+ */
+export async function updateAgentMemoryAndSave(
+  rootPath: string,
+  worldId: string,
+  agentId: string,
+  newMessages: AgentMessage[]
+): Promise<Agent | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
+
+  if (!existingAgent) {
+    return null;
+  }
+
+  // Update memory in agent object
+  const updatedMemory = [...existingAgent.memory, ...newMessages];
+  existingAgent.memory = updatedMemory;
+  existingAgent.lastActive = new Date();
+
+  // Save only memory to disk for performance
+  await saveAgentMemoryToDisk(rootPath, worldId, agentId, updatedMemory);
+
+  return existingAgent;
 }

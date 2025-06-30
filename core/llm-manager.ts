@@ -136,6 +136,7 @@ export async function streamAgentResponse(
  * Non-streaming LLM call
  */
 export async function generateAgentResponse(
+  world: World,
   agent: Agent,
   messages: AgentMessage[]
 ): Promise<string> {
@@ -149,10 +150,18 @@ export async function generateAgentResponse(
     maxTokens: agent.maxTokens
   });
 
-  // Update agent activity
+  // Update agent activity and LLM call count
   agent.lastActive = new Date();
   agent.llmCallCount++;
   agent.lastLLMCall = new Date();
+
+  // Auto-save agent state after LLM call
+  try {
+    const { saveAgentToDisk } = await import('./agent-storage');
+    await saveAgentToDisk(world.rootPath, world.id, agent);
+  } catch (error) {
+    console.warn(`Failed to auto-save agent ${agent.id} after LLM call:`, error);
+  }
 
   return text;
 }

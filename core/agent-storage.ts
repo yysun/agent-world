@@ -262,6 +262,25 @@ export async function saveAgentConfigToDisk(rootPath: string, worldId: string, a
 }
 
 /**
+ * Save only agent memory to disk (performance optimized)
+ */
+export async function saveAgentMemoryToDisk(
+  rootPath: string,
+  worldId: string,
+  agentId: string,
+  memory: AgentMessage[]
+): Promise<void> {
+  const agentDir = getAgentDir(rootPath, worldId, agentId);
+
+  // Ensure directory exists
+  await ensureAgentDirectory(rootPath, worldId, agentId);
+
+  // Save memory as JSON with Date serialization
+  const memoryPath = path.join(agentDir, 'memory.json');
+  await writeJsonFile(memoryPath, memory || []);
+}
+
+/**
  * Enhanced agent loading with retry mechanism and partial recovery
  */
 export async function loadAgentFromDiskWithRetry(

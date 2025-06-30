@@ -76,6 +76,14 @@ async function saveIncomingMessageToMemory(
 
     // Add to agent memory
     agent.memory.push(userMessage);
+
+    // Auto-save memory to disk
+    try {
+      const { saveAgentMemoryToDisk } = await import('./agent-storage');
+      await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
+    } catch (error) {
+      console.warn(`Failed to auto-save memory for agent ${agent.id}:`, error);
+    }
   } catch (error) {
     console.warn(`Could not save incoming message to memory for ${agent.id}:`, error);
   }
@@ -120,6 +128,14 @@ async function processAgentMessage(
     agent.llmCallCount++;
     agent.lastLLMCall = new Date();
 
+    // Auto-save agent state after LLM call count increment
+    try {
+      const { saveAgentToDisk } = await import('./agent-storage');
+      await saveAgentToDisk(world.rootPath, world.id, agent);
+    } catch (error) {
+      console.warn(`Failed to auto-save agent ${agent.id} after LLM call increment:`, error);
+    }
+
     // Call LLM for response with streaming
     const response = await streamAgentResponse(world, agent, messages);
 
@@ -131,6 +147,14 @@ async function processAgentMessage(
     };
 
     agent.memory.push(assistantMessage);
+
+    // Auto-save memory after adding assistant response
+    try {
+      const { saveAgentMemoryToDisk } = await import('./agent-storage');
+      await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
+    } catch (error) {
+      console.warn(`Failed to auto-save memory for agent ${agent.id} after response:`, error);
+    }
 
     // Check for pass command in response
     const passCommandRegex = /<world>pass<\/world>/i;
@@ -211,6 +235,14 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
   if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
     if (agent.llmCallCount > 0) {
       agent.llmCallCount = 0;
+
+      // Auto-save agent state after turn limit reset
+      try {
+        const { saveAgentToDisk } = await import('./agent-storage');
+        await saveAgentToDisk(world.rootPath, world.id, agent);
+      } catch (error) {
+        console.warn(`Failed to auto-save agent ${agent.id} after turn limit reset:`, error);
+      }
     }
   }
 
