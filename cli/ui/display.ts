@@ -761,17 +761,14 @@ export function handleExternalInputDisplay(hasExternalInput: boolean, isPiped: b
 }
 
 /**
- * Show initial prompt and instructions for interactive mode
- * Uses centralized sequencing for consistent flow
+ * Show initial prompt for interactive mode
+ * Just ensures input box is ready - initialization message is handled elsewhere
  */
 export function showInitialPrompt(): void {
   if (!getHasPipedInput()) {
-    displayUnifiedMessage({
-      type: 'instruction',
-      content: 'Type a message to broadcast to all agents, or use /help for commands.',
-      metadata: { source: 'cli', messageType: 'notification' }
-    });
-    // displayUnifiedMessage will automatically trigger enforceSequentialDisplayFlow
+    // Just ensure the input box is shown without additional messaging
+    // The initialization message is displayed by loadAgents function
+    enforceSequentialDisplayFlow();
   }
 }
 

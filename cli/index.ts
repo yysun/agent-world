@@ -224,13 +224,26 @@ async function broadcastMessageToCurrentWorld(message: string, sender: string): 
 
   publishMessage(currentWorld, message, sender);
 }
-// Load agents and display current state
+// Load agents and display initial welcome info
 async function loadAgents(worldName: string): Promise<void> {
   try {
     // Load world by name and set as current
     await loadWorldByName(worldName);
 
-    await listCommand([], currentWorld!); // Display loaded agents
+    // Display initial welcome/initialization info instead of immediate agent list
+    const agents = Array.from(currentWorld!.agents.values());
+    const agentCount = agents.length;
+    
+    displayUnifiedMessage({
+      type: 'instruction',
+      content: `Agent World CLI - ${worldName}
+
+${agentCount === 0 ? 'No agents found. Use /add <name> to create your first agent.' : 
+  `${agentCount} agent${agentCount === 1 ? '' : 's'} available. Use /agents to list them.`}
+
+Type /help for available commands or start typing to broadcast a message.`,
+      metadata: { source: 'cli', messageType: 'command' }
+    });
   } catch (error) {
     displayUnifiedMessage({
       type: 'error',
@@ -246,7 +259,7 @@ async function loadAgents(worldName: string): Promise<void> {
 async function quitCommand(args: string[], world: World): Promise<void> {
   displayUnifiedMessage({
     type: 'instruction',
-    content: 'Goodbye! 👋',
+    content: 'Goodbye!',
     metadata: { source: 'cli', messageType: 'command' }
   });
   process.exit(0);
