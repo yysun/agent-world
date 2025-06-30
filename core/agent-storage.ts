@@ -9,6 +9,7 @@
  * - Enhanced loading with retry mechanism and partial recovery
  * - Batch loading optimization for performance
  * - Complete isolation from other internal modules
+ * - Memory archiving for data preservation before clearing
  *
  * Core Functions:
  * - saveAgentToDisk: Save agent config, system prompt, and memory to separate files
@@ -23,6 +24,7 @@
  * - ensureAgentDirectory: Create agent directory structure
  * - validateAgentIntegrity: Check agent data consistency
  * - repairAgentData: Attempt to repair corrupted agent files
+ * - archiveAgentMemory: Archive current memory before clearing
  *
  * Implementation:
  * - Extracted from world-persistence.ts functions
@@ -30,6 +32,7 @@
  * - Handles memory as simple AgentMessage[] array
  * - Proper Date object serialization/deserialization
  * - Enhanced error recovery and data validation
+ * - Memory archiving preserves conversation history with timestamps
  */
 
 import { promises as fs } from 'fs';
@@ -278,6 +281,30 @@ export async function saveAgentMemoryToDisk(
   // Save memory as JSON with Date serialization
   const memoryPath = path.join(agentDir, 'memory.json');
   await writeJsonFile(memoryPath, memory || []);
+}
+
+/**
+ * Archive agent memory to timestamped file before clearing
+ */
+export async function archiveAgentMemory(
+  rootPath: string,
+  worldId: string,
+  agentId: string,
+  memory: AgentMessage[]
+): Promise<void> {
+  const agentDir = getAgentDir(rootPath, worldId, agentId);
+
+  // Create archive directory if it doesn't exist
+  const archiveDir = path.join(agentDir, 'archive');
+  await fs.mkdir(archiveDir, { recursive: true });
+
+  // Generate timestamp for archive filename
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const archiveFilename = `memory-${timestamp}.json`;
+  const archivePath = path.join(archiveDir, archiveFilename);
+
+  // Save memory to archive file
+  await writeJsonFile(archivePath, memory || []);
 }
 
 /**

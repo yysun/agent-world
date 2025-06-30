@@ -11,6 +11,7 @@
  * - Batch operations for performance optimization
  * - Clean separation from event systems (handled by world-manager)
  * - Dynamic imports for browser/Node.js compatibility
+ * - Memory archiving before clearing for data preservation
  *
  * Core Functions:
  * - createAgent: Create new agent with configuration and system prompt
@@ -19,7 +20,7 @@
  * - deleteAgent: Remove agent and all associated data
  * - listAgents: Get all agent IDs and basic info
  * - updateAgentMemory: Add messages to agent memory
- * - clearAgentMemory: Reset agent memory to empty state
+ * - clearAgentMemory: Archive existing memory then reset to empty state
  * - getAgentConfig: Get agent configuration without memory
  * - loadAgentsIntoWorld: Load all agents from disk into world runtime
  * - syncWorldAgents: Synchronize world agents Map with disk state
@@ -32,6 +33,7 @@
  * - Dynamic imports for storage functions only (browser compatibility)
  * - Event subscriptions managed by world-manager during world loading
  * - Enhanced world-agent relationship management
+ * - Memory archiving preserves conversation history before clearing
  * - Ready for EventBus integration in Phase 3
  */
 
@@ -48,7 +50,8 @@ let saveAgentToDisk: any,
   loadAllAgentsFromDiskBatch: any,
   agentExistsOnDisk: any,
   validateAgentIntegrity: any,
-  repairAgentData: any;
+  repairAgentData: any,
+  archiveAgentMemory: any;
 
 // Initialize dynamic imports
 async function initializeModules() {
@@ -66,6 +69,7 @@ async function initializeModules() {
     agentExistsOnDisk = agentStorage.agentExistsOnDisk;
     validateAgentIntegrity = agentStorage.validateAgentIntegrity;
     repairAgentData = agentStorage.repairAgentData;
+    archiveAgentMemory = agentStorage.archiveAgentMemory;
   } else {
     // Browser environment - provide no-op implementations for storage functions only
     console.warn('Agent storage functions disabled in browser environment');
@@ -84,6 +88,7 @@ async function initializeModules() {
     agentExistsOnDisk = browserNoOp;
     validateAgentIntegrity = browserNoOp;
     repairAgentData = browserNoOp;
+    archiveAgentMemory = browserNoOp;
   }
 }
 
@@ -489,7 +494,7 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
 }
 
 /**
- * Clear agent memory (reset to empty state)
+ * Clear agent memory (archive current memory then reset to empty state)
  */
 export async function clearAgentMemory(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
   // Ensure modules are initialized
@@ -499,6 +504,16 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
 
   if (!existingAgent) {
     return null;
+  }
+
+  // Archive current memory if it exists and has content
+  if (existingAgent.memory && existingAgent.memory.length > 0) {
+    try {
+      await archiveAgentMemory(rootPath, worldId, agentId, existingAgent.memory);
+    } catch (error) {
+      console.warn(`Failed to archive memory for agent ${agentId}:`, error);
+      // Continue with clearing even if archiving fails
+    }
   }
 
   const updatedAgent: Agent = {
