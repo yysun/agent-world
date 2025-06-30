@@ -39,7 +39,7 @@ export async function exportCommand(args: string[], world: World): Promise<void>
   }
 
   const filename = args[0];
-  const worldName = world.config.name; // Get world name from world object
+  const worldName = world.name; // Get world name from world object
   const messageCount = getMessageCount(worldName);
 
   if (messageCount === 0) {

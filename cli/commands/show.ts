@@ -33,15 +33,18 @@
  */
 
 import { World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/display';
+import { displayUnifiedMessage } from '../ui/display';
 import { colors } from '../ui/colors';
 import * as fs from 'fs/promises';
-import * as path from 'path';
 
 export async function showCommand(args: string[], world: World): Promise<void> {
   // Check if agent name is provided
   if (args.length === 0) {
-    displayError('Please specify an agent name: /show <agent-name> [filename]');
+    displayUnifiedMessage({
+      type: 'error',
+      content: 'Please specify an agent name: /show <agent-name> [filename]',
+      metadata: { source: 'cli', messageType: 'error' }
+    });
     return;
   }
 
@@ -51,11 +54,12 @@ export async function showCommand(args: string[], world: World): Promise<void> {
   // Get agent by name using World method
   const agent = await world.getAgent(agentName);
   if (!agent) {
-    displayError(`Agent "${agentName}" not found.`);
     displayUnifiedMessage({
-      content: 'Use /list to see available agents.',
-      type: 'instruction'
+      type: 'error',
+      content: `Agent "${agentName}" not found.`,
+      metadata: { source: 'cli', messageType: 'error' }
     });
+    console.log('Use /list to see available agents.');
     return;
   }
 
@@ -72,37 +76,32 @@ export async function showCommand(args: string[], world: World): Promise<void> {
     }
 
   } catch (error) {
-    displayError(`Error loading conversation history: ${error}`);
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Error loading conversation history: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
   }
 }
 
 /**
- * Display conversation history in terminal with colors and formatting
+ * Display conversation history in terminal with simple formatting
  */
 async function displayConversationInTerminal(agentName: string, history: any[]): Promise<void> {
   // Display agent header
-  displayUnifiedMessage({
-    content: `● ${agentName}`,
-    type: 'agent'
-  });
+  console.log(`● ${agentName}`);
 
   if (history.length === 0) {
-    displayUnifiedMessage({
-      content: '  No conversation history found.',
-      type: 'status'
-    });
+    console.log('  No conversation history found.');
     return;
   }
 
   // Format and display conversation history
-  const questionAnswerPairs = formatConversationPairs(history, true);
+  const questionAnswerPairs = formatConversationPairs(history, false);
 
   // Display all pairs as a single block with consistent spacing
   const conversationContent = questionAnswerPairs.join('\n\n');
-  displayUnifiedMessage({
-    content: conversationContent,
-    type: 'agent'
-  });
+  console.log(conversationContent);
 }
 
 /**
@@ -110,10 +109,7 @@ async function displayConversationInTerminal(agentName: string, history: any[]):
  */
 async function saveConversationToMarkdown(agentName: string, history: any[], fileName: string): Promise<void> {
   if (history.length === 0) {
-    displayUnifiedMessage({
-      content: `No conversation history found for ${agentName}. No file created.`,
-      type: 'status'
-    });
+    console.log(`No conversation history found for ${agentName}. No file created.`);
     return;
   }
 
@@ -126,9 +122,13 @@ async function saveConversationToMarkdown(agentName: string, history: any[], fil
   try {
     // Write to file
     await fs.writeFile(finalFileName, markdownContent, 'utf8');
-    displaySuccess(`Conversation history saved to: ${finalFileName}`);
+    console.log(`Conversation history saved to: ${finalFileName}`);
   } catch (error) {
-    displayError(`Error saving file: ${error}`);
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Error saving file: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
   }
 }
 
@@ -156,7 +156,7 @@ function buildMarkdownContent(agentName: string, history: any[]): string {
 /**
  * Format conversation into Q/A pairs
  * @param history - Array of conversation messages
- * @param useColors - Whether to apply terminal colors (true for display, false for markdown)
+ * @param useColors - Whether to apply terminal colors (deprecated, always false now)
  */
 function formatConversationPairs(history: any[], useColors: boolean): string[] {
   const questionAnswerPairs: string[] = [];
@@ -170,15 +170,15 @@ function formatConversationPairs(history: any[], useColors: boolean): string[] {
       }
 
       // Start new Q/A pair
-      const qLabel = useColors ? colors.cyan('Q:') : '**Q:**';
-      const content = formatMessageContent(message.content, useColors);
-      const indent = useColors ? '  ' : '';
+      const qLabel = 'Q:';
+      const content = formatMessageContent(message.content, false);
+      const indent = '  ';
       currentPair = `${indent}${qLabel} ${content}`;
     } else if (message.role === 'assistant') {
       // Complete the current pair with the answer
-      const aLabel = useColors ? colors.magenta('A:') : '**A:**';
-      const content = formatMessageContent(message.content, useColors);
-      const indent = useColors ? '  ' : '';
+      const aLabel = 'A:';
+      const content = formatMessageContent(message.content, false);
+      const indent = '  ';
       currentPair += `\n${indent}${aLabel} ${content}`;
     }
   }
@@ -195,21 +195,21 @@ function formatConversationPairs(history: any[], useColors: boolean): string[] {
  * Format message content for display
  * - Handles multi-line messages
  * - Adds proper indentation
- * - Applies colors for terminal display or plain text for markdown
+ * - Plain text output (no colors)
  */
-function formatMessageContent(content: string, useColors: boolean = true): string {
-  if (!content) return useColors ? colors.gray('(empty message)') : '*(empty message)*';
+function formatMessageContent(content: string, useColors: boolean = false): string {
+  if (!content) return '(empty message)';
 
   // Split into lines and format each one
   const lines = content.trim().split('\n');
   const formattedLines = lines.map((line, index) => {
     // First line doesn't need extra indentation
     if (index === 0) {
-      return useColors ? colors.gray(line) : line;
+      return line;
     }
     // Subsequent lines get extra indentation to align with content
-    const indent = useColors ? '     ' : '   ';
-    return useColors ? colors.gray(`${indent}${line}`) : `${indent}${line}`;
+    const indent = '     ';
+    return `${indent}${line}`;
   });
 
   return formattedLines.join('\n');

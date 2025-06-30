@@ -10,12 +10,12 @@
 - **SS**: Step-by-step with approval → wait for confirmation each step.
 - **AS**: Step-by-step auto → continue to next step automatically.
 - **GG**: Document features → create/update markdown (use mermaid if needed) to `docs/done` .
-- **!!**: Create requirements → focus on `what`, not `how`, no plan → save to `docs/requirements/req-{name}.md` → wait for confirmation.
+- **!!**: Create and save requirements to `docs/requirements/req-{name}.md` → wait for confirmation.
 - **!!!**: Update the requirements and plan, and implement.
 - **SP**: consolidate, remove redundant, keep all ideas, make it concise and easy for LLM to understand.
 
 ## Requirement and Planning Rules
-- Requirement creation → focus on functionality/logic, not optimizations.
+- Requirement creation or analysis → focus on `what`, not `how`, not optimization.
 - Large changes or "AA" → always create plan first → get confirmation.
 - Use checkboxes for each step in the implementation plan.
 
