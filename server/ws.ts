@@ -1,28 +1,60 @@
 /**
  * WebSocket Server for Agent World
- * 
+ *
  * Features:
  * - Real-time WebSocket communication using core modules
- * - Connection management for WebSocket clients
- * - Real-time event broadcasting to WebSocket clients
+ * - World object subscription management with event emitters
+ * - Connection m          case 'event':
+            // Use attached world object if available
+            const worldSocket = ws as WorldSocket;
+            if (!worldSocket.world || worldSocket.world.name !== worldName) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Event requires worldName and message'
+              }));
+              return;
+            }
+
+            console.log(`Publishing event message to world: ${worldSocket.world.name}`, {
+              eventMessage,
+              sender,
+              worldAgents: Array.from(worldSocket.world.agents.values()).map(a => ({ id: a.id, active: a.active }))
+            });
+
+            eventMessage && publishMessage(worldSocket.world, eventMessage, sender || 'HUMAN'); console.log(`Publishing event message to world: ${worldSocket.world.name}`, {
+              eventMessage,
+              sender,
+              worldAgents: Array.from(worldSocket.world.agents.values()).map(a => ({ id: a.id, active: a.active }))
+            });r WebSocket clients with world cleanup
+ * - Simplified event broadcasting - forwards all world events with eventType added to payload
  * - Message validation with Zod schemas
- * - World subscription management with new core architecture
- * 
+ * - World subscription lifecycle management with automatic cleanup
+ *
  * WebSocket Events:
- * - subscribe: Subscribe to world events (checks world existence)
- * - unsubscribe: Unsubscribe from world events
- * - event: Send message to world using publishMessage
- * - welcome: Connection confirmation
+ * - subscribe: Subscribe to world events (creates world object, attaches event listeners)
+ * - unsubscribe: Unsubscribe from world events (cleans up world object and listeners)
+ * - event: Send message to attached world object using publishMessage
+ * - welcome: Connection confirmation (triggers auto-subscription on client)
  * - subscribed: Subscription confirmation
  * - unsubscribed: Unsubscription confirmation
+ * - All world events: Forwarded with eventType field added (e.g., eventType: 'sse', type: 'chunk')
  * - error: Error messages
- * 
+ *
+ * World Subscription System:
+ * - Each WebSocket connection can have one world object attached
+ * - World objects are created/loaded on subscription and cleaned up on unsubscribe/disconnect
+ * - Generic event listener forwards all events from world.eventEmitter to WebSocket clients
+ * - Proper cleanup prevents memory leaks from orphaned world objects
+ * - Uses existing world-events system for message publishing
+ *
  * Migration Changes:
  * - Updated to use core/ modules instead of src/
  * - Uses listWorlds() and getWorld() from world-manager
  * - Converts worldName to worldId using toKebabCase
  * - Uses publishMessage from world-events for messaging
- * - Removed dependency on legacy loadWorld and broadcastMessage functions
+ * - Extended WorldSocket interface to track world references and event listeners
+ * - Implements comprehensive cleanup lifecycle management
+ * - Simplified event forwarding with generic handler
  */
 
 import { Server } from 'http';
@@ -31,7 +63,6 @@ import { World } from '../core/types.js';
 
 import { z } from 'zod';
 import { listWorlds, getWorld, WorldInfo } from '../core/world-manager.js';
-import { loadAllWorldsFromDisk } from '../core/world-storage.js';
 import { publishMessage } from '../core/world-events.js';
 import { toKebabCase } from '../core/utils.js';
 
@@ -47,6 +78,54 @@ const WebSocketMessageSchema = z.object({
   })
 });
 
+// Helper functions for world subscription management
+async function cleanupWorldSubscription(ws: WorldSocket) {
+  if (ws.world && ws.worldEventListeners) {
+    // Remove all event listeners
+    for (const [eventName, listener] of ws.worldEventListeners) {
+      ws.world.eventEmitter.off(eventName, listener);
+    }
+    ws.worldEventListeners.clear();
+  }
+
+  // Clear world reference
+  ws.world = undefined;
+  ws.worldEventListeners = undefined;
+}
+
+function setupWorldEventListeners(ws: WorldSocket, world: World) {
+  if (!ws.worldEventListeners) {
+    ws.worldEventListeners = new Map();
+  }
+
+  // Generic handler that forwards events to WebSocket with filtering
+  const handler = (eventType: string) => (eventData: any) => {
+    // Skip echoing user messages back to WebSocket
+    // Only forward agent responses, system messages, and SSE events
+    if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender.startsWith('user'))) {
+      return;
+    }
+
+    if (ws.readyState === ws.OPEN) {
+      // Add the event type to the payload so client knows what kind of event this is
+      ws.send(JSON.stringify({
+        ...eventData,
+        eventType
+      }));
+    }
+  };
+
+  // List of event types to forward
+  const eventTypes = ['system', 'world', 'message', 'sse'];
+
+  // Set up listeners for all event types
+  for (const eventType of eventTypes) {
+    const eventHandler = handler(eventType);
+    world.eventEmitter.on(eventType, eventHandler);
+    ws.worldEventListeners.set(eventType, eventHandler);
+  }
+}
+
 let wss: WebSocketServer;
 
 export function getWebSocketStats() {
@@ -56,6 +135,8 @@ export function getWebSocketStats() {
   };
 }
 interface WorldSocket extends WebSocket {
+  world?: World;
+  worldEventListeners?: Map<string, (...args: any[]) => void>;
 }
 
 export function createWebSocketServer(server: Server): WebSocketServer {
@@ -90,16 +171,26 @@ export function createWebSocketServer(server: Server): WebSocketServer {
         switch (type) {
           case 'subscribe':
             if (worldName) {
-              // Check if world exists
-              const availableWorlds = await listWorlds(ROOT_PATH);
-              const worldExists = availableWorlds.some(world => world.name === worldName);
-              if (!worldExists) {
+              // Load and attach world to WebSocket
+              const worldId = toKebabCase(worldName);
+              const world = await getWorld(ROOT_PATH, worldId);
+              if (!world) {
                 ws.send(JSON.stringify({
                   type: 'error',
-                  error: 'World not found'
+                  error: 'Failed to load world'
                 }));
                 return;
               }
+
+              // Clean up existing world subscription if any
+              await cleanupWorldSubscription(ws as WorldSocket);
+
+              // Attach world to WebSocket
+              (ws as WorldSocket).world = world;
+              (ws as WorldSocket).worldEventListeners = new Map();
+
+              // Set up event listeners
+              setupWorldEventListeners(ws as WorldSocket, world);
 
               ws.send(JSON.stringify({
                 type: 'subscribed',
@@ -110,6 +201,8 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             break;
 
           case 'unsubscribe':
+            // Clean up world subscription
+            await cleanupWorldSubscription(ws as WorldSocket);
 
             ws.send(JSON.stringify({
               type: 'unsubscribed',
@@ -118,7 +211,9 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             break;
 
           case 'event':
-            if (!worldName || !eventMessage) {
+            // Use attached world object if available
+            const worldSocket = ws as WorldSocket;
+            if (!worldSocket.world || worldSocket.world.name !== worldName) {
               ws.send(JSON.stringify({
                 type: 'error',
                 error: 'Event requires worldName and message'
@@ -126,30 +221,11 @@ export function createWebSocketServer(server: Server): WebSocketServer {
               return;
             }
 
-            // Check if world exists
-            const availableWorlds = await listWorlds(ROOT_PATH);
-            const worldExists = availableWorlds.some(world => world.name === worldName);
-            if (!worldExists) {
-              ws.send(JSON.stringify({
-                type: 'error',
-                error: 'World not found'
-              }));
-              return;
-            }
+            // Normalize user senders to 'HUMAN' for public messages that agents should respond to
+            const normalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
 
-            // Get world and send message
-            const worldId = toKebabCase(worldName);
-            const world = await getWorld(ROOT_PATH, worldId);
-            if (!world) {
-              ws.send(JSON.stringify({
-                type: 'error',
-                error: 'Failed to load world'
-              }));
-              return;
-            }
+            eventMessage && publishMessage(worldSocket.world, eventMessage, normalizedSender);
 
-            // Send message to world
-            publishMessage(world, eventMessage, sender || 'HUMAN');
             break;
 
           default:
@@ -167,8 +243,10 @@ export function createWebSocketServer(server: Server): WebSocketServer {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       console.log(`WebSocket client disconnected`);
+      // Clean up world subscription on disconnect
+      await cleanupWorldSubscription(ws as WorldSocket);
     });
 
     ws.on('error', (error) => {

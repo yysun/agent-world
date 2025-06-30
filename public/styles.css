@@ -438,6 +438,11 @@ body {
   transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
+.conversation-message.streaming {
+  border-left-color: #10b981;
+  background-color: var(--bg-accent);
+}
+
 .conversation-message:last-child {
   margin-bottom: 0;
 }
@@ -450,12 +455,54 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   transition: color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.streaming-indicator {
+  color: #10b981;
+  font-size: 0.5rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .message-text {
   color: var(--text-primary);
   line-height: 1.5;
   transition: color 0.3s ease;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.cursor {
+  animation: blink 1s step-end infinite;
+  color: var(--accent-primary);
+  font-weight: bold;
+}
+
+@keyframes blink {
+
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .conversation-placeholder {

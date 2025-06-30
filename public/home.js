@@ -1,32 +1,42 @@
 /**
- * Home Page Component
- * 
- * Features:
- * - World selection tabs
- * - Agent grid display with avatar cards
- * - Agent modal integration for create/edit operations
+ * Home Page Component - Main interface for Agent World
+ *
+ * Core Features:
+ * - World selection tabs with WebSocket subscription management
+ * - Agent grid display with avatar cards and modal integration
+ * - Real-time conversation area with streaming message support
+ * - Auto-scroll to bottom functionality for new messages
  * - Theme toggle functionality
- * - Conversation area (placeholder)
- * 
+ *
+ * WebSocket Integration:
+ * - Handles system/world/message events and SSE streaming
+ * - Real-time chunk accumulation with visual indicators
+ * - Connection status tracking and error handling
+ *
  * Implementation:
- * - Function-based AppRun component following simplified rules
- * - Agent modal receives props directly instead of global state
- * - Uses run() for local events (no registration in update object needed)
- * - Responsive grid layout for agents
- * 
- * Changes:
- * - Removed unnecessary event handler registration from update object
- * - Updated AgentModal to receive explicit props
- * - Follows AppRun simplified event handling rules
+ * - AppRun component with simplified event handling via run()
+ * - Event handlers in update/ modules for organization
+ * - Responsive layout with auto-scroll on message updates
  */
+
+const { html, run } = window.apprun;
 
 import * as api from './api.js';
 import { getAvatarInitials, getAvatarColor } from './utils.js';
 import { AgentModal } from './agent.js';
 import { toggleTheme, applyTheme, getThemeIcon } from './theme.js';
 import wsApi from './ws-api.js';
+import Message from './components/message.js';
+import {
+  selectWorld,
+  handleWebSocketMessage,
+  handleConnectionStatus,
+  handleWebSocketError,
+  openAgentModal,
+  closeAgentModal
+} from './update/index.js';
 
-const USER_ID = 'user1'; // Placeholder for user ID, can be replaced with actual user management
+const USER_ID = 'user1';
 
 // Initial state
 const state = async () => {
@@ -35,105 +45,17 @@ const state = async () => {
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
 
-  // Initialize WebSocket state properties (no connection yet)
-  const initialState = {
+  return selectWorld({
     worlds,
     theme,
     connectionStatus: 'disconnected',
     messages: [],
     currentMessage: '',
     wsError: null
-  };
-
-  return selectWorld(initialState, worldName);
+  }, worldName);
 };
 
-
-// Event handlers
-const selectWorld = async (state, worldName) => {
-  if (worldName === state.worldName) return state;
-
-  // Disconnect from previous world
-  if (state.worldName && wsApi.isConnected()) {
-    wsApi.disconnect();
-  }
-
-  // Clear messages when switching worlds
-  const newState = {
-    ...state,
-    worldName,
-    messages: [],
-    connectionStatus: 'disconnected'
-  };
-
-  if (worldName) setTimeout(() => {
-    // Connect to new world
-    newState.connectionStatus = 'connecting';
-    wsApi.connect();
-  }, 500)
-
-  const agents = await api.getAgents(worldName);
-  return { ...newState, agents };
-};
-
-// WebSocket event handlers
-const handleWebSocketMessage = (state, messageData) => {
-  const message = {
-    id: Date.now() + Math.random(),
-    type: messageData.type || 'agent',
-    sender: messageData.sender || messageData.agentName || 'system',
-    text: messageData.message || messageData.text || '',
-    timestamp: messageData.timestamp || new Date().toISOString(),
-    worldName: state.worldName
-  };
-
-  return {
-    ...state,
-    messages: [...state.messages, message]
-  };
-};
-
-const handleConnectionStatus = (state, status) => {
-  return {
-    ...state,
-    connectionStatus: status,
-    wsError: status === 'error' ? state.wsError : null
-  };
-};
-
-const handleWebSocketError = (state, error) => {
-  console.error('WebSocket error:', error);
-  return {
-    ...state,
-    connectionStatus: 'error',
-    wsError: error.message || 'WebSocket connection error'
-  };
-};
-
-const openAgentModal = (state, agent = null) => {
-  return ({
-    ...state,
-    editingAgent: agent || { name: 'New Agent', config: {}, status: 'New' },
-    showAgentModel: true
-  });
-};
-
-const closeAgentModal = (state, save) => {
-  try {
-    if (save) api.saveAgent(state.editingAgent);
-    return ({
-      ...state,
-      showAgentModel: false
-    });
-  } catch (error) {
-    console.error('Error closing agent modal:', error);
-    return ({
-      ...state,
-      error
-    });
-  }
-};
-
+// Local event handlers
 const onKeypress = (state, e) => {
   const value = e.target.value;
   state.currentMessage = value;
@@ -145,59 +67,52 @@ const onKeypress = (state, e) => {
 const sendMessage = (state) => {
   const message = state.currentMessage?.trim();
 
-  // Validate message input
-  if (!message) {
-    return state; // Don't send empty messages
-  }
-
-  if (!state.worldName) {
-    console.warn('No world selected');
-    return state;
-  }
-
-  if (!wsApi.isConnected()) {
-    console.warn('WebSocket not connected');
+  if (!message || !state.worldName || !wsApi.isConnected()) {
     return {
       ...state,
-      wsError: 'Not connected to server'
+      wsError: !message ? null : !state.worldName ? 'No world selected' : 'Not connected to server'
     };
   }
 
-  // Send message via WebSocket
-  const success = wsApi.sendMessage({
-    id: Date.now() + Math.random(),
-    sender: USER_ID,
-    worldName: state.worldName,
-    content: message,
-    type: 'message',
-  });
+  const success = wsApi.sendWorldEvent(state.worldName, message, USER_ID);
 
   if (success) {
-    // Add user message to local state immediately for better UX
     const userMessage = {
-      type: 'message',
+      id: Date.now() + Math.random(),
+      type: 'user-message',
       sender: USER_ID,
-      content: message,
+      text: message,
+      timestamp: new Date().toISOString(),
       worldName: state.worldName
     };
 
     return {
       ...state,
       messages: [...state.messages, userMessage],
-      currentMessage: '', // Clear input field
+      currentMessage: '',
       wsError: null
     };
-  } else {
-    return {
-      ...state,
-      wsError: 'Failed to send message'
-    };
   }
+
+  return { ...state, wsError: 'Failed to send message' };
 };
 
+// Auto-scroll to bottom after DOM updates
+const scrollToBottom = () => {
+  requestAnimationFrame(() => {
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: 'smooth'
+    });
+  });
+};
 
-// view function
+app.on('scroll-to-bottom', scrollToBottom);
+
+// Main view function
 const view = (state) => {
+  scrollToBottom(); // Schedule scroll after rendering
+
   return html`
       <div class="connect-container">
         <header class="connect-header">
@@ -217,7 +132,7 @@ const view = (state) => {
           ${state.worlds?.length > 0 ? html`
             <div class="world-tabs">
               ${state.worlds.map(world => html`
-                <button 
+                <button
                   class="world-tab ${state.worldName === world.name ? 'active' : ''}"
                   @click=${run(selectWorld, world.name)}
                   data-world="${world.name}"
@@ -244,7 +159,7 @@ const view = (state) => {
           ${state.loading ? html`
             <div class="loading">Loading agents...</div>
           ` : ''}
-          
+
           <!-- Agents grid -->
           <div class="agent-grid">
             <!-- Add new agent card -->
@@ -259,7 +174,7 @@ const view = (state) => {
               <h3 class="agent-name">Add Agent</h3>
               <p class="agent-role">create new agent</p>
             </div>
-            
+
             ${state.agents?.map(agent => html`
               <div class="agent-card" @click=${run(openAgentModal, agent)}>
                 <div class="avatar-container">
@@ -274,38 +189,28 @@ const view = (state) => {
           </div>
           <!-- Conversation area -->
           <div class="conversation-area">
-
-            
             <div class="conversation-content">
-              ${state.messages && state.messages.length > 0 ? html`
-                ${state.messages.map(message => html`
-                  <div class="conversation-message ${message.type}">
-                    <div class="message-sender">${message.sender}</div>
-                    <div class="message-text">${message.text}</div>
-                    <div class="message-time">${new Date(message.timestamp).toLocaleTimeString()}</div>
-                  </div>
-                `)}
-              ` : html`
-                <div class="conversation-placeholder">
+              ${state.messages?.length > 0 ?
+      state.messages.map(message => Message(message)) :
+      html`<div class="conversation-placeholder">
                   ${state.worldName ? 'Start a conversation by typing a message below' : 'Select a world to start chatting'}
-                </div>
-              `}
+                </div>`
+    }
             </div>
           </div>
 
           <div class="message-input-container">
             <div class="message-input-wrapper">
-              <input 
-                type="text" 
-                class="message-input" 
+              <input
+                type="text"
+                class="message-input"
                 placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
                 value="${state.currentMessage || ''}"
                 @keypress=${run(onKeypress)}
               >
-              <button 
-                class="send-button" 
+              <button
+                class="send-button"
                 @click=${run(sendMessage)}
-                
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="m5 12 7-7 7 7M12 19V5"/>
@@ -316,7 +221,6 @@ const view = (state) => {
         </main>
       </div>
       ${state.showAgentModel ? AgentModal(state.editingAgent, closeAgentModal) : ''}
-    })}
   `;
 };
 
@@ -325,8 +229,8 @@ const update = {
   handleWebSocketMessage,
   handleConnectionStatus,
   handleWebSocketError
-}
+};
 
-
-
-export default new Component(state, view, update, { global_event: true });
+export default new Component(state, view, update, {
+  global_event: true
+});

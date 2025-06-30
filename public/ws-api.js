@@ -1,37 +1,34 @@
 /**
- * WebSocket API Module
- * 
+ * WebSocket API Module - Real-time world communication and subscription management
+ *
  * Features:
- * - WebSocket connection management with automatic reconnection
- * - JSON message protocol with error handling
- * - Connection lifecycle and state management
- * 
- * Implementation:
- * - Function-based approach using native WebSocket API
- * - Event-driven messaging through app.run callbacks
+ * - Connection management with automatic reconnection
+ * - World subscription system with proper cleanup
+ * - JSON message protocol and event routing
+ * - AppRun integration via callbacks
+ *
+ * Implementation: Function-based module with automatic unsubscribe/subscribe
+ * flow for world switching and bidirectional event handling.
  */
 
-// WebSocket state
+// State management
 let ws = null;
+let currentWorldSubscription = null;
+let reconnectAttempts = 0;
+
+// Constants
 const url = `ws://localhost:3000/ws`;
 const userId = 'user1';
-let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 const reconnectDelay = 1000;
 
-// Core connection functions
+// Connection functions
 const connect = () => {
   try {
     ws = new WebSocket(url);
-
     ws.onopen = () => {
       reconnectAttempts = 0;
       app.run('handleConnectionStatus', 'connected');
-      sendMessage({
-        type: 'user_connect',
-        userId: userId,
-        timestamp: new Date().toISOString()
-      });
     };
 
     ws.onmessage = (event) => {
@@ -91,7 +88,63 @@ const attemptReconnect = () => {
   }
 };
 
-// Utility functions
+// World subscription functions
+const subscribeToWorld = (worldName) => {
+  if (!worldName) {
+    console.warn('Cannot subscribe to empty world name');
+    return false;
+  }
+
+  // Unsubscribe from current world first
+  if (currentWorldSubscription) {
+    unsubscribeFromWorld();
+  }
+
+  const success = sendMessage({
+    type: 'subscribe',
+    payload: {
+      worldName: worldName
+    }
+  });
+
+  if (success) {
+    currentWorldSubscription = worldName;
+  }
+
+  return success;
+};
+
+const unsubscribeFromWorld = () => {
+  if (!currentWorldSubscription) {
+    return true; // Already unsubscribed
+  }
+
+  const success = sendMessage({
+    type: 'unsubscribe',
+    payload: {}
+  });
+
+  if (success) {
+    currentWorldSubscription = null;
+  }
+
+  return success;
+};
+
+const sendWorldEvent = (worldName, message, sender = 'user1') => {
+  return sendMessage({
+    type: 'event',
+    payload: {
+      worldName: worldName,
+      message: message,
+      sender: sender
+    }
+  });
+};
+
+const getCurrentWorldSubscription = () => currentWorldSubscription;
+
+// Utilities and export
 const isConnected = () => ws && ws.readyState === WebSocket.OPEN;
 
 const getConnectionState = () => {
@@ -105,12 +158,15 @@ const getConnectionState = () => {
   }
 };
 
-// Export API
 export default {
   connect,
   disconnect,
   attemptReconnect,
   sendMessage,
   isConnected,
-  getConnectionState
+  getConnectionState,
+  subscribeToWorld,
+  unsubscribeFromWorld,
+  sendWorldEvent,
+  getCurrentWorldSubscription
 };

@@ -1,12 +1,13 @@
 /**
  * API Routes for Agent World
- * 
+ *
  * Features:
  * - REST API endpoints for world and agent management
  * - Server-Sent Events (SSE) for real-time chat streaming
  * - Zod validation for all endpoints
  * - Core module integration (world-manager, agent-manager, world-events)
- * 
+ * - SSE chunk streaming support for grouped message blocks
+ *
  * Endpoints:
  * - GET /worlds - List/create default world
  * - GET /worlds/:worldName/agents - List agents in world
@@ -14,18 +15,24 @@
  * - POST /worlds/:worldName/agents - Create agent (placeholder)
  * - PATCH /worlds/:worldName/agents/:agentName - Update agent with memory clearing
  * - POST /worlds/:worldName/chat - Chat with SSE streaming
- * 
+ *
  * Implementation:
  * - Uses World object methods for operations
  * - Converts worldName to worldId using toKebabCase
- * - Event handling via publishMessage/subscribeToMessages
+ * - Event handling via publishMessage/subscribeToMessages and subscribeToSSE
+ * - Streams both message events and SSE chunk events to client
+ *
+ * Changes:
+ * - Added subscribeToSSE for streaming chunk support
+ * - Enhanced SSE streaming to handle chunked responses properly
+ * - Fixed server-side SSE event forwarding to client
  */
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import { createWorld, getWorld, listWorlds } from '../core/world-manager.js';
 import { toKebabCase } from '../core/utils.js';
-import { publishMessage, subscribeToMessages } from '../core/world-events.js';
+import { publishMessage, subscribeToMessages, subscribeToSSE } from '../core/world-events.js';
 
 const DEFAULT_WORLD_NAME = 'Default World';
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
@@ -208,12 +215,22 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     });
 
     // Subscribe to world events for streaming
-    const unsubscribe = subscribeToMessages(world, (event) => {
+    const unsubscribeMessages = subscribeToMessages(world, (event) => {
       try {
         const eventData = { type: 'message', payload: event };
         res.write(`data: ${JSON.stringify(eventData)}\n\n`);
       } catch (error) {
-        console.error('Error sending event:', error);
+        console.error('Error sending message event:', error);
+      }
+    });
+
+    // Subscribe to SSE events for streaming chunks
+    const unsubscribeSSE = subscribeToSSE(world, (event) => {
+      try {
+        const eventData = { type: 'sse', payload: event };
+        res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+      } catch (error) {
+        console.error('Error sending SSE event:', error);
       }
     });
 
@@ -227,13 +244,15 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     // Handle client disconnection
     req.on('close', () => {
-      unsubscribe();
+      unsubscribeMessages();
+      unsubscribeSSE();
       console.log(`SSE connection closed for world: ${worldName}`);
     });
 
     req.on('error', (error) => {
       console.error('SSE connection error:', error);
-      unsubscribe();
+      unsubscribeMessages();
+      unsubscribeSSE();
     });
 
   } catch (error) {
