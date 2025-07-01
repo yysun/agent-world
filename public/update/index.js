@@ -10,12 +10,8 @@
 export { initializeState } from './init-state.js';
 export { selectWorld } from './select-world.js';
 export {
-  handleWebSocketMessage,
   handleConnectionStatus,
-  handleWebSocketError,
-  handleSSEEvent
-} from '../ws-api.js';
-export {
-  openAgentModal,
-  closeAgentModal
-} from '../components/agent-modal.js';
+  handleWebSocketMessage,
+  handleWebSocketError
+} from './ws-sse.js';
+

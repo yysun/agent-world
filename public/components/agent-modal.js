@@ -16,7 +16,7 @@
  * Recent changes:
  */
 
-export default (agent, close) => {
+export const AgentModal = (agent, close) => {
   return html`
     <div class="modal-overlay" @click=${run(close, false)}>
       <div class="modal-content" @click=${(e) => e.stopPropagation()}>

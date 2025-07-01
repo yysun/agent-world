@@ -34,20 +34,14 @@
 
 const { Component, html, run } = window["apprun"];
 
-import wsApi from './ws-api.js';
 import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
 import { getAvatarColor, getAvatarInitials } from './utils.js';
 import {
-  initializeState,
-  selectWorld,
-  handleWebSocketMessage,
-  handleConnectionStatus,
-  handleWebSocketError,
-  openAgentModal,
-  closeAgentModal,
+  initializeState, selectWorld,
+  handleWebSocketMessage, handleConnectionStatus, handleWebSocketError
 } from './update/index.js';
-import AgentModal from './components/agent-modal.js';
-
+import { AgentModal, openAgentModal, closeAgentModal} from './components/agent-modal.js';
+import { sendChatMessage } from './ws-api.js';
 import Message from './components/message.js';
 
 const USER_ID = 'user1';
@@ -78,7 +72,7 @@ const onKeypress = (state, e) => {
 const sendMessage = (state) => {
   const message = state.currentMessage?.trim();
 
-  if (!message || !state.worldName || !wsApi.isConnected()) {
+  if (!message || !state.worldName) {
     const errorMessage = !message ? 'Please enter a message' :
       !state.worldName ? 'No world selected' :
         'Not connected to server';
@@ -102,7 +96,7 @@ const sendMessage = (state) => {
     };
   }
 
-  const success = wsApi.sendWorldEvent(state.worldName, message, USER_ID);
+  const success = sendChatMessage(state.worldName, message, USER_ID);
 
   if (success) {
     const userMessage = {
@@ -277,7 +271,6 @@ const view = (state) => {
 
 const update = {
   '/,#': state => state,
-  'update-state': (state, newState) => newState,
   handleWebSocketMessage,
   handleConnectionStatus,
   handleWebSocketError
