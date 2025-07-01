@@ -237,23 +237,36 @@ export function createWebSocketServer(server: Server): WebSocketServer {
 
           case 'system':
           case 'world':
-            if (worldName && eventMessage && worldSocket.world) {
-              if (worldSocket.world.name !== worldName) {
-                sendError(client, `${type} event requires valid world subscription`);
-                break;
-              }
+            if (eventMessage && eventMessage.trim().startsWith('/')) {
+              // Check if this is a global command that doesn't require world subscription
+              const commandName = eventMessage.trim().slice(1).split(/\s+/)[0].toLowerCase();
+              const globalCommands = ['getworlds', 'addworld'];
 
-              if (eventMessage.trim().startsWith('/')) {
-                const result = await handleCommand(worldSocket.world, eventMessage);
+              if (globalCommands.includes(commandName)) {
+                // Execute global command without world context
+                const result = await handleCommand(null, eventMessage, ROOT_PATH);
                 sendCommandResult(client, result);
-
-                // Refresh world if needed
-                if (result.refreshWorld) {
-                  await refreshWorldSubscription(worldSocket, worldName);
-                }
               } else {
-                sendError(client, `${type} event requires command message starting with '/'`);
+                // Regular world-specific command - requires world subscription
+                if (worldName && worldSocket.world) {
+                  if (worldSocket.world.name !== worldName) {
+                    sendError(client, `${type} event requires valid world subscription`);
+                    break;
+                  }
+
+                  const result = await handleCommand(worldSocket.world, eventMessage, ROOT_PATH);
+                  sendCommandResult(client, result);
+
+                  // Refresh world if needed
+                  if (result.refreshWorld) {
+                    await refreshWorldSubscription(worldSocket, worldName);
+                  }
+                } else {
+                  sendError(client, `${type} event requires valid world subscription for command: ${commandName}`);
+                }
               }
+            } else {
+              sendError(client, `${type} event requires command message starting with '/'`);
             }
             break;
 
@@ -266,7 +279,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
 
               if (eventMessage.trim().startsWith('/')) {
                 // Handle as command
-                const result = await handleCommand(worldSocket.world, eventMessage);
+                const result = await handleCommand(worldSocket.world, eventMessage, ROOT_PATH);
                 sendCommandResult(client, result);
 
                 // Refresh world if needed

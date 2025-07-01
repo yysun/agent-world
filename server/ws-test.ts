@@ -140,7 +140,7 @@ function validateSuccessResponse(response: any, dataRequired: boolean = true): v
 function validateCommandSuccess(response: any, confirmationText?: string): void {
   validateSuccessResponse(response);
   if (confirmationText && !response.message?.includes('executed successfully') &&
-    !response.data.content?.includes(confirmationText)) {
+    !response.data?.content?.includes(confirmationText)) {
     throw new Error(`Command should confirm: ${confirmationText}`);
   }
 }
@@ -215,11 +215,11 @@ async function runTests(): Promise<void> {
     const response = await sendCommand(ws, '/getWorlds');
 
     validateSuccessResponse(response);
-    if (!Array.isArray(response.data.data)) {
-      throw new Error('getWorlds should return data.data array');
+    if (!Array.isArray(response.data)) {
+      throw new Error('getWorlds should return data array directly');
     }
 
-    const testWorldExists = response.data.data.some((world: any) => world.name === TEST_WORLD_NAME);
+    const testWorldExists = response.data.some((world: any) => world.name === TEST_WORLD_NAME);
     if (!testWorldExists) {
       throw new Error('Test world not found in worlds list');
     }
@@ -231,7 +231,7 @@ async function runTests(): Promise<void> {
     const response = await sendCommand(ws, '/getWorld');
 
     validateSuccessResponse(response);
-    if (response.data.data.name !== TEST_WORLD_NAME) {
+    if (response.data.name !== TEST_WORLD_NAME) {
       throw new Error('getWorld returned wrong world');
     }
     ws.close();
@@ -243,10 +243,10 @@ async function runTests(): Promise<void> {
     const response = await sendCommand(ws, `/addAgent ${TEST_AGENT_NAME} A helpful test agent`);
 
     validateSuccessResponse(response);
-    if (response.data.data.name !== TEST_AGENT_NAME) {
+    if (response.data.name !== TEST_AGENT_NAME) {
       throw new Error('addAgent returned wrong agent name');
     }
-    if (!response.data.refreshWorld) {
+    if (!response.refreshWorld) {
       throw new Error('addAgent should trigger world refresh');
     }
     ws.close();
@@ -257,11 +257,11 @@ async function runTests(): Promise<void> {
     const response = await sendCommand(ws, '/getWorld');
 
     validateSuccessResponse(response);
-    if (!response.data.data.agents) {
+    if (!response.data.agents) {
       throw new Error('getWorld should return agents array');
     }
 
-    const testAgentExists = response.data.data.agents.some((agent: any) => agent.name === TEST_AGENT_NAME);
+    const testAgentExists = response.data.agents.some((agent: any) => agent.name === TEST_AGENT_NAME);
     if (!testAgentExists) {
       throw new Error('Test agent not found in world');
     }
@@ -301,7 +301,7 @@ async function runTests(): Promise<void> {
     const response = await sendCommand(ws, `/addWorld new-test-world A second test world`);
 
     validateSuccessResponse(response);
-    if (response.data.data.name !== 'new-test-world') {
+    if (response.data.name !== 'new-test-world') {
       throw new Error('addWorld returned wrong world name');
     }
     ws.close();

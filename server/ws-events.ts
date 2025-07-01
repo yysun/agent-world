@@ -37,8 +37,6 @@ import { World } from '../core/types.js';
 import { publishMessage } from '../core/world-events.js';
 import { executeCommand } from './commands/index.js';
 
-const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
-
 // Minimal client connection interface for stateless event handling
 export interface ClientConnection {
   send: (data: string) => void;
@@ -110,16 +108,31 @@ export function sendError(client: ClientConnection, error: string, details?: any
 
 export function sendCommandResult(client: ClientConnection, commandResult: any) {
   const message = commandResult.error ? 'Command failed' : 'Command executed successfully';
+
+  // Handle simplified data responses (no double nesting)
+  if (commandResult.data !== undefined && commandResult.message && !commandResult.type) {
+    // This is a simplified data response - send data directly
+    client.send(JSON.stringify({
+      type: 'success',
+      message: commandResult.message,
+      data: commandResult.data, // Direct data access - no nesting
+      refreshWorld: commandResult.refreshWorld,
+      timestamp: new Date().toISOString()
+    }));
+    return;
+  }
+
+  // Handle traditional command results
   client.send(JSON.stringify({
     type: 'success',
     message,
-    data: commandResult, // Command result goes directly in data field
+    data: commandResult, // Traditional nested structure for backward compatibility
     timestamp: new Date().toISOString()
   }));
 }
 
 // Helper function to add root path to commands that need it
-export function prepareCommandWithRootPath(message: string): string {
+export function prepareCommandWithRootPath(message: string, rootPath: string): string {
   const commandLine = message.slice(1).trim(); // Remove leading '/'
   if (!commandLine) return message;
 
@@ -130,21 +143,21 @@ export function prepareCommandWithRootPath(message: string): string {
   const commandsRequiringRootPath = ['getworlds', 'addworld', 'updateworld'];
 
   if (commandsRequiringRootPath.includes(commandName)) {
-    // Insert ROOT_PATH as first argument
+    // Insert rootPath as first argument
     const args = parts.slice(1);
-    return `/${commandName} ${ROOT_PATH} ${args.join(' ')}`.trim();
+    return `/${commandName} ${rootPath} ${args.join(' ')}`.trim();
   }
 
   return message;
 }
 
 // Stateless command execution
-export async function handleCommand(world: World, eventMessage: string): Promise<any> {
+export async function handleCommand(world: World | null, eventMessage: string, rootPath: string): Promise<any> {
   if (!eventMessage?.trim().startsWith('/')) {
     return { error: 'Commands must start with /' };
   }
 
-  const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
+  const preparedCommand = prepareCommandWithRootPath(eventMessage.trim(), rootPath);
   return await executeCommand(preparedCommand, world);
 }
 

@@ -154,12 +154,24 @@ export const handleWebSocketMessage = (state, messageData) => {
       console.error('WebSocket error:', messageData.error);
       return { ...state, wsError: messageData.error };
 
+    case 'success':
+      // Command response - don't add to messages, just log for debugging
+      console.log('Command response:', messageData);
+      return state;
+
+    case 'connected':
+      // Initial connection message
+      return { ...state, connectionStatus: 'connected' };
+
     case 'welcome':
       if (state.worldName && wsApi.isConnected()) {
         wsApi.subscribeToWorld(state.worldName);
       }
       return { ...state, connectionStatus: 'connected' };
 
+    default:
+      console.warn('Unknown WebSocket message type:', messageData.type, messageData);
+      return state;
   }
 };
 

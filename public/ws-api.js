@@ -87,28 +87,57 @@ const attemptReconnect = () => {
 
 // World subscription functions
 const subscribeToWorld = (worldName) => {
-  if (!worldName) {
-    console.warn('Cannot subscribe to empty world name');
-    return false;
-  }
+  return new Promise((resolve, reject) => {
+    if (!worldName) {
+      console.warn('Cannot subscribe to empty world name');
+      reject(new Error('Cannot subscribe to empty world name'));
+      return;
+    }
 
-  // Unsubscribe from current world first
-  if (currentWorldSubscription) {
-    unsubscribeFromWorld();
-  }
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('WebSocket not connected'));
+      return;
+    }
 
-  const success = sendMessage({
-    type: 'subscribe',
-    payload: {
-      worldName: worldName
+    // Unsubscribe from current world first
+    if (currentWorldSubscription) {
+      unsubscribeFromWorld();
+    }
+
+    const timeout = setTimeout(() => reject(new Error('Subscription timeout')), 5000);
+    const handleResponse = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // Check for subscription success response
+        if (data.type === 'success' && data.message && data.message.includes('subscribed to world')) {
+          clearTimeout(timeout);
+          ws.removeEventListener('message', handleResponse);
+          currentWorldSubscription = worldName;
+          resolve(true);
+        }
+      } catch (error) {
+        clearTimeout(timeout);
+        ws.removeEventListener('message', handleResponse);
+        reject(error);
+      }
+    };
+
+    ws.addEventListener('message', handleResponse);
+
+    const success = sendMessage({
+      type: 'subscribe',
+      payload: {
+        worldName: worldName
+      }
+    });
+
+    if (!success) {
+      clearTimeout(timeout);
+      ws.removeEventListener('message', handleResponse);
+      reject(new Error('Failed to send subscription message'));
     }
   });
-
-  if (success) {
-    currentWorldSubscription = worldName;
-  }
-
-  return success;
 };
 
 const unsubscribeFromWorld = () => {
@@ -166,19 +195,37 @@ function sendCommand(command, worldName = null) {
 
     const timeout = setTimeout(() => reject(new Error('Command timeout')), 5000);
     const handleResponse = (event) => {
-      clearTimeout(timeout);
-      ws.removeEventListener('message', handleResponse);
       try {
-        resolve(JSON.parse(event.data));
+        const data = JSON.parse(event.data);
+
+        // Only handle command response messages, ignore other WebSocket messages
+        if (data.type === 'success' || data.type === 'error' ||
+          (data.type === 'connected') || // Initial connection message
+          (data.message && (data.message.includes('Command') || data.message.includes('Successfully')))) {
+          clearTimeout(timeout);
+          ws.removeEventListener('message', handleResponse);
+          resolve(data);
+        }
+        // Ignore other message types (events, subscriptions, etc.)
       } catch (error) {
+        clearTimeout(timeout);
+        ws.removeEventListener('message', handleResponse);
         reject(error);
       }
     };
 
     ws.addEventListener('message', handleResponse);
+
+    // Build payload - only include worldName if it's not null/undefined
+    const payload = { message: command };
+    const targetWorldName = worldName || currentWorldSubscription;
+    if (targetWorldName) {
+      payload.worldName = targetWorldName;
+    }
+
     ws.send(JSON.stringify({
       type: 'system',
-      payload: { worldName: worldName || currentWorldSubscription, message: command }
+      payload: payload
     }));
   });
 }
@@ -242,9 +289,9 @@ export default {
 // World and Agent API Functions
 
 async function getWorlds() {
-  const response = await sendCommand('/getWorlds');
-  if (response.type === 'success' && response.data?.data) {
-    return response.data.data;
+  const response = await sendCommand('/getWorlds', null); // Pass null for global command
+  if (response.type === 'success' && response.data) {
+    return response.data; // Direct access - no double nesting
   }
   throw new Error(response.data?.error || 'Failed to get worlds');
 }
@@ -256,8 +303,8 @@ async function getAgents(worldName) {
   }
 
   const response = await sendCommand('/getWorld', targetWorld);
-  if (response.type === 'success' && response.data?.data?.agents) {
-    return response.data.data.agents;
+  if (response.type === 'success' && response.data?.agents) {
+    return response.data.agents; // Direct access - no double nesting
   }
   throw new Error(response.data?.error || 'Failed to get agents');
 }
@@ -283,8 +330,8 @@ async function createAgent(worldName, agentData) {
   }
 
   const response = await sendCommand(`/addAgent ${name} ${description}`, targetWorld);
-  if (response.type === 'success' && response.data?.data) {
-    return response.data.data;
+  if (response.type === 'success' && response.data) {
+    return response.data; // Direct access - no double nesting
   }
   throw new Error(response.data?.error || 'Failed to create agent');
 }

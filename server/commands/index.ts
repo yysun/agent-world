@@ -37,19 +37,33 @@ import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHe
 // Helper functions
 const validateArgs: ValidationHelper = (args, requiredCount = 0) => {
   if (args.length < requiredCount) {
-    return createResponse(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`, 'error');
+    return createError(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`);
   }
   return null;
 };
 
-const createResponse: ResponseHelper = (content, type = 'system', data = undefined, refreshWorld = false) => ({
-  type,
-  content: type !== 'error' ? content : undefined,
-  error: type === 'error' ? content : undefined,
-  data,
-  timestamp: new Date().toISOString(),
-  refreshWorld
-});
+// Updated to create simplified responses - data commands return data directly
+const createResponse: ResponseHelper = (content, type = 'system', data = undefined, refreshWorld = false) => {
+  if (type === 'data') {
+    // For data responses, return the data directly with metadata
+    return {
+      data,
+      message: content,
+      refreshWorld,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // For system responses, return traditional structure
+  return {
+    type,
+    content: type !== 'error' ? content : undefined,
+    error: type === 'error' ? content : undefined,
+    data,
+    timestamp: new Date().toISOString(),
+    refreshWorld
+  };
+};
 
 const createError: ErrorHelper = (error) => ({
   type: 'error' as const,
@@ -443,10 +457,10 @@ export type CommandName = keyof typeof commands;
 /**
  * Execute a command by parsing the message and routing to appropriate command handler
  * @param message - The command message starting with '/'
- * @param world - The world context
+ * @param world - The world context (null for global commands)
  * @returns Promise<CommandResult> - The command execution result
  */
-export async function executeCommand(message: string, world: World): Promise<CommandResult> {
+export async function executeCommand(message: string, world: World | null): Promise<CommandResult> {
   try {
     // Remove leading '/' and split into command and arguments
     const commandLine = message.slice(1).trim();
@@ -467,6 +481,26 @@ export async function executeCommand(message: string, world: World): Promise<Com
 
     if (!command) {
       return createError(`Unknown command: /${commandName}`);
+    }
+
+    // Handle global commands that don't need world context
+    const globalCommands = ['getworlds', 'addworld'];
+    if (globalCommands.includes(commandKey.toLowerCase())) {
+      // For global commands, we can pass null but the command itself should handle it
+      // Create a dummy world context or handle specially
+      if (commandKey.toLowerCase() === 'getworlds') {
+        // getWorlds doesn't actually use the world parameter, just the ROOT_PATH from args
+        return await command(args, null as any); // Type cast to avoid error
+      }
+      if (commandKey.toLowerCase() === 'addworld') {
+        // addWorld creates a new world, doesn't need existing world context
+        return await command(args, null as any); // Type cast to avoid error
+      }
+    }
+
+    // For all other commands, world context is required
+    if (!world) {
+      return createError(`Command '${commandName}' requires world context`);
     }
 
     // Execute the command

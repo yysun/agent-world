@@ -21,9 +21,10 @@ import { World, Agent } from '../../core/types.js';
 import { WorldInfo } from '../../core/world-manager.js';
 
 export interface CommandResult {
-  type: 'system' | 'error' | 'data';
+  type?: 'system' | 'error' | 'data';
   content?: string;
   error?: string;
+  message?: string; // For simplified data responses
   data?: any;
   timestamp: string;
   refreshWorld?: boolean; // Flag to indicate world should be refreshed after operation

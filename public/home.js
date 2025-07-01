@@ -29,7 +29,9 @@ const { html, run } = window.apprun;
 
 import wsApi from './ws-api.js';
 import Message from './components/message.js';
+import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
 import {
+  initializeState,
   selectWorld,
   handleWebSocketMessage,
   handleConnectionStatus,
@@ -42,20 +44,9 @@ const USER_ID = 'user1';
 
 // Initial state
 const state = async () => {
-  const worlds = await wsApi.getWorlds();
-  const worldName = worlds.length > 0 ? worlds[0].name : null;
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
-
-  return selectWorld({
-    worlds,
-    theme,
-    connectionStatus: 'disconnected',
-    messages: [],
-    currentMessage: '',
-    wsError: null,
-    needScroll: false
-  }, worldName);
+  return initializeState();
 };
 
 // Local event handlers
@@ -71,7 +62,7 @@ const onKeypress = (state, e) => {
     e.target.value = ''; // Clear input field
     return sendMessage(state);
   }
-  return state;
+  // return state; // No need to return state here - no screen update needed
 };
 
 const sendMessage = (state) => {

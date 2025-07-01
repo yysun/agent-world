@@ -5,6 +5,7 @@
  * for convenient importing in components.
  */
 
+export { initializeState } from './init-state.js';
 export { selectWorld } from './select-world.js';
 export {
   handleWebSocketMessage,
