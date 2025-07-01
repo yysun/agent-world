@@ -358,8 +358,69 @@ async function processInput(input: string): Promise<void> {
       try {
         await commands[commandName](commandArgs, currentWorld!);
 
-        // Auto-run /agents command after clear command to show updated state
+        // Reload world after clear command to pick up changes from disk
         if (commandName === 'clear') {
+          // Reload the current world to get updated memory state
+          const currentWorldName = currentWorld!.name;
+
+          // Unsubscribe from current world events before reload
+          if (currentSSEUnsubscribe) {
+            currentSSEUnsubscribe();
+            currentSSEUnsubscribe = null;
+          }
+          if (currentMessagesUnsubscribe) {
+            currentMessagesUnsubscribe();
+            currentMessagesUnsubscribe = null;
+          }
+
+          // Reload the world
+          await loadWorldByName(currentWorldName);
+
+          // Re-subscribe to the reloaded world's events
+          const sseUnsubscribe = subscribeToSSE(currentWorld!, async (event) => {
+            if (event.type === 'start' || event.type === 'chunk' || event.type === 'end' || event.type === 'error') {
+              const sseData = event;
+              const agents = getAgentsFromCurrentWorld();
+              const agent = agents.find(a => a.name === sseData.agentName);
+              const agentName = agent?.name || 'Unknown Agent';
+
+              switch (sseData.type) {
+                case 'start':
+                  const estimatedInputTokens = await estimateInputTokens(sseData.agentName, currentWorldName);
+                  StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
+                  break;
+                case 'chunk':
+                  StreamingDisplay.addStreamingContent(sseData.agentName, sseData.content || '');
+                  break;
+                case 'end':
+                  if (sseData.usage) {
+                    StreamingDisplay.setStreamingUsage(sseData.agentName, sseData.usage);
+                    StreamingDisplay.updateFinalPreview(sseData.agentName);
+                  }
+                  StreamingDisplay.endStreaming(sseData.agentName);
+                  break;
+                case 'error':
+                  StreamingDisplay.markStreamingError(sseData.agentName);
+                  break;
+              }
+            }
+          });
+
+          const messagesUnsubscribe = subscribeToMessages(currentWorld!, async (event) => {
+            if (event.content.startsWith('@human')) {
+              const messageData: MessageEventPayload = {
+                content: event.content,
+                sender: event.sender
+              };
+              StreamingDisplay.displayMessage(messageData);
+            }
+          });
+
+          // Store new unsubscribe functions
+          currentSSEUnsubscribe = sseUnsubscribe;
+          currentMessagesUnsubscribe = messagesUnsubscribe;
+
+          // Auto-run /agents command after clear command to show updated state
           await listCommand([], currentWorld!);
         }
       } catch (error) {
@@ -465,7 +526,7 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
             commandSubtype: 'warning',
             metadata: { source: 'cli', messageType: 'command' }
           });
-          console.log(colors.cyan(`\nSelect a world (1-${worlds.length}): `));
+          process.stdout.write(colors.cyan(`Select a world (1-${worlds.length}): `));
           input = '';
           return;
         }
@@ -484,7 +545,7 @@ async function selectWorldInteractively(worlds: string[]): Promise<string> {
     };
 
     term.on('key', handleKey);
-    console.log(colors.cyan(`\nSelect a world (1-${worlds.length}): `));
+    process.stdout.write(colors.cyan(`Select a world (1-${worlds.length}): `));
   });
 }
 

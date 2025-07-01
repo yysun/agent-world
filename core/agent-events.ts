@@ -192,6 +192,16 @@ export async function processAgentMessage(
       }
     }
 
+    // Remove self-mentions from response (agents should not mention themselves)
+    if (finalResponse && typeof finalResponse === 'string') {
+      const selfMention = `@${agent.id}`;
+      const selfMentionRegex = new RegExp(`@${agent.id}\\b`, 'gi');
+      finalResponse = finalResponse.replace(selfMentionRegex, '').trim();
+
+      // Clean up any resulting double spaces or line breaks
+      finalResponse = finalResponse.replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+    }
+
     // Publish agent response
     if (finalResponse && typeof finalResponse === 'string') {
       publishMessage(world, finalResponse, agent.id);
