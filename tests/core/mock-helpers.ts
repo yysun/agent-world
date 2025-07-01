@@ -1,12 +1,12 @@
 /**
  * Mock Infrastructure for Core System Tests
- * 
+ *
  * Features:
  * - File I/O mocking with in-memory filesystem
  * - LLM provider mocking with configurable responses
  * - Environment variable management
  * - Test isolation and cleanup utilities
- * 
+ *
  * Implementation:
  * - Uses jest.mock for module mocking
  * - In-memory file system simulation
@@ -196,6 +196,43 @@ export function getLLMCallCount(): number {
 }
 
 /**
+ * Enhanced error scenario helpers for file operations
+ */
+export function setupFileSystemErrorScenarios(): void {
+  // Setup various error scenarios for testing
+  mockLLMResponses.set('file-errors', ['ENOENT', 'EACCES', 'EMFILE', 'ENOSPC']);
+}
+
+export function simulateFileSystemError(errorType: string = 'ENOENT'): void {
+  const error = new Error(`${errorType}: file system error`);
+  (error as any).code = errorType;
+
+  // Make next file operation fail with this error
+  mockFs.promises.readFile.mockRejectedValueOnce(error);
+}
+
+/**
+ * Enhanced LLM streaming simulation
+ */
+export function setupStreamingLLMMocks(): void {
+  // Mock streaming responses with configurable chunks
+  mockLLMResponses.set('streaming', [
+    'Chunk 1: Hello ',
+    'Chunk 2: from ',
+    'Chunk 3: streaming ',
+    'Chunk 4: LLM!'
+  ]);
+}
+
+export function createMockStreamResponse(chunks: string[]): AsyncGenerator<string> {
+  return (async function* () {
+    for (const chunk of chunks) {
+      yield chunk;
+    }
+  })();
+}
+
+/**
  * Test data creation utilities
  */
 export function createMockAgent(overrides: Partial<Agent> = {}): Agent {
@@ -347,4 +384,391 @@ export function expectFileDeleted(path: string, times: number = 1): void {
   if (times > 0) {
     expect(mockFs.promises.rm).toHaveBeenCalledTimes(times);
   }
+}
+
+/**
+ * Mock cleanup verification utilities
+ */
+export function verifyMockCleanup(): boolean {
+  // Verify all mocks are properly reset
+  return mockLLMCallCount === 0 && mockLLMResponses.size === 0;
+}
+
+export function getMockFileSystemState(): Record<string, string> {
+  // Return current mock file system state for debugging
+  const flatState: Record<string, string> = {};
+  const flatten = (obj: any, prefix = '') => {
+    for (const [key, value] of Object.entries(obj)) {
+      const path = prefix ? `${prefix}/${key}` : key;
+      if (typeof value === 'string') {
+        flatState[path] = value;
+      } else if (typeof value === 'object') {
+        flatten(value, path);
+      }
+    }
+  };
+  flatten(mockFileSystem);
+  return flatState;
+}
+
+/**
+ * Complex conversation history builders
+ */
+export function createComplexConversationHistory(scenarioType: 'multi-agent' | 'turn-heavy' | 'mention-heavy' = 'multi-agent'): AgentMessage[] {
+  const baseTime = new Date('2023-01-01T00:00:00Z');
+
+  switch (scenarioType) {
+    case 'multi-agent':
+      return [
+        createMockAgentMessage({
+          role: 'user',
+          content: 'Hello @alice, can you help @bob with the project?',
+          sender: 'user',
+          createdAt: new Date(baseTime.getTime() + 1000)
+        }),
+        createMockAgentMessage({
+          role: 'assistant',
+          content: 'Of course! @bob, I\'d be happy to help. What do you need assistance with?',
+          sender: 'alice',
+          createdAt: new Date(baseTime.getTime() + 2000)
+        }),
+        createMockAgentMessage({
+          role: 'assistant',
+          content: '@alice Thanks! I need help with the data analysis. Can you review my approach?',
+          sender: 'bob',
+          createdAt: new Date(baseTime.getTime() + 3000)
+        }),
+        createMockAgentMessage({
+          role: 'assistant',
+          content: '@bob Your approach looks good, but consider using a different algorithm for better performance.',
+          sender: 'alice',
+          createdAt: new Date(baseTime.getTime() + 4000)
+        }),
+        createMockAgentMessage({
+          role: 'user',
+          content: 'Great collaboration, everyone!',
+          sender: 'user',
+          createdAt: new Date(baseTime.getTime() + 5000)
+        })
+      ];
+
+    case 'turn-heavy':
+      return Array.from({ length: 15 }, (_, i) =>
+        createMockAgentMessage({
+          role: i % 2 === 0 ? 'user' : 'assistant',
+          content: `Turn ${i + 1}: This is message number ${i + 1} in a long conversation.`,
+          sender: i % 2 === 0 ? 'user' : 'agent',
+          createdAt: new Date(baseTime.getTime() + (i + 1) * 1000)
+        })
+      );
+
+    case 'mention-heavy':
+      return [
+        createMockAgentMessage({
+          role: 'user',
+          content: '@alice @bob @charlie @diana all need to coordinate on this task.',
+          sender: 'user',
+          createdAt: new Date(baseTime.getTime() + 1000)
+        }),
+        createMockAgentMessage({
+          role: 'assistant',
+          content: '@bob @charlie @diana I can coordinate this. Let\'s start with phase 1.',
+          sender: 'alice',
+          createdAt: new Date(baseTime.getTime() + 2000)
+        }),
+        createMockAgentMessage({
+          role: 'assistant',
+          content: '@alice @charlie @diana Sounds good. I\'ll handle the initial setup.',
+          sender: 'bob',
+          createdAt: new Date(baseTime.getTime() + 3000)
+        })
+      ];
+
+    default:
+      return [createMockAgentMessage()];
+  }
+}
+
+/**
+ * Event-heavy test scenarios
+ */
+export interface MockEventScenario {
+  name: string;
+  events: Array<{
+    type: 'message' | 'agent_join' | 'agent_leave' | 'turn_limit' | 'error';
+    timestamp: Date;
+    data: any;
+  }>;
+}
+
+export function createEventHeavyScenario(scenarioType: 'rapid-fire' | 'concurrent' | 'error-prone' = 'rapid-fire'): MockEventScenario {
+  const baseTime = new Date('2023-01-01T00:00:00Z');
+
+  switch (scenarioType) {
+    case 'rapid-fire':
+      return {
+        name: 'Rapid Fire Events',
+        events: Array.from({ length: 20 }, (_, i) => ({
+          type: 'message' as const,
+          timestamp: new Date(baseTime.getTime() + i * 100), // 100ms intervals
+          data: {
+            content: `Rapid message ${i + 1}`,
+            sender: i % 3 === 0 ? 'user' : `agent${i % 2 + 1}`
+          }
+        }))
+      };
+
+    case 'concurrent':
+      return {
+        name: 'Concurrent Agent Operations',
+        events: [
+          {
+            type: 'agent_join',
+            timestamp: new Date(baseTime.getTime() + 100),
+            data: { agentId: 'alice', worldId: 'test-world' }
+          },
+          {
+            type: 'agent_join',
+            timestamp: new Date(baseTime.getTime() + 150),
+            data: { agentId: 'bob', worldId: 'test-world' }
+          },
+          {
+            type: 'message',
+            timestamp: new Date(baseTime.getTime() + 200),
+            data: { content: 'Hello @alice @bob', sender: 'user' }
+          },
+          {
+            type: 'message',
+            timestamp: new Date(baseTime.getTime() + 250),
+            data: { content: 'Hi there!', sender: 'alice' }
+          },
+          {
+            type: 'message',
+            timestamp: new Date(baseTime.getTime() + 300),
+            data: { content: 'Hello everyone!', sender: 'bob' }
+          },
+          {
+            type: 'turn_limit',
+            timestamp: new Date(baseTime.getTime() + 400),
+            data: { agentId: 'alice', turnCount: 5 }
+          }
+        ]
+      };
+
+    case 'error-prone':
+      return {
+        name: 'Error-Prone Scenario',
+        events: [
+          {
+            type: 'message',
+            timestamp: new Date(baseTime.getTime() + 100),
+            data: { content: 'Test message', sender: 'user' }
+          },
+          {
+            type: 'error',
+            timestamp: new Date(baseTime.getTime() + 200),
+            data: { type: 'LLM_TIMEOUT', message: 'LLM response timeout' }
+          },
+          {
+            type: 'message',
+            timestamp: new Date(baseTime.getTime() + 300),
+            data: { content: 'Retry message', sender: 'user' }
+          },
+          {
+            type: 'error',
+            timestamp: new Date(baseTime.getTime() + 400),
+            data: { type: 'FILE_IO_ERROR', message: 'Failed to save agent memory' }
+          }
+        ]
+      };
+
+    default:
+      return {
+        name: 'Simple Scenario',
+        events: [{
+          type: 'message',
+          timestamp: baseTime,
+          data: { content: 'Test', sender: 'user' }
+        }]
+      };
+  }
+}
+
+/**
+ * Edge case agent configurations
+ */
+export function createEdgeCaseAgentConfig(edgeCase: 'minimal' | 'maximal' | 'invalid' | 'corrupted' = 'minimal'): Partial<Agent> {
+  const baseTime = new Date('2023-01-01T00:00:00Z');
+
+  switch (edgeCase) {
+    case 'minimal':
+      return {
+        id: 'min',
+        name: 'Min',
+        type: 'minimal',
+        status: 'active',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-3.5-turbo',
+        systemPrompt: 'Hi.',
+        temperature: 0,
+        maxTokens: 1,
+        createdAt: baseTime,
+        lastActive: baseTime,
+        llmCallCount: 0,
+        memory: []
+      };
+
+    case 'maximal':
+      return {
+        id: 'max-agent-with-very-long-identifier-that-tests-system-limits',
+        name: 'Maximum Configuration Agent with Extended Properties',
+        type: 'maximal-test-agent-type',
+        status: 'active',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4-turbo-preview',
+        systemPrompt: 'You are an extremely sophisticated AI agent with extensive capabilities. '.repeat(50), // Long prompt
+        temperature: 1.0,
+        maxTokens: 4096,
+        createdAt: baseTime,
+        lastActive: baseTime,
+        llmCallCount: 999,
+        memory: createComplexConversationHistory('turn-heavy')
+      };
+
+    case 'invalid':
+      return {
+        id: '', // Invalid empty ID
+        name: '',
+        type: '',
+        status: 'unknown' as any,
+        provider: 'INVALID_PROVIDER' as any,
+        model: '',
+        systemPrompt: '',
+        temperature: -1, // Invalid temperature
+        maxTokens: -100, // Invalid max tokens
+        createdAt: new Date('invalid'), // Invalid date
+        lastActive: new Date('invalid'),
+        llmCallCount: -1,
+        memory: null as any // Invalid memory
+      };
+
+    case 'corrupted':
+      return {
+        id: 'corrupted\x00agent', // Null character
+        name: 'Corrupted\nAgent\tName', // Special characters
+        type: '../../path/traversal',
+        status: 'active',
+        provider: LLMProvider.OPENAI,
+        model: 'model"with"quotes',
+        systemPrompt: 'System prompt with \u0000 null bytes and 🦄 emojis',
+        temperature: NaN,
+        maxTokens: Infinity,
+        createdAt: baseTime,
+        lastActive: baseTime,
+        llmCallCount: 0,
+        memory: [
+          {
+            role: 'user',
+            content: 'Message with \x00 null bytes',
+            createdAt: baseTime,
+            sender: 'corrupted\nuser'
+          } as any
+        ]
+      };
+
+    default:
+      return createMockAgent();
+  }
+}
+
+/**
+ * SSE event test patterns
+ */
+export interface MockSSEEvent {
+  type: string;
+  data: string;
+  id?: string;
+  retry?: number;
+}
+
+export function createSSEEventPattern(pattern: 'streaming' | 'error' | 'mixed' = 'streaming'): MockSSEEvent[] {
+  switch (pattern) {
+    case 'streaming':
+      return [
+        { type: 'llm-start', data: JSON.stringify({ agentId: 'test-agent', messageId: 'msg-1' }) },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Hello ', partial: 'Hello ' }), id: '1' },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'world', partial: 'Hello world' }), id: '2' },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: '!', partial: 'Hello world!' }), id: '3' },
+        {
+          type: 'llm-complete', data: JSON.stringify({
+            finalResponse: 'Hello world!',
+            tokenCount: 3,
+            duration: 1500
+          }), id: '4'
+        }
+      ];
+
+    case 'error':
+      return [
+        { type: 'llm-start', data: JSON.stringify({ agentId: 'test-agent', messageId: 'msg-1' }) },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Starting...', partial: 'Starting...' }), id: '1' },
+        {
+          type: 'llm-error', data: JSON.stringify({
+            error: 'Rate limit exceeded',
+            code: 'RATE_LIMIT',
+            retryAfter: 60
+          }), id: '2'
+        }
+      ];
+
+    case 'mixed':
+      return [
+        { type: 'llm-start', data: JSON.stringify({ agentId: 'agent1', messageId: 'msg-1' }) },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Agent 1: ', partial: 'Agent 1: ' }), id: '1' },
+        { type: 'llm-start', data: JSON.stringify({ agentId: 'agent2', messageId: 'msg-2' }) },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Hello', partial: 'Agent 1: Hello' }), id: '2' },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Agent 2: ', partial: 'Agent 2: ' }), id: '3' },
+        {
+          type: 'llm-complete', data: JSON.stringify({
+            finalResponse: 'Agent 1: Hello',
+            agentId: 'agent1'
+          }), id: '4'
+        },
+        { type: 'llm-chunk', data: JSON.stringify({ chunk: 'Hi!', partial: 'Agent 2: Hi!' }), id: '5' },
+        {
+          type: 'llm-complete', data: JSON.stringify({
+            finalResponse: 'Agent 2: Hi!',
+            agentId: 'agent2'
+          }), id: '6'
+        }
+      ];
+
+    default:
+      return [
+        { type: 'test-event', data: JSON.stringify({ message: 'test' }) }
+      ];
+  }
+}
+
+/**
+ * Comprehensive mock data builder
+ */
+export function createComprehensiveTestScenario(name: string = 'default'): {
+  world: CreateWorldParams;
+  agents: Agent[];
+  messages: AgentMessage[];
+  events: MockEventScenario;
+  sseEvents: MockSSEEvent[];
+} {
+  return {
+    world: createMockWorldConfig({ name: `${name}-world`, description: `Test world for ${name}` }),
+    agents: [
+      createMockAgent({ id: 'alice', name: 'Alice', type: 'helper' }),
+      createMockAgent({ id: 'bob', name: 'Bob', type: 'analyst' }),
+      createMockAgent(createEdgeCaseAgentConfig('minimal'))
+    ],
+    messages: createComplexConversationHistory('multi-agent'),
+    events: createEventHeavyScenario('concurrent'),
+    sseEvents: createSSEEventPattern('mixed')
+  };
 }

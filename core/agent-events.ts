@@ -34,7 +34,7 @@
 
 import { World, Agent, AgentMessage, MessageData, SenderType, WorldMessageEvent } from './types';
 import { subscribeToMessages, publishMessage, publishSSE } from './world-events';
-import { saveAgentToDisk, loadAgentFromDisk } from './agent-storage';
+import { saveAgentToDisk, loadAgentFromDisk, saveAgentMemoryToDisk } from './agent-storage';
 import { streamAgentResponse } from './llm-manager';
 import {
   getWorldTurnLimit,
@@ -65,7 +65,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
 /**
  * Save incoming message to agent memory (independent of LLM processing)
  */
-async function saveIncomingMessageToMemory(
+export async function saveIncomingMessageToMemory(
   world: World,
   agent: Agent,
   messageEvent: WorldMessageEvent
@@ -89,7 +89,6 @@ async function saveIncomingMessageToMemory(
 
     // Auto-save memory to disk
     try {
-      const { saveAgentMemoryToDisk } = await import('./agent-storage');
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
       console.warn(`Failed to auto-save memory for agent ${agent.id}:`, error);
@@ -102,7 +101,7 @@ async function saveIncomingMessageToMemory(
 /**
  * Agent message processing logic (enhanced from src/agent.ts)
  */
-async function processAgentMessage(
+export async function processAgentMessage(
   world: World,
   agent: Agent,
   messageEvent: WorldMessageEvent
@@ -140,7 +139,6 @@ async function processAgentMessage(
 
     // Auto-save agent state after LLM call count increment
     try {
-      const { saveAgentToDisk } = await import('./agent-storage');
       await saveAgentToDisk(world.rootPath, world.id, agent);
     } catch (error) {
       console.warn(`Failed to auto-save agent ${agent.id} after LLM call increment:`, error);
@@ -160,7 +158,6 @@ async function processAgentMessage(
 
     // Auto-save memory after adding assistant response
     try {
-      const { saveAgentMemoryToDisk } = await import('./agent-storage');
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
       console.warn(`Failed to auto-save memory for agent ${agent.id} after response:`, error);
@@ -216,7 +213,7 @@ async function processAgentMessage(
 /**
  * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
  */
-async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
+export async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
   // Never respond to own messages
   if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
     return false;
@@ -250,7 +247,6 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
 
       // Auto-save agent state after turn limit reset
       try {
-        const { saveAgentToDisk } = await import('./agent-storage');
         await saveAgentToDisk(world.rootPath, world.id, agent);
       } catch (error) {
         console.warn(`Failed to auto-save agent ${agent.id} after turn limit reset:`, error);

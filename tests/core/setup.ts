@@ -1,6 +1,6 @@
 /**
  * Jest Setup for Core System Tests
- * 
+ *
  * Features:
  * - Global mock configuration for fs/promises
  * - LLM provider mocking
@@ -36,12 +36,21 @@ jest.mock('path', () => ({
   }
 }));
 
-// Mock LLM manager
+// Enhanced LLM manager mocking with streaming simulation
 jest.mock('../../core/llm-manager.js', () => ({
   streamAgentResponse: jest.fn(),
   generateAgentResponse: jest.fn(),
   LLMConfig: jest.fn()
 }), { virtual: true });
+
+// Mock AI SDK for direct LLM testing
+jest.mock('ai', () => ({
+  generateText: jest.fn(),
+  streamText: jest.fn(),
+  createOpenAI: jest.fn(),
+  createAnthropic: jest.fn(),
+  createGoogle: jest.fn()
+}));
 
 // Global test timeout
 jest.setTimeout(10000);
