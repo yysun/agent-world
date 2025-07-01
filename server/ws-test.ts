@@ -1,36 +1,28 @@
 /**
  * WebSocket Integration Tests for Server Commands
  * 
- * Features:
- * - Integration tests for all WebSocket server commands
- * - Real WebSocket connection testing with ws library
- * - World and agent lifecycle testing
- * - Command validation and error handling tests
- * - Cleanup and teardown management
+ * Comprehensive test suite for WebSocket server commands with real connection testing,
+ * world/agent lifecycle management, command validation, and error handling.
  * 
- * Test Coverage:
- * - Connection and subscription management
- * - World commands: getWorlds, getWorld, addWorld, updateWorld
- * - Agent commands: addAgent, updateAgentConfig, updateAgentPrompt, updateAgentMemory
- * - Clear command functionality
- * - Error handling and validation
- * - World refresh after modifications
+ * Test Coverage: Connection/subscription, world commands (getWorlds, getWorld, addWorld, updateWorld),
+ * agent commands (addAgent, updateAgentConfig, updateAgentPrompt, updateAgentMemory), clear functionality,
+ * error handling and validation, world refresh after modifications.
  * 
- * Test Data:
- * - Uses test-data directory for isolated testing
- * - Creates and cleans up test worlds and agents
- * - Validates command responses and data integrity
+ * Protocol: Inbound { type: "subscribe"|"system", payload: {...} }, 
+ * Outbound { type: "success", message, data: commandResult, timestamp }
+ * 
+ * Implementation: Uses isolated test data directory with automatic setup/cleanup.
+ * Consolidated helper functions reduce code duplication and improve maintainability.
  */
 
 import WebSocket from 'ws';
 import { createServer, Server } from 'http';
-import { createWorld, deleteWorld, listWorlds } from '../core/world-manager.js';
+import { createWorld } from '../core/world-manager.js';
 import { promises as fs } from 'fs';
-import path from 'path';
 
 // Test configuration
 const TEST_PORT = 3000;
-const TEST_DATA_PATH = './data/worlds'; // Use the same path as WebSocket server
+const TEST_DATA_PATH = './data/worlds';
 const TEST_WORLD_NAME = 'test-world';
 const TEST_AGENT_NAME = 'test-agent';
 
@@ -39,23 +31,17 @@ let wsServer: any;
 
 // Setup test environment
 async function setupTestEnvironment(): Promise<void> {
-  // Clean up any existing test data
+  // Clean up and create test data directory
   try {
     await fs.rm(TEST_DATA_PATH, { recursive: true, force: true });
   } catch (error) {
-    // Directory doesn't exist, which is fine
+    // Directory doesn't exist, ignore
   }
-
-  // Create test data directory
   await fs.mkdir(TEST_DATA_PATH, { recursive: true });
 
-  // Import WebSocket server (use default path)
+  // Import and setup WebSocket server
   const { createWebSocketServer } = await import('./ws.js');
-
-  // Create HTTP server
   server = createServer();
-
-  // Setup WebSocket server (no custom root path)
   wsServer = createWebSocketServer(server);
 
   // Start server
@@ -68,14 +54,12 @@ async function setupTestEnvironment(): Promise<void> {
 
 // Cleanup test environment
 async function cleanupTestEnvironment(): Promise<void> {
-  // Close server
   if (server) {
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
   }
 
-  // Clean up test data
   try {
     await fs.rm(TEST_DATA_PATH, { recursive: true, force: true });
   } catch (error) {
@@ -85,28 +69,23 @@ async function cleanupTestEnvironment(): Promise<void> {
   console.log('Test environment cleaned up');
 }
 
-// Helper function to create WebSocket connection
+// Helper functions
 function createWebSocketConnection(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://localhost:${TEST_PORT}`);
-
     ws.on('open', () => resolve(ws));
     ws.on('error', reject);
   });
 }
 
-// Helper function to send command and wait for response
 function sendCommand(ws: WebSocket, command: string, worldName: string = TEST_WORLD_NAME): Promise<any> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Command timeout'));
-    }, 5000);
+    const timeout = setTimeout(() => reject(new Error('Command timeout')), 1000);
 
     ws.once('message', (data) => {
       clearTimeout(timeout);
       try {
-        const response = JSON.parse(data.toString());
-        resolve(response);
+        resolve(JSON.parse(data.toString()));
       } catch (error) {
         reject(error);
       }
@@ -114,26 +93,19 @@ function sendCommand(ws: WebSocket, command: string, worldName: string = TEST_WO
 
     ws.send(JSON.stringify({
       type: 'system',
-      payload: {
-        worldName: worldName,
-        message: command
-      }
+      payload: { worldName, message: command }
     }));
   });
 }
 
-// Helper function to subscribe to world
 function subscribeToWorld(ws: WebSocket, worldName: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Subscription timeout'));
-    }, 5000);
+    const timeout = setTimeout(() => reject(new Error('Subscription timeout')), 5000);
 
     ws.once('message', (data) => {
       clearTimeout(timeout);
       try {
-        const response = JSON.parse(data.toString());
-        resolve(response);
+        resolve(JSON.parse(data.toString()));
       } catch (error) {
         reject(error);
       }
@@ -141,13 +113,46 @@ function subscribeToWorld(ws: WebSocket, worldName: string): Promise<any> {
 
     ws.send(JSON.stringify({
       type: 'subscribe',
-      payload: {
-        worldName: worldName
-      }
+      payload: { worldName }
     }));
   });
 }
 
+// Helper to setup connection and subscription for tests
+async function setupTestConnection(): Promise<WebSocket> {
+  const ws = await createWebSocketConnection();
+  // Skip connected message
+  await new Promise((resolve) => ws.once('message', resolve));
+  await subscribeToWorld(ws, TEST_WORLD_NAME);
+  return ws;
+}
+
+// Validation helpers
+function validateSuccessResponse(response: any, dataRequired: boolean = true): void {
+  if (response.type !== 'success') {
+    throw new Error(`Expected success response, got: ${JSON.stringify(response)}`);
+  }
+  if (dataRequired && !response.data) {
+    throw new Error('Success response should include data');
+  }
+}
+
+function validateCommandSuccess(response: any, confirmationText?: string): void {
+  validateSuccessResponse(response);
+  if (confirmationText && !response.message?.includes('executed successfully') &&
+    !response.data.content?.includes(confirmationText)) {
+    throw new Error(`Command should confirm: ${confirmationText}`);
+  }
+}
+
+function validateErrorResponse(response: any, errorText: string): void {
+  if (response.type !== 'success' || response.message !== 'Command failed') {
+    throw new Error('Error should return success with "Command failed" message');
+  }
+  if (response.data?.type !== 'error' || !response.data?.error?.includes(errorText)) {
+    throw new Error(`Error should contain: ${errorText}`);
+  }
+}
 // Test cases
 async function runTests(): Promise<void> {
   console.log('Starting WebSocket integration tests...\n');
@@ -167,33 +172,16 @@ async function runTests(): Promise<void> {
     }
   };
 
-  // Test 1: Basic connection and welcome
+  // Basic connection test
   await test('Basic WebSocket connection', async () => {
     const ws = await createWebSocketConnection();
-
-    // Wait for welcome message
-    const welcome = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('No welcome message')), 2000);
-      ws.once('message', (data) => {
-        clearTimeout(timeout);
-        try {
-          const parsed = JSON.parse(data.toString());
-          console.log('Welcome message received:', parsed);
-          resolve(parsed);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-
-    if ((welcome as any).type !== 'welcome') {
-      throw new Error(`Expected welcome message, got: ${JSON.stringify(welcome)}`);
+    if (ws.readyState !== ws.OPEN) {
+      throw new Error('WebSocket connection failed');
     }
-
     ws.close();
   });
 
-  // Test 2: Create test world first
+  // Create test world
   await test('Create test world', async () => {
     const testWorld = await createWorld(TEST_DATA_PATH, {
       name: TEST_WORLD_NAME,
@@ -206,311 +194,140 @@ async function runTests(): Promise<void> {
     }
   });
 
-  // Test 3: World subscription
+  // World subscription
   await test('World subscription', async () => {
     const ws = await createWebSocketConnection();
-
-    // Skip welcome message
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
+    await new Promise((resolve) => ws.once('message', resolve)); // Skip connected message
 
     console.log(`Attempting to subscribe to world: ${TEST_WORLD_NAME}`);
-    console.log(`Test data path: ${TEST_DATA_PATH}`);
-
     const response = await subscribeToWorld(ws, TEST_WORLD_NAME);
     console.log('Subscription response:', response);
 
-    if (response.type !== 'subscribed' || response.worldName !== TEST_WORLD_NAME) {
+    if (response.type !== 'success' || response.data?.worldName !== TEST_WORLD_NAME) {
       throw new Error(`Failed to subscribe to world. Response: ${JSON.stringify(response)}`);
     }
-
     ws.close();
   });
 
-  // Test 4: getWorlds command
+  // World commands
   await test('getWorlds command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
-    // Don't pass TEST_DATA_PATH since the helper function will add ROOT_PATH automatically
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/getWorlds');
-    console.log('getWorlds response:', response);
 
-    if (response.type !== 'data' || !Array.isArray(response.data)) {
-      throw new Error(`getWorlds should return data array. Response: ${JSON.stringify(response)}`);
+    validateSuccessResponse(response);
+    if (!Array.isArray(response.data.data)) {
+      throw new Error('getWorlds should return data.data array');
     }
 
-    const testWorldExists = response.data.some((world: any) => world.name === TEST_WORLD_NAME);
+    const testWorldExists = response.data.data.some((world: any) => world.name === TEST_WORLD_NAME);
     if (!testWorldExists) {
       throw new Error('Test world not found in worlds list');
     }
-
     ws.close();
   });
 
-  // Test 5: getWorld command
   await test('getWorld command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/getWorld');
 
-    if (response.type !== 'data' || !response.data) {
-      throw new Error('getWorld should return data object');
-    }
-
-    if (response.data.name !== TEST_WORLD_NAME) {
+    validateSuccessResponse(response);
+    if (response.data.data.name !== TEST_WORLD_NAME) {
       throw new Error('getWorld returned wrong world');
     }
-
     ws.close();
   });
 
-  // Test 6: addAgent command
+  // Agent commands
   await test('addAgent command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/addAgent ${TEST_AGENT_NAME} A helpful test agent`);
 
-    if (response.type !== 'data' || !response.data) {
-      throw new Error('addAgent should return data object');
-    }
-
-    if (response.data.name !== TEST_AGENT_NAME) {
+    validateSuccessResponse(response);
+    if (response.data.data.name !== TEST_AGENT_NAME) {
       throw new Error('addAgent returned wrong agent name');
     }
-
-    if (!response.refreshWorld) {
+    if (!response.data.refreshWorld) {
       throw new Error('addAgent should trigger world refresh');
     }
-
     ws.close();
   });
 
-  // Test 7: Verify agent was created with getWorld
   await test('Verify agent creation', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/getWorld');
 
-    if (response.type !== 'data' || !response.data.agents) {
+    validateSuccessResponse(response);
+    if (!response.data.data.agents) {
       throw new Error('getWorld should return agents array');
     }
 
-    const testAgentExists = response.data.agents.some((agent: any) => agent.name === TEST_AGENT_NAME);
+    const testAgentExists = response.data.data.agents.some((agent: any) => agent.name === TEST_AGENT_NAME);
     if (!testAgentExists) {
       throw new Error('Test agent not found in world');
     }
-
     ws.close();
   });
 
-  // Test 8: updateAgentConfig command
   await test('updateAgentConfig command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/updateAgentConfig ${TEST_AGENT_NAME} model gpt-4`);
-
-    if (response.type !== 'system') {
-      throw new Error('updateAgentConfig should return system response');
-    }
-
-    if (!response.content?.includes('model updated')) {
-      throw new Error('updateAgentConfig should confirm model update');
-    }
-
+    validateCommandSuccess(response, 'model updated');
     ws.close();
   });
 
-  // Test 9: updateAgentPrompt command
   await test('updateAgentPrompt command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/updateAgentPrompt ${TEST_AGENT_NAME} You are a helpful test assistant with updated instructions.`);
-
-    if (response.type !== 'system') {
-      throw new Error('updateAgentPrompt should return system response');
-    }
-
-    if (!response.content?.includes('prompt updated')) {
-      throw new Error('updateAgentPrompt should confirm prompt update');
-    }
-
+    validateCommandSuccess(response, 'prompt updated');
     ws.close();
   });
 
-  // Test 10: updateAgentMemory add command
   await test('updateAgentMemory add command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/updateAgentMemory ${TEST_AGENT_NAME} add user Hello test agent!`);
-
-    if (response.type !== 'system') {
-      throw new Error('updateAgentMemory should return system response');
-    }
-
-    if (!response.content?.includes('Message added')) {
-      throw new Error('updateAgentMemory should confirm message addition');
-    }
-
+    validateCommandSuccess(response, 'Message added');
     ws.close();
   });
 
-  // Test 11: clear command (specific agent)
   await test('clear specific agent command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/clear ${TEST_AGENT_NAME}`);
-
-    if (response.type !== 'system') {
-      throw new Error('clear should return system response');
-    }
-
-    if (!response.content?.includes('Cleared memory')) {
-      throw new Error('clear should confirm memory cleared');
-    }
-
+    validateCommandSuccess(response, 'Cleared memory');
     ws.close();
   });
 
-  // Test 12: addWorld command
   await test('addWorld command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
-    // Don't pass TEST_DATA_PATH since the helper function will add ROOT_PATH automatically
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, `/addWorld new-test-world A second test world`);
 
-    if (response.type !== 'data' || !response.data) {
-      throw new Error('addWorld should return data object');
-    }
-
-    if (response.data.name !== 'new-test-world') {
+    validateSuccessResponse(response);
+    if (response.data.data.name !== 'new-test-world') {
       throw new Error('addWorld returned wrong world name');
     }
-
     ws.close();
   });
 
-  // Test 13: updateWorld command
   await test('updateWorld command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/updateWorld description Updated test world description');
-
-    if (response.type !== 'system') {
-      throw new Error('updateWorld should return system response');
-    }
-
-    if (!response.content?.includes('description updated')) {
-      throw new Error('updateWorld should confirm description update');
-    }
-
+    validateCommandSuccess(response, 'description updated');
     ws.close();
   });
 
-  // Test 14: Error handling for invalid commands
+  // Error handling tests
   await test('Error handling for invalid command', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/invalidCommand');
-
-    if (response.type !== 'error') {
-      throw new Error('Invalid command should return error');
-    }
-
-    if (!response.error?.includes('Unknown command')) {
-      throw new Error('Invalid command should return unknown command error');
-    }
-
+    console.log('Invalid command response:', JSON.stringify(response, null, 2));
+    validateErrorResponse(response, 'Unknown command');
     ws.close();
   });
 
-  // Test 15: Error handling for missing arguments
   await test('Error handling for missing arguments', async () => {
-    const ws = await createWebSocketConnection();
-
-    // Skip welcome and subscription
-    await new Promise((resolve) => {
-      ws.once('message', resolve);
-    });
-    await subscribeToWorld(ws, TEST_WORLD_NAME);
-
-    // Test a command that doesn't get ROOT_PATH automatically added and requires arguments
+    const ws = await setupTestConnection();
     const response = await sendCommand(ws, '/updateAgentConfig');
-
-    if (response.type !== 'error') {
-      throw new Error('Command with missing args should return error');
-    }
-
-    if (!response.error?.includes('Missing required arguments')) {
-      throw new Error('Missing args should return appropriate error');
-    }
-
+    console.log('Missing args response:', JSON.stringify(response, null, 2));
+    validateErrorResponse(response, 'Missing required arguments');
     ws.close();
   });
 

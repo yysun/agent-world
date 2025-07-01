@@ -1,57 +1,122 @@
 /**
- * Event Handling Module for Agent World
+ * Stateless Event Handling Module for Agent World
  *
  * Features:
- * - World subscription lifecycle management with automatic cleanup
- * - Event listener setup and teardown for world objects
- * - Message event handling with command routing and world publishing
- * - World refresh logic after command execution
- * - Generic event forwarding from world events to clients
- * - Message validation and error handling
- * - Sender normalization for user messages
+ * - Pure stateless command execution and message publishing
+ * - Transport-agnostic event handling functions
+ * - Command routing and validation
+ * - Message normalization and publishing
+ * - Standardized response helpers
+ * - No connection state management (handled by transport layer)
  *
- * Event Types Handled:
- * - subscribe: Create world subscription with event listeners
- * - unsubscribe: Clean up world subscription and listeners
- * - event: Handle commands or publish messages to world
- * - system: Execute commands only (requires '/' prefix)
- * - world: Execute commands only (requires '/' prefix)
- * - message: Execute commands if starts with '/', otherwise publish message to world
+ * Message Schemas:
+ * - InboundMessageSchema: Validates messages received from clients
+ * - OutboundMessageSchema: Defines structure for messages sent to clients
+ * - Supports success/error responses and command results
+ *
+ * Event Functions:
+ * - handleCommand: Execute commands and return results with refresh flags
+ * - handleMessagePublish: Publish messages to world events
+ * - All functions are pure and stateless
+ *
+ * Response Helpers:
+ * - sendSuccess(client, message, data?): Send standardized success response
+ * - sendError(client, error, details?): Send standardized error response
+ * - sendCommandResult(client, commandResult): Send standardized command execution result
+ * - All helpers automatically add timestamp and proper type fields
  *
  * Implementation:
- * - Uses generic ClientConnection interface for transport-agnostic event handling
- * - Implements comprehensive cleanup to prevent memory leaks
- * - Forwards all world events with eventType field added for client identification
- * - Filters out user message echoes to prevent feedback loops
- * - Supports automatic world refresh after add/update operations
+ * - Uses minimal ClientConnection interface for sending only
+ * - No world state management (handled by caller)
+ * - Pure functions that take explicit parameters
+ * - Command results indicate if world refresh is needed
  */
 
 import { z } from 'zod';
 import { World } from '../core/types.js';
-import { getWorld } from '../core/world-manager.js';
 import { publishMessage } from '../core/world-events.js';
-import { toKebabCase } from '../core/utils.js';
 import { executeCommand } from './commands/index.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
-// Generic client connection interface for transport-agnostic event handling
+// Minimal client connection interface for stateless event handling
 export interface ClientConnection {
   send: (data: string) => void;
   isOpen: boolean;
-  world?: World;
-  worldEventListeners?: Map<string, (...args: any[]) => void>;
 }
 
-// Zod validation schema for messages
-export const MessageSchema = z.object({
-  type: z.enum(["event", "subscribe", "unsubscribe", "system", "world", "message"]),
+// Zod validation schemas for inbound and outbound messages
+
+// Schema for messages received from clients (only event-related messages)
+export const InboundMessageSchema = z.object({
+  type: z.enum(["system", "world", "message"]),
   payload: z.object({
     worldName: z.string().optional(),
     message: z.string().optional(),
     sender: z.string().optional()
   })
 });
+
+// Schema for messages sent to clients
+export const OutboundMessageSchema = z.union([
+  // Success response (used for subscriptions, general operations, and command results)
+  z.object({
+    type: z.literal('success'),
+    message: z.string(),
+    data: z.any().optional(), // Command results go here
+    timestamp: z.string()
+  }),
+  // Error response
+  z.object({
+    type: z.literal('error'),
+    error: z.string(),
+    details: z.any().optional(),
+    timestamp: z.string()
+  }),
+  // World event forwarding
+  z.object({
+    eventType: z.enum(['system', 'world', 'message', 'sse']),
+    sender: z.string().optional(),
+    message: z.string().optional(),
+    timestamp: z.string().optional()
+  }).passthrough() // Allow additional properties for event data
+]);
+
+// Type aliases for convenience
+export type InboundMessage = z.infer<typeof InboundMessageSchema>;
+export type OutboundMessage = z.infer<typeof OutboundMessageSchema>;
+
+// Legacy alias for backward compatibility - still supports only event-related messages
+export const MessageSchema = InboundMessageSchema;
+
+// Helper functions for standardized responses
+export function sendSuccess(client: ClientConnection, message: string, data?: any) {
+  client.send(JSON.stringify({
+    type: 'success',
+    message,
+    data,
+    timestamp: new Date().toISOString()
+  }));
+}
+
+export function sendError(client: ClientConnection, error: string, details?: any) {
+  client.send(JSON.stringify({
+    type: 'error',
+    error,
+    details,
+    timestamp: new Date().toISOString()
+  }));
+}
+
+export function sendCommandResult(client: ClientConnection, commandResult: any) {
+  const message = commandResult.error ? 'Command failed' : 'Command executed successfully';
+  client.send(JSON.stringify({
+    type: 'success',
+    message,
+    data: commandResult, // Command result goes directly in data field
+    timestamp: new Date().toISOString()
+  }));
+}
 
 // Helper function to add root path to commands that need it
 export function prepareCommandWithRootPath(message: string): string {
@@ -73,209 +138,21 @@ export function prepareCommandWithRootPath(message: string): string {
   return message;
 }
 
-// Clean up world subscription and event listeners
-export async function cleanupWorldSubscription(client: ClientConnection): Promise<void> {
-  if (client.world && client.worldEventListeners) {
-    // Remove all event listeners
-    for (const [eventName, listener] of client.worldEventListeners) {
-      client.world.eventEmitter.off(eventName, listener);
-    }
-    client.worldEventListeners.clear();
+// Stateless command execution
+export async function handleCommand(world: World, eventMessage: string): Promise<any> {
+  if (!eventMessage?.trim().startsWith('/')) {
+    return { error: 'Commands must start with /' };
   }
 
-  // Clear world reference
-  client.world = undefined;
-  client.worldEventListeners = undefined;
+  const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
+  return await executeCommand(preparedCommand, world);
 }
 
-// Set up event listeners for world events
-export function setupWorldEventListeners(client: ClientConnection, world: World): void {
-  if (!client.worldEventListeners) {
-    client.worldEventListeners = new Map();
-  }
-
-  // Generic handler that forwards events to client with filtering
-  const handler = (eventType: string) => (eventData: any) => {
-    // Skip echoing user messages back to client
-    // Only forward agent responses, system messages, and SSE events
-    if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender.startsWith('user'))) {
-      return;
-    }
-
-    if (client.isOpen) {
-      // Add the event type to the payload so client knows what kind of event this is
-      client.send(JSON.stringify({
-        ...eventData,
-        eventType
-      }));
-    }
-  };
-
-  // List of event types to forward
-  const eventTypes = ['system', 'world', 'message', 'sse'];
-
-  // Set up listeners for all event types
-  for (const eventType of eventTypes) {
-    const eventHandler = handler(eventType);
-    world.eventEmitter.on(eventType, eventHandler);
-    client.worldEventListeners.set(eventType, eventHandler);
-  }
-}
-
-// Refresh world subscription after command execution
-async function refreshWorldSubscription(client: ClientConnection, worldName: string): Promise<void> {
-  try {
-    const worldId = toKebabCase(worldName);
-    const refreshedWorld = await getWorld(ROOT_PATH, worldId);
-    if (refreshedWorld) {
-      // Clean up existing world subscription
-      await cleanupWorldSubscription(client);
-
-      // Attach refreshed world
-      client.world = refreshedWorld;
-      client.worldEventListeners = new Map();
-
-      // Set up event listeners
-      setupWorldEventListeners(client, refreshedWorld);
-
-      client.send(JSON.stringify({
-        type: 'subscribed',
-        worldName,
-        timestamp: new Date().toISOString()
-      }));
-    }
-  } catch (error) {
-    console.error('Failed to refresh world:', error);
-  }
-}
-
-// Handle subscribe event
-export async function handleSubscribe(client: ClientConnection, worldName: string): Promise<void> {
-  // Load and attach world to client
-  const worldId = toKebabCase(worldName);
-  const world = await getWorld(ROOT_PATH, worldId);
-  if (!world) {
-    client.send(JSON.stringify({
-      type: 'error',
-      error: 'Failed to load world'
-    }));
-    return;
-  }
-
-  // Clean up existing world subscription if any
-  await cleanupWorldSubscription(client);
-
-  // Attach world to client
-  client.world = world;
-  client.worldEventListeners = new Map();
-
-  // Set up event listeners
-  setupWorldEventListeners(client, world);
-
-  client.send(JSON.stringify({
-    type: 'subscribed',
-    worldName,
-    timestamp: new Date().toISOString()
-  }));
-}
-
-// Handle unsubscribe event
-export async function handleUnsubscribe(client: ClientConnection): Promise<void> {
-  // Clean up world subscription
-  await cleanupWorldSubscription(client);
-
-  client.send(JSON.stringify({
-    type: 'unsubscribed',
-    timestamp: new Date().toISOString()
-  }));
-}
-
-// Handle event type message
-export async function handleEvent(client: ClientConnection, worldName: string, eventMessage: string, sender?: string): Promise<void> {
-  // Use attached world object if available
-  if (!client.world || client.world.name !== worldName) {
-    client.send(JSON.stringify({
-      type: 'error',
-      error: 'Event requires worldName and message'
-    }));
-    return;
-  }
-
-  // Check for command messages (starting with '/')
-  if (eventMessage && eventMessage.trim().startsWith('/')) {
-    const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
-    const result = await executeCommand(preparedCommand, client.world);
-
-    // Send command result
-    client.send(JSON.stringify(result));
-
-    // Refresh world if needed
-    if (result.refreshWorld) {
-      await refreshWorldSubscription(client, worldName);
-    }
-
-    return;
-  }
+// Stateless message publishing
+export function handleMessagePublish(world: World, eventMessage: string, sender?: string): void {
+  if (!eventMessage) return;
 
   // Normalize user senders to 'HUMAN' for public messages that agents should respond to
   const normalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
-  eventMessage && publishMessage(client.world, eventMessage, normalizedSender);
-}
-
-// Handle system and world type messages (commands only)
-export async function handleSystemOrWorld(client: ClientConnection, type: string, worldName: string, eventMessage: string): Promise<void> {
-  if (!client.world || client.world.name !== worldName) {
-    client.send(JSON.stringify({
-      type: 'error',
-      error: `${type} event requires valid world subscription`
-    }));
-    return;
-  }
-
-  if (eventMessage && eventMessage.trim().startsWith('/')) {
-    const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
-    const result = await executeCommand(preparedCommand, client.world);
-
-    // Send command result
-    client.send(JSON.stringify(result));
-
-    // Refresh world if needed
-    if (result.refreshWorld) {
-      await refreshWorldSubscription(client, worldName);
-    }
-  } else {
-    client.send(JSON.stringify({
-      type: 'error',
-      error: `${type} event requires command message starting with '/'`
-    }));
-  }
-}
-
-// Handle message type (commands if starts with '/', otherwise publish to world)
-export async function handleMessage(client: ClientConnection, worldName: string, eventMessage: string, sender?: string): Promise<void> {
-  if (!client.world || client.world.name !== worldName) {
-    client.send(JSON.stringify({
-      type: 'error',
-      error: 'Message event requires valid world subscription'
-    }));
-    return;
-  }
-
-  if (eventMessage && eventMessage.trim().startsWith('/')) {
-    // Handle as command
-    const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
-    const result = await executeCommand(preparedCommand, client.world);
-
-    // Send command result
-    client.send(JSON.stringify(result));
-
-    // Refresh world if needed
-    if (result.refreshWorld) {
-      await refreshWorldSubscription(client, worldName);
-    }
-  } else {
-    // Handle as regular message - publish to world
-    const msgNormalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
-    eventMessage && publishMessage(client.world, eventMessage, msgNormalizedSender);
-  }
+  publishMessage(world, eventMessage, normalizedSender);
 }
