@@ -2,11 +2,12 @@
  * Server Commands Index
  * 
  * Features:
- * - Central export for all server WebSocket commands
- * - Command registry for WebSocket message handling
+ * - Central export for all server commands
+ * - Command registry for message handling
  * - Extensible structure for adding new commands
  * - Helper functions for common command operations
  * - All commands implemented in single file for simplicity
+ * - Transport-agnostic using generic ClientConnection interface
  * 
  * Commands:
  * - clear: Clear agent memory (individual or all)
@@ -26,9 +27,9 @@
  * - Added helper functions for validation and responses
  * - Updated commands to use rootPath from args instead of environment variables
  * - Modified updateWorld command to require rootPath as first argument
+ * - Updated to use generic ClientConnection instead of WebSocket
  */
 
-import { WebSocket } from 'ws';
 import { World, Agent, LLMProvider } from '../../core/types.js';
 import { WorldInfo, listWorlds, getWorld as getWorldFromManager, createWorld, updateWorld } from '../../core/world-manager.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
@@ -57,7 +58,7 @@ const createError: ErrorHelper = (error) => ({
 });
 
 // Command implementations
-const clearCommand: ServerCommand = async (args, world, ws) => {
+const clearCommand: ServerCommand = async (args, world) => {
   try {
     // Handle /clear command (no args) - clear all agents
     if (args.length === 0) {
@@ -88,7 +89,7 @@ const clearCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const getWorldsCommand: ServerCommand = async (args, world, ws) => {
+const getWorldsCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
@@ -118,7 +119,7 @@ const getWorldsCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const getWorldCommand: ServerCommand = async (args, world, ws) => {
+const getWorldCommand: ServerCommand = async (args, world) => {
   try {
     // Return current world information with agent list
     const agents = Array.from(world.agents.values()).map(agent => ({
@@ -146,7 +147,7 @@ const getWorldCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const addWorldCommand: ServerCommand = async (args, world, ws) => {
+const addWorldCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
@@ -176,7 +177,7 @@ const addWorldCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const updateWorldCommand: ServerCommand = async (args, world, ws) => {
+const updateWorldCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
@@ -234,7 +235,7 @@ const updateWorldCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const addAgentCommand: ServerCommand = async (args, world, ws) => {
+const addAgentCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
@@ -267,7 +268,7 @@ const addAgentCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const updateAgentConfigCommand: ServerCommand = async (args, world, ws) => {
+const updateAgentConfigCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
@@ -340,7 +341,7 @@ const updateAgentConfigCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const updateAgentPromptCommand: ServerCommand = async (args, world, ws) => {
+const updateAgentPromptCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
@@ -364,7 +365,7 @@ const updateAgentPromptCommand: ServerCommand = async (args, world, ws) => {
   }
 };
 
-const updateAgentMemoryCommand: ServerCommand = async (args, world, ws) => {
+const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
   try {
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
@@ -443,10 +444,9 @@ export type CommandName = keyof typeof commands;
  * Execute a command by parsing the message and routing to appropriate command handler
  * @param message - The command message starting with '/'
  * @param world - The world context
- * @param ws - The WebSocket connection
  * @returns Promise<CommandResult> - The command execution result
  */
-export async function executeCommand(message: string, world: World, ws: WebSocket): Promise<CommandResult> {
+export async function executeCommand(message: string, world: World): Promise<CommandResult> {
   try {
     // Remove leading '/' and split into command and arguments
     const commandLine = message.slice(1).trim();
@@ -470,7 +470,7 @@ export async function executeCommand(message: string, world: World, ws: WebSocke
     }
 
     // Execute the command
-    return await command(args, world, ws);
+    return await command(args, world);
   } catch (error) {
     return createError(`Command execution failed: ${error}`);
   }

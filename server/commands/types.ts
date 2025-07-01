@@ -2,21 +2,21 @@
  * Server Command Types
  * 
  * Features:
- * - WebSocket command handler interface for server-side commands
- * - Async command processing with WebSocket response handling
+ * - Simple command handler interface for server-side commands
+ * - Async command processing with standardized response handling
  * - World context and command argument support
- * - Result-based response system for WebSocket communication
+ * - Result-based response system for client communication
  * - Extended command result types for data responses
  * - Helper function interfaces for common operations
  * 
  * Changes:
  * - Initial creation for server command structure
- * - Command result interface for standardized WebSocket responses
+ * - Command result interface for standardized client responses
  * - Added data response types for world and agent information
  * - Added helper function types for common command operations
+ * - Removed unused ClientConnection parameter from commands
  */
 
-import { WebSocket } from 'ws';
 import { World, Agent } from '../../core/types.js';
 import { WorldInfo } from '../../core/world-manager.js';
 
@@ -31,8 +31,7 @@ export interface CommandResult {
 
 export type ServerCommand = (
   args: string[],
-  world: World,
-  ws: WebSocket
+  world: World
 ) => Promise<CommandResult>;
 
 // Helper function types for common operations
