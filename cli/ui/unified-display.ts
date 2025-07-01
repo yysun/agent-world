@@ -1,25 +1,36 @@
 /**
- * Unified Display System - Consistent Message Display with Standard Spacing
+ * Unified Display System - Smart Contextual Message Display with Intelligent Spacing
  * 
  * Core Features:
  * - Single point of control for all CLI message display
- * - Enforces "blank line before and after" rule for all message blocks
+ * - Smart contextual spacing based on message flow and relationships
+ * - Conversation-aware spacing that groups related messages
+ * - Streaming integration with zero-spacing coordination
  * - Supports all message types: help, command, human, agent, system, debug, error, status, file, instruction
  * - Maintains color coding and emoji indicators for visual hierarchy
- * - Integrates with existing streaming display and terminal-kit systems
  * - Preserves message logging functionality for CLI session storage
+ * 
+ * Smart Spacing Rules:
+ * - Conversation flows (human → agent): Minimal spacing for natural flow
+ * - Command sequences: Zero spacing between command and immediate response
+ * - Streaming messages: Handled by streaming system, no additional spacing
+ * - Instructions/Help: Enhanced spacing for better readability
+ * - Time-based grouping: Rapid message sequences get compressed spacing
+ * - Context awareness: Maintains conversation state across message types
  * 
  * Implementation:
  * - Function-based approach following project guidelines
  * - Type-safe message interface with metadata support
- * - Consistent spacing enforcement with configurable exceptions
+ * - Context tracking for intelligent spacing decisions
  * - Integration hooks for streaming display and terminal positioning
  * - Performance optimized to avoid latency impact
  * 
  * Usage:
  * - Replace all direct console.log() calls with displayUnifiedMessage()
  * - Specify message type for appropriate formatting and spacing
- * - Include metadata for enhanced logging and debugging
+ * - Include metadata for enhanced logging and spacing coordination
+ * - Use displayConversationGroup() for related message sequences
+ * - Use forceSpacingBreak() before major UI transitions
  */
 
 import { colors } from './colors';
@@ -59,9 +70,24 @@ export interface UnifiedDisplayMessage {
   };
 }
 
+// Spacing context for smart display coordination
+interface SpacingContext {
+  lastMessageType?: MessageType;
+  lastSource?: string;
+  isInConversation: boolean;
+  isStreamingActive: boolean;
+  messageCount: number;
+  lastTimestamp: number;
+}
+
 // Global state for display coordination
 let currentWorldName: string = 'default';
-let isStreamingActive: boolean = false;
+let spacingContext: SpacingContext = {
+  isInConversation: false,
+  isStreamingActive: false,
+  messageCount: 0,
+  lastTimestamp: 0
+};
 
 /**
  * Set the current world name for message storage
@@ -74,25 +100,116 @@ export function setCurrentWorldName(worldName: string): void {
  * Set streaming state for display coordination
  */
 export function setStreamingActive(active: boolean): void {
-  isStreamingActive = active;
+  spacingContext.isStreamingActive = active;
 }
 
 /**
+ * Reset spacing context (for new sessions or major breaks)
+ */
+export function resetSpacingContext(): void {
+  spacingContext = {
+    isInConversation: false,
+    isStreamingActive: false,
+    messageCount: 0,
+    lastTimestamp: 0
+  };
+}
+
+/**
+ * Calculate smart spacing based on message context and flow
+ */
+function calculateSmartSpacing(message: UnifiedDisplayMessage): { before: number; after: number } {
+  const currentTime = Date.now();
+  const timeSinceLastMessage = currentTime - spacingContext.lastTimestamp;
+
+  // Default spacing (reduced from original)
+  let beforeSpacing = 1;
+  let afterSpacing = 0;
+
+  // No spacing for streaming source messages (handled by streaming system)
+  if (message.metadata?.source === 'streaming') {
+    return { before: 0, after: 0 };
+  }
+
+  // Conversation flow detection
+  const isConversationalMessage = ['human', 'agent', 'system'].includes(message.type);
+  const isCommandMessage = ['command', 'error', 'status'].includes(message.type);
+  const isInstructionalMessage = ['help', 'instruction'].includes(message.type);
+
+  // Smart spacing rules
+  if (spacingContext.messageCount === 0) {
+    // First message - minimal spacing
+    beforeSpacing = 0;
+  } else if (isConversationalMessage && spacingContext.isInConversation) {
+    // Continuing conversation - minimal spacing
+    beforeSpacing = 0;
+  } else if (message.type === spacingContext.lastMessageType && timeSinceLastMessage < 1000) {
+    // Same type, rapid succession - no spacing
+    beforeSpacing = 0;
+  } else if (isCommandMessage && spacingContext.lastMessageType === 'human') {
+    // Command response to human input - minimal spacing
+    beforeSpacing = 0;
+  } else if (isInstructionalMessage) {
+    // Help and instructions - extra spacing for readability
+    beforeSpacing = 1;
+    afterSpacing = 1;
+  } else if (message.type === 'file' || message.commandSubtype === 'success') {
+    // File operations and success messages - moderate spacing
+    beforeSpacing = 1;
+  }
+
+  // Reduce spacing during active streaming
+  if (spacingContext.isStreamingActive) {
+    beforeSpacing = Math.min(beforeSpacing, 1);
+    afterSpacing = 0;
+  }
+
+  return { before: beforeSpacing, after: afterSpacing };
+}
+
+/**
+ * Update spacing context after displaying a message
+ */
+function updateSpacingContext(message: UnifiedDisplayMessage): void {
+  spacingContext.lastMessageType = message.type;
+  spacingContext.lastSource = message.metadata?.source;
+  spacingContext.messageCount++;
+  spacingContext.lastTimestamp = Date.now();
+
+  // Update conversation state
+  const isConversationalMessage = ['human', 'agent', 'system'].includes(message.type);
+  if (isConversationalMessage) {
+    spacingContext.isInConversation = true;
+  } else if (['help', 'instruction', 'file'].includes(message.type)) {
+    spacingContext.isInConversation = false;
+  }
+}
+/**
  * Main unified display function - single entry point for all message display
- * Enforces consistent spacing: blank line before and after each message block
+ * Applies smart contextual spacing based on message flow and relationships
  */
 export function displayUnifiedMessage(message: UnifiedDisplayMessage): void {
+  // Calculate smart spacing based on context
+  const spacing = calculateSmartSpacing(message);
+
   // Format the message content based on type
   const formattedContent = formatMessageContent(message);
 
-  // Apply spacing rule: blank line before
-  console.log(); // Blank line before
+  // Apply spacing rule: smart spacing before
+  for (let i = 0; i < spacing.before; i++) {
+    console.log();
+  }
 
   // Display the formatted message
   console.log(formattedContent);
 
-  // Apply spacing rule: blank line after
-  console.log(); // Blank line after
+  // Apply spacing rule: smart spacing after  
+  for (let i = 0; i < spacing.after; i++) {
+    console.log();
+  }
+
+  // Update context for next message
+  updateSpacingContext(message);
 
   // Store message in CLI session memory if it's a conversational message
   if (shouldStoreMessage(message)) {
@@ -311,20 +428,22 @@ function detectMessageType(content: string, sender?: string): MessageType {
 }
 
 /**
- * Convenience functions for common message types
+ * Convenience functions for common message types with optimized spacing
  */
 export function displaySuccess(content: string): void {
   displayUnifiedMessage({
     type: 'command',
     content,
-    commandSubtype: 'success'
+    commandSubtype: 'success',
+    metadata: { source: 'cli', messageType: 'command' }
   });
 }
 
 export function displayError(content: string): void {
   displayUnifiedMessage({
     type: 'error',
-    content
+    content,
+    metadata: { source: 'cli', messageType: 'error' }
   });
 }
 
@@ -332,7 +451,8 @@ export function displayWarning(content: string): void {
   displayUnifiedMessage({
     type: 'command',
     content,
-    commandSubtype: 'warning'
+    commandSubtype: 'warning',
+    metadata: { source: 'cli', messageType: 'command' }
   });
 }
 
@@ -340,19 +460,21 @@ export function displayInfo(content: string): void {
   displayUnifiedMessage({
     type: 'command',
     content,
-    commandSubtype: 'info'
+    commandSubtype: 'info',
+    metadata: { source: 'cli', messageType: 'notification' }
   });
 }
 
 export function displayInstruction(content: string): void {
   displayUnifiedMessage({
     type: 'instruction',
-    content
+    content,
+    metadata: { source: 'cli', messageType: 'notification' }
   });
 }
 
 /**
- * Special function for streaming integration
+ * Special function for streaming integration with proper source marking
  */
 export function displayStreamingMessage(content: string, sender: string): void {
   const messageType = sender === 'HUMAN' || sender === 'you' ? 'human' : 'agent';
@@ -361,6 +483,81 @@ export function displayStreamingMessage(content: string, sender: string): void {
     type: messageType,
     content,
     sender,
-    metadata: { source: 'streaming' }
+    metadata: { source: 'streaming', messageType: 'response' }
   });
+}
+
+/**
+ * Display conversation group - multiple related messages with minimal spacing
+ */
+export function displayConversationGroup(messages: Array<{ content: string; sender: string; type?: MessageType }>): void {
+  messages.forEach((msg, index) => {
+    const messageType = msg.type || (msg.sender === 'HUMAN' || msg.sender === 'you' ? 'human' : 'agent');
+
+    // Override spacing for grouped conversation
+    if (index === 0) {
+      // First message gets normal spacing
+      displayUnifiedMessage({
+        type: messageType,
+        content: msg.content,
+        sender: msg.sender,
+        metadata: { source: 'cli', messageType: 'response' }
+      });
+    } else {
+      // Subsequent messages get minimal spacing
+      displayWithSpacing({
+        type: messageType,
+        content: msg.content,
+        sender: msg.sender,
+        metadata: { source: 'cli', messageType: 'response' }
+      }, 0, 0);
+    }
+  });
+}
+
+/**
+ * Force spacing context reset for major UI breaks (used by terminal system)
+ */
+export function forceSpacingBreak(): void {
+  spacingContext.isInConversation = false;
+  spacingContext.lastMessageType = undefined;
+  spacingContext.lastTimestamp = 0;
+}
+
+/**
+ * Get current spacing context (for debugging and coordination)
+ */
+export function getSpacingContext(): Readonly<SpacingContext> {
+  return { ...spacingContext };
+}
+
+/**
+ * Display with explicit spacing override (for special cases)
+ */
+export function displayWithSpacing(
+  message: UnifiedDisplayMessage,
+  beforeLines: number,
+  afterLines: number
+): void {
+  // Apply explicit spacing before
+  for (let i = 0; i < beforeLines; i++) {
+    console.log();
+  }
+
+  // Format and display the message
+  const formattedContent = formatMessageContent(message);
+  console.log(formattedContent);
+
+  // Apply explicit spacing after
+  for (let i = 0; i < afterLines; i++) {
+    console.log();
+  }
+
+  // Update context normally
+  updateSpacingContext(message);
+
+  // Store message if needed
+  if (shouldStoreMessage(message)) {
+    storeMessage(message);
+  }
 }
