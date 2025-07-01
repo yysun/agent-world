@@ -1,3 +1,4 @@
+//@ts-check
 /**
  * WebSocket API Module - Real-time world communication, CRUD operations, and message handling
  *
@@ -8,12 +9,14 @@
  * structure (eventType: 'sse', type: 'chunk'), backward compatibility with old 
  * SSE format, connection status management, error handling and logging, 
  * auto-subscription on welcome messages, proper streaming lifecycle 
- * (start, chunk, end, error), auto-scroll to bottom when messages are added or updated
+ * (start, chunk, end, error), auto-scroll to bottom when messages are added or updated,
+ * error messages added to conversation state with red left border styling
  *
  * Implementation: Function-based module with subscription lifecycle management,
  * WebSocket command protocol for world/agent operations, comprehensive 
- * message event handlers for real-time communication, and consolidated
- * connection management with built-in auto-reconnect functionality
+ * message event handlers for real-time communication, consolidated
+ * connection management with built-in auto-reconnect functionality,
+ * and error message integration into conversation flow
  *
  * Changes:
  * - Merged ws-message.js functionality into ws-api.js
@@ -24,6 +27,8 @@
  * - Maintains backward compatibility with old message format
  * - Added auto-scroll functionality for real-time message updates
  * - Integrated auto-reconnect directly into connection management
+ * - Added error messages to conversation state with visual error indicators
+ * - Error messages include red left border styling and error details
  */
 
 // State management
@@ -43,13 +48,11 @@ const connect = () => {
     ws = new WebSocket(url);
     ws.onopen = () => {
       reconnectAttempts = 0;
-      app.run('handleConnectionStatus', 'connected');
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        app.run('handleWebSocketMessage', data);
       } catch (error) {
         console.error('Error parsing WebSocket message:', error);
       }
@@ -57,8 +60,6 @@ const connect = () => {
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
-      app.run('handleConnectionStatus', 'disconnected');
-
       if (reconnectAttempts < maxReconnectAttempts) {
         attemptReconnect();
       }
@@ -66,11 +67,9 @@ const connect = () => {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      app.run('handleWebSocketError', error);
     };
   } catch (error) {
     console.error('Error connecting to WebSocket:', error);
-    app.run('handleWebSocketError', error);
   }
 };
 
@@ -88,7 +87,6 @@ const sendMessage = (message) => {
       return true;
     } catch (error) {
       console.error('Error sending WebSocket message:', error);
-      app.run('handleWebSocketError', error);
       return false;
     }
   } else {
@@ -181,7 +179,7 @@ const unsubscribeFromWorld = () => {
 
 const sendWorldEvent = (worldName, message, sender = 'user1') => {
   return sendMessage({
-    type: 'event',
+    type: 'message',
     payload: {
       worldName: worldName,
       message: message,
@@ -355,7 +353,8 @@ const handleWebSocketMessage = (state, messageData) => {
     text: content || messageData.message || messageData.content || JSON.stringify(messageData),
     timestamp: messageData.timestamp || new Date().toISOString(),
     worldName: messageData.worldName || state.worldName,
-    ...(type === 'sse' && { isStreaming: true })
+    ...(type === 'sse' && { isStreaming: true }),
+    ...(type === 'error' && { hasError: true })
   });
 
   // Check if this is an SSE event first (new structure with eventType)
@@ -379,7 +378,14 @@ const handleWebSocketMessage = (state, messageData) => {
 
     case 'error':
       console.error('WebSocket error:', messageData.error);
-      return { ...state, wsError: messageData.error };
+      // Add error message to conversation
+      const errorMessage = createMessage('error', messageData.error || messageData.message || 'An error occurred');
+      return {
+        ...state,
+        wsError: messageData.error,
+        messages: [...state.messages, errorMessage],
+        needScroll: true
+      };
 
     case 'success':
       // Command response - don't add to messages, just log for debugging
@@ -412,6 +418,7 @@ const handleConnectionStatus = (state, status) => {
 
 const handleWebSocketError = (state, error) => {
   console.error('WebSocket error:', error);
+
   return {
     ...state,
     connectionStatus: 'error',

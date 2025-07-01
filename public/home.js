@@ -1,3 +1,5 @@
+
+//@ts-check
 /**
  * Home Page Component - Main interface for Agent World
  *
@@ -8,28 +10,33 @@
  * - Auto-scroll to bottom functionality for new messages
  * - Theme toggle functionality
  * - Proper input handling with immediate character capture and state clearing
+ * - Error message handling with visual indicators and conversation integration
  *
  * WebSocket Integration:
  * - Handles system/world/message events and SSE streaming
  * - Real-time chunk accumulation with visual indicators
  * - Connection status tracking and error handling
+ * - Error messages added to conversation with red left border styling
  *
  * Implementation:
  * - AppRun component with simplified event handling via run()
  * - Event handlers in update/ modules for organization
  * - Responsive layout with auto-scroll on message updates
  * - Input field properly bound to state with @input and @keypress handlers
+ * - Error state management with visual feedback in conversation
  *
  * Recent Changes:
  * - Fixed missing character issue by using @input instead of relying on @keypress for text capture
  * - Fixed input clearing after message send by proper state management
+ * - Added error messages to conversation state with red left border styling
+ * - Enhanced error handling for send failures and validation errors
  */
 
-const { html, run } = window.apprun;
+const { Component, html, run } = window["apprun"];
 
 import wsApi from './ws-api.js';
-import Message from './components/message.js';
 import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
+import { getAvatarColor, getAvatarInitials } from './utils.js';
 import {
   initializeState,
   selectWorld,
@@ -37,8 +44,11 @@ import {
   handleConnectionStatus,
   handleWebSocketError,
   openAgentModal,
-  closeAgentModal
+  closeAgentModal,
 } from './update/index.js';
+import AgentModal from './components/agent-modal.js';
+
+import Message from './components/message.js';
 
 const USER_ID = 'user1';
 
@@ -69,9 +79,26 @@ const sendMessage = (state) => {
   const message = state.currentMessage?.trim();
 
   if (!message || !state.worldName || !wsApi.isConnected()) {
+    const errorMessage = !message ? 'Please enter a message' :
+      !state.worldName ? 'No world selected' :
+        'Not connected to server';
+
+    // Add error message to conversation
+    const errorMsg = {
+      id: Date.now() + Math.random(),
+      type: 'error',
+      sender: 'System',
+      text: errorMessage,
+      timestamp: new Date().toISOString(),
+      worldName: state.worldName,
+      hasError: true
+    };
+
     return {
       ...state,
-      wsError: !message ? null : !state.worldName ? 'No world selected' : 'Not connected to server'
+      wsError: errorMessage,
+      messages: [...state.messages, errorMsg],
+      needScroll: true
     };
   }
 
@@ -96,7 +123,23 @@ const sendMessage = (state) => {
     };
   }
 
-  return { ...state, wsError: 'Failed to send message' };
+  // Add error message for failed send
+  const errorMsg = {
+    id: Date.now() + Math.random(),
+    type: 'error',
+    sender: 'System',
+    text: 'Failed to send message',
+    timestamp: new Date().toISOString(),
+    worldName: state.worldName,
+    hasError: true
+  };
+
+  return {
+    ...state,
+    wsError: 'Failed to send message',
+    messages: [...state.messages, errorMsg],
+    needScroll: true
+  };
 };
 
 // Auto-scroll to bottom after DOM updates
@@ -114,16 +157,11 @@ const scrollToBottom = (state) => {
   return state;
 };
 
-app.on('scroll-to-bottom', scrollToBottom);
 
 // Main view function
 const view = (state) => {
   // Check if we need to scroll and update state
   const updatedState = scrollToBottom(state);
-  if (updatedState !== state) {
-    // Update the state if needScroll was reset
-    setTimeout(() => app.run('update-state', updatedState), 0);
-  }
 
   return html`
       <div class="connect-container">

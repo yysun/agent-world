@@ -442,6 +442,15 @@ body {
   background-color: var(--bg-accent);
 }
 
+.conversation-message.error {
+  border-left-color: #ef4444;
+  background-color: #fef2f2;
+}
+
+[data-theme="dark"] .conversation-message.error {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
 .conversation-message:last-child {
   margin-bottom: 0;
 }
@@ -463,6 +472,24 @@ body {
   color: #10b981;
   font-size: 0.5rem;
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.error-indicator {
+  color: #ef4444;
+  font-size: 0.75rem;
+  animation: pulse-error 2s ease-in-out infinite;
+}
+
+@keyframes pulse-error {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
 }
 
 @keyframes pulse {
@@ -1316,4 +1343,19 @@ body {
   .btn {
     width: 100%;
   }
+}
+
+.error-details {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  color: #dc2626;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+[data-theme="dark"] .error-details {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
 }

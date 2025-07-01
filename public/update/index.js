@@ -18,4 +18,4 @@ export {
 export {
   openAgentModal,
   closeAgentModal
-} from './modal.js';
+} from '../components/agent-modal.js';
