@@ -266,7 +266,6 @@ export function displayDebugMessage(message: string): void {
   displayUnifiedMessage({
     type: 'debug',
     content: message,
-    skipSpacing: activeStreams.size > 0, // Skip spacing during streaming
     metadata: { source: 'streaming' }
   });
 }
@@ -342,7 +341,6 @@ export function displayFormattedMessage(message: DisplayMessage): void {
     type: messageType,
     content: message.content,
     sender: message.sender,
-    skipSpacing: activeStreams.size > 0, // Skip spacing during streaming for real-time display
     metadata: message.metadata
   });
 }

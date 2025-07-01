@@ -129,7 +129,6 @@ export async function performShutdown(): Promise<void> {
   displayUnifiedMessage({
     type: 'instruction',
     content: 'Goodbye! 👋',
-    skipSpacing: true,
     metadata: { source: 'cli', messageType: 'notification' }
   });
 

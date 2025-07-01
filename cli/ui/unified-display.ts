@@ -50,7 +50,6 @@ export interface UnifiedDisplayMessage {
   commandSubtype?: CommandSubtype;
   emoji?: string;
   color?: string;
-  skipSpacing?: boolean; // For special cases like streaming previews
   metadata?: {
     source?: 'cli' | 'streaming' | 'system';
     messageType?: 'response' | 'command' | 'notification' | 'error';
@@ -86,18 +85,14 @@ export function displayUnifiedMessage(message: UnifiedDisplayMessage): void {
   // Format the message content based on type
   const formattedContent = formatMessageContent(message);
 
-  // Apply spacing rule: blank line before (unless explicitly skipped)
-  if (!message.skipSpacing) {
-    console.log(); // Blank line before
-  }
+  // Apply spacing rule: blank line before
+  console.log(); // Blank line before
 
   // Display the formatted message
   console.log(formattedContent);
 
-  // Apply spacing rule: blank line after (unless explicitly skipped)
-  if (!message.skipSpacing) {
-    console.log(); // Blank line after
-  }
+  // Apply spacing rule: blank line after
+  console.log(); // Blank line after
 
   // Store message in CLI session memory if it's a conversational message
   if (shouldStoreMessage(message)) {
@@ -357,16 +352,15 @@ export function displayInstruction(content: string): void {
 }
 
 /**
- * Special function for streaming integration - skips spacing for real-time updates
+ * Special function for streaming integration
  */
-export function displayStreamingMessage(content: string, sender: string, skipSpacing: boolean = false): void {
+export function displayStreamingMessage(content: string, sender: string): void {
   const messageType = sender === 'HUMAN' || sender === 'you' ? 'human' : 'agent';
 
   displayUnifiedMessage({
     type: messageType,
     content,
     sender,
-    skipSpacing,
     metadata: { source: 'streaming' }
   });
 }
