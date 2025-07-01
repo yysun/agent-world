@@ -7,20 +7,27 @@
  * - Connection management for WebSocket clients with world cleanup
  * - Simplified event broadcasting - forwards all world events with eventType added to payload
  * - Message validation with Zod schemas
- * - Memory clearing commands: /clear (all agents) and /clear <name> (specific agent)
+ * - Modular command system with clear commands in separate command modules
  * - World subscription lifecycle management with automatic cleanup
  *
  * WebSocket Events:
  * - subscribe: Subscribe to world events (creates world object, attaches event listeners)
  * - unsubscribe: Unsubscribe from world events (cleans up world object and listeners)
- * - event: Send message to attached world object using publishMessage
+ * - event: Send message to attached world object using publishMessage (supports commands with '/')
+ * - system: Execute commands only (requires '/' prefix)
+ * - world: Execute commands only (requires '/' prefix)
+ * - message: Execute commands if starts with '/', otherwise publish message to world
  * - welcome: Connection confirmation (triggers auto-subscription on client)
  * - subscribed: Subscription confirmation
  * - unsubscribed: Unsubscription confirmation
  * - All world events: Forwarded with eventType field added (e.g., eventType: 'sse', type: 'chunk')
  * - error: Error messages
  *
- * Special Commands:
+ * Command Handling:
+ * - All commands start with '/' and are routed through executeCommand()
+ * - Commands requiring root path (getWorlds, addWorld, updateWorld) automatically get ROOT_PATH prepended
+ * - Commands support world refresh after add/update operations
+ * - Available commands: clear, getWorlds, getWorld, addWorld, updateWorld, addAgent, updateAgentConfig, updateAgentPrompt, updateAgentMemory
  * - /clear: Clear memory for all agents in the world
  * - /clear <agentName>: Clear memory for specific agent
  *
@@ -39,7 +46,10 @@
  * - Extended WorldSocket interface to track world references and event listeners
  * - Implements comprehensive cleanup lifecycle management
  * - Simplified event forwarding with generic handler
- * - Added memory clearing functionality with /clear commands
+ * - Extracted command handling to modular server/commands/ structure
+ * - Clear commands moved to server/commands/clear.ts for better organization
+ * - Added helper function to automatically prepend ROOT_PATH to commands that require it
+ * - Updated all executeCommand calls to use prepareCommandWithRootPath helper
  */
 
 import { Server } from 'http';
@@ -50,12 +60,33 @@ import { z } from 'zod';
 import { listWorlds, getWorld, WorldInfo } from '../core/world-manager.js';
 import { publishMessage } from '../core/world-events.js';
 import { toKebabCase } from '../core/utils.js';
+import { executeCommand } from './commands/index.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
+// Helper function to add root path to commands that need it
+function prepareCommandWithRootPath(message: string): string {
+  const commandLine = message.slice(1).trim(); // Remove leading '/'
+  if (!commandLine) return message;
+
+  const parts = commandLine.split(/\s+/);
+  const commandName = parts[0].toLowerCase();
+
+  // Commands that require root path as first argument
+  const commandsRequiringRootPath = ['getworlds', 'addworld', 'updateworld'];
+
+  if (commandsRequiringRootPath.includes(commandName)) {
+    // Insert ROOT_PATH as first argument
+    const args = parts.slice(1);
+    return `/${commandName} ${ROOT_PATH} ${args.join(' ')}`.trim();
+  }
+
+  return message;
+}
+
 // Zod validation schema for WebSocket messages
 const WebSocketMessageSchema = z.object({
-  type: z.enum(["event", "subscribe", "unsubscribe"]),
+  type: z.enum(["event", "subscribe", "unsubscribe", "system", "world", "message"]),
   payload: z.object({
     worldName: z.string().optional(),
     message: z.string().optional(),
@@ -206,57 +237,142 @@ export function createWebSocketServer(server: Server): WebSocketServer {
               return;
             }
 
-            // Check for special commands
-            if (eventMessage) {
-              // Handle /clear command to clear all agent memories
-              if (eventMessage.trim() === '/clear') {
-                try {
-                  const agents = Array.from(worldSocket.world.agents.values());
-                  const clearPromises = agents.map(agent => worldSocket.world!.clearAgentMemory(agent.name));
-                  await Promise.all(clearPromises);
+            // Check for command messages (starting with '/')
+            if (eventMessage && eventMessage.trim().startsWith('/')) {
+              const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
+              const result = await executeCommand(preparedCommand, worldSocket.world, ws);
 
-                  ws.send(JSON.stringify({
-                    type: 'system',
-                    content: `Cleared memory for all ${agents.length} agents in ${worldSocket.world.name}`,
-                    timestamp: new Date().toISOString()
-                  }));
-                  return;
+              // Send command result
+              ws.send(JSON.stringify(result));
+
+              // Refresh world if needed
+              if (result.refreshWorld) {
+                try {
+                  const worldId = toKebabCase(worldName);
+                  const refreshedWorld = await getWorld(ROOT_PATH, worldId);
+                  if (refreshedWorld) {
+                    // Clean up existing world subscription
+                    await cleanupWorldSubscription(worldSocket);
+
+                    // Attach refreshed world
+                    worldSocket.world = refreshedWorld;
+                    worldSocket.worldEventListeners = new Map();
+
+                    // Set up event listeners
+                    setupWorldEventListeners(worldSocket, refreshedWorld);
+
+                    ws.send(JSON.stringify({
+                      type: 'subscribed',
+                      worldName,
+                      timestamp: new Date().toISOString()
+                    }));
+                  }
                 } catch (error) {
-                  ws.send(JSON.stringify({
-                    type: 'error',
-                    error: 'Failed to clear agent memories'
-                  }));
-                  return;
+                  console.error('Failed to refresh world:', error);
                 }
               }
 
-              // Handle /clear <name> command to clear specific agent memory
-              const clearMatch = eventMessage.trim().match(/^\/clear\s+(.+)$/);
-              if (clearMatch) {
-                const agentName = clearMatch[1].trim();
-                try {
-                  await worldSocket.world.clearAgentMemory(agentName);
-
-                  ws.send(JSON.stringify({
-                    type: 'system',
-                    content: `Cleared memory for agent: ${agentName}`,
-                    timestamp: new Date().toISOString()
-                  }));
-                  return;
-                } catch (error) {
-                  ws.send(JSON.stringify({
-                    type: 'error',
-                    error: `Failed to clear memory for agent: ${agentName}`
-                  }));
-                  return;
-                }
-              }
+              return;
             }
 
             // Normalize user senders to 'HUMAN' for public messages that agents should respond to
             const normalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
-
             eventMessage && publishMessage(worldSocket.world, eventMessage, normalizedSender);
+
+            break;
+
+          case 'system':
+          case 'world':
+            // Always call executeCommand for system and world event types
+            const sysWorldSocket = ws as WorldSocket;
+            if (!sysWorldSocket.world || sysWorldSocket.world.name !== worldName) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: `${type} event requires valid world subscription`
+              }));
+              return;
+            }
+
+            if (eventMessage && eventMessage.trim().startsWith('/')) {
+              const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
+              const result = await executeCommand(preparedCommand, sysWorldSocket.world, ws);
+
+              // Send command result
+              ws.send(JSON.stringify(result));
+
+              // Refresh world if needed
+              if (result.refreshWorld) {
+                try {
+                  const worldId = toKebabCase(worldName);
+                  const refreshedWorld = await getWorld(ROOT_PATH, worldId);
+                  if (refreshedWorld) {
+                    // Clean up existing world subscription
+                    await cleanupWorldSubscription(sysWorldSocket);
+
+                    // Attach refreshed world
+                    sysWorldSocket.world = refreshedWorld;
+                    sysWorldSocket.worldEventListeners = new Map();
+
+                    // Set up event listeners
+                    setupWorldEventListeners(sysWorldSocket, refreshedWorld);
+                  }
+                } catch (error) {
+                  console.error('Failed to refresh world:', error);
+                }
+              }
+            } else {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: `${type} event requires command message starting with '/'`
+              }));
+            }
+
+            break;
+
+          case 'message':
+            // Handle message type: commands if starts with '/', otherwise publish to world
+            const messageWorldSocket = ws as WorldSocket;
+            if (!messageWorldSocket.world || messageWorldSocket.world.name !== worldName) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Message event requires valid world subscription'
+              }));
+              return;
+            }
+
+            if (eventMessage && eventMessage.trim().startsWith('/')) {
+              // Handle as command
+              const preparedCommand = prepareCommandWithRootPath(eventMessage.trim());
+              const result = await executeCommand(preparedCommand, messageWorldSocket.world, ws);
+
+              // Send command result
+              ws.send(JSON.stringify(result));
+
+              // Refresh world if needed
+              if (result.refreshWorld) {
+                try {
+                  const worldId = toKebabCase(worldName);
+                  const refreshedWorld = await getWorld(ROOT_PATH, worldId);
+                  if (refreshedWorld) {
+                    // Clean up existing world subscription
+                    await cleanupWorldSubscription(messageWorldSocket);
+
+                    // Attach refreshed world
+                    messageWorldSocket.world = refreshedWorld;
+                    messageWorldSocket.worldEventListeners = new Map();
+
+                    // Set up event listeners
+                    setupWorldEventListeners(messageWorldSocket, refreshedWorld);
+                  }
+                } catch (error) {
+                  console.error('Failed to refresh world:', error);
+                }
+              }
+            } else {
+              // Handle as regular message - publish to world
+              const msgNormalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
+              eventMessage && publishMessage(messageWorldSocket.world, eventMessage, msgNormalizedSender);
+            }
 
             break;
 

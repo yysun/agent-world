@@ -8,10 +8,10 @@
     "agent-world-server": "./server/index.ts"
   },
   "scripts": {
-    "start": "npm run cli",
+    "start": "npm run server",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
-    "dev": "npx tsx --watch index.ts",
+    "dev": "npx tsx --watch server/index.ts",
     "test": "jest --config jest.config.js",
     "test:integration": "jest --config jest.integration.config.js",
     "test:all": "npm run test && npm run test:integration",
