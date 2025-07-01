@@ -34,7 +34,7 @@
 
 import { World, Agent, AgentMessage, MessageData, SenderType, WorldMessageEvent } from './types';
 import { subscribeToMessages, publishMessage, publishSSE } from './world-events';
-import { saveAgentToDisk, loadAgentFromDisk, saveAgentMemoryToDisk } from './agent-storage';
+import { saveAgentToDisk, loadAgentFromDisk, saveAgentMemoryToDisk, saveAgentConfigToDisk } from './agent-storage';
 import { streamAgentResponse } from './llm-manager';
 import {
   getWorldTurnLimit,
@@ -139,7 +139,7 @@ export async function processAgentMessage(
 
     // Auto-save agent state after LLM call count increment
     try {
-      await saveAgentToDisk(world.rootPath, world.id, agent);
+      await saveAgentConfigToDisk(world.rootPath, world.id, agent);
     } catch (error) {
       console.warn(`Failed to auto-save agent ${agent.id} after LLM call increment:`, error);
     }
@@ -245,7 +245,7 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
       // Auto-save agent state after turn limit reset
       try {
-        await saveAgentToDisk(world.rootPath, world.id, agent);
+        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
       } catch (error) {
         console.warn(`Failed to auto-save agent ${agent.id} after turn limit reset:`, error);
       }

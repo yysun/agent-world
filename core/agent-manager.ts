@@ -6,6 +6,7 @@
  * - AgentMessage memory integration with typed operations
  * - System prompt management with markdown file support
  * - Configuration persistence with Date serialization
+ * - Separate memory storage to memory.json files
  * - Isolated operations using agent-storage.ts
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
@@ -42,6 +43,7 @@ import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
 
 // Dynamic function assignments for storage operations only
 let saveAgentToDisk: any,
+  saveAgentConfigToDisk: any,
   saveAgentMemoryToDisk: any,
   loadAgentFromDisk: any,
   loadAgentFromDiskWithRetry: any,
@@ -60,6 +62,7 @@ async function initializeModules() {
     const agentStorage = await import('./agent-storage');
 
     saveAgentToDisk = agentStorage.saveAgentToDisk;
+    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
     saveAgentMemoryToDisk = agentStorage.saveAgentMemoryToDisk;
     loadAgentFromDisk = agentStorage.loadAgentFromDisk;
     loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
@@ -79,6 +82,7 @@ async function initializeModules() {
     };
 
     saveAgentToDisk = browserNoOp;
+    saveAgentConfigToDisk = browserNoOp;
     saveAgentMemoryToDisk = browserNoOp;
     loadAgentFromDisk = browserNoOp;
     loadAgentFromDiskWithRetry = browserNoOp;
@@ -371,7 +375,8 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     memory: []
   };
 
-  // Save to disk first
+  // Save configuration and system prompt (config.json + system-prompt.md)
+  // Memory starts empty and is saved separately to memory.json
   await saveAgentToDisk(rootPath, worldId, agent);
 
   // Register in runtime
@@ -432,7 +437,7 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
     lastActive: new Date()
   };
 
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  await saveAgentConfigToDisk(rootPath, worldId, updatedAgent);
   return updatedAgent;
 }
 
@@ -489,7 +494,9 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
     lastActive: new Date()
   };
 
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  // Save memory to memory.json and update config timestamps
+  await saveAgentMemoryToDisk(rootPath, worldId, agentId, updatedAgent.memory);
+  await saveAgentConfigToDisk(rootPath, worldId, updatedAgent);
   return updatedAgent;
 }
 
@@ -522,7 +529,9 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
     lastActive: new Date()
   };
 
-  await saveAgentToDisk(rootPath, worldId, updatedAgent);
+  // Save empty memory to memory.json and update config timestamps
+  await saveAgentMemoryToDisk(rootPath, worldId, agentId, []);
+  await saveAgentConfigToDisk(rootPath, worldId, updatedAgent);
   return updatedAgent;
 }
 
@@ -544,7 +553,7 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
 }
 
 /**
- * Update agent memory and save to disk atomically (memory-only save for performance)
+ * Update agent memory and save to memory.json
  */
 export async function updateAgentMemoryAndSave(
   rootPath: string,
@@ -566,7 +575,7 @@ export async function updateAgentMemoryAndSave(
   existingAgent.memory = updatedMemory;
   existingAgent.lastActive = new Date();
 
-  // Save only memory to disk for performance
+  // Save memory to memory.json
   await saveAgentMemoryToDisk(rootPath, worldId, agentId, updatedMemory);
 
   return existingAgent;
