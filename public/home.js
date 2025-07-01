@@ -27,10 +27,6 @@
 
 const { html, run } = window.apprun;
 
-import * as api from './api.js';
-import { getAvatarInitials, getAvatarColor } from './utils.js';
-import { AgentModal } from './agent.js';
-import { toggleTheme, applyTheme, getThemeIcon } from './theme.js';
 import wsApi from './ws-api.js';
 import Message from './components/message.js';
 import {
@@ -46,7 +42,7 @@ const USER_ID = 'user1';
 
 // Initial state
 const state = async () => {
-  const worlds = await api.getWorlds();
+  const worlds = await wsApi.getWorlds();
   const worldName = worlds.length > 0 ? worlds[0].name : null;
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);

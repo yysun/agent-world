@@ -8,7 +8,6 @@
  * - Message clearing on world change
  */
 
-import * as api from '../api.js';
 import wsApi from '../ws-api.js';
 
 export const selectWorld = async (state, worldName) => {
@@ -38,6 +37,6 @@ export const selectWorld = async (state, worldName) => {
     }
   }
 
-  const agents = await api.getAgents(worldName);
+  const agents = await wsApi.getAgents(worldName);
   return { ...newState, agents };
 };

@@ -1,15 +1,16 @@
 /**
- * API Service Module
+ * API Service Module (Legacy REST API)
  * 
- * Provides functions for interacting with the agent-world API endpoints:
+ * Provides functions for interacting with the agent-world REST API endpoints:
  * - World management
  * - Agent operations (list, get, update)
- * - Chat functionality with SSE streaming
+ * 
+ * Note: Chat functionality has been moved to ws-api.js for WebSocket-based messaging
+ * Consider migrating to ws-api.js for real-time functionality
  * 
  * Features:
  * - RESTful API client using fetch
  * - Error handling and response validation
- * - SSE streaming support for chat
  * - Base URL configuration
  */
 
@@ -119,110 +120,6 @@ async function updateAgent(worldName, agentName, updateData) {
   return response.json();
 }
 
-/**
- * Start a chat session with SSE streaming
- * @param {string} worldName - Name of the world
- * @param {Object} chatData - Chat message data
- * @param {Function} onMessage - Callback for each SSE message
- * @param {Function} onError - Callback for errors
- * @param {Function} onComplete - Callback when stream completes
- * @returns {EventSource} EventSource instance for manual control
- */
-function startChat(worldName, chatData, onMessage, onError, onComplete) {
-  if (!worldName || !chatData) {
-    throw new Error('World name and chat data are required');
-  }
-
-  // First, send the POST request to initiate the chat
-  const chatUrl = `${API_BASE_URL}/worlds/${encodeURIComponent(worldName)}/chat`;
-
-  return fetch(chatUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-    },
-    body: JSON.stringify(chatData),
-  })
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      // Create EventSource-like behavior from the fetch response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      function readStream() {
-        return reader.read().then(({ done, value }) => {
-          if (done) {
-            if (onComplete) onComplete();
-            return;
-          }
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                if (onComplete) onComplete();
-                return;
-              }
-
-              try {
-                const message = JSON.parse(data);
-                if (onMessage) onMessage(message);
-              } catch (e) {
-                console.warn('Failed to parse SSE message:', data);
-              }
-            }
-          }
-
-          return readStream();
-        });
-      }
-
-      readStream().catch(error => {
-        if (onError) onError(error);
-      });
-
-      // Return a simple controller object
-      return {
-        close: () => reader.cancel(),
-      };
-    })
-    .catch(error => {
-      if (onError) onError(error);
-      throw error;
-    });
-}
-
-/**
- * Alternative chat function that returns an EventSource
- * @param {string} worldName - Name of the world
- * @param {Object} chatData - Chat message data
- * @returns {EventSource} EventSource for SSE streaming
- */
-function createChatEventSource(worldName, chatData) {
-  if (!worldName || !chatData) {
-    throw new Error('World name and chat data are required');
-  }
-
-  // Note: This approach requires the server to accept SSE connections via GET
-  // with parameters, or we need to establish the connection differently
-  const url = new URL(`${API_BASE_URL}/worlds/${encodeURIComponent(worldName)}/chat`);
-
-  // For EventSource, we typically need to send initial data via URL params
-  // or establish the connection through a different mechanism
-  Object.keys(chatData).forEach(key => {
-    url.searchParams.append(key, JSON.stringify(chatData[key]));
-  });
-
-  return new EventSource(url.toString());
-}
-
 // Export the API functions
 export {
   getWorlds,
@@ -230,6 +127,4 @@ export {
   getAgent,
   createAgent,
   updateAgent,
-  startChat,
-  createChatEventSource,
 };

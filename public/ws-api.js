@@ -1,14 +1,11 @@
 /**
- * WebSocket API Module - Real-time world communication and subscription management
+ * WebSocket API Module - Real-time world communication and CRUD operations
  *
- * Features:
- * - Connection management with automatic reconnection
- * - World subscription system with proper cleanup
- * - JSON message protocol and event routing
- * - AppRun integration via callbacks
+ * Features: Connection management, world subscription, WebSocket commands, 
+ * world/agent CRUD operations, promise-based async API with error handling
  *
- * Implementation: Function-based module with automatic unsubscribe/subscribe
- * flow for world switching and bidirectional event handling.
+ * Implementation: Function-based module with subscription lifecycle management
+ * and WebSocket command protocol for world/agent operations
  */
 
 // State management
@@ -158,6 +155,67 @@ const getConnectionState = () => {
   }
 };
 
+
+// WebSocket command helper
+function sendCommand(command, worldName = null) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('WebSocket not connected'));
+      return;
+    }
+
+    const timeout = setTimeout(() => reject(new Error('Command timeout')), 5000);
+    const handleResponse = (event) => {
+      clearTimeout(timeout);
+      ws.removeEventListener('message', handleResponse);
+      try {
+        resolve(JSON.parse(event.data));
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    ws.addEventListener('message', handleResponse);
+    ws.send(JSON.stringify({
+      type: 'system',
+      payload: { worldName: worldName || currentWorldSubscription, message: command }
+    }));
+  });
+}
+
+
+// WebSocket-based chat functionality (replaces SSE from api.js)
+const sendChatMessage = (worldName, message, sender = 'user1') => {
+  return sendWorldEvent(worldName, message, sender);
+};
+
+// Enhanced connection management
+const ensureConnection = async (maxRetries = 3) => {
+  if (isConnected()) return true;
+
+  for (let i = 0; i < maxRetries; i++) {
+    connect();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (isConnected()) return true;
+  }
+
+  throw new Error('Failed to establish WebSocket connection');
+};
+
+// Auto-reconnect with exponential backoff
+const setupAutoReconnect = () => {
+  if (ws) {
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      app.run('handleConnectionStatus', 'disconnected');
+
+      if (reconnectAttempts < maxReconnectAttempts) {
+        attemptReconnect();
+      }
+    };
+  }
+};
+
 export default {
   connect,
   disconnect,
@@ -168,5 +226,114 @@ export default {
   subscribeToWorld,
   unsubscribeFromWorld,
   sendWorldEvent,
-  getCurrentWorldSubscription
+  sendChatMessage, // New chat function
+  ensureConnection, // New connection helper
+  setupAutoReconnect, // New auto-reconnect setup
+  getCurrentWorldSubscription,
+  sendCommand,
+  getWorlds,
+  getAgents,
+  getAgent,
+  createAgent,
+  updateAgent
+};
+
+
+// World and Agent API Functions
+
+async function getWorlds() {
+  const response = await sendCommand('/getWorlds');
+  if (response.type === 'success' && response.data?.data) {
+    return response.data.data;
+  }
+  throw new Error(response.data?.error || 'Failed to get worlds');
+}
+
+async function getAgents(worldName) {
+  const targetWorld = worldName || currentWorldSubscription;
+  if (!targetWorld) {
+    throw new Error('World name required or must be subscribed to a world');
+  }
+
+  const response = await sendCommand('/getWorld', targetWorld);
+  if (response.type === 'success' && response.data?.data?.agents) {
+    return response.data.data.agents;
+  }
+  throw new Error(response.data?.error || 'Failed to get agents');
+}
+
+async function getAgent(worldName, agentName) {
+  const agents = await getAgents(worldName);
+  const agent = agents.find(a => a.name === agentName);
+  if (!agent) {
+    throw new Error(`Agent '${agentName}' not found`);
+  }
+  return agent;
+}
+
+async function createAgent(worldName, agentData) {
+  const targetWorld = worldName || currentWorldSubscription;
+  if (!targetWorld) {
+    throw new Error('World name required or must be subscribed to a world');
+  }
+
+  const { name, description } = agentData;
+  if (!name || !description) {
+    throw new Error('Agent name and description are required');
+  }
+
+  const response = await sendCommand(`/addAgent ${name} ${description}`, targetWorld);
+  if (response.type === 'success' && response.data?.data) {
+    return response.data.data;
+  }
+  throw new Error(response.data?.error || 'Failed to create agent');
+}
+
+async function updateAgent(worldName, agentName, updateData) {
+  const targetWorld = worldName || currentWorldSubscription;
+  if (!targetWorld) {
+    throw new Error('World name required or must be subscribed to a world');
+  }
+
+  if (!agentName) {
+    throw new Error('Agent name is required');
+  }
+
+  // Handle different update types
+  if (updateData.config) {
+    for (const [key, value] of Object.entries(updateData.config)) {
+      const response = await sendCommand(`/updateAgentConfig ${agentName} ${key} ${value}`, targetWorld);
+      if (response.type !== 'success') {
+        throw new Error(response.data?.error || `Failed to update ${key}`);
+      }
+    }
+  }
+
+  if (updateData.prompt) {
+    const response = await sendCommand(`/updateAgentPrompt ${agentName} ${updateData.prompt}`, targetWorld);
+    if (response.type !== 'success') {
+      throw new Error(response.data?.error || 'Failed to update prompt');
+    }
+  }
+
+  if (updateData.memory) {
+    const { action, role, message } = updateData.memory;
+    const response = await sendCommand(`/updateAgentMemory ${agentName} ${action} ${role} ${message}`, targetWorld);
+    if (response.type !== 'success') {
+      throw new Error(response.data?.error || 'Failed to update memory');
+    }
+  }
+
+  return await getAgent(targetWorld, agentName);
+}
+
+
+export {
+  getWorlds,
+  getAgents,
+  getAgent,
+  createAgent,
+  updateAgent,
+  sendChatMessage, // Export new chat function
+  ensureConnection, // Export connection helper
 };

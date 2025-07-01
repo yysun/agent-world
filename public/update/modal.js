@@ -7,7 +7,7 @@
  * - Error handling for save operations
  */
 
-import * as api from '../api.js';
+import wsApi from '../ws-api.js';
 
 export const openAgentModal = (state, agent = null) => {
   return {
@@ -17,9 +17,21 @@ export const openAgentModal = (state, agent = null) => {
   };
 };
 
-export const closeAgentModal = (state, save) => {
+export const closeAgentModal = async (state, save) => {
   try {
-    if (save) api.saveAgent(state.editingAgent);
+    if (save && state.editingAgent) {
+      // Use updateAgent instead of the non-existent saveAgent
+      if (state.editingAgent.status === 'New') {
+        await wsApi.createAgent(state.worldName, {
+          name: state.editingAgent.name,
+          description: state.editingAgent.description || 'Agent created via modal'
+        });
+      } else {
+        await wsApi.updateAgent(state.worldName, state.editingAgent.name, {
+          config: state.editingAgent.config
+        });
+      }
+    }
     return {
       ...state,
       showAgentModel: false
