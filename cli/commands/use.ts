@@ -1,58 +1,112 @@
 /*
- * Use Command - Agent Activation
+ * Use Command - World Selection
  * 
  * Features:
- * - Activate agents (start them)
- * - Support for agent ID or name-based selection
- * - Status management
+ * - Validate and return world name for switching
+ * - List available worlds when no argument provided
+ * - Validate world exists before returning
  * 
  * Logic:
- * - Searches for agent by ID or partial name match
- * - Uses agent.start() to activate agents
- * - Provides feedback on activation status
+ * - Takes world name as argument
+ * - Validates world exists
+ * - Returns world name for main CLI to handle switching
  * 
  * Changes:
- * - Updated to receive World object directly instead of SimpleState
- * - Uses agent.start() method instead of setStatus
- * - Accesses agents through world.getAgentManager()
+ * - Simplified to only validate and return world name
+ * - Main CLI handles actual world switching and event management
  */
 
 import { World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
-import { colors } from '../ui/colors';
+import { listWorlds, getWorld } from '../../core/world-manager';
+import { toKebabCase } from '../../core/utils';
+import { displayUnifiedMessage } from '../ui/unified-display';
+
+// Custom error class to signal world switch request
+export class WorldSwitchRequest extends Error {
+  constructor(public worldName: string) {
+    super(`Switch to world: ${worldName}`);
+    this.name = 'WorldSwitchRequest';
+  }
+}
 
 export async function useCommand(args: string[], world: World): Promise<void> {
   try {
+    const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+
     if (args.length === 0) {
+      // List available worlds
+      const worlds = await listWorlds(rootPath);
+      if (worlds.length === 0) {
+        displayUnifiedMessage({
+          type: 'instruction',
+          content: 'No worlds available.',
+          metadata: { source: 'cli', messageType: 'command' }
+        });
+        return;
+      }
+
+      const currentWorldName = world.name;
+      const worldList = worlds.map(w =>
+        w.name === currentWorldName
+          ? `• ${w.name} (current)`
+          : `• ${w.name}`
+      ).join('\n');
+
       displayUnifiedMessage({
-        content: 'Please specify an agent name.\nUsage: /use <agent-name>',
-        type: 'help'
+        type: 'instruction',
+        content: `Available worlds:\n${worldList}\n\nUsage: /use <world-name>`,
+        metadata: { source: 'cli', messageType: 'command' }
       });
       return;
     }
 
-    const agentName = args[0];
+    const worldName = args.join(' '); // Support multi-word world names
 
-    // Activate agent using World method
-    const updatedAgent = await world.updateAgent(agentName, {
-      status: 'active'
-    });
-
-    if (updatedAgent) {
-      displaySuccess(`Activated agent: ${updatedAgent.name}`);
+    // Check if already in the requested world
+    if (world.name === worldName) {
       displayUnifiedMessage({
-        content: `  Status: ${updatedAgent.status}`,
-        type: 'status'
+        type: 'instruction',
+        content: `Already in world: ${worldName}`,
+        metadata: { source: 'cli', messageType: 'command' }
       });
-    } else {
-      displayError(`Agent not found: ${agentName}`);
-      displayUnifiedMessage({
-        content: 'Use /list to see available agents.',
-        type: 'instruction'
-      });
+      return;
     }
 
+    // Validate world exists
+    const worldId = toKebabCase(worldName);
+    const targetWorld = await getWorld(rootPath, worldId);
+
+    if (!targetWorld) {
+      displayUnifiedMessage({
+        type: 'error',
+        content: `World not found: ${worldName}`,
+        metadata: { source: 'cli', messageType: 'error' }
+      });
+
+      // Show available worlds
+      const worlds = await listWorlds(rootPath);
+      const worldList = worlds.map(w => `• ${w.name}`).join('\n');
+      displayUnifiedMessage({
+        type: 'instruction',
+        content: `Available worlds:\n${worldList}`,
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+      return;
+    }
+
+    // Throw special error to signal world switch request to main CLI
+    throw new WorldSwitchRequest(worldName);
+
   } catch (error) {
-    displayError(`Failed to activate agent: ${error}`);
+    if (error instanceof WorldSwitchRequest) {
+      // Re-throw world switch requests
+      throw error;
+    }
+
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Failed to process use command: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
   }
 }

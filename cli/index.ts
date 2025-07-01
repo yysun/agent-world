@@ -58,8 +58,7 @@ import { exportCommand } from './commands/export';
 // import { helpCommand } from './commands/help'; // TODO: Implement help command
 // import { listCommand } from './commands/list'; // TODO: Implement list command (use /agents instead)
 import { showCommand } from './commands/show';
-import { stopCommand } from './commands/stop';
-import { useCommand } from './commands/use';
+import { useCommand, WorldSwitchRequest } from './commands/use';
 
 // Remove temporary stub implementations (no longer needed)
 // Basic help command implementation
@@ -72,8 +71,7 @@ Available commands:
 - /add <name> - Create a new agent
 - /show <agent> - Display agent conversation history
 - /clear <agent|all> - Clear agent memory
-- /stop <agent|all> - Deactivate agents
-- /use <agent> - Activate agent
+- /use <world> - Switch to a different world
 - /export <filename> - Export conversation history
 - /agents - List all agents
 - /help - Show this help
@@ -151,6 +149,129 @@ const DEFAULT_WORLD_NAME = 'Default World';
 // Global world object for program execution
 let currentWorld: World | null = null;
 
+// Global subscription management
+let currentSSEUnsubscribe: (() => void) | null = null;
+let currentMessagesUnsubscribe: (() => void) | null = null;
+
+// World switching function
+async function switchToWorld(worldName: string): Promise<void> {
+  try {
+    displayUnifiedMessage({
+      type: 'command',
+      content: `Switching to world: ${worldName}...`,
+      commandSubtype: 'info',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
+
+    // Unsubscribe from current world events
+    if (currentWorld) {
+      displayUnifiedMessage({
+        type: 'command',
+        content: `Leaving world: ${currentWorld.name}`,
+        commandSubtype: 'info',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+
+      if (currentSSEUnsubscribe) {
+        currentSSEUnsubscribe();
+        currentSSEUnsubscribe = null;
+      }
+
+      if (currentMessagesUnsubscribe) {
+        currentMessagesUnsubscribe();
+        currentMessagesUnsubscribe = null;
+      }
+    }
+
+    // Load new world
+    await loadWorldByName(worldName);
+    setCurrentWorldName(worldName);
+
+    // Subscribe to new world events
+    const sseUnsubscribe = subscribeToSSE(currentWorld!, async (event) => {
+      if (event.type === 'start' || event.type === 'chunk' || event.type === 'end' || event.type === 'error') {
+        const sseData = event;
+        const agents = getAgentsFromCurrentWorld();
+        const agent = agents.find(a => a.name === sseData.agentName);
+        const agentName = agent?.name || 'Unknown Agent';
+
+        switch (sseData.type) {
+          case 'start':
+            const estimatedInputTokens = await estimateInputTokens(sseData.agentName, worldName);
+            StreamingDisplay.startStreaming(sseData.agentName, agentName, estimatedInputTokens);
+            break;
+          case 'chunk':
+            StreamingDisplay.addStreamingContent(sseData.agentName, sseData.content || '');
+            break;
+          case 'end':
+            if (sseData.usage) {
+              StreamingDisplay.setStreamingUsage(sseData.agentName, sseData.usage);
+              StreamingDisplay.updateFinalPreview(sseData.agentName);
+            }
+            StreamingDisplay.endStreaming(sseData.agentName);
+            break;
+          case 'error':
+            StreamingDisplay.markStreamingError(sseData.agentName);
+            break;
+        }
+      }
+    });
+
+    const messagesUnsubscribe = subscribeToMessages(currentWorld!, async (event) => {
+      if (event.content.startsWith('@human')) {
+        const messageData: MessageEventPayload = {
+          content: event.content,
+          sender: event.sender
+        };
+        StreamingDisplay.displayMessage(messageData);
+      }
+    });
+
+    // Store unsubscribe functions
+    currentSSEUnsubscribe = sseUnsubscribe;
+    currentMessagesUnsubscribe = messagesUnsubscribe;
+
+    // Display new world info
+    const agents = Array.from(currentWorld!.agents.values());
+    const agentCount = agents.length;
+    const totalMessages = agents.reduce((total, agent) => total + (agent.memory ? agent.memory.length : 0), 0);
+
+    displayUnifiedMessage({
+      type: 'command',
+      content: `Switched to world: ${currentWorld!.name}`,
+      commandSubtype: 'success',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
+
+    if (agentCount > 0) {
+      const agentList = agents.map(agent => {
+        const memoryCount = agent.memory ? agent.memory.length : 0;
+        const statusText = agent.status || 'active';
+        return `• ${agent.name} (${agent.type}) - ${statusText} - ${memoryCount} messages`;
+      }).join('\n');
+
+      displayUnifiedMessage({
+        type: 'instruction',
+        content: `Agents in this world:\n${agentList}\n\nTotal: ${agentCount} agents, ${totalMessages} messages in memory`,
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+    } else {
+      displayUnifiedMessage({
+        type: 'instruction',
+        content: 'No agents found in this world.',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+    }
+
+  } catch (error) {
+    displayUnifiedMessage({
+      type: 'error',
+      content: `Failed to switch world: ${error}`,
+      metadata: { source: 'cli', messageType: 'error' }
+    });
+  }
+}
+
 // Helper function to get root directory path
 function getRootPath(): string {
   return process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
@@ -218,6 +339,69 @@ async function broadcastMessageToCurrentWorld(message: string, sender: string): 
 
   publishMessage(currentWorld, message, sender);
 }
+
+// Shared input processing function for both interactive and piped input
+async function processInput(input: string): Promise<void> {
+  const trimmedInput = input.trim();
+
+  if (!trimmedInput) {
+    return;
+  }
+
+  if (trimmedInput.startsWith('/')) {
+    // Handle commands
+    const parts = trimmedInput.slice(1).split(' ');
+    const commandName = parts[0];
+    const commandArgs = parts.slice(1);
+
+    if (commands[commandName]) {
+      try {
+        await commands[commandName](commandArgs, currentWorld!);
+
+        // Auto-run /agents command after clear command to show updated state
+        if (commandName === 'clear') {
+          await listCommand([], currentWorld!);
+        }
+      } catch (error) {
+        if (error instanceof WorldSwitchRequest) {
+          // Handle world switch request
+          await switchToWorld(error.worldName);
+        } else {
+          displayUnifiedMessage({
+            type: 'error',
+            content: `Error executing command: ${error}`,
+            metadata: { source: 'cli', messageType: 'error' }
+          });
+        }
+      }
+    } else {
+      displayUnifiedMessage({
+        type: 'command',
+        content: `Unknown command: /${commandName}`,
+        commandSubtype: 'warning',
+        metadata: { source: 'cli', messageType: 'command' }
+      });
+      await helpCommand([], currentWorld!);
+    }
+  } else {
+    // Broadcast message to all agents
+    displayUnifiedMessage({
+      type: 'human',
+      content: trimmedInput,
+      sender: 'you',
+      metadata: { source: 'cli', messageType: 'command' }
+    });
+    try {
+      await broadcastMessageToCurrentWorld(trimmedInput, 'HUMAN');
+    } catch (error) {
+      displayUnifiedMessage({
+        type: 'error',
+        content: `Error broadcasting message: ${error}`,
+        metadata: { source: 'cli', messageType: 'error' }
+      });
+    }
+  }
+}
 // Load agents and display current state
 async function loadAgents(worldName: string): Promise<void> {
   try {
@@ -254,7 +438,6 @@ const commands: Record<string, (args: string[], world: World) => Promise<void>> 
   export: exportCommand,
   help: helpCommand,
   show: showCommand,
-  stop: stopCommand,
   use: useCommand,
   quit: quitCommand,
 };
@@ -359,10 +542,22 @@ async function main() {
       break;
 
     case 'select':
-      // Multiple worlds found - let user pick
-      const selectedWorld = await selectWorldInteractively(worlds);
-      await loadWorldByName(selectedWorld);
-      worldName = selectedWorld;
+      // Multiple worlds found - let user pick (or auto-select for piped input)
+      if (hasPipedInputDetected) {
+        // For piped input, automatically select the first world
+        await loadWorldByName(worlds[0]);
+        worldName = worlds[0];
+        displayUnifiedMessage({
+          type: 'instruction',
+          content: `Auto-selected world for piped input: ${worlds[0]}`,
+          metadata: { source: 'cli', messageType: 'notification' }
+        });
+      } else {
+        // Interactive mode - let user select
+        const selectedWorld = await selectWorldInteractively(worlds);
+        await loadWorldByName(selectedWorld);
+        worldName = selectedWorld;
+      }
       break;
 
     default:
@@ -416,7 +611,7 @@ async function main() {
     // Terminal is already initialized for interactive mode in initializeTerminal()
   }
 
-  // If we have external input, broadcast it
+  // If we have external input, process it (handles both commands and messages)
   if (hasExternalInput && externalMessage) {
     displayUnifiedMessage({
       type: 'human',
@@ -425,11 +620,11 @@ async function main() {
       metadata: { source: 'cli', messageType: 'command' }
     });
     try {
-      await broadcastMessageToCurrentWorld(externalMessage, 'HUMAN');
+      await processInput(externalMessage);
     } catch (error) {
       displayUnifiedMessage({
         type: 'error',
-        content: `Error broadcasting message: ${error}`,
+        content: `Error processing input: ${error}`,
         metadata: { source: 'cli', messageType: 'error' }
       });
     }
@@ -456,57 +651,14 @@ async function main() {
         // Hide the input box immediately after Enter is pressed
         hideInputBox();
 
+        // Process input using shared function
+        await processInput(trimmedInput);
+
+        // Handle display updates based on input type
         if (trimmedInput.startsWith('/')) {
-          // Handle commands
-          const parts = trimmedInput.slice(1).split(' ');
-          const commandName = parts[0];
-          const commandArgs = parts.slice(1);
-
-          if (commands[commandName]) {
-            try {
-              await commands[commandName](commandArgs, currentWorld!);
-
-              // Auto-run /agents command after clear command to show updated state
-              if (commandName === 'clear') {
-                await listCommand([], currentWorld!);
-              }
-            } catch (error) {
-              displayUnifiedMessage({
-                type: 'error',
-                content: `Error executing command: ${error}`,
-                metadata: { source: 'cli', messageType: 'error' }
-              });
-            }
-          } else {
-            displayUnifiedMessage({
-              type: 'command',
-              content: `Unknown command: /${commandName}`,
-              commandSubtype: 'warning',
-              metadata: { source: 'cli', messageType: 'command' }
-            });
-            await helpCommand([], currentWorld!);
-          }
-
           // Reset position and show input prompt immediately after command execution
           handlePostCommandDisplay();
         } else {
-          // Broadcast message to all agents
-          displayUnifiedMessage({
-            type: 'human',
-            content: trimmedInput,
-            sender: 'you',
-            metadata: { source: 'cli', messageType: 'command' }
-          });
-          try {
-            await broadcastMessageToCurrentWorld(trimmedInput, 'HUMAN');
-          } catch (error) {
-            displayUnifiedMessage({
-              type: 'error',
-              content: `Error broadcasting message: ${error}`,
-              metadata: { source: 'cli', messageType: 'error' }
-            });
-          }
-
           // For broadcast messages, wait for streaming to complete or show prompt if no streaming
           handlePostBroadcastDisplay();
         }
