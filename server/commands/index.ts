@@ -8,6 +8,7 @@
  * - Helper functions for common command operations
  * - All commands implemented in single file for simplicity
  * - Transport-agnostic using generic ClientConnection interface
+ * - Comprehensive debug logging with Pino for command execution tracking
  * 
  * Commands:
  * - clear: Clear agent memory (individual or all)
@@ -20,6 +21,13 @@
  * - updateAgentPrompt: Update agent system prompt
  * - updateAgentMemory: Update agent memory/conversation
  * 
+ * Logging:
+ * - Uses Pino for structured logging with debug/info/warn/error levels
+ * - Logs command execution start/end with context
+ * - Tracks successful/failed operations with metadata
+ * - Pretty printing in development, JSON in production
+ * - Configurable log level via LOG_LEVEL environment variable
+ * 
  * Changes:
  * - Initial creation with clear command export
  * - Structured for easy command addition and management
@@ -28,15 +36,30 @@
  * - Updated commands to use rootPath from args instead of environment variables
  * - Modified updateWorld command to require rootPath as first argument
  * - Updated to use generic ClientConnection instead of WebSocket
+ * - Added comprehensive Pino logging for debugging and monitoring
  */
 
+import pino from 'pino';
 import { World, Agent, LLMProvider } from '../../core/types.js';
 import { WorldInfo, listWorlds, getWorld as getWorldFromManager, createWorld, updateWorld } from '../../core/world-manager.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
 
+// Create logger instance
+const logger = pino({
+  name: 'commands',
+  level: process.env.LOG_LEVEL || 'debug',
+  transport: process.env.NODE_ENV !== 'production' ? {
+    target: 'pino-pretty',
+    options: {
+      colorize: true
+    }
+  } : undefined
+});
+
 // Helper functions
 const validateArgs: ValidationHelper = (args, requiredCount = 0) => {
   if (args.length < requiredCount) {
+    logger.warn('Argument validation failed', { provided: args.length, required: requiredCount });
     return createError(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`);
   }
   return null;
@@ -74,42 +97,57 @@ const createError: ErrorHelper = (error) => ({
 // Command implementations
 const clearCommand: ServerCommand = async (args, world) => {
   try {
+    logger.debug('Clear command started', { args: args.length, world: world?.name });
+
     // Handle /clear command (no args) - clear all agents
     if (args.length === 0) {
       const agents = Array.from(world.agents.values());
 
       if (agents.length === 0) {
+        logger.debug('No agents to clear');
         return createResponse('No agents to clear.');
       }
 
+      logger.debug('Clearing all agent memories', { agentCount: agents.length });
       const clearPromises = agents.map(agent => world.clearAgentMemory(agent.name));
       await Promise.all(clearPromises);
 
+      logger.info('Cleared all agent memories', { agentCount: agents.length, world: world.name });
       return createResponse(`Cleared memory for all ${agents.length} agents in ${world.name}`);
     }
 
     // Handle /clear <name> command - clear specific agent memory
     const agentName = args[0].trim();
+    logger.debug('Clearing specific agent memory', { agentName });
+
     const clearedAgent = await world.clearAgentMemory(agentName);
 
     if (clearedAgent) {
+      logger.info('Agent memory cleared successfully', { agentName });
       return createResponse(`Cleared memory for agent: ${agentName}`);
     } else {
+      logger.warn('Agent not found for clearing', { agentName });
       return createError(`Agent not found: ${agentName}`);
     }
 
   } catch (error) {
+    logger.error('Clear command failed', { error: error instanceof Error ? error.message : error, args });
     return createError(`Failed to clear agent memory: ${error}`);
   }
 };
 
 const getWorldsCommand: ServerCommand = async (args, world) => {
   try {
+    logger.debug('GetWorlds command started', { args: args.length });
+
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
 
     const ROOT_PATH = args[0].trim();
+    logger.debug('Loading worlds list', { rootPath: ROOT_PATH });
+
     const worlds = await listWorlds(ROOT_PATH);
+    logger.debug('Worlds loaded, counting agents', { worldCount: worlds.length });
 
     // Count agents for each world by loading and checking agents map
     const worldsWithAgentCount = await Promise.all(
@@ -121,14 +159,17 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
             agentCount: fullWorld ? fullWorld.agents.size : 0
           };
         } catch (error) {
+          logger.warn('Failed to load world for agent count', { worldId: worldInfo.id, error: error instanceof Error ? error.message : error });
           // If world fails to load, keep original count (0)
           return worldInfo;
         }
       })
     );
 
+    logger.info('Worlds retrieved successfully', { worldCount: worldsWithAgentCount.length });
     return createResponse('Worlds retrieved successfully', 'data', worldsWithAgentCount);
   } catch (error) {
+    logger.error('GetWorlds command failed', { error: error instanceof Error ? error.message : error, args });
     return createError(`Failed to get worlds: ${error}`);
   }
 };
@@ -251,11 +292,15 @@ const updateWorldCommand: ServerCommand = async (args, world) => {
 
 const addAgentCommand: ServerCommand = async (args, world) => {
   try {
+    logger.debug('AddAgent command started', { args: args.length, world: world?.name });
+
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
 
     const agentName = args[0].trim();
     const description = args.slice(1).join(' ').trim() || 'A helpful assistant';
+
+    logger.debug('Creating new agent', { agentName, description, world: world.name });
 
     // Create agent using world method
     const agent = await world.createAgent({
@@ -276,8 +321,10 @@ const addAgentCommand: ServerCommand = async (args, world) => {
       messageCount: agent.memory?.length || 0
     };
 
+    logger.info('Agent created successfully', { agentName, agentId: agent.id, world: world.name });
     return createResponse(`Agent '${agentName}' created successfully`, 'data', agentData, true);
   } catch (error) {
+    logger.error('AddAgent command failed', { error: error instanceof Error ? error.message : error, args, world: world?.name });
     return createError(`Failed to add agent: ${error}`);
   }
 };
@@ -465,12 +512,20 @@ export async function executeCommand(message: string, world: World | null): Prom
     // Remove leading '/' and split into command and arguments
     const commandLine = message.slice(1).trim();
     if (!commandLine) {
+      logger.warn('Empty command received');
       return createError('Empty command');
     }
 
     const parts = commandLine.split(/\s+/);
     const commandName = parts[0] as CommandName; // Keep original case
     const args = parts.slice(1);
+
+    logger.debug('Executing command', {
+      command: commandName,
+      args: args.length,
+      worldContext: world ? world.name : 'null',
+      fullMessage: message
+    });
 
     // Check if command exists (case-insensitive lookup)
     const commandKey = Object.keys(commands).find(key =>
@@ -480,32 +535,47 @@ export async function executeCommand(message: string, world: World | null): Prom
     const command = commandKey ? commands[commandKey] : undefined;
 
     if (!command) {
+      logger.warn('Unknown command requested', { command: commandName });
       return createError(`Unknown command: /${commandName}`);
     }
 
     // Handle global commands that don't need world context
     const globalCommands = ['getworlds', 'addworld'];
     if (globalCommands.includes(commandKey.toLowerCase())) {
+      logger.debug('Executing global command', { command: commandKey });
       // For global commands, we can pass null but the command itself should handle it
       // Create a dummy world context or handle specially
       if (commandKey.toLowerCase() === 'getworlds') {
         // getWorlds doesn't actually use the world parameter, just the ROOT_PATH from args
-        return await command(args, null as any); // Type cast to avoid error
+        const result = await command(args, null as any); // Type cast to avoid error
+        logger.debug('Global command completed', { command: commandKey, success: !result.error });
+        return result;
       }
       if (commandKey.toLowerCase() === 'addworld') {
         // addWorld creates a new world, doesn't need existing world context
-        return await command(args, null as any); // Type cast to avoid error
+        const result = await command(args, null as any); // Type cast to avoid error
+        logger.debug('Global command completed', { command: commandKey, success: !result.error });
+        return result;
       }
     }
 
     // For all other commands, world context is required
     if (!world) {
+      logger.warn('Command requires world context but none provided', { command: commandName });
       return createError(`Command '${commandName}' requires world context`);
     }
 
+    logger.debug('Executing world command', { command: commandKey, world: world.name });
     // Execute the command
-    return await command(args, world);
+    const result = await command(args, world);
+    logger.debug('Command completed', {
+      command: commandKey,
+      success: !result.error,
+      refreshWorld: result.refreshWorld
+    });
+    return result;
   } catch (error) {
+    logger.error('Command execution failed', { error: error instanceof Error ? error.message : error, message });
     return createError(`Command execution failed: ${error}`);
   }
 }
