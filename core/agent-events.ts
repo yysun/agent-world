@@ -2,24 +2,34 @@
  * Agent Events Module - World-Aware Agent Message Processing and Subscriptions
  *
  * Features:
- * - Automatic agent subscription to World.eventEmitter messages
- * - Agent message processing logic with world-specific turn limits
- * - Message filtering and response logic using world context
- * - LLM streaming integration with world's eventEmitter SSE events
- * - World-specific event emitter usage (agents use their world's eventEmitter)
+ * - Automatic agent subscription to World.eventEmitter messages with passive memory
+ * - Agent message processing logic with world-specific turn limits and LLM call tracking
+ * - Message filtering and response logic using world context and first-mention-only system
+ * - LLM streaming integration with world's eventEmitter SSE events and error handling
+ * - World-specific event emitter usage ensuring proper event isolation
+ * - Pass command detection with proper memory persistence and control handoff
+ * - Auto-mention logic for agent-to-agent conversations with sender type detection
  *
  * Core Functions:
- * - subscribeAgentToMessages: Auto-subscribe agent to world messages
- * - processAgentMessage: Handle agent message processing with world context
- * - shouldAgentRespond: Message filtering logic with world-specific turn limits
+ * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering
+ * - processAgentMessage: Handle agent message processing with world context and memory persistence
+ * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
+ * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
  *
- * Implementation:
- * - Uses World.eventEmitter for all event operations
- * - Implements agent processing logic with world awareness
- * - Integrates with LLM manager using world context
- * - Supports configurable world-specific turn limits
- * - Zero dependencies on existing agent.ts or event systems
- * - All operations scoped to specific world instance
+ * Implementation Details:
+ * - Uses World.eventEmitter for all event operations ensuring proper isolation
+ * - Implements agent processing logic with world awareness and turn limit management
+ * - Integrates with LLM manager using world context for SSE streaming events
+ * - Supports configurable world-specific turn limits with automatic reset on human messages
+ * - Zero dependencies on existing agent.ts or legacy event systems
+ * - All operations scoped to specific world instance with proper memory persistence
+ * - Case-insensitive mention detection with first-mention-only response logic
+ * - Pass command handling preserves original response in memory while redirecting control
+ *
+ * Recent Changes:
+ * - Fixed sender type detection to use determineSenderType() consistently
+ * - Enhanced pass command handling to preserve original LLM response in memory
+ * - Improved comment documentation with implementation details and change history
  */
 
 import { World, Agent, AgentMessage, MessageData, SenderType, WorldMessageEvent } from './types';
@@ -159,10 +169,12 @@ async function processAgentMessage(
     // Check for pass command in response
     const passCommandRegex = /<world>pass<\/world>/i;
     if (passCommandRegex.test(response)) {
-      // Replace response with @human redirect
+      // Publish pass command redirect message
       const passMessage = `@human ${agent.id} is passing control to you`;
-
       publishMessage(world, passMessage, 'system');
+
+      // Note: The original LLM response is already saved to memory above
+      // This ensures the pass command response is preserved in agent memory
       return;
     }
 
@@ -255,7 +267,7 @@ async function shouldAgentRespond(world: World, agent: Agent, messageEvent: Worl
   const mentions = extractMentions(messageEvent.content);
 
   // For HUMAN/user messages
-  if (messageEvent.sender === 'HUMAN' || messageEvent.sender === 'human') {
+  if (senderType === SenderType.HUMAN) {
     // If no mentions at all, respond to all (public message)
     if (mentions.length === 0) {
       return true;

@@ -1,17 +1,35 @@
 /**
- * Manager Utilities - Helper functions for managers
+ * Manager Utilities - Helper functions for managers and agent processing
  *
  * Features:
- * - Unique ID generation for events and messages
- * - Manager-specific utility functions
- * - String manipulation utilities (kebab-case conversion)
- * - Agent and message processing utilities
+ * - Unique ID generation for events and messages using crypto.randomUUID()
+ * - Manager-specific utility functions for string manipulation and processing
+ * - String manipulation utilities (kebab-case conversion for IDs and names)
+ * - Agent and message processing utilities with world-aware operations
+ * - LLM message preparation with conversation history and system prompts
+ * - Mention extraction with first-mention-only logic and case-insensitive matching
+ * - Sender type detection for humans, agents, and system messages
  *
- * Implementation:
- * - Uses native crypto.randomUUID() for ID generation
- * - Self-contained utility functions
- * - Ready for manager module integration
- * - All types moved to types.ts for better organization
+ * Core Utilities:
+ * - generateId: Crypto-based unique ID generation for messages and events
+ * - toKebabCase: String conversion for consistent naming conventions
+ * - getWorldTurnLimit: World-specific turn limit retrieval with fallback defaults
+ * - extractMentions: Case-insensitive mention extraction with first-mention-only logic
+ * - determineSenderType: Sender classification for message filtering and processing
+ * - prepareMessagesForLLM: Message formatting for LLM calls with history and system prompts
+ *
+ * Implementation Details:
+ * - Uses native crypto.randomUUID() for ID generation ensuring uniqueness
+ * - Self-contained utility functions with no external dependencies
+ * - Ready for manager module integration with consistent interfaces
+ * - All types imported from types.ts for better organization and reusability
+ * - World-aware functions that respect world-specific configurations
+ * - Message processing utilities that handle AI SDK compatibility
+ *
+ * Recent Changes:
+ * - Enhanced comment documentation with detailed feature descriptions
+ * - Improved function descriptions with implementation details
+ * - Added details about world-aware operations and LLM integration
  */
 /**
  * Generate unique ID for messages and events

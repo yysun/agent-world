@@ -2,21 +2,41 @@
  * Core type definitions for the Agent World system.
  * 
  * Features:
- * - Agent configuration and state management with LLM provider support (flattened structure)
- * - Event system with strict payload typing (MESSAGE, WORLD, SSE, SYSTEM)
- * - AI SDK compatible chat messages with utility functions for LLM integration
- * - Storage provider interfaces and file management
- * - World EventEmitter event data structures
- * - Zod schemas for runtime validation
+ * - Agent configuration and state management with comprehensive LLM provider support (flattened structure)
+ * - Event system with strict payload typing and union types for type safety (MESSAGE, WORLD, SSE, SYSTEM)
+ * - AI SDK compatible chat messages with utility functions for seamless LLM integration
+ * - Storage provider interfaces and file management with world-specific operations
+ * - World EventEmitter event data structures for isolated event handling
+ * - Zod schemas for runtime validation and type safety (where applicable)
+ * - Comprehensive LLM provider enumeration supporting all major services
  * 
- * Implementation:
- * - ChatMessage interface compatible with AI SDK (Date objects, optional sender field)
- * - Event system using union types for type-safe payloads
- * - Agent memory structure with message history and activity tracking
- * - Utility functions to strip custom fields before LLM calls
- * - Comprehensive LLM provider support (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
- * - World event structures for World.eventEmitter integration
- * - Flattened Agent interface for simplified property access
+ * Core Types:
+ * - ChatMessage: AI SDK compatible interface with Date objects and optional sender field
+ * - AgentMessage: Extended ChatMessage with custom fields for agent-specific data
+ * - Agent: Flattened interface with all LLM provider configurations and memory management
+ * - World: Complete world interface with agent operations and configuration management
+ * - Event System: Union types for type-safe payload handling across different event types
+ * - LLM Provider Support: Comprehensive enumeration covering OpenAI, Anthropic, Azure, Google, XAI, Ollama
+ * 
+ * Implementation Details:
+ * - Event system using union types for type-safe payloads preventing runtime errors
+ * - Agent memory structure with message history and activity tracking for conversation context
+ * - Utility functions to strip custom fields before LLM calls ensuring AI SDK compatibility
+ * - Comprehensive LLM provider support covering all major commercial and open-source options
+ * - World event structures for World.eventEmitter integration with proper typing
+ * - Flattened Agent interface for simplified property access and configuration management
+ * - Storage interfaces supporting world-specific file operations and data persistence
+ * 
+ * AI SDK Integration:
+ * - ChatMessage interface fully compatible with AI SDK requirements
+ * - stripCustomFields utility removes agent-specific fields before LLM calls
+ * - Date objects preserved for timestamp tracking and conversation history
+ * - Message role system supporting system, user, and assistant roles
+ * 
+ * Recent Changes:
+ * - Enhanced comment documentation with comprehensive feature descriptions
+ * - Added detailed implementation notes about AI SDK compatibility and type safety
+ * - Improved type descriptions with usage examples and integration details
  */
 
 // Chat Message Types - AI SDK Compatible

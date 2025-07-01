@@ -4,24 +4,40 @@
  * Features:
  * - LLM integration using AI SDK without existing event dependencies
  * - Streaming responses with SSE events via World.eventEmitter specifically
- * - Support for all LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
- * - Agent activity tracking and token usage
- * - Error handling with SSE error events via world's eventEmitter
- * - World-aware event publishing (uses world.eventEmitter, not global events)
+ * - Support for all major LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
+ * - Agent activity tracking and token usage monitoring with automatic state persistence
+ * - Error handling with SSE error events via world's eventEmitter and timeout management
+ * - World-aware event publishing using world.eventEmitter for proper event isolation
+ * - Conversation history support with message preparation and context management
  *
  * Core Functions:
  * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter
- * - generateAgentResponse: Non-streaming LLM calls
- * - loadLLMProvider: Provider loading logic
+ * - generateAgentResponse: Non-streaming LLM calls with automatic state management
+ * - loadLLMProvider: Provider loading logic supporting all major LLM services
  *
- * Implementation:
- * - Uses AI SDK for LLM integration
- * - Publishes SSE events via world.eventEmitter.emit('sse', event)
- * - Updates agent activity metrics
- * - Zero dependencies on existing llm.ts
- * - Complete provider support extraction
- * - All events scoped to specific world instance
- * - Full LLM provider support matching src/llm.ts
+ * Provider Support:
+ * - OpenAI: GPT models with streaming and function calling support
+ * - Anthropic: Claude models with conversation context and streaming
+ * - Google: Gemini models with proper API key management
+ * - Azure: OpenAI-compatible Azure endpoints with deployment management
+ * - XAI: Grok models through OpenAI-compatible interface
+ * - OpenAI-Compatible: Custom providers following OpenAI API standards
+ * - Ollama: Local model support with custom base URL configuration
+ *
+ * Implementation Details:
+ * - Uses AI SDK for LLM integration with consistent interfaces across providers
+ * - Publishes SSE events via world.eventEmitter.emit('sse', event) for proper isolation
+ * - Updates agent activity metrics and LLM call counts automatically
+ * - Zero dependencies on existing llm.ts or legacy event systems
+ * - Complete provider support extraction with environment variable fallbacks
+ * - All events scoped to specific world instance preventing cross-world interference
+ * - Full LLM provider support matching and exceeding legacy implementations
+ * - Timeout handling with configurable limits and proper error recovery
+ *
+ * Recent Changes:
+ * - Enhanced comment documentation with comprehensive provider details
+ * - Added detailed implementation notes about event isolation and state management
+ * - Improved error handling descriptions and timeout management details
  */
 
 import { generateText, streamText } from 'ai';
