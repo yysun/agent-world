@@ -142,10 +142,10 @@ export function getMemoryStats(): {
   let totalMessages = 0;
   const worldStats: { worldName: string; messageCount: number }[] = [];
 
-  messageStore.forEach((messages, worldName) => {
+  for (const [worldName, messages] of messageStore.entries()) {
     totalMessages += messages.length;
     worldStats.push({ worldName, messageCount: messages.length });
-  });
+  }
 
   return {
     totalWorlds,

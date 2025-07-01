@@ -2,14 +2,7 @@
  * Display Manager Module - Coordination between Streaming, Input, and Display Systems
  * 
  * Core Features:
- * - Coordinexport function handlePostBroadcastDisplay(): void {
-  // For broadcast messages, wait for streaming to complete or show prompt if no streaming
-  setTimeout(() => {
-    if (!StreamingDisplay.isStreamingActive()) {
-      drawInputBox('> ');
-    }
-  }, 50);
-}play timing between streaming and input prompts
+ * - Coordinates display timing between streaming and input prompts
  * - Manages callbacks for streaming end events
  * - Handles display state during external input processing
  * - Orchestrates input prompt display after streaming completion
@@ -28,10 +21,10 @@
  * - Clean separation of display concerns
  */
 
-import { isStreamingActive, setOnAllStreamingEndCallback } from './stream';
-import { drawInputBox, updateInputText } from './display';
-import { displayUnifiedMessage } from './display';
-import { detectPipedInput } from './terminal-lifecycle';
+import * as StreamingDisplay from './streaming-display';
+import { showInputPrompt } from './terminal-display';
+import { displayUnifiedMessage } from './unified-display';
+import { hasPipedInput as getHasPipedInput } from './terminal-lifecycle';
 
 // Display manager state
 interface DisplayManagerState {
@@ -55,7 +48,7 @@ let state: DisplayManagerState = {
 export function setupStreamingEndCallback(): void {
   StreamingDisplay.setOnAllStreamingEndCallback(() => {
     if (!getHasPipedInput()) {
-      drawInputBox('> '); // Always show empty input after streaming ends
+      showInputPrompt('> ', ''); // Always show empty input after streaming ends
     }
   });
 }
@@ -95,7 +88,7 @@ export function handleExternalInputDisplay(hasExternalInput: boolean, isPiped: b
     setTimeout(() => {
       if (!StreamingDisplay.isStreamingActive()) {
         if (!isPiped) {
-          drawInputBox('> ');
+          showInputPrompt('> ', '');
         }
       }
     }, 100);
@@ -114,7 +107,7 @@ export function showInitialPrompt(): void {
       content: 'Type a message to broadcast to all agents, or use /help for commands.',
       metadata: { source: 'cli', messageType: 'notification' }
     });
-    drawInputBox('> ');
+    showInputPrompt('> ', '');
   }
 }
 
@@ -123,7 +116,7 @@ export function showInitialPrompt(): void {
  * Shows input prompt after command execution, with timing coordination
  */
 export function handlePostCommandDisplay(): void {
-  drawInputBox('> ');
+  showInputPrompt('> ', '');
 }
 
 /**

@@ -23,7 +23,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getMessagesForWorld, getMessageCount, StoredMessage } from '../message-store';
 import { SenderType, World } from '../../core/types';
-import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/display';
+import { displayUnifiedMessage, displayError, displaySuccess } from '../ui/unified-display';
 import { colors } from '../ui/colors';
 
 /**
@@ -39,7 +39,7 @@ export async function exportCommand(args: string[], world: World): Promise<void>
   }
 
   const filename = args[0];
-  const worldName = world.name; // Get world name from world object
+  const worldName = world.config.name; // Get world name from world object
   const messageCount = getMessageCount(worldName);
 
   if (messageCount === 0) {
