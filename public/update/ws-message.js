@@ -46,7 +46,8 @@ const handleSSEEvent = (state, messageData) => {
           worldName: messageData.worldName || state.worldName,
           isStreaming: true,
           messageId: messageId
-        }]
+        }],
+        needScroll: true
       };
 
     case 'chunk':
@@ -66,7 +67,7 @@ const handleSSEEvent = (state, messageData) => {
           timestamp: messageData.timestamp || new Date().toISOString()
         };
 
-        return { ...state, messages: updatedMessages };
+        return { ...state, messages: updatedMessages, needScroll: true };
       } else {
         // Create new streaming message block if none exists
 
@@ -81,7 +82,8 @@ const handleSSEEvent = (state, messageData) => {
             worldName: messageData.worldName || state.worldName,
             isStreaming: true,
             messageId: messageId
-          }]
+          }],
+          needScroll: true
         };
       }
 
@@ -140,7 +142,8 @@ export const handleWebSocketMessage = (state, messageData) => {
 
       return {
         ...state,
-        messages: [...state.messages, createMessage(messageData.type)]
+        messages: [...state.messages, createMessage(messageData.type)],
+        needScroll: true
       };
 
     case 'sse':

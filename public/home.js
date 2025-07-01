@@ -57,7 +57,8 @@ const state = async () => {
     connectionStatus: 'disconnected',
     messages: [],
     currentMessage: '',
-    wsError: null
+    wsError: null,
+    needScroll: false
   }, worldName);
 };
 
@@ -103,7 +104,8 @@ const sendMessage = (state) => {
       ...state,
       messages: [...state.messages, userMessage],
       currentMessage: '',
-      wsError: null
+      wsError: null,
+      needScroll: true
     };
   }
 
@@ -111,20 +113,30 @@ const sendMessage = (state) => {
 };
 
 // Auto-scroll to bottom after DOM updates
-const scrollToBottom = () => {
-  requestAnimationFrame(() => {
-    window.scrollTo({
-      top: document.documentElement.scrollHeight,
-      behavior: 'smooth'
+const scrollToBottom = (state) => {
+  if (state?.needScroll) {
+    requestAnimationFrame(() => {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: 'smooth'
+      });
     });
-  });
+    // Reset the needScroll flag
+    return { ...state, needScroll: false };
+  }
+  return state;
 };
 
 app.on('scroll-to-bottom', scrollToBottom);
 
 // Main view function
 const view = (state) => {
-  scrollToBottom(); // Schedule scroll after rendering
+  // Check if we need to scroll and update state
+  const updatedState = scrollToBottom(state);
+  if (updatedState !== state) {
+    // Update the state if needScroll was reset
+    setTimeout(() => app.run('update-state', updatedState), 0);
+  }
 
   return html`
       <div class="connect-container">
@@ -240,6 +252,7 @@ const view = (state) => {
 
 const update = {
   '/,#': state => state,
+  'update-state': (state, newState) => newState,
   handleWebSocketMessage,
   handleConnectionStatus,
   handleWebSocketError
