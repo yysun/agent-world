@@ -227,19 +227,7 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     return false;
   }
 
-  // Check turn limit based on LLM call count using world-specific turn limit
-  const worldTurnLimit = getWorldTurnLimit(world);
-
-  if (agent.llmCallCount >= worldTurnLimit) {
-    // Send turn limit message with agentName as sender
-    const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
-
-    publishMessage(world, turnLimitMessage, agent.id);
-
-    return false; // Don't respond when turn limit is reached
-  }
-
-  // Reset LLM call count when receiving human or system messages
+  // Reset LLM call count when receiving human or system messages (MUST happen before turn limit check)
   const senderType = determineSenderType(messageEvent.sender);
   if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
     if (agent.llmCallCount > 0) {
@@ -252,6 +240,18 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
         console.warn(`Failed to auto-save agent ${agent.id} after turn limit reset:`, error);
       }
     }
+  }
+
+  // Check turn limit based on LLM call count using world-specific turn limit
+  const worldTurnLimit = getWorldTurnLimit(world);
+
+  if (agent.llmCallCount >= worldTurnLimit) {
+    // Send turn limit message with agentName as sender
+    const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
+
+    publishMessage(world, turnLimitMessage, agent.id);
+
+    return false; // Don't respond when turn limit is reached
   }
 
   // Always respond to system messages (except turn limit messages handled above)
@@ -270,9 +270,9 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     }
 
     // If there are mentions, only respond if this agent is the first mention
-    return mentions.length > 0 && mentions[0] === agent.name;
+    return mentions.length > 0 && mentions[0] === agent.id.toLowerCase();
   }
 
   // For agent messages, only respond if this agent is the first mention
-  return mentions.length > 0 && mentions[0] === agent.name;
+  return mentions.length > 0 && mentions[0] === agent.id.toLowerCase();
 }
