@@ -129,14 +129,17 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
   // Ensure modules are initialized
   await moduleInitialization;
 
+  // Convert name to kebab-case for consistent ID format
+  const worldId = toKebabCase(params.name);
+
   // Check if world already exists
-  const exists = await worldExistsOnDisk(rootPath, params.name);
+  const exists = await worldExistsOnDisk(rootPath, worldId);
   if (exists) {
     throw new Error(`World with name '${params.name}' already exists`);
   }
 
   const worldData: WorldData = {
-    id: params.name,
+    id: worldId,
     name: params.name,
     description: params.description,
     turnLimit: params.turnLimit || 5
@@ -265,38 +268,22 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     async getAgent(agentName) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let agent = await getAgentCore(world.rootPath, world.id, agentId);
-
-        // If not found, try with kebab-case conversion
-        if (!agent) {
-          agentId = toKebabCase(agentName);
-          agent = await getAgentCore(world.rootPath, world.id, agentId);
-        }
-
-        return agent;
+        return await getAgentCore(world.rootPath, world.id, agentId);
       } catch (error) {
         return null;
       }
     },
 
     async updateAgent(agentName, updates) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
-
-        // If not found, try with kebab-case conversion
-        if (!updatedAgent) {
-          agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
-        }
+        const updatedAgent = await updateAgentCore(world.rootPath, world.id, agentId, updates);
 
         if (updatedAgent) {
           // Update runtime map
@@ -309,18 +296,11 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     async deleteAgent(agentName) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let success = await deleteAgentCore(world.rootPath, world.id, agentId);
-
-        // If not found, try with kebab-case conversion
-        if (!success) {
-          agentId = toKebabCase(agentName);
-          success = await deleteAgentCore(world.rootPath, world.id, agentId);
-        }
+        const success = await deleteAgentCore(world.rootPath, world.id, agentId);
 
         if (success) {
           // Remove from runtime map
@@ -333,18 +313,11 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     async clearAgentMemory(agentName) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
-
-        // If not found, try with kebab-case conversion
-        if (!clearedAgent) {
-          agentId = toKebabCase(agentName);
-          clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
-        }
+        const clearedAgent = await clearAgentMemoryCore(world.rootPath, world.id, agentId);
 
         if (clearedAgent) {
           // Update runtime map
@@ -365,18 +338,11 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     async updateAgentMemory(agentName, messages) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
-
-        // If not found, try with kebab-case conversion
-        if (!updatedAgent) {
-          agentId = toKebabCase(agentName);
-          updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
-        }
+        const updatedAgent = await updateAgentMemoryCore(world.rootPath, world.id, agentId, messages);
 
         if (updatedAgent) {
           // Update runtime map
@@ -389,18 +355,11 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     async saveAgentConfig(agentName) {
-      // Try to find agent by name or ID
-      let agentId = agentName;
+      // Always convert agent name to kebab-case for consistent ID lookup
+      const agentId = toKebabCase(agentName);
 
       try {
-        // First try with the provided name as-is
-        let agent = await getAgentCore(world.rootPath, world.id, agentId);
-
-        // If not found, try with kebab-case conversion
-        if (!agent) {
-          agentId = toKebabCase(agentName);
-          agent = await getAgentCore(world.rootPath, world.id, agentId);
-        }
+        const agent = await getAgentCore(world.rootPath, world.id, agentId);
 
         if (!agent) {
           throw new Error(`Agent ${agentName} not found`);

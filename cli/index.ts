@@ -96,10 +96,17 @@ const listCommand = async (args: string[], world: World) => {
         metadata: { source: 'cli', messageType: 'command' }
       });
     } else {
-      const agentList = agents.map(agent => `• ${agent.name} (${agent.type}) - ${agent.status || 'active'}`).join('\n');
+      const agentList = agents.map(agent => {
+        const memoryCount = agent.memory ? agent.memory.length : 0;
+        const statusText = agent.status || 'active';
+        return `• ${agent.name} (${agent.type}) - ${statusText} - ${memoryCount} messages`;
+      }).join('\n');
+
+      const totalMessages = agents.reduce((total, agent) => total + (agent.memory ? agent.memory.length : 0), 0);
+
       displayUnifiedMessage({
         type: 'instruction',
-        content: `Agents in current world:\n${agentList}`,
+        content: `Agents in current world:\n${agentList}\n\nTotal: ${agents.length} agents, ${totalMessages} messages in memory`,
         metadata: { source: 'cli', messageType: 'command' }
       });
     }
@@ -458,6 +465,11 @@ async function main() {
           if (commands[commandName]) {
             try {
               await commands[commandName](commandArgs, currentWorld!);
+
+              // Auto-run /agents command after clear command to show updated state
+              if (commandName === 'clear') {
+                await listCommand([], currentWorld!);
+              }
             } catch (error) {
               displayUnifiedMessage({
                 type: 'error',
