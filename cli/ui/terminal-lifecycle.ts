@@ -12,7 +12,7 @@
  * - Basic cleanup on shutdown
  */
 
-import { resetStreamingState } from './display';
+import { resetStreamingState } from './stream';
 
 /**
  * Detect if input is potentially piped

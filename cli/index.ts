@@ -1,30 +1,28 @@
 /**
  * CLI Interface - Interactive Command Line Tool with Real-time Agent Streaming
  * 
- * Core Features:
+ * Features:
  * - Interactive command interface with world/agent management
  * - External input handling (piped input and CLI args)
  * - Real-time multi-agent streaming with content accumulation
- * - Natural prompt flow with automatic restoration after streaming
+ * - Natural prompt flow with streaming coordination
  * - World integration for agent persistence and message broadcasting
  * - Graceful shutdown and cleanup handling
  * 
  * Architecture:
  * - Function-based design with readline integration
- * - Natural prompt flow without positioning or boxes
  * - Command routing with core module function imports
  * - SSE event subscription for real-time agent streaming
  * - Global world object management for efficient execution
- * - Automatic prompt restoration with fallback mechanisms
+ * - Direct prompt restoration via streaming callbacks
  * 
  * Implementation:
- * - Core module migration from src/ to core/ architecture
- * - ID-based operations with name-to-ID conversion
+ * - Core module architecture with ID-based operations
  * - Smart world selection with automatic discovery
  * - Object-based data access for agent prompts and memory
  * - World-specific event subscriptions
  * - Clean streaming content accumulation with newline preservation
- * - Robust prompt management with streaming coordination
+ * - Simplified prompt management without fallback timeouts
  */
 
 // Set the data path for core modules
@@ -107,11 +105,13 @@ const quitCommand = async (args: string[], world: World): Promise<void> => {
 import { colors } from './ui/colors';
 import {
   displayUnifiedMessage, setCurrentWorldName, initializeDisplay,
-  startStreaming, addStreamingContent, endStreaming, markStreamingError,
-  setStreamingUsage, isStreamingActive,
   setOnStreamingStartCallback, setOnAllStreamingEndCallback, handleExternalInputDisplay,
   showInitialPrompt, setIsPipedInput
 } from './ui/display';
+import {
+  startStreaming, addStreamingContent, endStreaming, markStreamingError,
+  setStreamingUsage
+} from './ui/stream';
 import {
   detectPipedInput, readPipedInput, performShutdown
 } from './ui/terminal-lifecycle';
@@ -266,22 +266,13 @@ async function main() {
   // Set piped input state in display module
   setIsPipedInput(hasPipedInputDetected);
 
-  // Initialize simple terminal (inline)
-  if (!hasPipedInputDetected) {
-    process.stdout.write('\x1b[?25l'); // Hide cursor for streaming
-  }
+  // Initialize simple terminal
+  process.stdout.write('\x1b[?25l'); // Hide cursor for streaming
 
-  // Create simple terminal object for display compatibility
-  const term = {
-    write: (text: string) => process.stdout.write(text),
-    clear: () => process.stdout.write('\x1b[2J\x1b[H'),
-    showCursor: () => process.stdout.write('\x1b[?25h'),
-    hideCursor: () => process.stdout.write('\x1b[?25l')
-  };
+  // Initialize display
+  initializeDisplay();
 
-  initializeDisplay(term);
-
-  // Setup graceful shutdown handlers (inline)
+  // Setup graceful shutdown handlers
   const shutdown = async () => {
     await performShutdown();
   };
@@ -341,10 +332,6 @@ async function main() {
     }
   }
 
-  // Setup graceful shutdown (after hasPipedInputDetected is defined)
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
   if (hasPipedInputDetected) {
     displayUnifiedMessage({
       type: 'instruction',
@@ -386,6 +373,8 @@ async function main() {
       if (isPrompting) return;
 
       isPrompting = true;
+      // Show cursor for user input
+      process.stdout.write('\x1b[?25h');
       rl.question('> ', async (input) => {
         isPrompting = false;
 
@@ -438,11 +427,8 @@ async function main() {
             if (agents.length === 0) {
               // No agents to respond, prompt immediately
               promptUser();
-            } else {
-              // Set up fallback in case streaming doesn't start
-              setupFallbackPrompt();
             }
-            // If there are agents, the streaming end callback will handle prompting
+            // If there are agents, streaming callbacks will handle prompting
           } catch (error) {
             displayUnifiedMessage({
               type: 'error',
@@ -452,48 +438,25 @@ async function main() {
             // Prompt again after error
             promptUser();
           }
-
-          // Don't prompt immediately after broadcasting - wait for streaming to complete
-          // The streaming end callback will handle prompting
         }
       });
     };
 
     // Set up callback to prompt after streaming completes
     setOnAllStreamingEndCallback(() => {
-      // Clear any fallback timeout since streaming completed
-      if (fallbackTimeout) {
-        clearTimeout(fallbackTimeout);
-        fallbackTimeout = null;
-      }
-
+      // Show cursor and prompt after streaming ends
+      process.stdout.write('\x1b[?25h'); // Show cursor
       // Add a small delay to ensure display has settled
       setTimeout(() => {
-        if (!hasPipedInputDetected) {
-          promptUser();
-        }
+        promptUser();
       }, 100);
     });
 
-    // Set up callback when streaming starts to clear fallback
+    // Set up callback when streaming starts
     setOnStreamingStartCallback(() => {
-      if (fallbackTimeout) {
-        clearTimeout(fallbackTimeout);
-        fallbackTimeout = null;
-      }
+      // Hide cursor during streaming
+      process.stdout.write('\x1b[?25l');
     });
-
-    // Set up a fallback timeout to ensure prompt returns even if no streaming occurs
-    let fallbackTimeout: NodeJS.Timeout | null = null;
-
-    const setupFallbackPrompt = () => {
-      if (fallbackTimeout) clearTimeout(fallbackTimeout);
-      fallbackTimeout = setTimeout(() => {
-        if (!isStreamingActive() && !hasPipedInputDetected && !isPrompting) {
-          promptUser();
-        }
-      }, 5000); // 5 second fallback
-    };
 
     // Start the input loop
     promptUser();
