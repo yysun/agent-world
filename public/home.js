@@ -7,6 +7,7 @@
  * - Real-time conversation area with streaming message support
  * - Auto-scroll to bottom functionality for new messages
  * - Theme toggle functionality
+ * - Proper input handling with immediate character capture and state clearing
  *
  * WebSocket Integration:
  * - Handles system/world/message events and SSE streaming
@@ -17,6 +18,11 @@
  * - AppRun component with simplified event handling via run()
  * - Event handlers in update/ modules for organization
  * - Responsive layout with auto-scroll on message updates
+ * - Input field properly bound to state with @input and @keypress handlers
+ *
+ * Recent Changes:
+ * - Fixed missing character issue by using @input instead of relying on @keypress for text capture
+ * - Fixed input clearing after message send by proper state management
  */
 
 const { html, run } = window.apprun;
@@ -56,13 +62,19 @@ const state = async () => {
 };
 
 // Local event handlers
+const onInput = (state, e) => {
+  return {
+    ...state,
+    currentMessage: e.target.value
+  };
+};
+
 const onKeypress = (state, e) => {
   if (e.key === 'Enter') {
-    sendMessage(state, e);
-  } else {
-    const value = e.target.value;
-    state.currentMessage = value;
+    e.target.value = ''; // Clear input field
+    return sendMessage(state);
   }
+  return state;
 };
 
 const sendMessage = (state) => {
@@ -207,6 +219,7 @@ const view = (state) => {
                 class="message-input"
                 placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
                 value="${state.currentMessage || ''}"
+                @input=${run(onInput)}
                 @keypress=${run(onKeypress)}
               >
               <button
