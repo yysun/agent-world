@@ -21,6 +21,7 @@
 import pino from 'pino';
 import { World, Agent, LLMProvider } from '../core/types.js';
 import { WorldInfo, listWorlds, getWorld, createWorld, updateWorld } from '../core/world-manager.js';
+import { toKebabCase } from '../core/utils.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
 import { handleMessagePublish, prepareCommandWithRootPath } from './events.js';
 
@@ -37,13 +38,6 @@ const logger = pino({
 });
 
 // Helper functions
-const validateArgs: ValidationHelper = (args, requiredCount = 0) => {
-  if (args.length < requiredCount) {
-    return createError(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`);
-  }
-  return null;
-};
-
 const createResponse: ResponseHelper = (content, type = 'system', data = undefined, refreshWorld = false) => {
   if (type === 'data') {
     return { data, message: content, refreshWorld, timestamp: new Date().toISOString() };
@@ -64,6 +58,63 @@ const createError: ErrorHelper = (error) => ({
   timestamp: new Date().toISOString()
 });
 
+const validateArgs: ValidationHelper = (args, requiredCount = 0) => {
+  if (args.length < requiredCount) {
+    return createError(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`);
+  }
+  return null;
+};
+
+// Command registry for validation and mapping
+const commandRegistry = {
+  // Global commands (no world context required)
+  '/getWorlds': { command: 'getWorlds', global: true, minArgs: 0 },
+  '/addWorld': { command: 'addWorld', global: true, minArgs: 1 },
+  '/getWorld': { command: 'getWorld', global: true, minArgs: 0 },
+
+  // World-specific commands (require world context)
+  '/clear': { command: 'clear', global: false, minArgs: 0 },
+  '/addAgent': { command: 'addAgent', global: false, minArgs: 1 },
+  '/updateWorld': { command: 'updateWorld', global: false, minArgs: 2 },
+  '/updateAgentConfig': { command: 'updateAgentConfig', global: false, minArgs: 2 },
+  '/updateAgentPrompt': { command: 'updateAgentPrompt', global: false, minArgs: 2 },
+  '/updateAgentMemory': { command: 'updateAgentMemory', global: false, minArgs: 2 }
+} as const;
+
+// Command validation function
+function validateCommand(input: string): { isValid: boolean; error?: string; commandInfo?: typeof commandRegistry[keyof typeof commandRegistry] } {
+  if (!input?.trim()) {
+    return { isValid: false, error: 'Empty command' };
+  }
+
+  const trimmedInput = input.trim();
+  if (!trimmedInput.startsWith('/')) {
+    return { isValid: false, error: 'Commands must start with /' };
+  }
+
+  const parts = trimmedInput.split(/\s+/);
+  const commandKey = parts[0] as keyof typeof commandRegistry;
+  const args = parts.slice(1);
+
+  if (!commandRegistry[commandKey]) {
+    const availableCommands = Object.keys(commandRegistry).join(', ');
+    return {
+      isValid: false,
+      error: `Unknown command: ${commandKey}. Available commands: ${availableCommands}`
+    };
+  }
+
+  const commandInfo = commandRegistry[commandKey];
+  if (args.length < commandInfo.minArgs) {
+    return {
+      isValid: false,
+      error: `Command ${commandKey} requires at least ${commandInfo.minArgs} arguments, got ${args.length}`
+    };
+  }
+
+  return { isValid: true, commandInfo };
+}
+
 // Command implementations
 const clearCommand: ServerCommand = async (args, world) => {
   try {
@@ -76,7 +127,7 @@ const clearCommand: ServerCommand = async (args, world) => {
 
       const clearPromises = agents.map(agentValue => {
         const agent = agentValue as Agent;
-        return world.clearAgentMemory(agent.name);
+        return world.clearAgentMemory(agent.id); // Use agent.id directly since it's already in kebab-case
       });
       await Promise.all(clearPromises);
       return createResponse(`Cleared memory for all ${agents.length} agents in ${world.name}`);
@@ -84,7 +135,8 @@ const clearCommand: ServerCommand = async (args, world) => {
 
     // Clear specific agent
     const agentName = args[0].trim();
-    const clearedAgent = await world.clearAgentMemory(agentName);
+    const agentId = toKebabCase(agentName); // Convert to kebab-case for lookup
+    const clearedAgent = await world.clearAgentMemory(agentId);
 
     return clearedAgent
       ? createResponse(`Cleared memory for agent: ${agentName}`)
@@ -162,10 +214,11 @@ const getWorldCommand: ServerCommand = async (args) => {
     if (validationError) return validationError;
 
     const ROOT_PATH = args[0].trim();
-    const worldId = args[1].trim();
+    const worldIdentifier = args[1].trim();
+    const worldId = toKebabCase(worldIdentifier); // Convert to kebab-case for core function
 
     const world = await getWorld(ROOT_PATH, worldId);
-    if (!world) return createError(`World not found: ${worldId}`);
+    if (!world) return createError(`World not found: ${worldIdentifier}`);
 
     const agents = Array.from(world.agents.values()).map((agentValue) => agentValue as Agent);
     const worldData = {
@@ -290,7 +343,7 @@ const addAgentCommand: ServerCommand = async (args, world) => {
 
     // Create agent using world method
     const agent = await world.createAgent({
-      id: agentName.toLowerCase().replace(/\s+/g, '-'), // Convert to kebab-case
+      id: toKebabCase(agentName), // Convert to kebab-case using utility
       name: agentName,
       type: 'assistant',
       systemPrompt: `You are ${agentName}. ${description}`,
@@ -324,11 +377,12 @@ const updateAgentConfigCommand: ServerCommand = async (args, world) => {
     if (validationError) return validationError;
 
     const agentName = args[0].trim();
+    const agentId = toKebabCase(agentName); // Convert to kebab-case for lookup
     const configType = args[1].toLowerCase();
 
     if (configType === 'model' && args.length >= 3) {
       const model = args[2].trim();
-      const updatedAgent = await world.updateAgent(agentName, { model });
+      const updatedAgent = await world.updateAgent(agentId, { model });
 
       if (updatedAgent) {
         return createResponse(`Agent '${agentName}' model updated to '${model}'`, 'system', undefined, true);
@@ -362,7 +416,7 @@ const updateAgentConfigCommand: ServerCommand = async (args, world) => {
           return createError(`Invalid provider: ${providerStr}. Valid options: openai, anthropic, azure, google, xai, ollama`);
       }
 
-      const updatedAgent = await world.updateAgent(agentName, { provider });
+      const updatedAgent = await world.updateAgent(agentId, { provider });
 
       if (updatedAgent) {
         return createResponse(`Agent '${agentName}' provider updated to '${providerStr}'`, 'system', undefined, true);
@@ -376,7 +430,7 @@ const updateAgentConfigCommand: ServerCommand = async (args, world) => {
         return createError('Status must be: active, inactive, or error');
       }
 
-      const updatedAgent = await world.updateAgent(agentName, { status });
+      const updatedAgent = await world.updateAgent(agentId, { status });
 
       if (updatedAgent) {
         return createResponse(`Agent '${agentName}' status updated to '${status}'`, 'system', undefined, true);
@@ -401,13 +455,14 @@ const updateAgentPromptCommand: ServerCommand = async (args, world) => {
     if (validationError) return validationError;
 
     const agentName = args[0].trim();
+    const agentId = toKebabCase(agentName); // Convert to kebab-case for lookup
     const systemPrompt = args.slice(1).join(' ').trim();
 
     if (!systemPrompt) {
       return createError('System prompt cannot be empty');
     }
 
-    const updatedAgent = await world.updateAgent(agentName, { systemPrompt });
+    const updatedAgent = await world.updateAgent(agentId, { systemPrompt });
 
     if (updatedAgent) {
       return createResponse(`Agent '${agentName}' system prompt updated successfully`, 'system', undefined, true);
@@ -429,10 +484,11 @@ const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
     if (validationError) return validationError;
 
     const agentName = args[0].trim();
+    const agentId = toKebabCase(agentName); // Convert to kebab-case for lookup
     const action = args[1].toLowerCase();
 
     if (action === 'clear') {
-      const clearedAgent = await world.clearAgentMemory(agentName);
+      const clearedAgent = await world.clearAgentMemory(agentId);
 
       if (clearedAgent) {
         return createResponse(`Agent '${agentName}' memory cleared successfully`, 'system', undefined, true);
@@ -451,7 +507,7 @@ const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
         return createError('Message content cannot be empty');
       }
 
-      const agent = await world.getAgent(agentName);
+      const agent = await world.getAgent(agentId);
       if (!agent) {
         return createError(`Agent '${agentName}' not found`);
       }
@@ -465,7 +521,7 @@ const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
       };
 
       const updatedMemory = [...agent.memory, newMessage];
-      const updatedAgent = await world.updateAgentMemory(agentName, updatedMemory);
+      const updatedAgent = await world.updateAgentMemory(agentId, updatedMemory);
 
       if (updatedAgent) {
         return createResponse(`Message added to agent '${agentName}' memory`, 'system', undefined, true);
@@ -550,6 +606,178 @@ export const processInput = async (
       };
     }
   }
+};
+
+// Process system commands (/) with validation
+export const processSystemCommand = async (
+  input: string,
+  world: World | null,
+  rootPath: string,
+  sender: string = 'SYSTEM'
+): Promise<CommandResult> => {
+  try {
+    // Validate command format and existence
+    const validation = validateCommand(input);
+    if (!validation.isValid) {
+      return createError(validation.error!);
+    }
+
+    const commandInfo = validation.commandInfo!;
+
+    // Validate world context for non-global commands
+    if (!commandInfo.global && !world) {
+      return createError(`Command requires world context: ${input.split(/\s+/)[0]}`);
+    }
+
+    // Prepare command with rootPath for global commands
+    const preparedCommand = prepareCommandWithRootPath(input, rootPath);
+    return await executeCommand(preparedCommand, world);
+
+  } catch (error) {
+    logger.error('System command processing failed', {
+      error: error instanceof Error ? error.message : error,
+      input,
+      sender
+    });
+    return createError(`System command failed: ${error instanceof Error ? error.message : error}`);
+  }
+};
+
+// Process user messages (plain text)
+export const processUserMessage = async (
+  input: string,
+  world: World | null,
+  rootPath: string,
+  sender: string = 'HUMAN'
+): Promise<any> => {
+  if (!input?.trim()) {
+    return {
+      success: false,
+      error: 'Empty message',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  if (!world) {
+    return {
+      success: false,
+      error: 'World required for user messages',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // Check if world has required properties
+  if (!world.eventEmitter) {
+    logger.error('World eventEmitter not initialized', {
+      worldId: world.id,
+      worldName: world.name,
+      hasEventEmitter: !!world.eventEmitter
+    });
+    return {
+      success: false,
+      error: 'World eventEmitter not initialized',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  try {
+    handleMessagePublish(world, input.trim(), sender);
+
+    return {
+      success: true,
+      message: 'Message sent to world',
+      data: { message: input.trim(), sender },
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    logger.error('Error publishing user message to world', {
+      error: error instanceof Error ? error.message : error,
+      worldId: world.id,
+      worldName: world.name,
+      message: input.trim(),
+      sender
+    });
+    return {
+      success: false,
+      error: `Failed to send message: ${error instanceof Error ? error.message : error}`,
+      timestamp: new Date().toISOString()
+    };
+  }
+};
+
+// CLI input processor - routes to appropriate channel
+export const processCLIInput = async (
+  input: string,
+  world: World | null,
+  rootPath: string,
+  sender: string = 'HUMAN'
+): Promise<any> => {
+  if (!input?.trim()) {
+    return {
+      success: false,
+      error: 'Empty input',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  const trimmedInput = input.trim();
+
+  if (trimmedInput.startsWith('/')) {
+    // Route to system command processing
+    return await processSystemCommand(trimmedInput, world, rootPath, sender);
+  } else {
+    // Route to user message processing
+    return await processUserMessage(trimmedInput, world, rootPath, sender);
+  }
+};
+
+// WebSocket input processor - enforces channel restrictions
+export const processWSInput = async (
+  input: string,
+  world: World | null,
+  rootPath: string,
+  sender: string = 'WebSocket',
+  eventType: 'system' | 'world' | 'message' = 'message'
+): Promise<any> => {
+  if (!input?.trim()) {
+    return {
+      success: false,
+      error: 'Empty input',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  const trimmedInput = input.trim();
+  const isCommand = trimmedInput.startsWith('/');
+
+  // Enforce channel restrictions
+  if (eventType === 'system' || eventType === 'world') {
+    if (!isCommand) {
+      return {
+        success: false,
+        error: `${eventType} events require commands starting with /`,
+        timestamp: new Date().toISOString()
+      };
+    }
+    // Process as system command
+    return await processSystemCommand(trimmedInput, world, rootPath, sender);
+  } else if (eventType === 'message') {
+    if (isCommand) {
+      return {
+        success: false,
+        error: 'Message events cannot contain commands. Use system events for commands.',
+        timestamp: new Date().toISOString()
+      };
+    }
+    // Process as user message
+    return await processUserMessage(trimmedInput, world, rootPath, sender);
+  }
+
+  return {
+    success: false,
+    error: `Unknown event type: ${eventType}`,
+    timestamp: new Date().toISOString()
+  };
 };
 
 // Command registry for easy lookup

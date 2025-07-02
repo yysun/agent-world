@@ -38,7 +38,7 @@
 
 import { program } from 'commander';
 import readline from 'readline';
-import { processInput, subscribeWorld, getWorld, ClientConnection } from '../commands/index.js';
+import { processCLIInput, subscribeWorld, getWorld, ClientConnection } from '../commands/index.js';
 import { World } from '../core/types.js';
 import fs from 'fs';
 import path from 'path';
@@ -94,7 +94,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
         console.error(boldRed('Error: World must be specified to send user messages'));
         process.exit(1);
       }
-      const result = await processInput(options.command, world, rootPath, 'HUMAN');
+      const result = await processCLIInput(options.command, world, rootPath, 'HUMAN');
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
     }
@@ -103,7 +103,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
     if (commands.length > 0) {
       for (const cmd of commands) {
         if (cmd === 'exit') break;
-        const result = await processInput(cmd, world, rootPath, 'HUMAN');
+        const result = await processCLIInput(cmd, world, rootPath, 'HUMAN');
         console.log(`> ${cmd}`);
         console.log(JSON.stringify(result, null, 2));
         if (!result.success) process.exit(1);
@@ -128,7 +128,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
           console.error(boldRed('Error: World must be specified to send user messages'));
           process.exit(1);
         }
-        const result = await processInput(input.trim(), world, rootPath, 'HUMAN');
+        const result = await processCLIInput(input.trim(), world, rootPath, 'HUMAN');
         console.log(JSON.stringify(result, null, 2));
         process.exit(result.success ? 0 : 1);
       }
@@ -436,7 +436,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
       try {
-        const result = await processInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
 
         // Display result (skip user message confirmations)
         if (result.success === false) {

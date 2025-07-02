@@ -57,7 +57,7 @@ import {
   subscribeWorld,
   getWorld
 } from '../commands/events.js';
-import { processInput } from '../commands/index.js';
+import { processWSInput } from '../commands/index.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
@@ -301,60 +301,83 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             break;
 
           case 'system':
+            if (eventMessage && eventMessage.trim().startsWith('/')) {
+              // Only system events can process commands
+              logger.debug('Processing system command', { eventMessage });
+
+              // Special handling for getWorld command - add worldName from payload  
+              let processedMessage = eventMessage;
+              const commandName = eventMessage.trim().slice(1).split(/\s+/)[0].toLowerCase();
+              if (commandName === 'getworld' && worldName) {
+                processedMessage = `/getWorld ${worldName}`;
+                logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
+              }
+
+              const result = await processWSInput(processedMessage, worldSocket.world || null, ROOT_PATH, 'WebSocket', 'system');
+              sendCommandResult(client, result);
+
+              // Refresh world if needed for world-specific commands
+              if (result.refreshWorld && worldName) {
+                logger.debug('Refreshing world after system command', { commandName, world: worldName });
+                await refreshWorldSubscription(worldSocket, worldName);
+              }
+            } else {
+              logger.warn('System event requires command', { hasMessage: !!eventMessage });
+              sendError(client, 'System events require command message starting with /');
+            }
+            break;
+
           case 'world':
             if (eventMessage && eventMessage.trim().startsWith('/')) {
-              // Check if this is a global command that doesn't require world subscription
+              // World events require world subscription for non-global commands
               const commandName = eventMessage.trim().slice(1).split(/\s+/)[0].toLowerCase();
               const globalCommands = ['getworlds', 'addworld', 'getworld'];
 
-              logger.debug('Processing command', { type, commandName, isGlobal: globalCommands.includes(commandName) });
-
               if (globalCommands.includes(commandName)) {
-                // Execute global command without world context
-                logger.debug('Executing global command', { commandName });
+                // Global commands can be executed without world subscription
+                logger.debug('Processing global command via world event', { commandName });
 
-                // Special handling for getWorld command - add worldName from payload  
                 let processedMessage = eventMessage;
                 if (commandName === 'getworld' && worldName) {
                   processedMessage = `/getWorld ${worldName}`;
                   logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
                 }
 
-                const result = await processInput(processedMessage, null, ROOT_PATH, 'WebSocket');
+                const result = await processWSInput(processedMessage, null, ROOT_PATH, 'WebSocket', 'world');
                 sendCommandResult(client, result);
               } else {
-                // Regular world-specific command - requires world subscription
+                // World-specific commands require world subscription
                 if (worldName && worldSocket.world) {
                   if (worldSocket.world.name !== worldName) {
                     logger.warn('World name mismatch', {
                       requestedWorld: worldName,
                       subscribedWorld: worldSocket.world.name
                     });
-                    sendError(client, `${type} event requires valid world subscription`);
+                    sendError(client, 'World event requires valid world subscription');
                     break;
                   }
 
-                  logger.debug('Executing world command', { commandName, world: worldName });
-                  const result = await processInput(eventMessage, worldSocket.world, ROOT_PATH, 'WebSocket');
+                  logger.debug('Processing world-specific command', { commandName, world: worldName });
+                  const result = await processWSInput(eventMessage, worldSocket.world, ROOT_PATH, 'WebSocket', 'world');
                   sendCommandResult(client, result);
 
                   // Refresh world if needed
                   if (result.refreshWorld) {
-                    logger.debug('Refreshing world after command', { commandName, world: worldName });
+                    logger.debug('Refreshing world after world command', { commandName, world: worldName });
                     await refreshWorldSubscription(worldSocket, worldName);
                   }
                 } else {
-                  logger.warn('Command requires world subscription', {
+                  logger.warn('World command requires world subscription', {
                     commandName,
                     hasWorldName: !!worldName,
                     hasWorldSubscription: !!worldSocket.world
                   });
-                  sendError(client, `${type} event requires valid world subscription for command: ${commandName}`);
+                  sendError(client, `World event requires valid world subscription for command: ${commandName}`);
                 }
               }
             } else {
-              logger.warn('System/World event requires command', { type, hasMessage: !!eventMessage });
-              sendError(client, `${type} event requires command message starting with '/'`);
+              logger.warn('World event requires command', { hasMessage: !!eventMessage });
+              sendError(client, 'World events require command message starting with /');
             }
             break;
 
@@ -369,26 +392,28 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 break;
               }
 
-              // Process input using shared logic (command if starts with /, otherwise message)
-              logger.debug('Processing input', {
+              // Message events cannot contain commands - this is the breaking change
+              if (eventMessage.trim().startsWith('/')) {
+                logger.warn('Message event contains invalid command', {
+                  message: eventMessage,
+                  world: worldName
+                });
+                sendError(client, 'Message events cannot contain commands. Use system events for commands.');
+                break;
+              }
+
+              // Process as user message only
+              logger.debug('Processing user message', {
                 world: worldName,
-                isCommand: eventMessage.trim().startsWith('/'),
-                sender: sender || 'unknown',
-                hasWorld: !!worldSocket.world,
-                hasEventEmitter: !!worldSocket.world?.eventEmitter,
-                worldKeys: worldSocket.world ? Object.keys(worldSocket.world) : []
+                sender: sender || 'WebSocket',
+                messageLength: eventMessage.length
               });
 
-              const result = await processInput(eventMessage, worldSocket.world, ROOT_PATH, sender || 'WebSocket');
+              const result = await processWSInput(eventMessage, worldSocket.world, ROOT_PATH, sender || 'WebSocket', 'message');
 
-              // Commands get result responses, messages don't need responses
-              if (eventMessage.trim().startsWith('/')) {
-                sendCommandResult(client, result);
-
-                // Refresh world if needed
-                if (result.refreshWorld) {
-                  await refreshWorldSubscription(worldSocket, worldName);
-                }
+              // User messages don't need command result responses, they are published to world
+              if (!result.success) {
+                sendError(client, result.error || 'Failed to process message');
               }
             } else {
               logger.warn('Message event missing requirements', {
@@ -399,6 +424,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 messageLength: eventMessage?.length || 0,
                 currentWorldName: worldSocket.world?.name || 'none'
               });
+              sendError(client, 'Message event requires world subscription and message content');
             }
             break;
 
