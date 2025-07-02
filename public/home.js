@@ -4,7 +4,7 @@
  * Home Page Component - Main interface for Agent World
  *
  * Core Features:
- * - World selection tabs with WebSocket subscription management
+ * - World selection tabs with WebSocket subscription management and agent details display
  * - Agent grid display with avatar cards and modal integration
  * - Real-time conversation area with streaming message support
  * - Auto-scroll to bottom functionality for new messages
@@ -24,12 +24,14 @@
  * - Responsive layout with auto-scroll on message updates
  * - Input field properly bound to state with @input and @keypress handlers
  * - Error state management with visual feedback in conversation
+ * - Enhanced world tabs showing agent names, counts, and message statistics
  *
  * Recent Changes:
  * - Fixed missing character issue by using @input instead of relying on @keypress for text capture
  * - Fixed input clearing after message send by proper state management
  * - Added error messages to conversation state with red left border styling
  * - Enhanced error handling for send failures and validation errors
+ * - Updated world selector tabs to display agent details and message counts
  */
 
 const { Component, html, run } = window["apprun"];
@@ -40,7 +42,7 @@ import {
   initializeState, selectWorld,
   handleWebSocketMessage, handleConnectionStatus, handleWebSocketError
 } from './update/index.js';
-import { AgentModal, openAgentModal, closeAgentModal} from './components/agent-modal.js';
+import { AgentModal, openAgentModal, closeAgentModal } from './components/agent-modal.js';
 import { sendChatMessage } from './ws-api.js';
 import Message from './components/message.js';
 
@@ -175,22 +177,38 @@ const view = (state) => {
           <!-- World tabs -->
           ${state.worlds?.length > 0 ? html`
             <div class="world-tabs">
-              ${state.worlds.map(world => html`
-                <button
-                  class="world-tab ${state.worldName === world.name ? 'active' : ''}"
-                  @click=${run(selectWorld, world.name)}
-                  data-world="${world.name}"
-                >
-                  ${world.name}
-                  ${state.worldName === world.name ? html`
-                    <span class="connection-status ${state.connectionStatus}">
-                      ${state.connectionStatus === 'connected' ? '●' :
-        state.connectionStatus === 'connecting' ? '◐' :
-          state.connectionStatus === 'error' ? '✕' : '○'}
-                    </span>
-                  ` : ''}
-                </button>
-              `)}
+              ${state.worlds.map(world => {
+    const agentCount = world.agentCount || 0;
+    const agents = world.agents || [];
+    const totalMessages = agents.reduce((sum, agent) => sum + (agent.messageCount || 0), 0);
+
+    return html`
+                  <button
+                    class="world-tab ${state.worldName === world.name ? 'active' : ''}"
+                    @click=${run(selectWorld, world.name)}
+                    data-world="${world.name}"
+                    title="${agentCount === 0 ? 'No agents' :
+        agentCount === 1 ? `1 agent: ${agents[0]?.name || 'Unknown'} (${agents[0]?.messageCount || 0} messages)` :
+          `${agentCount} agents: ${agents.map(a => a.name).join(', ')} (${totalMessages} total messages)`}"
+                  >
+                    <div class="world-tab-content">
+                      <div class="world-name">${world.name}</div>
+                      <div class="world-info">
+                        ${agentCount === 0 ? 'No agents' :
+        agentCount === 1 ? `${agents[0]?.name || 'Unknown'} (${agents[0]?.messageCount || 0})` :
+          `${agentCount} agents (${totalMessages} msgs)`}
+                      </div>
+                    </div>
+                    ${state.worldName === world.name ? html`
+                      <span class="connection-status ${state.connectionStatus}">
+                        ${state.connectionStatus === 'connected' ? '●' :
+          state.connectionStatus === 'connecting' ? '◐' :
+            state.connectionStatus === 'error' ? '✕' : '○'}
+                      </span>
+                    ` : ''}
+                  </button>
+                `;
+  })}
               <button class="world-tab add-world-tab" @click="addNewWorld">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 5v14M5 12h14"/>
