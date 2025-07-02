@@ -3,21 +3,22 @@
  *
  * Features:
  * - Stateful WebSocket connection management per client
- * - World subscription lifecycle with event listener management
- * - Uses stateless event handlers from ws-events.ts for command processing
+ * - World subscription lifecycle with centralized commands layer integration
+ * - Uses commands layer for world loading and event listener management
  * - Connection-specific world state and event listener cleanup
  * - World refresh logic after command execution with state updates
  * - Comprehensive debug logging with Pino for WebSocket operations
  *
  * WebSocket Connection State:
- * - World subscription per connection with event listeners
+ * - World subscription per connection using commands layer subscribeWorld()
  * - Automatic cleanup on disconnect to prevent memory leaks
  * - World refresh and re-subscription after modifications
+ * - No direct core layer calls - all through commands layer
  *
  * WebSocket Events:
- * - subscribe: Load world and setup event listeners for this connection
- * - unsubscribe: Clean up world subscription and listeners
- * - system/world/message: Use stateless handlers from ws-events.ts
+ * - subscribe: Use commands layer subscribeWorld() with ClientConnection
+ * - unsubscribe: Clean up world subscription through commands layer
+ * - system/world/message: Use stateless handlers from commands layer
  *
  * Logging:
  * - Uses Pino for structured logging with debug/info/warn/error levels
@@ -28,17 +29,17 @@
  * - Configurable log level via LOG_LEVEL environment variable
  *
  * Architecture:
- * - ws.ts: Manages stateful connection and subscription lifecycle
- * - ws-events.ts: Provides stateless command execution and message publishing
- * - Clear separation between transport state and event logic
- * - Per-connection world state with proper cleanup
+ * - ws.ts: Manages stateful connection and implements ClientConnection interface
+ * - commands/events.ts: Provides centralized world subscription and event handling
+ * - Clear separation between transport state and business logic
+ * - Per-connection world state with proper cleanup through commands layer
  *
  * Changes:
- * - Moved subscription/unsubscribe logic from ws-events.ts to ws.ts
- * - Added connection-specific world state management
- * - Integrated stateless event handlers for command processing
- * - Implemented world refresh with state synchronization
- * - Added comprehensive Pino logging for WebSocket operations and debugging
+ * - Integrated commands layer subscribeWorld() for centralized world management
+ * - Implemented enhanced ClientConnection interface with event handlers
+ * - Removed direct core layer dependencies (getWorld, toKebabCase)
+ * - Added comprehensive world event forwarding through ClientConnection
+ * - Maintained backward compatibility with existing WebSocket protocol
  */
 
 import { Server } from 'http';
@@ -46,15 +47,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 import pino from 'pino';
 import { World } from '../core/types.js';
-import { getWorld } from '../core/world-manager.js';
-import { toKebabCase } from '../core/utils.js';
 
 import {
   InboundMessageSchema,
   sendSuccess,
   sendError,
   sendCommandResult,
-  ClientConnection
+  ClientConnection,
+  subscribeWorld,
+  getWorld
 } from '../commands/events.js';
 import { processInput } from '../commands/index.js';
 
@@ -82,8 +83,8 @@ export function getWebSocketStats() {
 }
 
 interface WorldSocket extends WebSocket {
+  subscription?: any; // WorldSubscription from commands layer
   world?: World;
-  worldEventListeners?: Map<string, (...args: any[]) => void>;
 }
 
 // Full message schema including subscribe/unsubscribe (handled here)
@@ -103,108 +104,88 @@ function createClientConnection(ws: WorldSocket): ClientConnection {
       logger.debug({ data }, '[WS OUT]');
       ws.send(data);
     },
-    isOpen: ws.readyState === ws.OPEN
+    isOpen: ws.readyState === ws.OPEN,
+    onWorldEvent: (eventType: string, eventData: any) => {
+      // Skip echoing user messages back to client
+      // Only forward agent responses, system messages, and SSE events
+      if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender.startsWith('user'))) {
+        logger.debug('Skipping echo of user message', { eventType, sender: eventData.sender });
+        return;
+      }
+
+      if (ws.readyState === ws.OPEN) {
+        const eventPayload = {
+          ...eventData,
+          eventType
+        };
+
+        logger.debug({
+          eventType,
+          sender: eventData.sender,
+          world: ws.world?.name,
+          payload: eventPayload
+        }, 'Forwarding world event to client');
+
+        const message = JSON.stringify(eventPayload);
+        logger.debug({ data: message }, '[WS OUT]');
+        ws.send(message);
+      }
+    },
+    onError: (error: string) => {
+      logger.error('World subscription error', { error });
+      if (ws.readyState === ws.OPEN) {
+        const errorMessage = JSON.stringify({
+          type: 'error',
+          error: error,
+          timestamp: new Date().toISOString()
+        });
+        logger.debug({ data: errorMessage }, '[WS OUT]');
+        ws.send(errorMessage);
+      }
+    }
   };
 }
 
 // Clean up world subscription and event listeners
 async function cleanupWorldSubscription(ws: WorldSocket): Promise<void> {
-  if (ws.world && ws.worldEventListeners) {
+  if (ws.subscription) {
     logger.debug('Cleaning up world subscription', {
-      world: ws.world.name,
-      listenerCount: ws.worldEventListeners.size
+      world: ws.world?.name
     });
 
-    // Remove all event listeners
-    for (const [eventName, listener] of ws.worldEventListeners) {
-      ws.world.eventEmitter.off(eventName, listener);
-    }
-    ws.worldEventListeners.clear();
-
-    logger.debug('World subscription cleanup completed', { world: ws.world.name });
+    await ws.subscription.unsubscribe();
+    logger.debug('World subscription cleanup completed', { world: ws.world?.name });
   }
 
   // Clear world reference
   ws.world = undefined;
-  ws.worldEventListeners = undefined;
+  ws.subscription = undefined;
 }
 
-// Set up event listeners for world events
-function setupWorldEventListeners(ws: WorldSocket, world: World): void {
-  if (!ws.worldEventListeners) {
-    ws.worldEventListeners = new Map();
-  }
-
-  logger.debug('Setting up world event listeners', { world: world.name });
-
-  const client = createClientConnection(ws);
-
-  // Generic handler that forwards events to client with filtering
-  const handler = (eventType: string) => (eventData: any) => {
-    // Skip echoing user messages back to client
-    // Only forward agent responses, system messages, and SSE events
-    if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender.startsWith('user'))) {
-      logger.debug('Skipping echo of user message', { eventType, sender: eventData.sender });
-      return;
-    }
-
-    if (client.isOpen) {
-      const eventPayload = {
-        ...eventData,
-        eventType
-      };
-
-      logger.debug({
-        eventType,
-        sender: eventData.sender,
-        world: world.name,
-        payload: eventPayload
-      }, 'Forwarding world event to client');
-
-      client.send(JSON.stringify(eventPayload));
-    }
-  };
-
-  // List of event types to forward
-  const eventTypes = ['system', 'world', 'message', 'sse'];
-
-  // Set up listeners for all event types
-  for (const eventType of eventTypes) {
-    const eventHandler = handler(eventType);
-    world.eventEmitter.on(eventType, eventHandler);
-    ws.worldEventListeners.set(eventType, eventHandler);
-  }
-
-  logger.info('World event listeners setup completed', {
-    world: world.name,
-    eventTypeCount: eventTypes.length
-  });
-}
+// World event listeners now handled in commands layer
+// Legacy function removed - logic moved to commands/events.ts
 
 // Refresh world subscription after command execution
 async function refreshWorldSubscription(ws: WorldSocket, worldName: string): Promise<void> {
   try {
     logger.debug('Refreshing world subscription', { worldName });
 
-    const worldId = toKebabCase(worldName);
-    const refreshedWorld = await getWorld(ROOT_PATH, worldId);
-    if (refreshedWorld) {
-      // Clean up existing world subscription
-      await cleanupWorldSubscription(ws);
+    // Clean up existing world subscription
+    await cleanupWorldSubscription(ws);
 
-      // Attach refreshed world
-      ws.world = refreshedWorld;
-      ws.worldEventListeners = new Map();
+    // Create WebSocket client connection
+    const client = createClientConnection(ws);
 
-      // Set up event listeners
-      setupWorldEventListeners(ws, refreshedWorld);
+    // Re-subscribe using commands layer
+    const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
+    if (subscription) {
+      ws.subscription = subscription;
+      ws.world = subscription.world;
 
-      const client = createClientConnection(ws);
       sendSuccess(client, 'World subscription refreshed', { worldName });
-
-      logger.info('World subscription refreshed successfully', { worldName, worldId });
+      logger.info('World subscription refreshed successfully', { worldName });
     } else {
-      logger.warn('Failed to load refreshed world', { worldName, worldId });
+      logger.warn('Failed to load refreshed world', { worldName });
     }
   } catch (error) {
     logger.error('Failed to refresh world subscription', {
@@ -220,27 +201,21 @@ async function handleSubscribe(ws: WorldSocket, worldName: string): Promise<void
 
   logger.debug('Handling world subscription', { worldName });
 
-  // Load and attach world to client
-  const worldId = toKebabCase(worldName);
-  const world = await getWorld(ROOT_PATH, worldId);
-  if (!world) {
-    logger.warn('Failed to load world for subscription', { worldName, worldId });
-    sendError(client, 'Failed to load world');
-    return;
-  }
-
   // Clean up existing world subscription if any
   await cleanupWorldSubscription(ws);
 
-  // Attach world to WebSocket
-  ws.world = world;
-  ws.worldEventListeners = new Map();
+  // Subscribe using commands layer
+  const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
+  if (subscription) {
+    ws.subscription = subscription;
+    ws.world = subscription.world;
 
-  // Set up event listeners
-  setupWorldEventListeners(ws, world);
-
-  sendSuccess(client, 'Successfully subscribed to world', { worldName });
-  logger.info('World subscription successful', { worldName, worldId });
+    sendSuccess(client, 'Successfully subscribed to world', { worldName });
+    logger.info('World subscription successful', { worldName });
+  } else {
+    logger.warn('Failed to load world for subscription', { worldName });
+    sendError(client, 'Failed to load world');
+  }
 }
 
 // Handle unsubscribe event
@@ -341,8 +316,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 // Special handling for getWorld command - add worldName from payload  
                 let processedMessage = eventMessage;
                 if (commandName === 'getworld' && worldName) {
-                  const worldId = toKebabCase(worldName);
-                  processedMessage = `/getWorld ${worldId}`;
+                  processedMessage = `/getWorld ${worldName}`;
                   logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
                 }
 

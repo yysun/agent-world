@@ -4,7 +4,7 @@
  * 
  * A dual-mode CLI for Agent World with pipeline and interactive capabilities.
  * Provides console-based interface with real-time streaming, color-coded output,
- * and seamless world management.
+ * and seamless world management through commands layer integration.
  *
  * FEATURES:
  * - Pipeline Mode: Execute commands and exit (--command, args, stdin)
@@ -18,20 +18,27 @@
  *
  * ARCHITECTURE:
  * - Uses commander.js for argument parsing and mode detection
- * - Shares command processing logic with WebSocket server (commands/index.ts)
+ * - Uses commands layer for all world management (subscribeWorld, getWorld)
+ * - Implements ClientConnection interface for console-based event handling
  * - Uses readline for interactive input with proper cleanup
  * - Implements streaming display with real-time chunk accumulation
+ * - No direct core layer dependencies - all through commands layer
  *
  * USAGE:
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"
  * Interactive: cli --root /data/worlds --world myworld
+ *
+ * CHANGES:
+ * - Integrated commands layer subscribeWorld() for centralized world management
+ * - Implemented CLI-specific ClientConnection with console event handling
+ * - Removed direct core dependencies (getWorld, toKebabCase)
+ * - Maintained all existing functionality and user experience
+ * - Added proper world subscription lifecycle management
  */
 
 import { program } from 'commander';
 import readline from 'readline';
-import { processInput } from '../commands/index.js';
-import { getWorld } from '../core/world-manager.js';
-import { toKebabCase } from '../core/utils.js';
+import { processInput, subscribeWorld, getWorld, ClientConnection } from '../commands/index.js';
 import { World } from '../core/types.js';
 import fs from 'fs';
 import path from 'path';
@@ -72,10 +79,9 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
   const rootPath = options.root || DEFAULT_ROOT_PATH;
 
   try {
-    let world: any = null;
+    let world: World | null = null;
     if (options.world) {
-      const worldId = toKebabCase(options.world);
-      world = await getWorld(rootPath, worldId);
+      world = await getWorld(options.world, rootPath);
       if (!world) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
         process.exit(1);
@@ -104,7 +110,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
 
         // Refresh world if needed
         if (result.refreshWorld && options.world) {
-          const refreshedWorld = await getWorld(rootPath, toKebabCase(options.world));
+          const refreshedWorld = await getWorld(options.world, rootPath);
           if (refreshedWorld) world = refreshedWorld;
         }
       }
@@ -136,8 +142,8 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
 }
 
 interface WorldState {
+  subscription: any; // WorldSubscription from commands layer
   world: World;
-  worldEventListeners: Map<string, (...args: any[]) => void>;
 }
 
 interface StreamingState {
@@ -169,105 +175,14 @@ function clearPromptTimer(globalState: GlobalState): void {
 
 // World subscription cleanup
 function cleanupWorldSubscription(worldState: WorldState | null): void {
-  if (worldState?.world && worldState?.worldEventListeners) {
-    for (const [eventName, listener] of worldState.worldEventListeners) {
-      worldState.world.eventEmitter.off(eventName, listener);
-    }
-    worldState.worldEventListeners.clear();
+  if (worldState?.subscription) {
+    worldState.subscription.unsubscribe();
   }
 }
 
 // Event listeners for world events with streaming support
-function setupWorldEventListeners(
-  world: World,
-  streaming: { current: StreamingState },
-  globalState: GlobalState,
-  rl?: readline.Interface
-): Map<string, (...args: any[]) => void> {
-  const worldEventListeners = new Map<string, (...args: any[]) => void>();
-
-  const handler = (eventType: string) => (eventData: any) => {
-    // Skip user messages to prevent echo
-    if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user'))) {
-      return;
-    }
-
-    // Handle streaming events
-    if (eventType === 'sse') {
-      if (eventData.type === 'chunk' && eventData.content) {
-        if (!streaming.current.isActive) {
-          streaming.current.isActive = true;
-          streaming.current.content = '';
-          streaming.current.sender = eventData.agentName || eventData.sender;
-          streaming.current.messageId = eventData.messageId;
-          console.log(`\n${boldGreen(`● ${streaming.current.sender}`)} ${gray('is responding...')}`);
-          clearPromptTimer(globalState);
-        }
-
-        if (streaming.current.messageId === eventData.messageId) {
-          streaming.current.content += eventData.content;
-          process.stdout.write(eventData.content);
-
-          if (rl) {
-            setupPromptTimer(globalState, rl, () => {
-              if (streaming.current.isActive) {
-                console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
-                streaming.current.isActive = false;
-                streaming.current.content = '';
-                streaming.current.messageId = undefined;
-                rl.prompt();
-              }
-            }, 500);
-          }
-        }
-        return;
-      } else if (eventData.type === 'end') {
-        if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-          console.log('\n');
-          streaming.current.isActive = false;
-          streaming.current.content = '';
-          streaming.current.messageId = undefined;
-
-          if (rl) {
-            clearPromptTimer(globalState);
-            setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-          }
-        }
-        return;
-      } else if (eventData.type === 'error') {
-        if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-          console.log(error(`Stream error: ${eventData.error || eventData.message}`));
-          streaming.current.isActive = false;
-          streaming.current.content = '';
-          streaming.current.messageId = undefined;
-
-          if (rl) {
-            clearPromptTimer(globalState);
-            setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-          }
-        }
-        return;
-      }
-    }
-
-    // Filter out success messages and display system events
-    if (eventData.content && eventData.content.includes('Success message sent')) return;
-
-    if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-      console.log(`\n${boldRed('● system:')} ${eventData.message}`);
-    }
-  };
-
-  // Set up listeners for all event types
-  const eventTypes = ['system', 'world', 'message', 'sse'];
-  for (const eventType of eventTypes) {
-    const eventHandler = handler(eventType);
-    world.eventEmitter.on(eventType, eventHandler);
-    worldEventListeners.set(eventType, eventHandler);
-  }
-
-  return worldEventListeners;
-}
+// Event listeners for world events with streaming support - now handled in commands layer
+// Legacy function removed - logic moved to handleWorldEvent and commands/events.ts
 
 // World subscription handler
 async function handleSubscribe(
@@ -277,11 +192,104 @@ async function handleSubscribe(
   globalState: GlobalState,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
-  const world = await getWorld(rootPath, toKebabCase(worldName));
-  if (!world) throw new Error('Failed to load world');
+  // Create CLI client connection
+  const cliClient: ClientConnection = {
+    send: (data: string) => {
+      // CLI doesn't need to send data back, but we implement for interface compliance
+    },
+    isOpen: true,
+    onWorldEvent: (eventType: string, eventData: any) => {
+      // Handle world events - use existing event handling logic
+      handleWorldEvent(eventType, eventData, streaming, globalState, rl);
+    },
+    onError: (error: string) => {
+      console.log(red(`Error: ${error}`));
+    }
+  };
 
-  const worldEventListeners = setupWorldEventListeners(world, streaming, globalState, rl);
-  return { world, worldEventListeners };
+  const subscription = await subscribeWorld(worldName, rootPath, cliClient);
+  if (!subscription) throw new Error('Failed to load world');
+
+  return { subscription, world: subscription.world };
+}
+
+// Handle world events (extracted from existing setupWorldEventListeners logic)
+function handleWorldEvent(
+  eventType: string,
+  eventData: any,
+  streaming: { current: StreamingState },
+  globalState: GlobalState,
+  rl?: readline.Interface
+): void {
+  // Skip user messages to prevent echo
+  if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user'))) {
+    return;
+  }
+
+  // Handle streaming events
+  if (eventType === 'sse') {
+    if (eventData.type === 'chunk' && eventData.content) {
+      if (!streaming.current.isActive) {
+        streaming.current.isActive = true;
+        streaming.current.content = '';
+        streaming.current.sender = eventData.agentName || eventData.sender;
+        streaming.current.messageId = eventData.messageId;
+        console.log(`\n${boldGreen(`● ${streaming.current.sender}`)} ${gray('is responding...')}`);
+        clearPromptTimer(globalState);
+      }
+
+      if (streaming.current.messageId === eventData.messageId) {
+        streaming.current.content += eventData.content;
+        process.stdout.write(eventData.content);
+
+        if (rl) {
+          setupPromptTimer(globalState, rl, () => {
+            if (streaming.current.isActive) {
+              console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
+              streaming.current.isActive = false;
+              streaming.current.content = '';
+              streaming.current.messageId = undefined;
+              rl.prompt();
+            }
+          }, 500);
+        }
+      }
+      return;
+    } else if (eventData.type === 'end') {
+      if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
+        console.log('\n');
+        streaming.current.isActive = false;
+        streaming.current.content = '';
+        streaming.current.messageId = undefined;
+
+        if (rl) {
+          clearPromptTimer(globalState);
+          setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
+        }
+      }
+      return;
+    } else if (eventData.type === 'error') {
+      if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
+        console.log(error(`Stream error: ${eventData.error || eventData.message}`));
+        streaming.current.isActive = false;
+        streaming.current.content = '';
+        streaming.current.messageId = undefined;
+
+        if (rl) {
+          clearPromptTimer(globalState);
+          setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
+        }
+      }
+      return;
+    }
+  }
+
+  // Filter out success messages and display system events
+  if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+  if ((eventType === 'system' || eventType === 'world') && eventData.message) {
+    console.log(`\n${boldRed('● system:')} ${eventData.message}`);
+  }
 }
 
 // World discovery and selection

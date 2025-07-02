@@ -7,7 +7,15 @@
  * - Command routing and validation
  * - Message normalization and publishing
  * - Standardized response helpers
+ * - World subscription management with centralized logic
  * - No connection state management (handled by transport layer)
+ *
+ * World Subscription:
+ * - subscribeWorld(): Centralized world loading and event listener setup
+ * - getWorld(): Simple world loading wrapper with kebab-case conversion
+ * - ClientConnection interface for transport abstraction
+ * - Event filtering and forwarding to client connections
+ * - Automatic cleanup on unsubscribe
  *
  * Message Schemas:
  * - InboundMessageSchema: Validates messages received from clients
@@ -26,16 +34,41 @@
  * - All helpers automatically add timestamp and proper type fields
  *
  * Implementation:
- * - Uses minimal ClientConnection interface for sending only
- * - No world state management (handled by caller)
+ * - Uses enhanced ClientConnection interface for world event handling
+ * - Centralizes world subscription logic from CLI and WebSocket transports
+ * - Handles toKebabCase conversion internally for world identifiers
  * - Pure functions that take explicit parameters
  * - Command results indicate if world refresh is needed
+ *
+ * Changes:
+ * - Added subscribeWorld() and getWorld() functions for centralized world management
+ * - Enhanced ClientConnection interface with onWorldEvent and onError callbacks
+ * - Moved world event listener setup logic from transport layers
+ * - Integrated toKebabCase conversion to eliminate transport layer dependency
  */
 
 import { z } from 'zod';
 import { World } from '../core/types.js';
 import { publishMessage } from '../core/world-events.js';
 import { executeCommand } from './commands.js';
+import { getWorld as coreGetWorld } from '../core/world-manager.js';
+import { toKebabCase } from '../core/utils.js';
+
+// Enhanced client connection interface for world subscription management
+export interface ClientConnection {
+  send: (data: string) => void;
+  isOpen: boolean;
+  // Optional event handler for world events
+  onWorldEvent?: (eventType: string, eventData: any) => void;
+  onError?: (error: string) => void;
+}
+
+// World subscription object with cleanup methods
+export interface WorldSubscription {
+  world: World;
+  unsubscribe: () => Promise<void>;
+  refresh: (rootPath: string) => Promise<World>;
+}
 
 // Minimal client connection interface for stateless event handling
 export interface ClientConnection {
@@ -168,4 +201,125 @@ export function handleMessagePublish(world: World, eventMessage: string, sender?
   // Normalize user senders to 'HUMAN' for public messages that agents should respond to
   const normalizedSender = sender && sender.startsWith('user') ? 'HUMAN' : (sender || 'HUMAN');
   publishMessage(world, eventMessage, normalizedSender);
+}
+
+// World subscription management functions
+
+/**
+ * Set up event listeners for world events with client connection forwarding
+ */
+function setupWorldEventListeners(world: World, client: ClientConnection): Map<string, (...args: any[]) => void> {
+  const worldEventListeners = new Map<string, (...args: any[]) => void>();
+
+  // Generic handler that forwards events to client with filtering
+  const handler = (eventType: string) => (eventData: any) => {
+    // Skip echoing user messages back to client
+    // Only forward agent responses, system messages, and SSE events
+    if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender.startsWith('user'))) {
+      return;
+    }
+
+    // Forward event to client if handler is provided
+    if (client.onWorldEvent && client.isOpen) {
+      client.onWorldEvent(eventType, eventData);
+    }
+  };
+
+  // List of event types to forward
+  const eventTypes = ['system', 'world', 'message', 'sse'];
+
+  // Set up listeners for all event types
+  for (const eventType of eventTypes) {
+    const eventHandler = handler(eventType);
+    world.eventEmitter.on(eventType, eventHandler);
+    worldEventListeners.set(eventType, eventHandler);
+  }
+
+  return worldEventListeners;
+}
+
+/**
+ * Clean up world subscription and event listeners
+ */
+async function cleanupWorldSubscription(world: World, worldEventListeners: Map<string, (...args: any[]) => void>): Promise<void> {
+  if (world && worldEventListeners) {
+    // Remove all event listeners
+    for (const [eventName, listener] of worldEventListeners) {
+      world.eventEmitter.off(eventName, listener);
+    }
+    worldEventListeners.clear();
+  }
+}
+
+/**
+ * Subscribe to a world with event listener setup
+ * Centralizes world loading and event subscription logic from CLI and WebSocket
+ * Handles toKebabCase conversion internally
+ */
+export async function subscribeWorld(
+  worldIdentifier: string,
+  rootPath: string,
+  client: ClientConnection
+): Promise<WorldSubscription | null> {
+  try {
+    // Load world using core manager (convert to kebab-case internally)
+    const worldId = toKebabCase(worldIdentifier);
+    const world = await coreGetWorld(rootPath, worldId);
+
+    if (!world) {
+      if (client.onError) {
+        client.onError(`World not found: ${worldIdentifier}`);
+      }
+      return null;
+    }
+
+    // Set up event listeners
+    const worldEventListeners = setupWorldEventListeners(world, client);
+
+    // Return subscription object with cleanup methods
+    return {
+      world,
+      unsubscribe: async () => {
+        await cleanupWorldSubscription(world, worldEventListeners);
+      },
+      refresh: async (rootPath: string) => {
+        // Clean up existing listeners
+        await cleanupWorldSubscription(world, worldEventListeners);
+
+        // Reload world
+        const refreshedWorld = await coreGetWorld(rootPath, worldId);
+        if (refreshedWorld) {
+          // Setup new listeners on refreshed world
+          const newListeners = setupWorldEventListeners(refreshedWorld, client);
+
+          // Update the world reference (note: this doesn't update the original subscription object)
+          // Callers should handle getting the new world reference
+          return refreshedWorld;
+        }
+        throw new Error(`Failed to refresh world: ${worldIdentifier}`);
+      }
+    };
+  } catch (error) {
+    if (client.onError) {
+      client.onError(`Failed to subscribe to world: ${error instanceof Error ? error.message : error}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * Get world wrapper function for commands layer
+ * Simple wrapper around core getWorld for consistency
+ * Handles toKebabCase conversion internally
+ */
+export async function getWorld(
+  worldIdentifier: string,
+  rootPath: string
+): Promise<World | null> {
+  try {
+    const worldId = toKebabCase(worldIdentifier);
+    return await coreGetWorld(rootPath, worldId);
+  } catch (error) {
+    return null;
+  }
 }
