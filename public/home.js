@@ -148,9 +148,8 @@ const scrollToBottom = (state) => {
       });
     });
     // Reset the needScroll flag
-    return { ...state, needScroll: false };
+    state.needScroll = false;
   }
-  return state;
 };
 
 
