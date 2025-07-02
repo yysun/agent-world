@@ -5,13 +5,11 @@
   "type": "module",
   "bin": {
     "agent-world": "./cli/index.ts",
-    "agent-world-server": "./server/index.ts",
-    "cli-ink": "./cli-ink/index.ts"
+    "agent-world-server": "./server/index.ts"
   },
   "scripts": {
     "start": "npm run server",
     "cli": "npx tsx cli/index.ts",
-    "cli-ink": "npx tsx cli-ink/index.ts",
     "server": "npx tsx server/index.ts",
     "dev": "set LOG_LEVEL=debug && npx tsx --watch server/index.ts",
     "test": "jest --config jest.config.js",
