@@ -36,62 +36,69 @@ cli-ink --root /data/worlds --world myworld
 
 ## Implementation Steps
 
-### Phase 1: Commands Relocation
-- [ ] Move `server/commands/` to root-level `commands/` directory
-- [ ] Update all import paths in `server/ws.ts` and related files
-- [ ] Ensure commands remain transport-agnostic with `ClientConnection` interface
-- [ ] Update TypeScript module resolution for new command location
-- [ ] Verify existing WebSocket functionality after relocation
+### Phase 1: Commands Relocation ✅ COMPLETED
+- [x] Move `server/commands/` to root-level `commands/` directory
+- [x] Update all import paths in `server/ws.ts` and related files
+- [x] Ensure commands remain transport-agnostic with `ClientConnection` interface
+- [x] Update TypeScript module resolution for new command location
+- [x] Verify existing WebSocket functionality after relocation
 
-### Phase 2: CLI Core Infrastructure  
-- [ ] Set up CLI project structure under `cli-ink/`
-- [ ] Install required dependencies (ink, @types/react, commander for arg parsing)
-- [ ] Create argument parser for pipeline vs interactive mode detection
-- [ ] Import relocated commands and events modules directly
-- [ ] Add configuration management for root path and settings
+### Phase 2: CLI Core Infrastructure ✅ COMPLETED
+- [x] Set up CLI project structure under `cli-ink/`
+- [x] Install required dependencies (ink, @types/react, commander for arg parsing)
+- [x] Create argument parser for pipeline vs interactive mode detection
+- [x] Import relocated commands and events modules directly
+- [x] Add configuration management for root path and settings
 
-### Phase 3: Pipeline Mode Implementation
-- [ ] Implement argument parsing using commander.js or yargs
-- [ ] Create pipeline input processing (stdin handling)
-- [ ] Add command execution with direct output (no Ink UI)
-- [ ] Implement exit-after-execution for pipeline mode
-- [ ] Support chained command execution from arguments
+### Phase 3: Pipeline Mode Implementation ✅ COMPLETED
+- [x] Implement argument parsing using commander.js or yargs
+- [x] Create pipeline input processing (stdin handling)
+- [x] Add command execution with direct output (no Ink UI)
+- [x] Implement exit-after-execution for pipeline mode
+- [x] Support chained command execution from arguments
 
-### Phase 4: CLI Transport Layer (Interactive Mode)
-- [ ] Implement `CLIClientConnection` class for Ink-based display
-- [ ] Create mode detection (pipeline vs interactive)
-- [ ] Handle JSON response parsing for CLI display formatting
-- [ ] Add CLI-specific error handling and user feedback
-- [ ] Implement terminal-optimized response formatting
+### Phase 4: CLI Transport Layer (Interactive Mode) ✅ COMPLETED
+- [x] Implement `CLIClientConnection` class for Ink-based display
+- [x] Create mode detection (pipeline vs interactive)
+- [x] Handle JSON response parsing for CLI display formatting
+- [x] Add CLI-specific error handling and user feedback
+- [x] Implement terminal-optimized response formatting
 
-### Phase 5: World Management Integration
-- [ ] Use existing `getWorld()`, `listWorlds()` from core/world-manager directly
-- [ ] Implement world selection using existing world loading functions
-- [ ] Handle world context in both pipeline and interactive modes
-- [ ] Add world discovery and selection for interactive mode
-- [ ] Support world specification via command line arguments
+### Phase 5: World Management Integration ✅ COMPLETED
+- [x] Use existing `getWorld()`, `listWorlds()` from core/world-manager directly
+- [x] Implement world selection using existing world loading functions
+- [x] Handle world context in both pipeline and interactive modes
+- [x] Add world discovery and selection for interactive mode
+- [x] Support world specification via command line arguments
 
-### Phase 6: Event System Integration (Interactive Mode Only)
+### Phase 5.1: Smart World Auto-Selection ✅ COMPLETED
+- [x] Implement automatic world discovery on startup when no --world specified
+- [x] Auto-create 'default-world' when no worlds exist in root path (partial - command format needs refinement)
+- [x] Auto-load single world when exactly one world found
+- [x] Create interactive world selection menu when multiple worlds available
+- [x] Add world refresh handling in CLIClientConnection after state-modifying commands
+
+### Phase 6: Event System Integration (Interactive Mode Only) 🔄 IN PROGRESS
 - [ ] Subscribe directly to `world.eventEmitter` instances for interactive mode
 - [ ] Create Ink components for real-time event display
 - [ ] Handle all EventType enum values using existing event structure
 - [ ] Use existing `handleMessagePublish()` for message sending
 - [ ] Skip event subscription in pipeline mode for performance
 
-### Phase 7: Ink UI Implementation (Interactive Mode)
-- [ ] Create main App component with shared command system integration
-- [ ] Implement CommandInput component that calls existing `handleCommand()`
-- [ ] Add EventDisplay component for real-time world events
-- [ ] Create WorldSelector using existing world discovery functions
-- [ ] Add StreamingResponse component for LLM output display
-- [ ] Implement mode switching and context preservation
+### Phase 7: Ink UI Implementation (Interactive Mode) ✅ COMPLETED
+- [x] Create main App component with shared command system integration
+- [x] Implement CommandInput component that calls existing `handleCommand()`
+- [x] Add EventDisplay component for real-time world events
+- [x] Create WorldSelector using existing world discovery functions
+- [x] Add StreamingResponse component for LLM output display
+- [x] Implement mode switching and context preservation
 
-### Phase 8: Command System Integration
-- [ ] Use relocated `handleCommand()` function directly with CLI ClientConnection
-- [ ] Implement all existing commands without modification (reuse shared commands)
-- [ ] Handle command results using existing `sendCommandResult()` with appropriate display
-- [ ] Support both global and world-specific commands using existing routing
-- [ ] Add CLI-specific command shortcuts and aliases as UI layer only
+### Phase 8: Command System Integration ✅ COMPLETED
+- [x] Use relocated `handleCommand()` function directly with CLI ClientConnection
+- [x] Implement all existing commands without modification (reuse shared commands)
+- [x] Handle command results using existing `sendCommandResult()` with appropriate display
+- [x] Support both global and world-specific commands using existing routing
+- [x] Add CLI-specific command shortcuts and aliases as UI layer only
 
 ### Phase 9: Advanced Features
 - [ ] Add command history and auto-completion for interactive mode

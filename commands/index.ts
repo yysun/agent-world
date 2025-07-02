@@ -37,11 +37,15 @@
  * - Modified updateWorld command to require rootPath as first argument
  * - Updated to use generic ClientConnection instead of WebSocket
  * - Added comprehensive Pino logging for debugging and monitoring
+ * - Fixed getWorldCommand to properly load all agents from disk before building response
+ * - Added proper TypeScript type casting for agent values from world.agents Map
+ * - Changed getWorldCommand to return full Agent objects including memory and systemPrompt
+ * - Enhanced getWorldsCommand to include agent details for world selector (names and message counts)
  */
 
 import pino from 'pino';
-import { World, Agent, LLMProvider } from '../../core/types.js';
-import { WorldInfo, listWorlds, getWorld as getWorldFromManager, createWorld, updateWorld } from '../../core/world-manager.js';
+import { World, Agent, LLMProvider } from '../core/types.js';
+import { WorldInfo, listWorlds, getWorld as getWorldFromManager, createWorld, updateWorld } from '../core/world-manager.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
 
 // Create logger instance
@@ -109,7 +113,10 @@ const clearCommand: ServerCommand = async (args, world) => {
       }
 
       logger.debug('Clearing all agent memories', { agentCount: agents.length });
-      const clearPromises = agents.map(agent => world.clearAgentMemory(agent.name));
+      const clearPromises = agents.map(agentValue => {
+        const agent = agentValue as Agent;
+        return world.clearAgentMemory(agent.name);
+      });
       await Promise.all(clearPromises);
 
       logger.info('Cleared all agent memories', { agentCount: agents.length, world: world.name });
@@ -149,25 +156,49 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
     const worlds = await listWorlds(ROOT_PATH);
     logger.debug('Worlds loaded, counting agents', { worldCount: worlds.length });
 
-    // Count agents for each world by loading and checking agents map
-    const worldsWithAgentCount = await Promise.all(
+    // Get detailed agent information for each world for the world selector
+    const worldsWithAgentDetails = await Promise.all(
       worlds.map(async (worldInfo) => {
         try {
           const fullWorld = await getWorldFromManager(ROOT_PATH, worldInfo.id);
+          if (!fullWorld) {
+            return {
+              ...worldInfo,
+              agentCount: 0,
+              agents: []
+            };
+          }
+
+          // Extract agent information for the world selector
+          const agents = Array.from(fullWorld.agents.values()).map((agentValue) => {
+            const agent = agentValue as Agent;
+            return {
+              id: agent.id,
+              name: agent.name,
+              messageCount: agent.memory?.length || 0,
+              status: agent.status || 'inactive'
+            };
+          });
+
           return {
             ...worldInfo,
-            agentCount: fullWorld ? fullWorld.agents.size : 0
+            agentCount: agents.length,
+            agents: agents
           };
         } catch (error) {
-          logger.warn('Failed to load world for agent count', { worldId: worldInfo.id, error: error instanceof Error ? error.message : error });
-          // If world fails to load, keep original count (0)
-          return worldInfo;
+          logger.warn('Failed to load world for agent details', { worldId: worldInfo.id, error: error instanceof Error ? error.message : error });
+          // If world fails to load, return basic info
+          return {
+            ...worldInfo,
+            agentCount: 0,
+            agents: []
+          };
         }
       })
     );
 
-    logger.info('Worlds retrieved successfully', { worldCount: worldsWithAgentCount.length });
-    return createResponse('Worlds retrieved successfully', 'data', worldsWithAgentCount);
+    logger.info('Worlds retrieved successfully', { worldCount: worldsWithAgentDetails.length });
+    return createResponse('Worlds retrieved successfully', 'data', worldsWithAgentDetails);
   } catch (error) {
     logger.error('GetWorlds command failed', { error: error instanceof Error ? error.message : error, args });
     return createError(`Failed to get worlds: ${error}`);
@@ -176,16 +207,18 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
 
 const getWorldCommand: ServerCommand = async (args, world) => {
   try {
-    // Return current world information with agent list
-    const agents = Array.from(world.agents.values()).map(agent => ({
-      id: agent.id,
-      name: agent.name,
-      status: agent.status,
-      provider: agent.provider,
-      model: agent.model,
-      lastActive: agent.lastActive,
-      messageCount: agent.memory?.length || 0
-    }));
+    logger.debug('GetWorld command started', { world: world?.name });
+
+    // Ensure all agents are loaded from disk
+    await world.loadAllAgentsFromDisk();
+
+    logger.debug('Agents loaded, building response', { agentCount: world.agents.size });
+
+    // Return current world information with full agent data
+    const agents = Array.from(world.agents.values()).map((agentValue) => {
+      const agent = agentValue as Agent;
+      return agent;
+    });
 
     const worldData = {
       id: world.id,
@@ -196,8 +229,17 @@ const getWorldCommand: ServerCommand = async (args, world) => {
       agents: agents
     };
 
+    logger.info('World information retrieved successfully', {
+      worldId: world.id,
+      worldName: world.name,
+      agentCount: agents.length
+    });
     return createResponse('World information retrieved successfully', 'data', worldData);
   } catch (error) {
+    logger.error('GetWorld command failed', {
+      error: error instanceof Error ? error.message : error,
+      world: world?.name
+    });
     return createError(`Failed to get world: ${error}`);
   }
 };

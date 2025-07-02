@@ -5,11 +5,13 @@
   "type": "module",
   "bin": {
     "agent-world": "./cli/index.ts",
-    "agent-world-server": "./server/index.ts"
+    "agent-world-server": "./server/index.ts",
+    "cli-ink": "./cli-ink/index.ts"
   },
   "scripts": {
     "start": "npm run server",
     "cli": "npx tsx cli/index.ts",
+    "cli-ink": "npx tsx cli-ink/index.ts",
     "server": "npx tsx server/index.ts",
     "dev": "set LOG_LEVEL=debug && npx tsx --watch server/index.ts",
     "test": "jest --config jest.config.js",
@@ -64,11 +66,16 @@
     "@types/jest": "^29.5.0",
     "@types/node": "^20.19.1",
     "@types/pino": "^7.0.4",
+    "@types/react": "^19.1.8",
     "@types/tmp": "^0.2.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
+    "commander": "^14.0.0",
     "concurrently": "^9.1.2",
     "esbuild": "^0.21.5",
+    "ink": "^6.0.1",
+    "ink-select-input": "^6.2.0",
+    "ink-text-input": "^6.0.0",
     "jest": "^29.5.0",
     "nodemon": "^3.1.10",
     "tmp": "^0.2.0",

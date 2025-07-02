@@ -57,7 +57,7 @@ import {
   sendError,
   sendCommandResult,
   ClientConnection
-} from './commands/events.js';
+} from '../commands/events.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 

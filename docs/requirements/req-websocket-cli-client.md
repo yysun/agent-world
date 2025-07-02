@@ -14,8 +14,15 @@ Create a command-line interface that directly integrates with the Agent World co
 
 ### World Selection and Management
 - User-driven world selection from available worlds in root path
+- **Automatic World Selection Logic**:
+  - If no `--world` argument provided on startup:
+    - Get all available worlds from root path
+    - If no worlds exist: automatically create 'default-world'
+    - If exactly one world found: auto-load it for immediate use
+    - If multiple worlds found: present interactive world selection menu
 - Real-time world loading and agent discovery
 - Local world state management and persistence
+- **World Refresh Handling**: Automatic world refresh after commands that modify world state
 - Support for world creation and configuration through commands
 
 ### Event Display and Interaction
@@ -48,8 +55,12 @@ Create a command-line interface that directly integrates with the Agent World co
 
 ### World Interaction
 - Direct world loading and selection from user-specified root path
+- **Smart World Discovery**: Automatic world selection based on availability
+- **Default World Creation**: Auto-create 'default-world' when no worlds exist
+- **Interactive World Selection**: User menu when multiple worlds available
 - Local world management without server dependency
 - Real-time event subscription to world EventEmitter instances
+- **Automatic World Refresh**: Reload world state after modifying commands
 - Direct message publishing to world event system
 - Local agent management and interaction
 
