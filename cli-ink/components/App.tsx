@@ -129,13 +129,6 @@ function setupWorldEventListeners(
       eventType
     };
 
-    console.debug({
-      eventType,
-      sender: eventData.sender,
-      world: world.name,
-      payload: eventPayload
-    }, 'Forwarding world event to CLI display');
-
     // Handle SSE events specially for streaming display
     if (eventType === 'sse') {
       if (eventData.type === 'chunk' && eventData.content) {
@@ -179,6 +172,11 @@ function setupWorldEventListeners(
         });
         return;
       }
+    }
+
+    // Filter out "Success message sent" messages
+    if (eventData.content && eventData.content.includes('Success message sent')) {
+      return;
     }
 
     // Route regular events to Ink components
@@ -433,43 +431,44 @@ const App: React.FC<AppProps> = ({ initialRootPath, initialWorldName }) => {
         </Box>
       )}
 
-      {/* Show streaming content */}
-      {worldName && worldState && !needsWorldSelection && streaming.isActive && (
-        <Box marginBottom={1} paddingX={1} borderStyle="round" borderColor="yellow">
-          <Box flexDirection="column">
-            <Text color="yellow" bold>⚡ Streaming: {streaming.sender}</Text>
-            <Box marginLeft={1} marginTop={1}>
-              <Text>{streaming.content}<Text color="yellow">▊</Text></Text>
-            </Box>
-          </Box>
-        </Box>
-      )}
-
-      {/* Show recent events */}
+      {/* Show completed messages */}
       {worldName && worldState && !needsWorldSelection && events.length > 0 && (
-        <Box marginBottom={1} paddingX={1} borderStyle="round">
-          <Box flexDirection="column">
-            <Text color="cyan" bold>📡 Recent Events:</Text>
-            {events.slice(-5).map((event, index) => (
-              <Box key={index} marginLeft={1}>
-                <Text color="gray" dimColor>[{event.eventType}]</Text>
-                <Text> {event.sender}: {event.content || event.message || JSON.stringify(event)}</Text>
+        <Box flexDirection="column" marginBottom={1}>
+          {events.filter(event => event.eventType === 'message' && event.content).slice(-3).map((event, index) => (
+            <Box key={index} marginBottom={1} paddingX={1} borderStyle="round" borderColor="cyan">
+              <Box flexDirection="column">
+                <Text color="cyan" bold>🤖 {event.sender || 'Agent'}</Text>
+                <Box marginLeft={1} marginTop={1}>
+                  <Text>{event.content}</Text>
+                </Box>
               </Box>
-            ))}
-          </Box>
+            </Box>
+          ))}
         </Box>
       )}
 
-      {/* Show command results */}
-      {!needsWorldSelection && renderLastResult()}
-
-      {/* Show command input when world is connected */}
+      {/* Input and streaming area grouped together */}
       {worldName && worldState && !needsWorldSelection && (
-        <CommandInput
-          world={worldState.world}
-          rootPath={rootPath}
-          onCommandResult={handleCommandResult}
-        />
+        <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="single">
+          {/* Show streaming content within input area */}
+          {streaming.isActive && (
+            <Box marginBottom={1} paddingX={1} borderStyle="round" borderColor="yellow">
+              <Box flexDirection="column">
+                <Text color="yellow" bold>⚡ Streaming: {streaming.sender}</Text>
+                <Box marginLeft={1} marginTop={1}>
+                  <Text>{streaming.content}<Text color="yellow">▊</Text></Text>
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          {/* Command input */}
+          <CommandInput
+            world={worldState.world}
+            rootPath={rootPath}
+            onCommandResult={handleCommandResult}
+          />
+        </Box>
       )}
 
       {/* Show tips */}
