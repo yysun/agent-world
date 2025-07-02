@@ -2,50 +2,25 @@
  * Server Commands Index
  * 
  * Features:
- * - Central export for all server commands
- * - Command registry for message handling
- * - Extensible structure for adding new commands
- * - Helper functions for common command operations
- * - All commands implemented in single file for simplicity
- * - Transport-agnostic using generic ClientConnection interface
- * - Comprehensive debug logging with Pino for command execution tracking
+ * - Central export for all server commands with command registry
+ * - Global commands (getWorlds, getWorld, addWorld) and world-context commands
+ * - Transport-agnostic using optional world parameter
+ * - Pino logging for error tracking and debugging
  * 
  * Commands:
  * - clear: Clear agent memory (individual or all)
- * - getWorlds: List all available worlds (requires rootPath)
- * - getWorld: Get world information and agents
- * - addWorld: Create a new world (requires rootPath)
- * - updateWorld: Update world configuration (requires rootPath)
- * - addAgent: Add a new agent to world
- * - updateAgentConfig: Update agent configuration
- * - updateAgentPrompt: Update agent system prompt
- * - updateAgentMemory: Update agent memory/conversation
+ * - getWorlds/getWorld/addWorld: Global commands using rootPath from args
+ * - updateWorld/addAgent/updateAgent*: Commands requiring world context
  * 
- * Logging:
- * - Uses Pino for structured logging with debug/info/warn/error levels
- * - Logs command execution start/end with context
- * - Tracks successful/failed operations with metadata
- * - Pretty printing in development, JSON in production
- * - Configurable log level via LOG_LEVEL environment variable
- * 
- * Changes:
- * - Initial creation with clear command export
- * - Structured for easy command addition and management
- * - Consolidated all commands into single file
- * - Added helper functions for validation and responses
- * - Updated commands to use rootPath from args instead of environment variables
- * - Modified updateWorld command to require rootPath as first argument
- * - Updated to use generic ClientConnection instead of WebSocket
- * - Added comprehensive Pino logging for debugging and monitoring
- * - Fixed getWorldCommand to properly load all agents from disk before building response
- * - Added proper TypeScript type casting for agent values from world.agents Map
- * - Changed getWorldCommand to return full Agent objects including memory and systemPrompt
- * - Enhanced getWorldsCommand to include agent details for world selector (names and message counts)
+ * Implementation:
+ * - Uses getWorld() from world-manager which auto-loads agents and subscribes to events
+ * - Helper functions for validation, responses, and error handling
+ * - Structured logging with configurable levels
  */
 
 import pino from 'pino';
 import { World, Agent, LLMProvider } from '../core/types.js';
-import { WorldInfo, listWorlds, getWorld as getWorldFromManager, createWorld, updateWorld } from '../core/world-manager.js';
+import { WorldInfo, listWorlds, getWorld, createWorld, updateWorld } from '../core/world-manager.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
 
 // Create logger instance
@@ -63,25 +38,15 @@ const logger = pino({
 // Helper functions
 const validateArgs: ValidationHelper = (args, requiredCount = 0) => {
   if (args.length < requiredCount) {
-    logger.warn('Argument validation failed', { provided: args.length, required: requiredCount });
     return createError(`Missing required arguments. Expected ${requiredCount}, got ${args.length}`);
   }
   return null;
 };
 
-// Updated to create simplified responses - data commands return data directly
 const createResponse: ResponseHelper = (content, type = 'system', data = undefined, refreshWorld = false) => {
   if (type === 'data') {
-    // For data responses, return the data directly with metadata
-    return {
-      data,
-      message: content,
-      refreshWorld,
-      timestamp: new Date().toISOString()
-    };
+    return { data, message: content, refreshWorld, timestamp: new Date().toISOString() };
   }
-
-  // For system responses, return traditional structure
   return {
     type,
     content: type !== 'error' ? content : undefined,
@@ -101,41 +66,28 @@ const createError: ErrorHelper = (error) => ({
 // Command implementations
 const clearCommand: ServerCommand = async (args, world) => {
   try {
-    logger.debug('Clear command started', { args: args.length, world: world?.name });
+    if (!world) return createError('Clear command requires world context');
 
-    // Handle /clear command (no args) - clear all agents
     if (args.length === 0) {
+      // Clear all agents
       const agents = Array.from(world.agents.values());
+      if (agents.length === 0) return createResponse('No agents to clear.');
 
-      if (agents.length === 0) {
-        logger.debug('No agents to clear');
-        return createResponse('No agents to clear.');
-      }
-
-      logger.debug('Clearing all agent memories', { agentCount: agents.length });
       const clearPromises = agents.map(agentValue => {
         const agent = agentValue as Agent;
         return world.clearAgentMemory(agent.name);
       });
       await Promise.all(clearPromises);
-
-      logger.info('Cleared all agent memories', { agentCount: agents.length, world: world.name });
       return createResponse(`Cleared memory for all ${agents.length} agents in ${world.name}`);
     }
 
-    // Handle /clear <name> command - clear specific agent memory
+    // Clear specific agent
     const agentName = args[0].trim();
-    logger.debug('Clearing specific agent memory', { agentName });
-
     const clearedAgent = await world.clearAgentMemory(agentName);
 
-    if (clearedAgent) {
-      logger.info('Agent memory cleared successfully', { agentName });
-      return createResponse(`Cleared memory for agent: ${agentName}`);
-    } else {
-      logger.warn('Agent not found for clearing', { agentName });
-      return createError(`Agent not found: ${agentName}`);
-    }
+    return clearedAgent
+      ? createResponse(`Cleared memory for agent: ${agentName}`)
+      : createError(`Agent not found: ${agentName}`);
 
   } catch (error) {
     logger.error('Clear command failed', { error: error instanceof Error ? error.message : error, args });
@@ -143,24 +95,19 @@ const clearCommand: ServerCommand = async (args, world) => {
   }
 };
 
-const getWorldsCommand: ServerCommand = async (args, world) => {
+const getWorldsCommand: ServerCommand = async (args) => {
   try {
-    logger.debug('GetWorlds command started', { args: args.length });
-
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
 
     const ROOT_PATH = args[0].trim();
-    logger.debug('Loading worlds list', { rootPath: ROOT_PATH });
-
     const worlds = await listWorlds(ROOT_PATH);
-    logger.debug('Worlds loaded, counting agents', { worldCount: worlds.length });
 
-    // Get detailed agent information for each world for the world selector
+    // Load each world to get agent details
     const worldsWithAgentDetails = await Promise.all(
       worlds.map(async (worldInfo) => {
         try {
-          const fullWorld = await getWorldFromManager(ROOT_PATH, worldInfo.id);
+          const fullWorld = await getWorld(ROOT_PATH, worldInfo.id);
           if (!fullWorld) {
             return {
               ...worldInfo,
@@ -169,7 +116,6 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
             };
           }
 
-          // Extract agent information for the world selector
           const agents = Array.from(fullWorld.agents.values()).map((agentValue) => {
             const agent = agentValue as Agent;
             return {
@@ -183,11 +129,13 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
           return {
             ...worldInfo,
             agentCount: agents.length,
-            agents: agents
+            agents
           };
         } catch (error) {
-          logger.warn('Failed to load world for agent details', { worldId: worldInfo.id, error: error instanceof Error ? error.message : error });
-          // If world fails to load, return basic info
+          logger.warn('Failed to load world for agent details', {
+            worldId: worldInfo.id,
+            error: error instanceof Error ? error.message : error
+          });
           return {
             ...worldInfo,
             agentCount: 0,
@@ -197,49 +145,40 @@ const getWorldsCommand: ServerCommand = async (args, world) => {
       })
     );
 
-    logger.info('Worlds retrieved successfully', { worldCount: worldsWithAgentDetails.length });
     return createResponse('Worlds retrieved successfully', 'data', worldsWithAgentDetails);
   } catch (error) {
-    logger.error('GetWorlds command failed', { error: error instanceof Error ? error.message : error, args });
+    logger.error('GetWorlds command failed', {
+      error: error instanceof Error ? error.message : error,
+      args
+    });
     return createError(`Failed to get worlds: ${error}`);
   }
 };
 
-const getWorldCommand: ServerCommand = async (args, world) => {
+const getWorldCommand: ServerCommand = async (args) => {
   try {
-    logger.debug('GetWorld command started', { world: world?.name });
+    const validationError = validateArgs(args, 2);
+    if (validationError) return validationError;
 
-    // Ensure all agents are loaded from disk
-    await world.loadAllAgentsFromDisk();
+    const ROOT_PATH = args[0].trim();
+    const worldId = args[1].trim();
 
-    logger.debug('Agents loaded, building response', { agentCount: world.agents.size });
+    const world = await getWorld(ROOT_PATH, worldId);
+    if (!world) return createError(`World not found: ${worldId}`);
 
-    // Return current world information with full agent data
-    const agents = Array.from(world.agents.values()).map((agentValue) => {
-      const agent = agentValue as Agent;
-      return agent;
-    });
-
+    const agents = Array.from(world.agents.values()).map((agentValue) => agentValue as Agent);
     const worldData = {
       id: world.id,
       name: world.name,
       description: world.description,
       turnLimit: world.turnLimit,
       agentCount: agents.length,
-      agents: agents
+      agents
     };
 
-    logger.info('World information retrieved successfully', {
-      worldId: world.id,
-      worldName: world.name,
-      agentCount: agents.length
-    });
     return createResponse('World information retrieved successfully', 'data', worldData);
   } catch (error) {
-    logger.error('GetWorld command failed', {
-      error: error instanceof Error ? error.message : error,
-      world: world?.name
-    });
+    logger.error('GetWorld command failed', { error: error instanceof Error ? error.message : error, args });
     return createError(`Failed to get world: ${error}`);
   }
 };
@@ -276,6 +215,10 @@ const addWorldCommand: ServerCommand = async (args, world) => {
 
 const updateWorldCommand: ServerCommand = async (args, world) => {
   try {
+    if (!world) {
+      return createError('UpdateWorld command requires world context');
+    }
+
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
 
@@ -334,15 +277,15 @@ const updateWorldCommand: ServerCommand = async (args, world) => {
 
 const addAgentCommand: ServerCommand = async (args, world) => {
   try {
-    logger.debug('AddAgent command started', { args: args.length, world: world?.name });
+    if (!world) {
+      return createError('AddAgent command requires world context');
+    }
 
     const validationError = validateArgs(args, 1);
     if (validationError) return validationError;
 
     const agentName = args[0].trim();
     const description = args.slice(1).join(' ').trim() || 'A helpful assistant';
-
-    logger.debug('Creating new agent', { agentName, description, world: world.name });
 
     // Create agent using world method
     const agent = await world.createAgent({
@@ -363,7 +306,6 @@ const addAgentCommand: ServerCommand = async (args, world) => {
       messageCount: agent.memory?.length || 0
     };
 
-    logger.info('Agent created successfully', { agentName, agentId: agent.id, world: world.name });
     return createResponse(`Agent '${agentName}' created successfully`, 'data', agentData, true);
   } catch (error) {
     logger.error('AddAgent command failed', { error: error instanceof Error ? error.message : error, args, world: world?.name });
@@ -373,6 +315,10 @@ const addAgentCommand: ServerCommand = async (args, world) => {
 
 const updateAgentConfigCommand: ServerCommand = async (args, world) => {
   try {
+    if (!world) {
+      return createError('UpdateAgentConfig command requires world context');
+    }
+
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
 
@@ -446,6 +392,10 @@ const updateAgentConfigCommand: ServerCommand = async (args, world) => {
 
 const updateAgentPromptCommand: ServerCommand = async (args, world) => {
   try {
+    if (!world) {
+      return createError('UpdateAgentPrompt command requires world context');
+    }
+
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
 
@@ -470,6 +420,10 @@ const updateAgentPromptCommand: ServerCommand = async (args, world) => {
 
 const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
   try {
+    if (!world) {
+      return createError('UpdateAgentMemory command requires world context');
+    }
+
     const validationError = validateArgs(args, 2);
     if (validationError) return validationError;
 
@@ -525,8 +479,7 @@ const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
   }
 };
 
-// Export individual commands
-export { clearCommand };
+export { clearCommand, executeCommand };
 
 // Command registry for easy lookup
 export const commands = {
@@ -543,81 +496,34 @@ export const commands = {
 
 export type CommandName = keyof typeof commands;
 
-/**
- * Execute a command by parsing the message and routing to appropriate command handler
- * @param message - The command message starting with '/'
- * @param world - The world context (null for global commands)
- * @returns Promise<CommandResult> - The command execution result
- */
-export async function executeCommand(message: string, world: World | null): Promise<CommandResult> {
+const executeCommand = async (message: string, world: World | null): Promise<CommandResult> => {
   try {
-    // Remove leading '/' and split into command and arguments
     const commandLine = message.slice(1).trim();
-    if (!commandLine) {
-      logger.warn('Empty command received');
-      return createError('Empty command');
-    }
+    if (!commandLine) return createError('Empty command');
 
     const parts = commandLine.split(/\s+/);
-    const commandName = parts[0] as CommandName; // Keep original case
+    const commandName = parts[0] as CommandName;
     const args = parts.slice(1);
 
-    logger.debug('Executing command', {
-      command: commandName,
-      args: args.length,
-      worldContext: world ? world.name : 'null',
-      fullMessage: message
-    });
-
-    // Check if command exists (case-insensitive lookup)
     const commandKey = Object.keys(commands).find(key =>
       key.toLowerCase() === commandName.toLowerCase()
     ) as CommandName;
 
     const command = commandKey ? commands[commandKey] : undefined;
+    if (!command) return createError(`Unknown command: /${commandName}`);
 
-    if (!command) {
-      logger.warn('Unknown command requested', { command: commandName });
-      return createError(`Unknown command: /${commandName}`);
-    }
-
-    // Handle global commands that don't need world context
-    const globalCommands = ['getworlds', 'addworld'];
+    // Global commands
+    const globalCommands = ['getworlds', 'addworld', 'getworld'];
     if (globalCommands.includes(commandKey.toLowerCase())) {
-      logger.debug('Executing global command', { command: commandKey });
-      // For global commands, we can pass null but the command itself should handle it
-      // Create a dummy world context or handle specially
-      if (commandKey.toLowerCase() === 'getworlds') {
-        // getWorlds doesn't actually use the world parameter, just the ROOT_PATH from args
-        const result = await command(args, null as any); // Type cast to avoid error
-        logger.debug('Global command completed', { command: commandKey, success: !result.error });
-        return result;
-      }
-      if (commandKey.toLowerCase() === 'addworld') {
-        // addWorld creates a new world, doesn't need existing world context
-        const result = await command(args, null as any); // Type cast to avoid error
-        logger.debug('Global command completed', { command: commandKey, success: !result.error });
-        return result;
-      }
+      return await command(args, commandKey.toLowerCase() === 'addworld' ? (null as any) : undefined);
     }
 
-    // For all other commands, world context is required
-    if (!world) {
-      logger.warn('Command requires world context but none provided', { command: commandName });
-      return createError(`Command '${commandName}' requires world context`);
-    }
+    // World-context commands
+    if (!world) return createError(`Command '${commandName}' requires world context`);
+    return await command(args, world);
 
-    logger.debug('Executing world command', { command: commandKey, world: world.name });
-    // Execute the command
-    const result = await command(args, world);
-    logger.debug('Command completed', {
-      command: commandKey,
-      success: !result.error,
-      refreshWorld: result.refreshWorld
-    });
-    return result;
   } catch (error) {
     logger.error('Command execution failed', { error: error instanceof Error ? error.message : error, message });
     return createError(`Command execution failed: ${error}`);
   }
-}
+};

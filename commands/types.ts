@@ -15,10 +15,11 @@
  * - Added data response types for world and agent information
  * - Added helper function types for common command operations
  * - Removed unused ClientConnection parameter from commands
+ * - Made world parameter optional to support global commands
  */
 
-import { World, Agent } from '../../core/types.js';
-import { WorldInfo } from '../../core/world-manager.js';
+import { World, Agent } from '../core/types.js';
+import { WorldInfo } from '../core/world-manager.js';
 
 export interface CommandResult {
   type?: 'system' | 'error' | 'data';
@@ -32,7 +33,7 @@ export interface CommandResult {
 
 export type ServerCommand = (
   args: string[],
-  world: World
+  world?: World
 ) => Promise<CommandResult>;
 
 // Helper function types for common operations

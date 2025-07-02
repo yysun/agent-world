@@ -10,7 +10,7 @@
  * - Enhanced display with agent names and message counts
  *
  * Architecture:
- * - Uses listWorlds() from core/world-manager for discovery
+ * - Uses getWorlds command for discovery with full agent details
  * - Implements smart selection logic based on availability
  * - Creates new worlds using existing command system
  * - Provides clean interface for world selection workflow
@@ -20,7 +20,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
-import { listWorlds, createWorld } from '../../core/world-manager.js';
+import { createWorld } from '../../core/world-manager.js';
 import { handleCommand } from '../../commands/events.js';
 import { CLIClientConnection } from '../transport/cli-client.js';
 
@@ -47,23 +47,29 @@ const WorldSelector: React.FC<WorldSelectorProps> = ({ rootPath, onWorldSelected
       try {
         setStatus('Scanning for available worlds...');
 
-        // Get all available worlds
-        const availableWorlds = await listWorlds(rootPath);
+        // Get all available worlds with agent details using command system
+        const client = new CLIClientConnection(false); // pipeline mode
+        const result = await handleCommand(null, `/getWorlds ${rootPath}`, rootPath);
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Failed to get worlds');
+        }
+
+        const availableWorlds = result.data;
         setWorlds(availableWorlds);
 
         if (availableWorlds.length === 0) {
           // No worlds found - create default world
           setStatus('No worlds found. Creating default world...');
 
-          const client = new CLIClientConnection(false); // pipeline mode for creation
           // Format: /addworld <rootPath> <worldName> <description>
-          const result = await handleCommand(null, `/addworld ${rootPath} default-world "Default World"`, rootPath);
+          const createResult = await handleCommand(null, `/addWorld ${rootPath} default-world "Default World"`, rootPath);
 
-          if (result.success) {
+          if (createResult.success) {
             setStatus('Default world created successfully');
             onWorldSelected('default-world', null); // Let parent load the world
           } else {
-            onError('Failed to create default world: ' + (result.error || result.message || 'Unknown error'));
+            onError('Failed to create default world: ' + (createResult.error || createResult.message || 'Unknown error'));
           }
         } else if (availableWorlds.length === 1) {
           // Exactly one world found - auto-load it
