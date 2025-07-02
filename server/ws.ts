@@ -51,13 +51,12 @@ import { toKebabCase } from '../core/utils.js';
 
 import {
   InboundMessageSchema,
-  handleCommand,
-  handleMessagePublish,
   sendSuccess,
   sendError,
   sendCommandResult,
   ClientConnection
 } from '../commands/events.js';
+import { processInput } from '../commands/index.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
@@ -331,14 +330,23 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             if (eventMessage && eventMessage.trim().startsWith('/')) {
               // Check if this is a global command that doesn't require world subscription
               const commandName = eventMessage.trim().slice(1).split(/\s+/)[0].toLowerCase();
-              const globalCommands = ['getworlds', 'addworld'];
+              const globalCommands = ['getworlds', 'addworld', 'getworld'];
 
               logger.debug('Processing command', { type, commandName, isGlobal: globalCommands.includes(commandName) });
 
               if (globalCommands.includes(commandName)) {
                 // Execute global command without world context
                 logger.debug('Executing global command', { commandName });
-                const result = await handleCommand(null, eventMessage, ROOT_PATH);
+
+                // Special handling for getWorld command - add worldName from payload  
+                let processedMessage = eventMessage;
+                if (commandName === 'getworld' && worldName) {
+                  const worldId = toKebabCase(worldName);
+                  processedMessage = `/getWorld ${worldId}`;
+                  logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
+                }
+
+                const result = await processInput(processedMessage, null, ROOT_PATH, 'WebSocket');
                 sendCommandResult(client, result);
               } else {
                 // Regular world-specific command - requires world subscription
@@ -353,7 +361,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                   }
 
                   logger.debug('Executing world command', { commandName, world: worldName });
-                  const result = await handleCommand(worldSocket.world, eventMessage, ROOT_PATH);
+                  const result = await processInput(eventMessage, worldSocket.world, ROOT_PATH, 'WebSocket');
                   sendCommandResult(client, result);
 
                   // Refresh world if needed
@@ -387,29 +395,35 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 break;
               }
 
+              // Process input using shared logic (command if starts with /, otherwise message)
+              logger.debug('Processing input', {
+                world: worldName,
+                isCommand: eventMessage.trim().startsWith('/'),
+                sender: sender || 'unknown',
+                hasWorld: !!worldSocket.world,
+                hasEventEmitter: !!worldSocket.world?.eventEmitter,
+                worldKeys: worldSocket.world ? Object.keys(worldSocket.world) : []
+              });
+
+              const result = await processInput(eventMessage, worldSocket.world, ROOT_PATH, sender || 'WebSocket');
+
+              // Commands get result responses, messages don't need responses
               if (eventMessage.trim().startsWith('/')) {
-                // Handle as command
-                logger.debug('Processing message as command', { world: worldName });
-                const result = await handleCommand(worldSocket.world, eventMessage, ROOT_PATH);
                 sendCommandResult(client, result);
 
                 // Refresh world if needed
                 if (result.refreshWorld) {
                   await refreshWorldSubscription(worldSocket, worldName);
                 }
-              } else {
-                // Handle as regular message - publish to world
-                logger.debug('Publishing message to world', {
-                  world: worldName,
-                  sender: sender || 'unknown'
-                });
-                handleMessagePublish(worldSocket.world, eventMessage, sender);
               }
             } else {
               logger.warn('Message event missing requirements', {
                 hasWorldName: !!worldName,
                 hasMessage: !!eventMessage,
-                hasWorldSubscription: !!worldSocket.world
+                hasWorldSubscription: !!worldSocket.world,
+                worldName,
+                messageLength: eventMessage?.length || 0,
+                currentWorldName: worldSocket.world?.name || 'none'
               });
             }
             break;

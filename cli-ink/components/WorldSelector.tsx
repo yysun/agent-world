@@ -20,12 +20,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
-import { createWorld } from '../../core/world-manager.js';
-import { handleCommand } from '../../commands/events.js';
-import { CLIClientConnection } from '../transport/cli-client.js';
+import { processInput } from '../../commands/index.js';
 
 interface WorldSelectorProps {
-  rootPath: string;
+  rootPath: string; // Required, passed from CLI index
   onWorldSelected: (worldName: string, world: any) => void;
   onError: (error: string) => void;
 }
@@ -48,10 +46,10 @@ const WorldSelector: React.FC<WorldSelectorProps> = ({ rootPath, onWorldSelected
         setStatus('Scanning for available worlds...');
 
         // Get all available worlds with agent details using command system
-        const client = new CLIClientConnection(false); // pipeline mode
-        const result = await handleCommand(null, `/getWorlds ${rootPath}`, rootPath);
+        const result = await processInput(`/getWorlds`, null, rootPath, 'CLI');
 
-        if (!result.success || !result.data) {
+        // Check if we have data (success) or error
+        if (result.error || !result.data) {
           throw new Error(result.error || 'Failed to get worlds');
         }
 
@@ -62,10 +60,10 @@ const WorldSelector: React.FC<WorldSelectorProps> = ({ rootPath, onWorldSelected
           // No worlds found - create default world
           setStatus('No worlds found. Creating default world...');
 
-          // Format: /addworld <rootPath> <worldName> <description>
-          const createResult = await handleCommand(null, `/addWorld ${rootPath} default-world "Default World"`, rootPath);
+          // Create default world using command system
+          const createResult = await processInput(`/addWorld default-world "Default World"`, null, rootPath, 'CLI');
 
-          if (createResult.success) {
+          if (!createResult.error && createResult.data) {
             setStatus('Default world created successfully');
             onWorldSelected('default-world', null); // Let parent load the world
           } else {

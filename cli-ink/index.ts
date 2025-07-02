@@ -6,8 +6,14 @@
  * - Pipeline Mode: Process arguments, execute commands, output results, exit
  * - Interactive Mode: Enter Ink-based UI loop with real-time event handling
  * - Mode Detection: Automatic based on argument presence and stdin availability
- * - Shared Command Core: Uses relocated commands/ directory for consistency
+ * - Shared Command Core: Uses commands/index.ts processInput() for consistency
  * - Context Preservation: Command line context carries into interactive mode
+ * - Dual Input Processing: Commands (/) vs Messages (plain text) via shared logic
+ *
+ * Input Processing:
+ * - If input starts with '/': Process as command via handleCommand()
+ * - Else: Process as message to world via handleMessagePublish()
+ * - Applies to all input sources: --command, args, stdin, interactive
  *
  * Architecture:
  * - Uses commander.js for robust argument parsing
@@ -18,9 +24,9 @@
  *
  * Usage:
  * Pipeline Mode:
- *   cli-ink --root /data/worlds --world myworld --command "clear agent1"
+ *   cli-ink --root /data/worlds --world myworld --command "/clear agent1"
  *   echo "Hello agents" | cli-ink --root /data/worlds --world myworld
- *   cli-ink setroot /data/worlds select myworld clear agent1 exit
+ *   cli-ink setroot /data/worlds select myworld "/clear agent1" "Hello world" exit
  *
  * Interactive Mode:
  *   cli-ink
@@ -33,7 +39,7 @@ import React from 'react';
 import { render } from 'ink';
 import App from './components/App.js';
 import { CLIClientConnection } from './transport/cli-client.js';
-import { handleCommand } from '../commands/events.js';
+import { processInput } from '../commands/index.js';
 import { getWorld } from '../core/world-manager.js';
 import { toKebabCase } from '../core/utils.js';
 
@@ -53,7 +59,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
   const client = new CLIClientConnection(false); // pipeline mode = false for Ink
 
   try {
-    // Load world if specified
+    // Load world if specified using core (same as WebSocket server)
     let world: any = null;
     if (options.world) {
       const worldId = toKebabCase(options.world);
@@ -66,7 +72,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
 
     // Execute single command if provided
     if (options.command) {
-      const result = await handleCommand(world, options.command, rootPath);
+      const result = await processInput(options.command, world, rootPath, 'HUMAN');
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
     }
@@ -76,17 +82,15 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
       for (const cmd of commands) {
         if (cmd === 'exit') break;
 
-        const commandText = cmd.startsWith('/') ? cmd : `/${cmd}`;
-        const result = await handleCommand(world, commandText, rootPath);
-
-        console.log(`> ${commandText}`);
+        const result = await processInput(cmd, world, rootPath, 'HUMAN');
+        console.log(`> ${cmd}`);
         console.log(JSON.stringify(result, null, 2));
 
         if (!result.success) {
           process.exit(1);
         }
 
-        // Refresh world if needed
+        // Refresh world if needed for commands using core (same as WebSocket)
         if (result.refreshWorld && options.world) {
           const worldId = toKebabCase(options.world);
           const refreshedWorld = await getWorld(rootPath, worldId);
@@ -108,14 +112,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
       }
 
       if (input.trim()) {
-        // Treat stdin as message to send to world
-        if (!world) {
-          console.error('Error: World required for message input');
-          process.exit(1);
-        }
-
-        // Use message handling from commands system
-        const result = await handleCommand(world, input.trim(), rootPath);
+        const result = await processInput(input.trim(), world, rootPath, 'HUMAN');
         console.log(JSON.stringify(result, null, 2));
         process.exit(result.success ? 0 : 1);
       }

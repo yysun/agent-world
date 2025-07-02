@@ -22,6 +22,7 @@ import pino from 'pino';
 import { World, Agent, LLMProvider } from '../core/types.js';
 import { WorldInfo, listWorlds, getWorld, createWorld, updateWorld } from '../core/world-manager.js';
 import { ServerCommand, CommandResult, ValidationHelper, ResponseHelper, ErrorHelper } from './types.js';
+import { handleMessagePublish, prepareCommandWithRootPath } from './events.js';
 
 // Create logger instance
 const logger = pino({
@@ -479,7 +480,77 @@ const updateAgentMemoryCommand: ServerCommand = async (args, world) => {
   }
 };
 
-export { clearCommand, executeCommand };
+// Shared input processing function for CLI and WebSocket
+export const processInput = async (
+  input: string,
+  world: World | null,
+  rootPath: string,
+  sender: string = 'HUMAN'
+): Promise<any> => {
+  if (!input?.trim()) {
+    return {
+      success: false,
+      error: 'Empty input',
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  const trimmedInput = input.trim();
+
+  if (trimmedInput.startsWith('/')) {
+    // Process as command - prepare with rootPath for global commands
+    const preparedCommand = prepareCommandWithRootPath(trimmedInput, rootPath);
+    return await executeCommand(preparedCommand, world);
+  } else {
+    // Process as message to world
+    if (!world) {
+      return {
+        success: false,
+        error: 'World required for message input',
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    // Check if world has required properties
+    if (!world.eventEmitter) {
+      logger.error('World eventEmitter not initialized', {
+        worldId: world.id,
+        worldName: world.name,
+        hasEventEmitter: !!world.eventEmitter,
+        worldKeys: Object.keys(world)
+      });
+      return {
+        success: false,
+        error: 'World eventEmitter not initialized',
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    try {
+      handleMessagePublish(world, trimmedInput, sender);
+
+      return {
+        success: true,
+        message: 'Message sent to world',
+        data: { message: trimmedInput, sender },
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error('Error publishing message to world', {
+        error: error instanceof Error ? error.message : error,
+        worldId: world.id,
+        worldName: world.name,
+        message: trimmedInput,
+        sender
+      });
+      return {
+        success: false,
+        error: `Failed to send message: ${error instanceof Error ? error.message : error}`,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+};
 
 // Command registry for easy lookup
 export const commands = {
@@ -496,7 +567,7 @@ export const commands = {
 
 export type CommandName = keyof typeof commands;
 
-const executeCommand = async (message: string, world: World | null): Promise<CommandResult> => {
+export const executeCommand = async (message: string, world: World | null): Promise<CommandResult> => {
   try {
     const commandLine = message.slice(1).trim();
     if (!commandLine) return createError('Empty command');

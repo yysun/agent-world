@@ -1,7 +1,35 @@
 # Implementation Plan: Shared Command Core CLI (cli-ink)
 
 ## Overview
-Build a command-line interface that leverages the relocated shared commands system, supporting both pipeline mode (process arguments and exit) and interactive mode (Ink-based terminal UI) while sharing command core with WebSocket server.
+Build a com### Phase 6: Event System Integration (Interactive Mode Only) ✅ COMPLETED
+- [x] **ARCHITECTURE MATCH**: Subscribe directly to `world.eventEmitter` instances (## Success Metrics
+- [x] All existing commands work identically in CLI and WebSocket
+- [x] **Architecture Consistency**: CLI uses commands layer exclusively like WebSocket
+- [x] **Architecture Consistency**: CLI uses identical world loading, event subscription, and cleanup patterns as WebSocket server
+- [x] Real-time world event streaming functional with Ink UI
+- [x] Zero command logic duplication between CLI and WebSocket
+- [x] Smooth user experience with rich terminal interface  
+- [x] Command response time parity or better than WebSocket interface
+- [x] SSE streaming display with real-time chunk rendering and visual indicators WebSocket server)
+- [x] **ARCHITECTURE MATCH**: Use setupWorldEventListeners() pattern (same as WebSocket server)
+- [x] **ARCHITECTURE MATCH**: Use cleanupWorldSubscription() pattern (same as WebSocket server)
+- [x] **ARCHITECTURE MATCH**: Use refreshWorldSubscription() pattern (same as WebSocket server)
+- [x] **ARCHITECTURE MATCH**: Handle all event types (system, world, message, sse) using existing event structure
+- [x] **ARCHITECTURE MATCH**: Filter user message echoes (same as WebSocket server)
+- [x] Create Ink components for real-time event display with connection state tracking
+- [x] Route events to Ink UI components instead of WebSocket client transport
+- [x] Add proper cleanup on component unmount to prevent memory leaks
+- [x] Skip event subscription in pipeline mode for performance
+
+### Phase 6.1: SSE Streaming Display Enhancement ✅ COMPLETED
+- [x] Display SSE chunks inline as they arrive (real-time streaming)
+- [x] Handle SSE chunk accumulation for continuous display
+- [x] Add proper SSE event type detection and routing (chunk, end, error)
+- [x] Implement streaming text display component for LLM responses
+- [x] Handle SSE end events for proper line termination and move to event history
+- [x] Visual indicators for active streaming with typing cursor effect
+- [x] Separate streaming display from regular event history
+- [x] Error handling for streaming failuresine interface that leverages the relocated shared commands system, supporting both pipeline mode (process arguments and exit) and interactive mode (Ink-based terminal UI) while sharing command core with WebSocket server.
 
 ## Key Architectural Changes
 - **Commands Relocated**: Move `server/commands/` to root-level `commands/` for true sharing
@@ -65,11 +93,12 @@ cli-ink --root /data/worlds --world myworld
 - [x] Implement terminal-optimized response formatting
 
 ### Phase 5: World Management Integration ✅ COMPLETED
-- [x] Use existing `getWorld()`, `listWorlds()` from core/world-manager directly
-- [x] Implement world selection using existing world loading functions
+- [x] **ARCHITECTURE MATCH**: Use core `getWorld()` for world loading (same as WebSocket server)
+- [x] Use commands layer for command execution (same as WebSocket server)
 - [x] Handle world context in both pipeline and interactive modes
 - [x] Add world discovery and selection for interactive mode
 - [x] Support world specification via command line arguments
+- [x] **CONSISTENCY**: CLI now follows identical architecture to WebSocket server
 
 ### Phase 5.1: Smart World Auto-Selection ✅ COMPLETED
 - [x] Implement automatic world discovery on startup when no --world specified
@@ -78,12 +107,16 @@ cli-ink --root /data/worlds --world myworld
 - [x] Create interactive world selection menu when multiple worlds available
 - [x] Add world refresh handling in CLIClientConnection after state-modifying commands
 
-### Phase 6: Event System Integration (Interactive Mode Only) 🔄 IN PROGRESS
-- [ ] Subscribe directly to `world.eventEmitter` instances for interactive mode
-- [ ] Create Ink components for real-time event display
-- [ ] Handle all EventType enum values using existing event structure
-- [ ] Use existing `handleMessagePublish()` for message sending
-- [ ] Skip event subscription in pipeline mode for performance
+### Phase 6: Event System Integration (Interactive Mode Only) ✅ COMPLETED
+- [x] Subscribe directly to `world.eventEmitter` instances for interactive mode
+- [x] Create Ink components for real-time event display
+- [x] Handle all EventType enum values using existing event structure
+- [x] Use existing `handleMessagePublish()` for message sending
+- [x] Skip event subscription in pipeline mode for performance
+- [x] **ARCHITECTURE MATCH**: Use `getWorld()` + `setupWorldEventListeners()` pattern (same as WebSocket)
+- [x] **CLEANUP PATTERN**: Implement `cleanupWorldSubscription()` and `refreshWorldSubscription()` (same as WebSocket)
+- [x] **EVENT FILTERING**: Skip user message echoes and forward agent responses (same as WebSocket)
+- [x] **STATE MANAGEMENT**: Connection-specific world state tracking with proper cleanup
 
 ### Phase 7: Ink UI Implementation (Interactive Mode) ✅ COMPLETED
 - [x] Create main App component with shared command system integration
@@ -196,27 +229,37 @@ cli/direct-client/
 - **App.tsx**: Main application using existing command system
 - **CommandInput.tsx**: Input that calls existing `handleCommand()`
 - **EventDisplay.tsx**: Real-time events from `world.eventEmitter`
-- **WorldSelector.tsx**: Uses existing `listWorlds()` and `getWorld()`
+- **WorldSelector.tsx**: Uses commands layer (`/getWorlds`, `/addWorld`) for consistency
 - **ResponseDisplay.tsx**: Formats command results from existing system
 
 ### Shared System Integration
-- **Command Execution**: Direct use of `handleCommand()` from events.ts
-- **World Management**: Direct use of core/world-manager functions
+- **Command Execution**: Direct use of `processInput()` from commands/index.ts (same as WebSocket)
+- **World Loading**: Use core `getWorld()` for world object creation (same as WebSocket)
+- **Event Subscription**: Direct subscription to `world.eventEmitter` (same as WebSocket)
+- **Event Listeners Setup**: Use `setupWorldEventListeners()` pattern (same as WebSocket)
+- **Cleanup Pattern**: Use `cleanupWorldSubscription()` for proper cleanup (same as WebSocket)
+- **World Refresh**: Use `refreshWorldSubscription()` pattern after state changes (same as WebSocket)
 - **Event Publishing**: Direct use of `handleMessagePublish()` and world events
+- **Event Filtering**: Skip user message echoes (same as WebSocket)
 
 ## Integration Points
-- **Shared Command Core**: Use existing `server/commands` and `core` modules unchanged
+- **Shared Command Core**: Use commands layer for command execution (same as WebSocket)
+- **World Management**: Use core `getWorld()` for world loading (same as WebSocket)
 - **Transport Layer Only**: CLI implements `ClientConnection` interface for terminal
 - **Event System Reuse**: Direct subscription to existing world EventEmitter system
 - **Configuration Layer**: CLI manages rootPath and preferences, passes to existing system
 - **Command Parity**: 100% command compatibility with WebSocket interface
+- **Consistent Architecture**: Both CLI and WebSocket use identical dual-layer approach
 
 ## Success Metrics
-- [ ] All existing commands work identically in CLI and WebSocket
-- [ ] Real-time world event streaming functional with Ink UI
-- [ ] Zero command logic duplication between CLI and WebSocket
-- [ ] Smooth user experience with rich terminal interface  
-- [ ] Command response time parity or better than WebSocket interface
+- [x] All existing commands work identically in CLI and WebSocket
+- [x] **Architecture Consistency**: CLI uses commands layer exclusively like WebSocket
+- [x] Real-time world event streaming functional with Ink UI
+- [x] Zero command logic duplication between CLI and WebSocket
+- [x] Smooth user experience with rich terminal interface  
+- [x] Command response time parity or better than WebSocket interface
+- [x] **Event System Alignment**: CLI follows identical event subscription patterns as WebSocket
+- [x] **World Management Consistency**: CLI uses same getWorld() + setupWorldEventListeners() as WebSocket
 
 ## Risk Mitigation
 - **Minimal Changes**: Reuse existing command system reduces implementation risk
@@ -224,3 +267,29 @@ cli/direct-client/
 - **Proven Architecture**: Command system already proven with WebSocket transport
 - **Incremental Development**: Start with basic commands, add features incrementally
 - **Compatibility Testing**: Ensure CLI and WebSocket produce identical results
+
+## Phase 6 Architectural Alignment Summary ✅ COMPLETED
+
+### CLI App.tsx now matches WebSocket ws.ts architecture:
+
+#### World Management
+- **Loading**: Uses `getWorld()` from core/world-manager (identical to WebSocket)
+- **State Tracking**: Implements `WorldState` interface with world + eventListeners (same pattern as WebSocket)
+- **Cleanup**: Implements `cleanupWorldSubscription()` function (identical pattern to WebSocket)
+
+#### Event System
+- **Setup**: Implements `setupWorldEventListeners()` function (identical pattern to WebSocket)
+- **Filtering**: Skips user message echoes using same logic as WebSocket
+- **Event Types**: Handles all event types (system, world, message, sse) same as WebSocket
+- **Routing**: Routes to Ink components instead of WebSocket client transport
+
+#### Subscription Lifecycle
+- **Subscribe**: Implements `handleSubscribe()` function (identical pattern to WebSocket)
+- **Refresh**: Implements `refreshWorldSubscription()` function (identical pattern to WebSocket)
+- **Cleanup**: Proper event listener removal and memory leak prevention
+
+#### Key Differences (Transport-Specific)
+- **Display Target**: Routes events to Ink UI components vs WebSocket client.send()
+- **Logging**: Uses console methods vs Pino structured logging
+- **State Management**: React state vs WebSocket connection-specific state
+- **Lifecycle**: React useEffect cleanup vs WebSocket disconnect cleanup

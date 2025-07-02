@@ -140,7 +140,7 @@ export function prepareCommandWithRootPath(message: string, rootPath: string): s
   const commandName = parts[0].toLowerCase();
 
   // Commands that require root path as first argument
-  const commandsRequiringRootPath = ['getworlds', 'addworld', 'updateworld'];
+  const commandsRequiringRootPath = ['getworlds', 'addworld', 'updateworld', 'getworld'];
 
   if (commandsRequiringRootPath.includes(commandName)) {
     // Insert rootPath as first argument

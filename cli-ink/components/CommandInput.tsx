@@ -2,16 +2,18 @@
  * Command Input Component for Ink CLI
  *
  * Features:
- * - Interactive command input with real-time processing
+ * - Interactive input with dual processing modes
+ * - Commands (starting with /): Execute system commands
+ * - Messages (not starting with /): Send messages to world agents
  * - Command history and auto-completion
  * - Integration with shared command core
- * - Real-time command execution and result display
+ * - Real-time execution and result display
  * - Error handling and user feedback
  *
- * Architecture:
- * - Uses handleCommand() from relocated commands/ directory
- * - Implements command parsing and validation
- * - Provides immediate feedback on command execution
+ * Input Processing:
+ * - If input starts with '/': Process as command
+ * - Else: Process as message to world
+ * - Uses shared processInput() function for consistency with CLI pipeline
  * - Integrates with world context and state management
  */
 
@@ -37,13 +39,12 @@ const CommandInput: React.FC<CommandInputProps> = ({ world, rootPath, onCommandR
     setIsExecuting(true);
 
     try {
-      // Import handleCommand dynamically to avoid circular imports
-      const { handleCommand } = await import('../../commands/events.js');
+      // Import processInput to handle both commands and messages
+      const { processInput } = await import('../../commands/index.js');
 
-      // Ensure command starts with /
-      const formattedCommand = commandText.startsWith('/') ? commandText : `/${commandText}`;
-
-      const result = await handleCommand(world, formattedCommand, rootPath);
+      // Use the world object as-is - it should already have eventEmitter initialized
+      // Don't load fresh world for messages, use the subscribed world from App state
+      const result = await processInput(commandText.trim(), world, rootPath, 'HUMAN');
       onCommandResult(result);
 
       // Add to history
@@ -87,7 +88,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ world, rootPath, onCommandR
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box marginBottom={1}>
-        <Text color="cyan">Command:</Text>
+        <Text color="cyan">Command or Message:</Text>
       </Box>
 
       <Box>
@@ -96,7 +97,7 @@ const CommandInput: React.FC<CommandInputProps> = ({ world, rootPath, onCommandR
           value={command}
           onChange={setCommand}
           onSubmit={handleSubmit}
-          placeholder="Enter command (e.g., getworld, clear agent1)"
+          placeholder="Enter command (/getworld) or message (Hello agents)"
           showCursor={!isExecuting}
         />
         {isExecuting && (
