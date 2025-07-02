@@ -35,7 +35,7 @@
 import { z } from 'zod';
 import { World } from '../core/types.js';
 import { publishMessage } from '../core/world-events.js';
-import { executeCommand } from './index.js';
+import { executeCommand } from './commands.js';
 
 // Minimal client connection interface for stateless event handling
 export interface ClientConnection {
