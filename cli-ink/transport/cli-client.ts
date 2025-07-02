@@ -1,24 +1,44 @@
 /**
- * CLI Client Connection Implementation
+ * CLI Client Connection Implementation - Console Display Version
+ * 
+ * FILE COMMENT BLOCK:
+ * This file implements the ClientConnection interface for console-based CLI modes,
+ * replacing the previous Ink-specific message handling with structured console
+ * output formatting for both pipeline and interactive modes.
  *
- * Features:
+ * FEATURES:
  * - Implements ClientConnection interface for both pipeline and interactive modes
  * - Pipeline mode: Direct stdout output, no JSON parsing needed
- * - Interactive mode: Parse JSON responses and route to Ink components
+ * - Interactive mode: Console-based output with structured formatting
  * - Mode-specific display formatting for optimal user experience
  * - Error handling appropriate for each mode context
  * - World refresh handling for state-modifying commands
+ * - Emoji-enhanced output for better readability
+ * - Structured data display with proper formatting
+ *
+ * IMPLEMENTATION:
+ * - Removed Ink-specific message routing
+ * - Added structured console output with status indicators
+ * - Enhanced error and success message formatting
+ * - Maintained callback system for world refresh notifications
+ * - Supports both JSON structured output and plain text display
+ *
+ * CHANGES FROM INK VERSION:
+ * - Replaced Ink component routing with console.log formatting
+ * - Added emoji indicators for different message types
+ * - Enhanced readability with structured output
+ * - Simplified message handling while maintaining functionality
  *
  * Architecture:
  * - Shared interface with WebSocket client for command system compatibility
  * - Mode detection determines output format and behavior
  * - Pipeline mode optimized for scripting and automation
- * - Interactive mode optimized for rich terminal UI experience
+ * - Interactive mode optimized for console-based terminal UI experience
  * - Callback system for world refresh notifications
  *
  * Usage:
  * - Pipeline: new CLIClientConnection(false) - direct output
- * - Interactive: new CLIClientConnection(true, refreshCallback) - JSON parsing for Ink
+ * - Interactive: new CLIClientConnection(true, refreshCallback) - formatted console output
  */
 
 import { ClientConnection } from '../../commands/events.js';
@@ -59,9 +79,27 @@ export class CLIClientConnection implements ClientConnection {
       this.onWorldRefresh(true);
     }
 
-    // For now, just output to console
-    // This will be enhanced when Ink components are ready
-    console.log(JSON.stringify(message, null, 2));
+    // Format output for console display
+    if (message.type === 'success') {
+      console.log(`✅ ${message.message || 'Success'}`);
+      if (message.data) {
+        console.log('📄 Data:', JSON.stringify(message.data, null, 2));
+      }
+    } else if (message.type === 'error') {
+      console.log(`❌ Error: ${message.error || message.message}`);
+    } else if (message.type === 'command_result') {
+      if (message.success) {
+        console.log(`✅ ${message.message || 'Command completed'}`);
+        if (message.data) {
+          console.log('📄 Data:', JSON.stringify(message.data, null, 2));
+        }
+      } else {
+        console.log(`❌ Command failed: ${message.error || message.message}`);
+      }
+    } else {
+      // Unknown message type, output formatted
+      console.log('📋 Response:', JSON.stringify(message, null, 2));
+    }
   }
 
   private handlePipelineMessage(data: string): void {

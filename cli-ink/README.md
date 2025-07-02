@@ -1,9 +1,11 @@
 # CLI-Ink Usage Guide
 
 ## Overview
-The Agent World CLI-Ink provides dual-mode operation for interacting with Agent World:
+The Agent World CLI-Ink provides dual-mode operation for interacting with Agent World with console-based display:
 - **Pipeline Mode**: Command-line execution with structured output for scripting
-- **Interactive Mode**: Rich terminal UI with real-time interaction
+- **Interactive Mode**: Console-based terminal interface with real-time interaction
+
+**Note**: This CLI now uses console.log for all display events instead of Ink components for simpler output and fewer dependencies.
 
 ## Installation
 The CLI is available as part of the Agent World package:
@@ -59,7 +61,7 @@ All pipeline mode commands return structured JSON:
 
 ## Interactive Mode
 
-Interactive mode provides a rich terminal interface with real-time command execution and world interaction.
+Interactive mode provides a console-based terminal interface with real-time command execution and world interaction using simple console.log output.
 
 ### Basic Usage
 ```bash
@@ -75,23 +77,30 @@ npm run cli-ink -- --root /data/worlds --world myworld
 
 ### Interactive Features
 
-#### Command Input
-- Type commands directly (with or without leading `/`)
-- Real-time command execution with immediate feedback
-- Command history with ↑/↓ arrow navigation
-- Auto-completion and validation
+#### World Selection
+- Automatic discovery of available worlds
+- Interactive world selection menu (numbered or by name)
+- Auto-selection when only one world is available
 
-#### World Connection
-- Live world status display
-- Agent count and configuration
-- Turn limit and world metadata
-- Automatic world refresh after state changes
+#### Command Input
+- Readline-based command input with prompt
+- Real-time command execution with immediate feedback
+- Direct message sending (without / prefix for agent communication)
+- Graceful Ctrl+C handling
+
+#### Real-time Event Display
+- **Streaming**: Live agent responses displayed as they generate
+- **System Events**: 📟 System notifications and status updates
+- **World Events**: 🌍 World-level notifications
+- **Messages**: 🤖 Agent messages and responses
+- **Streaming Indicator**: ⚡ Shows when agents are actively responding
 
 #### Result Display
-- Formatted command results with success/error indicators
+- Emoji-enhanced status indicators (✅ success, ❌ error)
+- Formatted command results with clear feedback
 - Timestamp tracking for all operations
 - Structured data display with JSON formatting
-- Error handling with detailed feedback
+- Real-time streaming content display
 
 ### Available Commands
 
@@ -126,21 +135,6 @@ Hello agents!
 ```bash
 AGENT_WORLD_DATA_PATH=/path/to/worlds  # Default root path
 LOG_LEVEL=debug                        # Enable debug logging
-```
-
-### Configuration File
-User preferences are stored in `~/.agent-world/cli-config.json`:
-```json
-{
-  "defaultRootPath": "/data/worlds",
-  "defaultWorld": "myworld",
-  "interactiveMode": true,
-  "displayOptions": {
-    "colors": true,
-    "timestamps": false,
-    "verboseOutput": false
-  }
-}
 ```
 
 ## Integration Examples
@@ -179,17 +173,18 @@ npm run cli-ink -- --world development
 - Structured error output in JSON format
 
 ### Interactive Mode
-- Real-time error display with context
-- Graceful error recovery
-- Detailed error messages and suggestions
+- Real-time error display with emoji indicators
+- Graceful error recovery with world state refresh
+- Detailed error messages and context
+- Automatic cleanup on exit or interruption
 
 ## Tips and Best Practices
 
 1. **Use Pipeline Mode for Automation**: Reliable, scriptable, structured output
-2. **Use Interactive Mode for Exploration**: Rich UI, real-time feedback, easy experimentation
-3. **Command History**: Use ↑/↓ arrows in interactive mode to replay commands
-4. **World Context**: Connect to a world first for agent-specific commands
-5. **Structured Output**: Pipeline mode output is perfect for parsing in scripts
+2. **Use Interactive Mode for Exploration**: Console-based UI, real-time feedback, easy experimentation
+3. **World Context**: Connect to a world first for agent-specific commands
+4. **Structured Output**: Pipeline mode output is perfect for parsing in scripts
+5. **Real-time Interaction**: Watch for streaming indicators to see when agents are responding
 
 ## Troubleshooting
 
@@ -204,8 +199,42 @@ Enable debug logging for detailed operation insight:
 LOG_LEVEL=debug npm run cli-ink
 ```
 
-### Configuration Reset
-Remove configuration file to reset to defaults:
-```bash
-rm ~/.agent-world/cli-config.json
+## Changes from Ink Version
+
+### Removed Dependencies
+- React and @types/react
+- ink, ink-select-input, ink-text-input
+- All JSX/TSX component files
+
+### New Features
+- Console-based event display with emoji indicators
+- Readline interface for interactive input
+- Real-time streaming display via stdout
+- Simplified world selection interface
+- Enhanced error handling with visual feedback
+
+### Maintained Features
+- All command processing logic
+- Event streaming and real-time updates
+- World subscription and management
+- Pipeline and interactive mode support
+- Structured JSON output for automation
+
+## Display Features
+
+### Console-Based Output
+- **Status Indicators**: ✅ ❌ 🔄 for success/error/loading states
+- **Event Types**: Different emoji prefixes for different event types
+- **Streaming Display**: Real-time content streaming with visual indicators
+- **World Info**: Agent count, turn limits, and connection status
+- **Structured Data**: Clean JSON formatting for complex data
+
+### Event Display Examples
+```
+🤖 Assistant: Hello! How can I help you today?
+📟 System: Agent memory cleared successfully
+🌍 World: New agent added to the world
+⚡ Streaming: Assistant
+This is a real-time streaming response...
+✅ Command completed successfully
 ```
