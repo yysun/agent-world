@@ -108,14 +108,6 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
     const server = app.listen(port, host, () => {
       console.log(`🌐 Web server running at http://${host}:${port}`);
       console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-      console.log(`🔗 API endpoints available:`);
-      console.log(`   GET  /health`);
-      console.log(`   GET  /worlds`);
-      console.log(`   GET  /worlds/:worldName/agents`);
-      console.log(`   GET  /worlds/:worldName/agents/:agentName`);
-      console.log(`   POST /worlds/:worldName/agents (coming soon)`);
-      console.log(`   PATCH /worlds/:worldName/agents/:agentName`);
-      console.log(`   POST /worlds/:worldName/chat (SSE streaming)`);
 
       // Create WebSocket server
       const wss = createWebSocketServer(server);
