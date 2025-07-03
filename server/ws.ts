@@ -58,25 +58,26 @@ import { Server } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 import pino from 'pino';
-import { World } from '../core/types.js';
+import { World, LLMProvider } from '../core/types.js';
 
 import {
-  InboundMessageSchema,
   sendSuccess,
   sendError,
   sendCommandResult,
   ClientConnection,
   subscribeWorld,
-  getWorld
-} from '../commands/events.js';
-import { processCommandRequest } from '../commands/commands.js';
+  getWorld,
+  SimpleCommandResponse,
+  generateRequestId,
+  processWSCommand
+} from '../commands/subscription.js';
 import {
-  CommandRequest,
-  CommandResponse,
-  CommandRequestMessage,
-  CommandResponseMessage,
-  generateRequestId
-} from '../commands/types.js';
+  listWorlds,
+  getWorld as getCoreWorld,
+  createWorld,
+  updateWorld
+} from '../core/world-manager.js';
+import { toKebabCase } from '../core/utils.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
@@ -169,8 +170,8 @@ function createClientConnection(ws: WorldSocket): ClientConnection {
 }
 
 // Helper function to send command response via WebSocket
-function sendCommandResponse(client: ClientConnection, response: CommandResponse): void {
-  const message: CommandResponseMessage = {
+function sendCommandResponse(client: ClientConnection, response: SimpleCommandResponse): void {
+  const message = {
     type: 'system',
     payload: {
       eventType: 'command-response',
@@ -181,7 +182,7 @@ function sendCommandResponse(client: ClientConnection, response: CommandResponse
 }
 
 // Helper function to parse legacy command string to typed request
-function parseCommandToRequest(commandString: string, worldName?: string): CommandRequest | null {
+function parseCommandToRequest(commandString: string, worldName?: string): any {
   const trimmed = commandString.trim();
   if (!trimmed.startsWith('/')) return null;
 
@@ -493,11 +494,11 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 requestId: request.id
               });
 
-              const response = await processCommandRequest(request, worldSocket.world || null, ROOT_PATH);
+              const response = await processWSCommand(request.type, request, worldSocket.world || null, ROOT_PATH);
               sendCommandResponse(client, response);
 
               // Refresh world if needed for world-specific commands
-              if (response.success && worldName && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+              if (response.success && worldName && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
                 logger.debug('Refreshing world after typed command', { commandType: request.type, world: worldName });
                 await refreshWorldSubscription(worldSocket, worldName);
               }
@@ -516,11 +517,11 @@ export function createWebSocketServer(server: Server): WebSocketServer {
               // Convert legacy command to typed request
               const legacyRequest = parseCommandToRequest(processedMessage, worldName);
               if (legacyRequest) {
-                const response = await processCommandRequest(legacyRequest, worldSocket.world || null, ROOT_PATH);
+                const response = await processWSCommand(legacyRequest.type, legacyRequest, worldSocket.world || null, ROOT_PATH);
                 sendCommandResponse(client, response);
 
                 // Refresh world if needed for world-specific commands
-                if (response.success && worldName && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+                if (response.success && worldName && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
                   logger.debug('Refreshing world after legacy command', { commandName, world: worldName });
                   await refreshWorldSubscription(worldSocket, worldName);
                 }
@@ -556,7 +557,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 // Convert legacy command to typed request
                 const request = parseCommandToRequest(processedMessage, worldName);
                 if (request) {
-                  const response = await processCommandRequest(request, null, ROOT_PATH);
+                  const response = await processWSCommand(request.type, request, null, ROOT_PATH);
                   sendCommandResponse(client, response);
                 } else {
                   sendError(client, `Failed to parse world command: ${eventMessage}`);
@@ -578,11 +579,11 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                   // Convert legacy command to typed request
                   const request = parseCommandToRequest(eventMessage, worldName);
                   if (request) {
-                    const response = await processCommandRequest(request, worldSocket.world, ROOT_PATH);
+                    const response = await processWSCommand(request.type, request, worldSocket.world, ROOT_PATH);
                     sendCommandResponse(client, response);
 
                     // Refresh world if needed
-                    if (response.success && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+                    if (response.success && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
                       logger.debug('Refreshing world after world command', { commandName, world: worldName });
                       await refreshWorldSubscription(worldSocket, worldName);
                     }

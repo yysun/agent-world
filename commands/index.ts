@@ -1,28 +1,19 @@
 /**
- * Simplified Commands Module Index
+ * Commands Module - Simplified Subscription-Only Export
  * 
- * Features:
- * - Unified export structure for simplified commands layer
- * - Backward compatible re-exports for existing imports
- * - Consolidated command processing and world subscription
+ * This module now only exports world subscription management functionality.
+ * Command processing has been eliminated in favor of direct core function calls.
  * 
  * Exports:
- * - Simplified types from types-new.ts
- * - Unified command processing from core.ts
- * - Backward compatibility aliases
+ * - World subscription management (subscription.ts)
+ * - Client connection interface
+ * - Event handling utilities
  * 
- * Implementation:
- * - Single source of truth for command functionality
- * - Maintains existing import patterns
- * - Reduced module complexity
+ * Removed:
+ * - Redundant command processing wrapper
+ * - Command request/response types 
+ * - Command routing logic
  */
 
-// Export simplified types and interfaces
-export * from './types-new.js';
-
-// Export unified command processing and world subscription
-export * from './core.js';
-
-// Legacy re-exports for backward compatibility (if needed)
-// These can be removed once all consumers are updated
-export { processCommand as processCommandRequest } from './core.js';
+// Export only subscription management functionality
+export * from './subscription.js';
