@@ -37,11 +37,29 @@ let ws = null;
 let currentWorldSubscription = null;
 let reconnectAttempts = 0;
 
+// Configuration - WebSocket URL based on environment
+const getWebSocketUrl = () => {
+  // Check if running in development environment
+  const isDevelopment = window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname.startsWith('192.168.');
+
+  // Use environment-specific URL
+  if (isDevelopment) {
+    return `ws://localhost:3000/ws`;
+  } else {
+    // Production: use same host as the webpage with WebSocket protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws`;
+  }
+};
+
 // Constants
-const url = `ws://localhost:3000/ws`;
+const url = getWebSocketUrl();
 const userId = 'user1';
 const maxReconnectAttempts = 5;
 const reconnectDelay = 1000;
+const commandTimeout = 10000; // 10 seconds for command responses
 
 // Typed command system utilities
 const generateRequestId = () => {
@@ -260,7 +278,7 @@ function sendTypedCommand(request) {
     const timeout = setTimeout(() => {
       pendingRequests.delete(request.id);
       reject(new Error('Command timeout'));
-    }, 10000); // Increased timeout for complex operations
+    }, commandTimeout); // Use configurable timeout
 
     // Store the promise handlers for this request
     pendingRequests.set(request.id, {

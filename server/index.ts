@@ -31,7 +31,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'http';
 
 // Import modular components
-import apiRouter from './api';
+// import apiRouter from './api';
 import { createWebSocketServer, getWebSocketStats } from './ws';
 
 
@@ -60,7 +60,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Use API routes
-app.use('/', apiRouter);
+// app.use('/', apiRouter);
 
 // GET /health - Server health check
 app.get('/health', (req, res) => {

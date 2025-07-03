@@ -18,7 +18,7 @@
 - Requirement creation or analysis → focus on `what`, not `how`, not optimization.
 - Large changes or "AA" → always create plan first → get confirmation.
 
-## Execution Rules
+## Implementation Rules
 - All step-by-step execution follows: implement from plan → update document each step → mark as done → git commit.
 - **SS** = manual approval required each step.
 - **AS** = automatic progression through steps.

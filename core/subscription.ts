@@ -220,6 +220,7 @@ export interface SimpleCommandResponse {
   data?: any;
   error?: string;
   type?: string; // Add type field for command tracking
+  requestId?: string; // Add requestId for client correlation
 }
 
 // Helper function to generate request IDs
@@ -346,26 +347,28 @@ export async function processWSCommand(
 
       case 'clearAgentMemory':
         if (!world) {
-          return { success: false, error: 'No world selected' };
+          return { success: false, error: 'No world selected', type: commandType };
         }
         const agentForClear = world.agents.get(params.agentName);
         if (!agentForClear) {
-          return { success: false, error: `Agent '${params.agentName}' not found` };
+          return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
         }
         await world.clearAgentMemory(params.agentName);
         return {
           success: true,
           message: `Agent '${params.agentName}' memory cleared successfully`,
-          data: null
+          data: null,
+          type: commandType
         };
 
       default:
-        return { success: false, error: `Unknown command type: ${commandType}` };
+        return { success: false, error: `Unknown command type: ${commandType}`, type: commandType };
     }
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      type: commandType
     };
   }
 }

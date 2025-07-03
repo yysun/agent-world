@@ -169,12 +169,18 @@ function createClientConnection(ws: WorldSocket): ClientConnection {
 }
 
 // Helper function to send command response via WebSocket
-function sendCommandResponse(client: ClientConnection, response: SimpleCommandResponse): void {
+function sendCommandResponse(client: ClientConnection, response: SimpleCommandResponse, requestId?: string): void {
+  // Ensure response includes requestId for client correlation
+  const responseWithId = {
+    ...response,
+    requestId: requestId || response.requestId
+  };
+
   const message = {
     type: 'system',
     payload: {
       eventType: 'command-response',
-      response
+      response: responseWithId
     }
   };
   client.send(JSON.stringify(message));
@@ -494,7 +500,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
               });
 
               const response = await processWSCommand(request.type, request, worldSocket.world || null, ROOT_PATH);
-              sendCommandResponse(client, response);
+              sendCommandResponse(client, response, request.id);
 
               // Refresh world if needed for world-specific commands
               if (response.success && worldName && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
@@ -517,7 +523,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
               const legacyRequest = parseCommandToRequest(processedMessage, worldName);
               if (legacyRequest) {
                 const response = await processWSCommand(legacyRequest.type, legacyRequest, worldSocket.world || null, ROOT_PATH);
-                sendCommandResponse(client, response);
+                sendCommandResponse(client, response, legacyRequest.id);
 
                 // Refresh world if needed for world-specific commands
                 if (response.success && worldName && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
@@ -557,7 +563,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 const request = parseCommandToRequest(processedMessage, worldName);
                 if (request) {
                   const response = await processWSCommand(request.type, request, null, ROOT_PATH);
-                  sendCommandResponse(client, response);
+                  sendCommandResponse(client, response, request.id);
                 } else {
                   sendError(client, `Failed to parse world command: ${eventMessage}`);
                 }
@@ -579,7 +585,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                   const request = parseCommandToRequest(eventMessage, worldName);
                   if (request) {
                     const response = await processWSCommand(request.type, request, worldSocket.world, ROOT_PATH);
-                    sendCommandResponse(client, response);
+                    sendCommandResponse(client, response, request.id);
 
                     // Refresh world if needed
                     if (response.success && response.type && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
