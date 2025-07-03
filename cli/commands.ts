@@ -34,14 +34,6 @@ import {
 import readline from 'readline';
 import { publishMessage } from '../core/world-events.js';
 
-// Define ClientConnection interface for CLI
-export interface ClientConnection {
-  send: (data: string) => void;
-  isOpen: boolean;
-  onWorldEvent?: (eventType: string, eventData: any) => void;
-  onError?: (error: string) => void;
-}
-
 // CLI Response types for user-friendly output
 export interface CLIResponse {
   success: boolean;

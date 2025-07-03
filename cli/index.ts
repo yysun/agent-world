@@ -11,7 +11,7 @@
  * - Interactive Mode: Real-time console interface with streaming responses
  * - Dual Input Processing: Commands (/) vs Messages (plain text)
  * - World Management: Auto-discovery and interactive selection
- * - Real-time Streaming: Live agent responses with visual feedback
+ * - Real-time Streaming: Live agent responses via stream.ts module
  * - Color Helpers: Consistent styling with simplified color functions
  * - Timer Management: Smart prompt restoration after streaming
  * - Event Handling: Comprehensive world event listeners with filtering
@@ -21,7 +21,7 @@
  * - Uses commands layer for all world management (subscribeWorld, getWorld)
  * - Implements ClientConnection interface for console-based event handling
  * - Uses readline for interactive input with proper cleanup
- * - Implements streaming display with real-time chunk accumulation
+ * - Delegates streaming display to stream.ts module for real-time chunk accumulation
  * - No direct core layer dependencies - all through commands layer
  *
  * USAGE:
@@ -32,6 +32,7 @@
  * - Integrated commands layer subscribeWorld() for centralized world management
  * - Implemented CLI-specific ClientConnection with console event handling
  * - Removed direct core dependencies (getWorld, toKebabCase)
+ * - Extracted streaming functionality to stream.ts module for better modularity
  * - Maintained all existing functionality and user experience
  * - Added proper world subscription lifecycle management
  */
@@ -39,11 +40,20 @@
 import { program } from 'commander';
 import readline from 'readline';
 import { subscribeWorld } from '../core/index.js';
-import { getWorld } from '../core/world-manager.js';
+import { getWorld, listWorlds } from '../core/world-manager.js';
 import { World } from '../core/types.js';
-import { processCLICommand, processCLIInput, CLIContext, PromptFunction, ClientConnection } from './commands.js';
-import fs from 'fs';
-import path from 'path';
+import { processCLIInput } from './commands.js';
+import { ClientConnection } from '../core/subscription.js';
+import {
+  StreamingState,
+  GlobalState,
+  createStreamingState,
+  createGlobalState,
+  setupPromptTimer,
+  clearPromptTimer,
+  handleWorldEventWithStreaming,
+  isStreamingActive
+} from './stream.js';
 
 // Color helper functions - consolidated API
 const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
@@ -148,30 +158,6 @@ interface WorldState {
   world: World;
 }
 
-interface StreamingState {
-  isActive: boolean;
-  content: string;
-  sender?: string;
-  messageId?: string;
-}
-
-interface GlobalState {
-  promptTimer?: ReturnType<typeof setTimeout>;
-}
-
-// Timer and resource management functions
-function setupPromptTimer(globalState: GlobalState, rl: readline.Interface, callback: () => void, delay: number = 2000): void {
-  clearPromptTimer(globalState);
-  globalState.promptTimer = setTimeout(callback, delay);
-}
-
-function clearPromptTimer(globalState: GlobalState): void {
-  if (globalState.promptTimer) {
-    clearTimeout(globalState.promptTimer);
-    globalState.promptTimer = undefined;
-  }
-}
-
 function cleanupWorldSubscription(worldState: WorldState | null): void {
   if (worldState?.subscription) {
     worldState.subscription.unsubscribe();
@@ -217,14 +203,8 @@ function handleWorldEvent(
   globalState: GlobalState,
   rl?: readline.Interface
 ): void {
-  // Skip user messages to prevent echo
-  if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user'))) {
-    return;
-  }
-
-  // Handle streaming events
-  if (eventType === 'sse') {
-    handleStreamingEvents(eventData, streaming, globalState, rl);
+  // Try streaming event handling first
+  if (handleWorldEventWithStreaming(eventType, eventData, streaming, globalState, rl)) {
     return;
   }
 
@@ -236,79 +216,11 @@ function handleWorldEvent(
   }
 }
 
-// Helper function for streaming event handling
-function handleStreamingEvents(
-  eventData: any,
-  streaming: { current: StreamingState },
-  globalState: GlobalState,
-  rl?: readline.Interface
-): void {
-  // Handle chunk events
-  if (eventData.type === 'chunk' && eventData.content) {
-    if (!streaming.current.isActive) {
-      streaming.current.isActive = true;
-      streaming.current.content = '';
-      streaming.current.sender = eventData.agentName || eventData.sender;
-      streaming.current.messageId = eventData.messageId;
-      console.log(`\n${boldGreen(`● ${streaming.current.sender}`)} ${gray('is responding...')}`);
-      clearPromptTimer(globalState);
-    }
-
-    if (streaming.current.messageId === eventData.messageId) {
-      streaming.current.content += eventData.content;
-      process.stdout.write(eventData.content);
-
-      if (rl) {
-        setupPromptTimer(globalState, rl, () => {
-          if (streaming.current.isActive) {
-            console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
-            streaming.current.isActive = false;
-            streaming.current.content = '';
-            streaming.current.messageId = undefined;
-            rl.prompt();
-          }
-        }, 500);
-      }
-    }
-    return;
-  }
-
-  // Handle end events
-  if (eventData.type === 'end' && streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-    console.log('\n');
-    streaming.current.isActive = false;
-    streaming.current.content = '';
-    streaming.current.messageId = undefined;
-
-    if (rl) {
-      clearPromptTimer(globalState);
-      setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-    }
-    return;
-  }
-
-  // Handle error events
-  if (eventData.type === 'error' && streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-    console.log(error(`Stream error: ${eventData.error || eventData.message}`));
-    streaming.current.isActive = false;
-    streaming.current.content = '';
-    streaming.current.messageId = undefined;
-
-    if (rl) {
-      clearPromptTimer(globalState);
-      setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-    }
-  }
-}
-
-// World discovery and selection
-async function listAvailableWorlds(rootPath: string): Promise<string[]> {
+// World discovery and selection using core functions
+async function getAvailableWorldNames(rootPath: string): Promise<string[]> {
   try {
-    if (!fs.existsSync(rootPath)) return [];
-    const items = fs.readdirSync(rootPath, { withFileTypes: true });
-    return items
-      .filter(item => item.isDirectory() && !item.name.startsWith('.'))
-      .map(item => item.name);
+    const worldInfos = await listWorlds(rootPath);
+    return worldInfos.map(info => info.id);
   } catch (error) {
     console.error('Error listing worlds:', error);
     return [];
@@ -316,7 +228,7 @@ async function listAvailableWorlds(rootPath: string): Promise<string[]> {
 }
 
 async function selectWorld(rootPath: string, rl: readline.Interface): Promise<string | null> {
-  const worlds = await listAvailableWorlds(rootPath);
+  const worlds = await getAvailableWorldNames(rootPath);
 
   if (worlds.length === 0) {
     console.log(boldRed(`No worlds found in ${rootPath}`));
@@ -371,8 +283,8 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
-  const streaming = { current: { isActive: false, content: '', sender: undefined, messageId: undefined } };
-  const globalState: GlobalState = {};
+  const streaming = { current: createStreamingState() };
+  const globalState: GlobalState = createGlobalState();
 
   console.log(boldCyan('Agent World CLI (Interactive Mode)'));
   console.log(cyan('===================================='));
@@ -485,7 +397,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       // Set up timer after user input to allow for streaming or other events
       setupPromptTimer(globalState, rl, () => {
-        if (!streaming.current.isActive) {
+        if (!isStreamingActive(streaming)) {
           rl.prompt();
         }
       }, 5000); // Brief delay to allow for streaming to start
