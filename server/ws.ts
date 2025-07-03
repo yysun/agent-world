@@ -73,7 +73,6 @@ import {
 } from '../core';
 import {
   listWorlds,
-  getWorld as getCoreWorld,
   createWorld,
   updateWorld
 } from '../core/world-manager.js';
@@ -398,8 +397,21 @@ async function handleSubscribe(ws: WorldSocket, worldName: string): Promise<void
     ws.subscription = subscription;
     ws.world = subscription.world;
 
-    sendSuccess(client, 'Successfully subscribed to world', { worldName });
-    logger.info('World subscription successful', { worldName });
+    // Send back the full world object with agents for web client
+    const worldData = {
+      id: subscription.world.id,
+      name: subscription.world.name,
+      description: subscription.world.description,
+      turnLimit: subscription.world.turnLimit,
+      agents: Array.from(subscription.world.agents.values()),
+      agentCount: subscription.world.agents.size
+    };
+
+    sendSuccess(client, 'Successfully subscribed to world', {
+      worldName,
+      world: worldData
+    });
+    logger.info('World subscription successful', { worldName, agentCount: worldData.agentCount });
   } else {
     logger.warn('Failed to load world for subscription', { worldName });
     sendError(client, 'Failed to load world');

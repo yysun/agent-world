@@ -25,6 +25,7 @@
  * - Input field properly bound to state with @input and @keypress handlers
  * - Error state management with visual feedback in conversation
  * - Enhanced world tabs showing agent names, counts, and message statistics
+ * - Robust state.agents handling with Array.isArray() check to prevent TypeError
  *
  * Recent Changes:
  * - Fixed missing character issue by using @input instead of relying on @keypress for text capture
@@ -32,6 +33,7 @@
  * - Added error messages to conversation state with red left border styling
  * - Enhanced error handling for send failures and validation errors
  * - Updated world selector tabs to display agent details and message counts
+ * - Fixed TypeError: state.agents?.map is not a function by ensuring proper array initialization
  */
 
 const { Component, html, run } = window["apprun"];
@@ -158,6 +160,10 @@ const view = (state) => {
   // Check if we need to scroll and update state
   const updatedState = scrollToBottom(state);
 
+  // Debug logging for agents
+  console.log('🖼️ View render - state.agents:', state.agents);
+  console.log('🖼️ View render - Array.isArray(state.agents):', Array.isArray(state.agents));
+
   return html`
       <div class="connect-container">
         <header class="connect-header">
@@ -236,7 +242,7 @@ const view = (state) => {
               <p class="agent-role">create new agent</p>
             </div>
 
-            ${state.agents?.map(agent => html`
+            ${Array.isArray(state.agents) ? state.agents.map(agent => html`
               <div class="agent-card" @click=${run(openAgentModal, agent)}>
                 <div class="avatar-container">
                   <div class="avatar" style="background-color: ${getAvatarColor(agent.name)}">
@@ -246,7 +252,7 @@ const view = (state) => {
                 <h3 class="agent-name">${`${agent.name}`}</h3>
                 <p class="agent-role">${agent.memory?.length || 0} memories</p>
               </div>
-            `)}
+            `) : ''}
           </div>
           <!-- Conversation area -->
           <div class="conversation-area">

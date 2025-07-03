@@ -30,11 +30,13 @@ export const selectWorld = async (state, worldName) => {
       try {
         newState.connectionStatus = 'connected';
 
-        // Subscribe to world and wait for confirmation
-        await wsApi.subscribeToWorld(worldName);
+        // Subscribe to world and get world data with agents
+        const worldData = await wsApi.subscribeToWorld(worldName);
+        console.log('🌍 Subscription result for', worldName, ':', worldData);
 
-        // Now get agents after subscription is established
-        const agents = await wsApi.getAgents(worldName);
+        // Extract agents from subscription response
+        const agents = worldData?.agents || [];
+        console.log('🤖 Agents from subscription for', worldName, ':', agents);
         return { ...newState, agents };
       } catch (error) {
         console.error('Failed to subscribe or get agents:', error);

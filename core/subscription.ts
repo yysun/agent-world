@@ -16,7 +16,7 @@
 
 import pino from 'pino';
 import { World } from './types.js';
-import { getWorld as coreGetWorld } from './world-manager.js';
+import { getFullWorld as coreGetFullWorld } from './world-manager.js';
 import { publishMessage } from './world-events.js';
 import { toKebabCase } from './utils.js';
 
@@ -56,7 +56,7 @@ export async function subscribeWorld(
   try {
     // Load world using core manager (convert to kebab-case internally)
     const worldId = toKebabCase(worldIdentifier);
-    const world = await coreGetWorld(rootPath, worldId);
+    const world = await coreGetFullWorld(rootPath, worldId);
 
     if (!world) {
       if (client.onError) {
@@ -79,7 +79,7 @@ export async function subscribeWorld(
         await cleanupWorldSubscription(world, worldEventListeners);
 
         // Reload world
-        const refreshedWorld = await coreGetWorld(rootPath, worldId);
+        const refreshedWorld = await coreGetFullWorld(rootPath, worldId);
         if (!refreshedWorld) {
           throw new Error(`Failed to refresh world: ${worldIdentifier}`);
         }
@@ -169,7 +169,7 @@ export async function getWorld(
 ): Promise<World | null> {
   try {
     const worldId = toKebabCase(worldIdentifier);
-    return await coreGetWorld(rootPath, worldId);
+    return await coreGetFullWorld(rootPath, worldId);
   } catch (error) {
     logger.error('Failed to get world', {
       worldIdentifier,
@@ -248,12 +248,12 @@ export async function processWSCommand(
         };
 
       case 'getWorld':
-        const { getWorld: getCoreWorld } = await import('./world-manager.js');
+        const { getWorldConfig } = await import('./world-manager.js');
         const worldName = params.worldName || params.name;
         if (!worldName) {
           return { success: false, error: 'World name is required', type: commandType };
         }
-        const worldData = await getCoreWorld(rootPath, toKebabCase(worldName));
+        const worldData = await getWorldConfig(rootPath, toKebabCase(worldName));
         if (!worldData) {
           return { success: false, error: `World '${worldName}' not found`, type: commandType };
         }

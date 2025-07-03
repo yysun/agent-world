@@ -12,7 +12,8 @@
  *
  * Core Functions:
  * - createWorld: Create new world with configuration
- * - getWorld: Load world by ID with EventEmitter reconstruction and agent subscriptions
+ * - getWorld: Load world configuration only (lightweight)
+ * - getFullWorld: Load world with EventEmitter reconstruction and agent subscriptions
  * - updateWorld: Update world configuration
  * - deleteWorld: Remove world and all associated data
  * - listWorlds: Get all world IDs and basic info
@@ -152,10 +153,33 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
 }
 
 /**
- * Load world by ID with EventEmitter reconstruction
+ * Load world configuration only (lightweight operation)
+ * Automatically converts worldId to kebab-case for consistent lookup
+ * Note: For full world with agents and events, use subscription layer
+ * @deprecated Use getWorldConfig for explicit lightweight access or subscribeWorld for full world
+ */
+export async function getWorld(rootPath: string, worldId: string): Promise<WorldData | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = toKebabCase(worldId);
+
+  const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
+
+  if (!worldData) {
+    return null;
+  }
+
+  return worldData;
+}
+
+/**
+ * Load full world by ID with EventEmitter reconstruction and agent loading
+ * This is the function used by the subscription layer for complete world setup
  * Automatically converts worldId to kebab-case for consistent lookup
  */
-export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
+export async function getFullWorld(rootPath: string, worldId: string): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
@@ -232,13 +256,32 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
 
   const allWorldData = await loadAllWorldsFromDisk(rootPath);
 
-  return allWorldData.map((data: WorldData) => ({
-    id: data.id,
-    name: data.name,
-    description: data.description,
-    turnLimit: data.turnLimit || 5,
-    agentCount: 0 // TODO: Count agents in world directory when implemented
-  }));
+  // Count agents for each world
+  const worldsWithAgentCount = await Promise.all(
+    allWorldData.map(async (data: WorldData) => {
+      try {
+        const agents = await loadAllAgentsFromDisk(rootPath, data.id);
+        return {
+          id: data.id,
+          name: data.name,
+          description: data.description,
+          turnLimit: data.turnLimit || 5,
+          agentCount: agents.length
+        };
+      } catch (error) {
+        // If agent loading fails, still return world info with 0 agents
+        return {
+          id: data.id,
+          name: data.name,
+          description: data.description,
+          turnLimit: data.turnLimit || 5,
+          agentCount: 0
+        };
+      }
+    })
+  );
+
+  return worldsWithAgentCount;
 }
 
 /**

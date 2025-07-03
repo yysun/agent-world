@@ -196,7 +196,10 @@ const subscribeToWorld = (worldName) => {
           clearTimeout(timeout);
           ws.removeEventListener('message', handleResponse);
           currentWorldSubscription = worldName;
-          resolve(true);
+
+          // Return the world data with agents if available
+          const worldData = data.data?.world;
+          resolve(worldData || true);
         }
       } catch (error) {
         clearTimeout(timeout);
