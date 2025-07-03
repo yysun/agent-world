@@ -141,7 +141,7 @@ export enum SenderType {
 
 // Agent Operation Types
 export interface CreateAgentParams {
-  id: string;
+  id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
   name: string;
   type: string;
   provider: LLMProvider;

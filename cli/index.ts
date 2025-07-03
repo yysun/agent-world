@@ -38,14 +38,14 @@
 
 import { program } from 'commander';
 import readline from 'readline';
-import { subscribeWorld, ClientConnection } from '../commands/index.js';
+import { subscribeWorld } from '../core/index.js';
 import { getWorld } from '../core/world-manager.js';
 import { World } from '../core/types.js';
-import { processCLICommand, processCLIInput, CLIContext, PromptFunction } from './commands.js';
+import { processCLICommand, processCLIInput, CLIContext, PromptFunction, ClientConnection } from './commands.js';
 import fs from 'fs';
 import path from 'path';
 
-// Color helper functions - simplified API
+// Color helper functions - consolidated API
 const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
 const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
@@ -55,7 +55,7 @@ const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
 const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
 const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
 
-// Combined styles for common patterns
+// Combined styles
 const boldRed = (text: string) => `\x1b[1m\x1b[31m${text}\x1b[0m`;
 const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
 const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text}\x1b[0m`;
@@ -159,12 +159,9 @@ interface GlobalState {
   promptTimer?: ReturnType<typeof setTimeout>;
 }
 
-// Timer management - integrated clearing
+// Timer and resource management functions
 function setupPromptTimer(globalState: GlobalState, rl: readline.Interface, callback: () => void, delay: number = 2000): void {
-  if (globalState.promptTimer) {
-    clearTimeout(globalState.promptTimer);
-    globalState.promptTimer = undefined;
-  }
+  clearPromptTimer(globalState);
   globalState.promptTimer = setTimeout(callback, delay);
 }
 
@@ -175,16 +172,13 @@ function clearPromptTimer(globalState: GlobalState): void {
   }
 }
 
-// World subscription cleanup
 function cleanupWorldSubscription(worldState: WorldState | null): void {
   if (worldState?.subscription) {
     worldState.subscription.unsubscribe();
   }
 }
 
-// Event listeners for world events with streaming support
-// Event listeners for world events with streaming support - now handled in commands layer
-// Legacy function removed - logic moved to handleWorldEvent and commands/events.ts
+// Event listeners for world events are now handled in commands layer
 
 // World subscription handler
 async function handleSubscribe(
@@ -215,7 +209,7 @@ async function handleSubscribe(
   return { subscription, world: subscription.world };
 }
 
-// Handle world events (extracted from existing setupWorldEventListeners logic)
+// Handle world events with streaming support
 function handleWorldEvent(
   eventType: string,
   eventData: any,
@@ -230,60 +224,8 @@ function handleWorldEvent(
 
   // Handle streaming events
   if (eventType === 'sse') {
-    if (eventData.type === 'chunk' && eventData.content) {
-      if (!streaming.current.isActive) {
-        streaming.current.isActive = true;
-        streaming.current.content = '';
-        streaming.current.sender = eventData.agentName || eventData.sender;
-        streaming.current.messageId = eventData.messageId;
-        console.log(`\n${boldGreen(`● ${streaming.current.sender}`)} ${gray('is responding...')}`);
-        clearPromptTimer(globalState);
-      }
-
-      if (streaming.current.messageId === eventData.messageId) {
-        streaming.current.content += eventData.content;
-        process.stdout.write(eventData.content);
-
-        if (rl) {
-          setupPromptTimer(globalState, rl, () => {
-            if (streaming.current.isActive) {
-              console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
-              streaming.current.isActive = false;
-              streaming.current.content = '';
-              streaming.current.messageId = undefined;
-              rl.prompt();
-            }
-          }, 500);
-        }
-      }
-      return;
-    } else if (eventData.type === 'end') {
-      if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-        console.log('\n');
-        streaming.current.isActive = false;
-        streaming.current.content = '';
-        streaming.current.messageId = undefined;
-
-        if (rl) {
-          clearPromptTimer(globalState);
-          setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-        }
-      }
-      return;
-    } else if (eventData.type === 'error') {
-      if (streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
-        console.log(error(`Stream error: ${eventData.error || eventData.message}`));
-        streaming.current.isActive = false;
-        streaming.current.content = '';
-        streaming.current.messageId = undefined;
-
-        if (rl) {
-          clearPromptTimer(globalState);
-          setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
-        }
-      }
-      return;
-    }
+    handleStreamingEvents(eventData, streaming, globalState, rl);
+    return;
   }
 
   // Filter out success messages and display system events
@@ -291,6 +233,71 @@ function handleWorldEvent(
 
   if ((eventType === 'system' || eventType === 'world') && eventData.message) {
     console.log(`\n${boldRed('● system:')} ${eventData.message}`);
+  }
+}
+
+// Helper function for streaming event handling
+function handleStreamingEvents(
+  eventData: any,
+  streaming: { current: StreamingState },
+  globalState: GlobalState,
+  rl?: readline.Interface
+): void {
+  // Handle chunk events
+  if (eventData.type === 'chunk' && eventData.content) {
+    if (!streaming.current.isActive) {
+      streaming.current.isActive = true;
+      streaming.current.content = '';
+      streaming.current.sender = eventData.agentName || eventData.sender;
+      streaming.current.messageId = eventData.messageId;
+      console.log(`\n${boldGreen(`● ${streaming.current.sender}`)} ${gray('is responding...')}`);
+      clearPromptTimer(globalState);
+    }
+
+    if (streaming.current.messageId === eventData.messageId) {
+      streaming.current.content += eventData.content;
+      process.stdout.write(eventData.content);
+
+      if (rl) {
+        setupPromptTimer(globalState, rl, () => {
+          if (streaming.current.isActive) {
+            console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
+            streaming.current.isActive = false;
+            streaming.current.content = '';
+            streaming.current.messageId = undefined;
+            rl.prompt();
+          }
+        }, 500);
+      }
+    }
+    return;
+  }
+
+  // Handle end events
+  if (eventData.type === 'end' && streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
+    console.log('\n');
+    streaming.current.isActive = false;
+    streaming.current.content = '';
+    streaming.current.messageId = undefined;
+
+    if (rl) {
+      clearPromptTimer(globalState);
+      setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
+    }
+    return;
+  }
+
+  // Handle error events
+  if (eventData.type === 'error' && streaming.current.isActive && streaming.current.messageId === eventData.messageId) {
+    console.log(error(`Stream error: ${eventData.error || eventData.message}`));
+    streaming.current.isActive = false;
+    streaming.current.content = '';
+    streaming.current.messageId = undefined;
+
+    if (rl) {
+      clearPromptTimer(globalState);
+      setupPromptTimer(globalState, rl, () => rl.prompt(), 2000);
+    }
   }
 }
 
@@ -316,27 +323,32 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
     return null;
   }
 
+  // Auto-select if there's only one world
   if (worlds.length === 1) {
     console.log(`${boldGreen('Auto-selecting the only available world:')} ${cyan(worlds[0])}`);
     return worlds[0];
   }
 
+  // Display available worlds for selection
   console.log(`\n${boldMagenta('Available worlds:')}`);
   worlds.forEach((world, index) => {
     console.log(`  ${yellow(`${index + 1}.`)} ${cyan(world)}`);
   });
 
+  // Process world selection
   return new Promise((resolve) => {
-    const askForSelection = () => {
+    function askForSelection() {
       rl.question(`\n${boldMagenta('Select a world (number or name):')} `, (answer) => {
         const trimmed = answer.trim();
         const num = parseInt(trimmed);
 
+        // Try to match by number
         if (!isNaN(num) && num >= 1 && num <= worlds.length) {
           resolve(worlds[num - 1]);
           return;
         }
 
+        // Try to match by name
         const found = worlds.find(world =>
           world.toLowerCase() === trimmed.toLowerCase() ||
           world.toLowerCase().includes(trimmed.toLowerCase())
@@ -350,7 +362,8 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
         console.log(boldRed('Invalid selection. Please try again.'));
         askForSelection();
       });
-    };
+    }
+
     askForSelection();
   });
 }
@@ -533,18 +546,21 @@ async function main(): Promise<void> {
   }
 }
 
-// Error handling
-process.on('unhandledRejection', (error) => {
-  console.error(boldRed('Unhandled rejection:'), error);
-  process.exit(1);
-});
+// Global error handling and CLI initialization
+function setupErrorHandlers() {
+  process.on('unhandledRejection', (error) => {
+    console.error(boldRed('Unhandled rejection:'), error);
+    process.exit(1);
+  });
 
-process.on('uncaughtException', (error) => {
-  console.error(boldRed('Uncaught exception:'), error);
-  process.exit(1);
-});
+  process.on('uncaughtException', (error) => {
+    console.error(boldRed('Uncaught exception:'), error);
+    process.exit(1);
+  });
+}
 
-// Run CLI
+// Set up error handlers and run CLI
+setupErrorHandlers();
 main().catch((error) => {
   console.error(boldRed('CLI error:'), error);
   process.exit(1);

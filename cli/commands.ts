@@ -3,15 +3,15 @@
  * 
  * Features:
  * - Direct command mapping system (/clear maps to clear command)
- * - Direct core function calls (no command processing layer)
- * - Interactive prompt for missing parameters
+ * - Direct core function calls without command processing layer
+ * - Interactive prompt for missing parameters with validation
  * - User-friendly messages with technical details for debugging
  * - Automatic world state management and refreshing
- * - Help message generation
+ * - Help message generation with command documentation
  * - Dual input handling for commands (/command) and messages
- * - Direct message handling without system event overhead
+ * - Direct message handling through world events
  * 
- * Commands:
+ * Available Commands:
  * - worlds: List all available worlds
  * - world: Get specific world information
  * - create-world: Create a new world with parameters
@@ -21,15 +21,6 @@
  * - update-prompt: Update agent system prompt
  * - clear: Clear agent memory (specific agent or all)
  * - help: Show command help and documentation
- * 
- * Implementation:
- * - Maps CLI commands directly to core function calls
- * - Handles interactive parameter collection with validation
- * - Direct command execution using core APIs
- * - Direct message sending to message events
- * - Maintains world context between commands
- * - Provides both simple and detailed error messages
- * - Eliminates redundant command processing layer
  */
 
 import { World, Agent, LLMProvider } from '../core/types.js';
@@ -40,12 +31,16 @@ import {
   updateWorld,
   WorldInfo
 } from '../core/world-manager.js';
-import { toKebabCase } from '../core/utils.js';
 import readline from 'readline';
 import { publishMessage } from '../core/world-events.js';
 
-// Import ClientConnection interface for world subscription
-export { ClientConnection } from '../commands/subscription.js';
+// Define ClientConnection interface for CLI
+export interface ClientConnection {
+  send: (data: string) => void;
+  isOpen: boolean;
+  onWorldEvent?: (eventType: string, eventData: any) => void;
+  onError?: (error: string) => void;
+}
 
 // CLI Response types for user-friendly output
 export interface CLIResponse {
@@ -371,7 +366,7 @@ export async function processCLICommand(
     let world: World | null = null;
     if (commandInfo.requiresWorld && context.currentWorldName) {
       try {
-        world = await getWorld(context.rootPath, toKebabCase(context.currentWorldName));
+        world = await getWorld(context.rootPath, context.currentWorldName);
         if (!world) {
           return {
             success: false,
@@ -408,7 +403,7 @@ export async function processCLICommand(
           cliResponse = { success: false, message: 'World name is required', data: null };
           break;
         }
-        const worldData = await getWorld(context.rootPath, toKebabCase(worldName));
+        const worldData = await getWorld(context.rootPath, worldName);
         if (!worldData) {
           cliResponse = { success: false, message: `World '${worldName}' not found`, data: null };
           break;
@@ -455,7 +450,6 @@ export async function processCLICommand(
           break;
         }
         const agent = await world.createAgent({
-          id: toKebabCase(collectedParams.name),
           name: collectedParams.name,
           type: 'conversational',
           provider: LLMProvider.OPENAI,
@@ -545,7 +539,7 @@ export async function processCLICommand(
     // Check if world refresh is needed
     if (cliResponse.needsWorldRefresh && context.currentWorldName) {
       try {
-        const refreshedWorld = await getWorld(context.rootPath, toKebabCase(context.currentWorldName));
+        const refreshedWorld = await getWorld(context.rootPath, context.currentWorldName);
         context.currentWorld = refreshedWorld;
       } catch (error) {
         // Don't fail the command, just log the refresh issue

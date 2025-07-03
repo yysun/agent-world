@@ -15,10 +15,10 @@
  */
 
 import pino from 'pino';
-import { World } from '../core/types.js';
-import { getWorld as coreGetWorld } from '../core/world-manager.js';
-import { publishMessage } from '../core/world-events.js';
-import { toKebabCase } from '../core/utils.js';
+import { World } from './types.js';
+import { getWorld as coreGetWorld } from './world-manager.js';
+import { publishMessage } from './world-events.js';
+import { toKebabCase } from './utils.js';
 
 // Create logger instance
 const logger = pino({
@@ -237,7 +237,7 @@ export async function processWSCommand(
   try {
     switch (commandType) {
       case 'getWorlds':
-        const { listWorlds } = await import('../core/world-manager.js');
+        const { listWorlds } = await import('./world-manager.js');
         const worlds = await listWorlds(rootPath);
         return {
           success: true,
@@ -247,7 +247,7 @@ export async function processWSCommand(
         };
 
       case 'getWorld':
-        const { getWorld: getCoreWorld } = await import('../core/world-manager.js');
+        const { getWorld: getCoreWorld } = await import('./world-manager.js');
         const worldName = params.worldName || params.name;
         if (!worldName) {
           return { success: false, error: 'World name is required', type: commandType };
@@ -264,7 +264,7 @@ export async function processWSCommand(
         };
 
       case 'createWorld':
-        const { createWorld } = await import('../core/world-manager.js');
+        const { createWorld } = await import('./world-manager.js');
         const newWorld = await createWorld(rootPath, {
           name: params.name,
           description: params.description || `A world named ${params.name}`
@@ -280,7 +280,7 @@ export async function processWSCommand(
         if (!world) {
           return { success: false, error: 'No world selected', type: commandType };
         }
-        const { updateWorld } = await import('../core/world-manager.js');
+        const { updateWorld } = await import('./world-manager.js');
         const updates = params.updates || {};
         const updatedWorld = await updateWorld(rootPath, world.id, updates);
         return {
@@ -294,7 +294,7 @@ export async function processWSCommand(
         if (!world) {
           return { success: false, error: 'No world selected', type: commandType };
         }
-        const { LLMProvider } = await import('../core/types.js');
+        const { LLMProvider } = await import('./types.js');
         const agent = await world.createAgent({
           id: toKebabCase(params.name),
           name: params.name,

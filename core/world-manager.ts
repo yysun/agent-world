@@ -153,12 +153,16 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
 
 /**
  * Load world by ID with EventEmitter reconstruction
+ * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  const worldData = await loadWorldFromDisk(rootPath, worldId);
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = toKebabCase(worldId);
+
+  const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
   if (!worldData) {
     return null;
@@ -180,12 +184,16 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
 
 /**
  * Update world configuration
+ * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function updateWorld(rootPath: string, worldId: string, updates: UpdateWorldParams): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  const existingData = await loadWorldFromDisk(rootPath, worldId);
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = toKebabCase(worldId);
+
+  const existingData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
   if (!existingData) {
     return null;
@@ -203,12 +211,16 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
 
 /**
  * Delete world and all associated data
+ * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function deleteWorld(rootPath: string, worldId: string): Promise<boolean> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  return await deleteWorldFromDisk(rootPath, worldId);
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = toKebabCase(worldId);
+
+  return await deleteWorldFromDisk(rootPath, normalizedWorldId);
 }
 
 /**
@@ -231,12 +243,16 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
 
 /**
  * Get world configuration without runtime objects (lightweight operation)
+ * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function getWorldConfig(rootPath: string, worldId: string): Promise<WorldData | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  const worldData = await loadWorldFromDisk(rootPath, worldId);
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = toKebabCase(worldId);
+
+  const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
   if (!worldData) {
     return null;
@@ -261,7 +277,13 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     // Agent operation methods
     async createAgent(params) {
-      const agent = await createAgentCore(world.rootPath, world.id, params);
+      // Automatically convert agent name to kebab-case for consistent ID
+      const agentParams = {
+        ...params,
+        id: toKebabCase(params.name)
+      };
+
+      const agent = await createAgentCore(world.rootPath, world.id, agentParams);
       // Update runtime map
       world.agents.set(agent.id, agent);
       return agent;

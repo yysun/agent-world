@@ -40,6 +40,7 @@
 
 import { Agent, AgentMessage, LLMProvider, CreateAgentParams, UpdateAgentParams, AgentInfo } from './types';
 import type { AgentLoadOptions, BatchLoadResult } from './agent-storage';
+import { toKebabCase } from './utils';
 
 // Dynamic function assignments for storage operations only
 let saveAgentToDisk: any,
@@ -350,15 +351,18 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
   // Ensure modules are initialized
   await moduleInitialization;
 
+  // Automatically generate ID from name if not provided
+  const agentId = params.id || toKebabCase(params.name);
+
   // Check if agent already exists
-  const exists = await agentExistsOnDisk(rootPath, worldId, params.id);
+  const exists = await agentExistsOnDisk(rootPath, worldId, agentId);
   if (exists) {
-    throw new Error(`Agent with ID '${params.id}' already exists`);
+    throw new Error(`Agent with ID '${agentId}' already exists`);
   }
 
   const now = new Date();
   const agent: Agent = {
-    id: params.id,
+    id: agentId,
     name: params.name,
     type: params.type,
     status: 'inactive',

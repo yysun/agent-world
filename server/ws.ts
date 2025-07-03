@@ -70,14 +70,13 @@ import {
   SimpleCommandResponse,
   generateRequestId,
   processWSCommand
-} from '../commands/subscription.js';
+} from '../core';
 import {
   listWorlds,
   getWorld as getCoreWorld,
   createWorld,
   updateWorld
 } from '../core/world-manager.js';
-import { toKebabCase } from '../core/utils.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
