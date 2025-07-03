@@ -14,4 +14,9 @@ export {
   handleWebSocketMessage,
   handleWebSocketError
 } from './ws-sse.js';
+export {
+  displayAgentMemory,
+  clearAgentMemory,
+  clearAgentMemoryFromModal
+} from './agent-actions.js';
 

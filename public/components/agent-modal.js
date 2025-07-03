@@ -16,6 +16,10 @@
  * Recent changes:
  */
 
+import * as wsApi from '../ws-api.js';
+
+const { html, run } = window["apprun"];
+
 export const AgentModal = (agent, close) => {
   return html`
     <div class="modal-overlay" @click=${run(close, false)}>
@@ -57,6 +61,11 @@ export const AgentModal = (agent, close) => {
             <button type="button" class="btn btn-secondary" @click=${run(close, false)}>
               Cancel
             </button>
+            ${agent && agent.status !== 'New' ? html`
+              <button type="button" class="btn btn-danger" @click=${run('clearAgentMemoryFromModal', agent)}>
+                Clear Memory
+              </button>
+            ` : ''}
             <button type="submit" class="btn btn-primary">
               ${agent ? 'Update Agent' : 'Create Agent'}
             </button>
