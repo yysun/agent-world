@@ -38,8 +38,10 @@
 
 import { program } from 'commander';
 import readline from 'readline';
-import { processCLIInput, subscribeWorld, getWorld, ClientConnection } from '../commands/index.js';
+import { subscribeWorld, ClientConnection } from '../commands/index.js';
+import { getWorld } from '../core/world-manager.js';
 import { World } from '../core/types.js';
+import { processCLICommand, processCLIInput, CLIContext, PromptFunction } from './commands.js';
 import fs from 'fs';
 import path from 'path';
 

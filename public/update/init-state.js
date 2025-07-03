@@ -5,7 +5,7 @@
  * - Establishes WebSocket connection before world selection
  * - Loads available worlds from server
  * - Manages connection status and error handling during initialization
- * - Auto-selects first available world after successful connection
+ * - Auto-selects first available world after successful connection using world ID
  * - Returns theme preference from localStorage without applying it
  *
  * Implementation:
@@ -13,11 +13,13 @@
  * - Integrates with wsApi for connection management
  * - Pure state initialization without side effects (theme application handled by caller)
  * - Error handling for connection failures with fallback states
+ * - Uses world.id instead of world.name for proper API consistency
  *
  * Recent Changes:
  * - Extracted from home.js for better separation of concerns
  * - Added WebSocket connection establishment before world selection
  * - Removed theme application dependency - now returns theme preference only
+ * - Fixed world selection to use world.id instead of world.name for API calls
  */
 
 import wsApi from '../ws-api.js';

@@ -1,34 +1,33 @@
 //@ts-check
 /**
- * WebSocket API Module - Real-time world communication, CRUD operations, and message handling
+ * WebSocket API Module - Real-time world communication with typed command system
  *
- * Features: Connection management with auto-reconnect, world subscription, WebSocket commands, 
+ * Features: Connection management with auto-reconnect, world subscription, typed WebSocket commands,
  * world/agent CRUD operations, promise-based async API with error handling,
- * unified message creation with type-specific handling, SSE chunk grouping 
- * into single message blocks by agent and messageId, support for new eventType 
- * structure (eventType: 'sse', type: 'chunk'), backward compatibility with old 
- * SSE format, connection status management, error handling and logging, 
- * auto-subscription on welcome messages, proper streaming lifecycle 
- * (start, chunk, end, error), auto-scroll to bottom when messages are added or updated,
+ * request/response tracking with time-based IDs, unified message creation with type-specific handling,
+ * SSE chunk grouping into single message blocks by agent and messageId, support for new eventType 
+ * structure (eventType: 'sse', type: 'chunk'), backward compatibility with old SSE format,
+ * connection status management, error handling and logging, auto-subscription on welcome messages,
+ * proper streaming lifecycle (start, chunk, end, error), auto-scroll to bottom when messages are added or updated,
  * error messages added to conversation state with red left border styling
  *
+ * Typed Command System: Uses structured CommandRequest/CommandResponse objects instead of string commands,
+ * time-based request ID generation for tracking, type-safe command parameters replacing unsafe args arrays,
+ * request/response correlation via WebSocket command-response events, comprehensive error handling with typed responses
+ *
  * Implementation: Function-based module with subscription lifecycle management,
- * WebSocket command protocol for world/agent operations, comprehensive 
+ * typed WebSocket command protocol for world/agent operations, comprehensive 
  * message event handlers for real-time communication, consolidated
  * connection management with built-in auto-reconnect functionality,
  * and error message integration into conversation flow
  *
  * Changes:
- * - Merged ws-message.js functionality into ws-api.js
- * - Consolidated WebSocket event handlers to remove redundancy
- * - Enhanced agent-based message grouping with messageId tracking
- * - Improved SSE event type handling (start, chunk, end, error)
- * - Added error state handling for streaming messages
- * - Maintains backward compatibility with old message format
- * - Added auto-scroll functionality for real-time message updates
- * - Integrated auto-reconnect directly into connection management
- * - Added error messages to conversation state with visual error indicators
- * - Error messages include red left border styling and error details
+ * - Updated to use typed command system with CommandRequest/CommandResponse
+ * - Replaced string-based commands with structured request objects
+ * - Added request ID generation and tracking for commands
+ * - Enhanced error handling with typed response validation
+ * - Maintained backward compatibility with existing API interfaces
+ * - Added command-response event handling for typed responses
  */
 
 
@@ -44,6 +43,28 @@ const userId = 'user1';
 const maxReconnectAttempts = 5;
 const reconnectDelay = 1000;
 
+// Typed command system utilities
+const generateRequestId = () => {
+  return `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+// Pending requests tracking for command responses
+const pendingRequests = new Map();
+
+// Helper function to create typed command requests
+const createCommandRequest = (type, params = {}) => {
+  const requestId = generateRequestId();
+  const timestamp = new Date().toISOString();
+
+  const baseRequest = {
+    id: requestId,
+    type,
+    timestamp
+  };
+
+  return { ...baseRequest, ...params };
+};
+
 // Connection functions
 const connect = () => {
   const app = window["app"]
@@ -58,6 +79,26 @@ const connect = () => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+
+        // Handle command responses first
+        if (data.type === 'system' && data.payload?.eventType === 'command-response') {
+          const response = data.payload.response;
+          const requestId = response.requestId;
+
+          if (pendingRequests.has(requestId)) {
+            const { resolve, reject } = pendingRequests.get(requestId);
+            pendingRequests.delete(requestId);
+
+            if (response.success) {
+              resolve(response);
+            } else {
+              reject(new Error(response.error || 'Command failed'));
+            }
+          }
+          return; // Don't pass command responses to main message handler
+        }
+
+        // Handle other WebSocket messages
         app.run('handleWebSocketMessage', data);
 
       } catch (error) {
@@ -208,48 +249,46 @@ const getConnectionState = () => {
 };
 
 
-// WebSocket command helper
-function sendCommand(command, worldName = null) {
+// Typed command sender
+function sendTypedCommand(request) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('WebSocket not connected'));
       return;
     }
 
-    const timeout = setTimeout(() => reject(new Error('Command timeout')), 5000);
-    const handleResponse = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    const timeout = setTimeout(() => {
+      pendingRequests.delete(request.id);
+      reject(new Error('Command timeout'));
+    }, 10000); // Increased timeout for complex operations
 
-        // Only handle command response messages, ignore other WebSocket messages
-        if (data.type === 'success' || data.type === 'error' ||
-          (data.type === 'connected') || // Initial connection message
-          (data.message && (data.message.includes('Command') || data.message.includes('Successfully')))) {
-          clearTimeout(timeout);
-          ws.removeEventListener('message', handleResponse);
-          resolve(data);
-        }
-        // Ignore other message types (events, subscriptions, etc.)
-      } catch (error) {
+    // Store the promise handlers for this request
+    pendingRequests.set(request.id, {
+      resolve: (response) => {
         clearTimeout(timeout);
-        ws.removeEventListener('message', handleResponse);
+        resolve(response);
+      },
+      reject: (error) => {
+        clearTimeout(timeout);
         reject(error);
+      }
+    });
+
+    // Send the command request
+    const message = {
+      type: 'system',
+      payload: {
+        eventType: 'command-request',
+        request
       }
     };
 
-    ws.addEventListener('message', handleResponse);
-
-    // Build payload - only include worldName if it's not null/undefined
-    const payload = { message: command };
-    const targetWorldName = worldName || currentWorldSubscription;
-    if (targetWorldName) {
-      payload.worldName = targetWorldName;
+    const success = sendMessage(message);
+    if (!success) {
+      pendingRequests.delete(request.id);
+      clearTimeout(timeout);
+      reject(new Error('Failed to send command request'));
     }
-
-    ws.send(JSON.stringify({
-      type: 'system',
-      payload: payload
-    }));
   });
 }
 
@@ -285,7 +324,7 @@ export default {
   sendChatMessage, // New chat function
   ensureConnection, // New connection helper
   getCurrentWorldSubscription,
-  sendCommand,
+  sendTypedCommand, // New typed command function
   getWorlds,
   getAgents,
   getAgent,
@@ -298,11 +337,13 @@ export default {
 // World and Agent API Functions
 
 async function getWorlds() {
-  const response = await sendCommand('/getWorlds', null); // Pass null for global command
-  if (response.type === 'success' && response.data) {
-    return response.data; // Direct access - no double nesting
+  const request = createCommandRequest('getWorlds');
+  const response = await sendTypedCommand(request);
+
+  if (response.success && response.data) {
+    return response.data;
   }
-  throw new Error(response.data?.error || 'Failed to get worlds');
+  throw new Error(response.error || 'Failed to get worlds');
 }
 
 async function getAgents(worldName) {
@@ -311,11 +352,13 @@ async function getAgents(worldName) {
     throw new Error('World name required or must be subscribed to a world');
   }
 
-  const response = await sendCommand('/getWorld', targetWorld);
-  if (response.type === 'success' && response.data?.agents) {
-    return response.data.agents; // Direct access - no double nesting
+  const request = createCommandRequest('getWorld', { worldName: targetWorld });
+  const response = await sendTypedCommand(request);
+
+  if (response.success && response.data?.agents) {
+    return response.data.agents;
   }
-  throw new Error(response.data?.error || 'Failed to get agents');
+  throw new Error(response.error || 'Failed to get agents');
 }
 
 async function getAgent(worldName, agentName) {
@@ -338,11 +381,18 @@ async function createAgent(worldName, agentData) {
     throw new Error('Agent name and description are required');
   }
 
-  const response = await sendCommand(`/addAgent ${name} ${description}`, targetWorld);
-  if (response.type === 'success' && response.data) {
-    return response.data; // Direct access - no double nesting
+  const request = createCommandRequest('createAgent', {
+    worldName: targetWorld,
+    name,
+    description
+  });
+
+  const response = await sendTypedCommand(request);
+
+  if (response.success && response.data) {
+    return response.data;
   }
-  throw new Error(response.data?.error || 'Failed to create agent');
+  throw new Error(response.error || 'Failed to create agent');
 }
 
 async function updateAgent(worldName, agentName, updateData) {
@@ -355,28 +405,47 @@ async function updateAgent(worldName, agentName, updateData) {
     throw new Error('Agent name is required');
   }
 
-  // Handle different update types
+  // Handle different update types with typed commands
   if (updateData.config) {
     for (const [key, value] of Object.entries(updateData.config)) {
-      const response = await sendCommand(`/updateAgentConfig ${agentName} ${key} ${value}`, targetWorld);
-      if (response.type !== 'success') {
-        throw new Error(response.data?.error || `Failed to update ${key}`);
+      const request = createCommandRequest('updateAgentConfig', {
+        worldName: targetWorld,
+        agentName,
+        config: { [key]: value }
+      });
+
+      const response = await sendTypedCommand(request);
+      if (!response.success) {
+        throw new Error(response.error || `Failed to update ${key}`);
       }
     }
   }
 
   if (updateData.prompt) {
-    const response = await sendCommand(`/updateAgentPrompt ${agentName} ${updateData.prompt}`, targetWorld);
-    if (response.type !== 'success') {
-      throw new Error(response.data?.error || 'Failed to update prompt');
+    const request = createCommandRequest('updateAgentPrompt', {
+      worldName: targetWorld,
+      agentName,
+      systemPrompt: updateData.prompt
+    });
+
+    const response = await sendTypedCommand(request);
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to update prompt');
     }
   }
 
   if (updateData.memory) {
     const { action, role, message } = updateData.memory;
-    const response = await sendCommand(`/updateAgentMemory ${agentName} ${action} ${role} ${message}`, targetWorld);
-    if (response.type !== 'success') {
-      throw new Error(response.data?.error || 'Failed to update memory');
+    const request = createCommandRequest('updateAgentMemory', {
+      worldName: targetWorld,
+      agentName,
+      action,
+      message: action === 'add' ? { role, content: message } : undefined
+    });
+
+    const response = await sendTypedCommand(request);
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to update memory');
     }
   }
 

@@ -4,7 +4,7 @@
  * Features:
  * - Stateful WebSocket connection management per client
  * - World subscription lifecycle with centralized commands layer integration
- * - Uses commands layer for world loading and event listener management
+ * - Typed command system with request/response tracking
  * - Connection-specific world state and event listener cleanup
  * - World refresh logic after command execution with state updates
  * - Comprehensive debug logging with Pino for WebSocket operations
@@ -18,7 +18,16 @@
  * WebSocket Events:
  * - subscribe: Use commands layer subscribeWorld() with ClientConnection
  * - unsubscribe: Clean up world subscription through commands layer
- * - system/world/message: Use stateless handlers from commands layer
+ * - system: Process typed commands with request/response tracking
+ * - world: Global and world-specific typed commands
+ * - message: User messages published to world event system
+ *
+ * Typed Command System:
+ * - Legacy command string parsing to typed CommandRequest objects
+ * - Time-based request ID generation for tracking
+ * - Structured CommandResponse with success/error handling
+ * - Type-safe command parameters replacing unsafe args arrays
+ * - Request/response correlation via WebSocket command-response events
  *
  * Logging:
  * - Uses Pino for structured logging with debug/info/warn/error levels
@@ -30,15 +39,18 @@
  *
  * Architecture:
  * - ws.ts: Manages stateful connection and implements ClientConnection interface
+ * - commands/commands.ts: Provides typed command processing with request/response
+ * - commands/types.ts: Defines typed command unions and interfaces
  * - commands/events.ts: Provides centralized world subscription and event handling
  * - Clear separation between transport state and business logic
  * - Per-connection world state with proper cleanup through commands layer
  *
  * Changes:
- * - Integrated commands layer subscribeWorld() for centralized world management
- * - Implemented enhanced ClientConnection interface with event handlers
- * - Removed direct core layer dependencies (getWorld, toKebabCase)
- * - Added comprehensive world event forwarding through ClientConnection
+ * - Integrated typed command system with CommandRequest/CommandResponse
+ * - Replaced unsafe args array processing with structured parameters
+ * - Added legacy command string parsing to typed requests
+ * - Implemented request/response tracking with time-based IDs
+ * - Enhanced error handling with typed responses
  * - Maintained backward compatibility with existing WebSocket protocol
  */
 
@@ -57,7 +69,14 @@ import {
   subscribeWorld,
   getWorld
 } from '../commands/events.js';
-import { processWSInput } from '../commands/index.js';
+import { processCommandRequest } from '../commands/commands.js';
+import {
+  CommandRequest,
+  CommandResponse,
+  CommandRequestMessage,
+  CommandResponseMessage,
+  generateRequestId
+} from '../commands/types.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
@@ -87,13 +106,16 @@ interface WorldSocket extends WebSocket {
   world?: World;
 }
 
-// Full message schema including subscribe/unsubscribe (handled here)
+// Full message schema including subscribe/unsubscribe and command-request/command-response
 const FullMessageSchema = z.object({
   type: z.enum(["subscribe", "unsubscribe", "system", "world", "message"]),
   payload: z.object({
     worldName: z.string().optional(),
     message: z.string().optional(),
-    sender: z.string().optional()
+    sender: z.string().optional(),
+    eventType: z.string().optional(),
+    request: z.any().optional(), // CommandRequest for command-request
+    response: z.any().optional() // CommandResponse for command-response  
   })
 });
 
@@ -144,6 +166,166 @@ function createClientConnection(ws: WorldSocket): ClientConnection {
       }
     }
   };
+}
+
+// Helper function to send command response via WebSocket
+function sendCommandResponse(client: ClientConnection, response: CommandResponse): void {
+  const message: CommandResponseMessage = {
+    type: 'system',
+    payload: {
+      eventType: 'command-response',
+      response
+    }
+  };
+  client.send(JSON.stringify(message));
+}
+
+// Helper function to parse legacy command string to typed request
+function parseCommandToRequest(commandString: string, worldName?: string): CommandRequest | null {
+  const trimmed = commandString.trim();
+  if (!trimmed.startsWith('/')) return null;
+
+  const parts = trimmed.slice(1).split(/\s+/);
+  const commandType = parts[0].toLowerCase();
+  const args = parts.slice(1);
+
+  const requestId = generateRequestId();
+  const timestamp = new Date().toISOString();
+
+  switch (commandType) {
+    case 'getworlds':
+      return {
+        id: requestId,
+        type: 'getWorlds',
+        timestamp
+      };
+
+    case 'getworld':
+      if (!worldName) return null;
+      return {
+        id: requestId,
+        type: 'getWorld',
+        worldName,
+        timestamp
+      };
+
+    case 'createworld':
+    case 'addworld':
+      if (args.length === 0) return null;
+      return {
+        id: requestId,
+        type: 'createWorld',
+        name: args[0],
+        description: args.slice(1).join(' ') || undefined,
+        timestamp
+      };
+
+    case 'updateworld':
+      if (!worldName || args.length < 2) return null;
+      const updateType = args[0].toLowerCase();
+      const updateValue = args.slice(1).join(' ');
+
+      let updates: any = {};
+      if (updateType === 'name') updates.name = updateValue;
+      else if (updateType === 'description') updates.description = updateValue;
+      else if (updateType === 'turnlimit') updates.turnLimit = parseInt(updateValue);
+      else return null;
+
+      return {
+        id: requestId,
+        type: 'updateWorld',
+        worldName,
+        updates,
+        timestamp
+      };
+
+    case 'createagent':
+    case 'addagent':
+      if (!worldName || args.length === 0) return null;
+      return {
+        id: requestId,
+        type: 'createAgent',
+        worldName,
+        name: args[0],
+        description: args.slice(1).join(' ') || undefined,
+        timestamp
+      };
+
+    case 'updateagentconfig':
+      if (!worldName || args.length < 3) return null;
+      const agentName = args[0];
+      const configType = args[1].toLowerCase();
+      const configValue = args[2];
+
+      let config: any = {};
+      if (configType === 'model') config.model = configValue;
+      else if (configType === 'provider') config.provider = configValue;
+      else if (configType === 'status') config.status = configValue;
+      else return null;
+
+      return {
+        id: requestId,
+        type: 'updateAgentConfig',
+        worldName,
+        agentName,
+        config,
+        timestamp
+      };
+
+    case 'updateagentprompt':
+      if (!worldName || args.length < 2) return null;
+      return {
+        id: requestId,
+        type: 'updateAgentPrompt',
+        worldName,
+        agentName: args[0],
+        systemPrompt: args.slice(1).join(' '),
+        timestamp
+      };
+
+    case 'updateagentmemory':
+      if (!worldName || args.length < 2) return null;
+      const agentNameMem = args[0];
+      const action = args[1].toLowerCase();
+
+      if (action === 'clear') {
+        return {
+          id: requestId,
+          type: 'updateAgentMemory',
+          worldName,
+          agentName: agentNameMem,
+          action: 'clear',
+          timestamp
+        };
+      } else if (action === 'add' && args.length >= 4) {
+        const role = args[2].toLowerCase() as 'user' | 'assistant' | 'system';
+        const content = args.slice(3).join(' ');
+        return {
+          id: requestId,
+          type: 'updateAgentMemory',
+          worldName,
+          agentName: agentNameMem,
+          action: 'add',
+          message: { role, content },
+          timestamp
+        };
+      }
+      return null;
+
+    case 'clear':
+    case 'clearagentmemory':
+      if (!worldName) return null;
+      return {
+        id: requestId,
+        type: 'clearAgentMemory',
+        worldName,
+        agentName: args.length > 0 ? args[0] : undefined,
+        timestamp
+      };
+
+    default:
+      return null;
+  }
 }
 
 // Clean up world subscription and event listeners
@@ -273,7 +455,7 @@ export function createWebSocketServer(server: Server): WebSocketServer {
         }
 
         const { type, payload } = validation.data;
-        const { worldName, message: eventMessage, sender } = payload;
+        const { worldName, message: eventMessage, sender, eventType, request } = payload;
         const worldSocket = ws as WorldSocket;
         const client = createClientConnection(worldSocket);
 
@@ -281,6 +463,8 @@ export function createWebSocketServer(server: Server): WebSocketServer {
           type,
           worldName,
           hasMessage: !!eventMessage,
+          hasRequest: !!request,
+          eventType,
           sender,
           currentWorld: worldSocket.world?.name || 'none'
         });
@@ -301,9 +485,25 @@ export function createWebSocketServer(server: Server): WebSocketServer {
             break;
 
           case 'system':
-            if (eventMessage && eventMessage.trim().startsWith('/')) {
-              // Only system events can process commands
-              logger.debug('Processing system command', { eventMessage });
+            // Handle both new typed command system and legacy string commands
+            if (eventType === 'command-request' && request) {
+              // New typed command system
+              logger.debug('Processing typed command request', {
+                commandType: request.type,
+                requestId: request.id
+              });
+
+              const response = await processCommandRequest(request, worldSocket.world || null, ROOT_PATH);
+              sendCommandResponse(client, response);
+
+              // Refresh world if needed for world-specific commands
+              if (response.success && worldName && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+                logger.debug('Refreshing world after typed command', { commandType: request.type, world: worldName });
+                await refreshWorldSubscription(worldSocket, worldName);
+              }
+            } else if (eventMessage && eventMessage.trim().startsWith('/')) {
+              // Legacy string command system (for backward compatibility)
+              logger.debug('Processing legacy system command', { eventMessage });
 
               // Special handling for getWorld command - add worldName from payload  
               let processedMessage = eventMessage;
@@ -313,17 +513,27 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
               }
 
-              const result = await processWSInput(processedMessage, worldSocket.world || null, ROOT_PATH, 'WebSocket', 'system');
-              sendCommandResult(client, result);
+              // Convert legacy command to typed request
+              const legacyRequest = parseCommandToRequest(processedMessage, worldName);
+              if (legacyRequest) {
+                const response = await processCommandRequest(legacyRequest, worldSocket.world || null, ROOT_PATH);
+                sendCommandResponse(client, response);
 
-              // Refresh world if needed for world-specific commands
-              if (result.refreshWorld && worldName) {
-                logger.debug('Refreshing world after system command', { commandName, world: worldName });
-                await refreshWorldSubscription(worldSocket, worldName);
+                // Refresh world if needed for world-specific commands
+                if (response.success && worldName && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+                  logger.debug('Refreshing world after legacy command', { commandName, world: worldName });
+                  await refreshWorldSubscription(worldSocket, worldName);
+                }
+              } else {
+                sendError(client, `Failed to parse legacy system command: ${eventMessage}`);
               }
             } else {
-              logger.warn('System event requires command', { hasMessage: !!eventMessage });
-              sendError(client, 'System events require command message starting with /');
+              logger.warn('System event requires either command-request or command message starting with /', {
+                hasMessage: !!eventMessage,
+                hasRequest: !!request,
+                eventType
+              });
+              sendError(client, 'System events require either command-request with request object or command message starting with /');
             }
             break;
 
@@ -343,8 +553,14 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                   logger.debug('Modified getWorld command', { original: eventMessage, modified: processedMessage });
                 }
 
-                const result = await processWSInput(processedMessage, null, ROOT_PATH, 'WebSocket', 'world');
-                sendCommandResult(client, result);
+                // Convert legacy command to typed request
+                const request = parseCommandToRequest(processedMessage, worldName);
+                if (request) {
+                  const response = await processCommandRequest(request, null, ROOT_PATH);
+                  sendCommandResponse(client, response);
+                } else {
+                  sendError(client, `Failed to parse world command: ${eventMessage}`);
+                }
               } else {
                 // World-specific commands require world subscription
                 if (worldName && worldSocket.world) {
@@ -358,13 +574,20 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                   }
 
                   logger.debug('Processing world-specific command', { commandName, world: worldName });
-                  const result = await processWSInput(eventMessage, worldSocket.world, ROOT_PATH, 'WebSocket', 'world');
-                  sendCommandResult(client, result);
 
-                  // Refresh world if needed
-                  if (result.refreshWorld) {
-                    logger.debug('Refreshing world after world command', { commandName, world: worldName });
-                    await refreshWorldSubscription(worldSocket, worldName);
+                  // Convert legacy command to typed request
+                  const request = parseCommandToRequest(eventMessage, worldName);
+                  if (request) {
+                    const response = await processCommandRequest(request, worldSocket.world, ROOT_PATH);
+                    sendCommandResponse(client, response);
+
+                    // Refresh world if needed
+                    if (response.success && ['updateWorld', 'createAgent', 'updateAgentConfig', 'updateAgentPrompt', 'updateAgentMemory', 'clearAgentMemory'].includes(response.type)) {
+                      logger.debug('Refreshing world after world command', { commandName, world: worldName });
+                      await refreshWorldSubscription(worldSocket, worldName);
+                    }
+                  } else {
+                    sendError(client, `Failed to parse world command: ${eventMessage}`);
                   }
                 } else {
                   logger.warn('World command requires world subscription', {
@@ -409,11 +632,29 @@ export function createWebSocketServer(server: Server): WebSocketServer {
                 messageLength: eventMessage.length
               });
 
-              const result = await processWSInput(eventMessage, worldSocket.world, ROOT_PATH, sender || 'WebSocket', 'message');
+              // User messages are published to the world, not processed as commands
+              try {
+                if (!worldSocket.world.eventEmitter) {
+                  sendError(client, 'World eventEmitter not initialized');
+                  break;
+                }
 
-              // User messages don't need command result responses, they are published to world
-              if (!result.success) {
-                sendError(client, result.error || 'Failed to process message');
+                // Publish message to world
+                worldSocket.world.eventEmitter.emit('new-message', {
+                  content: eventMessage,
+                  sender: sender || 'WebSocket',
+                  timestamp: new Date(),
+                  metadata: { source: 'websocket' }
+                });
+
+                // Send success confirmation but don't echo the message back
+                logger.debug('Message published to world successfully', { world: worldName });
+              } catch (error) {
+                logger.error('Failed to publish message to world', {
+                  error: error instanceof Error ? error.message : error,
+                  world: worldName
+                });
+                sendError(client, 'Failed to send message to world');
               }
             } else {
               logger.warn('Message event missing requirements', {

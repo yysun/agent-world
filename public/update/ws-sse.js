@@ -13,6 +13,7 @@
  * - Auto-scroll to bottom when messages are added or updated
  * - Success response handling with nested system message display
  * - Error response handling within success messages for command failures
+ * - Safe state handling with fallbacks for undefined properties
  *
  * Changes:
  * - Added handleSSEEvent function for new WebSocket server structure
@@ -23,12 +24,21 @@
  * - Added auto-scroll functionality for real-time message updates
  * - Enhanced success response handling to display nested system messages
  * - Added error message handling within success responses for command failures
+ * - Fixed TypeError: state.messages is not iterable by adding safe state fallbacks
+ * - Added proper null/undefined checks for state.messages and state.worldName
  */
 
 import wsApi from '../ws-api.js';
 
 // Handle SSE events with new eventType structure
 const handleSSEEvent = (state, messageData) => {
+  // Ensure state has required properties with fallbacks
+  const safeState = {
+    ...state,
+    messages: state.messages || [],
+    worldName: state.worldName || null
+  };
+
   const messageId = messageData.messageId || messageData.id;
   const agentName = messageData.agentName || messageData.sender || 'Agent';
   const chunk = messageData.content || messageData.chunk || messageData.message || '';
@@ -39,14 +49,14 @@ const handleSSEEvent = (state, messageData) => {
     case 'start':
       // Create new streaming message block
       return {
-        ...state,
-        messages: [...state.messages, {
+        ...safeState,
+        messages: [...safeState.messages, {
           id: Date.now() + Math.random(),
           type: 'agent-stream',
           sender: agentName,
           text: '',
           timestamp: messageData.timestamp || new Date().toISOString(),
-          worldName: messageData.worldName || state.worldName,
+          worldName: messageData.worldName || safeState.worldName,
           isStreaming: true,
           messageId: messageId
         }],
@@ -57,14 +67,14 @@ const handleSSEEvent = (state, messageData) => {
       // Find existing streaming message for this agent/messageId
 
       // Look for existing streaming message by messageId first, then by agent name
-      let existingIndex = state.messages.findLastIndex(msg =>
+      let existingIndex = safeState.messages.findLastIndex(msg =>
         msg.isStreaming &&
         msg.messageId === messageId
       );
 
       // If no message found by messageId, look for the last streaming message from this agent
       if (existingIndex === -1) {
-        existingIndex = state.messages.findLastIndex(msg =>
+        existingIndex = safeState.messages.findLastIndex(msg =>
           msg.isStreaming &&
           msg.sender === agentName &&
           msg.type === 'agent-stream'
@@ -73,7 +83,7 @@ const handleSSEEvent = (state, messageData) => {
 
       if (existingIndex !== -1) {
         // Update existing message with accumulated content
-        const updatedMessages = [...state.messages];
+        const updatedMessages = [...safeState.messages];
         const currentText = updatedMessages[existingIndex].text || '';
         updatedMessages[existingIndex] = {
           ...updatedMessages[existingIndex],
@@ -82,19 +92,19 @@ const handleSSEEvent = (state, messageData) => {
           messageId: messageId // Ensure messageId is set
         };
 
-        return { ...state, messages: updatedMessages, needScroll: true };
+        return { ...safeState, messages: updatedMessages, needScroll: true };
       } else {
         // Create new streaming message block if none exists (handles missing 'start' event)
 
         return {
-          ...state,
-          messages: [...state.messages, {
+          ...safeState,
+          messages: [...safeState.messages, {
             id: Date.now() + Math.random(),
             type: 'agent-stream',
             sender: agentName,
             text: chunk,
             timestamp: messageData.timestamp || new Date().toISOString(),
-            worldName: messageData.worldName || state.worldName,
+            worldName: messageData.worldName || safeState.worldName,
             isStreaming: true,
             messageId: messageId
           }],
@@ -104,7 +114,7 @@ const handleSSEEvent = (state, messageData) => {
 
     case 'end':
       // Mark streaming as complete for the message block
-      const updatedMessages = state.messages.map(msg =>
+      const updatedMessages = safeState.messages.map(msg =>
         msg.isStreaming &&
           msg.sender === agentName &&
           (msg.messageId === messageId || (!messageId && msg.type === 'agent-stream'))
@@ -112,11 +122,11 @@ const handleSSEEvent = (state, messageData) => {
           : msg
       );
 
-      return { ...state, messages: updatedMessages };
+      return { ...safeState, messages: updatedMessages };
 
     case 'error':
       // Mark streaming as complete and add error indicator
-      const errorUpdatedMessages = state.messages.map(msg =>
+      const errorUpdatedMessages = safeState.messages.map(msg =>
         msg.isStreaming &&
           msg.sender === agentName &&
           (msg.messageId === messageId || (!messageId && msg.type === 'agent-stream'))
@@ -124,27 +134,34 @@ const handleSSEEvent = (state, messageData) => {
           : msg
       );
 
-      return { ...state, messages: errorUpdatedMessages };
+      return { ...safeState, messages: errorUpdatedMessages };
 
     default:
-      return state;
+      return safeState;
   }
 };
 
 export const handleWebSocketMessage = (state, messageData) => {
+  // Ensure state has required properties with fallbacks
+  const safeState = {
+    ...state,
+    messages: state.messages || [],
+    worldName: state.worldName || null
+  };
+
   const createMessage = (type, content) => ({
     id: Date.now() + Math.random(),
     type,
     sender: messageData.sender || messageData.agentName || type,
     text: content || messageData.message || messageData.content || JSON.stringify(messageData),
     timestamp: messageData.timestamp || new Date().toISOString(),
-    worldName: messageData.worldName || state.worldName,
+    worldName: messageData.worldName || safeState.worldName,
     ...(type === 'sse' && { isStreaming: true })
   });
 
   // Check if this is an SSE event first (new structure with eventType)
   if (messageData.eventType === 'sse') {
-    return handleSSEEvent(state, messageData);
+    return handleSSEEvent(safeState, messageData);
   }
 
   switch (messageData.type) {
@@ -153,50 +170,50 @@ export const handleWebSocketMessage = (state, messageData) => {
     case 'message':
 
       return {
-        ...state,
-        messages: [...state.messages, createMessage(messageData.type)],
+        ...safeState,
+        messages: [...safeState.messages, createMessage(messageData.type)],
         needScroll: true
       };
 
     case 'sse':
       // Backward compatibility for old SSE format
-      return handleSSEEvent(state, messageData);
+      return handleSSEEvent(safeState, messageData);
 
     case 'error':
-      return { ...state, wsError: messageData.error };
+      return { ...safeState, wsError: messageData.error };
 
     case 'success':
       // Command response - check if there's a data field with content to display
       if (messageData.data) {
         if (messageData.data.type === 'system' && messageData.data.content) {
           return {
-            ...state,
-            messages: [...state.messages, createMessage('system', messageData.data.content)],
+            ...safeState,
+            messages: [...safeState.messages, createMessage('system', messageData.data.content)],
             needScroll: true
           };
         } else if (messageData.data.type === 'error' && messageData.data.error) {
           return {
-            ...state,
-            messages: [...state.messages, createMessage('error', messageData.data.error)],
+            ...safeState,
+            messages: [...safeState.messages, createMessage('error', messageData.data.error)],
             needScroll: true
           };
         }
       }
       // Otherwise don't add to messages
-      return state;
+      return safeState;
 
     case 'connected':
       // Initial connection message
-      return { ...state, connectionStatus: 'connected' };
+      return { ...safeState, connectionStatus: 'connected' };
 
     case 'welcome':
-      if (state.worldName && wsApi.isConnected()) {
-        wsApi.subscribeToWorld(state.worldName);
+      if (safeState.worldName && wsApi.isConnected()) {
+        wsApi.subscribeToWorld(safeState.worldName);
       }
-      return { ...state, connectionStatus: 'connected' };
+      return { ...safeState, connectionStatus: 'connected' };
 
     default:
-      return state;
+      return safeState;
   }
 };
 
