@@ -11,9 +11,8 @@
  * - World instance isolation and proper cleanup during refresh
  *
  * Available Commands:
- * - worlds, world, create-world, update-world
- * - create-agent, update-agent, update-prompt, clear
- * - help
+ * - new (create-world), add (create-agent), clear, select
+ * - help, quit, exit
  * 
  * World Refresh Mechanism:
  * - Commands that modify world state signal refresh requirement via `refreshWorld: true`
@@ -23,7 +22,7 @@
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, listWorlds, getWorld, createWorld, updateWorld, WorldInfo, publishMessage } from '../core/index.js';
+import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage } from '../core/index.js';
 import readline from 'readline';
 
 // CLI response and context types
@@ -59,78 +58,40 @@ export const CLI_COMMAND_MAP: Record<string, {
     options?: string[];
   }>;
 }> = {
-  'worlds': {
-    type: 'getWorlds',
+  'select': {
+    type: 'selectWorld',
     requiresWorld: false,
-    description: 'List all available worlds',
-    usage: '/worlds',
+    description: 'Show world selection menu to pick a world',
+    usage: '/select',
     parameters: []
   },
-  'world': {
-    type: 'getWorld',
-    requiresWorld: false,
-    description: 'Get world information',
-    usage: '/world [worldName]',
-    parameters: [
-      { name: 'worldName', required: false, description: 'World name (uses current if omitted)', type: 'string' }
-    ]
-  },
-  'create-world': {
+  'new': {
     type: 'createWorld',
     requiresWorld: false,
     description: 'Create a new world',
-    usage: '/create-world <name> [description]',
+    usage: '/new <name> [description]',
     parameters: [
       { name: 'name', required: true, description: 'World name', type: 'string' },
       { name: 'description', required: false, description: 'World description', type: 'string' }
     ]
   },
-  'update-world': {
-    type: 'updateWorld',
-    requiresWorld: true,
-    description: 'Update world properties',
-    usage: '/update-world <description>',
-    parameters: [
-      { name: 'description', required: true, description: 'New description', type: 'string' }
-    ]
-  },
-  'create-agent': {
+  'add': {
     type: 'createAgent',
     requiresWorld: true,
     description: 'Create a new agent',
-    usage: '/create-agent <name> [prompt]',
+    usage: '/add <name> [prompt]',
     parameters: [
       { name: 'name', required: true, description: 'Agent name', type: 'string' },
       { name: 'prompt', required: false, description: 'Agent system prompt', type: 'string' }
     ]
   },
-  'update-agent': {
-    type: 'updateAgentConfig',
-    requiresWorld: true,
-    description: 'Update agent configuration',
-    usage: '/update-agent <agentName> <config>',
-    parameters: [
-      { name: 'agentName', required: true, description: 'Agent name', type: 'string' },
-      { name: 'config', required: true, description: 'Config JSON string', type: 'string' }
-    ]
-  },
-  'update-prompt': {
-    type: 'updateAgentPrompt',
-    requiresWorld: true,
-    description: 'Update agent system prompt',
-    usage: '/update-prompt <agentName> <prompt>',
-    parameters: [
-      { name: 'agentName', required: true, description: 'Agent name', type: 'string' },
-      { name: 'prompt', required: true, description: 'New system prompt', type: 'string' }
-    ]
-  },
   'clear': {
     type: 'clearAgentMemory',
     requiresWorld: true,
-    description: 'Clear agent memory',
-    usage: '/clear <agentName>',
+    description: 'Clear agent memory or all agents',
+    usage: '/clear <agentName|all>',
     parameters: [
-      { name: 'agentName', required: true, description: 'Agent name', type: 'string' }
+      { name: 'agentName', required: true, description: 'Agent name or "all" for all agents', type: 'string' }
     ]
   },
   'help': {
@@ -141,13 +102,25 @@ export const CLI_COMMAND_MAP: Record<string, {
     parameters: [
       { name: 'command', required: false, description: 'Show help for specific command', type: 'string' }
     ]
+  },
+  'quit': {
+    type: 'quit',
+    requiresWorld: false,
+    description: 'Exit the CLI',
+    usage: '/quit',
+    parameters: []
+  },
+  'exit': {
+    type: 'exit',
+    requiresWorld: false,
+    description: 'Exit the CLI',
+    usage: '/exit',
+    parameters: []
   }
 };
 
 // Legacy command aliases
 const COMMAND_MAP: Record<string, string> = {
-  'list': 'getWorlds',
-  'get': 'getWorld',
   'create': 'createWorld',
   'update': 'updateWorld'
 };
@@ -268,19 +241,14 @@ export async function processCLICommand(
 
     // Check world requirement
     if (commandInfo.requiresWorld && !context.currentWorldName) {
-      const worldName = await promptFn('No world selected. Please enter world name:');
-      if (!worldName.trim()) {
-        return {
-          success: false,
-          message: 'World selection is required for this command',
-          technicalDetails: `Command ${command} requires world context`
-        };
-      }
-      context.currentWorldName = worldName.trim();
-      context.currentWorld = null;
+      return {
+        success: false,
+        message: 'No world selected. World is required for this command.',
+        technicalDetails: `Command ${command} requires world context`
+      };
     }
 
-    // Collect parameters through interactive prompts
+    // Collect parameters from command arguments
     const collectedParams: Record<string, any> = {};
 
     for (let i = 0; i < commandInfo.parameters.length; i++) {
@@ -288,19 +256,11 @@ export async function processCLICommand(
       let value = args[i];
 
       if (!value && param.required) {
-        const promptMessage = param.options
-          ? `Enter ${param.description} (${param.options.join(', ')}):`
-          : `Enter ${param.description}:`;
-
-        value = await promptFn(promptMessage, param.options);
-
-        if (!value.trim()) {
-          return {
-            success: false,
-            message: `${param.name} is required but not provided`,
-            technicalDetails: `Missing required parameter: ${param.name}`
-          };
-        }
+        return {
+          success: false,
+          message: `Missing required parameter: ${param.name}`,
+          technicalDetails: `Usage: ${commandInfo.usage}`
+        };
       }
 
       if (value) {
@@ -350,33 +310,6 @@ export async function processCLICommand(
     let cliResponse: CLIResponse;
 
     switch (commandInfo.type) {
-      case 'getWorlds':
-        const worlds = await listWorlds(context.rootPath);
-        cliResponse = {
-          success: true,
-          message: 'Worlds retrieved successfully',
-          data: worlds
-        };
-        break;
-
-      case 'getWorld':
-        const worldName = collectedParams.worldName || context.currentWorldName;
-        if (!worldName) {
-          cliResponse = { success: false, message: 'World name is required', data: null };
-          break;
-        }
-        const worldData = await getWorld(context.rootPath, worldName);
-        if (!worldData) {
-          cliResponse = { success: false, message: `World '${worldName}' not found`, data: null };
-          break;
-        }
-        cliResponse = {
-          success: true,
-          message: `World '${worldName}' retrieved successfully`,
-          data: worldData
-        };
-        break;
-
       case 'createWorld':
         const newWorld = await createWorld(context.rootPath, {
           name: collectedParams.name,
@@ -390,19 +323,11 @@ export async function processCLICommand(
         };
         break;
 
-      case 'updateWorld':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
-        }
-        const updates: any = {};
-        if (collectedParams.description) updates.description = collectedParams.description;
-        const updatedWorld = await updateWorld(context.rootPath, world.id, updates);
+      case 'selectWorld':
         cliResponse = {
           success: true,
-          message: `World '${world.name}' updated successfully`,
-          data: updatedWorld,
-          needsWorldRefresh: true
+          message: 'Opening world selection...',
+          data: { selectWorld: true }
         };
         break;
 
@@ -426,60 +351,29 @@ export async function processCLICommand(
         };
         break;
 
-      case 'updateAgentConfig':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
-        }
-        const agentToUpdate = world.agents.get(collectedParams.agentName);
-        if (!agentToUpdate) {
-          cliResponse = { success: false, message: `Agent '${collectedParams.agentName}' not found`, data: null };
-          break;
-        }
-        let configUpdates = {};
-        if (collectedParams.config) {
-          try {
-            configUpdates = JSON.parse(collectedParams.config);
-          } catch {
-            cliResponse = { success: false, message: 'Invalid JSON for config updates', data: null };
-            break;
-          }
-        }
-        const updatedAgent = await world.updateAgent(collectedParams.agentName, configUpdates);
-        cliResponse = {
-          success: true,
-          message: `Agent '${collectedParams.agentName}' config updated successfully`,
-          data: updatedAgent,
-          needsWorldRefresh: true
-        };
-        break;
-
-      case 'updateAgentPrompt':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
-        }
-        const agentForPrompt = world.agents.get(collectedParams.agentName);
-        if (!agentForPrompt) {
-          cliResponse = { success: false, message: `Agent '${collectedParams.agentName}' not found`, data: null };
-          break;
-        }
-        const agentWithNewPrompt = await world.updateAgent(collectedParams.agentName, {
-          systemPrompt: collectedParams.prompt
-        });
-        cliResponse = {
-          success: true,
-          message: `Agent '${collectedParams.agentName}' prompt updated successfully`,
-          data: agentWithNewPrompt,
-          needsWorldRefresh: true
-        };
-        break;
-
       case 'clearAgentMemory':
         if (!world) {
           cliResponse = { success: false, message: 'No world selected', data: null };
           break;
         }
+
+        // Handle /clear all to clear all agents' memory
+        if (collectedParams.agentName.toLowerCase() === 'all') {
+          const clearedAgents: string[] = [];
+          for (const [agentName] of world.agents) {
+            await world.clearAgentMemory(agentName);
+            clearedAgents.push(agentName);
+          }
+          cliResponse = {
+            success: true,
+            message: `Memory cleared for all agents: ${clearedAgents.join(', ')}`,
+            data: { clearedAgents },
+            needsWorldRefresh: true
+          };
+          break;
+        }
+
+        // Handle single agent clear
         const agentForClear = world.agents.get(collectedParams.agentName);
         if (!agentForClear) {
           cliResponse = { success: false, message: `Agent '${collectedParams.agentName}' not found`, data: null };
@@ -491,6 +385,15 @@ export async function processCLICommand(
           message: `Agent '${collectedParams.agentName}' memory cleared successfully`,
           data: null,
           needsWorldRefresh: true
+        };
+        break;
+
+      case 'quit':
+      case 'exit':
+        cliResponse = {
+          success: true,
+          message: 'Exiting CLI...',
+          data: { exit: true }
         };
         break;
 

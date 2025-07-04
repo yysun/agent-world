@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+
+// Configure logger level BEFORE any imports to prevent core modules from using debug level
+// This must be the very first thing that happens
+if (!process.env.CLI_LOG_LEVEL_OVERRIDE) {
+  process.env.LOG_LEVEL = 'error';
+  process.env.CLI_LOG_LEVEL_OVERRIDE = 'true';
+}
+
 /**
  * Agent World CLI Entry Point - Dual-Mode Console Interface
  * 
@@ -13,6 +21,7 @@
  * - Real-time Streaming: Live agent responses via stream.ts module
  * - Color Helpers: Consistent styling with simplified color functions
  * - Timer Management: Smart prompt restoration and exit handling
+ * - Debug Logging: Configurable log levels using core logger module
  *
  * ARCHITECTURE:
  * - Uses commander.js for argument parsing and mode detection
@@ -20,17 +29,19 @@
  * - Implements ClientConnection interface for console-based event handling
  * - Uses readline for interactive input with proper cleanup
  * - Delegates streaming display to stream.ts module for real-time chunk accumulation
+ * - Uses core logger for structured debug logging with configurable levels
  *
  * USAGE:
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"
  * Pipeline: cli --root /data/worlds --world myworld "Hello, world!"
  * Pipeline: echo "Hello, world!" | cli --root /data/worlds --world myworld
  * Interactive: cli --root /data/worlds --world myworld
+ * Debug Mode: cli --root /data/worlds --world myworld --logLevel debug
  */
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection } from '../core/index.js';
+import { listWorlds, subscribeWorld, World, ClientConnection, logger } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
@@ -38,6 +49,13 @@ import {
   handleWorldEventWithStreaming,
   isStreamingActive
 } from './stream.js';
+
+// Immediately configure logger to override any core defaults
+// This must happen before any core operations that might use the logger
+logger.level = 'error';
+if (process.env.LOG_LEVEL) {
+  process.env.LOG_LEVEL = 'error';
+}
 
 // Timer management for prompt restoration
 interface GlobalState {
@@ -86,12 +104,31 @@ const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
+// Logger configuration
+function configureLogger(logLevel?: string): void {
+  // Always override the logger level, default to 'error' unless explicitly set
+  // This overrides any environment variable or core logger defaults
+  const level = logLevel || 'error';
+
+  // Force set the logger level regardless of environment variables
+  logger.level = level;
+  
+  // Also override environment variable to prevent any child loggers from using it
+  process.env.LOG_LEVEL = level;
+
+  // Only log the debug message if we're actually at debug level
+  if (level === 'debug' || level === 'trace') {
+    logger.debug(`CLI log level forcibly set to: ${level}`);
+  }
+}
+
 const DEFAULT_ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
 interface CLIOptions {
   root?: string;
   world?: string;
   command?: string;
+  logLevel?: string;
 }
 
 // Pipeline mode execution with timer-based cleanup
@@ -300,15 +337,21 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
   }
 
   console.log(`\n${boldMagenta('Available worlds:')}`);
+  console.log(`  ${yellow('0.')} ${cyan('Exit')}`);
   worlds.forEach((world, index) => {
     console.log(`  ${yellow(`${index + 1}.`)} ${cyan(world)}`);
   });
 
   return new Promise((resolve) => {
     function askForSelection() {
-      rl.question(`\n${boldMagenta('Select a world (number or name):')} `, (answer) => {
+      rl.question(`\n${boldMagenta('Select a world (number or name), or 0 to exit:')} `, (answer) => {
         const trimmed = answer.trim();
         const num = parseInt(trimmed);
+
+        if (num === 0) {
+          resolve(null);
+          return;
+        }
 
         if (!isNaN(num) && num >= 1 && num <= worlds.length) {
           resolve(worlds[num - 1]);
@@ -371,11 +414,12 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
   let worldState: WorldState | null = null;
   let currentWorldName = '';
+  let isExiting = false;
 
   try {
     // Load initial world or prompt for selection
     if (options.world) {
-      console.log(`\n${boldBlue(`Loading world: ${options.world}`)}`);
+      logger.debug(`Loading world: ${options.world}`);
       try {
         worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, rl);
         currentWorldName = options.world;
@@ -398,7 +442,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
-      console.log(`\n${boldBlue(`Loading world: ${selectedWorld}`)}`);
+      logger.debug(`Loading world: ${selectedWorld}`);
       try {
         worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl);
         currentWorldName = selectedWorld;
@@ -416,9 +460,11 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
     // Show usage tips
     console.log(`\n${gray('Tips:')}`);
-    console.log(`  ${bullet(gray('Type commands like:'))} ${cyan('/clear agent1')}, ${cyan('/addagent MyAgent')}`);
+    console.log(`  ${bullet(gray('Type commands like:'))} ${cyan('/clear agent1')}, ${cyan('/clear all')}, ${cyan('/add MyAgent')}`);
+    console.log(`  ${bullet(gray('Use'))} ${cyan('/select')} ${gray('to choose a different world')}`);
     console.log(`  ${bullet(gray('Type messages to send to agents'))}`);
-    console.log(`  ${bullet(gray('Press'))} ${boldYellow('Ctrl+C')} ${gray('to exit')}`);
+    console.log(`  ${bullet(gray('Use'))} ${cyan('/quit')} ${gray('or')} ${cyan('/exit')} ${gray('to exit, or press')} ${boldYellow('Ctrl+C')}`);
+    console.log(`  ${bullet(gray('Use'))} ${cyan('--logLevel debug')} ${gray('to see detailed debug messages')}`);
     console.log('');
 
     rl.prompt();
@@ -435,6 +481,64 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       try {
         const result = await processCLIInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
+
+        // Handle exit commands
+        if (result.data?.exit) {
+          if (isExiting) return; // Prevent duplicate exit handling
+          isExiting = true;
+
+          // Clear any existing timers immediately
+          if (streaming.stopWait) {
+            streaming.stopWait();
+          }
+
+          console.log(`\n${boldCyan('Goodbye!')}`);
+          if (worldState) {
+            cleanupWorldSubscription(worldState);
+          }
+          rl.close();
+          return;
+        }
+
+        // Handle world selection command
+        if (result.data?.selectWorld) {
+          console.log(`\n${boldBlue('Discovering available worlds...')}`);
+          const selectedWorld = await selectWorld(rootPath, rl);
+
+          if (!selectedWorld) {
+            console.log(error('No world selected.'));
+            rl.prompt();
+            return;
+          }
+
+          logger.debug(`Loading world: ${selectedWorld}`);
+          try {
+            // Clean up existing world subscription first
+            if (worldState) {
+              logger.debug('Cleaning up previous world subscription...');
+              cleanupWorldSubscription(worldState);
+              worldState = null;
+              // Small delay to ensure cleanup is complete
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            // Subscribe to the new world
+            logger.debug(`Subscribing to world: ${selectedWorld}...`);
+            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl);
+            currentWorldName = selectedWorld;
+            console.log(success(`Connected to world: ${currentWorldName}`));
+
+            if (worldState?.world) {
+              console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
+            }
+          } catch (error) {
+            console.error(error(`Error loading world: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          }
+
+          // Show prompt immediately after world selection
+          rl.prompt();
+          return;
+        }
 
         if (result.success === false) {
           console.log(error(`Error: ${result.error || result.message || 'Command failed'}`));
@@ -467,12 +571,30 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         console.error(error(`Command error: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
 
-      if (streaming.wait) {
+      // Set timer based on input type: commands get short delay, messages get longer delay
+      const isCommand = trimmedInput.startsWith('/');
+      const isExitCommand = trimmedInput.toLowerCase() === '/exit' || trimmedInput.toLowerCase() === '/quit';
+      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
+
+      if (isExitCommand) {
+        // For exit commands, don't set any timer - exit should be immediate
+        return;
+      } else if (isSelectCommand) {
+        // For select command, prompt is already shown in the handler
+        return;
+      } else if (isCommand) {
+        // For other commands, show prompt immediately
+        rl.prompt();
+      } else if (streaming.wait) {
+        // For messages, wait for potential agent responses
         streaming.wait(5000);
       }
     });
 
     rl.on('close', () => {
+      if (isExiting) return; // Prevent duplicate cleanup
+      isExiting = true;
+
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) {
         if (streaming.stopWait) {
@@ -484,6 +606,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     });
 
     rl.on('SIGINT', () => {
+      if (isExiting) return; // Prevent duplicate cleanup
+      isExiting = true;
+
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) {
         if (streaming.stopWait) {
@@ -510,11 +635,26 @@ async function main(): Promise<void> {
     .option('-r, --root <path>', 'Root path for worlds data', DEFAULT_ROOT_PATH)
     .option('-w, --world <name>', 'World name to connect to')
     .option('-c, --command <cmd>', 'Command to execute in pipeline mode')
+    .option('-l, --logLevel <level>', 'Set log level (trace, debug, info, warn, error)', 'error')
     .allowUnknownOption()
     .allowExcessArguments()
     .parse();
 
   const options = program.opts<CLIOptions>();
+
+  // Configure logger - override the early environment setting if user specified a level
+  if (options.logLevel && options.logLevel !== 'error') {
+    // User explicitly requested a different log level
+    process.env.LOG_LEVEL = options.logLevel;
+    logger.level = options.logLevel;
+    if (options.logLevel === 'debug' || options.logLevel === 'trace') {
+      logger.debug(`CLI log level set to: ${options.logLevel}`);
+    }
+  } else {
+    // Ensure we stick with error level
+    configureLogger(options.logLevel);
+  }
+
   const args = program.args;
   const messageFromArgs = args.length > 0 ? args.join(' ') : null;
 

@@ -29,7 +29,7 @@ import {
   PromptFunction
 } from '../cli/commands.js';
 import { World, Agent, LLMProvider } from '../core/types.js';
-import { listWorlds, getWorld, createWorld, updateWorld, deleteWorld } from '../core/world-manager.js';
+import { listWorlds, createWorld, updateWorld, deleteWorld, publishMessage } from '../core/index.js';
 import { subscribeWorld, cleanupWorldSubscription, ClientConnection } from '../core/subscription.js';
 import fs from 'fs';
 import path from 'path';
@@ -261,21 +261,15 @@ async function testHelpSystem(): Promise<void> {
 }
 
 async function testWorldInformationCommands(state: TestState): Promise<void> {
-  console.log('  Testing world information commands...');
+  console.log('  Testing world selection commands...');
 
-  // Test /worlds command
-  const worldsResult = await processCLICommand('/worlds', state.context, mockPrompt);
-  if (!worldsResult.success || !worldsResult.data || !Array.isArray(worldsResult.data)) {
-    throw new Error('Worlds command failed or returned invalid data');
+  // Test /select command
+  const selectResult = await processCLICommand('/select', state.context, mockPrompt);
+  if (!selectResult.success || !selectResult.data?.selectWorld) {
+    throw new Error('Select command failed or did not return proper data');
   }
 
-  // Test /world command
-  const worldResult = await processCLICommand(`/world ${TEST_WORLD_NAME}`, state.context, mockPrompt);
-  if (!worldResult.success || !worldResult.data) {
-    throw new Error('World command failed');
-  }
-
-  console.log('    ✅ World information commands work correctly');
+  console.log('    ✅ World selection commands work correctly');
 }
 
 async function testAgentManagementCommands(state: TestState): Promise<void> {
@@ -376,7 +370,6 @@ async function testEventSubscriptionIntegrity(state: TestState): Promise<void> {
   // Test that world events are properly received
   // Publish a test message to trigger events
   if (state.world) {
-    const { publishMessage } = await import('../core/world-events.js');
     publishMessage(state.world, 'Test message for event subscription', 'TEST_SENDER');
 
     // Allow some time for event propagation
@@ -393,8 +386,7 @@ async function testEventSubscriptionIntegrity(state: TestState): Promise<void> {
   // Test subscription after multiple operations
   const operationsToTest = [
     '/help',
-    '/worlds',
-    `/world ${TEST_WORLD_NAME}`
+    '/select'
   ];
 
   for (const operation of operationsToTest) {
@@ -406,7 +398,6 @@ async function testEventSubscriptionIntegrity(state: TestState): Promise<void> {
 
     // Verify subscription is still intact by publishing another test message
     if (state.world) {
-      const { publishMessage } = await import('../core/world-events.js');
       publishMessage(state.world, `Test after ${operation}`, 'TEST_SENDER');
       await new Promise(resolve => setTimeout(resolve, 50));
 

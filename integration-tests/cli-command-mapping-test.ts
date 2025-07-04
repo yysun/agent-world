@@ -11,7 +11,7 @@
  */
 
 import { processCLIInput } from '../cli/commands.js';
-import { getWorld } from '../core/world-manager.js';
+import { subscribeWorld, ClientConnection } from '../core/index.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -30,7 +30,17 @@ async function runTests() {
   }
 
   console.log('🔍 Loading test world...');
-  const world = await getWorld(worldName, rootPath);
+
+  // Create a simple client for testing
+  const testClient: ClientConnection = {
+    send: (data: string) => { },
+    isOpen: true,
+    onWorldEvent: (eventType: string, eventData: any) => { },
+    onError: (error: string) => console.error('World error:', error)
+  };
+
+  const subscription = await subscribeWorld(worldName, rootPath, testClient);
+  const world = subscription?.world;
 
   if (!world) {
     console.log('❌ Test failed: Unable to load test world');
@@ -72,14 +82,14 @@ async function runTests() {
     process.exit(1);
   }
 
-  // Test case 4: Command with parameters (world info)
+  // Test case 4: Command with parameters (help command)
   console.log('\n📋 Test Case 4: Command with parameters');
-  const worldResult = await processCLIInput(`/world ${worldName}`, world, rootPath);
+  const helpDetailResult = await processCLIInput('/help clear', world, rootPath);
 
-  if (worldResult.success) {
-    console.log('✅ World command with parameters executed successfully');
+  if (helpDetailResult.success) {
+    console.log('✅ Help command with parameters executed successfully');
   } else {
-    console.log('❌ World command test failed:', worldResult.message);
+    console.log('❌ Help command test failed:', helpDetailResult.message);
     process.exit(1);
   }
 
