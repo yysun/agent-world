@@ -368,6 +368,49 @@ async function getWorlds() {
   throw new Error(response.error || 'Failed to get worlds');
 }
 
+async function getAgent(worldName, agentName) {
+  const targetWorld = worldName || currentWorldSubscription;
+  if (!targetWorld) {
+    throw new Error('World name required or must be subscribed to a world');
+  }
+
+  if (!agentName) {
+    throw new Error('Agent name is required');
+  }
+
+  console.log('🐛 DEBUG: getAgent called', {
+    worldName: targetWorld,
+    agentName,
+    currentSubscription: currentWorldSubscription
+  });
+
+  const request = createCommandRequest('getAgent', {
+    worldName: targetWorld,
+    agentName
+  });
+
+  console.log('🐛 DEBUG: Sending getAgent command', request);
+
+  const response = await sendTypedCommand(request);
+
+  console.log('🐛 DEBUG: getAgent response', {
+    success: response.success,
+    hasData: !!response.data,
+    agentName: response.data?.name,
+    hasSystemPrompt: !!(response.data?.systemPrompt),
+    systemPromptLength: response.data?.systemPrompt?.length || 0,
+    error: response.error
+  });
+
+  if (response.success && response.data) {
+    console.log('🐛 DEBUG: getAgent successful, returning agent data');
+    return response.data;
+  }
+
+  console.log('🐛 DEBUG: getAgent failed, throwing error');
+  throw new Error(response.error || 'Failed to get agent');
+}
+
 async function getAgents(worldName) {
   const targetWorld = worldName || currentWorldSubscription;
   if (!targetWorld) {
@@ -402,7 +445,7 @@ async function getAgents(worldName) {
   throw new Error(response.error || 'Failed to get agents');
 }
 
-async function getAgent(worldName, agentName) {
+async function getAgentFromList(worldName, agentName) {
   const agents = await getAgents(worldName);
   const agent = agents.find(a => a.name === agentName);
   if (!agent) {
