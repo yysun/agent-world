@@ -17,7 +17,7 @@
 
 import WebSocket from 'ws';
 import { createServer, Server } from 'http';
-import { createWorld } from '../core/world-manager.js';
+import { createWorld } from '../core/index.js';
 import { promises as fs } from 'fs';
 
 // Test configuration

@@ -64,8 +64,9 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types';
-import { publishSSE } from './world-events';
+import { publishSSE } from './events';
 import { generateId } from './utils';
+import { logger } from './logger';
 
 /**
  * Global LLM call queue to ensure serialized execution
@@ -128,7 +129,7 @@ class LLMQueue {
         const result = await Promise.race([processPromise, timeoutPromise]);
         item.resolve(result);
       } catch (error) {
-        console.error(`LLM queue error for agent ${item.agentId}:`, error);
+        logger.error('LLM queue error', { agentId: item.agentId, error: error instanceof Error ? error.message : error });
         item.reject(error);
       }
     }
@@ -326,7 +327,7 @@ async function executeGenerateAgentResponse(
     const { saveAgentToDisk } = await import('./agent-storage');
     await saveAgentToDisk(world.rootPath, world.id, agent);
   } catch (error) {
-    console.warn(`Failed to auto-save agent ${agent.id} after LLM call:`, error);
+    logger.warn('Failed to auto-save agent after LLM call', { agentId: agent.id, error: error instanceof Error ? error.message : error });
   }
 
   return text;

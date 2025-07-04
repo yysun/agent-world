@@ -30,8 +30,7 @@
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, getWorld, listWorlds } from '../core/world-manager.js';
-import { publishMessage, subscribeToMessages, subscribeToSSE } from '../core/world-events.js';
+import { createWorld, getWorld, getFullWorld, listWorlds, publishMessage, subscribeToMessages, subscribeToSSE } from '../core/index.js';
 
 const DEFAULT_WORLD_NAME = 'Default World';
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
@@ -71,7 +70,7 @@ router.get('/worlds', async (req, res) => {
 router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
     const worldName = req.params.worldName;
-    const world = await getWorld(ROOT_PATH, worldName);
+    const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -90,7 +89,7 @@ router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Pro
 router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, agentName } = req.params;
-    const world = await getWorld(ROOT_PATH, worldName);
+    const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -131,7 +130,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     }
 
     const { status, config, systemPrompt, clearMemory } = validation.data;
-    const world = await getWorld(ROOT_PATH, worldName);
+    const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
@@ -194,7 +193,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     }
 
     const { message, sender } = validation.data;
-    const world = await getWorld(ROOT_PATH, worldName);
+    const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
       res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });

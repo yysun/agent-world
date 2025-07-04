@@ -47,6 +47,7 @@ The following tests were removed as they were integration tests rather than unit
 - `agent-manager.test.ts` - Integration test with real world dependencies  
 - `validation.test.ts` - Integration test requiring full file system
 - `world-manager.test.ts` - Integration test with storage dependencies
+- `world-only-patterns.test.ts` - Outdated test with old import paths
 
 These tests were calling real functions instead of mocked dependencies, causing:
 - World persistence between tests

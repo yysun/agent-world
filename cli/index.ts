@@ -30,10 +30,8 @@
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld } from '../core/index.js';
-import { World } from '../core/types.js';
+import { listWorlds, subscribeWorld, World, ClientConnection } from '../core/index.js';
 import { processCLIInput } from './commands.js';
-import { ClientConnection } from '../core/subscription.js';
 import {
   StreamingState,
   createStreamingState,

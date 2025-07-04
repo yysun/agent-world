@@ -4,7 +4,7 @@
  */
 
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
-import { shouldAgentRespond } from '../../core/agent-events';
+import { shouldAgentRespond } from '../../core/events';
 import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../core/types';
 
 // Mock dependencies
@@ -14,11 +14,15 @@ jest.mock('../../core/agent-storage', () => ({
   saveAgentToDisk: jest.fn()
 }));
 
-jest.mock('../../core/world-events', () => ({
-  subscribeToMessages: jest.fn(),
-  publishMessage: jest.fn(),
-  publishSSE: jest.fn()
-}));
+jest.mock('../../core/events', () => {
+  const originalModule = jest.requireActual('../../core/events') as any;
+  return {
+    ...originalModule,
+    subscribeToMessages: jest.fn(),
+    publishMessage: jest.fn(),
+    publishSSE: jest.fn()
+  };
+});
 
 jest.mock('../../core/llm-manager', () => ({
   streamAgentResponse: jest.fn()

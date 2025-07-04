@@ -3,33 +3,58 @@
  * 
  * Exports:
  * - World management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Agent management functions (Node.js: full implementation, Browser: no-op warnings)
+ * - Message management functions for high-level broadcasting
  * - Type definitions and LLM provider enumeration (both environments)
  * - Utility functions (both environments)
+ * - Subscription layer for world lifecycle management
  * - Package version metadata
  * 
- * Architecture: World-mediated access pattern with conditional compilation.
+ * Architecture: Unified manager module with conditional compilation.
  * Browser gets types and structure, Node.js gets full storage functionality.
  */
 
-// World management functions - conditionally compiled
+// Unified management functions - conditionally compiled
 export {
+  // World management
   createWorld,
   getWorld,
+  getFullWorld,
   updateWorld,
   deleteWorld,
-  listWorlds
-} from './world-manager';
+  listWorlds,
+  getWorldConfig,
 
-// Agent management functions - conditionally compiled  
-export {
+  // Agent management
   createAgent,
   getAgent,
   updateAgent,
   deleteAgent,
   listAgents,
   updateAgentMemory,
-  clearAgentMemory
-} from './agent-manager';
+  clearAgentMemory,
+  loadAgentsIntoWorld,
+  syncWorldAgents,
+  createAgentsBatch,
+  registerAgentRuntime,
+  getAgentConfig,
+
+  // Message management
+  broadcastMessage,
+  sendDirectMessage,
+  getWorldMessages
+} from './managers';
+
+// Event functions for direct access
+export {
+  publishMessage,
+  subscribeToMessages,
+  subscribeToSSE,
+  publishSSE,
+  subscribeAgentToMessages,
+  processAgentMessage,
+  shouldAgentRespond
+} from './events';
 
 // Types and enums (safe for both Node.js and browser)
 export type {
@@ -43,12 +68,21 @@ export type {
   AgentInfo
 } from './types';
 
+// Manager types
+export type { WorldInfo } from './managers';
+
 export { LLMProvider } from './types';
+
+// Logging (safe for both Node.js and browser)
+export { logger } from './logger';
 
 // Utility functions (safe for both Node.js and browser)
 export { generateId, toKebabCase } from './utils';
 
 export * from './subscription.js';
 
+// Storage access (for advanced use cases)  
+export type { WorldData } from './world-storage';
+
 // Package metadata
-export const VERSION = '1.0.0';
+export const VERSION = '3.0.0';

@@ -26,8 +26,8 @@
 
 import pino from 'pino';
 import { World } from './types.js';
-import { getFullWorld as coreGetFullWorld } from './world-manager.js';
-import { publishMessage } from './world-events.js';
+import { getFullWorld as coreGetFullWorld } from './managers.js';
+import { publishMessage } from './events.js';
 import { toKebabCase } from './utils.js';
 
 // Create logger instance
@@ -286,7 +286,7 @@ export async function processWSCommand(
   try {
     switch (commandType) {
       case 'getWorlds':
-        const { listWorlds } = await import('./world-manager.js');
+        const { listWorlds } = await import('./managers.js');
         const worlds = await listWorlds(rootPath);
         return {
           success: true,
@@ -296,7 +296,7 @@ export async function processWSCommand(
         };
 
       case 'getWorld':
-        const { getWorldConfig } = await import('./world-manager.js');
+        const { getWorldConfig } = await import('./managers.js');
         const worldName = params.worldName || params.name;
         if (!worldName) {
           return { success: false, error: 'World name is required', type: commandType };
@@ -313,7 +313,7 @@ export async function processWSCommand(
         };
 
       case 'createWorld':
-        const { createWorld } = await import('./world-manager.js');
+        const { createWorld } = await import('./managers.js');
         const newWorld = await createWorld(rootPath, {
           name: params.name,
           description: params.description || `A world named ${params.name}`
@@ -329,7 +329,7 @@ export async function processWSCommand(
         if (!world) {
           return { success: false, error: 'No world selected', type: commandType };
         }
-        const { updateWorld } = await import('./world-manager.js');
+        const { updateWorld } = await import('./managers.js');
         const updates = params.updates || {};
         const updatedWorld = await updateWorld(rootPath, world.id, updates);
         return {

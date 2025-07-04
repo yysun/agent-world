@@ -1,50 +1,118 @@
+import { logger } from './logger';
+
 /**
- * Agent Events Module - World-Aware Agent Message Processing and Subscriptions
+ * Unified Events Module - World and Agent Event Functions
  *
  * Features:
- * - Automatic agent subscription to World.eventEmitter messages with passive memory
- * - Agent message processing logic with world-specific turn limits and LLM call tracking
- * - Message filtering and response logic using world context and first-mention-only system
- * - LLM streaming integration with world's eventEmitter SSE events and error handling
- * - World-specific event emitter usage ensuring proper event isolation
- * - Pass command detection with proper memory persistence and control handoff
- * - Auto-mention logic for agent-to-agent conversations with sender type detection
+ * - Direct World.eventEmitter event publishing and subscription with type safety
+ * - Agent subscription and message processing logic with world context
+ * - Natural event isolation per World instance ensuring no cross-world interference
+ * - Zero dependencies on existing event systems or complex abstractions
+ * - Type-safe event handling with proper interfaces and validation
+ * - High-level message broadcasting with sender attribution and timestamping
  *
  * Core Functions:
+ * World Events:
+ * - publishMessage: Emit message events to World.eventEmitter with automatic ID generation
+ * - subscribeToMessages: Subscribe to World.eventEmitter message events with cleanup
+ * - publishSSE: Emit SSE events for streaming responses with structured data
+ * - subscribeToSSE: Subscribe to SSE streaming events with proper typing
+ * - broadcastToWorld: High-level message broadcasting with default sender handling
+ *
+ * Agent Events:
  * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering
  * - processAgentMessage: Handle agent message processing with world context and memory persistence
  * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
  * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
  *
- * Implementation Details:
- * - Uses World.eventEmitter for all event operations ensuring proper isolation
- * - Implements agent processing logic with world awareness and turn limit management
- * - Integrates with LLM manager using world context for SSE streaming events
- * - Supports configurable world-specific turn limits with automatic reset on human messages
- * - Zero dependencies on existing agent.ts or legacy event systems
- * - All operations scoped to specific world instance with proper memory persistence
- * - Case-insensitive mention detection with first-mention-only response logic
- * - Pass command handling preserves original response in memory while redirecting control
+ * Event Structure:
+ * - Message Events: WorldMessageEvent with content, sender, timestamp, and messageId
+ * - SSE Events: WorldSSEEvent with agentName, type, content, error, and usage data
+ * - Automatic timestamp generation and unique ID assignment for all events
+ * - Structured event data ensuring consistency across all event consumers
  *
- * Recent Changes:
- * - Fixed sender type detection to use determineSenderType() consistently
- * - Enhanced pass command handling to preserve original LLM response in memory
- * - Improved comment documentation with implementation details and change history
+ * Implementation Details:
+ * - Uses World.eventEmitter.emit() and .on() directly for maximum performance
+ * - No abstraction layers or complex providers reducing complexity and overhead
+ * - Events are naturally scoped to World instance preventing event leakage
+ * - Ready for agent subscription and LLM integration with consistent interfaces
+ * - Subscription functions return cleanup callbacks for proper memory management
+ * - All events include timestamps and unique IDs for debugging and tracing
  */
 
-import { World, Agent, AgentMessage, MessageData, SenderType, WorldMessageEvent } from './types';
-import { subscribeToMessages, publishMessage, publishSSE } from './world-events';
-import { saveAgentToDisk, loadAgentFromDisk, saveAgentMemoryToDisk, saveAgentConfigToDisk } from './agent-storage';
-import { streamAgentResponse } from './llm-manager';
+import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
+import { generateId } from './utils.js';
+
+// World Events Functions (from world-events.ts)
+
+/**
+ * Message publishing using World.eventEmitter
+ */
+export function publishMessage(world: World, content: string, sender: string): void {
+  const messageEvent: WorldMessageEvent = {
+    content,
+    sender,
+    timestamp: new Date(),
+    messageId: generateId()
+  };
+  world.eventEmitter.emit('message', messageEvent);
+}
+
+/**
+ * Message subscription using World.eventEmitter
+ */
+export function subscribeToMessages(
+  world: World,
+  handler: (event: WorldMessageEvent) => void
+): () => void {
+  world.eventEmitter.on('message', handler);
+  return () => world.eventEmitter.off('message', handler);
+}
+
+/**
+ * SSE events using World.eventEmitter
+ */
+export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
+  const sseEvent: WorldSSEEvent = {
+    agentName: data.agentName!,
+    type: data.type!,
+    content: data.content,
+    error: data.error,
+    messageId: data.messageId || generateId(),
+    usage: data.usage
+  };
+  world.eventEmitter.emit('sse', sseEvent);
+}
+
+/**
+ * SSE subscription using World.eventEmitter
+ */
+export function subscribeToSSE(
+  world: World,
+  handler: (event: WorldSSEEvent) => void
+): () => void {
+  world.eventEmitter.on('sse', handler);
+  return () => world.eventEmitter.off('sse', handler);
+}
+
+/**
+ * Broadcast message to all agents in world
+ */
+export function broadcastToWorld(world: World, message: string, sender?: string): void {
+  publishMessage(world, message, sender || 'HUMAN');
+}
+
+// Agent Events Functions (from agent-events.ts)
+
+// Import additional dependencies for agent events
 import {
   getWorldTurnLimit,
   extractMentions,
   extractParagraphBeginningMentions,
   determineSenderType,
   messageDataToAgentMessage,
-  prepareMessagesForLLM,
-  generateId
-} from './utils';
+  prepareMessagesForLLM
+} from './utils.js';
 
 /**
  * Agent subscription with automatic processing
@@ -90,12 +158,13 @@ export async function saveIncomingMessageToMemory(
 
     // Auto-save memory to disk
     try {
+      const { saveAgentMemoryToDisk } = await import('./agent-storage');
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
-      console.warn(`Failed to auto-save memory for agent ${agent.id}:`, error);
+      logger.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   } catch (error) {
-    console.warn(`Could not save incoming message to memory for ${agent.id}:`, error);
+    logger.warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
   }
 }
 
@@ -119,7 +188,7 @@ export async function processAgentMessage(
       // Get last 10 messages from agent memory
       conversationHistory = agent.memory.slice(-10);
     } catch (error) {
-      console.warn(`Could not load conversation history for ${agent.id}:`, error);
+      logger.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Create MessageData for compatibility with utility functions
@@ -140,12 +209,14 @@ export async function processAgentMessage(
 
     // Auto-save agent state after LLM call count increment
     try {
+      const { saveAgentConfigToDisk } = await import('./agent-storage');
       await saveAgentConfigToDisk(world.rootPath, world.id, agent);
     } catch (error) {
-      console.warn(`Failed to auto-save agent ${agent.id} after LLM call increment:`, error);
+      logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Call LLM for response with streaming
+    const { streamAgentResponse } = await import('./llm-manager');
     const response = await streamAgentResponse(world, agent, messages);
 
     // Add response to memory
@@ -159,9 +230,10 @@ export async function processAgentMessage(
 
     // Auto-save memory after adding assistant response
     try {
+      const { saveAgentMemoryToDisk } = await import('./agent-storage');
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
-      console.warn(`Failed to auto-save memory for agent ${agent.id} after response:`, error);
+      logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Check for pass command in response
@@ -209,7 +281,7 @@ export async function processAgentMessage(
     }
 
   } catch (error) {
-    console.error(`Agent ${agent.id} failed to process message:`, error);
+    logger.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
 
     // Publish error event via world's eventEmitter
     publishSSE(world, {
@@ -246,9 +318,10 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
       // Auto-save agent state after turn limit reset
       try {
+        const { saveAgentConfigToDisk } = await import('./agent-storage');
         await saveAgentConfigToDisk(world.rootPath, world.id, agent);
       } catch (error) {
-        console.warn(`Failed to auto-save agent ${agent.id} after turn limit reset:`, error);
+        logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
       }
     }
   }

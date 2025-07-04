@@ -58,9 +58,9 @@ import { Server } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 import pino from 'pino';
-import { World, LLMProvider } from '../core/types.js';
-
 import {
+  World,
+  LLMProvider,
   sendSuccess,
   sendError,
   sendCommandResult,
@@ -69,13 +69,11 @@ import {
   getWorld,
   SimpleCommandResponse,
   generateRequestId,
-  processWSCommand
-} from '../core';
-import {
+  processWSCommand,
   listWorlds,
   createWorld,
   updateWorld
-} from '../core/world-manager.js';
+} from '../core';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 

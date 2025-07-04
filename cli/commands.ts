@@ -23,10 +23,8 @@
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider } from '../core/types.js';
-import { listWorlds, getWorld, createWorld, updateWorld, WorldInfo } from '../core/world-manager.js';
+import { World, Agent, LLMProvider, listWorlds, getWorld, createWorld, updateWorld, WorldInfo, publishMessage } from '../core/index.js';
 import readline from 'readline';
-import { publishMessage } from '../core/world-events.js';
 
 // CLI response and context types
 export interface CLIResponse {
