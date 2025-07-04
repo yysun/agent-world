@@ -1,31 +1,31 @@
 /**
- * Initial State Module - Application state initialization with WebSocket connection
+ * Initial State Module - Application state initialization with REST API for worlds
  *
  * Features:
- * - Establishes WebSocket connection before world selection
- * - Loads available worlds from server
+ * - Establishes WebSocket connection for chat functionality only
+ * - Loads available worlds from REST API
  * - Manages connection status and error handling during initialization
- * - Auto-selects first available world after successful connection using world ID
+ * - Auto-selects first available world after loading
  * - Returns theme preference from localStorage without applying it
- * - Uses world.agents data when available, falls back to selectWorld result
+ * - Uses REST API for world data, WebSocket only for chat
  *
  * Implementation:
  * - Function-based module that returns promise-based initialization
- * - Integrates with wsApi for connection management
+ * - Uses REST API for CRUD operations (worlds, agents)
+ * - WebSocket connection for chat functionality only
  * - Pure state initialization without side effects (theme application handled by caller)
  * - Error handling for connection failures with fallback states
- * - Uses world.id instead of world.name for proper API consistency
- * - Prioritizes world.agents over separate API calls for better consistency
+ * - REST API for world and agent data loading
  *
  * Recent Changes:
- * - Extracted from home.js for better separation of concerns
- * - Added WebSocket connection establishment before world selection
- * - Removed theme application dependency - now returns theme preference only
- * - Fixed world selection to use world.id instead of world.name for API calls
- * - Updated to use world.agents instead of empty array initialization for better data consistency
+ * - Updated to use REST API for world loading instead of WebSocket
+ * - WebSocket connection maintained for chat functionality only
+ * - CRUD operations moved to REST API calls
+ * - Improved separation between chat (WebSocket) and data (REST API)
  */
 
 import wsApi from '../ws-api.js';
+import * as api from '../api.js';
 import { selectWorld } from './select-world.js';
 
 /**
@@ -49,16 +49,16 @@ export const initializeState = async () => {
   };
 
   try {
-    // Connect to WebSocket first
+    // Connect to WebSocket for chat functionality
     baseState.connectionStatus = 'connecting';
 
-    // Ensure connection is established
+    // Ensure WebSocket connection is established for chat
     await wsApi.ensureConnection();
     baseState.connectionStatus = 'connected';
 
-    // Load worlds after connection is established
-    const worlds = await wsApi.getWorlds();
-    console.log('🌍 Loaded worlds:', worlds);
+    // Load worlds using REST API
+    const worlds = await api.getWorlds();
+    console.log('🌍 Loaded worlds via REST API:', worlds);
     console.log('🌍 First world structure:', worlds[0]);
     baseState.worlds = worlds;
     baseState.loading = false;
@@ -69,19 +69,18 @@ export const initializeState = async () => {
     if (worldName) {
       const selectedWorld = worlds[0];
       console.log('🌍 Selected world:', selectedWorld);
-      console.log('🤖 World agents from worlds list:', selectedWorld.agents);
 
       const subscriptionResult = await selectWorld(baseState, worldName);
       console.log('🔄 State after selectWorld:', subscriptionResult);
-      console.log('🤖 Agents from subscription:', subscriptionResult.agents);
+      console.log('🤖 Agents from REST API:', subscriptionResult.agents);
 
-      // Use agents from subscription result (selectWorld now gets them from subscribeToWorld)
+      // Use agents from subscription result (selectWorld now gets them from REST API)
       return subscriptionResult;
     } else {
       return {
         ...baseState,
         agents: [],
-        wsError: 'No worlds available'
+        error: 'No worlds available'
       };
     }
   } catch (error) {
@@ -91,7 +90,7 @@ export const initializeState = async () => {
       agents: [],
       connectionStatus: 'error',
       loading: false,
-      wsError: error.message || 'Failed to connect to server'
+      error: error.message || 'Failed to connect to server'
     };
   }
 };

@@ -31,11 +31,64 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import { createWorld, getWorld, getFullWorld, listWorlds, publishMessage, subscribeToMessages, subscribeToSSE } from '../core/index.js';
+import { createCategoryLogger } from '../core/logger.js';
+import { LLMProvider } from '../core/types.js';
+
+const logger = createCategoryLogger('api');
 
 const DEFAULT_WORLD_NAME = 'Default World';
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
+// Error response helper
+function sendError(res: Response, status: number, message: string, code?: string, details?: any) {
+  const error: { error: string; code?: string; details?: any } = { error: message };
+  if (code) error.code = code;
+  if (details) error.details = details;
+  res.status(status).json(error);
+}
+
+// Validation utilities
+function toKebabCase(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function validateMemoryFormat(memory: any): memory is Array<any> {
+  return Array.isArray(memory);
+}
+
+async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: string): Promise<boolean> {
+  if (excludeAgent && agentName === excludeAgent) return true;
+  const existingAgent = await world.getAgent(agentName);
+  return !existingAgent;
+}
+
 // Validation schemas
+const WorldCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().optional()
+});
+
+const WorldUpdateSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().optional()
+});
+
+const AgentCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  type: z.string().optional().default('default'),
+  provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).default('openai'),
+  model: z.string().default('gpt-4'),
+  systemPrompt: z.string().optional(),
+  apiKey: z.string().optional(),
+  baseUrl: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().min(1).optional()
+});
+
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
   sender: z.string().default("HUMAN")
@@ -46,6 +99,14 @@ const AgentUpdateSchema = z.object({
   config: z.object({}).optional(),
   systemPrompt: z.string().optional(),
   clearMemory: z.boolean().optional()
+});
+
+const MemoryAppendSchema = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string().min(1),
+    sender: z.string().optional()
+  })).min(1)
 });
 
 const router = express.Router();
@@ -61,8 +122,116 @@ router.get('/worlds', async (req, res) => {
       res.json(worlds.map(world => ({ name: world.name })));
     }
   } catch (error) {
-    console.error('Error listing worlds:', error);
-    res.status(500).json({ error: 'Failed to list worlds', code: 'WORLD_LIST_ERROR' });
+    logger.error('Error listing worlds', { error: error instanceof Error ? error.message : error });
+    sendError(res, 500, 'Failed to list worlds', 'WORLD_LIST_ERROR');
+  }
+});
+
+// POST /worlds - Create new world
+router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = WorldCreateSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { name, description } = validation.data;
+    const worldId = toKebabCase(name);
+
+    // Check if world already exists
+    const existingWorld = await getFullWorld(ROOT_PATH, worldId);
+    if (existingWorld) {
+      sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
+      return;
+    }
+
+    // Create the world
+    const worldData = { name, description };
+    const world = await createWorld(ROOT_PATH, worldData);
+
+    res.status(201).json({ name: world.name, id: worldId });
+  } catch (error) {
+    logger.error('Error creating world', { error: error instanceof Error ? error.message : error });
+    sendError(res, 500, 'Failed to create world', 'WORLD_CREATE_ERROR');
+  }
+});
+
+// PATCH /worlds/:worldName - Update world metadata
+router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const validation = WorldUpdateSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    const { name, description } = validation.data;
+
+    // If name is being changed, check for duplicates
+    if (name && name !== world.name) {
+      const newWorldId = toKebabCase(name);
+      const existingWorld = await getFullWorld(ROOT_PATH, newWorldId);
+      if (existingWorld) {
+        sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
+        return;
+      }
+    }
+
+    // Update world metadata
+    const updates: any = {};
+    if (name !== undefined) updates.name = name;
+    if (description !== undefined) updates.description = description;
+
+    // Apply updates if any
+    if (Object.keys(updates).length > 0) {
+      // Update world properties directly
+      if (updates.name) world.name = updates.name;
+      if (updates.description !== undefined) world.description = updates.description;
+
+      // Save the world
+      await world.save();
+      res.json({ name: world.name, description: world.description });
+    } else {
+      res.json({ name: world.name, description: world.description });
+    }
+  } catch (error) {
+    logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
+  }
+});
+
+// DELETE /worlds/:worldName - Delete world
+router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Delete the world
+    const deleted = await world.delete();
+    if (!deleted) {
+      sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
   }
 });
 
@@ -73,15 +242,15 @@ router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Pro
     const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
-      res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
     const agents = await world.listAgents();
     res.json(agents);
   } catch (error) {
-    console.error('Error listing agents:', error);
-    res.status(500).json({ error: 'Failed to list agents', code: 'AGENT_LIST_ERROR' });
+    logger.error('Error listing agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to list agents', 'AGENT_LIST_ERROR');
   }
 });
 
@@ -92,26 +261,69 @@ router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Res
     const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
-      res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
     const agent = await world.getAgent(agentName);
     if (!agent) {
-      res.status(404).json({ error: 'Agent not found', code: 'AGENT_NOT_FOUND' });
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
     res.json(agent);
   } catch (error) {
-    console.error('Error getting agent:', error);
-    res.status(500).json({ error: 'Failed to get agent details', code: 'AGENT_GET_ERROR' });
+    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to get agent details', 'AGENT_GET_ERROR');
   }
 });
 
-// POST /worlds/:worldName/agents - Create agent (placeholder)
-router.post('/worlds/:worldName/agents', (req, res) => {
-  res.status(501).json({ error: 'Coming soon', code: 'NOT_IMPLEMENTED' });
+// POST /worlds/:worldName/agents - Create agent
+router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const validation = AgentCreateSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { name, type, provider, model, systemPrompt, apiKey, baseUrl, temperature, maxTokens } = validation.data;
+    const agentId = toKebabCase(name);
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Check if agent name is unique
+    const isUnique = await isAgentNameUnique(world, agentId);
+    if (!isUnique) {
+      sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
+      return;
+    }
+
+    // Create the agent
+    const agentData = {
+      name,
+      type,
+      provider: provider as LLMProvider,
+      model,
+      systemPrompt,
+      apiKey,
+      baseUrl,
+      temperature,
+      maxTokens
+    };
+
+    const agent = await world.createAgent(agentData);
+    res.status(201).json({ name: agent.name, id: agentId, type: agent.type });
+  } catch (error) {
+    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
+  }
 });
 
 // PATCH /worlds/:worldName/agents/:agentName - Update agent
@@ -121,11 +333,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     const validation = AgentUpdateSchema.safeParse(req.body);
 
     if (!validation.success) {
-      res.status(400).json({
-        error: 'Invalid request body',
-        code: 'VALIDATION_ERROR',
-        details: validation.error.issues
-      });
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
@@ -133,19 +341,19 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
-      res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
     const existingAgent = await world.getAgent(agentName);
     if (!existingAgent) {
-      res.status(404).json({ error: 'Agent not found', code: 'AGENT_NOT_FOUND' });
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
     // Clear memory if requested
     if (clearMemory && !(await world.clearAgentMemory(agentName))) {
-      res.status(500).json({ error: 'Failed to clear agent memory', code: 'MEMORY_CLEAR_ERROR' });
+      sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
       return;
     }
 
@@ -164,7 +372,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     if (Object.keys(updates).length > 0) {
       const updateResult = await world.updateAgent(agentName, updates);
       if (!updateResult) {
-        res.status(500).json({ error: 'Failed to update agent', code: 'AGENT_UPDATE_ERROR' });
+        sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
         return;
       }
       updatedAgent = updateResult;
@@ -172,8 +380,153 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
 
     res.json(updatedAgent);
   } catch (error) {
-    console.error('Error updating agent:', error);
-    res.status(500).json({ error: 'Failed to update agent', code: 'AGENT_UPDATE_ERROR' });
+    logger.error('Error updating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
+  }
+});
+
+// DELETE /worlds/:worldName/agents/:agentName - Delete agent
+router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Check if agent exists
+    const existingAgent = await world.getAgent(agentName);
+    if (!existingAgent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    // Delete the agent
+    const deleted = await world.deleteAgent(agentName);
+    if (!deleted) {
+      sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Error deleting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
+  }
+});
+
+// GET /worlds/:worldName/agents/:agentName/memory - Get agent memory
+router.get('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    const agent = await world.getAgent(agentName);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    // Ensure memory is in array format
+    const memory = validateMemoryFormat(agent.memory) ? agent.memory : [];
+    res.json({ memory });
+  } catch (error) {
+    logger.error('Error getting agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to get agent memory', 'MEMORY_GET_ERROR');
+  }
+});
+
+// POST /worlds/:worldName/agents/:agentName/memory - Append to agent memory
+router.post('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+    const validation = MemoryAppendSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { messages } = validation.data;
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    const agent = await world.getAgent(agentName);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    // Ensure existing memory is in array format
+    let currentMemory = validateMemoryFormat(agent.memory) ? agent.memory : [];
+
+    // Convert non-array memory to array format if needed
+    if (!Array.isArray(currentMemory)) {
+      currentMemory = [];
+    }
+
+    // Convert messages to AgentMessage format with timestamps
+    const newMessages = messages.map(msg => ({
+      ...msg,
+      createdAt: new Date()
+    }));
+
+    // Append new messages
+    const newMemory = [...currentMemory, ...newMessages];
+
+    // Update agent memory
+    const updatedAgent = await world.updateAgentMemory(agentName, newMemory);
+    if (!updatedAgent) {
+      sendError(res, 500, 'Failed to append to agent memory', 'MEMORY_APPEND_ERROR');
+      return;
+    }
+
+    res.json({ memory: newMemory, appended: messages.length });
+  } catch (error) {
+    logger.error('Error appending to agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to append to agent memory', 'MEMORY_APPEND_ERROR');
+  }
+});
+
+// DELETE /worlds/:worldName/agents/:agentName/memory - Clear agent memory
+router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+
+    const world = await getFullWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    const agent = await world.getAgent(agentName);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    // Clear agent memory
+    const clearedAgent = await world.clearAgentMemory(agentName);
+    if (!clearedAgent) {
+      sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Error clearing agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
   }
 });
 
@@ -184,11 +537,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     const validation = ChatMessageSchema.safeParse(req.body);
 
     if (!validation.success) {
-      res.status(400).json({
-        error: 'Invalid request body',
-        code: 'VALIDATION_ERROR',
-        details: validation.error.issues
-      });
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
@@ -196,7 +545,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     const world = await getFullWorld(ROOT_PATH, worldName);
 
     if (!world) {
-      res.status(404).json({ error: 'World not found', code: 'WORLD_NOT_FOUND' });
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
@@ -209,13 +558,37 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       'Access-Control-Allow-Headers': 'Cache-Control'
     });
 
+    // CLI Pipeline Timer Pattern - completion timer management
+    let completionTimer: NodeJS.Timeout | null = null;
+
+    const setupCompletionTimer = (delay: number) => {
+      if (completionTimer) clearTimeout(completionTimer);
+      completionTimer = setTimeout(() => {
+        // Send completion event and end SSE connection
+        try {
+          res.write('data: ' + JSON.stringify({
+            type: 'complete',
+            payload: { reason: 'timeout', delay }
+          }) + '\n\n');
+          unsubscribeMessages();
+          unsubscribeSSE();
+          res.end();
+        } catch (error) {
+          logger.error('Error during completion timeout', { error: error instanceof Error ? error.message : error, worldName });
+        }
+      }, delay);
+    };
+
     // Subscribe to world events for streaming
     const unsubscribeMessages = subscribeToMessages(world, (event) => {
       try {
         const eventData = { type: 'message', payload: event };
         res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+
+        // Reset completion timer for message events (3000ms delay)
+        setupCompletionTimer(3000);
       } catch (error) {
-        console.error('Error sending message event:', error);
+        logger.error('Error sending message event', { error: error instanceof Error ? error.message : error, worldName });
       }
     });
 
@@ -224,8 +597,17 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       try {
         const eventData = { type: 'sse', payload: event };
         res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+
+        // Reset timer based on SSE event type (CLI pattern)
+        if (event.type === 'chunk') {
+          setupCompletionTimer(500);   // Short delay - more chunks expected
+        } else if (event.type === 'end' || event.type === 'error') {
+          setupCompletionTimer(2000);  // Longer delay - conversation segment done
+        } else {
+          setupCompletionTimer(1000);  // Default delay for other events
+        }
       } catch (error) {
-        console.error('Error sending SSE event:', error);
+        logger.error('Error sending SSE event', { error: error instanceof Error ? error.message : error, worldName });
       }
     });
 
@@ -237,23 +619,28 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     publishMessage(world, message, sender);
 
+    // Start initial completion timer (message sent - wait for responses)
+    setupCompletionTimer(3000);
+
     // Handle client disconnection
     req.on('close', () => {
+      if (completionTimer) clearTimeout(completionTimer);
       unsubscribeMessages();
       unsubscribeSSE();
-      console.log(`SSE connection closed for world: ${worldName}`);
+      logger.info('SSE connection closed', { worldName });
     });
 
     req.on('error', (error) => {
-      console.error('SSE connection error:', error);
+      if (completionTimer) clearTimeout(completionTimer);
+      logger.error('SSE connection error', { error: error instanceof Error ? error.message : error, worldName });
       unsubscribeMessages();
       unsubscribeSSE();
     });
 
   } catch (error) {
-    console.error('Error in chat endpoint:', error);
+    logger.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error });
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to process chat message', code: 'CHAT_ERROR' });
+      sendError(res, 500, 'Failed to process chat message', 'CHAT_ERROR');
     }
   }
 });

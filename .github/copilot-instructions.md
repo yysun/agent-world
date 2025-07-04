@@ -7,8 +7,8 @@
 - **AP**: Review requirements → think hard ensure no flaw → provide suggestions → wait for confirmation.
 - **CC**: Consolidate code and comments block → remove redundant.
 - **OO**: Present options → wait for confirmation before proceeding.
-- **SS**: Step-by-step with approval → wait for confirmation each step.
-- **AS**: Step-by-step auto → continue to next step automatically.
+- **SS**: Step-by-step with approval → update plan doc → wait for confirmation each step.
+- **AS**: Step-by-step auto → update plan doc → continue to next step.
 - **GG**: Document features → create/update markdown (use mermaid if needed) to `docs/done` .
 - **!!**: Create and save requirements to `docs/requirements/req-{name}.md` → wait for confirmation.
 - **!!!**: Update the requirements and plan, and implement.

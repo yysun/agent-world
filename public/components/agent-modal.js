@@ -49,7 +49,7 @@
  * - Added proper async handling for agent data loading with error fallback
  */
 
-import * as wsApi from '../ws-api.js';
+import * as api from '../api.js';
 
 const { html, run } = window["apprun"];
 
@@ -139,7 +139,7 @@ export const openAgentModal = async (state, agent = null) => {
 
   // Editing existing agent - fetch full agent details including system prompt
   try {
-    const fullAgent = await wsApi.getAgent(state.worldName, agent.name);
+    const fullAgent = await api.getAgent(state.worldName, agent.name);
     console.log('🔍 Full agent data retrieved:', fullAgent);
 
     return {
@@ -164,7 +164,7 @@ export const closeAgentModal = async (state, save) => {
     if (save && state.editingAgent) {
       if (state.editingAgent.status === 'New') {
         // For new agents, create with initial prompt if provided
-        await wsApi.createAgent(state.worldName, {
+        await api.createAgent(state.worldName, {
           name: state.editingAgent.name,
           description: state.editingAgent.description || 'Agent created via modal'
         });
@@ -172,7 +172,7 @@ export const closeAgentModal = async (state, save) => {
         // If there's a system prompt, update it after creation
         const systemPrompt = state.editingAgent.systemPrompt || state.editingAgent.prompt || '';
         if (systemPrompt) {
-          await wsApi.updateAgent(state.worldName, state.editingAgent.name, {
+          await api.updateAgent(state.worldName, state.editingAgent.name, {
             prompt: systemPrompt
           });
         }
@@ -192,7 +192,7 @@ export const closeAgentModal = async (state, save) => {
         }
 
         console.log('🔧 Updating agent with data:', updateData);
-        await wsApi.updateAgent(state.worldName, state.editingAgent.name, updateData);
+        await api.updateAgent(state.worldName, state.editingAgent.name, updateData);
       }
     }
     return {

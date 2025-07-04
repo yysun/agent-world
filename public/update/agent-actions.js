@@ -20,7 +20,7 @@
  * - Real API calls for memory clearing functionality
  */
 
-import * as wsApi from '../ws-api.js';
+import * as api from '../api.js';
 
 export const displayAgentMemory = (state, agent) => {
   if (!agent || !agent.memory || agent.memory.length === 0) {
@@ -91,7 +91,7 @@ export const displayAgentMemory = (state, agent) => {
 export const clearAgentMemory = async (state, agent) => {
   try {
     // Call the actual API to clear agent memory
-    await wsApi.clearAgentMemory(state.worldName, agent.name);
+    await api.clearAgentMemory(state.worldName, agent.name);
 
     const confirmMessage = {
       id: Date.now() + Math.random(),
@@ -131,7 +131,7 @@ export const clearAgentMemory = async (state, agent) => {
 export const clearAgentMemoryFromModal = async (state, agent) => {
   try {
     // Call the actual API to clear agent memory
-    await wsApi.clearAgentMemory(state.worldName, agent.name);
+    await api.clearAgentMemory(state.worldName, agent.name);
 
     const confirmMessage = {
       id: Date.now() + Math.random(),

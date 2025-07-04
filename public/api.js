@@ -1,17 +1,19 @@
 /**
- * API Service Module (Legacy REST API)
+ * API Service Module - Complete REST API Client
  * 
  * Provides functions for interacting with the agent-world REST API endpoints:
- * - World management
- * - Agent operations (list, get, update)
- * 
- * Note: Chat functionality has been moved to ws-api.js for WebSocket-based messaging
- * Consider migrating to ws-api.js for real-time functionality
+ * - World management (create, update, delete, list)
+ * - Agent operations (create, read, update, delete, list)
+ * - Agent memory management (get, append, clear)
  * 
  * Features:
  * - RESTful API client using fetch
- * - Error handling and response validation
+ * - Comprehensive error handling with structured error format
  * - Base URL configuration
+ * - Full CRUD operations for worlds and agents
+ * - Memory management for agents
+ * 
+ * Note: Chat functionality uses WebSocket/SSE in ws-api.js
  */
 
 // Base API URL - can be configured
@@ -33,7 +35,22 @@ async function apiRequest(endpoint, options = {}) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+
+      // Try to parse structured error response
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+          if (errorData.code) {
+            errorMessage += ` (${errorData.code})`;
+          }
+        }
+      } catch (parseError) {
+        // Fall back to status text if JSON parsing fails
+      }
+
+      throw new Error(errorMessage);
     }
 
     return response;
@@ -50,6 +67,62 @@ async function apiRequest(endpoint, options = {}) {
 async function getWorlds() {
   const response = await apiRequest('/worlds');
   return response.json();
+}
+
+/**
+ * Create a new world
+ * @param {Object} worldData - World configuration data
+ * @param {string} worldData.name - Name of the world
+ * @param {string} [worldData.description] - Optional description
+ * @returns {Promise<Object>} Created world data
+ */
+async function createWorld(worldData) {
+  if (!worldData || !worldData.name) {
+    throw new Error('World data with name is required');
+  }
+
+  const response = await apiRequest('/worlds', {
+    method: 'POST',
+    body: JSON.stringify(worldData),
+  });
+
+  return response.json();
+}
+
+/**
+ * Update an existing world
+ * @param {string} worldName - Name of the world to update
+ * @param {Object} updateData - Partial world data to update
+ * @param {string} [updateData.name] - New name for the world
+ * @param {string} [updateData.description] - New description for the world
+ * @returns {Promise<Object>} Updated world data
+ */
+async function updateWorld(worldName, updateData) {
+  if (!worldName || !updateData) {
+    throw new Error('World name and update data are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updateData),
+  });
+
+  return response.json();
+}
+
+/**
+ * Delete a world
+ * @param {string} worldName - Name of the world to delete
+ * @returns {Promise<void>}
+ */
+async function deleteWorld(worldName) {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}`, {
+    method: 'DELETE',
+  });
 }
 
 /**
@@ -120,11 +193,103 @@ async function updateAgent(worldName, agentName, updateData) {
   return response.json();
 }
 
+/**
+ * Delete an agent from a world
+ * @param {string} worldName - Name of the world
+ * @param {string} agentName - Name of the agent to delete
+ * @returns {Promise<void>}
+ */
+async function deleteAgent(worldName, agentName) {
+  if (!worldName || !agentName) {
+    throw new Error('World name and agent name are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Get agent memory
+ * @param {string} worldName - Name of the world
+ * @param {string} agentName - Name of the agent
+ * @returns {Promise<Object>} Agent memory data
+ */
+async function getAgentMemory(worldName, agentName) {
+  if (!worldName || !agentName) {
+    throw new Error('World name and agent name are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`);
+  return response.json();
+}
+
+/**
+ * Append messages to agent memory
+ * @param {string} worldName - Name of the world
+ * @param {string} agentName - Name of the agent
+ * @param {Array} messages - Array of message objects to append
+ * @returns {Promise<Object>} Updated memory data
+ */
+async function appendAgentMemory(worldName, agentName, messages) {
+  if (!worldName || !agentName || !messages) {
+    throw new Error('World name, agent name, and messages are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`, {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
+  });
+
+  return response.json();
+}
+
+/**
+ * Clear agent memory
+ * @param {string} worldName - Name of the world
+ * @param {string} agentName - Name of the agent
+ * @returns {Promise<void>}
+ */
+async function clearAgentMemory(worldName, agentName) {
+  if (!worldName || !agentName) {
+    throw new Error('World name and agent name are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Comprehensive world update function for bulk operations
+ * @param {string} worldName - Name of the world
+ * @param {Object} updateData - Comprehensive update data
+ * @returns {Promise<Object>} Updated world data
+ */
+async function updateWorldComprehensive(worldName, updateData) {
+  // For now, this is the same as updateWorld since we implemented basic world updates
+  // In the future, this could handle complex operations like agent bulk updates
+  return updateWorld(worldName, updateData);
+}
+
 // Export the API functions
 export {
+  // World management
   getWorlds,
+  createWorld,
+  updateWorld,
+  deleteWorld,
+  updateWorldComprehensive,
+
+  // Agent management
   getAgents,
   getAgent,
   createAgent,
   updateAgent,
+  deleteAgent,
+
+  // Agent memory management
+  getAgentMemory,
+  appendAgentMemory,
+  clearAgentMemory,
 };
