@@ -357,22 +357,25 @@ async function refreshWorldSubscription(ws: WorldSocket, worldName: string): Pro
   try {
     logger.debug('Refreshing world subscription', { worldName });
 
-    // Clean up existing world subscription
-    await cleanupWorldSubscription(ws);
+    // Use the subscription's refresh method to properly destroy old world and create new
+    if (ws.subscription) {
+      const refreshedWorld = await ws.subscription.refresh(ROOT_PATH);
+      ws.world = refreshedWorld;
 
-    // Create WebSocket client connection
-    const client = createClientConnection(ws);
-
-    // Re-subscribe using commands layer
-    const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
-    if (subscription) {
-      ws.subscription = subscription;
-      ws.world = subscription.world;
-
+      const client = createClientConnection(ws);
       sendSuccess(client, 'World subscription refreshed', { worldName });
       logger.info('World subscription refreshed successfully', { worldName });
     } else {
-      logger.warn('Failed to load refreshed world', { worldName });
+      logger.warn('No existing subscription to refresh', { worldName });
+
+      // Fall back to creating new subscription
+      const client = createClientConnection(ws);
+      const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
+      if (subscription) {
+        ws.subscription = subscription;
+        ws.world = subscription.world;
+        sendSuccess(client, 'World subscription created', { worldName });
+      }
     }
   } catch (error) {
     logger.error('Failed to refresh world subscription', {

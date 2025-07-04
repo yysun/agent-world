@@ -454,8 +454,11 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (result.refreshWorld && currentWorldName && worldState) {
           try {
             console.log(boldBlue('Refreshing world state...'));
-            cleanupWorldSubscription(worldState);
-            worldState = await handleSubscribe(rootPath, currentWorldName, streaming, globalState, rl);
+
+            // Use the subscription's refresh method to properly destroy old world and create new
+            const refreshedWorld = await worldState.subscription.refresh(rootPath);
+            worldState.world = refreshedWorld;
+
             console.log(success('World state refreshed'));
           } catch (error) {
             console.error(error(`Error refreshing world: ${error instanceof Error ? error.message : 'Unknown error'}`));

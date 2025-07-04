@@ -6,12 +6,22 @@
  * - Transport-agnostic client connection interface
  * - Event listener setup and cleanup management
  * - Memory leak prevention and proper resource cleanup
+ * - World instance isolation and complete destruction during refresh
+ * - EventEmitter recreation and agent map repopulation
  * 
  * Purpose:
  * - Eliminate redundant command processing wrapper
  * - Preserve essential world subscription functionality
  * - Maintain transport abstraction for CLI and WebSocket
  * - Provide code reuse for event handling across transports
+ * - Ensure proper world lifecycle management across refresh operations
+ * 
+ * World Refresh Architecture:
+ * - Each subscription maintains reference to current world instance
+ * - Refresh completely destroys old world (EventEmitter, agents map, listeners)
+ * - Creates fresh world instance with new EventEmitter and repopulated agents
+ * - Prevents event crosstalk between old and new world instances
+ * - Maintains subscription continuity for client connections
  */
 
 import pino from 'pino';
@@ -45,6 +55,7 @@ export interface WorldSubscription {
   world: World;
   unsubscribe: () => Promise<void>;
   refresh: (rootPath: string) => Promise<World>;
+  destroy: () => Promise<void>;
 }
 
 // World subscription management
@@ -56,9 +67,9 @@ export async function subscribeWorld(
   try {
     // Load world using core manager (convert to kebab-case internally)
     const worldId = toKebabCase(worldIdentifier);
-    const world = await coreGetFullWorld(rootPath, worldId);
+    let currentWorld = await coreGetFullWorld(rootPath, worldId);
 
-    if (!world) {
+    if (!currentWorld) {
       if (client.onError) {
         client.onError(`World not found: ${worldIdentifier}`);
       }
@@ -66,27 +77,64 @@ export async function subscribeWorld(
     }
 
     // Set up event listeners
-    const worldEventListeners = setupWorldEventListeners(world, client);
+    let worldEventListeners = setupWorldEventListeners(currentWorld, client);
+
+    // Helper function to destroy current world instance
+    const destroyCurrentWorld = async () => {
+      if (currentWorld) {
+        // Clean up all event listeners
+        await cleanupWorldSubscription(currentWorld, worldEventListeners);
+
+        // Remove all listeners from the EventEmitter to prevent memory leaks
+        currentWorld.eventEmitter.removeAllListeners();
+
+        // Clear agents map references
+        currentWorld.agents.clear();
+
+        logger.debug('World instance destroyed', { worldId: currentWorld.id });
+      }
+    };
 
     // Return subscription object with cleanup methods
     return {
-      world,
-      unsubscribe: async () => {
-        await cleanupWorldSubscription(world, worldEventListeners);
+      get world() {
+        if (!currentWorld) {
+          throw new Error('World subscription has been destroyed');
+        }
+        return currentWorld;
       },
-      refresh: async (rootPath: string) => {
-        // Clean up existing listeners
-        await cleanupWorldSubscription(world, worldEventListeners);
+      unsubscribe: async () => {
+        await destroyCurrentWorld();
+        currentWorld = null;
+      },
+      destroy: async () => {
+        await destroyCurrentWorld();
+        currentWorld = null;
+      },
+      refresh: async (refreshRootPath: string) => {
+        logger.debug('Refreshing world subscription', { worldId, worldIdentifier });
 
-        // Reload world
-        const refreshedWorld = await coreGetFullWorld(rootPath, worldId);
+        // Destroy the old world instance completely
+        await destroyCurrentWorld();
+
+        // Create a completely new world instance
+        const refreshedWorld = await coreGetFullWorld(refreshRootPath, worldId);
         if (!refreshedWorld) {
           throw new Error(`Failed to refresh world: ${worldIdentifier}`);
         }
 
-        // Set up new listeners
-        setupWorldEventListeners(refreshedWorld, client);
-        return refreshedWorld;
+        // Update current references
+        currentWorld = refreshedWorld;
+
+        // Set up new event listeners on the fresh world
+        worldEventListeners = setupWorldEventListeners(currentWorld, client);
+
+        logger.debug('World subscription refreshed', {
+          worldId: currentWorld.id,
+          agentCount: currentWorld.agents.size
+        });
+
+        return currentWorld;
       }
     };
   } catch (error) {

@@ -8,11 +8,19 @@
  * - Automatic world state management and refreshing
  * - Help message generation with command documentation
  * - Dual input handling for commands and messages
+ * - World instance isolation and proper cleanup during refresh
  *
  * Available Commands:
  * - worlds, world, create-world, update-world
  * - create-agent, update-agent, update-prompt, clear
  * - help
+ * 
+ * World Refresh Mechanism:
+ * - Commands that modify world state signal refresh requirement via `refreshWorld: true`
+ * - CLI properly destroys old world instances and creates fresh ones
+ * - Event subscriptions are cleanly transferred to new world instances
+ * - Prevents memory leaks and ensures event isolation between old/new worlds
+ * - Agent persistence maintained across refresh cycles
  */
 
 import { World, Agent, LLMProvider } from '../core/types.js';
