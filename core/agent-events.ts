@@ -39,6 +39,7 @@ import { streamAgentResponse } from './llm-manager';
 import {
   getWorldTurnLimit,
   extractMentions,
+  extractParagraphBeginningMentions,
   determineSenderType,
   messageDataToAgentMessage,
   prepareMessagesForLLM,
@@ -269,20 +270,26 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     return true;
   }
 
-  // Extract @mentions from content
-  const mentions = extractMentions(messageEvent.content);
+  // Extract @mentions that appear at paragraph beginnings only
+  const mentions = extractParagraphBeginningMentions(messageEvent.content);
 
   // For HUMAN/user messages
   if (senderType === SenderType.HUMAN) {
-    // If no mentions at all, respond to all (public message)
+    // If no paragraph-beginning mentions, check for any mentions at all
     if (mentions.length === 0) {
-      return true;
+      // If there are no paragraph-beginning mentions but there are mentions elsewhere,
+      // treat as public message (no response)
+      const anyMentions = extractMentions(messageEvent.content);
+      if (anyMentions.length > 0) {
+        return false; // Has mentions but not at paragraph beginning
+      }
+      return true; // No mentions at all - public message
     }
 
-    // If there are mentions, only respond if this agent is the first mention
-    return mentions.length > 0 && mentions[0] === agent.id.toLowerCase();
+    // If there are paragraph-beginning mentions, respond if this agent is mentioned
+    return mentions.includes(agent.id.toLowerCase());
   }
 
-  // For agent messages, only respond if this agent is the first mention
-  return mentions.length > 0 && mentions[0] === agent.id.toLowerCase();
+  // For agent messages, only respond if this agent has a paragraph-beginning mention
+  return mentions.includes(agent.id.toLowerCase());
 }

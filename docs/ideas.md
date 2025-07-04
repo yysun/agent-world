@@ -21,22 +21,7 @@ A multi-agent AI simulation exploring collaboration, learning, and competition b
 All communication flows through a unified public event system. Privacy achieved through natural language patterns (@mentions) rather than message classification.
 
 ### System Components
-```mermaid
-graph TB
-    CLI[CLI Interface] --> CMD[Command Pattern]
-    UI[User Interface] --> API[API Layer]
-    CLI --> API
-    API --> EM[Event System]
-    EM --> SSE[Server-Sent Events]
-    EM --> AS[Agent System]
-    AS --> WM[World Management]
-    AS --> LLM[Multi-Provider LLM]
-    AS --> ST[Storage System]
-```
 
-**CLI Interface**
-- Command-based interface with commands like `/add`, `/list`, `/use`, `/stop`
-- Built around a simple command pattern architecture
 
 **Agent System**
 - Function-based agent implementation with message processing as main entry point

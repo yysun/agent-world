@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect } from '@jest/globals';
-import { generateId, toKebabCase, extractMentions, determineSenderType, getWorldTurnLimit, prepareMessagesForLLM } from '../../core/utils.js';
+import { generateId, toKebabCase, extractMentions, extractParagraphBeginningMentions, determineSenderType, getWorldTurnLimit, prepareMessagesForLLM } from '../../core/utils.js';
 
 describe('Core Utilities', () => {
   describe('generateId', () => {
@@ -134,6 +134,67 @@ describe('Core Utilities', () => {
       expect(extractMentions('@agent@invalid')).toEqual(['agent']);
       expect(extractMentions('@@double')).toEqual(['double']);
       expect(extractMentions('@agent with spaces @second')).toEqual(['agent']);
+    });
+  });
+
+  describe('extractParagraphBeginningMentions', () => {
+    test('should extract mentions at start of string', () => {
+      expect(extractParagraphBeginningMentions('@pro, what do you think?')).toEqual(['pro']);
+      expect(extractParagraphBeginningMentions('@alice how are you?')).toEqual(['alice']);
+      expect(extractParagraphBeginningMentions('@bob-test please help')).toEqual(['bob-test']);
+    });
+
+    test('should extract mentions after newlines', () => {
+      expect(extractParagraphBeginningMentions('Hello everyone!\n@pro, please respond.')).toEqual(['pro']);
+      expect(extractParagraphBeginningMentions('First line\n\n@alice what do you think?')).toEqual(['alice']);
+      expect(extractParagraphBeginningMentions('Text\n  @bob with spaces')).toEqual(['bob']);
+    });
+
+    test('should ignore mentions in middle of text', () => {
+      expect(extractParagraphBeginningMentions('hi @pro, what do you think?')).toEqual([]);
+      expect(extractParagraphBeginningMentions('I think @alice should handle this.')).toEqual([]);
+      expect(extractParagraphBeginningMentions('Please ask @bob about this.')).toEqual([]);
+    });
+
+    test('should handle multiple paragraphs correctly', () => {
+      const content = 'Hello everyone!\n@pro, please respond.\n\nAlso, we need input from someone else.';
+      expect(extractParagraphBeginningMentions(content)).toEqual(['pro']);
+    });
+
+    test('should extract multiple valid mentions', () => {
+      const content = '@alice, please start.\n@bob, you handle the next part.';
+      expect(extractParagraphBeginningMentions(content)).toEqual(['alice', 'bob']);
+    });
+
+    test('should be case-insensitive', () => {
+      expect(extractParagraphBeginningMentions('@Alice, hello')).toEqual(['alice']);
+      expect(extractParagraphBeginningMentions('@BOB how are you?')).toEqual(['bob']);
+      expect(extractParagraphBeginningMentions('Hi\n@ChArLiE test')).toEqual(['charlie']);
+    });
+
+    test('should handle whitespace after newlines', () => {
+      expect(extractParagraphBeginningMentions('Hello\n   @pro with spaces')).toEqual(['pro']);
+      expect(extractParagraphBeginningMentions('Text\n\t@alice with tab')).toEqual(['alice']);
+      expect(extractParagraphBeginningMentions('Line\n\n  @bob multiple spaces')).toEqual(['bob']);
+    });
+
+    test('should handle mixed valid and invalid mentions', () => {
+      const content = '@alice, please start. Then ask @bob.\n@charlie, you handle the final part.';
+      expect(extractParagraphBeginningMentions(content)).toEqual(['alice', 'charlie']);
+    });
+
+    test('should handle edge cases', () => {
+      expect(extractParagraphBeginningMentions('')).toEqual([]);
+      expect(extractParagraphBeginningMentions('No mentions here')).toEqual([]);
+      expect(extractParagraphBeginningMentions('@')).toEqual([]);
+      expect(extractParagraphBeginningMentions('@ invalid')).toEqual([]);
+      expect(extractParagraphBeginningMentions('@123')).toEqual(['123']);
+    });
+
+    test('should handle special characters in mentions', () => {
+      expect(extractParagraphBeginningMentions('@agent-1, hello')).toEqual(['agent-1']);
+      expect(extractParagraphBeginningMentions('@test_agent please respond')).toEqual(['test_agent']);
+      expect(extractParagraphBeginningMentions('@agent_with-mixed chars')).toEqual(['agent_with-mixed']);
     });
   });
 

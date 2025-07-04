@@ -95,6 +95,35 @@ export function extractMentions(content: string): string[] {
 }
 
 /**
+ * Extract @mentions that appear at the beginning of paragraphs
+ * Implements paragraph-beginning-only logic for agent response triggering
+ * 
+ * @param content - The message content to search for mentions
+ * @returns Array of mention names (lowercase) that appear at paragraph beginnings
+ */
+export function extractParagraphBeginningMentions(content: string): string[] {
+  if (!content) return [];
+
+  // Pattern to match @mentions at paragraph beginning:
+  // (?:^|\n\s*) - Start of string OR newline followed by optional whitespace
+  // @ - Literal @ symbol
+  // (\w+(?:[-_]\w+)*) - Capture group for mention name (word chars, hyphens, underscores)
+  const paragraphMentionRegex = /(?:^|\n\s*)@(\w+(?:[-_]\w+)*)/g;
+  const validMentions: string[] = [];
+  let match;
+
+  while ((match = paragraphMentionRegex.exec(content)) !== null) {
+    const mention = match[1];
+    if (mention && mention.length > 0) {
+      const lowerMention = mention.toLowerCase();
+      validMentions.push(lowerMention);
+    }
+  }
+
+  return validMentions;
+}
+
+/**
  * Determine sender type based on sender name (matches src/agent.ts logic)
  */
 export function determineSenderType(sender: string | undefined): SenderType {
