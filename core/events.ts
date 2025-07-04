@@ -1,4 +1,7 @@
-import { logger } from './logger';
+import { createCategoryLogger } from './logger';
+
+// Create events category logger
+const logger = createCategoryLogger('events');
 
 /**
  * Unified Events Module - World and Agent Event Functions

@@ -41,7 +41,7 @@ if (!process.env.CLI_LOG_LEVEL_OVERRIDE) {
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection, logger } from '../core/index.js';
+import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, setLogLevel, setCategoryLogLevel } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
@@ -49,6 +49,9 @@ import {
   handleWorldEventWithStreaming,
   isStreamingActive
 } from './stream.js';
+
+// Create CLI category logger
+const logger = createCategoryLogger('cli');
 
 // Immediately configure logger to override any core defaults
 // This must happen before any core operations that might use the logger
@@ -106,19 +109,18 @@ const bullet = (text: string) => `${gray('•')} ${text}`;
 
 // Logger configuration
 function configureLogger(logLevel?: string): void {
-  // Always override the logger level, default to 'error' unless explicitly set
-  // This overrides any environment variable or core logger defaults
-  const level = logLevel || 'error';
+  // Use the centralized logger configuration from core
+  const level = (logLevel || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
-  // Force set the logger level regardless of environment variables
-  logger.level = level;
-  
-  // Also override environment variable to prevent any child loggers from using it
-  process.env.LOG_LEVEL = level;
+  // Set the log level for all core modules through the centralized logger
+  setLogLevel(level);
+
+  // Set CLI-specific log level (can be different from global)
+  setCategoryLogLevel('cli', level);
 
   // Only log the debug message if we're actually at debug level
   if (level === 'debug' || level === 'trace') {
-    logger.debug(`CLI log level forcibly set to: ${level}`);
+    logger.debug(`CLI log level set to: ${level}`);
   }
 }
 
@@ -646,7 +648,7 @@ async function main(): Promise<void> {
   if (options.logLevel && options.logLevel !== 'error') {
     // User explicitly requested a different log level
     process.env.LOG_LEVEL = options.logLevel;
-    logger.level = options.logLevel;
+    setCategoryLogLevel('cli', options.logLevel as 'trace' | 'debug' | 'info' | 'warn' | 'error');
     if (options.logLevel === 'debug' || options.logLevel === 'trace') {
       logger.debug(`CLI log level set to: ${options.logLevel}`);
     }

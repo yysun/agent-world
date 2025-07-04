@@ -30,18 +30,20 @@
  * - Request/response correlation via WebSocket command-response events
  *
  * Logging:
- * - Uses Pino for structured logging with debug/info/warn/error levels
+ * - Uses centralized logger from core module with setLogLevel() control
+ * - Configures log level from LOG_LEVEL environment variable
+ * - All logging goes through core logger instance for consistency
  * - Logs connection/disconnection events with client information
  * - Tracks message flow (incoming/outgoing) with data content
  * - Monitors world subscription lifecycle and event forwarding
- * - Pretty printing in development, JSON in production
- * - Configurable log level via LOG_LEVEL environment variable
+ * - No separate pino instance - uses core centralized logger
  *
  * Architecture:
  * - ws.ts: Manages stateful connection and implements ClientConnection interface
  * - commands/commands.ts: Provides typed command processing with request/response
  * - commands/types.ts: Defines typed command unions and interfaces
  * - commands/events.ts: Provides centralized world subscription and event handling
+ * - core/logger.ts: Centralized logging with client-controlled log levels
  * - Clear separation between transport state and business logic
  * - Per-connection world state with proper cleanup through commands layer
  *
@@ -57,7 +59,6 @@
 import { Server } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
-import pino from 'pino';
 import {
   World,
   LLMProvider,
@@ -72,22 +73,22 @@ import {
   processWSCommand,
   listWorlds,
   createWorld,
-  updateWorld
+  updateWorld,
+  createCategoryLogger,
+  setLogLevel
 } from '../core';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
-// Create logger instance for WebSocket operations
-const logger = pino({
-  name: 'websocket',
-  level: process.env.LOG_LEVEL || 'debug',
-  transport: process.env.NODE_ENV !== 'production' ? {
-    target: 'pino-pretty',
-    options: {
-      colorize: true
-    }
-  } : undefined
-});
+// Create WebSocket category logger
+const logger = createCategoryLogger('ws');
+
+// Configure centralized logger from environment
+const logLevel = (process.env.LOG_LEVEL || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
+setLogLevel(logLevel);
+
+// Log WebSocket server initialization
+logger.debug(`WebSocket server logger configured to level: ${logLevel}`);
 
 let wss: WebSocketServer;
 

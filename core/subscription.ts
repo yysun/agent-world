@@ -24,23 +24,14 @@
  * - Maintains subscription continuity for client connections
  */
 
-import pino from 'pino';
 import { World } from './types.js';
 import { getFullWorld as coreGetFullWorld } from './managers.js';
 import { publishMessage } from './events.js';
 import { toKebabCase } from './utils.js';
+import { createCategoryLogger } from './logger.js';
 
-// Create logger instance
-const logger = pino({
-  name: 'world-subscription',
-  level: process.env.LOG_LEVEL || 'debug',
-  transport: process.env.NODE_ENV !== 'production' ? {
-    target: 'pino-pretty',
-    options: {
-      colorize: true
-    }
-  } : undefined
-});
+// Create subscription category logger (part of core functionality)
+const logger = createCategoryLogger('core');
 
 // Client connection interface for transport abstraction
 export interface ClientConnection {

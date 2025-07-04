@@ -74,7 +74,7 @@ export type { WorldInfo } from './managers';
 export { LLMProvider } from './types';
 
 // Logging (safe for both Node.js and browser)
-export { logger } from './logger';
+export { logger, setLogLevel, setCategoryLogLevel, createCategoryLogger, getCategoryLogLevel } from './logger';
 
 // Utility functions (safe for both Node.js and browser)
 export { generateId, toKebabCase } from './utils';
