@@ -23,7 +23,11 @@
  */
 
 import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage } from '../core/index.js';
+import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
+
+// Create CLI logger
+const logger = createCategoryLogger('cli');
 
 // CLI response and context types
 export interface CLIResponse {
@@ -357,10 +361,18 @@ export async function processCLICommand(
           break;
         }
 
+        logger.debug('clearAgentMemory command started', {
+          agentName: collectedParams.agentName,
+          worldName: world.name,
+          worldId: world.id,
+          agentsInWorld: Array.from(world.agents.keys())
+        });
+
         // Handle /clear all to clear all agents' memory
         if (collectedParams.agentName.toLowerCase() === 'all') {
           const clearedAgents: string[] = [];
           for (const [agentName] of world.agents) {
+            logger.debug('Clearing memory for agent', { agentName });
             await world.clearAgentMemory(agentName);
             clearedAgents.push(agentName);
           }
@@ -374,18 +386,47 @@ export async function processCLICommand(
         }
 
         // Handle single agent clear
+        logger.debug('Looking for agent in world.agents Map', {
+          searchName: collectedParams.agentName,
+          availableAgents: Array.from(world.agents.keys()),
+          agentExists: world.agents.has(collectedParams.agentName)
+        });
+
         const agentForClear = world.agents.get(collectedParams.agentName);
         if (!agentForClear) {
+          logger.debug('Agent not found in world.agents Map');
           cliResponse = { success: false, message: `Agent '${collectedParams.agentName}' not found`, data: null };
           break;
         }
-        await world.clearAgentMemory(collectedParams.agentName);
-        cliResponse = {
-          success: true,
-          message: `Agent '${collectedParams.agentName}' memory cleared successfully`,
-          data: null,
-          needsWorldRefresh: true
-        };
+
+        logger.debug('Found agent, calling clearAgentMemory', {
+          agentName: agentForClear.name,
+          agentId: agentForClear.id,
+          memoryCount: agentForClear.memory?.length || 0
+        });
+
+        try {
+          const result = await world.clearAgentMemory(collectedParams.agentName);
+          logger.debug('clearAgentMemory result', {
+            success: !!result,
+            resultAgentId: result?.id,
+            resultMemoryCount: result?.memory?.length || 0
+          });
+
+          cliResponse = {
+            success: true,
+            message: `Agent '${collectedParams.agentName}' memory cleared successfully`,
+            data: null,
+            needsWorldRefresh: true
+          };
+        } catch (error) {
+          logger.error('clearAgentMemory error', { agentName: collectedParams.agentName, error: error instanceof Error ? error.message : error });
+          cliResponse = {
+            success: false,
+            message: `Failed to clear agent memory: ${error instanceof Error ? error.message : error}`,
+            data: null
+          };
+        }
         break;
 
       case 'quit':

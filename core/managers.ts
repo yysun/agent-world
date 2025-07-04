@@ -330,9 +330,23 @@ export async function getWorldConfig(rootPath: string, worldId: string): Promise
   // Automatically convert worldId to kebab-case for consistent lookup
   const normalizedWorldId = toKebabCase(worldId);
 
+  logger.debug('getWorldConfig called', {
+    originalWorldId: worldId,
+    normalizedWorldId,
+    rootPath
+  });
+
   const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
+  logger.debug('loadWorldFromDisk result', {
+    worldFound: !!worldData,
+    worldId: worldData?.id,
+    worldName: worldData?.name,
+    agentsLength: worldData?.agents?.length || 0
+  });
+
   if (!worldData) {
+    logger.debug('World not found, returning null');
     return null;
   }
 
@@ -416,15 +430,32 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       // Always convert agent name to kebab-case for consistent ID lookup
       const agentId = toKebabCase(agentName);
 
+      logger.debug('World.clearAgentMemory called', {
+        originalAgentName: agentName,
+        convertedAgentId: agentId,
+        worldRootPath: world.rootPath,
+        worldId: world.id,
+        agentsInMap: Array.from(world.agents.keys())
+      });
+
       try {
         const clearedAgent = await clearAgentMemory(world.rootPath, world.id, agentId);
+
+        logger.debug('Core clearAgentMemory result', {
+          success: !!clearedAgent,
+          clearedAgentId: clearedAgent?.id,
+          clearedAgentName: clearedAgent?.name,
+          memoryLength: clearedAgent?.memory?.length || 0
+        });
 
         if (clearedAgent) {
           // Update runtime map
           world.agents.set(clearedAgent.id, clearedAgent);
+          logger.debug('Updated world.agents map with cleared agent');
         }
         return clearedAgent;
       } catch (error) {
+        logger.error('clearAgentMemory error in world manager', { agentName, error: error instanceof Error ? error.message : error });
         return null;
       }
     },
@@ -902,16 +933,31 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
   // Ensure modules are initialized
   await moduleInitialization;
 
+  logger.debug('Core clearAgentMemory called', {
+    rootPath,
+    worldId,
+    agentId
+  });
+
   const existingAgent = await loadAgentFromDisk(rootPath, worldId, agentId);
 
+  logger.debug('loadAgentFromDisk result', {
+    agentFound: !!existingAgent,
+    agentName: existingAgent?.name,
+    memoryLength: existingAgent?.memory?.length || 0
+  });
+
   if (!existingAgent) {
+    logger.debug('Agent not found on disk, returning null');
     return null;
   }
 
   // Archive current memory if it exists and has content
   if (existingAgent.memory && existingAgent.memory.length > 0) {
     try {
+      logger.debug('Archiving existing memory');
       await archiveAgentMemory(rootPath, worldId, agentId, existingAgent.memory);
+      logger.debug('Memory archived successfully');
     } catch (error) {
       logger.warn('Failed to archive memory', { agentId, error: error instanceof Error ? error.message : error });
       // Continue with clearing even if archiving fails
@@ -924,9 +970,13 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
     lastActive: new Date()
   };
 
+  logger.debug('Saving cleared memory to disk');
+
   // Save empty memory to memory.json and update config timestamps
   await saveAgentMemoryToDisk(rootPath, worldId, agentId, []);
   await saveAgentConfigToDisk(rootPath, worldId, updatedAgent);
+
+  logger.debug('Memory cleared and saved successfully');
   return updatedAgent;
 }
 

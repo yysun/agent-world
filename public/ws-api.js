@@ -5,7 +5,7 @@
  * Features: Connection management with auto-reconnect, world subscription, typed WebSocket commands,
  * world/agent CRUD operations, promise-based async API with error handling,
  * request/response tracking with time-based IDs, unified message creation with type-specific handling,
- * SSE chunk grouping into single message blocks by agent and messageId, support for new eventType 
+ * SSE chunk grouping into single message blocks by agent and messageId, support for new eventType
  * structure (eventType: 'sse', type: 'chunk'), backward compatibility with old SSE format,
  * connection status management, error handling and logging, auto-subscription on welcome messages,
  * proper streaming lifecycle (start, chunk, end, error), auto-scroll to bottom when messages are added or updated,
@@ -16,7 +16,7 @@
  * request/response correlation via WebSocket command-response events, comprehensive error handling with typed responses
  *
  * Implementation: Function-based module with subscription lifecycle management,
- * typed WebSocket command protocol for world/agent operations, comprehensive 
+ * typed WebSocket command protocol for world/agent operations, comprehensive
  * message event handlers for real-time communication, consolidated
  * connection management with built-in auto-reconnect functionality,
  * and error message integration into conversation flow
@@ -351,6 +351,7 @@ export default {
   getAgent,
   createAgent,
   updateAgent,
+  clearAgentMemory,
 
 };
 
@@ -373,12 +374,31 @@ async function getAgents(worldName) {
     throw new Error('World name required or must be subscribed to a world');
   }
 
+  console.log('🐛 DEBUG: getAgents called', {
+    worldName: targetWorld,
+    currentSubscription: currentWorldSubscription
+  });
+
   const request = createCommandRequest('getWorld', { worldName: targetWorld });
+
+  console.log('🐛 DEBUG: Sending getWorld command for agents', request);
+
   const response = await sendTypedCommand(request);
 
+  console.log('🐛 DEBUG: getWorld response', {
+    success: response.success,
+    hasData: !!response.data,
+    hasAgents: !!(response.data?.agents),
+    agentsLength: response.data?.agents?.length || 0,
+    error: response.error
+  });
+
   if (response.success && response.data?.agents) {
+    console.log('🐛 DEBUG: getAgents successful, returning agents');
     return response.data.agents;
   }
+
+  console.log('🐛 DEBUG: getAgents failed, throwing error');
   throw new Error(response.error || 'Failed to get agents');
 }
 
@@ -473,6 +493,53 @@ async function updateAgent(worldName, agentName, updateData) {
   return await getAgent(targetWorld, agentName);
 }
 
+async function clearAgentMemory(worldName, agentName) {
+  const targetWorld = worldName || currentWorldSubscription;
+  if (!targetWorld) {
+    throw new Error('World name required or must be subscribed to a world');
+  }
+
+  if (!agentName) {
+    throw new Error('Agent name is required');
+  }
+
+  console.log('🐛 DEBUG: clearAgentMemory called', {
+    worldName: targetWorld,
+    agentName,
+    currentSubscription: currentWorldSubscription
+  });
+
+  const request = createCommandRequest('clearAgentMemory', {
+    worldName: targetWorld,
+    agentName
+  });
+
+  console.log('🐛 DEBUG: Sending clearAgentMemory command', request);
+
+  const response = await sendTypedCommand(request);
+
+  console.log('🐛 DEBUG: clearAgentMemory response', {
+    success: response.success,
+    error: response.error,
+    type: response.type
+  });
+
+  if (!response.success) {
+    throw new Error(response.error || 'Failed to clear agent memory');
+  }
+
+  console.log('🐛 DEBUG: clearAgentMemory successful, calling getAgent');
+
+  try {
+    const agent = await getAgent(targetWorld, agentName);
+    console.log('🐛 DEBUG: getAgent successful', { agentName: agent.name, memoryCount: agent.memory?.length || 0 });
+    return agent;
+  } catch (error) {
+    console.log('🐛 DEBUG: getAgent failed', { error: error.message });
+    throw error;
+  }
+}
+
 
 export {
   getWorlds,
@@ -480,6 +547,7 @@ export {
   getAgent,
   createAgent,
   updateAgent,
+  clearAgentMemory,
   sendChatMessage, // Export new chat function
   ensureConnection, // Export connection helper
 };

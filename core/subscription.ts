@@ -287,7 +287,7 @@ export async function processWSCommand(
         };
 
       case 'getWorld':
-        const { getWorldConfig } = await import('./managers.js');
+        const { getWorldConfig, listAgents } = await import('./managers.js');
         const worldName = params.worldName || params.name;
         if (!worldName) {
           return { success: false, error: 'World name is required', type: commandType };
@@ -296,10 +296,23 @@ export async function processWSCommand(
         if (!worldData) {
           return { success: false, error: `World '${worldName}' not found`, type: commandType };
         }
+
+        // Load agents for this world
+        const agents = await listAgents(rootPath, toKebabCase(worldName));
+
+        logger.debug('getWorld including agents', {
+          worldName,
+          agentsCount: agents.length
+        });
+
         return {
           success: true,
           message: `World '${worldName}' retrieved successfully`,
-          data: worldData,
+          data: {
+            ...worldData,
+            agents,
+            agentCount: agents.length
+          },
           type: commandType
         };
 
@@ -388,17 +401,43 @@ export async function processWSCommand(
         if (!world) {
           return { success: false, error: 'No world selected', type: commandType };
         }
+
+        logger.debug('processWSCommand clearAgentMemory', {
+          agentName: params.agentName,
+          worldName: world.name,
+          worldId: world.id,
+          agentsInWorld: Array.from(world.agents.keys())
+        });
+
         const agentForClear = world.agents.get(params.agentName);
         if (!agentForClear) {
+          logger.debug('Agent not found in world.agents', {
+            searchName: params.agentName,
+            availableAgents: Array.from(world.agents.keys())
+          });
           return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
         }
-        await world.clearAgentMemory(params.agentName);
-        return {
-          success: true,
-          message: `Agent '${params.agentName}' memory cleared successfully`,
-          data: null,
-          type: commandType
-        };
+
+        logger.debug('Agent found, calling world.clearAgentMemory');
+
+        try {
+          const result = await world.clearAgentMemory(params.agentName);
+          logger.debug('world.clearAgentMemory result', {
+            success: !!result,
+            agentId: result?.id,
+            memoryLength: result?.memory?.length || 0
+          });
+
+          return {
+            success: true,
+            message: `Agent '${params.agentName}' memory cleared successfully`,
+            data: null,
+            type: commandType
+          };
+        } catch (error) {
+          logger.error('world.clearAgentMemory error', { agentName: params.agentName, error: error instanceof Error ? error.message : error });
+          return { success: false, error: `Failed to clear agent memory: ${error instanceof Error ? error.message : error}`, type: commandType };
+        }
 
       default:
         return { success: false, error: `Unknown command type: ${commandType}`, type: commandType };
