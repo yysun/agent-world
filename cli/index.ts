@@ -1,61 +1,73 @@
 #!/usr/bin/env node
 /**
- * Agent World CLI Entry Point - Console-Based Display
+ * Agent World CLI Entry Point - Dual-Mode Console Interface
  * 
- * A dual-mode CLI for Agent World with pipeline and interactive capabilities.
- * Provides console-based interface with real-time streaming, color-coded output,
- * and seamless world management through commands layer integration.
+ * Provides pipeline and interactive modes with unified subscription system,
+ * real-time streaming, and comprehensive world management.
  *
  * FEATURES:
- * - Pipeline Mode: Execute commands and exit (--command, args, stdin)
+ * - Pipeline Mode: Execute commands and exit with timer-based cleanup
  * - Interactive Mode: Real-time console interface with streaming responses
- * - Dual Input Processing: Commands (/) vs Messages (plain text)
+ * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
  * - Real-time Streaming: Live agent responses via stream.ts module
  * - Color Helpers: Consistent styling with simplified color functions
- * - Timer Management: Smart prompt restoration after streaming
- * - Event Handling: Comprehensive world event listeners with filtering
+ * - Timer Management: Smart prompt restoration and exit handling
  *
  * ARCHITECTURE:
  * - Uses commander.js for argument parsing and mode detection
- * - Uses commands layer for all world management (subscribeWorld, getWorld)
+ * - Uses subscribeWorld for all world management in both modes
  * - Implements ClientConnection interface for console-based event handling
  * - Uses readline for interactive input with proper cleanup
  * - Delegates streaming display to stream.ts module for real-time chunk accumulation
- * - No direct core layer dependencies - all through commands layer
  *
  * USAGE:
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"
+ * Pipeline: cli --root /data/worlds --world myworld "Hello, world!"
+ * Pipeline: echo "Hello, world!" | cli --root /data/worlds --world myworld
  * Interactive: cli --root /data/worlds --world myworld
- *
- * CHANGES:
- * - Integrated commands layer subscribeWorld() for centralized world management
- * - Implemented CLI-specific ClientConnection with console event handling
- * - Removed direct core dependencies (getWorld, toKebabCase)
- * - Extracted streaming functionality to stream.ts module for better modularity
- * - Maintained all existing functionality and user experience
- * - Added proper world subscription lifecycle management
  */
 
 import { program } from 'commander';
 import readline from 'readline';
-import { subscribeWorld } from '../core/index.js';
-import { getWorld, listWorlds } from '../core/world-manager.js';
+import { listWorlds, subscribeWorld } from '../core/index.js';
 import { World } from '../core/types.js';
 import { processCLIInput } from './commands.js';
 import { ClientConnection } from '../core/subscription.js';
 import {
   StreamingState,
-  GlobalState,
   createStreamingState,
-  createGlobalState,
-  setupPromptTimer,
-  clearPromptTimer,
   handleWorldEventWithStreaming,
   isStreamingActive
 } from './stream.js';
 
-// Color helper functions - consolidated API
+// Timer management for prompt restoration
+interface GlobalState {
+  promptTimer?: ReturnType<typeof setTimeout>;
+}
+
+function setupPromptTimer(
+  globalState: GlobalState,
+  rl: readline.Interface,
+  callback: () => void,
+  delay: number = 2000
+): void {
+  clearPromptTimer(globalState);
+  globalState.promptTimer = setTimeout(callback, delay);
+}
+
+function clearPromptTimer(globalState: GlobalState): void {
+  if (globalState.promptTimer) {
+    clearTimeout(globalState.promptTimer);
+    globalState.promptTimer = undefined;
+  }
+}
+
+function createGlobalState(): GlobalState {
+  return {};
+}
+
+// Color helpers - consolidated styling API
 const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
 const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
@@ -65,7 +77,6 @@ const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
 const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
 const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
 
-// Combined styles
 const boldRed = (text: string) => `\x1b[1m\x1b[31m${text}\x1b[0m`;
 const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
 const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text}\x1b[0m`;
@@ -73,7 +84,6 @@ const boldBlue = (text: string) => `\x1b[1m\x1b[34m${text}\x1b[0m`;
 const boldMagenta = (text: string) => `\x1b[1m\x1b[35m${text}\x1b[0m`;
 const boldCyan = (text: string) => `\x1b[1m\x1b[36m${text}\x1b[0m`;
 
-// Semantic helpers
 const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
@@ -86,21 +96,57 @@ interface CLIOptions {
   command?: string;
 }
 
-// Pipeline mode: execute commands and exit
-async function runPipelineMode(options: CLIOptions, commands: string[]): Promise<void> {
+// Pipeline mode execution with timer-based cleanup
+async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
 
   try {
     let world: World | null = null;
+    let worldSubscription: any = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    const pipelineClient: ClientConnection = {
+      send: (data: string) => { },
+      isOpen: true,
+      onWorldEvent: (eventType: string, eventData: any) => {
+        if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+        if ((eventType === 'system' || eventType === 'world') && eventData.message) {
+          console.log(`${boldRed('● system:')} ${eventData.message}`);
+        }
+
+        if (eventType === 'sse' && eventData.content) {
+          setupExitTimer(5000);
+        }
+
+        if (eventType === 'message' && eventData.content) {
+          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
+          setupExitTimer(3000);
+        }
+      },
+      onError: (error: string) => {
+        console.log(red(`Error: ${error}`));
+      }
+    };
+
+    const setupExitTimer = (delay: number = 2000) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (worldSubscription) worldSubscription.unsubscribe();
+        process.exit(0);
+      }, delay);
+    };
+
     if (options.world) {
-      world = await getWorld(options.world, rootPath);
-      if (!world) {
+      worldSubscription = await subscribeWorld(options.world, rootPath, pipelineClient);
+      if (!worldSubscription) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
         process.exit(1);
       }
+      world = worldSubscription.world;
     }
 
-    // Execute single command
+    // Execute command from --command option
     if (options.command) {
       if (!options.command.startsWith('/') && !world) {
         console.error(boldRed('Error: World must be specified to send user messages'));
@@ -108,25 +154,38 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
       }
       const result = await processCLIInput(options.command, world, rootPath, 'HUMAN');
       console.log(JSON.stringify(result, null, 2));
-      process.exit(result.success ? 0 : 1);
+
+      // Only set timer if sending message to world (not for commands)
+      if (!options.command.startsWith('/') && world) {
+        setupExitTimer();
+      } else {
+        // For commands, exit immediately after processing
+        if (worldSubscription) worldSubscription.unsubscribe();
+        process.exit(result.success ? 0 : 1);
+      }
+
+      if (!result.success) {
+        setTimeout(() => process.exit(1), 100);
+        return;
+      }
     }
 
-    // Execute command sequence
-    if (commands.length > 0) {
-      for (const cmd of commands) {
-        if (cmd === 'exit') break;
-        const result = await processCLIInput(cmd, world, rootPath, 'HUMAN');
-        console.log(`> ${cmd}`);
-        console.log(JSON.stringify(result, null, 2));
-        if (!result.success) process.exit(1);
-
-        // Refresh world if needed
-        if (result.refreshWorld && options.world) {
-          const refreshedWorld = await getWorld(options.world, rootPath);
-          if (refreshedWorld) world = refreshedWorld;
-        }
+    // Execute message from args
+    if (messageFromArgs) {
+      if (!world) {
+        console.error(boldRed('Error: World must be specified to send user messages'));
+        process.exit(1);
       }
-      process.exit(0);
+      const result = await processCLIInput(messageFromArgs, world, rootPath, 'HUMAN');
+      console.log(JSON.stringify(result, null, 2));
+
+      // Set timer with longer delay for message processing (always needed for messages)
+      setupExitTimer(8000);
+
+      if (!result.success) {
+        setTimeout(() => process.exit(1), 100);
+        return;
+      }
     }
 
     // Handle stdin input
@@ -142,11 +201,21 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
         }
         const result = await processCLIInput(input.trim(), world, rootPath, 'HUMAN');
         console.log(JSON.stringify(result, null, 2));
-        process.exit(result.success ? 0 : 1);
+
+        // Set timer with longer delay for message processing (always needed for stdin messages)
+        setupExitTimer(8000);
+
+        if (!result.success) {
+          setTimeout(() => process.exit(1), 100);
+          return;
+        }
+        return;
       }
     }
 
-    program.help();
+    if (!options.command && !messageFromArgs) {
+      program.help();
+    }
   } catch (error) {
     console.error(boldRed('Error:'), error instanceof Error ? error.message : error);
     process.exit(1);
@@ -154,7 +223,7 @@ async function runPipelineMode(options: CLIOptions, commands: string[]): Promise
 }
 
 interface WorldState {
-  subscription: any; // WorldSubscription from commands layer
+  subscription: any;
   world: World;
 }
 
@@ -164,24 +233,18 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
   }
 }
 
-// Event listeners for world events are now handled in commands layer
-
 // World subscription handler
 async function handleSubscribe(
   rootPath: string,
   worldName: string,
-  streaming: { current: StreamingState },
+  streaming: StreamingState,
   globalState: GlobalState,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
-  // Create CLI client connection
   const cliClient: ClientConnection = {
-    send: (data: string) => {
-      // CLI doesn't need to send data back, but we implement for interface compliance
-    },
+    send: (data: string) => { },
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      // Handle world events - use existing event handling logic
       handleWorldEvent(eventType, eventData, streaming, globalState, rl);
     },
     onError: (error: string) => {
@@ -199,16 +262,14 @@ async function handleSubscribe(
 function handleWorldEvent(
   eventType: string,
   eventData: any,
-  streaming: { current: StreamingState },
+  streaming: StreamingState,
   globalState: GlobalState,
   rl?: readline.Interface
 ): void {
-  // Try streaming event handling first
-  if (handleWorldEventWithStreaming(eventType, eventData, streaming, globalState, rl)) {
+  if (handleWorldEventWithStreaming(eventType, eventData, streaming)) {
     return;
   }
 
-  // Filter out success messages and display system events
   if (eventData.content && eventData.content.includes('Success message sent')) return;
 
   if ((eventType === 'system' || eventType === 'world') && eventData.message) {
@@ -216,7 +277,7 @@ function handleWorldEvent(
   }
 }
 
-// World discovery and selection using core functions
+// World discovery and selection
 async function getAvailableWorldNames(rootPath: string): Promise<string[]> {
   try {
     const worldInfos = await listWorlds(rootPath);
@@ -235,32 +296,27 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
     return null;
   }
 
-  // Auto-select if there's only one world
   if (worlds.length === 1) {
     console.log(`${boldGreen('Auto-selecting the only available world:')} ${cyan(worlds[0])}`);
     return worlds[0];
   }
 
-  // Display available worlds for selection
   console.log(`\n${boldMagenta('Available worlds:')}`);
   worlds.forEach((world, index) => {
     console.log(`  ${yellow(`${index + 1}.`)} ${cyan(world)}`);
   });
 
-  // Process world selection
   return new Promise((resolve) => {
     function askForSelection() {
       rl.question(`\n${boldMagenta('Select a world (number or name):')} `, (answer) => {
         const trimmed = answer.trim();
         const num = parseInt(trimmed);
 
-        // Try to match by number
         if (!isNaN(num) && num >= 1 && num <= worlds.length) {
           resolve(worlds[num - 1]);
           return;
         }
 
-        // Try to match by name
         const found = worlds.find(world =>
           world.toLowerCase() === trimmed.toLowerCase() ||
           world.toLowerCase().includes(trimmed.toLowerCase())
@@ -283,18 +339,37 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
-  const streaming = { current: createStreamingState() };
   const globalState: GlobalState = createGlobalState();
+  const streaming = createStreamingState();
 
-  console.log(boldCyan('Agent World CLI (Interactive Mode)'));
-  console.log(cyan('===================================='));
-
-  // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: '> '
   });
+
+  // Set up streaming callbacks
+  streaming.wait = (delay: number) => {
+    setupPromptTimer(globalState, rl, () => {
+      if (streaming.isActive) {
+        console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
+        streaming.isActive = false;
+        streaming.content = '';
+        streaming.sender = undefined;
+        streaming.messageId = undefined;
+        rl.prompt();
+      } else {
+        rl.prompt();
+      }
+    }, delay);
+  };
+
+  streaming.stopWait = () => {
+    clearPromptTimer(globalState);
+  };
+
+  console.log(boldCyan('Agent World CLI (Interactive Mode)'));
+  console.log(cyan('===================================='));
 
   let worldState: WorldState | null = null;
   let currentWorldName = '';
@@ -348,7 +423,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     console.log(`  ${bullet(gray('Press'))} ${boldYellow('Ctrl+C')} ${gray('to exit')}`);
     console.log('');
 
-    // Set up command processing
     rl.prompt();
 
     rl.on('line', async (input) => {
@@ -359,13 +433,11 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
-      // Display user input
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
       try {
         const result = await processCLIInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
 
-        // Display result (skip user message confirmations)
         if (result.success === false) {
           console.log(error(`Error: ${result.error || result.message || 'Command failed'}`));
         } else if (result.message &&
@@ -374,7 +446,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           console.log(success(result.message));
         }
 
-        // Skip showing data for user messages (they contain sender: HUMAN)
         if (result.data && !(result.data.sender === 'HUMAN')) {
           console.log(`${boldMagenta('Data:')} ${JSON.stringify(result.data, null, 2)}`);
         }
@@ -395,28 +466,28 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         console.error(error(`Command error: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
 
-      // Set up timer after user input to allow for streaming or other events
-      setupPromptTimer(globalState, rl, () => {
-        if (!isStreamingActive(streaming)) {
-          rl.prompt();
-        }
-      }, 5000); // Brief delay to allow for streaming to start
+      if (streaming.wait) {
+        streaming.wait(5000);
+      }
     });
 
     rl.on('close', () => {
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) {
-        clearPromptTimer(globalState);
+        if (streaming.stopWait) {
+          streaming.stopWait();
+        }
         cleanupWorldSubscription(worldState);
       }
       process.exit(0);
     });
 
-    // Handle Ctrl+C gracefully
     rl.on('SIGINT', () => {
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) {
-        clearPromptTimer(globalState);
+        if (streaming.stopWait) {
+          streaming.stopWait();
+        }
         cleanupWorldSubscription(worldState);
       }
       rl.close();
@@ -439,26 +510,27 @@ async function main(): Promise<void> {
     .option('-w, --world <name>', 'World name to connect to')
     .option('-c, --command <cmd>', 'Command to execute in pipeline mode')
     .allowUnknownOption()
+    .allowExcessArguments()
     .parse();
 
   const options = program.opts<CLIOptions>();
-  const commands = program.args;
+  const args = program.args;
+  const messageFromArgs = args.length > 0 ? args.join(' ') : null;
 
-  // Detect mode: pipeline vs interactive
   const isPipelineMode = !!(
     options.command ||
-    commands.length > 0 ||
+    messageFromArgs ||
     !process.stdin.isTTY
   );
 
   if (isPipelineMode) {
-    await runPipelineMode(options, commands);
+    await runPipelineMode(options, messageFromArgs);
   } else {
     await runInteractiveMode(options);
   }
 }
 
-// Global error handling and CLI initialization
+// Global error handling
 function setupErrorHandlers() {
   process.on('unhandledRejection', (error) => {
     console.error(boldRed('Unhandled rejection:'), error);
@@ -471,7 +543,6 @@ function setupErrorHandlers() {
   });
 }
 
-// Set up error handlers and run CLI
 setupErrorHandlers();
 main().catch((error) => {
   console.error(boldRed('CLI error:'), error);

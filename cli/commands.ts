@@ -2,39 +2,25 @@
  * CLI Commands Implementation - Direct Core Integration
  * 
  * Features:
- * - Direct command mapping system (/clear maps to clear command)
- * - Direct core function calls without command processing layer
- * - Interactive prompt for missing parameters with validation
+ * - Direct command mapping system with interactive parameter collection
+ * - Core function calls without command processing layer
  * - User-friendly messages with technical details for debugging
  * - Automatic world state management and refreshing
  * - Help message generation with command documentation
- * - Dual input handling for commands (/command) and messages
- * - Direct message handling through world events
- * 
+ * - Dual input handling for commands and messages
+ *
  * Available Commands:
- * - worlds: List all available worlds
- * - world: Get specific world information
- * - create-world: Create a new world with parameters
- * - update-world: Update world properties
- * - create-agent: Create a new agent in the current world
- * - update-agent: Update agent configuration
- * - update-prompt: Update agent system prompt
- * - clear: Clear agent memory (specific agent or all)
- * - help: Show command help and documentation
+ * - worlds, world, create-world, update-world
+ * - create-agent, update-agent, update-prompt, clear
+ * - help
  */
 
 import { World, Agent, LLMProvider } from '../core/types.js';
-import {
-  listWorlds,
-  getWorld,
-  createWorld,
-  updateWorld,
-  WorldInfo
-} from '../core/world-manager.js';
+import { listWorlds, getWorld, createWorld, updateWorld, WorldInfo } from '../core/world-manager.js';
 import readline from 'readline';
 import { publishMessage } from '../core/world-events.js';
 
-// CLI Response types for user-friendly output
+// CLI response and context types
 export interface CLIResponse {
   success: boolean;
   message: string;
@@ -45,17 +31,15 @@ export interface CLIResponse {
   error?: string;
 }
 
-// CLI Context for maintaining state
 export interface CLIContext {
   currentWorldName?: string;
   currentWorld?: World | null;
   rootPath: string;
 }
 
-// Interactive prompt function type
 export type PromptFunction = (question: string, options?: string[]) => Promise<string>;
 
-// CLI Command Mapping - Maps CLI commands to typed command types
+// CLI Command Mapping
 export const CLI_COMMAND_MAP: Record<string, {
   type: string;
   requiresWorld: boolean;
@@ -154,7 +138,7 @@ export const CLI_COMMAND_MAP: Record<string, {
   }
 };
 
-// Legacy command mapping for compatibility
+// Legacy command aliases
 const COMMAND_MAP: Record<string, string> = {
   'list': 'getWorlds',
   'get': 'getWorld',
@@ -162,7 +146,7 @@ const COMMAND_MAP: Record<string, string> = {
   'update': 'updateWorld'
 };
 
-// Parse CLI command input
+// Command parsing and help generation
 export function parseCLICommand(input: string): {
   command: string;
   args: string[];
@@ -196,11 +180,8 @@ export function parseCLICommand(input: string): {
   const command = parts[0].toLowerCase();
   const args = parts.slice(1);
 
-  // Check for command in CLI command map
   if (!CLI_COMMAND_MAP[command]) {
-    // Check for direct matches with COMMAND_MAP (aliases)
     const directMatch = COMMAND_MAP[command];
-
     if (!directMatch) {
       const availableCommands = Object.keys(CLI_COMMAND_MAP).join(', ');
       return {
@@ -211,8 +192,6 @@ export function parseCLICommand(input: string): {
         error: `Unknown command: ${command}. Available commands: ${availableCommands}`
       };
     }
-
-    // Found a direct match in the command map
     return {
       command,
       args,
@@ -221,7 +200,6 @@ export function parseCLICommand(input: string): {
     };
   }
 
-  // Use the command type from CLI_COMMAND_MAP
   return {
     command,
     args,
@@ -230,7 +208,6 @@ export function parseCLICommand(input: string): {
   };
 }
 
-// Generate help message for commands
 export function generateHelpMessage(command?: string): string {
   if (command && CLI_COMMAND_MAP[command]) {
     const cmd = CLI_COMMAND_MAP[command];
@@ -255,14 +232,13 @@ export function generateHelpMessage(command?: string): string {
   return help;
 }
 
-// CLI Command Processor with direct core function calls
+// CLI Command Processor
 export async function processCLICommand(
   input: string,
   context: CLIContext,
   promptFn: PromptFunction
 ): Promise<CLIResponse> {
   try {
-    // Parse the command with enhanced parsing
     const { command, args, commandType, isValid, error } = parseCLICommand(input);
 
     if (!isValid) {
@@ -273,7 +249,6 @@ export async function processCLICommand(
       };
     }
 
-    // Handle help command directly
     if (command === 'help') {
       const helpCommand = args[0];
       return {
@@ -287,7 +262,6 @@ export async function processCLICommand(
 
     // Check world requirement
     if (commandInfo.requiresWorld && !context.currentWorldName) {
-      // Try to get world name from user
       const worldName = await promptFn('No world selected. Please enter world name:');
       if (!worldName.trim()) {
         return {
@@ -297,17 +271,16 @@ export async function processCLICommand(
         };
       }
       context.currentWorldName = worldName.trim();
-      context.currentWorld = null; // Will be loaded below
+      context.currentWorld = null;
     }
 
-    // Collect required parameters through interactive prompts
+    // Collect parameters through interactive prompts
     const collectedParams: Record<string, any> = {};
 
     for (let i = 0; i < commandInfo.parameters.length; i++) {
       const param = commandInfo.parameters[i];
       let value = args[i];
 
-      // If parameter is missing and required, prompt for it
       if (!value && param.required) {
         const promptMessage = param.options
           ? `Enter ${param.description} (${param.options.join(', ')}):`
@@ -324,7 +297,6 @@ export async function processCLICommand(
         }
       }
 
-      // Set parameter value if provided
       if (value) {
         // Type conversion
         if (param.type === 'number') {
@@ -354,29 +326,21 @@ export async function processCLICommand(
       }
     }
 
-    // Load world if needed
+    // Use already loaded world from context
     let world: World | null = null;
-    if (commandInfo.requiresWorld && context.currentWorldName) {
-      try {
-        world = await getWorld(context.rootPath, context.currentWorldName);
-        if (!world) {
-          return {
-            success: false,
-            message: `World '${context.currentWorldName}' not found`,
-            technicalDetails: `Failed to load world: ${context.currentWorldName}`
-          };
-        }
-        context.currentWorld = world;
-      } catch (error) {
+    if (commandInfo.requiresWorld) {
+      if (context.currentWorld) {
+        world = context.currentWorld;
+      } else {
         return {
           success: false,
-          message: `Failed to load world '${context.currentWorldName}'`,
-          technicalDetails: error instanceof Error ? error.message : String(error)
+          message: 'No world available',
+          technicalDetails: 'Command requires world context but no world is loaded'
         };
       }
     }
 
-    // Execute command directly using core functions
+    // Execute command using core functions
     let cliResponse: CLIResponse;
 
     switch (commandInfo.type) {
@@ -528,16 +492,9 @@ export async function processCLICommand(
         cliResponse = { success: false, message: `Unknown command type: ${commandInfo.type}`, data: null };
     }
 
-    // Check if world refresh is needed
-    if (cliResponse.needsWorldRefresh && context.currentWorldName) {
-      try {
-        const refreshedWorld = await getWorld(context.rootPath, context.currentWorldName);
-        context.currentWorld = refreshedWorld;
-      } catch (error) {
-        // Don't fail the command, just log the refresh issue
-        cliResponse.technicalDetails = (cliResponse.technicalDetails || '') +
-          `\nWorld refresh failed: ${error instanceof Error ? error.message : error}`;
-      }
+    // Signal CLI to refresh subscription if needed
+    if (cliResponse.needsWorldRefresh) {
+      cliResponse.refreshWorld = true;
     }
 
     return cliResponse;
@@ -553,12 +510,10 @@ export async function processCLICommand(
 
 // Extract command and arguments from CLI input
 function extractCommand(input: string): { command: string, args: string[] } {
-  // Remove the leading '/' and split by spaces
   const cleanInput = input.startsWith('/') ? input.slice(1) : input;
   const parts = cleanInput.trim().split(/\s+/);
   const commandName = parts[0]?.toLowerCase() || '';
   const args = parts.slice(1);
-
   return { command: commandName, args };
 }
 
@@ -569,14 +524,13 @@ export async function processCLIInput(
   rootPath: string,
   sender: string = 'HUMAN'
 ): Promise<CLIResponse> {
-  // Create a simple CLI context
   const context: CLIContext = {
     currentWorld: world,
     currentWorldName: world?.name,
     rootPath
   };
 
-  // Simple prompt function for single-line CLI prompts
+  // Simple prompt function for CLI
   const promptFunction: PromptFunction = async (question: string, options?: string[]): Promise<string> => {
     console.log(question);
     if (options && options.length > 0) {
@@ -596,17 +550,13 @@ export async function processCLIInput(
     });
   };
 
-  // If input starts with '/', process as command
+  // Process commands (starting with '/')
   if (input.trim().startsWith('/')) {
-    // Extract command and parameters
     try {
       const { command, args } = extractCommand(input);
 
-      // Check if command exists in CLI command map
       if (!CLI_COMMAND_MAP[command]) {
-        // Try to match with command map for alias support
         const matchedCommand = Object.keys(CLI_COMMAND_MAP).find(cmd => cmd === command);
-
         if (!matchedCommand) {
           return {
             success: false,
@@ -616,7 +566,6 @@ export async function processCLIInput(
         }
       }
 
-      // Direct command execution - bypassing system events
       return await processCLICommand(input, context, promptFunction);
     } catch (error) {
       return {
@@ -628,7 +577,7 @@ export async function processCLIInput(
     }
   }
 
-  // Otherwise, handle as a message to the current world
+  // Handle messages to the current world
   if (!world) {
     return {
       success: false,
@@ -638,9 +587,7 @@ export async function processCLIInput(
   }
 
   try {
-    // Send message directly to message event (not through system event)
     publishMessage(world, input, sender);
-
     return {
       success: true,
       message: 'Message sent to world',
