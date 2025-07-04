@@ -5,6 +5,7 @@
  * - Stateful WebSocket connection management per client
  * - World subscription lifecycle with centralized commands layer integration
  * - Typed command system with request/response tracking
+ * - WebSocket command processing via local processWSCommand
  * - Connection-specific world state and event listener cleanup
  * - World refresh logic after command execution with state updates
  * - Comprehensive debug logging with Pino for WebSocket operations
@@ -54,6 +55,7 @@
  * - Implemented request/response tracking with time-based IDs
  * - Enhanced error handling with typed responses
  * - Maintained backward compatibility with existing WebSocket protocol
+ * - Moved processWSCommand function from core to WebSocket server
  */
 
 import { Server } from 'http';
@@ -68,14 +70,13 @@ import {
   ClientConnection,
   subscribeWorld,
   getWorld,
-  SimpleCommandResponse,
   generateRequestId,
-  processWSCommand,
   listWorlds,
   createWorld,
   updateWorld,
   createCategoryLogger,
-  setLogLevel
+  setLogLevel,
+  toKebabCase
 } from '../core';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
@@ -89,6 +90,215 @@ setLogLevel(logLevel);
 
 // Log WebSocket server initialization
 logger.debug(`WebSocket server logger configured to level: ${logLevel}`);
+
+// Response interfaces for WebSocket compatibility
+export interface SimpleCommandResponse {
+  success: boolean;
+  message?: string;
+  data?: any;
+  error?: string;
+  type?: string; // Add type field for command tracking
+  requestId?: string; // Add requestId for client correlation
+}
+
+// Command processing function that calls core directly
+export async function processWSCommand(
+  commandType: string,
+  params: any,
+  world: World | null,
+  rootPath: string
+): Promise<SimpleCommandResponse> {
+  try {
+    switch (commandType) {
+      case 'getWorlds':
+        const { listWorlds } = await import('../core/managers.js');
+        const worlds = await listWorlds(rootPath);
+        return {
+          success: true,
+          message: 'Worlds retrieved successfully',
+          data: worlds,
+          type: commandType
+        };
+
+      case 'getWorld':
+        const { getWorldConfig, listAgents } = await import('../core/managers.js');
+        const worldName = params.worldName || params.name;
+        if (!worldName) {
+          return { success: false, error: 'World name is required', type: commandType };
+        }
+        const worldData = await getWorldConfig(rootPath, toKebabCase(worldName));
+        if (!worldData) {
+          return { success: false, error: `World '${worldName}' not found`, type: commandType };
+        }
+
+        // Load agents for this world
+        const agents = await listAgents(rootPath, toKebabCase(worldName));
+
+        logger.debug('getWorld including agents', {
+          worldName,
+          agentsCount: agents.length
+        });
+
+        return {
+          success: true,
+          message: `World '${worldName}' retrieved successfully`,
+          data: {
+            ...worldData,
+            agents,
+            agentCount: agents.length
+          },
+          type: commandType
+        };
+
+      case 'createWorld':
+        const { createWorld } = await import('../core/managers.js');
+        const newWorld = await createWorld(rootPath, {
+          name: params.name,
+          description: params.description || `A world named ${params.name}`
+        });
+        return {
+          success: true,
+          message: `World '${params.name}' created successfully`,
+          data: newWorld,
+          type: commandType
+        };
+
+      case 'updateWorld':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+        const { updateWorld } = await import('../core/managers.js');
+        const updates = params.updates || {};
+        const updatedWorld = await updateWorld(rootPath, world.id, updates);
+        return {
+          success: true,
+          message: `World '${world.name}' updated successfully`,
+          data: updatedWorld,
+          type: commandType
+        };
+
+      case 'getAgent':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+        const requestedAgent = await world.getAgent(params.agentName);
+        if (!requestedAgent) {
+          return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
+        }
+        return {
+          success: true,
+          message: `Agent '${params.agentName}' retrieved successfully`,
+          data: requestedAgent,
+          type: commandType
+        };
+
+      case 'createAgent':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+        const { LLMProvider } = await import('../core/types.js');
+        const agent = await world.createAgent({
+          id: toKebabCase(params.name),
+          name: params.name,
+          type: 'conversational',
+          provider: LLMProvider.OPENAI,
+          model: params.model || 'gpt-4',
+          systemPrompt: params.prompt || `You are ${params.name}, an agent in the ${world.name} world.`
+        });
+        return {
+          success: true,
+          message: `Agent '${params.name}' created successfully`,
+          data: agent,
+          type: commandType
+        };
+
+      case 'updateAgentConfig':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+        const agentToUpdate = world.agents.get(params.agentName);
+        if (!agentToUpdate) {
+          return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
+        }
+        const updatedAgent = await world.updateAgent(params.agentName, params.config || {});
+        return {
+          success: true,
+          message: `Agent '${params.agentName}' config updated successfully`,
+          data: updatedAgent,
+          type: commandType
+        };
+
+      case 'updateAgentPrompt':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+        const agentForPrompt = world.agents.get(params.agentName);
+        if (!agentForPrompt) {
+          return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
+        }
+        const agentWithNewPrompt = await world.updateAgent(params.agentName, {
+          systemPrompt: params.prompt
+        });
+        return {
+          success: true,
+          message: `Agent '${params.agentName}' prompt updated successfully`,
+          data: agentWithNewPrompt,
+          type: commandType
+        };
+
+      case 'clearAgentMemory':
+        if (!world) {
+          return { success: false, error: 'No world selected', type: commandType };
+        }
+
+        logger.debug('processWSCommand clearAgentMemory', {
+          agentName: params.agentName,
+          worldName: world.name,
+          worldId: world.id,
+          agentsInWorld: Array.from(world.agents.keys())
+        });
+
+        const agentForClear = world.agents.get(params.agentName);
+        if (!agentForClear) {
+          logger.debug('Agent not found in world.agents', {
+            searchName: params.agentName,
+            availableAgents: Array.from(world.agents.keys())
+          });
+          return { success: false, error: `Agent '${params.agentName}' not found`, type: commandType };
+        }
+
+        logger.debug('Agent found, calling world.clearAgentMemory');
+
+        try {
+          const result = await world.clearAgentMemory(params.agentName);
+          logger.debug('world.clearAgentMemory result', {
+            success: !!result,
+            agentId: result?.id,
+            memoryLength: result?.memory?.length || 0
+          });
+
+          return {
+            success: true,
+            message: `Agent '${params.agentName}' memory cleared successfully`,
+            data: null,
+            type: commandType
+          };
+        } catch (error) {
+          logger.error('world.clearAgentMemory error', { agentName: params.agentName, error: error instanceof Error ? error.message : error });
+          return { success: false, error: `Failed to clear agent memory: ${error instanceof Error ? error.message : error}`, type: commandType };
+        }
+
+      default:
+        return { success: false, error: `Unknown command type: ${commandType}`, type: commandType };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      type: commandType
+    };
+  }
+}
 
 let wss: WebSocketServer;
 
@@ -252,6 +462,16 @@ function parseCommandToRequest(commandString: string, worldName?: string): any {
         worldName,
         name: args[0],
         description: args.slice(1).join(' ') || undefined,
+        timestamp
+      };
+
+    case 'getagent':
+      if (!worldName || args.length === 0) return null;
+      return {
+        id: requestId,
+        type: 'getAgent',
+        worldName,
+        agentName: args[0],
         timestamp
       };
 
