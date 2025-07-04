@@ -47,10 +47,7 @@ export function AgentCard(agent, displayAgentMemory, openAgentModal, clearAgentM
           <button 
             class="clear-memory-btn" 
             title="Clear all memories"
-            @click=${(e) => {
-        e.stopPropagation();
-        run(clearAgentMemory, agent)(e);
-      }}
+            @click=${run(clearAgentMemory, agent)}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -62,10 +59,7 @@ export function AgentCard(agent, displayAgentMemory, openAgentModal, clearAgentM
         <button 
           class="action-btn edit-btn" 
           title="Edit agent" 
-          @click=${(e) => {
-      e.stopPropagation();
-      run(openAgentModal, agent)(e);
-    }}
+          @click=${run(openAgentModal, agent)}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>

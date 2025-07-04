@@ -242,9 +242,7 @@ const view = (state) => {
 
           <!-- Agents grid -->
           <div class="agent-grid">
-            ${Array.isArray(state.agents) ? state.agents.map(agent =>
-    AgentCard(agent, displayAgentMemory, openAgentModal)
-  ) : ''}
+            ${Array.isArray(state.agents) ? state.agents.map(agent => AgentCard(agent, displayAgentMemory, openAgentModal, clearAgentMemory)) : ''}
           </div>
           <!-- Conversation area -->
           <div class="conversation-area">
