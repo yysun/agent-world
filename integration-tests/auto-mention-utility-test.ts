@@ -1,17 +1,26 @@
 /**
  * Simple Auto-Mention Utility Functions Test
  * Tests the core utility functions directly without mocking LLM
+ * Updated to test the new ANY mention logic that prevents loops
  *
  * Usage:
  * npx tsx integration-tests/auto-mention-utility-test.ts
  */
 
 import { extractParagraphBeginningMentions } from '../core/utils.js';
+import { hasAnyMentionAtBeginning, addAutoMention, removeSelfMentions } from '../core/events.js';
 
-// Import the utility functions directly from the events module
-let hasAutoMentionAtBeginning: (response: string, sender: string) => boolean;
-let addAutoMention: (response: string, sender: string) => string;
-let removeSelfMentions: (response: string, agentId: string) => string;
+/**
+ * Simple Auto-Mention Utility Functions Test
+ * Tests the core utility functions directly without mocking LLM
+ * Updated to test the new ANY mention logic that prevents loops
+ *
+ * Usage:
+ * npx tsx integration-tests/auto-mention-utility-test.ts
+ */
+
+import { extractParagraphBeginningMentions } from '../core/utils.js';
+import { hasAnyMentionAtBeginning, addAutoMention, removeSelfMentions } from '../core/events.js';
 
 // Test result tracking
 interface TestResult {
@@ -39,68 +48,12 @@ async function runTest(name: string, testFn: () => void): Promise<void> {
   }
 }
 
-// Load the utility functions from events.ts
-async function loadUtilityFunctions() {
-  try {
-    // Since the functions are not exported, we'll recreate them based on the implementation
-    hasAutoMentionAtBeginning = function (response: string, sender: string): boolean {
-      if (!response || !sender) return false;
-
-      const trimmedResponse = response.trim();
-      if (!trimmedResponse) return false;
-
-      const mentions = extractParagraphBeginningMentions(trimmedResponse);
-      return mentions.includes(sender.toLowerCase());
-    };
-
-    addAutoMention = function (response: string, sender: string): string {
-      if (!response || !sender) return response;
-
-      const trimmedResponse = response.trim();
-      if (!trimmedResponse) return response;
-
-      // Check if already has mention at beginning
-      if (hasAutoMentionAtBeginning(trimmedResponse, sender)) {
-        return trimmedResponse;
-      }
-
-      // Prepend @sender
-      return `@${sender} ${trimmedResponse}`;
-    };
-
-    removeSelfMentions = function (response: string, agentId: string): string {
-      if (!response || !agentId) return response;
-
-      const trimmedResponse = response.trim();
-      if (!trimmedResponse) return response;
-
-      // Remove all consecutive @agentId mentions from beginning (case-insensitive)
-      const selfMentionPattern = new RegExp(`^(@${agentId}\\s*)+`, 'gi');
-      const cleaned = trimmedResponse.replace(selfMentionPattern, '').trim();
-
-      // Clean up any resulting double spaces
-      return cleaned.replace(/\s+/g, ' ');
-    };
-
-    return true;
-  } catch (error) {
-    console.error('Failed to load utility functions:', error);
-    return false;
-  }
-}
-
 async function runUtilityTests() {
-  console.log('🧪 Auto-Mention Utility Functions Test');
-  console.log('======================================');
+  console.log('🧪 Auto-Mention Utility Functions Test (Updated for ANY Mention Logic)');
+  console.log('==================================================================');
 
   try {
-    // Load utility functions
-    console.log('\n🔧 Loading utility functions...');
-    const loaded = await loadUtilityFunctions();
-    if (!loaded) {
-      throw new Error('Failed to load utility functions');
-    }
-    console.log('✅ Utility functions loaded successfully');
+    console.log('✅ Using exported utility functions from events module');
 
     // Test extractParagraphBeginningMentions first
     console.log('\n📋 Testing extractParagraphBeginningMentions...');
@@ -139,45 +92,52 @@ async function runUtilityTests() {
       }
     });
 
-    // Test hasAutoMentionAtBeginning
-    console.log('\n📋 Testing hasAutoMentionAtBeginning...');
-    await runTest('hasAutoMentionAtBeginning: @human at start', () => {
-      const result = hasAutoMentionAtBeginning('@human hello', 'human');
+    // Test hasAnyMentionAtBeginning (NEW FUNCTION)
+    console.log('\n📋 Testing hasAnyMentionAtBeginning...');
+    await runTest('hasAnyMentionAtBeginning: @human at start', () => {
+      const result = hasAnyMentionAtBeginning('@human hello');
       if (!result) {
         throw new Error('Expected true for mention at beginning');
       }
     });
 
-    await runTest('hasAutoMentionAtBeginning: @human in middle', () => {
-      const result = hasAutoMentionAtBeginning('hello @human', 'human');
+    await runTest('hasAnyMentionAtBeginning: @gm at start', () => {
+      const result = hasAnyMentionAtBeginning('@gm hello');
+      if (!result) {
+        throw new Error('Expected true for any mention at beginning');
+      }
+    });
+
+    await runTest('hasAnyMentionAtBeginning: @human in middle', () => {
+      const result = hasAnyMentionAtBeginning('hello @human');
       if (result) {
         throw new Error('Expected false for mention in middle');
       }
     });
 
-    await runTest('hasAutoMentionAtBeginning: case insensitive', () => {
-      const result = hasAutoMentionAtBeginning('@HUMAN hello', 'human');
-      if (!result) {
-        throw new Error('Expected true for case insensitive match');
-      }
-    });
-
-    await runTest('hasAutoMentionAtBeginning: @human with newline', () => {
-      const result = hasAutoMentionAtBeginning('@human\n hi', 'human');
+    await runTest('hasAnyMentionAtBeginning: @human with newline', () => {
+      const result = hasAnyMentionAtBeginning('@human\n hi');
       if (!result) {
         throw new Error('Expected true for mention with newline');
       }
     });
 
-    await runTest('hasAutoMentionAtBeginning: @human with mixed whitespace', () => {
-      const result = hasAutoMentionAtBeginning('@human \t\n hello', 'human');
+    await runTest('hasAnyMentionAtBeginning: @human with mixed whitespace', () => {
+      const result = hasAnyMentionAtBeginning('@human \t\n hello');
       if (!result) {
         throw new Error('Expected true for mention with mixed whitespace');
       }
     });
 
-    // Test addAutoMention
-    console.log('\n📋 Testing addAutoMention...');
+    await runTest('hasAnyMentionAtBeginning: empty string', () => {
+      const result = hasAnyMentionAtBeginning('');
+      if (result) {
+        throw new Error('Expected false for empty string');
+      }
+    });
+
+    // Test addAutoMention (UPDATED LOGIC)
+    console.log('\n📋 Testing addAutoMention (Updated Logic)...');
     await runTest('addAutoMention: basic addition', () => {
       const result = addAutoMention('Hello there!', 'human');
       const expected = '@human Hello there!';
@@ -186,9 +146,25 @@ async function runUtilityTests() {
       }
     });
 
-    await runTest('addAutoMention: already has mention', () => {
+    await runTest('addAutoMention: already has ANY mention (should not add)', () => {
+      const result = addAutoMention('@gm Hello there!', 'human');
+      const expected = '@gm Hello there!';
+      if (result !== expected) {
+        throw new Error(`Expected: "${expected}", Got: "${result}"`);
+      }
+    });
+
+    await runTest('addAutoMention: already has sender mention (should not add)', () => {
       const result = addAutoMention('@human Hello there!', 'human');
       const expected = '@human Hello there!';
+      if (result !== expected) {
+        throw new Error(`Expected: "${expected}", Got: "${result}"`);
+      }
+    });
+
+    await runTest('addAutoMention: already has different mention (should not add)', () => {
+      const result = addAutoMention('@pro Let me redirect to @con', 'gm');
+      const expected = '@pro Let me redirect to @con';
       if (result !== expected) {
         throw new Error(`Expected: "${expected}", Got: "${result}"`);
       }
@@ -202,8 +178,8 @@ async function runUtilityTests() {
       }
     });
 
-    await runTest('addAutoMention: already has mention with newline', () => {
-      const result = addAutoMention('@human\n Hello there!', 'human');
+    await runTest('addAutoMention: already has mention with newline (should not add)', () => {
+      const result = addAutoMention('@human\n Hello there!', 'gm');
       const expected = '@human\n Hello there!';
       if (result !== expected) {
         throw new Error(`Expected: "${expected}", Got: "${result}"`);
@@ -218,7 +194,7 @@ async function runUtilityTests() {
       }
     });
 
-    // Test removeSelfMentions
+    // Test removeSelfMentions (UNCHANGED)
     console.log('\n📋 Testing removeSelfMentions...');
     await runTest('removeSelfMentions: single self-mention', () => {
       const result = removeSelfMentions('@alice I should handle this.', 'alice');
@@ -252,38 +228,57 @@ async function runUtilityTests() {
       }
     });
 
-    // Test combined workflow
-    console.log('\n📋 Testing Combined Workflow...');
-    await runTest('Combined: auto-mention then remove self-mention', () => {
-      let response = 'I am doing well, thank you!';
+    // Test Loop Prevention Scenarios
+    console.log('\n📋 Testing Loop Prevention Scenarios...');
+    await runTest('Loop Prevention: @gm->@pro response should not add @gm', () => {
+      let response = '@gm I will work on this task.';
 
-      // Step 1: Add auto-mention
-      response = addAutoMention(response, 'human');
-      let expected = '@human I am doing well, thank you!';
-      if (response !== expected) {
-        throw new Error(`Step 1 failed. Expected: "${expected}", Got: "${response}"`);
+      // Step 1: Remove self-mentions (pro removes @pro mentions)
+      response = removeSelfMentions(response, 'pro');
+      let afterSelfRemoval = '@gm I will work on this task.';
+      if (response !== afterSelfRemoval) {
+        throw new Error(`Step 1 failed. Expected: "${afterSelfRemoval}", Got: "${response}"`);
       }
 
-      // Step 2: Remove self-mentions (should not change anything)
-      response = removeSelfMentions(response, 'alice');
+      // Step 2: Add auto-mention (should NOT add @gm because @gm already exists)
+      response = addAutoMention(response, 'gm');
+      let expected = '@gm I will work on this task.';
       if (response !== expected) {
         throw new Error(`Step 2 failed. Expected: "${expected}", Got: "${response}"`);
       }
     });
 
-    await runTest('Combined: self-mention then auto-mention', () => {
-      let response = '@alice I should handle this task.';
+    await runTest('Redirection: @gm can redirect to @con', () => {
+      let response = '@con Please handle this request.';
 
-      // Step 1: Remove self-mentions
-      response = removeSelfMentions(response, 'alice');
-      let intermediate = 'I should handle this task.';
-      if (response !== intermediate) {
-        throw new Error(`Step 1 failed. Expected: "${intermediate}", Got: "${response}"`);
+      // Step 1: Remove self-mentions (gm removes @gm mentions)
+      response = removeSelfMentions(response, 'gm');
+      let afterSelfRemoval = '@con Please handle this request.';
+      if (response !== afterSelfRemoval) {
+        throw new Error(`Step 1 failed. Expected: "${afterSelfRemoval}", Got: "${response}"`);
       }
 
-      // Step 2: Add auto-mention
+      // Step 2: Add auto-mention (should NOT add auto-mention because @con already exists)
       response = addAutoMention(response, 'human');
-      let expected = '@human I should handle this task.';
+      let expected = '@con Please handle this request.';
+      if (response !== expected) {
+        throw new Error(`Step 2 failed. Expected: "${expected}", Got: "${response}"`);
+      }
+    });
+
+    await runTest('Normal Response: should add auto-mention when no mention exists', () => {
+      let response = 'I understand your request.';
+
+      // Step 1: Remove self-mentions
+      response = removeSelfMentions(response, 'gm');
+      let afterSelfRemoval = 'I understand your request.';
+      if (response !== afterSelfRemoval) {
+        throw new Error(`Step 1 failed. Expected: "${afterSelfRemoval}", Got: "${response}"`);
+      }
+
+      // Step 2: Add auto-mention (should add because no mention exists)
+      response = addAutoMention(response, 'human');
+      let expected = '@human I understand your request.';
       if (response !== expected) {
         throw new Error(`Step 2 failed. Expected: "${expected}", Got: "${response}"`);
       }
@@ -310,8 +305,11 @@ async function runUtilityTests() {
       console.log('\n❌ Some utility function tests failed. The implementation needs review.');
       process.exit(1);
     } else {
-      console.log('\n🎉 All utility function tests passed! The core logic is working correctly.');
-      console.log('\n💡 Next step: Check why the integration tests are not getting LLM responses.');
+      console.log('\n🎉 All utility function tests passed! The loop prevention logic is working correctly.');
+      console.log('\n💡 Key improvements:');
+      console.log('  - Prevents @gm->@pro->@gm loops by checking for ANY mention at beginning');
+      console.log('  - Allows @gm->@con redirections by preserving explicit mentions');
+      console.log('  - Self-mentions are still properly removed');
     }
 
   } catch (error) {

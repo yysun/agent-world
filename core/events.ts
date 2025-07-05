@@ -30,10 +30,12 @@ const logger = createCategoryLogger('events');
  * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
  * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
  *
- * Auto-Mention Logic (Fixed):
+ * Auto-Mention Logic (Enhanced to Prevent Loops):
  * - Step 1: Remove self-mentions from response beginning (prevents agent self-mention)
- * - Step 2: Add auto-mention for sender if not already present at paragraph beginning
+ * - Step 2: Add auto-mention for sender only if NO mention exists at paragraph beginning
  * - Uses extractParagraphBeginningMentions for consistent mention detection
+ * - Prevents agent loops (e.g., @gm->@pro->@gm) by checking for ANY mention at beginning
+ * - Allows redirections (e.g., @gm->@con) by preserving explicit mentions
  * - Handles case-insensitive matching while preserving original case
  * - Ensures published message matches stored memory content
  * - Preserves original formatting including newlines and whitespace structure
@@ -133,40 +135,43 @@ import {
  */
 
 /**
- * Check if response already has auto-mention at the beginning using extractParagraphBeginningMentions logic
+ * Check if response already has ANY mention at the beginning using extractParagraphBeginningMentions logic
+ * This prevents auto-mention loops by detecting any existing mention, not just the sender's
  */
-function hasAutoMentionAtBeginning(response: string, sender: string): boolean {
-  if (!response || !sender) return false;
+export function hasAnyMentionAtBeginning(response: string): boolean {
+  if (!response) return false;
 
   // Use original response to preserve newlines, only check if it's effectively empty
   if (!response.trim()) return false;
 
   const mentions = extractParagraphBeginningMentions(response);
-  return mentions.includes(sender.toLowerCase());
+  return mentions.length > 0;
 }
 
 /**
  * Add auto-mention at the beginning of response, preserving case if found elsewhere
+ * Modified to check for ANY mention at beginning to prevent loops
  */
-function addAutoMention(response: string, sender: string): string {
+export function addAutoMention(response: string, sender: string): string {
   if (!response || !sender) return response;
 
   // Check if effectively empty (only whitespace)
   if (!response.trim()) return response;
 
-  // Check if already has mention at beginning
-  if (hasAutoMentionAtBeginning(response, sender)) {
+  // Check if already has ANY mention at beginning (prevents loops)
+  if (hasAnyMentionAtBeginning(response)) {
     return response;
   }
 
-  // Prepend @sender while preserving original formatting
-  return `@${sender} ${response}`;
+  // Trim the response and prepend @sender
+  const trimmedResponse = response.trim();
+  return `@${sender} ${trimmedResponse}`;
 }
 
 /**
  * Remove all consecutive self-mentions from response beginning (case-insensitive)
  */
-function removeSelfMentions(response: string, agentId: string): string {
+export function removeSelfMentions(response: string, agentId: string): string {
   if (!response || !agentId) return response;
 
   const trimmedResponse = response.trim();
@@ -191,13 +196,29 @@ function removeSelfMentions(response: string, agentId: string): string {
  * Agent subscription with automatic processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
+  logger.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
+
   const handler = async (messageEvent: WorldMessageEvent) => {
+    logger.debug('Agent received message event', {
+      agentId: agent.id,
+      sender: messageEvent.sender,
+      content: messageEvent.content,
+      messageId: messageEvent.messageId
+    });
+
     // Skip messages from this agent itself
-    if (messageEvent.sender === agent.id) return;
+    if (messageEvent.sender === agent.id) {
+      logger.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
+      return;
+    }
 
     // Automatic message processing
+    logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
     if (await shouldAgentRespond(world, agent, messageEvent)) {
+      logger.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
       await processAgentMessage(world, agent, messageEvent);
+    } else {
+      logger.debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
     }
   };
 
@@ -377,8 +398,16 @@ export async function processAgentMessage(
  * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
  */
 export async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
+  logger.debug('shouldAgentRespond called', {
+    agentId: agent.id,
+    sender: messageEvent.sender,
+    content: messageEvent.content,
+    llmCallCount: agent.llmCallCount
+  });
+
   // Never respond to own messages
   if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
+    logger.debug('Skipping own message', { agentId: agent.id, sender: messageEvent.sender });
     return false;
   }
 
@@ -387,13 +416,17 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Never respond to turn limit messages (prevents endless loops)
   if (content.includes('Turn limit reached')) {
+    logger.debug('Skipping turn limit message', { agentId: agent.id });
     return false;
   }
 
   // Reset LLM call count when receiving human or system messages (MUST happen before turn limit check)
   const senderType = determineSenderType(messageEvent.sender);
+  logger.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
+
   if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
     if (agent.llmCallCount > 0) {
+      logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
       agent.llmCallCount = 0;
 
       // Auto-save agent state after turn limit reset
@@ -408,8 +441,10 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Check turn limit based on LLM call count using world-specific turn limit
   const worldTurnLimit = getWorldTurnLimit(world);
+  logger.debug('Checking turn limit', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
 
   if (agent.llmCallCount >= worldTurnLimit) {
+    logger.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     // Send turn limit message with agentName as sender
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
 
@@ -420,29 +455,40 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Always respond to system messages (except turn limit messages handled above)
   if (!messageEvent.sender || messageEvent.sender === 'system') {
+    logger.debug('Responding to system message', { agentId: agent.id });
     return true;
   }
 
   // Extract @mentions that appear at paragraph beginnings only
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
+  logger.debug('Extracted paragraph beginning mentions', { agentId: agent.id, mentions, content: messageEvent.content });
 
   // For HUMAN/user messages
   if (senderType === SenderType.HUMAN) {
+    logger.debug('Processing HUMAN message logic', { agentId: agent.id });
     // If no paragraph-beginning mentions, check for any mentions at all
     if (mentions.length === 0) {
       // If there are no paragraph-beginning mentions but there are mentions elsewhere,
       // treat as public message (no response)
       const anyMentions = extractMentions(messageEvent.content);
+      logger.debug('No paragraph mentions, checking any mentions', { agentId: agent.id, anyMentions });
       if (anyMentions.length > 0) {
+        logger.debug('Has mentions but not at paragraph beginning - skipping', { agentId: agent.id });
         return false; // Has mentions but not at paragraph beginning
       }
+      logger.debug('No mentions at all - responding as public message', { agentId: agent.id });
       return true; // No mentions at all - public message
     }
 
     // If there are paragraph-beginning mentions, respond if this agent is mentioned
-    return mentions.includes(agent.id.toLowerCase());
+    const shouldRespond = mentions.includes(agent.id.toLowerCase());
+    logger.debug('HUMAN message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
+    return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  return mentions.includes(agent.id.toLowerCase());
+  logger.debug('Processing AGENT message logic', { agentId: agent.id });
+  const shouldRespond = mentions.includes(agent.id.toLowerCase());
+  logger.debug('AGENT message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
+  return shouldRespond;
 }
