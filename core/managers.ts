@@ -28,7 +28,7 @@
  * - deleteAgent: Remove agent and all associated data
  * - listAgents: Get all agent IDs and basic info
  * - updateAgentMemory: Add messages to agent memory
- * - clearAgentMemory: Archive existing memory then reset to empty state
+ * - clearAgentMemory: Archive existing memory then reset to empty state and reset LLM call count
  * - loadAgentsIntoWorld: Load all agents from disk into world runtime
  * - syncWorldAgents: Synchronize world agents Map with disk state
  * - createAgentsBatch: Create multiple agents atomically
@@ -928,6 +928,7 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
 
 /**
  * Clear agent memory (archive current memory then reset to empty state)
+ * Also resets the LLM call count to 0
  */
 export async function clearAgentMemory(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
   // Ensure modules are initialized
@@ -944,7 +945,8 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
   logger.debug('loadAgentFromDisk result', {
     agentFound: !!existingAgent,
     agentName: existingAgent?.name,
-    memoryLength: existingAgent?.memory?.length || 0
+    memoryLength: existingAgent?.memory?.length || 0,
+    currentLLMCallCount: existingAgent?.llmCallCount || 0
   });
 
   if (!existingAgent) {
@@ -967,6 +969,7 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
   const updatedAgent: Agent = {
     ...existingAgent,
     memory: [],
+    llmCallCount: 0,
     lastActive: new Date()
   };
 
@@ -976,7 +979,10 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
   await saveAgentMemoryToDisk(rootPath, worldId, agentId, []);
   await saveAgentConfigToDisk(rootPath, worldId, updatedAgent);
 
-  logger.debug('Memory cleared and saved successfully');
+  logger.debug('Memory and LLM call count cleared and saved successfully', {
+    agentId,
+    newLLMCallCount: updatedAgent.llmCallCount
+  });
   return updatedAgent;
 }
 

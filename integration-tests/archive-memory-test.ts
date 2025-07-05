@@ -7,7 +7,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { createAgent, clearAgentMemory, getAgent, updateAgentMemory } from '../core/agent-manager';
+import { createAgent, clearAgentMemory, getAgent, updateAgentMemory } from '../core/managers';
 import { AgentMessage, LLMProvider } from '../core/types';
 
 const TEST_ROOT_PATH = './test-data/archive-test';
@@ -42,7 +42,19 @@ async function testMemoryArchiving() {
 
     console.log('✅ Agent created successfully');
 
-    // 2. Add some memory to the agent
+    // 2. Manually set a non-zero LLM call count for testing
+    console.log('🔢 Setting LLM call count to test reset functionality...');
+    // Load agent, modify LLM call count, and save it back
+    const agentToModify = await getAgent(TEST_ROOT_PATH, TEST_WORLD_ID, TEST_AGENT_ID);
+    if (agentToModify) {
+      agentToModify.llmCallCount = 5;
+      // Save the agent configuration with updated call count
+      const { saveAgentConfigToDisk } = await import('../core/agent-storage');
+      await saveAgentConfigToDisk(TEST_ROOT_PATH, TEST_WORLD_ID, agentToModify);
+      console.log('✅ LLM call count set to 5 for testing');
+    }
+
+    // 3. Add some memory to the agent
     const testMessages: AgentMessage[] = [
       {
         role: 'user',
@@ -77,16 +89,16 @@ async function testMemoryArchiving() {
 
     console.log(`✅ Added ${testMessages.length} messages to agent memory`);
 
-    // 3. Verify memory exists before clearing
+    // 4. Verify memory and LLM call count exist before clearing
     const agentBeforeClear = await getAgent(TEST_ROOT_PATH, TEST_WORLD_ID, TEST_AGENT_ID);
     if (!agentBeforeClear || agentBeforeClear.memory.length === 0) {
       throw new Error('Agent memory should not be empty before clearing');
     }
 
-    console.log(`📊 Agent memory before clearing: ${agentBeforeClear.memory.length} messages`);
+    console.log(`📊 Agent state before clearing: ${agentBeforeClear.memory.length} messages, LLM call count: ${agentBeforeClear.llmCallCount}`);
 
-    // 4. Clear the agent memory (should archive first)
-    console.log('🗂️  Clearing agent memory (with archiving)...');
+    // 5. Clear the agent memory (should archive memory and reset LLM call count)
+    console.log('🗂️  Clearing agent memory (with archiving and LLM call count reset)...');
     const clearedAgent = await clearAgentMemory(TEST_ROOT_PATH, TEST_WORLD_ID, TEST_AGENT_ID);
 
     if (!clearedAgent) {
@@ -95,14 +107,18 @@ async function testMemoryArchiving() {
 
     console.log('✅ Agent memory cleared successfully');
 
-    // 5. Verify memory is empty after clearing
+    // 6. Verify memory is empty and LLM call count is reset after clearing
     if (clearedAgent.memory.length !== 0) {
       throw new Error(`Agent memory should be empty after clearing, but has ${clearedAgent.memory.length} messages`);
     }
 
-    console.log('📊 Agent memory after clearing: 0 messages');
+    if (clearedAgent.llmCallCount !== 0) {
+      throw new Error(`Agent LLM call count should be 0 after clearing, but is ${clearedAgent.llmCallCount}`);
+    }
 
-    // 6. Check that archive directory was created
+    console.log('📊 Agent state after clearing: 0 messages, LLM call count: 0');
+
+    // 7. Check that archive directory was created
     const agentDir = path.join(TEST_ROOT_PATH, TEST_WORLD_ID, 'agents', TEST_AGENT_ID);
     const archiveDir = path.join(agentDir, 'archive');
 
@@ -116,7 +132,7 @@ async function testMemoryArchiving() {
 
       console.log(`📂 Found ${memoryArchives.length} archive file(s): ${memoryArchives.join(', ')}`);
 
-      // 7. Verify archive content
+      // 8. Verify archive content
       const latestArchive = memoryArchives.sort().pop()!;
       const archivePath = path.join(archiveDir, latestArchive);
       const archiveContent = JSON.parse(await fs.readFile(archivePath, 'utf8'));
@@ -127,7 +143,7 @@ async function testMemoryArchiving() {
 
       console.log(`✅ Archive contains ${archiveContent.length} messages as expected`);
 
-      // 8. Verify archive content matches original messages
+      // 9. Verify archive content matches original messages
       for (let i = 0; i < testMessages.length; i++) {
         const original = testMessages[i];
         const archived = archiveContent[i];
@@ -143,7 +159,7 @@ async function testMemoryArchiving() {
       throw new Error(`Failed to access archive directory: ${error}`);
     }
 
-    console.log('🎉 All tests passed! Memory archiving works correctly.');
+    console.log('🎉 All tests passed! Memory archiving and LLM call count reset work correctly.');
 
   } catch (error) {
     console.error('❌ Test failed:', error);
