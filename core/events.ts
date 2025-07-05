@@ -325,14 +325,14 @@ export async function processAgentMessage(
       finalResponse = removeSelfMentions(finalResponse, agent.id);
     }
 
-    // Step 2: Auto-mention processing (for both humans and agents, not system)
+    // Step 2: Auto-mention processing (for agents only, not humans or system)
     if (messageEvent.sender && typeof messageEvent.sender === 'string' &&
       messageEvent.sender.toLowerCase() !== agent.id.toLowerCase()) {
 
       const senderType = determineSenderType(messageEvent.sender);
 
-      // Auto-mention humans and agents (not system messages)
-      if ((senderType === SenderType.HUMAN || senderType === SenderType.AGENT) &&
+      // Auto-mention agents only (not humans or system messages)
+      if (senderType === SenderType.AGENT &&
         finalResponse && typeof finalResponse === 'string') {
         finalResponse = addAutoMention(finalResponse, messageEvent.sender);
       }
