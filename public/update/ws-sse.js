@@ -1,5 +1,5 @@
 /**
- * WebSocket Message Event Handlers
+ * Message Event Handlers - Now supporting both WebSocket (legacy) and REST + SSE
  *
  * Features:
  * - Unified message creation with type-specific handling
@@ -14,6 +14,7 @@
  * - Success response handling with nested system message display
  * - Error response handling within success messages for command failures
  * - Safe state handling with fallbacks for undefined properties
+ * - **NEW**: REST API + SSE handlers for migration from WebSocket
  *
  * Changes:
  * - Added handleSSEEvent function for new WebSocket server structure
@@ -26,9 +27,9 @@
  * - Added error message handling within success responses for command failures
  * - Fixed TypeError: state.messages is not iterable by adding safe state fallbacks
  * - Added proper null/undefined checks for state.messages and state.worldName
+ * - **MIGRATION**: Added REST API compatible handlers (handleRestMessage, handleRestError)
+ * - Removed WebSocket dependency from this module
  */
-
-import wsApi from '../ws-api.js';
 
 // Handle SSE events with new eventType structure
 const handleSSEEvent = (state, messageData) => {
@@ -207,9 +208,7 @@ export const handleWebSocketMessage = (state, messageData) => {
       return { ...safeState, connectionStatus: 'connected' };
 
     case 'welcome':
-      if (safeState.worldName && wsApi.isConnected()) {
-        wsApi.subscribeToWorld(safeState.worldName);
-      }
+      // No longer need WebSocket subscription for REST + SSE architecture
       return { ...safeState, connectionStatus: 'connected' };
 
     default:
@@ -230,5 +229,61 @@ export const handleWebSocketError = (state, error) => {
     ...state,
     connectionStatus: 'error',
     wsError: error.message || 'WebSocket connection error'
+  };
+};
+
+// REST API compatible handlers (adapted from WebSocket handlers)
+export const handleRestMessage = (state, data) => {
+  // Ensure state has required properties with fallbacks
+  const safeState = {
+    ...state,
+    messages: state.messages || [],
+    worldName: state.worldName || null
+  };
+
+  // Handle SSE messages from REST API
+  if (data.type === 'sse') {
+    return handleSSEEvent(safeState, data.payload);
+  } else if (data.type === 'message') {
+    // Handle regular messages
+    const messageData = data.payload;
+    const newMessage = {
+      id: Date.now() + Math.random(),
+      type: messageData.type || 'message',
+      sender: messageData.sender || messageData.agentName || 'Agent',
+      text: messageData.content || messageData.message || '',
+      timestamp: messageData.timestamp || new Date().toISOString(),
+      worldName: messageData.worldName || safeState.worldName
+    };
+
+    return {
+      ...safeState,
+      messages: [...safeState.messages, newMessage],
+      needScroll: true
+    };
+  }
+
+  return safeState;
+};
+
+export const handleRestError = (state, error) => {
+  const errorMessage = error.message || 'REST API error';
+
+  // Add error message to conversation
+  const errorMsg = {
+    id: Date.now() + Math.random(),
+    type: 'error',
+    sender: 'System',
+    text: errorMessage,
+    timestamp: new Date().toISOString(),
+    worldName: state.worldName,
+    hasError: true
+  };
+
+  return {
+    ...state,
+    wsError: errorMessage,
+    messages: [...state.messages, errorMsg],
+    needScroll: true
   };
 };

@@ -5,6 +5,7 @@
  * - World management (create, update, delete, list)
  * - Agent operations (create, read, update, delete, list)
  * - Agent memory management (get, append, clear)
+ * - Chat functionality with Server-Sent Events (SSE)
  * 
  * Features:
  * - RESTful API client using fetch
@@ -12,8 +13,7 @@
  * - Base URL configuration
  * - Full CRUD operations for worlds and agents
  * - Memory management for agents
- * 
- * Note: Chat functionality uses WebSocket/SSE in ws-api.js
+ * - Real-time chat via SSE streaming
  */
 
 // Base API URL - can be configured
@@ -272,6 +272,108 @@ async function updateWorldComprehensive(worldName, updateData) {
   return updateWorld(worldName, updateData);
 }
 
+/**
+ * Send a chat message and listen for SSE responses
+ * @param {string} worldName - Name of the world
+ * @param {string} message - Message to send
+ * @param {string} sender - Sender identifier (default: 'user1')
+ * @param {Function} onMessage - Callback for received messages
+ * @param {Function} onError - Callback for errors
+ * @param {Function} onComplete - Callback when chat session completes
+ * @returns {Promise<Function>} Cleanup function to stop listening
+ */
+async function sendChatMessage(worldName, message, sender = 'user1', onMessage, onError, onComplete) {
+  if (!worldName || !message) {
+    throw new Error('World name and message are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chat`, {
+    method: 'POST',
+    body: JSON.stringify({ message, sender }),
+    headers: {
+      'Accept': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  });
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let isActive = true;
+
+  const cleanup = () => {
+    if (isActive) {
+      isActive = false;
+      try {
+        reader.cancel();
+      } catch (error) {
+        console.warn('Error canceling SSE reader:', error);
+      }
+    }
+  };
+
+  // Process SSE stream
+  const processStream = async () => {
+    try {
+      while (isActive) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.trim() === '') continue; // Skip empty lines
+
+          if (line.startsWith('data: ')) {
+            try {
+              const dataContent = line.slice(6).trim();
+              if (dataContent === '') continue; // Skip empty data lines
+
+              const data = JSON.parse(dataContent);
+
+              if (data.type === 'complete') {
+                if (onComplete) onComplete(data.payload);
+                cleanup();
+                return;
+              } else if (data.type === 'connected') {
+                // Connection confirmation - can be handled or ignored
+                console.log('SSE connected to world:', data.payload?.worldName);
+              } else if (data.type === 'message' || data.type === 'sse') {
+                if (onMessage) onMessage(data);
+              } else {
+                console.warn('Unknown SSE data type:', data.type, data);
+              }
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError, 'Line:', line);
+              if (onError) onError(parseError);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (isActive) {
+        console.error('SSE stream error:', error);
+        if (onError) onError(error);
+      }
+    } finally {
+      cleanup();
+    }
+  };
+
+  // Start processing stream
+  processStream().catch((error) => {
+    console.error('SSE processing failed:', error);
+    if (onError) onError(error);
+    cleanup();
+  });
+
+  return cleanup;
+}
+
 // Export the API functions
 export {
   // World management
@@ -292,4 +394,7 @@ export {
   getAgentMemory,
   appendAgentMemory,
   clearAgentMemory,
+
+  // Chat functionality
+  sendChatMessage,
 };

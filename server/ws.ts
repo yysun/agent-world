@@ -32,7 +32,7 @@
  *
  * Logging:
  * - Uses centralized logger from core module with setLogLevel() control
- * - Configures log level from LOG_LEVEL environment variable
+ * - Log level configured globally in server/index.ts from LOG_LEVEL environment variable
  * - All logging goes through core logger instance for consistency
  * - Logs connection/disconnection events with client information
  * - Tracks message flow (incoming/outgoing) with data content
@@ -83,13 +83,6 @@ const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
 // Create WebSocket category logger
 const logger = createCategoryLogger('ws');
-
-// Configure centralized logger from environment
-const logLevel = (process.env.LOG_LEVEL || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
-setLogLevel(logLevel);
-
-// Log WebSocket server initialization
-logger.debug(`WebSocket server logger configured to level: ${logLevel}`);
 
 // Response interfaces for WebSocket compatibility
 export interface SimpleCommandResponse {

@@ -4,7 +4,7 @@
  * Re-exports all event handlers from their respective modules
  * for convenient importing in components.
  * 
- * WebSocket message handlers are now imported from the consolidated ws-api.js module.
+ * Includes both WebSocket and REST API message handlers for transition period.
  */
 
 export { initializeState } from './init-state.js';
@@ -12,7 +12,9 @@ export { selectWorld } from './select-world.js';
 export {
   handleConnectionStatus,
   handleWebSocketMessage,
-  handleWebSocketError
+  handleWebSocketError,
+  handleRestMessage,
+  handleRestError
 } from './ws-sse.js';
 export {
   displayAgentMemory,

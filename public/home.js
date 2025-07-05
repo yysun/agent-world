@@ -6,7 +6,7 @@
  * Core Features:
  * - Enhanced world selection with modular WorldCard and AddWorldCard components
  * - Improved agent grid using modular AgentCard and AddAgentCard components
- * - Real-time conversation area with streaming message support
+ * - Real-time conversation area with REST API + SSE streaming support
  * - Auto-scroll to bottom functionality for new messages
  * - Theme toggle functionality
  * - Proper input handling with immediate character capture and state clearing
@@ -38,9 +38,11 @@
  * - Memory count display with user-friendly formatting
  * - Avatar generation with color-coded backgrounds and initials
  *
- * WebSocket Integration:
- * - Handles system/world/message events and SSE streaming
- * - Real-time chunk accumulation with visual indicators
+ * REST API + SSE Integration:
+ * - Uses REST API for all CRUD operations (worlds, agents, memory)
+ * - Server-Sent Events (SSE) for real-time chat streaming
+ * - No WebSocket dependency - fully migrated to REST + SSE architecture
+ * - Real-time chunk accumulation with visual indicators via SSE
  * - Connection status tracking and error handling
  * - Error messages added to conversation with red left border styling
  *
@@ -77,6 +79,10 @@
  * - Maintained all existing functionality while improving code structure and UI compactness
  * - Added comprehensive component documentation and feature descriptions
  * - Improved maintainability through separation of concerns and streamlined design
+ * - **MIGRATION COMPLETE**: Fully migrated from WebSocket to REST API + SSE architecture
+ * - Uses REST API for all CRUD operations and SSE for real-time chat streaming
+ * - Removed all WebSocket dependencies and imports
+ * - Updated message handlers to work with REST + SSE event streams
  */
 
 const { Component, html, run } = window["apprun"];
@@ -85,13 +91,13 @@ import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
 import { getAvatarColor, getAvatarInitials } from './utils.js';
 import {
   initializeState, selectWorld,
-  handleWebSocketMessage, handleConnectionStatus, handleWebSocketError,
+  handleRestMessage, handleConnectionStatus, handleRestError,
   displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
 } from './update/index.js';
 import { AgentModal, openAgentModal, closeAgentModal } from './components/agent-modal.js';
 import { WorldCard, AddWorldCard } from './components/world-card.js';
 import { AgentCard } from './components/agent-card.js';
-import { sendChatMessage } from './ws-api.js';
+import { sendChatMessage } from './api.js';
 import Message from './components/message.js';
 
 const USER_ID = 'user1';
@@ -119,7 +125,7 @@ const onKeypress = (state, e) => {
   // return state; // No need to return state here - no screen update needed
 };
 
-const sendMessage = (state) => {
+const sendMessage = async (state) => {
   const message = state.currentMessage?.trim();
 
   if (!message || !state.worldName) {
@@ -146,44 +152,68 @@ const sendMessage = (state) => {
     };
   }
 
-  const success = sendChatMessage(state.worldName, message, USER_ID);
+  // Add user message immediately
+  const userMessage = {
+    id: Date.now() + Math.random(),
+    type: 'user-message',
+    sender: USER_ID,
+    text: message,
+    timestamp: new Date().toISOString(),
+    worldName: state.worldName
+  };
 
-  if (success) {
-    const userMessage = {
+  const newState = {
+    ...state,
+    messages: [...state.messages, userMessage],
+    currentMessage: '',
+    wsError: null,
+    needScroll: true
+  };
+
+  try {
+    // Send chat message via REST API with SSE
+    await sendChatMessage(
+      state.worldName,
+      message,
+      USER_ID,
+      (data) => {
+        // Handle incoming messages from SSE
+        const app = window["app"];
+        app.run('handleRestMessage', data);
+      },
+      (error) => {
+        // Handle errors
+        const app = window["app"];
+        app.run('handleRestError', error);
+      },
+      (completion) => {
+        // Handle completion
+        console.log('Chat session completed:', completion);
+      }
+    );
+
+    return newState;
+  } catch (error) {
+    console.error('Failed to send message:', error);
+
+    // Add error message for failed send
+    const errorMsg = {
       id: Date.now() + Math.random(),
-      type: 'user-message',
-      sender: USER_ID,
-      text: message,
+      type: 'error',
+      sender: 'System',
+      text: 'Failed to send message: ' + error.message,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName
+      worldName: state.worldName,
+      hasError: true
     };
 
     return {
-      ...state,
-      messages: [...state.messages, userMessage],
-      currentMessage: '',
-      wsError: null,
+      ...newState,
+      wsError: 'Failed to send message',
+      messages: [...newState.messages, errorMsg],
       needScroll: true
     };
   }
-
-  // Add error message for failed send
-  const errorMsg = {
-    id: Date.now() + Math.random(),
-    type: 'error',
-    sender: 'System',
-    text: 'Failed to send message',
-    timestamp: new Date().toISOString(),
-    worldName: state.worldName,
-    hasError: true
-  };
-
-  return {
-    ...state,
-    wsError: 'Failed to send message',
-    messages: [...state.messages, errorMsg],
-    needScroll: true
-  };
 };
 
 // Auto-scroll to bottom after DOM updates
@@ -284,9 +314,9 @@ const view = (state) => {
 
 const update = {
   '/,#': state => state,
-  handleWebSocketMessage,
+  handleRestMessage,
   handleConnectionStatus,
-  handleWebSocketError,
+  handleRestError,
   openAgentModal,
   closeAgentModal,
   displayAgentMemory,

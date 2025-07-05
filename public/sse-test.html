@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSE Chat Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    .log {
+      background: #f5f5f5;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      white-space: pre-wrap;
+    }
+
+    .error {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .info {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+    }
+
+    input[type="text"] {
+      padding: 8px;
+      margin: 5px;
+      width: 300px;
+    }
+
+    #messages {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>SSE Chat Test</h1>
+
+  <div>
+    <input type="text" id="worldName" placeholder="World name" value="Default World">
+    <input type="text" id="message" placeholder="Your message" value="Hello from SSE test!">
+    <button onclick="testChat()">Send Chat Message</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+  </div>
+
+  <div id="messages"></div>
+
+  <script type="module">
+    // Import sendChatMessage from api.js
+    async function sendChatMessage(worldName, message, sender = 'user1', onMessage, onError, onComplete) {
+      const response = await fetch(`/worlds/${encodeURIComponent(worldName)}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ message, sender }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let isActive = true;
+
+      const cleanup = () => {
+        if (isActive) {
+          isActive = false;
+          try {
+            reader.cancel();
+          } catch (error) {
+            console.warn('Error canceling SSE reader:', error);
+          }
+        }
+      };
+
+      const processStream = async () => {
+        try {
+          while (isActive) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.trim() === '') continue;
+
+              if (line.startsWith('data: ')) {
+                try {
+                  const dataContent = line.slice(6).trim();
+                  if (dataContent === '') continue;
+
+                  const data = JSON.parse(dataContent);
+
+                  if (data.type === 'complete') {
+                    if (onComplete) onComplete(data.payload);
+                    cleanup();
+                    return;
+                  } else if (data.type === 'connected') {
+                    addLog('Connected to world: ' + data.payload?.worldName, 'info');
+                  } else if (data.type === 'message' || data.type === 'sse') {
+                    if (onMessage) onMessage(data);
+                  }
+                } catch (parseError) {
+                  console.error('Error parsing SSE data:', parseError);
+                  if (onError) onError(parseError);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          if (isActive) {
+            console.error('SSE stream error:', error);
+            if (onError) onError(error);
+          }
+        } finally {
+          cleanup();
+        }
+      };
+
+      processStream().catch((error) => {
+        console.error('SSE processing failed:', error);
+        if (onError) onError(error);
+        cleanup();
+      });
+
+      return cleanup;
+    }
+
+    function addLog(message, type = 'info') {
+      const messagesDiv = document.getElementById('messages');
+      const logDiv = document.createElement('div');
+      logDiv.className = `log ${type}`;
+      logDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      messagesDiv.appendChild(logDiv);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    window.testChat = async function () {
+      const worldName = document.getElementById('worldName').value;
+      const message = document.getElementById('message').value;
+
+      if (!worldName || !message) {
+        addLog('Please enter both world name and message', 'error');
+        return;
+      }
+
+      addLog(`Sending message to "${worldName}": ${message}`, 'info');
+
+      try {
+        const cleanup = await sendChatMessage(
+          worldName,
+          message,
+          'web-test-user',
+          (data) => {
+            addLog(`Received ${data.type}: ${JSON.stringify(data.payload, null, 2)}`, 'success');
+          },
+          (error) => {
+            addLog(`Error: ${error.message}`, 'error');
+          },
+          (completion) => {
+            addLog(`Chat completed: ${JSON.stringify(completion, null, 2)}`, 'info');
+          }
+        );
+
+        // Store cleanup function for manual cleanup if needed
+        window.currentCleanup = cleanup;
+
+      } catch (error) {
+        addLog(`Failed to send message: ${error.message}`, 'error');
+      }
+    };
+
+    window.clearLogs = function () {
+      document.getElementById('messages').innerHTML = '';
+    };
+
+    // Initial log
+    addLog('SSE Chat Test initialized. Ready to test!', 'info');
+  </script>
+</body>
+
+</html>

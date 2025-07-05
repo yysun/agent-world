@@ -2,27 +2,41 @@
  * Web Server for Agent World
  * 
  * Features:
- * - Express.js server with REST API endpoints using core modules
- * - WebSocket server for real-time communication
- * - Static file serving from public directory
+ * - Express.js server with REST API endpoints using core mod    const server = app.listen(port, host, () => {
+      console.log(`🌐 Web server running at http://${host}:${port}`);
+      console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
+      console.log(`🚀 HTTP server running with REST API and SSE chat`);
+
+      resolve(server);
+    }); - Static file serving from public directory
  * - CORS support for cross-origin requests
- * - Modular architecture with separate API and WebSocket modules
+ * - Modular architecture with separate API module
  * - Proper data path configuration for core modules
+ * - Centralized log level configuration from LOG_LEVEL environment variable
  * 
  * Main Endpoints:
  * - GET /health - Server health check
- * - API routes handled by ./api.ts
- * - WebSocket communication handled by ./ws.ts
+ * - API routes handled by ./api.ts (includes SSE chat functionality)
  * 
  * Data Path Configuration:
  * - Sets AGENT_WORLD_DATA_PATH environment variable for core modules
  * - Ensures consistent data storage location with CLI
+ * 
+ * Logging Configuration:
+ * - Sets global log level from LOG_LEVEL environment variable
+ * - Applies to all logger instances throughout the application
+ * - Default level is 'error' if not specified
  */
 
 // Set the data path for core modules (same as CLI)
 if (!process.env.AGENT_WORLD_DATA_PATH) {
   process.env.AGENT_WORLD_DATA_PATH = './data/worlds';
 }
+
+// Configure centralized logger from environment variable
+import { setLogLevel } from '../core/index.js';
+const logLevel = (process.env.LOG_LEVEL || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
+setLogLevel(logLevel);
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -31,8 +45,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'http';
 
 // Import modular components
-// import apiRouter from './api';
-import { createWebSocketServer, getWebSocketStats } from './ws';
+import apiRouter from './api';
 
 
 // Get current directory for ES modules
@@ -60,20 +73,17 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Use API routes
-// app.use('/', apiRouter);
+app.use('/', apiRouter);
 
 // GET /health - Server health check
 app.get('/health', (req, res) => {
   try {
-    const wsStats = getWebSocketStats();
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
       services: {
-        express: 'running',
-        websocket: 'running'
-      },
-      websocket: wsStats
+        express: 'running'
+      }
     });
   } catch (error) {
     console.error('Error getting server health:', error);
@@ -108,12 +118,7 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
     const server = app.listen(port, host, () => {
       console.log(`🌐 Web server running at http://${host}:${port}`);
       console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-
-      // Create WebSocket server
-      const wss = createWebSocketServer(server);
-      console.log(`🔌 WebSocket server running at ws://${host}:${port}/ws`);
-      console.log(`📡 WebSocket events: subscribe, unsubscribe, chat`);
-      console.log(`🚀 Both HTTP and WebSocket servers running`);
+      console.log(`� HTTP server running with REST API and SSE chat`);
 
       resolve(server);
     });

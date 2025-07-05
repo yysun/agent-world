@@ -1,35 +1,31 @@
 /**
- * Initial State Module - Application state initialization with REST API for worlds
+ * Initial State Module - Application state initialization with REST API
  *
  * Features:
- * - Establishes WebSocket connection for chat functionality only
  * - Loads available worlds from REST API
- * - Manages connection status and error handling during initialization
+ * - No WebSocket connection - uses REST + SSE for all functionality
  * - Auto-selects first available world after loading
  * - Returns theme preference from localStorage without applying it
- * - Uses REST API for world data, WebSocket only for chat
+ * - Uses REST API for all data operations and SSE for chat
  *
  * Implementation:
  * - Function-based module that returns promise-based initialization
- * - Uses REST API for CRUD operations (worlds, agents)
- * - WebSocket connection for chat functionality only
+ * - Uses REST API for all operations (worlds, agents, chat via SSE)
  * - Pure state initialization without side effects (theme application handled by caller)
  * - Error handling for connection failures with fallback states
  * - REST API for world and agent data loading
  *
  * Recent Changes:
- * - Updated to use REST API for world loading instead of WebSocket
- * - WebSocket connection maintained for chat functionality only
- * - CRUD operations moved to REST API calls
- * - Improved separation between chat (WebSocket) and data (REST API)
+ * - Completely removed WebSocket dependency
+ * - Uses only REST API + SSE for all functionality
+ * - Simplified connection model without persistent connections
  */
 
-import wsApi from '../ws-api.js';
 import * as api from '../api.js';
 import { selectWorld } from './select-world.js';
 
 /**
- * Initialize application state with WebSocket connection and world selection
+ * Initialize application state with REST API
  * @returns {Promise<Object>} Initial application state
  */
 export const initializeState = async () => {
@@ -40,7 +36,7 @@ export const initializeState = async () => {
   const baseState = {
     worlds: [],
     theme,
-    connectionStatus: 'disconnected',
+    connectionStatus: 'connected', // REST API is always "connected"
     messages: [],
     currentMessage: '',
     wsError: null,
@@ -49,13 +45,6 @@ export const initializeState = async () => {
   };
 
   try {
-    // Connect to WebSocket for chat functionality
-    baseState.connectionStatus = 'connecting';
-
-    // Ensure WebSocket connection is established for chat
-    await wsApi.ensureConnection();
-    baseState.connectionStatus = 'connected';
-
     // Load worlds using REST API
     const worlds = await api.getWorlds();
     console.log('🌍 Loaded worlds via REST API:', worlds);
@@ -74,7 +63,6 @@ export const initializeState = async () => {
       console.log('🔄 State after selectWorld:', subscriptionResult);
       console.log('🤖 Agents from REST API:', subscriptionResult.agents);
 
-      // Use agents from subscription result (selectWorld now gets them from REST API)
       return subscriptionResult;
     } else {
       return {
