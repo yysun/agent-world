@@ -81,8 +81,9 @@
  * - Improved maintainability through separation of concerns and streamlined design
  * - **MIGRATION COMPLETE**: Fully migrated from WebSocket to REST API + SSE architecture
  * - Uses REST API for all CRUD operations and SSE for real-time chat streaming
- * - Removed all WebSocket dependencies and imports
- * - Updated message handlers to work with REST + SSE event streams
+ * - Removed all WebSocket dependencies and ws-sse.js references
+ * - Unified SSE client (sse-client.js) replaces complex multi-module architecture
+ * - Clean imports and simple event handling like original ws-sse.js approach
  */
 
 const { Component, html, run } = window["apprun"];
@@ -91,16 +92,19 @@ import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
 import { getAvatarColor, getAvatarInitials } from './utils.js';
 import {
   initializeState, selectWorld,
-  handleRestMessage, handleConnectionStatus, handleRestError,
   displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
 } from './update/index.js';
+import {
+  sendChatMessage,
+  handleStreamStart, handleStreamChunk, handleStreamEnd, handleStreamError,
+  handleMessage, handleConnectionStatus, handleError, handleComplete
+} from './sse-client.js';
 import { AgentModal, openAgentModal, closeAgentModal, updateEditingAgent } from './components/agent-modal.js';
 import { WorldCard, AddWorldCard } from './components/world-card.js';
 import { AgentCard } from './components/agent-card.js';
-import { sendChatMessage } from './api.js';
 import Message from './components/message.js';
 
-const USER_ID = 'user1';
+const USER_ID = 'HUMAN';
 
 // Initial state
 const state = async () => {
@@ -119,8 +123,21 @@ const onInput = (state, e) => {
 
 const onKeypress = (state, e) => {
   if (e.key === 'Enter') {
+    const message = e.target.value.trim();
     e.target.value = ''; // Clear input field
-    return sendMessage(state);
+
+    // Don't process empty messages
+    if (!message) {
+      return state; // Return current state unchanged
+    }
+
+    // Create new state with the captured message
+    const newState = {
+      ...state,
+      currentMessage: message
+    };
+
+    return sendMessage(newState);
   }
   // return state; // No need to return state here - no screen update needed
 };
@@ -171,26 +188,8 @@ const sendMessage = async (state) => {
   };
 
   try {
-    // Send chat message via REST API with SSE
-    await sendChatMessage(
-      state.worldName,
-      message,
-      USER_ID,
-      (data) => {
-        // Handle incoming messages from SSE
-        const app = window["app"];
-        app.run('handleRestMessage', data);
-      },
-      (error) => {
-        // Handle errors
-        const app = window["app"];
-        app.run('handleRestError', error);
-      },
-      (completion) => {
-        // Handle completion
-        console.log('Chat session completed:', completion);
-      }
-    );
+    // Send chat message via unified SSE client
+    await sendChatMessage(state.worldName, message, USER_ID);
 
     return newState;
   } catch (error) {
@@ -314,9 +313,14 @@ const view = (state) => {
 
 const update = {
   '/,#': state => state,
-  handleRestMessage,
+  handleStreamStart,
+  handleStreamChunk,
+  handleStreamEnd,
+  handleStreamError,
+  handleMessage,
   handleConnectionStatus,
-  handleRestError,
+  handleError,
+  handleComplete,
   openAgentModal,
   closeAgentModal,
   updateEditingAgent,

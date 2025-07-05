@@ -77,7 +77,7 @@ import {
   createCategoryLogger,
   setLogLevel,
   toKebabCase
-} from '../core';
+} from '../core/index.js';
 
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
