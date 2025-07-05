@@ -58,6 +58,30 @@ export const AgentModal = (agent, close) => {
   console.log('🔍 Agent Modal Debug - Agent object:', agent);
   console.log('🔍 Agent properties:', Object.keys(agent || {}));
 
+  // Show loading state while fetching agent data
+  if (agent?.loading) {
+    return html`
+      <div class="modal-overlay" @click=${run(close, false)}>
+        <div class="modal-content" @click=${(e) => e.stopPropagation()}>
+          <div class="modal-header">
+            <h2>Loading Agent...</h2>
+            <button class="modal-close" @click=${run(close, false)}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="loading-spinner">
+              <div class="spinner"></div>
+              <p>Loading agent details...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // Try different possible property names for system prompt
   const systemPrompt = agent?.systemPrompt || agent?.prompt || agent?.system_prompt || agent?.config?.systemPrompt || '';
   console.log('🔍 System prompt value:', systemPrompt);
@@ -92,20 +116,8 @@ export const AgentModal = (agent, close) => {
               id="agent-system-prompt"
               class="form-textarea"
               rows="20"
-              value="${systemPrompt}"
-              @input=${(e) => {
-      // Update the agent object with the new system prompt value
-      if (agent) {
-        agent.systemPrompt = e.target.value;
-        // Also try other possible property names
-        agent.prompt = e.target.value;
-        if (agent.config) {
-          agent.config.systemPrompt = e.target.value;
-        }
-      }
-    }}
               placeholder="Define the agent's behavior and personality..."
-            ></textarea>
+            >${systemPrompt}</textarea>
           </div>
 
           <div class="form-actions">
@@ -127,7 +139,7 @@ export const AgentModal = (agent, close) => {
   `;
 };
 
-export const openAgentModal = async (state, agent = null) => {
+export const openAgentModal = (state, agent = null) => {
   if (!agent) {
     // Creating new agent
     return {
@@ -137,26 +149,40 @@ export const openAgentModal = async (state, agent = null) => {
     };
   }
 
-  // Editing existing agent - fetch full agent details including system prompt
-  try {
-    const fullAgent = await api.getAgent(state.worldName, agent.name);
-    console.log('🔍 Full agent data retrieved:', fullAgent);
+  // Show modal with loading state first
+  const newState = {
+    ...state,
+    editingAgent: { ...agent, loading: true },
+    showAgentModel: true
+  };
 
-    return {
-      ...state,
-      editingAgent: fullAgent,
-      showAgentModel: true
-    };
-  } catch (error) {
-    console.error('Error fetching full agent details:', error);
-    // Fallback to the existing agent data if fetch fails
-    return {
-      ...state,
-      editingAgent: agent,
-      showAgentModel: true,
-      error: `Failed to load agent details: ${error.message}`
-    };
-  }
+  // Fetch full agent details asynchronously
+  (async () => {
+    try {
+      const fullAgent = await api.getAgent(state.worldName, agent.name);
+      console.log('🔍 Full agent data retrieved:', fullAgent);
+
+      // Update the state with the loaded agent data
+      const app = window["app"];
+      app.run('updateEditingAgent', fullAgent);
+    } catch (error) {
+      console.error('Error fetching full agent details:', error);
+      // Fallback to the existing agent data if fetch fails
+      const app = window["app"];
+      app.run('updateEditingAgent', agent, `Failed to load agent details: ${error.message}`);
+    }
+  })();
+
+  return newState;
+};
+
+export const updateEditingAgent = (state, agentData, error = null) => {
+  console.log('🔄 Updating editing agent with data:', agentData);
+  return {
+    ...state,
+    editingAgent: agentData,
+    error: error ? error : state.error
+  };
 };
 
 export const closeAgentModal = async (state, save) => {

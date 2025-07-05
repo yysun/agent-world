@@ -94,7 +94,7 @@ import {
   handleRestMessage, handleConnectionStatus, handleRestError,
   displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
 } from './update/index.js';
-import { AgentModal, openAgentModal, closeAgentModal } from './components/agent-modal.js';
+import { AgentModal, openAgentModal, closeAgentModal, updateEditingAgent } from './components/agent-modal.js';
 import { WorldCard, AddWorldCard } from './components/world-card.js';
 import { AgentCard } from './components/agent-card.js';
 import { sendChatMessage } from './api.js';
@@ -319,6 +319,7 @@ const update = {
   handleRestError,
   openAgentModal,
   closeAgentModal,
+  updateEditingAgent,
   displayAgentMemory,
   clearAgentMemory,
   clearAgentMemoryFromModal

@@ -117,9 +117,14 @@ router.get('/worlds', async (req, res) => {
     const worlds = await listWorlds(ROOT_PATH);
     if (!worlds?.length) {
       const world = await createWorld(ROOT_PATH, { name: DEFAULT_WORLD_NAME });
-      res.json([{ name: world.name }]);
+      res.json([{ name: world.name, agentCount: 0 }]);
     } else {
-      res.json(worlds.map(world => ({ name: world.name })));
+      res.json(worlds.map(world => ({ 
+        name: world.name, 
+        agentCount: world.agentCount || 0,
+        id: world.id,
+        description: world.description
+      })));
     }
   } catch (error) {
     logger.error('Error listing worlds', { error: error instanceof Error ? error.message : error });

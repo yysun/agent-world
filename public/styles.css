@@ -551,7 +551,6 @@ body {
   padding: 2rem;
   color: var(--text-tertiary);
   font-style: italic;
-  transition: color 0.3s ease;
 }
 
 /* Agent grid */
@@ -1687,6 +1686,36 @@ body {
 .modal-close:hover {
   background-color: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+/* Modal Loading Spinner */
+.modal-body {
+  padding: 2rem;
+}
+
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+  text-align: center;
+}
+
+.loading-spinner .spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--bg-tertiary);
+  border-top: 4px solid var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+.loading-spinner p {
+  color: var(--text-tertiary);
+  font-size: 0.875rem;
+  margin: 0;
 }
 
 /* Form Styles */
