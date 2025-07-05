@@ -18,14 +18,16 @@
 const { html, run } = window.apprun;
 
 export default (message) => {
+  if (message.streamComplete) return '';
+  const showStreaming = message.isStreaming && !message.streamComplete;
   return html`
-  <div class="conversation-message ${message.type} ${message.isStreaming ? 'streaming' : ''} ${message.hasError ? 'error' : ''}">
+  <div class="conversation-message ${message.type} ${showStreaming ? 'streaming' : ''} ${message.hasError ? 'error' : ''}">
     <div class="message-sender">
       ${message.sender}
-      ${message.isStreaming ? html`<span class="streaming-indicator">●</span>` : ''}
+      ${showStreaming ? html`<span class="streaming-indicator">●</span>` : ''}
       ${message.hasError ? html`<span class="error-indicator">⚠</span>` : ''}
     </div>
-    <div class="message-text">${message.text}${message.isStreaming ? html`<span class="cursor">|</span>` : ''}</div>
+    <div class="message-text">${message.text}${showStreaming ? html`<span class="cursor">|</span>` : ''}</div>
     ${message.hasError && message.errorMessage && message.errorMessage !== message.text ? html`<div class="error-details">${message.errorMessage}</div>` : ''}
   </div>
 `;

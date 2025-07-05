@@ -47,8 +47,6 @@ export const initializeState = async () => {
   try {
     // Load worlds using REST API
     const worlds = await api.getWorlds();
-    console.log('🌍 Loaded worlds via REST API:', worlds);
-    console.log('🌍 First world structure:', worlds[0]);
     baseState.worlds = worlds;
     baseState.loading = false;
 
@@ -57,12 +55,7 @@ export const initializeState = async () => {
 
     if (worldName) {
       const selectedWorld = worlds[0];
-      console.log('🌍 Selected world:', selectedWorld);
-
       const subscriptionResult = await selectWorld(baseState, worldName);
-      console.log('🔄 State after selectWorld:', subscriptionResult);
-      console.log('🤖 Agents from REST API:', subscriptionResult.agents);
-
       return subscriptionResult;
     } else {
       return {

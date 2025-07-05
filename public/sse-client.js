@@ -352,6 +352,7 @@ export const handleStreamEnd = (state, data) => {
       return {
         ...msg,
         isStreaming: false,
+        streamComplete: true,
         text: content !== undefined ? content : msg.text
       };
     }

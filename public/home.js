@@ -1,4 +1,3 @@
-
 //@ts-check
 /**
  * Home Page Component - Main interface for Agent World
@@ -64,6 +63,8 @@
  * - Input field properly bound to state with @input and @keypress handlers
  * - Error state management with visual feedback in conversation
  * - Robust state.agents handling with Array.isArray() check to prevent TypeError
+ * - Click-to-view agent memory functionality with proper event handling
+ * - Double-send prevention: send button disabled for 2 seconds after sending
  *
  * Recent Changes:
  * - Extracted WorldCard and AddWorldCard components to components/world-card.js
@@ -89,7 +90,6 @@
 const { Component, html, run } = window["apprun"];
 
 import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
-import { getAvatarColor, getAvatarInitials } from './utils.js';
 import {
   initializeState, selectWorld,
   displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
@@ -100,28 +100,29 @@ import {
   handleMessage, handleConnectionStatus, handleError, handleComplete
 } from './sse-client.js';
 import { AgentModal, openAgentModal, closeAgentModal, updateEditingAgent } from './components/agent-modal.js';
-import { WorldCard, AddWorldCard } from './components/world-card.js';
 import { AgentCard } from './components/agent-card.js';
 import Message from './components/message.js';
 
-const USER_ID = 'HUMAN';
+const USER_ID = 'human';
 
 // Initial state
 const state = async () => {
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
-  return initializeState();
-};
-
-// Local event handlers
-const onInput = (state, e) => {
   return {
-    ...state,
-    currentMessage: e.target.value
+    ...await initializeState()
   };
 };
 
-const onKeypress = (state, e) => {
+// Local event handlers
+const onQuickInput = (state, e) => {
+  return {
+    ...state,
+    quickMessage: e.target.value
+  };
+};
+
+const onQuickKeypress = (state, e) => {
   if (e.key === 'Enter') {
     const message = e.target.value.trim();
     e.target.value = ''; // Clear input field
@@ -134,16 +135,15 @@ const onKeypress = (state, e) => {
     // Create new state with the captured message
     const newState = {
       ...state,
-      currentMessage: message
+      quickMessage: message
     };
 
-    return sendMessage(newState);
+    return sendQuickMessage(newState);
   }
-  // return state; // No need to return state here - no screen update needed
 };
 
-const sendMessage = async (state) => {
-  const message = state.currentMessage?.trim();
+const sendQuickMessage = async (state) => {
+  const message = state.quickMessage?.trim();
 
   if (!message || !state.worldName) {
     const errorMessage = !message ? 'Please enter a message' :
@@ -182,7 +182,7 @@ const sendMessage = async (state) => {
   const newState = {
     ...state,
     messages: [...state.messages, userMessage],
-    currentMessage: '',
+    quickMessage: '',
     wsError: null,
     needScroll: true
   };
@@ -244,6 +244,17 @@ const view = (state) => {
           <div class="header-left">
             <span class="logo">Agent World</span>
           </div>
+          <div class="world-chips">
+            ${state.worlds?.map(world => html`
+              <button 
+                class="world-chip ${world.name === state.worldName ? 'active' : ''}"
+                @click=${run('selectWorld', world.name)}
+              >
+                ${world.name}
+                <span class="world-chip-count">${world.name === state.worldName ? (state.agents?.length || 0) : (world.agents?.length || 0)}</span>
+              </button>
+            `)}
+          </div>
           <div class="header-right">
             <button class="theme-toggle" @click=${run(toggleTheme)}>
               ${getThemeIcon(state.theme || 'system')}
@@ -252,18 +263,7 @@ const view = (state) => {
           </div>
         </header>
 
-        <main class="main-content">          <!-- World tabs -->
-          ${state.worlds?.length > 0 ? html`
-            <div class="world-tabs">
-              ${state.worlds.map(world => WorldCard(world, state.worldName, state.connectionStatus, selectWorld, openAgentModal))}
-              ${AddWorldCard(() => run('addNewWorld'), false)}
-            </div>
-          ` : html`
-            <div class="world-tabs">
-              ${AddWorldCard(() => run('addNewWorld'), true)}
-            </div>
-          `}
-
+        <main class="main-content">
           <!-- Loading indicator -->
           ${state.loading ? html`
             <div class="loading">Loading agents...</div>
@@ -273,6 +273,7 @@ const view = (state) => {
           <div class="agent-grid">
             ${Array.isArray(state.agents) ? state.agents.map(agent => AgentCard(agent, displayAgentMemory, openAgentModal, clearAgentMemory)) : ''}
           </div>
+          
           <!-- Conversation area -->
           <div class="conversation-area">
             <div class="conversation-content">
@@ -285,26 +286,27 @@ const view = (state) => {
             </div >
           </div >
 
-  <div class="message-input-container">
-    <div class="message-input-wrapper">
-      <input
-        type="text"
-        class="message-input"
-        placeholder="${state.worldName ? 'How can I help you today?' : 'Select a world first...'}"
-        value="${state.currentMessage || ''}"
-                @input=${run(onInput)}
-      @keypress=${run(onKeypress)}
+          <!-- Simple input above existing input -->
+          <div class="simple-input-container">
+            <div class="simple-input-wrapper">
+              <input
+                type="text"
+                class="simple-input"
+                placeholder="${state.worldName ? 'Quick message...' : 'Select a world first...'}"
+                value="${state.quickMessage || ''}"
+                @input=${run('onQuickInput')}
+                @keypress=${run('onQuickKeypress')}
               >
-      <button
-        class="send-button"
-                @click=${run(sendMessage)}
+              <button
+                class="simple-send-button"
+                @click=${run('sendQuickMessage')}
               >
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="m5 12 7-7 7 7M12 19V5" />
-      </svg>
-    </button>
-  </div>
-          </div >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m5 12 7-7 7 7M12 19V5" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </main >
       </div >
   ${state.showAgentModel ? AgentModal(state.editingAgent, closeAgentModal) : ''}
@@ -326,7 +328,11 @@ const update = {
   updateEditingAgent,
   displayAgentMemory,
   clearAgentMemory,
-  clearAgentMemoryFromModal
+  clearAgentMemoryFromModal,
+  selectWorld,
+  onQuickInput,
+  onQuickKeypress,
+  sendQuickMessage
 };
 
 export default new Component(state, view, update, {

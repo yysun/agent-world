@@ -1,10 +1,18 @@
 /**
- * Agent Actions Module
+ * Agent Actions Module - Agent Memory Display Fix
  *
  * Handles agent-related actions and memory management:
  * - Display agent memory in conversation area
  * - Clear agent memory functionality with actual API calls
  * - Memory format parsing and chat-like display
+ * - Automatic full agent data fetching when memory is not loaded
+ *
+ * Core Fix:
+ * - Fixed issue where clicking agent card showed "no memories" despite having memories
+ * - Added automatic full agent data fetching when memory array is missing but memorySize > 0
+ * - Agent cards now properly load and display conversation history
+ * - Fixed conversation area not updating when switching between agents (messages now replace instead of append)
+ * - Maintains backward compatibility with both AgentInfo (memorySize) and full Agent (memory) objects
  *
  * Memory Display Features:
  * - Chat-like interface for agent memories
@@ -12,17 +20,43 @@
  * - Assistant messages: left-aligned, 80% width, standard background
  * - Automatic detection of message roles from memory structure
  * - Support for string, object with content/text/message properties, and JSON fallback
+ * - Smart loading: fetches full agent data if memory array is missing but memorySize > 0
  *
  * Implementation:
  * - Proper memory content parsing for different formats
  * - System messages for empty memory states
  * - Role detection for user/assistant message styling
  * - Real API calls for memory clearing functionality
+ * - Async agent data loading for complete memory access
+ * - Error handling for failed agent data fetches
  */
 
 import * as api from '../api.js';
 
-export const displayAgentMemory = (state, agent) => {
+export const displayAgentMemory = async (state, agent) => {
+  // If agent doesn't have memory array but has memorySize > 0, fetch full agent data
+  if (!agent?.memory && agent?.memorySize > 0) {
+    try {
+      const fullAgent = await api.getAgent(state.worldName, agent.name);
+      agent = fullAgent;
+    } catch (error) {
+      console.error('Failed to fetch agent memory:', error);
+      const errorMessage = {
+        id: Date.now() + Math.random(),
+        type: 'error',
+        sender: 'System',
+        text: `Failed to load memories for agent "${agent?.name || 'Unknown'}": ${error.message}`,
+        timestamp: new Date().toISOString(),
+        worldName: state.worldName
+      };
+
+      return {
+        ...state,
+        messages: [errorMessage], // Replace messages instead of appending
+      };
+    }
+  }
+
   if (!agent || !agent.memory || agent.memory.length === 0) {
     const noMemoryMessage = {
       id: Date.now() + Math.random(),
@@ -35,7 +69,7 @@ export const displayAgentMemory = (state, agent) => {
 
     return {
       ...state,
-      messages: [...state.messages, noMemoryMessage],
+      messages: [noMemoryMessage], // Replace messages instead of appending
     };
   }
 
@@ -84,7 +118,7 @@ export const displayAgentMemory = (state, agent) => {
 
   return {
     ...state,
-    messages: [...state.messages, ...memoryMessages],
+    messages: memoryMessages, // Replace messages instead of appending
   };
 };
 

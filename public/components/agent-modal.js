@@ -58,30 +58,6 @@ export const AgentModal = (agent, close) => {
   console.log('🔍 Agent Modal Debug - Agent object:', agent);
   console.log('🔍 Agent properties:', Object.keys(agent || {}));
 
-  // Show loading state while fetching agent data
-  if (agent?.loading) {
-    return html`
-      <div class="modal-overlay" @click=${run(close, false)}>
-        <div class="modal-content" @click=${(e) => e.stopPropagation()}>
-          <div class="modal-header">
-            <h2>Loading Agent...</h2>
-            <button class="modal-close" @click=${run(close, false)}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="modal-body">
-            <div class="loading-spinner">
-              <div class="spinner"></div>
-              <p>Loading agent details...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
   // Try different possible property names for system prompt
   const systemPrompt = agent?.systemPrompt || agent?.prompt || agent?.system_prompt || agent?.config?.systemPrompt || '';
   console.log('🔍 System prompt value:', systemPrompt);
@@ -117,7 +93,13 @@ export const AgentModal = (agent, close) => {
               class="form-textarea"
               rows="20"
               placeholder="Define the agent's behavior and personality..."
-            >${systemPrompt}</textarea>
+              .value=${systemPrompt}
+              @input=${(e) => {
+      if (agent) {
+        agent.systemPrompt = e.target.value;
+      }
+    }}
+            ></textarea>
           </div>
 
           <div class="form-actions">
@@ -149,13 +131,6 @@ export const openAgentModal = (state, agent = null) => {
     };
   }
 
-  // Show modal with loading state first
-  const newState = {
-    ...state,
-    editingAgent: { ...agent, loading: true },
-    showAgentModel: true
-  };
-
   // Fetch full agent details asynchronously
   (async () => {
     try {
@@ -173,7 +148,11 @@ export const openAgentModal = (state, agent = null) => {
     }
   })();
 
-  return newState;
+  return {
+    ...state,
+    editingAgent: agent,
+    showAgentModel: true
+  };
 };
 
 export const updateEditingAgent = (state, agentData, error = null) => {
