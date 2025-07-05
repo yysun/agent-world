@@ -14,6 +14,7 @@ const logger = createCategoryLogger('events');
  * - Type-safe event handling with proper interfaces and validation
  * - High-level message broadcasting with sender attribution and timestamping
  * - Fixed auto-mention functionality with proper self-mention removal order
+ * - Preserved newline handling in LLM streaming responses for proper formatting
  *
  * Core Functions:
  * World Events:
@@ -35,6 +36,7 @@ const logger = createCategoryLogger('events');
  * - Uses extractParagraphBeginningMentions for consistent mention detection
  * - Handles case-insensitive matching while preserving original case
  * - Ensures published message matches stored memory content
+ * - Preserves original formatting including newlines and whitespace structure
  *
  * Event Structure:
  * - Message Events: WorldMessageEvent with content, sender, timestamp, and messageId
@@ -49,6 +51,7 @@ const logger = createCategoryLogger('events');
  * - Ready for agent subscription and LLM integration with consistent interfaces
  * - Subscription functions return cleanup callbacks for proper memory management
  * - All events include timestamps and unique IDs for debugging and tracing
+ * - Newline preservation in LLM responses maintains proper text formatting
  */
 
 import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
@@ -135,10 +138,10 @@ import {
 function hasAutoMentionAtBeginning(response: string, sender: string): boolean {
   if (!response || !sender) return false;
 
-  const trimmedResponse = response.trim();
-  if (!trimmedResponse) return false;
+  // Use original response to preserve newlines, only check if it's effectively empty
+  if (!response.trim()) return false;
 
-  const mentions = extractParagraphBeginningMentions(trimmedResponse);
+  const mentions = extractParagraphBeginningMentions(response);
   return mentions.includes(sender.toLowerCase());
 }
 
@@ -148,16 +151,16 @@ function hasAutoMentionAtBeginning(response: string, sender: string): boolean {
 function addAutoMention(response: string, sender: string): string {
   if (!response || !sender) return response;
 
-  const trimmedResponse = response.trim();
-  if (!trimmedResponse) return response;
+  // Check if effectively empty (only whitespace)
+  if (!response.trim()) return response;
 
   // Check if already has mention at beginning
-  if (hasAutoMentionAtBeginning(trimmedResponse, sender)) {
-    return trimmedResponse;
+  if (hasAutoMentionAtBeginning(response, sender)) {
+    return response;
   }
 
-  // Prepend @sender
-  return `@${sender} ${trimmedResponse}`;
+  // Prepend @sender while preserving original formatting
+  return `@${sender} ${response}`;
 }
 
 /**
@@ -171,10 +174,17 @@ function removeSelfMentions(response: string, agentId: string): string {
 
   // Remove all consecutive @agentId mentions from beginning (case-insensitive)
   const selfMentionPattern = new RegExp(`^(@${agentId}\\s*)+`, 'gi');
-  const cleaned = trimmedResponse.replace(selfMentionPattern, '').trim();
+  const cleaned = trimmedResponse.replace(selfMentionPattern, '');
 
-  // Clean up any resulting double spaces
-  return cleaned.replace(/\s+/g, ' ');
+  // If the cleaned response is empty, return original response to preserve formatting
+  if (!cleaned.trim()) return response;
+
+  // Preserve original leading whitespace structure by finding where content starts
+  const originalMatch = response.match(/^(\s*)/);
+  const originalLeadingWhitespace = originalMatch ? originalMatch[1] : '';
+
+  // Return cleaned content with original leading whitespace preserved
+  return originalLeadingWhitespace + cleaned.trim();
 }
 
 /**
