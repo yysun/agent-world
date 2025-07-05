@@ -62,6 +62,7 @@ const logger = createCategoryLogger('events');
  * - Newline preservation in LLM responses maintains proper text formatting
  * - LLM call count reset happens before shouldAgentRespond for accurate turn limit checking
  * - Agent state persistence ensures turn count resets are saved to disk immediately
+ * - LLM call count is saved to disk after every LLM call and memory save operation
  */
 
 import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
@@ -407,6 +408,14 @@ export async function processAgentMessage(
         logger.warn('Failed to auto-save memory after pass command', { agentId: agent.id, error: error instanceof Error ? error.message : error });
       }
 
+      // Auto-save agent config after pass command (ensures LLM call count is persisted)
+      try {
+        const { saveAgentConfigToDisk } = await import('./agent-storage');
+        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+      } catch (error) {
+        logger.warn('Failed to auto-save agent config after pass command', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      }
+
       // Publish pass command redirect message
       const passMessage = `@human ${agent.id} is passing control to you`;
       publishMessage(world, passMessage, 'system');
@@ -441,6 +450,14 @@ export async function processAgentMessage(
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
       logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    }
+
+    // Auto-save agent config after final response (ensures LLM call count is persisted)
+    try {
+      const { saveAgentConfigToDisk } = await import('./agent-storage');
+      await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+    } catch (error) {
+      logger.warn('Failed to auto-save agent config after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Step 4: Publish final response
