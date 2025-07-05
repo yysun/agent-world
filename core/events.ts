@@ -13,6 +13,7 @@ const logger = createCategoryLogger('events');
  * - Zero dependencies on existing event systems or complex abstractions
  * - Type-safe event handling with proper interfaces and validation
  * - High-level message broadcasting with sender attribution and timestamping
+ * - Fixed auto-mention functionality with proper self-mention removal order
  *
  * Core Functions:
  * World Events:
@@ -27,6 +28,13 @@ const logger = createCategoryLogger('events');
  * - processAgentMessage: Handle agent message processing with world context and memory persistence
  * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
  * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
+ *
+ * Auto-Mention Logic (Fixed):
+ * - Step 1: Remove self-mentions from response beginning (prevents agent self-mention)
+ * - Step 2: Add auto-mention for sender if not already present at paragraph beginning
+ * - Uses extractParagraphBeginningMentions for consistent mention detection
+ * - Handles case-insensitive matching while preserving original case
+ * - Ensures published message matches stored memory content
  *
  * Event Structure:
  * - Message Events: WorldMessageEvent with content, sender, timestamp, and messageId
@@ -116,6 +124,58 @@ import {
   messageDataToAgentMessage,
   prepareMessagesForLLM
 } from './utils.js';
+
+/**
+ * Auto-mention utility functions for processAgentMessage
+ */
+
+/**
+ * Check if response already has auto-mention at the beginning using extractParagraphBeginningMentions logic
+ */
+function hasAutoMentionAtBeginning(response: string, sender: string): boolean {
+  if (!response || !sender) return false;
+
+  const trimmedResponse = response.trim();
+  if (!trimmedResponse) return false;
+
+  const mentions = extractParagraphBeginningMentions(trimmedResponse);
+  return mentions.includes(sender.toLowerCase());
+}
+
+/**
+ * Add auto-mention at the beginning of response, preserving case if found elsewhere
+ */
+function addAutoMention(response: string, sender: string): string {
+  if (!response || !sender) return response;
+
+  const trimmedResponse = response.trim();
+  if (!trimmedResponse) return response;
+
+  // Check if already has mention at beginning
+  if (hasAutoMentionAtBeginning(trimmedResponse, sender)) {
+    return trimmedResponse;
+  }
+
+  // Prepend @sender
+  return `@${sender} ${trimmedResponse}`;
+}
+
+/**
+ * Remove all consecutive self-mentions from response beginning (case-insensitive)
+ */
+function removeSelfMentions(response: string, agentId: string): string {
+  if (!response || !agentId) return response;
+
+  const trimmedResponse = response.trim();
+  if (!trimmedResponse) return response;
+
+  // Remove all consecutive @agentId mentions from beginning (case-insensitive)
+  const selfMentionPattern = new RegExp(`^(@${agentId}\\s*)+`, 'gi');
+  const cleaned = trimmedResponse.replace(selfMentionPattern, '').trim();
+
+  // Clean up any resulting double spaces
+  return cleaned.replace(/\s+/g, ' ');
+}
 
 /**
  * Agent subscription with automatic processing
@@ -222,16 +282,62 @@ export async function processAgentMessage(
     const { streamAgentResponse } = await import('./llm-manager');
     const response = await streamAgentResponse(world, agent, messages);
 
-    // Add response to memory
+    // Check for pass command in response first
+    const passCommandRegex = /<world>pass<\/world>/i;
+    if (passCommandRegex.test(response)) {
+      // Add original LLM response to memory for pass commands
+      const assistantMessage: AgentMessage = {
+        role: 'assistant',
+        content: response,
+        createdAt: new Date()
+      };
+      agent.memory.push(assistantMessage);
+
+      // Auto-save memory
+      try {
+        const { saveAgentMemoryToDisk } = await import('./agent-storage');
+        await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
+      } catch (error) {
+        logger.warn('Failed to auto-save memory after pass command', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      }
+
+      // Publish pass command redirect message
+      const passMessage = `@human ${agent.id} is passing control to you`;
+      publishMessage(world, passMessage, 'system');
+      return;
+    }
+
+    // Process auto-mention logic with new requirements
+    let finalResponse = response;
+
+    // Step 1: Remove self-mentions first (safety measure)
+    if (finalResponse && typeof finalResponse === 'string') {
+      finalResponse = removeSelfMentions(finalResponse, agent.id);
+    }
+
+    // Step 2: Auto-mention processing (for both humans and agents, not system)
+    if (messageEvent.sender && typeof messageEvent.sender === 'string' &&
+      messageEvent.sender.toLowerCase() !== agent.id.toLowerCase()) {
+
+      const senderType = determineSenderType(messageEvent.sender);
+
+      // Auto-mention humans and agents (not system messages)
+      if ((senderType === SenderType.HUMAN || senderType === SenderType.AGENT) &&
+        finalResponse && typeof finalResponse === 'string') {
+        finalResponse = addAutoMention(finalResponse, messageEvent.sender);
+      }
+    }
+
+    // Step 3: Save final response to memory (after all processing)
     const assistantMessage: AgentMessage = {
       role: 'assistant',
-      content: response,
+      content: finalResponse,
       createdAt: new Date()
     };
 
     agent.memory.push(assistantMessage);
 
-    // Auto-save memory after adding assistant response
+    // Auto-save memory after adding final response
     try {
       const { saveAgentMemoryToDisk } = await import('./agent-storage');
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
@@ -239,46 +345,7 @@ export async function processAgentMessage(
       logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Check for pass command in response
-    const passCommandRegex = /<world>pass<\/world>/i;
-    if (passCommandRegex.test(response)) {
-      // Publish pass command redirect message
-      const passMessage = `@human ${agent.id} is passing control to you`;
-      publishMessage(world, passMessage, 'system');
-
-      // Note: The original LLM response is already saved to memory above
-      // This ensures the pass command response is preserved in agent memory
-      return;
-    }
-
-    // Auto-add @mention when replying to other agents (only for agent-to-agent replies)
-    let finalResponse = response;
-    if (messageEvent.sender && typeof messageEvent.sender === 'string' &&
-      messageEvent.sender.toLowerCase() !== agent.id.toLowerCase()) {
-
-      const senderType = determineSenderType(messageEvent.sender);
-
-      // Only auto-mention when replying to agents (not humans or system)
-      if (senderType === SenderType.AGENT && finalResponse && typeof finalResponse === 'string') {
-        // Check if response already contains @mention for the sender
-        const senderMention = `@${messageEvent.sender}`;
-        if (!finalResponse.toLowerCase().includes(senderMention.toLowerCase())) {
-          finalResponse = `${senderMention} ${finalResponse}`;
-        }
-      }
-    }
-
-    // Remove self-mentions from response (agents should not mention themselves)
-    if (finalResponse && typeof finalResponse === 'string') {
-      const selfMention = `@${agent.id}`;
-      const selfMentionRegex = new RegExp(`@${agent.id}\\b`, 'gi');
-      finalResponse = finalResponse.replace(selfMentionRegex, '').trim();
-
-      // Clean up any resulting double spaces or line breaks
-      finalResponse = finalResponse.replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
-    }
-
-    // Publish agent response
+    // Step 4: Publish final response
     if (finalResponse && typeof finalResponse === 'string') {
       publishMessage(world, finalResponse, agent.id);
     }
