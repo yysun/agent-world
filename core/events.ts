@@ -25,7 +25,8 @@ const logger = createCategoryLogger('events');
  * - broadcastToWorld: High-level message broadcasting with default sender handling
  *
  * Agent Events:
- * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering
+ * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering and reset logic
+ * - resetLLMCallCountIfNeeded: Reset LLM call count for human/system messages with agent state persistence
  * - processAgentMessage: Handle agent message processing with world context and memory persistence
  * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
  * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
@@ -54,6 +55,8 @@ const logger = createCategoryLogger('events');
  * - Subscription functions return cleanup callbacks for proper memory management
  * - All events include timestamps and unique IDs for debugging and tracing
  * - Newline preservation in LLM responses maintains proper text formatting
+ * - LLM call count reset happens before shouldAgentRespond for accurate turn limit checking
+ * - Agent state persistence ensures turn count resets are saved to disk immediately
  */
 
 import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
@@ -212,6 +215,9 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       return;
     }
 
+    // Reset LLM call count if needed (must happen before shouldAgentRespond check)
+    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
+
     // Automatic message processing
     logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
     if (await shouldAgentRespond(world, agent, messageEvent)) {
@@ -297,27 +303,16 @@ export async function processAgentMessage(
     // Prepare messages for LLM (including system prompt, history, and current message)
     const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
 
-    // Reset LLM call count when receiving human or system messages (before incrementing)
-    const senderType = determineSenderType(messageEvent.sender);
-    logger.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
-
-    if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
-      if (agent.llmCallCount > 0) {
-        logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
-        agent.llmCallCount = 0;
-      }
-    }
-
     // Increment LLM call count before making the call
     agent.llmCallCount++;
     agent.lastLLMCall = new Date();
 
-    // Auto-save agent state after LLM call count changes (reset + increment)
+    // Auto-save agent state after LLM call count increment
     try {
       const { saveAgentConfigToDisk } = await import('./agent-storage');
       await saveAgentConfigToDisk(world.rootPath, world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save agent after LLM call count changes', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Call LLM for response with streaming
@@ -402,6 +397,39 @@ export async function processAgentMessage(
       error: (error as Error).message,
       messageId
     });
+  }
+}
+
+/**
+ * Reset LLM call count for human and system messages with agent state persistence
+ * This should be called before shouldAgentRespond to ensure proper turn limit checking
+ */
+export async function resetLLMCallCountIfNeeded(
+  world: World,
+  agent: Agent,
+  messageEvent: WorldMessageEvent
+): Promise<void> {
+  const senderType = determineSenderType(messageEvent.sender);
+  logger.debug('Checking if LLM call count reset needed', {
+    agentId: agent.id,
+    sender: messageEvent.sender,
+    senderType,
+    currentCallCount: agent.llmCallCount
+  });
+
+  if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
+    if (agent.llmCallCount > 0) {
+      logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
+      agent.llmCallCount = 0;
+
+      // Auto-save agent state after turn limit reset
+      try {
+        const { saveAgentConfigToDisk } = await import('./agent-storage');
+        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+      } catch (error) {
+        logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      }
+    }
   }
 }
 

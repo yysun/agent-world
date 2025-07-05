@@ -17,7 +17,7 @@
  * - Tests auto-mention logic with various sender types
  */
 
-import { describe, test, expect, beforeEach, jest, afterEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, beforeAll, jest, afterEach } from '@jest/globals';
 import { World, Agent, WorldMessageEvent, AgentMessage, LLMProvider } from '../../core/types';
 
 // Mock dependencies
@@ -25,6 +25,7 @@ const mockSaveAgentMemoryToDisk = jest.fn();
 const mockSaveAgentConfigToDisk = jest.fn();
 const mockStreamAgentResponse = jest.fn();
 
+// Mock modules that will be dynamically imported
 jest.mock('../../core/agent-storage', () => ({
   saveAgentMemoryToDisk: mockSaveAgentMemoryToDisk,
   saveAgentConfigToDisk: mockSaveAgentConfigToDisk
@@ -34,8 +35,8 @@ jest.mock('../../core/llm-manager', () => ({
   streamAgentResponse: mockStreamAgentResponse
 }));
 
-// Import the function to test
-import { processAgentMessage } from '../../core/events';
+// Import the new function to test
+import { processAgentMessage, resetLLMCallCountIfNeeded } from '../../core/events';
 
 // Spy on the events module functions after import
 import * as events from '../../core/events';
@@ -99,11 +100,11 @@ describe('processAgentMessage', () => {
     jest.restoreAllMocks();
   });
 
-  describe('LLM Call Count Reset Logic', () => {
-    test('should reset LLM call count for human messages', async () => {
-      const agentWithHighCallCount = {
+  describe('LLM Call Count Logic', () => {
+    test('should increment LLM call count (reset happens elsewhere)', async () => {
+      const agentWithLowCallCount = {
         ...mockAgent,
-        llmCallCount: 3
+        llmCallCount: 2
       };
 
       const humanMessage: WorldMessageEvent = {
@@ -113,17 +114,17 @@ describe('processAgentMessage', () => {
         messageId: 'msg-human'
       };
 
-      await processAgentMessage(mockWorld, agentWithHighCallCount, humanMessage);
+      await processAgentMessage(mockWorld, agentWithLowCallCount, humanMessage);
 
-      // Should reset to 0, then increment to 1
-      expect(agentWithHighCallCount.llmCallCount).toBe(1);
-      expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
+      // Should only increment (reset happens in subscribeAgentToMessages)
+      expect(agentWithLowCallCount.llmCallCount).toBe(3);
+      expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithLowCallCount);
     });
 
-    test('should reset LLM call count for system messages', async () => {
-      const agentWithHighCallCount = {
+    test('should increment LLM call count for system messages', async () => {
+      const agentWithLowCallCount = {
         ...mockAgent,
-        llmCallCount: 4
+        llmCallCount: 1
       };
 
       const systemMessage: WorldMessageEvent = {
@@ -133,14 +134,14 @@ describe('processAgentMessage', () => {
         messageId: 'msg-system'
       };
 
-      await processAgentMessage(mockWorld, agentWithHighCallCount, systemMessage);
+      await processAgentMessage(mockWorld, agentWithLowCallCount, systemMessage);
 
-      // Should reset to 0, then increment to 1
-      expect(agentWithHighCallCount.llmCallCount).toBe(1);
+      // Should only increment (reset happens in subscribeAgentToMessages)
+      expect(agentWithLowCallCount.llmCallCount).toBe(2);
     });
 
-    test('should NOT reset LLM call count for agent messages', async () => {
-      const agentWithHighCallCount = {
+    test('should increment LLM call count for agent messages', async () => {
+      const agentWithLowCallCount = {
         ...mockAgent,
         llmCallCount: 2
       };
@@ -152,10 +153,10 @@ describe('processAgentMessage', () => {
         messageId: 'msg-agent'
       };
 
-      await processAgentMessage(mockWorld, agentWithHighCallCount, agentMessage);
+      await processAgentMessage(mockWorld, agentWithLowCallCount, agentMessage);
 
-      // Should NOT reset, just increment: 2 -> 3
-      expect(agentWithHighCallCount.llmCallCount).toBe(3);
+      // Should just increment: 2 -> 3
+      expect(agentWithLowCallCount.llmCallCount).toBe(3);
     });
 
     test('should update lastLLMCall timestamp', async () => {
@@ -446,5 +447,169 @@ describe('processAgentMessage', () => {
 
       await expect(processAgentMessage(mockWorld, mockAgent, longMessage)).resolves.not.toThrow();
     });
+  });
+});
+
+describe('resetLLMCallCountIfNeeded', () => {
+  let mockWorld: World;
+  let mockAgent: Agent;
+
+  beforeEach(() => {
+    // Clear all mocks
+    jest.clearAllMocks();
+
+    // Setup fresh mocks for each test
+    mockWorld = {
+      id: 'test-world',
+      name: 'Test World',
+      description: 'A test world',
+      rootPath: '/test/path',
+      agents: new Map(),
+      eventEmitter: {
+        emit: jest.fn(),
+        on: jest.fn(),
+        off: jest.fn(),
+        removeAllListeners: jest.fn()
+      } as any,
+      turnLimit: 5
+    } as World;
+
+    mockAgent = {
+      id: 'test-agent',
+      name: 'Test Agent',
+      type: 'assistant',
+      status: 'active',
+      provider: LLMProvider.OPENAI,
+      model: 'gpt-4o',
+      temperature: 0.7,
+      maxTokens: 1000,
+      createdAt: new Date(),
+      lastActive: new Date(),
+      llmCallCount: 0,
+      memory: []
+    };
+
+    // Default mock responses
+    (mockSaveAgentConfigToDisk as any).mockResolvedValue(undefined);
+  });
+
+  test('should reset LLM call count for human messages', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 3
+    };
+
+    const humanMessage: WorldMessageEvent = {
+      content: 'Hello from human',
+      sender: 'user',
+      timestamp: new Date(),
+      messageId: 'msg-human'
+    };
+
+    await resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, humanMessage);
+
+    expect(agentWithHighCallCount.llmCallCount).toBe(0);
+    expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
+  });
+
+  test('should reset LLM call count for system messages', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 4
+    };
+
+    const systemMessage: WorldMessageEvent = {
+      content: 'System notification',
+      sender: 'system',
+      timestamp: new Date(),
+      messageId: 'msg-system'
+    };
+
+    await resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, systemMessage);
+
+    expect(agentWithHighCallCount.llmCallCount).toBe(0);
+    expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
+  });
+
+  test('should NOT reset LLM call count for agent messages', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 2
+    };
+
+    const agentMessage: WorldMessageEvent = {
+      content: '@test-agent hello from another agent',
+      sender: 'other-agent',
+      timestamp: new Date(),
+      messageId: 'msg-agent'
+    };
+
+    await resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, agentMessage);
+
+    // Should NOT reset for agent messages
+    expect(agentWithHighCallCount.llmCallCount).toBe(2);
+    expect(mockSaveAgentConfigToDisk).not.toHaveBeenCalled();
+  });
+
+  test('should not reset when call count is already 0', async () => {
+    const agentWithZeroCallCount = {
+      ...mockAgent,
+      llmCallCount: 0
+    };
+
+    const humanMessage: WorldMessageEvent = {
+      content: 'Hello from human',
+      sender: 'user',
+      timestamp: new Date(),
+      messageId: 'msg-human'
+    };
+
+    await resetLLMCallCountIfNeeded(mockWorld, agentWithZeroCallCount, humanMessage);
+
+    // Should not save to disk when no reset needed
+    expect(agentWithZeroCallCount.llmCallCount).toBe(0);
+    expect(mockSaveAgentConfigToDisk).not.toHaveBeenCalled();
+  });
+
+  test('should handle save errors gracefully', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 3
+    };
+
+    const saveError = new Error('Disk full');
+    (mockSaveAgentConfigToDisk as any).mockRejectedValue(saveError);
+
+    const humanMessage: WorldMessageEvent = {
+      content: 'Hello from human',
+      sender: 'user',
+      timestamp: new Date(),
+      messageId: 'msg-human'
+    };
+
+    // Should not throw, just log warning
+    await expect(resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, humanMessage)).resolves.not.toThrow();
+
+    // Count should still be reset even if save fails
+    expect(agentWithHighCallCount.llmCallCount).toBe(0);
+  });
+
+  test('should handle undefined sender gracefully', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 2
+    };
+
+    const messageWithUndefinedSender: WorldMessageEvent = {
+      content: 'Message with undefined sender',
+      sender: undefined as any,
+      timestamp: new Date(),
+      messageId: 'msg-undefined'
+    };
+
+    await expect(resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, messageWithUndefinedSender)).resolves.not.toThrow();
+
+    // Should treat undefined as system message and reset
+    expect(agentWithHighCallCount.llmCallCount).toBe(0);
   });
 });
