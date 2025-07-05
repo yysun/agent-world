@@ -9,6 +9,13 @@
  * - Enhanced SSE streaming for chunked responses
  * - Fixed duplicate message prevention with case-insensitive filtering
  * - Consolidated redundant code and comments
+ * - Improved timer management to prevent premature stream termination:
+ *   - Initial response timer: 15s
+ *   - Streaming stall timer: 5s between chunks
+ *   - Completion timer: 3s after stream ends
+ *   - Error completion timer: 2s
+ *   - Regular message timer: 5s
+ * - Fixed streaming timeout logic to prevent ending during active LLM responses
  */
 
 import express, { Request, Response } from 'express';
@@ -553,7 +560,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     // Timer management
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const setupTimer = (callback: () => void, delay: number = 2000): void => {
+    const setupTimer = (callback: () => void, delay: number = 5000): void => {
       clearTimer();
       timer = setTimeout(callback, delay);
     };
@@ -567,14 +574,15 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     // Setup streaming callbacks
     streaming.wait = (delay: number) => {
+      // Clear any existing timer before setting up new one
+      clearTimer();
       setupTimer(() => {
+        // Only timeout if streaming is not active or has stalled
         if (streaming.isActive) {
           logger.debug('Streaming appears stalled - timing out...');
           resetStreamingState();
-          handleStreamingComplete();
-        } else {
-          handleStreamingComplete();
         }
+        handleStreamingComplete();
       }, delay);
     };
 
@@ -639,9 +647,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
             }
           })}\n\n`);
 
-          // Reset stall timer with each chunk
+          // Reset stall timer with each chunk (clear previous and set new)
           if (streaming.wait) {
-            streaming.wait(500);
+            streaming.wait(5000); // 5 second stall timeout between chunks
           }
         }
         return true;
@@ -665,9 +673,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
         resetStreamingState();
 
-        // Set completion timer
+        // Set completion timer (clear previous and set new) - shorter since streaming is complete
         if (streaming.wait) {
-          streaming.wait(2000);
+          streaming.wait(3000); // 3 second completion timeout
         }
         return true;
       }
@@ -690,9 +698,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
         resetStreamingState();
 
-        // Set completion timer
+        // Set completion timer (clear previous and set new) - shorter since there's an error
         if (streaming.wait) {
-          streaming.wait(2000);
+          streaming.wait(2000); // 2 second completion timeout for errors
         }
         return true;
       }
@@ -745,9 +753,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
             }
           })}\n\n`);
 
-          // Setup completion timer for non-streaming messages
+          // Setup completion timer for non-streaming messages (clear previous and set new)
           if (streaming.wait) {
-            streaming.wait(3000);
+            streaming.wait(5000); // 5 second completion timeout for regular messages
           }
         }
       },
@@ -792,10 +800,10 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
         data: { sender }
       })}\n\n`);
 
-      // Set timeout for long operations
-      setTimeout(() => {
-        handleStreamingComplete();
-      }, 8000); // 8 second timeout for long operations
+      // Set initial wait timer to allow for LLM response
+      if (streaming.wait) {
+        streaming.wait(15000); // 15 second timeout for initial response
+      }
 
     } catch (error) {
       res.write(`data: ${JSON.stringify({
