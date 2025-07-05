@@ -1,9 +1,28 @@
 /**
- * Integration test for paragraph beginning mention rule
- * Tests the complete flow of mention detection and agent response behavior
+ * Paragraph Beginning Mention Rule Integration Test
+ * 
+ * Features:
+ * - Tests the complete flow of mention detection and agent response behavior
+ * - Validates paragraph beginning mention rule implementation
+ * - Tests extractParagraphBeginningMentions function with requirement examples
+ * - Tests backward compatibility with extractMentions function
+ * - Simulates agent response logic for various mention scenarios
+ * - Tests performance and edge cases for mention extraction
+ * 
+ * Implementation:
+ * - Uses Jest testing framework for structured test organization
+ * - Imports core utility functions for mention extraction
+ * - Tests valid and invalid mention scenarios from requirements
+ * - Simulates shouldAgentRespond function logic for comprehensive testing
+ * - Tests complex multi-paragraph scenarios and edge cases
+ * - Validates performance with large messages and malformed input
+ * 
+ * Changes:
+ * - Moved from integration-tests folder to tests/integration for Jest organization
+ * - Added comprehensive file comment block following coding standards
  */
 
-import { extractParagraphBeginningMentions, extractMentions } from '../core/utils';
+import { extractParagraphBeginningMentions, extractMentions } from '../../core/utils';
 
 describe('Paragraph Beginning Mention Rule Integration', () => {
   describe('extractParagraphBeginningMentions', () => {

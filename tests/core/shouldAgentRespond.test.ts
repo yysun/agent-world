@@ -236,7 +236,7 @@ describe('shouldAgentRespond', () => {
     test('should reset turn count on human messages', async () => {
       const agentWithHighCallCount = {
         ...mockAgent,
-        llmCallCount: 3 // Will be reset to 0
+        llmCallCount: 3 // Will NOT be reset in shouldAgentRespond anymore
       };
 
       const messageEvent: WorldMessageEvent = {
@@ -248,13 +248,13 @@ describe('shouldAgentRespond', () => {
 
       const result = await shouldAgentRespond(mockWorld, agentWithHighCallCount, messageEvent);
       expect(result).toBe(true);
-      expect(agentWithHighCallCount.llmCallCount).toBe(0); // Should be reset
+      expect(agentWithHighCallCount.llmCallCount).toBe(3); // Should NOT be reset in shouldAgentRespond
     });
 
     test('should reset turn count on system messages', async () => {
       const agentWithHighCallCount = {
         ...mockAgent,
-        llmCallCount: 3 // Will be reset to 0
+        llmCallCount: 3 // Will NOT be reset in shouldAgentRespond anymore
       };
 
       const messageEvent: WorldMessageEvent = {
@@ -266,7 +266,7 @@ describe('shouldAgentRespond', () => {
 
       const result = await shouldAgentRespond(mockWorld, agentWithHighCallCount, messageEvent);
       expect(result).toBe(true);
-      expect(agentWithHighCallCount.llmCallCount).toBe(0); // Should be reset
+      expect(agentWithHighCallCount.llmCallCount).toBe(3); // Should NOT be reset in shouldAgentRespond
     });
 
     test('should not respond to turn limit messages', async () => {

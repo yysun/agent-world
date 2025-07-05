@@ -25,7 +25,7 @@ export default {
   extensionsToTreatAsEsm: ['.ts'],
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
-  testMatch: ['**/world-management.test.ts', '**/world-only-patterns.test.ts'],
+  testMatch: ['test/integration/'],
   coverageDirectory: 'coverage-integration',
   coverageReporters: ['text', 'lcov', 'html'],
   testTimeout: 30000, // Higher timeout for real file operations
