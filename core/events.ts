@@ -30,10 +30,15 @@ const logger = createCategoryLogger('events');
  * - processAgentMessage: Handle agent message processing with world context and memory persistence
  * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
  * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
+ * - shouldAutoMention: Determine if agent should auto-mention sender (fixed bug for all sender types)
+ * - getValidMentions: Get all paragraph beginning mentions excluding self-mentions
+ * - isSenderMentionedAtBeginning: Check if specific sender is mentioned at paragraph beginning
  *
  * Auto-Mention Logic (Enhanced to Prevent Loops):
  * - Step 1: Remove self-mentions from response beginning (prevents agent self-mention)
- * - Step 2: Add auto-mention for sender only if NO mention exists at paragraph beginning
+ * - Step 2: Add auto-mention for sender only if NO valid mentions exist at paragraph beginnings
+ * - Fixed bug: Auto-mention all valid senders (human or agent), not just agents
+ * - Fixed bug: Only skip auto-mention if ANY valid mentions exist at paragraph beginnings (excluding self)
  * - Uses extractParagraphBeginningMentions for consistent mention detection
  * - Prevents agent loops (e.g., @gm->@pro->@gm) by checking for ANY mention at beginning
  * - Allows redirections (e.g., @gm->@con) by preserving explicit mentions
@@ -169,6 +174,70 @@ export function addAutoMention(response: string, sender: string): string {
   // Trim the response and prepend @sender
   const trimmedResponse = response.trim();
   return `@${sender} ${trimmedResponse}`;
+}
+
+/**
+ * Get all valid mentions at the beginning of every paragraph, excluding self-mentions
+ * This is used to determine if auto-mention should be added
+ */
+export function getValidMentions(response: string, agentId: string): string[] {
+  if (!response || !agentId) return [];
+
+  // Use original response to preserve newlines, only check if it's effectively empty
+  if (!response.trim()) return [];
+
+  // Get all mentions at paragraph beginnings
+  const allMentions = extractParagraphBeginningMentions(response);
+
+  // Filter out self-mentions (case-insensitive)
+  const validMentions = allMentions.filter(mention =>
+    mention.toLowerCase() !== agentId.toLowerCase()
+  );
+
+  return validMentions;
+}
+
+/**
+ * Check if the specific sender is mentioned at the beginning of the response
+ * This is more specific than hasAnyMentionAtBeginning - only checks for the sender
+ */
+export function isSenderMentionedAtBeginning(response: string, sender: string): boolean {
+  if (!response || !sender) return false;
+
+  // Use original response to preserve newlines, only check if it's effectively empty
+  if (!response.trim()) return false;
+
+  // Get all mentions at paragraph beginnings
+  const mentions = extractParagraphBeginningMentions(response);
+
+  // Check if the specific sender is mentioned at the beginning (case-insensitive)
+  return mentions.some(mention => mention.toLowerCase() === sender.toLowerCase());
+}
+
+/**
+ * Determine if agent should auto-mention the sender based on message context
+ * Fixed bug: Should auto-mention sender regardless of sender type (human or agent)
+ * Fixed bug: Only add auto-mention if NO valid mentions exist at paragraph beginnings
+ */
+export function shouldAutoMention(
+  response: string,
+  sender: string,
+  agentId: string
+): boolean {
+  if (!response || !sender || !agentId) return false;
+
+  // Don't auto-mention if response is effectively empty
+  if (!response.trim()) return false;
+
+  // Don't auto-mention self
+  if (sender.toLowerCase() === agentId.toLowerCase()) return false;
+
+  // Don't auto-mention if there are any valid mentions at paragraph beginnings
+  const validMentions = getValidMentions(response, agentId);
+  if (validMentions.length > 0) return false;
+
+  // Auto-mention for all valid senders (human or agent)
+  return true;
 }
 
 /**
@@ -352,17 +421,9 @@ export async function processAgentMessage(
       finalResponse = removeSelfMentions(finalResponse, agent.id);
     }
 
-    // Step 2: Auto-mention processing (for agents only, not humans or system)
-    if (messageEvent.sender && typeof messageEvent.sender === 'string' &&
-      messageEvent.sender.toLowerCase() !== agent.id.toLowerCase()) {
-
-      const senderType = determineSenderType(messageEvent.sender);
-
-      // Auto-mention agents only (not humans or system messages)
-      if (senderType === SenderType.AGENT &&
-        finalResponse && typeof finalResponse === 'string') {
-        finalResponse = addAutoMention(finalResponse, messageEvent.sender);
-      }
+    // Step 2: Auto-mention processing (fixed bug - should auto-mention all valid senders)
+    if (shouldAutoMention(finalResponse, messageEvent.sender, agent.id)) {
+      finalResponse = addAutoMention(finalResponse, messageEvent.sender);
     }
 
     // Step 3: Save final response to memory (after all processing)
