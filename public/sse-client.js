@@ -1,20 +1,23 @@
 /**
- * SSE Client - Unified Server-Sent Events handler for Agent World
+ * SSE Client - Server-Sent Events handler for Agent World
  * 
- * Features:
- * - Complete SSE streaming with direct AppRun event publishing
- * - Message accumulation and state management
- * - Error handling and connection status
- * - Single module approach (like original ws-sse.js)
- * 
- * This replaces the complex sse-events.js + sse-handlers.js architecture
- * with a simple, unified approach that works like the original WebSocket system.
+ * Features: Complete SSE streaming, message accumulation, error handling
+ * Architecture: Direct AppRun event publishing with streaming state management
+ * Replaces complex multi-module approach with unified solution
  */
 
 import { apiRequest } from './api.js';
 
-// Get AppRun app instance
+// Get AppRun instance and publish events
 const getApp = () => window["app"];
+const publishEvent = (eventType, data) => {
+  const app = getApp();
+  if (app?.run) {
+    app.run(eventType, data);
+  } else {
+    console.warn('AppRun app not available for event:', eventType);
+  }
+};
 
 // Streaming state
 let streamingState = {
@@ -22,35 +25,16 @@ let streamingState = {
   currentWorldName: null
 };
 
-/**
- * Publish events directly to AppRun (like ws-api.js)
- */
-const publishEvent = (eventType, data) => {
-  const app = getApp();
-  if (app && app.run) {
-    app.run(eventType, data);
-  } else {
-    console.warn('AppRun app not available for event:', eventType);
-  }
-};
-
-/**
- * Handle SSE streaming events and convert to AppRun state updates
- */
+// Handle SSE data and convert to AppRun events
 const handleSSEData = (data) => {
-  if (!data || typeof data !== 'object') {
-    return;
-  }
+  if (!data || typeof data !== 'object') return;
 
-  // Handle different event types
   if (data.type === 'sse') {
     handleStreamingEvent(data);
   } else if (data.type === 'message') {
-    // Regular message
     publishEvent('handleMessage', data);
   } else if (data.type === 'response') {
-    // Response acknowledgment - don't publish to AppRun, just log
-    // This confirms the message was received by the server
+    // Response acknowledgment - just log, don't publish
   } else if (data.type === 'error') {
     publishEvent('handleError', { message: data.message || 'SSE error' });
   } else if (data.type === 'connected') {
@@ -124,6 +108,12 @@ const handleStreamingEvent = (data) => {
           messageId,
           sender: agentName,
           content: finalContent,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        });
+
+        // Increment agent memorySize after stream completion
+        publishEvent('incrementAgentMemorySize', {
+          agentId: agentName,
           worldName: eventData.worldName || streamingState.currentWorldName
         });
 
@@ -445,5 +435,26 @@ export const handleComplete = (state, payload) => {
   return {
     ...state,
     connectionStatus: 'completed'
+  };
+};
+
+// Handle incrementing agent memory size after stream completion
+export const incrementAgentMemorySize = (state, data) => {
+  const { agentId, worldName } = data;
+
+  // Find the agent in the state and increment its memorySize
+  const agents = (state.agents || []).map(agent => {
+    if (agent.id === agentId || agent.name === agentId) {
+      return {
+        ...agent,
+        memorySize: (agent.memorySize || agent.memory?.length || 0) + 1
+      };
+    }
+    return agent;
+  });
+
+  return {
+    ...state,
+    agents
   };
 };

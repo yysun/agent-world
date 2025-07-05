@@ -841,6 +841,15 @@ body {
   background-color: rgba(239, 68, 68, 0.1);
 }
 
+.conversation-message.user-message,
+.conversation-message.human {
+  border-left-color: #f97316;
+}
+
+.conversation-message.system {
+  border-left-color: #eab308;
+}
+
 /* Memory chat-like messages */
 .conversation-message.memory-user {
   margin-left: 0;

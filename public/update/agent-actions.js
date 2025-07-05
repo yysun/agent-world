@@ -6,6 +6,7 @@
  * - Clear agent memory functionality with actual API calls
  * - Memory format parsing and chat-like display
  * - Automatic full agent data fetching when memory is not loaded
+ * - Agent memory count updates after clearing memory or receiving messages
  *
  * Core Fix:
  * - Fixed issue where clicking agent card showed "no memories" despite having memories
@@ -13,6 +14,7 @@
  * - Agent cards now properly load and display conversation history
  * - Fixed conversation area not updating when switching between agents (messages now replace instead of append)
  * - Maintains backward compatibility with both AgentInfo (memorySize) and full Agent (memory) objects
+ * - Added agent memory count refresh after clearing memory operations
  *
  * Memory Display Features:
  * - Chat-like interface for agent memories
@@ -21,6 +23,7 @@
  * - Automatic detection of message roles from memory structure
  * - Support for string, object with content/text/message properties, and JSON fallback
  * - Smart loading: fetches full agent data if memory array is missing but memorySize > 0
+ * - Real-time memory count updates on agent cards
  *
  * Implementation:
  * - Proper memory content parsing for different formats
@@ -29,6 +32,7 @@
  * - Real API calls for memory clearing functionality
  * - Async agent data loading for complete memory access
  * - Error handling for failed agent data fetches
+ * - Agent list refresh after memory operations to update counts
  */
 
 import * as api from '../api.js';
@@ -127,6 +131,9 @@ export const clearAgentMemory = async (state, agent) => {
     // Call the actual API to clear agent memory
     await api.clearAgentMemory(state.worldName, agent.name);
 
+    // Refresh agents list to update memory counts
+    const updatedAgents = await api.getAgents(state.worldName);
+
     const confirmMessage = {
       id: Date.now() + Math.random(),
       type: 'system',
@@ -138,6 +145,7 @@ export const clearAgentMemory = async (state, agent) => {
 
     return {
       ...state,
+      agents: updatedAgents, // Update agents with refreshed memory counts
       messages: [...state.messages, confirmMessage],
       needScroll: true
     };
@@ -167,6 +175,9 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
     // Call the actual API to clear agent memory
     await api.clearAgentMemory(state.worldName, agent.name);
 
+    // Refresh agents list to update memory counts
+    const updatedAgents = await api.getAgents(state.worldName);
+
     const confirmMessage = {
       id: Date.now() + Math.random(),
       type: 'system',
@@ -178,6 +189,7 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
 
     return {
       ...state,
+      agents: updatedAgents, // Update agents with refreshed memory counts
       messages: [...state.messages, confirmMessage],
       showAgentModel: false, // Close the modal after clearing memory
       needScroll: true

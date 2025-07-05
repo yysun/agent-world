@@ -1,31 +1,14 @@
 /**
  * API Routes for Agent World
  *
- * Features:
- * - REST API endpoints for world and agent management
- * - Server-Sent Events (SSE) for real-time chat streaming
- * - Zod validation for all endpoints
- * - Core module integration (world-manager, agent-manager, world-events)
- * - SSE chunk streaming support for grouped message blocks
- *
- * Endpoints:
- * - GET /worlds - List/create default world
- * - GET /worlds/:worldName/agents - List agents in world
- * - GET /worlds/:worldName/agents/:agentName - Get agent details
- * - POST /worlds/:worldName/agents - Create agent (placeholder)
- * - PATCH /worlds/:worldName/agents/:agentName - Update agent with memory clearing
- * - POST /worlds/:worldName/chat - Chat with SSE streaming
- *
- * Implementation:
- * - Uses World object methods for operations
- * - World name handling delegated to core functions
- * - Event handling via publishMessage/subscribeToMessages and subscribeToSSE
- * - Streams both message events and SSE chunk events to client
- *
- * Changes:
- * - Added subscribeToSSE for streaming chunk support
- * - Enhanced SSE streaming to handle chunked responses properly
- * - Fixed server-side SSE event forwarding to client
+ * Features: REST API + SSE streaming with Zod validation
+ * Endpoints: World/agent management, real-time chat with SSE
+ * Implementation: Core module integration with event handling
+ * 
+ * Recent Changes:
+ * - Enhanced SSE streaming for chunked responses
+ * - Fixed duplicate message prevention with case-insensitive filtering
+ * - Consolidated redundant code and comments
  */
 
 import express, { Request, Response } from 'express';
@@ -39,7 +22,7 @@ const logger = createCategoryLogger('api');
 const DEFAULT_WORLD_NAME = 'Default World';
 const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
-// Error response helper
+// Utility functions
 function sendError(res: Response, status: number, message: string, code?: string, details?: any) {
   const error: { error: string; code?: string; details?: any } = { error: message };
   if (code) error.code = code;
@@ -47,13 +30,8 @@ function sendError(res: Response, status: number, message: string, code?: string
   res.status(status).json(error);
 }
 
-// Validation utilities
 function toKebabCase(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
 function validateMemoryFormat(memory: any): memory is Array<any> {
@@ -736,7 +714,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
         }
 
         // Skip user messages to prevent echo
-        if (eventData.sender && ['HUMAN', 'CLI', 'user'].includes(eventData.sender)) {
+        if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
           return;
         }
 

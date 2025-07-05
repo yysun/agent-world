@@ -5,6 +5,7 @@
  * - World data fetching with REST API integration  
  * - Automatic agent loading per world
  * - Message clearing on world change
+ * - World persistence to localStorage for session continuity
  * - Uses only REST API + SSE (no WebSocket)
  */
 
@@ -12,6 +13,13 @@ import * as api from '../api.js';
 
 export const selectWorld = async (state, worldName) => {
   if (worldName === state.worldName) return state;
+
+  // Save selected world to localStorage
+  if (worldName) {
+    localStorage.setItem('selectedWorldName', worldName);
+  } else {
+    localStorage.removeItem('selectedWorldName');
+  }
 
   const newState = {
     ...state,
@@ -23,10 +31,7 @@ export const selectWorld = async (state, worldName) => {
   if (worldName) {
     try {
       // Get world data and agents using REST API
-      console.log('🌍 Fetching world data for', worldName);
       const agents = await api.getAgents(worldName);
-      console.log('🤖 Agents from REST API for', worldName, ':', agents);
-
       return { ...newState, agents };
     } catch (error) {
       console.error('Failed to fetch world data:', error);

@@ -4,9 +4,10 @@
  * Features:
  * - Loads available worlds from REST API
  * - No WebSocket connection - uses REST + SSE for all functionality
- * - Auto-selects first available world after loading
+ * - Auto-selects persisted world from localStorage or first available world
  * - Returns theme preference from localStorage without applying it
  * - Uses REST API for all data operations and SSE for chat
+ * - World persistence for better user experience across sessions
  *
  * Implementation:
  * - Function-based module that returns promise-based initialization
@@ -14,11 +15,13 @@
  * - Pure state initialization without side effects (theme application handled by caller)
  * - Error handling for connection failures with fallback states
  * - REST API for world and agent data loading
+ * - localStorage integration for world selection persistence
  *
  * Recent Changes:
  * - Completely removed WebSocket dependency
  * - Uses only REST API + SSE for all functionality
  * - Simplified connection model without persistent connections
+ * - Added world persistence using localStorage
  */
 
 import * as api from '../api.js';
@@ -50,11 +53,19 @@ export const initializeState = async () => {
     baseState.worlds = worlds;
     baseState.loading = false;
 
-    // Auto-select first world if available
-    const worldName = worlds.length > 0 ? worlds[0].name : null;
+    // Get persisted world name from localStorage, fallback to first available world
+    const persistedWorldName = localStorage.getItem('selectedWorldName');
+    let worldName = null;
+
+    if (persistedWorldName && worlds.find(w => w.name === persistedWorldName)) {
+      // Use persisted world if it still exists
+      worldName = persistedWorldName;
+    } else if (worlds.length > 0) {
+      // Fallback to first world
+      worldName = worlds[0].name;
+    }
 
     if (worldName) {
-      const selectedWorld = worlds[0];
       const subscriptionResult = await selectWorld(baseState, worldName);
       return subscriptionResult;
     } else {

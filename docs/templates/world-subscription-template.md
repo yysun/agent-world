@@ -155,7 +155,7 @@ function handleWorldEvent(
   }
 
   // Skip user messages to prevent echo
-  if (eventData.sender && ['HUMAN', 'CLI', 'user'].includes(eventData.sender)) {
+  if (eventData.sender && ['HUMAN', 'CLI', 'human'].includes(eventData.sender)) {
     return;
   }
 

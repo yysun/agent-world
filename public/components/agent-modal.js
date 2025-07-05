@@ -86,7 +86,7 @@ export const AgentModal = (agent, close) => {
           </button>
         </div>
 
-        <form class="agent-form" @submit=${(e) => { e.preventDefault(); run(close, true); }}>
+        <form class="agent-form" @submit=${run(close, true)}}>
           <div class="form-group">
             <textarea
               id="agent-system-prompt"
@@ -94,12 +94,9 @@ export const AgentModal = (agent, close) => {
               rows="20"
               placeholder="Define the agent's behavior and personality..."
               .value=${systemPrompt}
-              @input=${(e) => {
-      if (agent) {
-        agent.systemPrompt = e.target.value;
-      }
-    }}
-            ></textarea>
+            >
+            ${systemPrompt}
+            </textarea>
           </div>
 
           <div class="form-actions">
