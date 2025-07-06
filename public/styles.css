@@ -121,7 +121,6 @@ body {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  justify-content: center;
 }
 
 .world-dropdown {
@@ -816,6 +815,43 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+.conversation-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.control-button {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.control-button:hover {
+  background-color: var(--bg-accent);
+  color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.control-button:active {
+  transform: translateY(0);
+}
+
+.control-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .conversation-message {

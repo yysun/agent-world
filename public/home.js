@@ -10,6 +10,7 @@
  * - Fixed world chips agent count display
  * - Fixed duplicate message prevention via server-side filtering
  * - Consolidated redundant code and comments
+ * - Added conversation control buttons (scroll to top, clear messages)
  */
 
 const { Component, html, run } = window["apprun"];
@@ -111,6 +112,21 @@ const sendQuickMessage = async (state) => {
   }
 };
 
+// Scroll to top function
+const scrollToTop = (state) => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  return state;
+};
+
+// Clear messages function
+const clearMessages = (state) => {
+  return {
+    ...state,
+    messages: [],
+    wsError: null
+  };
+};
+
 // Auto-scroll after DOM updates
 const scrollToBottom = (state) => {
   if (state?.needScroll) {
@@ -168,6 +184,20 @@ const view = (state) => {
               </div>`
     }
           </div>
+          ${state.messages?.length > 0 ? html`
+            <div class="conversation-controls">
+              <button class="control-button" @click=${run('clearMessages')} title="Clear messages">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c0-1 1-2 2-2v2"/>
+                </svg>
+              </button>
+              <button class="control-button" @click=${run('scrollToTop')} title="Scroll to top">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m18 15-6-6-6 6"/>
+                </svg>
+              </button>
+            </div>
+          ` : ''}
         </div>
 
         <div class="simple-input-container">
@@ -213,7 +243,9 @@ const update = {
   selectWorld,
   onQuickInput,
   onQuickKeypress,
-  sendQuickMessage
+  sendQuickMessage,
+  scrollToTop,
+  clearMessages
 };
 
 export default new Component(state, view, update, {
