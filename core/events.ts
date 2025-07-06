@@ -233,11 +233,14 @@ export function shouldAutoMention(
   // Don't auto-mention self
   if (sender.toLowerCase() === agentId.toLowerCase()) return false;
 
+  // Don't auto-mention human senders
+  if (determineSenderType(sender) === SenderType.HUMAN) return false;
+
   // Don't auto-mention if there are any valid mentions at paragraph beginnings
   const validMentions = getValidMentions(response, agentId);
   if (validMentions.length > 0) return false;
 
-  // Auto-mention for all valid senders (human or agent)
+  // Auto-mention for agent senders only
   return true;
 }
 
@@ -284,9 +287,6 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       logger.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
       return;
     }
-
-    // Reset LLM call count if needed (must happen before shouldAgentRespond check)
-    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
 
     // Automatic message processing
     logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
@@ -349,6 +349,9 @@ export async function processAgentMessage(
   const messageId = generateId();
 
   try {
+    // Reset LLM call count if needed (for human/system messages)
+    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
+
     // Always save incoming message to memory (regardless of response decision)
     await saveIncomingMessageToMemory(world, agent, messageEvent);
 
@@ -450,14 +453,6 @@ export async function processAgentMessage(
       await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
     } catch (error) {
       logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-    }
-
-    // Auto-save agent config after final response (ensures LLM call count is persisted)
-    try {
-      const { saveAgentConfigToDisk } = await import('./agent-storage');
-      await saveAgentConfigToDisk(world.rootPath, world.id, agent);
-    } catch (error) {
-      logger.warn('Failed to auto-save agent config after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Step 4: Publish final response
