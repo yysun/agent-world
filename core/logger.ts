@@ -1,149 +1,117 @@
 /**
- * Centralized Logger Module - Browser-Safe Logging Across Core
+ * Simple Logger Module - Zero-Dependency Cross-Platform Logging
  *
  * Features:
- * - Browser-safe logger with dynamic pino loading
- * - Pretty printing for development environment (Node.js)
- * - Structured logging with appropriate log levels
- * - Client-controlled configuration (no environment variables)
- * - Category-based logging for granular control (ws, cli, core, etc.)
- * - Fallback console logging for browser environments
+ * - Pure console-based logging (Node.js/browser compatible)
+ * - Category-specific loggers with independent levels
+ * - Configuration-driven setup with level filtering
+ * - Zero external dependencies
  *
- * Usage:
- * - Replace all console.log/warn/error calls with structured logging
- * - Consistent log format across all core modules
- * - Proper log level management controlled by clients
- * - Use initializeLogger() to setup environment-specific logger
- * - Use setLogLevel() to configure global log level
- * - Use setCategoryLogLevel() to control specific category levels
- * - Use createCategoryLogger() to get category-specific logger
- *
- * Categories:
- * - ws: WebSocket server logging
- * - cli: CLI application logging
- * - core: Core module logging
- * - storage: Storage operations logging
- * - llm: LLM interactions logging
- * - events: Event system logging
- *
- * Implementation:
- * - Uses pino for Node.js environments
- * - Uses pino/browser for browser environments
- * - Fallback console logger for initialization
- * - Dynamic loading prevents Node.js dependencies in browser
- * - Category loggers are child loggers with category-specific levels
- * - Provides functions for both global and category-specific log control
+ * Categories: ws, cli, core, storage, llm, events, api, server
+ * Usage: initializeLogger(config) → createCategoryLogger(category)
+ * Implementation: Console methods with structured output formatting
  */
 
-import { isNodeEnvironment } from './utils.js';
-import type * as pino from 'pino';
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
-// Browser-safe fallback logger
-const fallbackLogger = {
-  trace: (msg: any, ...args: any[]) => console.log('[TRACE]', msg, ...args),
-  debug: (msg: any, ...args: any[]) => console.log('[DEBUG]', msg, ...args),
-  info: (msg: any, ...args: any[]) => console.info('[INFO]', msg, ...args),
-  warn: (msg: any, ...args: any[]) => console.warn('[WARN]', msg, ...args),
-  error: (msg: any, ...args: any[]) => console.error('[ERROR]', msg, ...args),
-  level: 'error',
-  child: (opts: any) => ({ ...fallbackLogger, ...opts })
-} as pino.Logger;
+const LOG_LEVELS: Record<LogLevel, number> = {
+  trace: 10, debug: 20, info: 30, warn: 40, error: 50
+};
 
-// Start with fallback logger
-let logger: pino.Logger = fallbackLogger;
+function shouldLog(messageLevel: LogLevel, currentLevel: LogLevel): boolean {
+  return LOG_LEVELS[messageLevel] >= LOG_LEVELS[currentLevel];
+}
 
-// Category log levels - defaults to same as main logger
-const categoryLevels: Record<string, string> = {};
+// Logger interface
+export interface Logger {
+  trace: (msg: any, ...args: any[]) => void;
+  debug: (msg: any, ...args: any[]) => void;
+  info: (msg: any, ...args: any[]) => void;
+  warn: (msg: any, ...args: any[]) => void;
+  error: (msg: any, ...args: any[]) => void;
+  level: LogLevel;
+}
 
-// Cache for category loggers
-const categoryLoggers: Record<string, pino.Logger> = {};
+// Simple logger implementation
+function createSimpleLogger(category?: string, level: LogLevel = 'error'): Logger {
+  const prefix = category ? `[${category.toUpperCase()}]` : '[LOG]';
 
-// Dynamic logger initialization
-export async function initializeLogger(): Promise<void> {
-  if (isNodeEnvironment()) {
-    // Node.js environment - use pino with pretty printing
-    const pino = await import('pino');
-    logger = pino.default({
-      name: 'agent-world-core',
-      level: 'error',
-      transport: process.env.NODE_ENV !== 'production' ? {
-        target: 'pino-pretty',
-        options: { colorize: true }
-      } : undefined
-    });
-  } else {
-    // Browser environment - use pino/browser
-    try {
-      const pinoBrowser = await import('pino/browser');
-      logger = (pinoBrowser as any).default ? (pinoBrowser as any).default({
-        name: 'agent-world-core',
-        level: 'error'
-      }) : (pinoBrowser as any)({
-        name: 'agent-world-core',
-        level: 'error'
-      });
-    } catch (error) {
-      // Fallback to our fallback logger if pino/browser fails
-      console.warn('Failed to load pino/browser, using fallback logger:', error);
-      logger = fallbackLogger;
-    }
+  return {
+    trace: (msg: any, ...args: any[]) => {
+      if (shouldLog('trace', level)) {
+        console.log(`${prefix}[TRACE]`, msg, ...args);
+      }
+    },
+    debug: (msg: any, ...args: any[]) => {
+      if (shouldLog('debug', level)) {
+        console.log(`${prefix}[DEBUG]`, msg, ...args);
+      }
+    },
+    info: (msg: any, ...args: any[]) => {
+      if (shouldLog('info', level)) {
+        console.info(`${prefix}[INFO]`, msg, ...args);
+      }
+    },
+    warn: (msg: any, ...args: any[]) => {
+      if (shouldLog('warn', level)) {
+        console.warn(`${prefix}[WARN]`, msg, ...args);
+      }
+    },
+    error: (msg: any, ...args: any[]) => {
+      if (shouldLog('error', level)) {
+        console.error(`${prefix}[ERROR]`, msg, ...args);
+      }
+    },
+    level
+  };
+}
+
+// Global state
+let globalLevel: LogLevel = 'error';
+const categoryLevels: Record<string, LogLevel> = {};
+const categoryLoggers: Record<string, Logger> = {};
+
+export interface LoggerConfig {
+  globalLevel?: LogLevel;
+  categoryLevels?: Record<string, LogLevel>;
+}
+
+// Simple synchronous logger initialization
+export function initializeLogger(config: LoggerConfig = {}): void {
+  globalLevel = config.globalLevel || 'error';
+
+  if (config.categoryLevels) {
+    Object.assign(categoryLevels, config.categoryLevels);
   }
 
   // Update existing category loggers
   Object.keys(categoryLoggers).forEach(category => {
-    const categoryLogger = logger.child({ category });
-    if (categoryLevels[category]) {
-      categoryLogger.level = categoryLevels[category];
-    }
-    categoryLoggers[category] = categoryLogger;
+    const level = categoryLevels[category] || globalLevel;
+    categoryLoggers[category] = createSimpleLogger(category, level);
   });
 }
 
-// Function to set global log level
-export function setLogLevel(level: 'trace' | 'debug' | 'info' | 'warn' | 'error'): void {
-  logger.level = level;
-
-  // Update existing category loggers if they don't have specific level set
-  Object.keys(categoryLoggers).forEach(category => {
-    if (!categoryLevels[category]) {
-      categoryLoggers[category].level = level;
-    }
-  });
-}
-
-// Function to set log level for specific category
-export function setCategoryLogLevel(category: string, level: 'trace' | 'debug' | 'info' | 'warn' | 'error'): void {
-  categoryLevels[category] = level;
-
-  // Update existing logger if it exists
-  if (categoryLoggers[category]) {
-    categoryLoggers[category].level = level;
-  }
-}
-
-// Function to create category-specific logger
-export function createCategoryLogger(category: string): pino.Logger {
+// Category logger management
+export function createCategoryLogger(category: string): Logger {
   if (categoryLoggers[category]) {
     return categoryLoggers[category];
   }
 
-  const categoryLogger = logger.child({ category });
-
-  // Set specific level if configured, otherwise inherit from main logger
-  if (categoryLevels[category]) {
-    categoryLogger.level = categoryLevels[category];
-  } else {
-    categoryLogger.level = logger.level;
-  }
-
-  categoryLoggers[category] = categoryLogger;
-  return categoryLogger;
+  const level = categoryLevels[category] || globalLevel;
+  const logger = createSimpleLogger(category, level);
+  categoryLoggers[category] = logger;
+  return logger;
 }
 
-// Function to get current category log level
-export function getCategoryLogLevel(category: string): string {
-  return categoryLevels[category] || logger.level;
+export function getCategoryLogLevel(category: string): LogLevel {
+  return categoryLevels[category] || globalLevel;
 }
+
+export function shouldLogForCategory(messageLevel: LogLevel, category: string): boolean {
+  return shouldLog(messageLevel, getCategoryLogLevel(category));
+}
+
+// Default logger instance
+export const logger = createSimpleLogger();
 
 export default logger;
-export { logger };

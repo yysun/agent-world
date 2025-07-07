@@ -1,22 +1,19 @@
 /**
- * Core Module Exports - Public API for both Node.js and Browser
+ * Core Module - Unified Public API
  * 
- * Exports:
- * - World management functions (Node.js: full implementation, Browser: no-op warnings)
- * - Agent management functions (Node.js: full implementation, Browser: no-op warnings)
- * - Message management functions for high-level broadcasting
- * - Type definitions and LLM provider enumeration (both environments)
- * - Utility functions (both environments)
- * - Subscription layer for world lifecycle management
- * - Package version metadata
+ * Features:
+ * - Cross-platform world/agent/message management (Node.js: full, Browser: types only)
+ * - Event-driven messaging with subscription support
+ * - Category-based logging system
+ * - Utility functions and type definitions
  * 
- * Architecture: Unified manager module with conditional compilation.
- * Browser gets types and structure, Node.js gets full storage functionality.
+ * Architecture: Conditional compilation for environment-specific functionality.
+ * Version: 3.0.0
  */
 
-// Unified management functions - conditionally compiled
+// Management functions
 export {
-  // World management
+  // World operations
   createWorld,
   getWorld,
   getFullWorld,
@@ -24,8 +21,7 @@ export {
   deleteWorld,
   listWorlds,
   getWorldConfig,
-
-  // Agent management
+  // Agent operations
   createAgent,
   getAgent,
   updateAgent,
@@ -38,14 +34,13 @@ export {
   createAgentsBatch,
   registerAgentRuntime,
   getAgentConfig,
-
-  // Message management
+  // Message operations
   broadcastMessage,
   sendDirectMessage,
   getWorldMessages
 } from './managers';
 
-// Event functions for direct access
+// Event system
 export {
   publishMessage,
   subscribeToMessages,
@@ -56,7 +51,7 @@ export {
   shouldAgentRespond
 } from './events';
 
-// Types and enums (safe for both Node.js and browser)
+// Core types and utilities
 export type {
   World,
   CreateWorldParams,
@@ -67,22 +62,17 @@ export type {
   UpdateAgentParams,
   AgentInfo
 } from './types';
-
-// Manager types
 export type { WorldInfo } from './managers';
+export type { WorldData } from './world-storage';
+export type { LoggerConfig, LogLevel } from './logger';
 
 export { LLMProvider } from './types';
 
-// Logging (safe for both Node.js and browser)
-export { logger, setLogLevel, setCategoryLogLevel, createCategoryLogger, getCategoryLogLevel } from './logger';
-
-// Utility functions (safe for both Node.js and browser)
+// Logging and utilities
+export { logger, createCategoryLogger, getCategoryLogLevel, initializeLogger } from './logger';
 export { generateId, toKebabCase } from './utils';
 
+// Subscription system
 export * from './subscription.js';
 
-// Storage access (for advanced use cases)  
-export type { WorldData } from './world-storage';
-
-// Package metadata
 export const VERSION = '3.0.0';

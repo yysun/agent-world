@@ -50,7 +50,10 @@
  */
 
 // Import logger and initialize function
-import { logger, initializeLogger } from './logger.js';
+import { createCategoryLogger, initializeLogger } from './logger.js';
+
+// Create core category logger for managers
+const logger = createCategoryLogger('core');
 
 // Type-only imports
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, WorldMessageEvent } from './types';
@@ -85,8 +88,8 @@ let archiveAgentMemory: any;
 
 // Initialize dynamic imports (consolidated from all managers)
 async function initializeModules() {
-  // Initialize logger first
-  await initializeLogger();
+  // Initialize logger first (now synchronous)
+  initializeLogger();
 
   if (isNodeEnvironment()) {
     // Node.js environment - use dynamic imports for storage functions

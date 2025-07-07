@@ -74,7 +74,10 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types';
 import { publishSSE } from './events';
 import { generateId } from './utils';
-import { logger } from './logger';
+import { createCategoryLogger } from './logger';
+
+// Create LLM category logger
+const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config';
 
 /**

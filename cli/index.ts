@@ -1,12 +1,5 @@
 #!/usr/bin/env node
 
-// Configure logger level BEFORE any imports to prevent core modules from using debug level
-// This must be the very first thing that happens
-if (!process.env.CLI_LOG_LEVEL_OVERRIDE) {
-  process.env.LOG_LEVEL = 'error';
-  process.env.CLI_LOG_LEVEL_OVERRIDE = 'true';
-}
-
 /**
  * Agent World CLI Entry Point - Dual-Mode Console Interface
  * 
@@ -41,7 +34,8 @@ if (!process.env.CLI_LOG_LEVEL_OVERRIDE) {
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, setLogLevel, setCategoryLogLevel, LLMProvider } from '../core/index.js';
+import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, LLMProvider, initializeLogger } from '../core/index.js';
+import type { LoggerConfig, LogLevel } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
@@ -51,15 +45,19 @@ import {
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
-// Create CLI category logger
-const logger = createCategoryLogger('cli');
+// Initialize logger system with default configuration: all categories at 'error' level
+initializeLogger({
+  globalLevel: 'error',
+  categoryLevels: {
+    cli: 'error',
+    core: 'error',
+    events: 'error',
+    llm: 'error'
+  }
+});
 
-// Immediately configure logger to override any core defaults
-// This must happen before any core operations that might use the logger
-logger.level = 'error';
-if (process.env.LOG_LEVEL) {
-  process.env.LOG_LEVEL = 'error';
-}
+// Create CLI category logger after initialization
+const logger = createCategoryLogger('cli');
 
 // Timer management for prompt restoration
 interface GlobalState {
@@ -109,19 +107,24 @@ const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
 // Logger configuration
-function configureLogger(logLevel?: string): void {
+async function configureLogger(logLevel?: string): Promise<void> {
   // Use the centralized logger configuration from core
-  const level = (logLevel || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
+  const level = (logLevel || 'error') as LogLevel;
 
-  // Set the log level for all core modules through the centralized logger
-  setLogLevel(level);
+  // Reinitialize logger with new configuration
+  initializeLogger({
+    globalLevel: level,
+    categoryLevels: {
+      cli: 'error',      // Always keep CLI at error level
+      core: level,       // Core modules use global level
+      events: 'error',   // Keep events at error level (too verbose)
+      llm: level         // LLM module uses global level
+    }
+  });
 
-  // Set CLI-specific log level (can be different from global)
-  setCategoryLogLevel('cli', level);
-
-  // Only log the debug message if we're actually at debug level
+  // Only log the debug message if we're actually at debug level for global
   if (level === 'debug' || level === 'trace') {
-    logger.debug(`CLI log level set to: ${level}`);
+    logger.debug(`Global log level set to: ${level}, CLI log level: error`);
   }
 }
 
@@ -717,18 +720,8 @@ async function main(): Promise<void> {
 
   const options = program.opts<CLIOptions>();
 
-  // Configure logger - override the early environment setting if user specified a level
-  if (options.logLevel && options.logLevel !== 'error') {
-    // User explicitly requested a different log level
-    process.env.LOG_LEVEL = options.logLevel;
-    setCategoryLogLevel('cli', options.logLevel as 'trace' | 'debug' | 'info' | 'warn' | 'error');
-    if (options.logLevel === 'debug' || options.logLevel === 'trace') {
-      logger.debug(`CLI log level set to: ${options.logLevel}`);
-    }
-  } else {
-    // Ensure we stick with error level
-    configureLogger(options.logLevel);
-  }
+  // Configure logger - set global level first, then CLI-specific level
+  await configureLogger(options.logLevel);
 
   const args = program.args;
   const messageFromArgs = args.length > 0 ? args.join(' ') : null;
