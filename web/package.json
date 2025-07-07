@@ -1,0 +1,18 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "description": "* Use _npm dev_ to start the dev server * Use _npm test_ to run unit tests * Use _npm run build_ to build for production",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite dev --port 8080",
+    "build": "vite build --outDir public"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "apprun": "^3.35.0",
+    "vite": "^6.3.5"
+  }
+}
