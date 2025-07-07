@@ -413,32 +413,36 @@ body {
 }
 
 .add-agent-btn {
-  background: none;
-  border: 1px solid var(--border-primary);
+  background: rgba(59, 130, 246, 0.1);
+  border: 2px solid rgba(59, 130, 246, 0.5);
   border-radius: 50%;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--text-tertiary);
+  color: rgba(59, 130, 246, 0.9);
   transition: all 0.3s ease;
-  opacity: 0.7;
+  opacity: 1;
   margin-left: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+  min-width: 26px;
 }
 
 .add-agent-btn:hover {
-  background-color: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: var(--bg-primary);
+  background-color: rgba(59, 130, 246, 0.8);
+  border-color: rgba(59, 130, 246, 0.8);
+  color: white;
   opacity: 1;
   transform: scale(1.1);
 }
 
 .world-card.active .add-agent-btn {
+  background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .world-card.active .add-agent-btn:hover {
@@ -2118,4 +2122,32 @@ body {
 .world-chip:hover:not(.active) .world-chip-count {
   background-color: var(--accent-primary);
   color: var(--bg-primary);
+}
+
+.world-chip-add-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.9);
+  transition: all 0.3s ease;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+  min-width: 22px;
+}
+
+.world-chip-add-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: white;
+  transform: scale(1.1);
+}
+
+.world-chip:not(.active) .world-chip-add-btn {
+  display: none;
 }

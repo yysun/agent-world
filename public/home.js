@@ -155,6 +155,17 @@ const view = (state) => {
             >
               ${world.name}
               <span class="world-chip-count">${world.name === state.worldName ? (state.agents?.length || 0) : (world.agentCount || 0)}</span>
+              ${world.name === state.worldName ? html`
+                <button 
+                  class="world-chip-add-btn" 
+                  title="Add agent to this world"
+                  @click=${run(openAgentModal)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M12 5v14M5 12h14"/>
+                  </svg>
+                </button>
+              ` : ''}
             </button>
           `)}
         </div>
