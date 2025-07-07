@@ -216,7 +216,6 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
     let timeoutId: NodeJS.Timeout | null = null;
 
     const pipelineClient: ClientConnection = {
-      send: (data: string) => { },
       isOpen: true,
       onWorldEvent: (eventType: string, eventData: any) => {
         if (eventData.content && eventData.content.includes('Success message sent')) return;
@@ -352,7 +351,6 @@ async function handleSubscribe(
   rl?: readline.Interface
 ): Promise<WorldState | null> {
   const cliClient: ClientConnection = {
-    send: (data: string) => { },
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
       handleWorldEvent(eventType, eventData, streaming, globalState, rl);

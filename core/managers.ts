@@ -35,8 +35,6 @@
  * - registerAgentRuntime: Register agent in world runtime without persistence
  *
  * Message Functions:
- * - broadcastMessage: Send message to all agents in world
- * - sendDirectMessage: Send message to specific agent
  * - getWorldMessages: Get message history (placeholder)
  *
  * Implementation:
@@ -56,16 +54,13 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, WorldMessageEvent } from './types';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage } from './types';
 import type { WorldData } from './world-storage';
 import { toKebabCase } from './utils';
 
 // Dynamic imports for browser/Node.js compatibility
 import { EventEmitter } from 'events';
 import { isNodeEnvironment } from './utils.js';
-
-// Import event functions directly since they work in both environments
-import { subscribeAgentToMessages, publishMessage } from './events.js';
 
 // Dynamic function assignments for all storage operations
 let saveWorldToDisk: any;
@@ -294,12 +289,10 @@ export async function getFullWorld(rootPath: string, worldId: string): Promise<W
   // Create runtime World with fresh EventEmitter and methods
   const world = worldDataToWorld(worldData, rootPath);
 
-  // Load agents and subscribe them to messages
+  // Load agents into world runtime (subscription handled by startWorld)
   const agents = await loadAllAgentsFromDisk(rootPath, worldId);
   for (const agent of agents) {
     world.agents.set(agent.id, agent);
-    // Automatically subscribe agent to world messages
-    subscribeAgentToMessages(world, agent);
   }
 
   return world;
@@ -1057,53 +1050,4 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
 
   const { memory, ...config } = agent;
   return config;
-}
-
-// ========================
-// MESSAGE MANAGEMENT
-// ========================
-
-/**
- * Broadcast message to all agents in a world
- */
-export async function broadcastMessage(rootPath: string, worldId: string, message: string, sender?: string): Promise<void> {
-  const world = await getFullWorld(rootPath, worldId);
-  if (!world) {
-    throw new Error(`World ${worldId} not found`);
-  }
-
-  publishMessage(world, message, sender || 'HUMAN');
-}
-
-/**
- * Send direct message to specific agent
- */
-export async function sendDirectMessage(
-  rootPath: string,
-  worldId: string,
-  targetAgentId: string,
-  message: string,
-  sender?: string
-): Promise<void> {
-  const world = await getFullWorld(rootPath, worldId);
-  if (!world) {
-    throw new Error(`World ${worldId} not found`);
-  }
-
-  const targetAgent = world.agents.get(targetAgentId);
-  if (!targetAgent) {
-    throw new Error(`Agent ${targetAgentId} not found in world ${worldId}`);
-  }
-
-  // Publish with target information for filtering
-  publishMessage(world, `@${targetAgentId} ${message}`, sender || 'HUMAN');
-}
-
-/**
- * Get world message history (placeholder for future implementation)
- */
-export async function getWorldMessages(worldId: string): Promise<WorldMessageEvent[]> {
-  // Implementation depends on if you want to track message history
-  // Could store in World object or separate storage
-  return [];
 }

@@ -64,18 +64,13 @@ import { z } from 'zod';
 import {
   World,
   LLMProvider,
-  sendSuccess,
-  sendError,
-  sendCommandResult,
   ClientConnection,
   subscribeWorld,
   getWorld,
-  generateRequestId,
   listWorlds,
   createWorld,
   updateWorld,
   createCategoryLogger,
-  setLogLevel,
   toKebabCase
 } from '../core/index.js';
 
@@ -83,6 +78,36 @@ const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
 // Create WebSocket category logger
 const logger = createCategoryLogger('ws');
+
+// WebSocket client interface with send capability
+interface WebSocketClient extends ClientConnection {
+  send: (data: string) => void;
+}
+
+// Response helper functions for WebSocket
+function sendSuccess(client: WebSocketClient, message: string, data?: any): void {
+  const response = {
+    type: 'success',
+    message,
+    data,
+    timestamp: new Date().toISOString()
+  };
+  client.send(JSON.stringify(response));
+}
+
+function sendError(client: WebSocketClient, error: string, details?: any): void {
+  const response = {
+    type: 'error',
+    error,
+    details,
+    timestamp: new Date().toISOString()
+  };
+  client.send(JSON.stringify(response));
+}
+
+function sendCommandResult(client: WebSocketClient, commandResult: any): void {
+  client.send(JSON.stringify(commandResult));
+}
 
 // Response interfaces for WebSocket compatibility
 export interface SimpleCommandResponse {
@@ -92,6 +117,11 @@ export interface SimpleCommandResponse {
   error?: string;
   type?: string; // Add type field for command tracking
   requestId?: string; // Add requestId for client correlation
+}
+
+// Helper function to generate request IDs
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 // Command processing function that calls core directly
@@ -320,8 +350,8 @@ const FullMessageSchema = z.object({
   })
 });
 
-// Adapter to make WebSocket compatible with ClientConnection interface
-function createClientConnection(ws: WorldSocket): ClientConnection {
+// Adapter to make WebSocket compatible with WebSocketClient interface
+function createClientConnection(ws: WorldSocket): WebSocketClient {
   return {
     send: (data: string) => {
       logger.debug({ data }, '[WS OUT]');
@@ -370,7 +400,7 @@ function createClientConnection(ws: WorldSocket): ClientConnection {
 }
 
 // Helper function to send command response via WebSocket
-function sendCommandResponse(client: ClientConnection, response: SimpleCommandResponse, requestId?: string): void {
+function sendCommandResponse(client: WebSocketClient, response: SimpleCommandResponse, requestId?: string): void {
   // Ensure response includes requestId for client correlation
   const responseWithId = {
     ...response,

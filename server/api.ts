@@ -599,10 +599,10 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     const handleStreamingComplete = (): void => {
       // Send completion event
-      res.write(`data: ${JSON.stringify({
+      sendSSE(JSON.stringify({
         type: 'complete',
         message: 'Operation completed'
-      })}\n\n`);
+      }));
       res.end();
     };
 
@@ -619,14 +619,14 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
           streaming.messageId = eventData.messageId;
 
           // Send start event
-          res.write(`data: ${JSON.stringify({
+          sendSSE(JSON.stringify({
             type: 'sse',
             data: {
               type: 'start',
               sender: streaming.sender,
               messageId: streaming.messageId
             }
-          })}\n\n`);
+          }));
 
           if (streaming.stopWait) {
             streaming.stopWait();
@@ -637,7 +637,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
           streaming.content += eventData.content;
 
           // Send chunk event
-          res.write(`data: ${JSON.stringify({
+          sendSSE(JSON.stringify({
             type: 'sse',
             data: {
               type: 'chunk',
@@ -645,7 +645,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
               sender: streaming.sender,
               messageId: streaming.messageId
             }
-          })}\n\n`);
+          }));
 
           // Reset stall timer with each chunk (clear previous and set new)
           if (streaming.wait) {
@@ -661,7 +661,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
         streaming.messageId === eventData.messageId) {
 
         // Send end event
-        res.write(`data: ${JSON.stringify({
+        sendSSE(JSON.stringify({
           type: 'sse',
           data: {
             type: 'end',
@@ -669,7 +669,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
             messageId: streaming.messageId,
             content: streaming.content
           }
-        })}\n\n`);
+        }));
 
         resetStreamingState();
 
@@ -686,7 +686,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
         streaming.messageId === eventData.messageId) {
 
         // Send error event
-        res.write(`data: ${JSON.stringify({
+        sendSSE(JSON.stringify({
           type: 'sse',
           data: {
             type: 'error',
@@ -694,7 +694,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
             sender: streaming.sender,
             messageId: streaming.messageId
           }
-        })}\n\n`);
+        }));
 
         resetStreamingState();
 
@@ -708,12 +708,13 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       return false;
     };
 
-    // Create client connection
+    // Helper function to send SSE data
+    const sendSSE = (data: string) => {
+      res.write(`data: ${data}\n\n`);
+    };
+
+    // Create client connection using only onWorldEvent
     const client: ClientConnection = {
-      send: (data: string) => {
-        // Send data via SSE
-        res.write(`data: ${data}\n\n`);
-      },
       isOpen: true,
       onWorldEvent: (eventType: string, eventData: any) => {
         // Handle streaming events first
@@ -733,25 +734,25 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
         // Handle system messages
         if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-          res.write(`data: ${JSON.stringify({
+          sendSSE(JSON.stringify({
             type: eventType,
             data: {
               message: eventData.message,
               sender: 'system'
             }
-          })}\n\n`);
+          }));
         }
 
         // Handle regular messages
         if (eventType === 'message' && eventData.content) {
-          res.write(`data: ${JSON.stringify({
+          sendSSE(JSON.stringify({
             type: 'message',
             data: {
               content: eventData.content,
               sender: eventData.sender || 'agent',
               timestamp: eventData.timestamp
             }
-          })}\n\n`);
+          }));
 
           // Setup completion timer for non-streaming messages (clear previous and set new)
           if (streaming.wait) {
@@ -761,10 +762,10 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       },
       onError: (error: string) => {
         logger.error(`World error: ${error}`);
-        res.write(`data: ${JSON.stringify({
+        sendSSE(JSON.stringify({
           type: 'error',
           message: error
-        })}\n\n`);
+        }));
         res.end();
       }
     };
@@ -774,31 +775,31 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     // World existence already checked above, so subscription should not be null
     if (!subscription) {
       logger.error('Unexpected: subscription is null after world existence check');
-      res.write(`data: ${JSON.stringify({
+      sendSSE(JSON.stringify({
         type: 'error',
         message: 'Failed to subscribe to world'
-      })}\n\n`);
+      }));
       res.end();
       return;
     }
 
     // Send initial connection event
-    res.write(`data: ${JSON.stringify({
+    sendSSE(JSON.stringify({
       type: 'connected',
       payload: { worldName }
-    })}\n\n`);
+    }));
 
     // Send message to world
     try {
       publishMessage(subscription.world, message, sender);
 
       // Send success response
-      res.write(`data: ${JSON.stringify({
+      sendSSE(JSON.stringify({
         type: 'response',
         success: true,
         message: 'Message sent to world',
         data: { sender }
-      })}\n\n`);
+      }));
 
       // Set initial wait timer to allow for LLM response
       if (streaming.wait) {
@@ -806,11 +807,11 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       }
 
     } catch (error) {
-      res.write(`data: ${JSON.stringify({
+      sendSSE(JSON.stringify({
         type: 'error',
         message: 'Failed to send message',
         data: { error: error instanceof Error ? error.message : String(error) }
-      })}\n\n`);
+      }));
       res.end();
     }
 

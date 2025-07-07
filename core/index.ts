@@ -35,9 +35,7 @@ export {
   registerAgentRuntime,
   getAgentConfig,
   // Message operations
-  broadcastMessage,
-  sendDirectMessage,
-  getWorldMessages
+  // Note: Message operations moved to events.js (publishMessage, etc.)
 } from './managers';
 
 // Event system

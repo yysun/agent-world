@@ -33,7 +33,6 @@ async function runTests() {
 
   // Create a simple client for testing
   const testClient: ClientConnection = {
-    send: (data: string) => { },
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => { },
     onError: (error: string) => console.error('World error:', error)
