@@ -4,8 +4,8 @@
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "agent-world": "./cli/index.ts",
-    "agent-world-server": "./server/index.ts"
+    "agent-world": "npx tsx ./cli/index.ts",
+    "agent-world-server": "npx tsx ./server/index.ts"
   },
   "scripts": {
     "start": "npm run cli",

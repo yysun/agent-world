@@ -1,52 +1,18 @@
 /**
- * Agent Modal Component - System Prompt Loading Fix
- * 
- * Core Fix:
- * - Added getAgent WebSocket command to core/subscription.ts for fetching full agent details
- * - Added getAgent command parsing to server/ws.ts for WebSocket protocol support
- * - Updated openAgentModal to fetch complete agent data including systemPrompt when editing
- * - Replaced agent list lookup with direct agent API call to ensure system prompt is loaded
- * 
- * Implementation:
- * - openAgentModal now calls wsApi.getAgent() for existing agents to fetch full details
- * - Added proper async/await handling with error fallback to existing agent data
- * - Maintains backward compatibility while ensuring system prompts are always loaded
- * - Debug logging added to trace agent data flow and system prompt retrieval
- * 
- * Changes:
- * - Core: Added 'getAgent' case to processWSCommand function
- * - Server: Added 'getagent' command parsing in parseCommandToRequest
- * - Frontend: Added dedicated getAgent API function with full agent data retrieval
- * - Modal: Updated openAgentModal to use getAgent API for editing existing agents
- */
-
-/**
  * Agent Modal Component
+ * 
  * Features:
- * - Modal dialog for creating/editing agents
- * - Agent name input with validation
- * - System prompt textarea for agent configuration with full agent data loading
- * - Form validation and submission handling
- * - Responsive design with proper modal overlay
+ * - Modal dialog for creating/editing agents with system prompt configuration
+ * - Responsive design with proper modal overlay and form validation
+ * - Full agent data loading via getAgent API for editing existing agents
+ * - Multiple property fallbacks for system prompt (systemPrompt, prompt, system_prompt, config.systemPrompt)
  * - Clear memory functionality for existing agents
- *
+ * 
  * Implementation:
- * - Uses template literals with event bindings
- * - Handles both create and edit modes
- * - Prevents modal close on content click
- * - Auto-saves agent data on input changes
- * - Debug logging for agent object structure investigation
- * - Multiple property name fallbacks for system prompt (systemPrompt, prompt, system_prompt, config.systemPrompt)
+ * - Uses template literals with event bindings for create/edit modes
+ * - Async agent data fetching with error handling and fallback
  * - Proper system prompt saving via updateAgent API with prompt parameter
- * - Full agent data fetching via getAgent API when editing existing agents
- *
- * Recent changes:
- * - Added debug logging to investigate agent object structure
- * - Implemented fallback property access for system prompt display
- * - Fixed save logic to properly update system prompts
- * - Added system prompt updates for both new and existing agents
- * - Fixed system prompt loading by fetching full agent details via getAgent API when editing
- * - Added proper async handling for agent data loading with error fallback
+ * - Debug logging for agent object structure investigation
  */
 
 import * as api from '../api.js';
@@ -54,9 +20,8 @@ import * as api from '../api.js';
 const { html, run } = window["apprun"];
 
 export const AgentModal = (agent, close) => {
-  // Debug: Log agent object structure to understand available properties
+  // Debug: Log agent object structure and extract system prompt
   console.log('🔍 Agent Modal Debug - Agent object:', agent);
-  console.log('🔍 Agent properties:', Object.keys(agent || {}));
 
   // Try different possible property names for system prompt
   const systemPrompt = agent?.systemPrompt || agent?.prompt || agent?.system_prompt || agent?.config?.systemPrompt || '';
@@ -118,7 +83,7 @@ export const AgentModal = (agent, close) => {
   `;
 };
 
-export const openAgentModal = (state, agent = null) => {
+export const openAgentModal = async (state, agent = null) => {
   if (!agent) {
     // Creating new agent
     return {
@@ -128,67 +93,52 @@ export const openAgentModal = (state, agent = null) => {
     };
   }
 
-  // Fetch full agent details asynchronously
-  (async () => {
-    try {
-      const fullAgent = await api.getAgent(state.worldName, agent.name);
-      console.log('🔍 Full agent data retrieved:', fullAgent);
-
-      // Update the state with the loaded agent data
-      const app = window["app"];
-      app.run('updateEditingAgent', fullAgent);
-    } catch (error) {
-      console.error('Error fetching full agent details:', error);
-      // Fallback to the existing agent data if fetch fails
-      const app = window["app"];
-      app.run('updateEditingAgent', agent, `Failed to load agent details: ${error.message}`);
-    }
-  })();
-
-  return {
-    ...state,
-    editingAgent: agent,
-    showAgentModel: true
-  };
-};
-
-export const updateEditingAgent = (state, agentData, error = null) => {
-  console.log('🔄 Updating editing agent with data:', agentData);
-  return {
-    ...state,
-    editingAgent: agentData,
-    error: error ? error : state.error
-  };
+  // Fetch full agent details for editing
+  try {
+    const fullAgent = await api.getAgent(state.worldName, agent.name);
+    console.log('🔍 Full agent data retrieved:', fullAgent);
+    return {
+      ...state,
+      editingAgent: fullAgent,
+      showAgentModel: true
+    };
+  } catch (error) {
+    console.error('Error fetching full agent details:', error);
+    // Fallback to provided agent data
+    return {
+      ...state,
+      editingAgent: agent,
+      showAgentModel: true
+    };
+  }
 };
 
 export const closeAgentModal = async (state, save) => {
   try {
     if (save && state.editingAgent) {
+      const systemPrompt = document.getElementById('agent-system-prompt')?.value || '';
+
       if (state.editingAgent.status === 'New') {
-        // For new agents, create with initial prompt if provided
+        // Create new agent
         await api.createAgent(state.worldName, {
           name: state.editingAgent.name,
           description: state.editingAgent.description || 'Agent created via modal'
         });
 
-        // If there's a system prompt, update it after creation
-        const systemPrompt = state.editingAgent.systemPrompt || state.editingAgent.prompt || '';
+        // Update system prompt if provided
         if (systemPrompt) {
           await api.updateAgent(state.worldName, state.editingAgent.name, {
             prompt: systemPrompt
           });
         }
       } else {
-        // For existing agents, update both config and system prompt
+        // Update existing agent
         const updateData = {};
 
-        // Update config if it exists
         if (state.editingAgent.config) {
           updateData.config = state.editingAgent.config;
         }
 
-        // Update system prompt if it has been modified
-        const systemPrompt = state.editingAgent.systemPrompt || state.editingAgent.prompt || '';
         if (systemPrompt) {
           updateData.prompt = systemPrompt;
         }

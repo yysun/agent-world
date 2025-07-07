@@ -26,7 +26,7 @@ import {
   handleMessage, handleConnectionStatus, handleError, handleComplete,
   incrementAgentMemorySize
 } from './sse-client.js';
-import { AgentModal, openAgentModal, closeAgentModal, updateEditingAgent } from './components/agent-modal.js';
+import { AgentModal, openAgentModal, closeAgentModal } from './components/agent-modal.js';
 import { AgentCard } from './components/agent-card.js';
 import Message from './components/message.js';
 
@@ -236,7 +236,6 @@ const update = {
   incrementAgentMemorySize,
   openAgentModal,
   closeAgentModal,
-  updateEditingAgent,
   displayAgentMemory,
   clearAgentMemory,
   clearAgentMemoryFromModal,
