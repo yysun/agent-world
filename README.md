@@ -236,6 +236,22 @@ export GOOGLE_API_KEY="your-key-here"
 export OLLAMA_BASE_URL="http://localhost:11434"
 ```
 
+### Environment Support
+
+**Node.js Environment:**
+- Full functionality including file system operations
+- Complete world and agent persistence
+- CLI and server modes
+- All LLM providers supported
+
+**Browser Environment:**
+- Core agent communication and logic
+- Memory-only operation (no file system persistence)
+- Real-time agent interactions via WebSocket
+- Limited storage operations (NoOp implementations)
+
+**Note:** The core library is designed to work in both environments with runtime detection. Storage operations gracefully become NoOp in browsers while maintaining full API compatibility.
+
 ### Commands
 ```bash
 # Start interactive CLI

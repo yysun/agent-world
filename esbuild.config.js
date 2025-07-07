@@ -10,7 +10,8 @@
  * Browser Build Notes:
  * - Excludes all Node.js built-in modules (fs, path, os, crypto, etc.)
  * - Includes EventEmitter polyfill via 'events' package alias
- * - Uses conditional compilation (__IS_BROWSER__) for environment-specific code
+ * - Uses runtime environment detection instead of build-time constants
+ * - NoOp implementations handle browser compatibility gracefully
  */
 
 import { build } from 'esbuild';
@@ -34,8 +35,7 @@ const configurations = [
       'path'
     ],
     define: {
-      'process.env.NODE_ENV': '"production"',
-      '__IS_BROWSER__': 'true'
+      'process.env.NODE_ENV': '"production"'
     }
   },
 
@@ -49,10 +49,7 @@ const configurations = [
     outfile: 'dist/index.js',
     external: ['tsx'],
     minify: false,
-    sourcemap: true,
-    define: {
-      '__IS_BROWSER__': 'false'
-    }
+    sourcemap: true
   }
 ];
 

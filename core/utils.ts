@@ -39,6 +39,14 @@ export function generateId(): string {
 }
 
 /**
+ * Simple runtime environment detection
+ * Returns true for Node.js, false for browser
+ */
+export function isNodeEnvironment(): boolean {
+  return typeof window === 'undefined' && typeof global !== 'undefined';
+}
+
+/**
  * Convert a string to kebab-case
  * @param str - The string to convert
  * @returns The kebab-case version of the string

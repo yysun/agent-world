@@ -49,8 +49,8 @@
  * - Complete isolation from other internal modules
  */
 
-// Import logger
-import { logger } from './logger';
+// Import logger and initialize function
+import { logger, initializeLogger } from './logger.js';
 
 // Type-only imports
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, WorldMessageEvent } from './types';
@@ -59,9 +59,10 @@ import { toKebabCase } from './utils';
 
 // Dynamic imports for browser/Node.js compatibility
 import { EventEmitter } from 'events';
+import { isNodeEnvironment } from './utils.js';
 
 // Import event functions directly since they work in both environments
-import { subscribeAgentToMessages, publishMessage } from './events';
+import { subscribeAgentToMessages, publishMessage } from './events.js';
 
 // Dynamic function assignments for all storage operations
 let saveWorldToDisk: any;
@@ -84,10 +85,13 @@ let archiveAgentMemory: any;
 
 // Initialize dynamic imports (consolidated from all managers)
 async function initializeModules() {
-  if (typeof __IS_BROWSER__ === 'undefined' || !__IS_BROWSER__) {
+  // Initialize logger first
+  await initializeLogger();
+
+  if (isNodeEnvironment()) {
     // Node.js environment - use dynamic imports for storage functions
-    const worldStorage = await import('./world-storage');
-    const agentStorage = await import('./agent-storage');
+    const worldStorage = await import('./world-storage.js');
+    const agentStorage = await import('./agent-storage.js');
 
     // World storage functions
     saveWorldToDisk = worldStorage.saveWorldToDisk;
@@ -110,33 +114,90 @@ async function initializeModules() {
     repairAgentData = agentStorage.repairAgentData;
     archiveAgentMemory = agentStorage.archiveAgentMemory;
   } else {
-    // Browser environment - provide no-op implementations for storage functions only
-    logger.warn('Manager functions disabled in browser environment');
+    // Browser environment - provide NoOp implementations with debug logging
+    logger.warn('Storage operations disabled in browser environment');
 
-    const browserNoOp = () => {
-      throw new Error('This function is not available in browser environment');
+    // World storage NoOps
+    saveWorldToDisk = async (rootPath: string, worldData: any) => {
+      logger.debug('NoOp: saveWorldToDisk called in browser', { worldId: worldData?.id });
     };
 
-    // World storage no-ops
-    saveWorldToDisk = browserNoOp;
-    loadWorldFromDisk = browserNoOp;
-    deleteWorldFromDisk = browserNoOp;
-    loadAllWorldsFromDisk = browserNoOp;
-    worldExistsOnDisk = browserNoOp;
+    loadWorldFromDisk = async (rootPath: string, worldId: string) => {
+      logger.debug('NoOp: loadWorldFromDisk called in browser', { worldId });
+      return null;
+    };
 
-    // Agent storage no-ops
-    loadAllAgentsFromDisk = browserNoOp;
-    saveAgentConfigToDisk = browserNoOp;
-    saveAgentToDisk = browserNoOp;
-    saveAgentMemoryToDisk = browserNoOp;
-    loadAgentFromDisk = browserNoOp;
-    loadAgentFromDiskWithRetry = browserNoOp;
-    deleteAgentFromDisk = browserNoOp;
-    loadAllAgentsFromDiskBatch = browserNoOp;
-    agentExistsOnDisk = browserNoOp;
-    validateAgentIntegrity = browserNoOp;
-    repairAgentData = browserNoOp;
-    archiveAgentMemory = browserNoOp;
+    deleteWorldFromDisk = async (rootPath: string, worldId: string) => {
+      logger.debug('NoOp: deleteWorldFromDisk called in browser', { worldId });
+      return false;
+    };
+
+    loadAllWorldsFromDisk = async (rootPath: string) => {
+      logger.debug('NoOp: loadAllWorldsFromDisk called in browser');
+      return [];
+    };
+
+    worldExistsOnDisk = async (rootPath: string, worldId: string) => {
+      logger.debug('NoOp: worldExistsOnDisk called in browser', { worldId });
+      return false;
+    };
+
+    // Agent storage NoOps
+    loadAllAgentsFromDisk = async (rootPath: string, worldId: string) => {
+      logger.debug('NoOp: loadAllAgentsFromDisk called in browser', { worldId });
+      return [];
+    };
+
+    saveAgentConfigToDisk = async (rootPath: string, worldId: string, agent: any) => {
+      logger.debug('NoOp: saveAgentConfigToDisk called in browser', { worldId, agentId: agent?.id });
+    };
+
+    saveAgentToDisk = async (rootPath: string, worldId: string, agent: any) => {
+      logger.debug('NoOp: saveAgentToDisk called in browser', { worldId, agentId: agent?.id });
+    };
+
+    saveAgentMemoryToDisk = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+      logger.debug('NoOp: saveAgentMemoryToDisk called in browser', { worldId, agentId, memoryLength: memory?.length });
+    };
+
+    loadAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
+      logger.debug('NoOp: loadAgentFromDisk called in browser', { worldId, agentId });
+      return null;
+    };
+
+    loadAgentFromDiskWithRetry = async (rootPath: string, worldId: string, agentId: string, options?: any) => {
+      logger.debug('NoOp: loadAgentFromDiskWithRetry called in browser', { worldId, agentId });
+      return null;
+    };
+
+    deleteAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
+      logger.debug('NoOp: deleteAgentFromDisk called in browser', { worldId, agentId });
+      return false;
+    };
+
+    loadAllAgentsFromDiskBatch = async (rootPath: string, worldId: string, options?: any) => {
+      logger.debug('NoOp: loadAllAgentsFromDiskBatch called in browser', { worldId });
+      return { successful: [], failed: [] };
+    };
+
+    agentExistsOnDisk = async (rootPath: string, worldId: string, agentId: string) => {
+      logger.debug('NoOp: agentExistsOnDisk called in browser', { worldId, agentId });
+      return false;
+    };
+
+    validateAgentIntegrity = async (rootPath: string, worldId: string, agentId: string) => {
+      logger.debug('NoOp: validateAgentIntegrity called in browser', { worldId, agentId });
+      return true;
+    };
+
+    repairAgentData = async (rootPath: string, worldId: string, agentId: string) => {
+      logger.debug('NoOp: repairAgentData called in browser', { worldId, agentId });
+      return false;
+    };
+
+    archiveAgentMemory = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+      logger.debug('NoOp: archiveAgentMemory called in browser', { worldId, agentId, memoryLength: memory?.length });
+    };
   }
 }
 

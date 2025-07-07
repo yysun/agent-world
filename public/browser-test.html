@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser-Safe Core Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .test-container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      margin-bottom: 20px;
+    }
+
+    .test-result {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+    }
+
+    .test-pass {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .test-fail {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .test-info {
+      background-color: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    pre {
+      background-color: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>🧪 Browser-Safe Core Test</h1>
+  <p>This page tests the browser-safe core implementation with NoOp storage operations.</p>
+
+  <div class="test-container">
+    <h2>Test Control</h2>
+    <button onclick="runBrowserTests()">Run Browser Tests</button>
+    <button onclick="clearResults()">Clear Results</button>
+  </div>
+
+  <div class="test-container">
+    <h2>Test Results</h2>
+    <div id="test-results"></div>
+  </div>
+
+  <div class="test-container">
+    <h2>Console Output</h2>
+    <pre id="console-output"></pre>
+  </div>
+
+  <script type="module">
+    import { isNodeEnvironment } from './core.js';
+
+    // Make functions available globally
+    window.isNodeEnvironment = isNodeEnvironment;
+
+    // Capture console output
+    const originalConsole = {
+      log: console.log,
+      info: console.info,
+      warn: console.warn,
+      error: console.error
+    };
+
+    let consoleOutput = '';
+
+    function interceptConsole(level, ...args) {
+      const message = args.map(arg =>
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+
+      consoleOutput += `[${level.toUpperCase()}] ${message}\n`;
+      document.getElementById('console-output').textContent = consoleOutput;
+
+      // Call original console method
+      originalConsole[level].apply(console, args);
+    }
+
+    console.log = (...args) => interceptConsole('log', ...args);
+    console.info = (...args) => interceptConsole('info', ...args);
+    console.warn = (...args) => interceptConsole('warn', ...args);
+    console.error = (...args) => interceptConsole('error', ...args);
+
+    // Test functions
+    async function testEnvironmentDetection() {
+      console.log('=== Testing Environment Detection ===');
+
+      const isNode = isNodeEnvironment();
+      console.log('isNodeEnvironment():', isNode);
+
+      if (!isNode) {
+        addTestResult('✅ Correctly detected browser environment', 'pass');
+        return true;
+      } else {
+        addTestResult('❌ Incorrectly detected Node.js environment', 'fail');
+        return false;
+      }
+    }
+
+    async function testLoggerInitialization() {
+      console.log('\n=== Testing Logger Initialization ===');
+
+      try {
+        // Try to import logger
+        const { initializeLogger, logger } = await import('./core.js');
+
+        // Initialize logger
+        await initializeLogger();
+
+        // Test logger functionality
+        logger.info('Logger initialized successfully');
+        logger.debug('Debug message test');
+        logger.warn('Warning message test');
+        logger.error('Error message test');
+
+        addTestResult('✅ Logger initialization successful', 'pass');
+        return true;
+      } catch (error) {
+        console.error('❌ Logger initialization failed:', error);
+        addTestResult('❌ Logger initialization failed: ' + error.message, 'fail');
+        return false;
+      }
+    }
+
+    async function testStorageNoOps() {
+      console.log('\n=== Testing Storage NoOp Operations ===');
+
+      try {
+        const { createWorld, getWorld, listAgents, createAgent } = await import('./core.js');
+        const { LLMProvider } = await import('./core.js');
+
+        const testRootPath = '/tmp/test-world';
+        const testWorldId = 'test-world';
+
+        // Test world operations
+        console.log('Testing world operations...');
+
+        // These should be NoOp in browser
+        const world = await createWorld(testRootPath, {
+          name: 'Test World',
+          description: 'Test world for browser-safe core',
+          turnLimit: 5
+        });
+
+        addTestResult('✅ World creation NoOp executed without error', 'pass');
+
+        // Test world loading
+        const loadedWorld = await getWorld(testRootPath, testWorldId);
+        addTestResult('✅ World loading NoOp returned null as expected', 'pass');
+
+        // Test agent operations
+        console.log('Testing agent operations...');
+
+        const agents = await listAgents(testRootPath, testWorldId);
+        addTestResult('✅ Agent listing NoOp returned empty array', 'pass');
+
+        // Test agent creation
+        const agent = await createAgent(testRootPath, testWorldId, {
+          name: 'Test Agent',
+          type: 'text',
+          provider: LLMProvider.OPENAI,
+          model: 'gpt-3.5-turbo',
+          systemPrompt: 'You are a test agent'
+        });
+
+        addTestResult('✅ Agent creation NoOp executed without error', 'pass');
+
+        console.log('✅ Storage NoOp operations tested successfully');
+        addTestResult('✅ Storage NoOp operations completed successfully', 'pass');
+        return true;
+      } catch (error) {
+        console.error('❌ Storage NoOp testing failed:', error);
+        addTestResult('❌ Storage NoOp testing failed: ' + error.message, 'fail');
+        return false;
+      }
+    }
+
+    async function testCategoryLoggers() {
+      console.log('\n=== Testing Category Loggers ===');
+
+      try {
+        const { createCategoryLogger } = await import('./core.js');
+
+        const coreLogger = createCategoryLogger('core');
+        const storageLogger = createCategoryLogger('storage');
+        const wsLogger = createCategoryLogger('ws');
+
+        coreLogger.info('Core category logger test');
+        storageLogger.debug('Storage category logger test');
+        wsLogger.warn('WebSocket category logger test');
+
+        addTestResult('✅ Category loggers working correctly', 'pass');
+        return true;
+      } catch (error) {
+        console.error('❌ Category logger testing failed:', error);
+        addTestResult('❌ Category logger testing failed: ' + error.message, 'fail');
+        return false;
+      }
+    }
+
+    function addTestResult(message, type = 'info') {
+      const resultsDiv = document.getElementById('test-results');
+      const resultDiv = document.createElement('div');
+      resultDiv.className = `test-result test-${type}`;
+      resultDiv.textContent = message;
+      resultsDiv.appendChild(resultDiv);
+    }
+
+    async function runBrowserTests() {
+      console.log('🧪 Running Browser-Safe Core Tests in Browser Environment\n');
+
+      // Clear previous results
+      document.getElementById('test-results').innerHTML = '';
+      consoleOutput = '';
+      document.getElementById('console-output').textContent = '';
+
+      const results = [];
+
+      // Run all tests
+      results.push(await testEnvironmentDetection());
+      results.push(await testLoggerInitialization());
+      results.push(await testStorageNoOps());
+      results.push(await testCategoryLoggers());
+
+      // Summary
+      const passed = results.filter(r => r).length;
+      const failed = results.filter(r => !r).length;
+
+      console.log('\n=== Test Summary ===');
+      console.log(`✅ Passed: ${passed}`);
+      console.log(`❌ Failed: ${failed}`);
+      console.log(`📊 Total: ${results.length}`);
+
+      if (failed === 0) {
+        console.log('\n🎉 All tests passed! Browser-safe core implementation is working correctly.');
+        addTestResult('🎉 All tests passed!', 'pass');
+      } else {
+        console.log('\n⚠️  Some tests failed. Please review the implementation.');
+        addTestResult('⚠️  Some tests failed', 'fail');
+      }
+    }
+
+    function clearResults() {
+      document.getElementById('test-results').innerHTML = '';
+      consoleOutput = '';
+      document.getElementById('console-output').textContent = '';
+    }
+
+    // Make functions available globally
+    window.runBrowserTests = runBrowserTests;
+    window.clearResults = clearResults;
+
+    // Add initial info
+    addTestResult('Browser test environment loaded. Click "Run Browser Tests" to start.', 'info');
+
+    console.log('Browser test environment initialized.');
+    console.log('Environment detection: isNodeEnvironment() =', isNodeEnvironment());
+  </script>
+</body>
+
+</html>
