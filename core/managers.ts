@@ -853,8 +853,6 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     status: 'inactive',
     provider: params.provider,
     model: params.model,
-    apiKey: params.apiKey,
-    baseUrl: params.baseUrl,
     systemPrompt: params.systemPrompt,
     temperature: params.temperature,
     maxTokens: params.maxTokens,
@@ -914,15 +912,9 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
     status: updates.status || existingAgent.status,
     provider: updates.provider || existingAgent.provider,
     model: updates.model || existingAgent.model,
-    apiKey: updates.apiKey !== undefined ? updates.apiKey : existingAgent.apiKey,
-    baseUrl: updates.baseUrl !== undefined ? updates.baseUrl : existingAgent.baseUrl,
     systemPrompt: updates.systemPrompt !== undefined ? updates.systemPrompt : existingAgent.systemPrompt,
     temperature: updates.temperature !== undefined ? updates.temperature : existingAgent.temperature,
     maxTokens: updates.maxTokens !== undefined ? updates.maxTokens : existingAgent.maxTokens,
-    azureEndpoint: updates.azureEndpoint !== undefined ? updates.azureEndpoint : existingAgent.azureEndpoint,
-    azureApiVersion: updates.azureApiVersion !== undefined ? updates.azureApiVersion : existingAgent.azureApiVersion,
-    azureDeployment: updates.azureDeployment !== undefined ? updates.azureDeployment : existingAgent.azureDeployment,
-    ollamaBaseUrl: updates.ollamaBaseUrl !== undefined ? updates.ollamaBaseUrl : existingAgent.ollamaBaseUrl,
     lastActive: new Date()
   };
 

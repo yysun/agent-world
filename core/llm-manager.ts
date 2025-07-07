@@ -1,8 +1,8 @@
 /**
- * LLM Manager Module - LLM Integration with World-Specific EventEmitter SSE Events
+ * LLM Manager Module - Browser-Safe LLM Integration with Configuration Injection
  *
  * Features:
- * - LLM integration using AI SDK without existing event dependencies
+ * - Browser-safe LLM integration using AI SDK with configuration injection
  * - Streaming responses with SSE events via World.eventEmitter specifically
  * - Support for all major LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
  * - Agent activity tracking and token usage monitoring with automatic state persistence
@@ -10,11 +10,12 @@
  * - World-aware event publishing using world.eventEmitter for proper event isolation
  * - Conversation history support with message preparation and context management
  * - Global LLM call queue to ensure serialized execution (one LLM call at a time)
+ * - Configuration injection from external sources (CLI/server) for browser compatibility
  *
  * Core Functions:
  * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter (queued)
  * - generateAgentResponse: Non-streaming LLM calls with automatic state management (queued)
- * - loadLLMProvider: Provider loading logic supporting all major LLM services
+ * - loadLLMProvider: Provider loading logic using injected configuration
  * - getLLMQueueStatus: Monitor queue status for debugging and administration
  * - clearLLMQueue: Emergency queue clearing for administrative purposes
  *
@@ -37,24 +38,31 @@
  * - Proper error handling with promise rejection for failed calls
  * - Automatic queue processing with safety measures for edge cases
  *
+ * Browser Safety Implementation:
+ * - Zero process.env dependencies for browser compatibility
+ * - Configuration injection via llm-config module
+ * - All provider settings supplied externally by CLI/server components
+ * - Type-safe configuration interfaces prevent runtime errors
+ * - Clear error messages when configuration is missing
+ *
  * Implementation Details:
  * - Uses AI SDK for LLM integration with consistent interfaces across providers
  * - Publishes SSE events via world.eventEmitter.emit('sse', event) for proper isolation
  * - Updates agent activity metrics and LLM call counts automatically
- * - Zero dependencies on existing llm.ts or legacy event systems
- * - Complete provider support extraction with environment variable fallbacks
+ * - Zero dependencies on Node.js environment variables or legacy event systems
+ * - Complete provider support with externally injected configuration
  * - All events scoped to specific world instance preventing cross-world interference
- * - Full LLM provider support matching and exceeding legacy implementations
+ * - Full LLM provider support with configuration validation and error handling
  * - Timeout handling with configurable limits and proper error recovery
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
- * - Added global LLM call queue to serialize all LLM requests across agents and worlds
- * - Implemented queue safety measures including size limits and timeout handling
- * - Added queue monitoring and emergency clear functions for administration
- * - Enhanced error handling with proper promise rejection and logging
- * - Updated all LLM functions to use queued execution pattern
- * - Documented queue implementation details and safety features
+ * - Removed all process.env dependencies for browser compatibility
+ * - Added configuration injection using llm-config module
+ * - Updated loadLLMProvider to use injected configuration instead of environment variables
+ * - Enhanced error handling for missing provider configuration
+ * - Maintained all existing functionality while making module browser-safe
+ * - Updated comment block to reflect browser-safe implementation
  */
 
 import { generateText, streamText } from 'ai';
@@ -67,6 +75,7 @@ import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages,
 import { publishSSE } from './events';
 import { generateId } from './utils';
 import { logger } from './logger';
+import { getLLMProviderConfig } from './llm-config';
 
 /**
  * Global LLM call queue to ensure serialized execution
@@ -355,48 +364,62 @@ export function clearLLMQueue(): number {
 }
 
 /**
- * LLM provider loading (extracted from existing llm.ts)
+ * LLM provider loading with configuration injection (browser-safe)
  */
 function loadLLMProvider(agent: Agent): any {
   switch (agent.provider) {
-    case LLMProvider.OPENAI:
+    case LLMProvider.OPENAI: {
+      const config = getLLMProviderConfig(LLMProvider.OPENAI);
       return createOpenAI({
-        apiKey: agent.apiKey || process.env.OPENAI_API_KEY || ''
+        apiKey: config.apiKey
       })(agent.model);
+    }
 
-    case LLMProvider.ANTHROPIC:
+    case LLMProvider.ANTHROPIC: {
+      const config = getLLMProviderConfig(LLMProvider.ANTHROPIC);
       return createAnthropic({
-        apiKey: agent.apiKey || process.env.ANTHROPIC_API_KEY || ''
+        apiKey: config.apiKey
       })(agent.model);
+    }
 
-    case LLMProvider.AZURE:
+    case LLMProvider.AZURE: {
+      const config = getLLMProviderConfig(LLMProvider.AZURE);
       return createOpenAI({
-        apiKey: agent.apiKey || process.env.AZURE_OPENAI_API_KEY || '',
-        baseURL: `${agent.azureEndpoint}/openai/deployments/${agent.azureDeployment}`
+        apiKey: config.apiKey,
+        baseURL: `${config.endpoint}/openai/deployments/${config.deployment}`
       })(agent.model);
+    }
 
-    case LLMProvider.GOOGLE:
+    case LLMProvider.GOOGLE: {
+      const config = getLLMProviderConfig(LLMProvider.GOOGLE);
       return createGoogleGenerativeAI({
-        apiKey: agent.apiKey || process.env.GOOGLE_API_KEY || ''
+        apiKey: config.apiKey
       })(agent.model);
+    }
 
-    case LLMProvider.XAI:
+    case LLMProvider.XAI: {
+      const config = getLLMProviderConfig(LLMProvider.XAI);
       return createOpenAI({
-        apiKey: agent.apiKey || process.env.XAI_API_KEY || '',
+        apiKey: config.apiKey,
         baseURL: 'https://api.x.ai/v1'
       })(agent.model);
+    }
 
-    case LLMProvider.OPENAI_COMPATIBLE:
+    case LLMProvider.OPENAI_COMPATIBLE: {
+      const config = getLLMProviderConfig(LLMProvider.OPENAI_COMPATIBLE);
       return createOpenAICompatible({
         name: 'custom-provider',
-        apiKey: agent.apiKey || process.env.OPENAI_COMPATIBLE_API_KEY || '',
-        baseURL: agent.baseUrl || process.env.OPENAI_COMPATIBLE_BASE_URL || ''
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl
       })(agent.model);
+    }
 
-    case LLMProvider.OLLAMA:
+    case LLMProvider.OLLAMA: {
+      const config = getLLMProviderConfig(LLMProvider.OLLAMA);
       return createOllama({
-        baseURL: agent.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api'
+        baseURL: config.baseUrl
       })(agent.model);
+    }
 
     default:
       throw new Error(`Unsupported LLM provider: ${agent.provider}`);

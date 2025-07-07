@@ -5,6 +5,9 @@
  * - Express.js server with REST API endpoints and SSE c// Start server function for CLI integration
 export function startWebServer(port = PORT, host = HOST): Promise<Server> {
   return new Promise((resolve, reject) => {
+    // Configure LLM providers from environment variables at startup
+    configureLLMProvidersFromEnv();
+    
     serverLogger.debug('Starting web server', { port, host });
     
     const server = app.listen(port, host, () => {
@@ -48,13 +51,83 @@ if (!process.env.AGENT_WORLD_DATA_PATH) {
 }
 
 // Configure centralized logger from environment variable
-import { setLogLevel, createCategoryLogger } from '../core/index.js';
+import { setLogLevel, createCategoryLogger, LLMProvider } from '../core/index.js';
+import { configureLLMProvider } from '../core/llm-config.js';
 const logLevel = (process.env.LOG_LEVEL || 'error') as 'trace' | 'debug' | 'info' | 'warn' | 'error';
 setLogLevel(logLevel);
 
 // Create server logger for debugging
 const serverLogger = createCategoryLogger('server');
 serverLogger.debug('Server starting with log level', { logLevel });
+
+// LLM Provider configuration from environment variables
+function configureLLMProvidersFromEnv(): void {
+  // OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    configureLLMProvider(LLMProvider.OPENAI, {
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    serverLogger.debug('Configured OpenAI provider from environment');
+  }
+
+  // Anthropic
+  if (process.env.ANTHROPIC_API_KEY) {
+    configureLLMProvider(LLMProvider.ANTHROPIC, {
+      apiKey: process.env.ANTHROPIC_API_KEY
+    });
+    serverLogger.debug('Configured Anthropic provider from environment');
+  }
+
+  // Google
+  if (process.env.GOOGLE_API_KEY) {
+    configureLLMProvider(LLMProvider.GOOGLE, {
+      apiKey: process.env.GOOGLE_API_KEY
+    });
+    serverLogger.debug('Configured Google provider from environment');
+  }
+
+  // Azure
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_ENDPOINT && process.env.AZURE_DEPLOYMENT) {
+    configureLLMProvider(LLMProvider.AZURE, {
+      apiKey: process.env.AZURE_OPENAI_API_KEY,
+      endpoint: process.env.AZURE_ENDPOINT,
+      deployment: process.env.AZURE_DEPLOYMENT,
+      apiVersion: process.env.AZURE_API_VERSION || '2023-12-01-preview'
+    });
+    serverLogger.debug('Configured Azure provider from environment');
+  }
+
+  // XAI
+  if (process.env.XAI_API_KEY) {
+    configureLLMProvider(LLMProvider.XAI, {
+      apiKey: process.env.XAI_API_KEY
+    });
+    serverLogger.debug('Configured XAI provider from environment');
+  }
+
+  // OpenAI Compatible
+  if (process.env.OPENAI_COMPATIBLE_API_KEY && process.env.OPENAI_COMPATIBLE_BASE_URL) {
+    configureLLMProvider(LLMProvider.OPENAI_COMPATIBLE, {
+      apiKey: process.env.OPENAI_COMPATIBLE_API_KEY,
+      baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL
+    });
+    serverLogger.debug('Configured OpenAI-Compatible provider from environment');
+  }
+
+  // Ollama
+  if (process.env.OLLAMA_BASE_URL) {
+    configureLLMProvider(LLMProvider.OLLAMA, {
+      baseUrl: process.env.OLLAMA_BASE_URL
+    });
+    serverLogger.debug('Configured Ollama provider from environment');
+  } else {
+    // Configure Ollama with default URL if not specified
+    configureLLMProvider(LLMProvider.OLLAMA, {
+      baseUrl: 'http://localhost:11434/api'
+    });
+    serverLogger.debug('Configured Ollama provider with default URL');
+  }
+}
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -144,6 +217,10 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
 // For direct server execution
 if (import.meta.url === `file://${process.argv[1]}`) {
   serverLogger.debug('Direct server execution detected');
+
+  // Configure LLM providers from environment variables
+  configureLLMProvidersFromEnv();
+
   startWebServer()
     .then(() => {
       serverLogger.debug('Server started successfully');

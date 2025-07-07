@@ -41,7 +41,7 @@ if (!process.env.CLI_LOG_LEVEL_OVERRIDE) {
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, setLogLevel, setCategoryLogLevel } from '../core/index.js';
+import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, setLogLevel, setCategoryLogLevel, LLMProvider } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
@@ -49,6 +49,7 @@ import {
   handleWorldEventWithStreaming,
   isStreamingActive
 } from './stream.js';
+import { configureLLMProvider } from '../core/llm-config.js';
 
 // Create CLI category logger
 const logger = createCategoryLogger('cli');
@@ -121,6 +122,75 @@ function configureLogger(logLevel?: string): void {
   // Only log the debug message if we're actually at debug level
   if (level === 'debug' || level === 'trace') {
     logger.debug(`CLI log level set to: ${level}`);
+  }
+}
+
+// LLM Provider configuration from environment variables
+function configureLLMProvidersFromEnv(): void {
+  // OpenAI
+  if (process.env.OPENAI_API_KEY) {
+    configureLLMProvider(LLMProvider.OPENAI, {
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    logger.debug('Configured OpenAI provider from environment');
+  }
+
+  // Anthropic
+  if (process.env.ANTHROPIC_API_KEY) {
+    configureLLMProvider(LLMProvider.ANTHROPIC, {
+      apiKey: process.env.ANTHROPIC_API_KEY
+    });
+    logger.debug('Configured Anthropic provider from environment');
+  }
+
+  // Google
+  if (process.env.GOOGLE_API_KEY) {
+    configureLLMProvider(LLMProvider.GOOGLE, {
+      apiKey: process.env.GOOGLE_API_KEY
+    });
+    logger.debug('Configured Google provider from environment');
+  }
+
+  // Azure
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_ENDPOINT && process.env.AZURE_DEPLOYMENT) {
+    configureLLMProvider(LLMProvider.AZURE, {
+      apiKey: process.env.AZURE_OPENAI_API_KEY,
+      endpoint: process.env.AZURE_ENDPOINT,
+      deployment: process.env.AZURE_DEPLOYMENT,
+      apiVersion: process.env.AZURE_API_VERSION || '2023-12-01-preview'
+    });
+    logger.debug('Configured Azure provider from environment');
+  }
+
+  // XAI
+  if (process.env.XAI_API_KEY) {
+    configureLLMProvider(LLMProvider.XAI, {
+      apiKey: process.env.XAI_API_KEY
+    });
+    logger.debug('Configured XAI provider from environment');
+  }
+
+  // OpenAI Compatible
+  if (process.env.OPENAI_COMPATIBLE_API_KEY && process.env.OPENAI_COMPATIBLE_BASE_URL) {
+    configureLLMProvider(LLMProvider.OPENAI_COMPATIBLE, {
+      apiKey: process.env.OPENAI_COMPATIBLE_API_KEY,
+      baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL
+    });
+    logger.debug('Configured OpenAI-Compatible provider from environment');
+  }
+
+  // Ollama
+  if (process.env.OLLAMA_BASE_URL) {
+    configureLLMProvider(LLMProvider.OLLAMA, {
+      baseUrl: process.env.OLLAMA_BASE_URL
+    });
+    logger.debug('Configured Ollama provider from environment');
+  } else {
+    // Configure Ollama with default URL if not specified
+    configureLLMProvider(LLMProvider.OLLAMA, {
+      baseUrl: 'http://localhost:11434/api'
+    });
+    logger.debug('Configured Ollama provider with default URL');
   }
 }
 
@@ -630,6 +700,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
 // Main CLI entry point
 async function main(): Promise<void> {
+  // Configure LLM providers from environment variables at startup
+  configureLLMProvidersFromEnv();
+
   program
     .name('cli')
     .description('Agent World CLI')

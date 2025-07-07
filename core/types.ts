@@ -61,16 +61,9 @@ export interface Agent {
   status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
-  apiKey?: string;
-  baseUrl?: string;
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  // Provider-specific configs
-  azureEndpoint?: string;
-  azureApiVersion?: string;
-  azureDeployment?: string;
-  ollamaBaseUrl?: string;
   createdAt?: Date;
   lastActive?: Date;
   llmCallCount: number;
@@ -147,8 +140,6 @@ export interface CreateAgentParams {
   provider: LLMProvider;
   model: string;
   systemPrompt?: string;
-  apiKey?: string;
-  baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
 }
@@ -159,15 +150,9 @@ export interface UpdateAgentParams {
   status?: 'active' | 'inactive' | 'error';
   provider?: LLMProvider;
   model?: string;
-  apiKey?: string;
-  baseUrl?: string;
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
-  azureEndpoint?: string;
-  azureApiVersion?: string;
-  azureDeployment?: string;
-  ollamaBaseUrl?: string;
 }
 
 export interface AgentInfo {
