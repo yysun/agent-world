@@ -80,13 +80,23 @@ export default new Component(state, view, update, {global_event: true});
 
 // Event with callback function
 @click=${run(closeModal, false)}
-
-// Inline event handler
-@click=${(e) => e.stopPropagation()}
-
-// Form submission prevention
-@submit=${(e) => { e.preventDefault(); run(close, true); }}
 ```
+
+- DO NOT use `@click=${() => run(<event_name>)}` - this will not trigger re-rendering.
+
+- DO NOT use `@click=${(e) => ... run(<event_name>, e)}` - this will not pass the event correctly. Event parameter will be automatically injected:
+
+```js
+// Injecting event parameter into run()
+@input=${run('updateModalAgentName')}
+
+// Event handler function gets the event as the last parameter
+const updateModalAgentName = (state, e) => {
+  const name = e.target.value;
+  return ({...state,  agentName: name });
+};
+```
+
 
 ### Conditional Rendering
 ```js
@@ -113,6 +123,13 @@ return ({ ...state, newProperty: value });
 
 // Async state updates
 const handler = async (state, param) => {
+  const data = await api.call(param);
+  return ({ ...state, data });
+};
+
+// Async state updates using generators
+const handler = async function* (state, param) {
+  yield { loading: true };
   const data = await api.call(param);
   return ({ ...state, data });
 };

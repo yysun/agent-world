@@ -26,6 +26,7 @@
 
 import * as api from '../api.js';
 import { selectWorld } from './select-world.js';
+import { createInitialModalState } from '../utils/agent-modal-state.js';
 
 /**
  * Initialize application state with REST API
@@ -44,7 +45,8 @@ export const initializeState = async () => {
     currentMessage: '',
     wsError: null,
     needScroll: false,
-    loading: true
+    loading: true,
+    agentModal: createInitialModalState() // Unified modal state
   };
 
   try {

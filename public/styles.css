@@ -1897,6 +1897,47 @@ body {
   color: #fc8181;
 }
 
+/* Modal error and validation styles */
+.modal-error {
+  background-color: #fed7d7;
+  border: 1px solid #feb2b2;
+  color: #9b2c2c;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin: 0 1.5rem 1rem 1.5rem;
+  font-size: 0.875rem;
+}
+
+[data-theme="dark"] .modal-error {
+  background-color: #2d1b1b;
+  border-color: #9b2c2c;
+  color: #feb2b2;
+}
+
+.modal-validation-errors {
+  margin: 0 1.5rem 1rem 1.5rem;
+}
+
+.validation-error {
+  background-color: #fed7d7;
+  border: 1px solid #feb2b2;
+  color: #9b2c2c;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+[data-theme="dark"] .validation-error {
+  background-color: #2d1b1b;
+  border-color: #9b2c2c;
+  color: #feb2b2;
+}
+
+.validation-error:last-child {
+  margin-bottom: 0;
+}
+
 .form-actions {
   display: flex;
   justify-content: flex-end;

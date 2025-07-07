@@ -272,9 +272,11 @@ router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Res
 router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
+    console.log('🔧 Creating agent in world:', worldName, 'with body:', req.body);
     const validation = AgentCreateSchema.safeParse(req.body);
 
     if (!validation.success) {
+      console.log('❌ Validation failed:', validation.error.issues);
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
@@ -309,8 +311,10 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
     };
 
     const agent = await world.createAgent(agentData);
+    console.log('✅ Agent created successfully:', agent.name);
     res.status(201).json({ name: agent.name, id: agentId, type: agent.type });
   } catch (error) {
+    console.log('❌ Error creating agent:', error);
     logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
   }

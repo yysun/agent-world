@@ -26,7 +26,8 @@ import {
   handleMessage, handleConnectionStatus, handleError, handleComplete,
   incrementAgentMemorySize
 } from './sse-client.js';
-import { AgentModal, openAgentModal, closeAgentModal } from './components/agent-modal.js';
+import { AgentModal, openAgentModal, closeAgentModalHandler } from './components/agent-modal.js';
+import { updateModalAgent } from './utils/agent-modal-state.js';
 import { AgentCard } from './components/agent-card.js';
 import Message from './components/message.js';
 
@@ -50,8 +51,8 @@ const onQuickKeypress = (state, e) => {
   }
 };
 
-// Send message with error handling
-const sendQuickMessage = async (state) => {
+// Send message with error handling using generator pattern for loading states
+const sendQuickMessage = async function* (state) {
   const message = state.quickMessage?.trim();
 
   if (!message || !state.worldName) {
@@ -72,42 +73,59 @@ const sendQuickMessage = async (state) => {
     };
   }
 
-  // Add user message immediately
+  // Add user message immediately and show sending state
   const userMessage = {
     id: Date.now() + Math.random(),
     type: 'user-message',
     sender: USER_ID,
     text: message,
     timestamp: new Date().toISOString(),
-    worldName: state.worldName
+    worldName: state.worldName,
+    sending: true // Add sending indicator
   };
 
-  const newState = {
+  // Yield initial state with user message and sending indicator
+  yield {
     ...state,
     messages: [...state.messages, userMessage],
     quickMessage: '',
     wsError: null,
-    needScroll: true
+    needScroll: true,
+    isSending: true
   };
 
   try {
     await sendChatMessage(state.worldName, message, USER_ID);
-    return newState;
+    
+    // Return final state with sending completed
+    return {
+      ...state,
+      messages: [...state.messages, { ...userMessage, sending: false }],
+      quickMessage: '',
+      wsError: null,
+      needScroll: true,
+      isSending: false
+    };
   } catch (error) {
     console.error('Failed to send message:', error);
     return {
-      ...newState,
+      ...state,
+      messages: [...state.messages, 
+        { ...userMessage, sending: false },
+        {
+          id: Date.now() + Math.random(),
+          type: 'error',
+          sender: 'System',
+          text: 'Failed to send message: ' + error.message,
+          timestamp: new Date().toISOString(),
+          worldName: state.worldName,
+          hasError: true
+        }
+      ],
+      quickMessage: '',
       wsError: 'Failed to send message',
-      messages: [...newState.messages, {
-        id: Date.now() + Math.random(),
-        type: 'error',
-        sender: 'System',
-        text: 'Failed to send message: ' + error.message,
-        timestamp: new Date().toISOString(),
-        worldName: state.worldName,
-        hasError: true
-      }],
-      needScroll: true
+      needScroll: true,
+      isSending: false
     };
   }
 };
@@ -125,6 +143,17 @@ const clearMessages = (state) => {
     messages: [],
     wsError: null
   };
+};
+
+// Modal update handlers
+const updateModalAgentName = (state, e) => {
+  const name = e.target.value;
+  return updateModalAgent(state, { name });
+};
+
+const updateModalAgentSystemPrompt = (state, e) => {
+  const systemPrompt = e.target.value;
+  return updateModalAgent(state, { systemPrompt });
 };
 
 // Auto-scroll after DOM updates
@@ -159,7 +188,7 @@ const view = (state) => {
                 <button 
                   class="world-chip-add-btn" 
                   title="Add agent to this world"
-                  @click=${run(openAgentModal)}
+                  @click=${run(openAgentModal, null)}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <path d="M12 5v14M5 12h14"/>
@@ -230,7 +259,7 @@ const view = (state) => {
         </div>
       </main>
     </div>
-    ${state.showAgentModel ? AgentModal(state.editingAgent, closeAgentModal) : ''}
+    ${state.agentModal?.isOpen ? AgentModal(state.agentModal, closeAgentModalHandler) : ''}
   `;
 };
 
@@ -246,7 +275,9 @@ const update = {
   handleComplete,
   incrementAgentMemorySize,
   openAgentModal,
-  closeAgentModal,
+  closeAgentModal: closeAgentModalHandler,
+  updateModalAgentName,
+  updateModalAgentSystemPrompt,
   displayAgentMemory,
   clearAgentMemory,
   clearAgentMemoryFromModal,

@@ -36,6 +36,7 @@
  */
 
 import * as api from '../api.js';
+import { closeAgentModal } from '../utils/agent-modal-state.js';
 
 export const displayAgentMemory = async (state, agent) => {
   // If agent doesn't have memory array but has memorySize > 0, fetch full agent data
@@ -191,7 +192,7 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
       ...state,
       agents: updatedAgents, // Update agents with refreshed memory counts
       messages: [...state.messages, confirmMessage],
-      showAgentModel: false, // Close the modal after clearing memory
+      agentModal: closeAgentModal(state).agentModal, // Close the modal after clearing memory
       needScroll: true
     };
   } catch (error) {
@@ -210,7 +211,7 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
     return {
       ...state,
       messages: [...state.messages, errorMessage],
-      showAgentModel: false, // Close the modal even on error
+      agentModal: closeAgentModal(state).agentModal, // Close the modal even on error
       needScroll: true
     };
   }
