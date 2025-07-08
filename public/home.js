@@ -13,12 +13,13 @@
  * - Removed redundant state transformations
  */
 
-const { Component, html, run } = window["apprun"];
+const { Component, html, run, app } = window["apprun"];
 
 import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
+import * as api from './api.js';
 import {
   initializeState, selectWorld,
-  displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
+  displayAgentMemory, clearAgentMemory
 } from './update/index.js';
 import { addMessage, clearMessages as clearMessagesState } from './app-state.js';
 import {
@@ -27,9 +28,10 @@ import {
   handleMessage, handleConnectionStatus, handleError, handleComplete,
   incrementAgentMemorySize
 } from './sse-client.js';
-import { AgentModal, openAgentModal, closeAgentModalHandler, updateModalAgent } from './components/agent-modal.js';
 import { AgentCard } from './components/agent-card.js';
 import Message from './components/message.js';
+// Import the modal component to initialize it
+import './components/agent-modal.js';
 
 const USER_ID = 'human';
 
@@ -135,23 +137,50 @@ const clearMessages = (state) => {
   return clearMessagesState(state);
 };
 
-// Modal update handlers
-const updateModalAgentName = (state, e) => {
-  const name = e.target.value;
-  return updateModalAgent(state, { name });
+// Modal event handlers - use global events
+const openAgentModal = (state, agent) => {
+  app.run('show-agent-modal', agent);
+  return state;
 };
 
-const updateModalAgentSystemPrompt = (state, e) => {
-  const systemPrompt = e.target.value;
-  return updateModalAgent(state, { systemPrompt });
-};
-
-// Handler specifically for create modal (handles event propagation)
 const openAgentModalCreate = (state, e) => {
   if (e && e.stopPropagation) {
     e.stopPropagation();
   }
-  return openAgentModal(state, null, e);
+  app.run('show-agent-modal', null);
+  return state;
+};
+
+const closeAgentModal = (state) => {
+  app.run('hide-agent-modal');
+  return state;
+};
+
+// Handle agent updates from modal
+const handleAgentUpdated = async (state, { worldName, agent }) => {
+  try {
+    const updatedAgents = await api.getAgents(worldName);
+    return {
+      ...state,
+      agents: updatedAgents
+    };
+  } catch (error) {
+    console.error('Error refreshing agents:', error);
+    return state;
+  }
+};
+
+// Handle agent memory cleared from modal
+const handleAgentMemoryCleared = (state, { worldName, agentName }) => {
+  // Update the agent's memory count in the current agents list
+  const updatedAgents = state.agents.map(agent =>
+    agent.name === agentName ? { ...agent, memoryCount: 0 } : agent
+  );
+
+  return {
+    ...state,
+    agents: updatedAgents
+  };
 };
 
 // Auto-scroll after DOM updates
@@ -277,7 +306,6 @@ const view = (state) => {
         </div>
       </main>
     </div>
-    ${state.agentModal?.isOpen ? AgentModal(state.agentModal, closeAgentModalHandler) : ''}
   `;
 };
 
@@ -294,18 +322,17 @@ const update = {
   incrementAgentMemorySize,
   openAgentModal,
   openAgentModalCreate,
-  closeAgentModal: closeAgentModalHandler,
-  updateModalAgentName,
-  updateModalAgentSystemPrompt,
+  closeAgentModal,
   displayAgentMemory,
   clearAgentMemory,
-  clearAgentMemoryFromModal,
   selectWorld,
   onQuickInput,
   onQuickKeypress,
   sendQuickMessage,
   scrollToTop,
-  clearMessages
+  clearMessages,
+  'agent-updated': handleAgentUpdated,
+  'agent-memory-cleared': handleAgentMemoryCleared
 };
 
 export default new Component(state, view, update, {

@@ -1,120 +1,56 @@
 /**
- * Agent Modal Component - Consolidated State Management and UI
+ * Agent Modal Component - Standalone AppRun Component
  * 
  * Complete modal solution for creating and editing agents with system prompt configuration.
- * Includes state management, UI components, and business logic in a single consolidated file.
+ * Implements proper AppRun Component pattern with isolated state management.
  * 
  * Features:
- * - Modular UI components with clean separation
- * - Integrated state management functions
+ * - Standalone AppRun Component with state/view/update pattern
+ * - Internal state management with global event communication
  * - Form validation and error handling
  * - System prompt loading for edit mode
- * - AppRun functional patterns with immutable updates
+ * - Complete encapsulation with callback events
  * 
- * Usage:
- * ```javascript
- * const updatedState = await openAgentModal(state, agent); // null for create
- * ${state.agentModal?.isOpen ? AgentModal(state.agentModal, closeAgentModalHandler) : ''}
- * ```
+ * Communication:
+ * - Open: app.run('show-agent-modal', agent)
+ * - Close: app.run('hide-agent-modal')
+ * - Updates: app.run('agent-updated', updatedAgent)
  */
 
 import * as api from '../api.js';
 import { AgentValidation } from '../app-state.js';
 
-const { html, run } = window["apprun"];
+const { Component, html, run, app } = window["apprun"];
 
 // ============================================================================
-// State Management - Modal State Operations
+// Component State - Internal Modal State Management
 // ============================================================================
 
-const createInitialModalState = () => ({
+const state = () => ({
   isOpen: false,
-  mode: 'create',
+  mode: 'create', // 'create' | 'edit'
   agent: null,
   isLoading: false,
   error: null,
-  validationErrors: []
-});
-
-const openCreateAgentModal = (state, options = {}) => {
-  const defaults = {
-    name: '',
-    systemPrompt: '',
-    type: 'assistant',
-    provider: 'ollama',
-    model: 'llama3.2:3b',
-    ...options.defaults
-  };
-
-  return {
-    ...state,
-    agentModal: {
-      isOpen: true,
-      mode: 'create',
-      agent: defaults,
-      isLoading: false,
-      error: null,
-      validationErrors: []
-    }
-  };
-};
-
-const openEditAgentModal = (state, agent, isLoading = false) => ({
-  ...state,
-  agentModal: {
-    isOpen: true,
-    mode: 'edit',
-    agent: { ...agent },
-    isLoading,
-    error: null,
-    validationErrors: []
-  }
-});
-
-const closeAgentModal = (state) => ({
-  ...state,
-  agentModal: createInitialModalState()
-});
-
-const updateModalAgent = (state, updates) => {
-  if (!state.agentModal?.agent) return state;
-
-  const updatedAgent = { ...state.agentModal.agent, ...updates };
-  const validation = AgentValidation.validateAgent(updatedAgent);
-
-  return {
-    ...state,
-    agentModal: {
-      ...state.agentModal,
-      agent: updatedAgent,
-      validationErrors: validation.isValid ? [] : Object.values(validation.errors)
-    }
-  };
-};
-
-const setModalError = (state, error) => ({
-  ...state,
-  agentModal: {
-    ...state.agentModal,
-    error,
-    isLoading: false
-  }
+  validationErrors: [],
+  currentWorld: null
 });
 
 // ============================================================================
 // Utilities
 // ============================================================================
 
-// Get selected world name from state
-const getSelectedWorldName = (state) => {
-  if (!state.selectedWorldId) return null;
-  const world = state.worlds?.find(w => w.id === state.selectedWorldId);
-  return world ? world.name : null;
-};
-
 const getSubmitButtonText = (isNewAgent, isLoading) => {
   if (isLoading) return 'Saving...';
   return isNewAgent ? 'Create Agent' : 'Update Agent';
+};
+
+const getCurrentWorldName = () => {
+  // Get current world from global app state
+  const appState = app.state;
+  if (!appState?.selectedWorldId) return null;
+  const world = appState.worlds?.find(w => w.id === appState.selectedWorldId);
+  return world ? world.name : null;
 };
 
 // ============================================================================
@@ -124,7 +60,7 @@ const getSubmitButtonText = (isNewAgent, isLoading) => {
 /**
  * Modal Header - renders create/edit headers with agent name input or display
  */
-const ModalHeader = (agent, isNewAgent, closeModalFn) => html`
+const ModalHeader = (agent, isNewAgent) => html`
   <div class="modal-header">
     ${isNewAgent ? html`
       <div class="new-agent-header">
@@ -133,13 +69,13 @@ const ModalHeader = (agent, isNewAgent, closeModalFn) => html`
           class="agent-name-input"
           placeholder="Agent Name"
           value="${agent?.name || ''}"
-          @input=${run('updateModalAgentName')}
+          @input=${run('update-agent-name')}
         >
       </div>
     ` : html`
       <h2>${agent?.name}</h2>
     `}
-    <button class="modal-close" type="button" @click=${run(closeModalFn, false)}>
+    <button class="modal-close" type="button" @click=${run('hide-agent-modal')}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M18 6L6 18M6 6l12 12"/>
       </svg>
@@ -181,7 +117,7 @@ const SystemPromptForm = (systemPrompt, isLoading) => html`
         rows="20"
         placeholder="Define the agent's behavior and personality..."
         .value=${systemPrompt || ''}
-        @input=${run('updateModalAgentSystemPrompt')}
+        @input=${run('update-agent-system-prompt')}
       >${systemPrompt || ''}</textarea>
     `}
   </div>
@@ -190,13 +126,13 @@ const SystemPromptForm = (systemPrompt, isLoading) => html`
 /**
  * Form Actions - cancel, clear memory, and save buttons
  */
-const FormActions = (agent, isNewAgent, isLoading, hasValidationErrors, closeModalFn) => html`
+const FormActions = (agent, isNewAgent, isLoading, hasValidationErrors) => html`
   <div class="form-actions">
-    <button type="button" class="btn btn-secondary" @click=${run(closeModalFn, false)}>
+    <button type="button" class="btn btn-secondary" @click=${run('hide-agent-modal')}>
       Cancel
     </button>
     ${!isNewAgent ? html`
-      <button type="button" class="btn btn-danger" @click=${run('clearAgentMemoryFromModal', agent)}>
+      <button type="button" class="btn btn-danger" @click=${run('clear-agent-memory', agent)}>
         Clear Memory
       </button>
     ` : ''}
@@ -211,18 +147,15 @@ const FormActions = (agent, isNewAgent, isLoading, hasValidationErrors, closeMod
 `;
 
 // ============================================================================
-// Main Modal Component
+// Component View - Modal Rendering
 // ============================================================================
 
-/**
- * Agent Modal - orchestrates UI components for create/edit modal
- */
-export const AgentModal = (modalState, closeModalFn) => {
-  if (!modalState?.isOpen) {
+const view = (state) => {
+  if (!state.isOpen) {
     return '';
   }
 
-  const { agent, isLoading, error, validationErrors } = modalState;
+  const { agent, isLoading, error, validationErrors } = state;
 
   // Derived state
   const isNewAgent = AgentValidation.isNewAgent(agent);
@@ -231,14 +164,14 @@ export const AgentModal = (modalState, closeModalFn) => {
   const isLoadingSystemPrompt = isLoading && !isNewAgent && !systemPrompt;
 
   return html`
-    <div class="modal-overlay" @click=${run(closeModalFn, false)}>
+    <div class="modal-overlay" @click=${run('hide-agent-modal')}>
       <div class="modal-content" @click=${(e) => e.stopPropagation()}>
-        ${ModalHeader(agent, isNewAgent, closeModalFn)}
+        ${ModalHeader(agent, isNewAgent)}
         ${ErrorDisplay(error, validationErrors)}
         
-        <form class="agent-form" @submit=${run(closeModalFn, true)}>
+        <form class="agent-form" @submit=${run('save-agent')}>
           ${SystemPromptForm(systemPrompt, isLoadingSystemPrompt)}
-          ${FormActions(agent, isNewAgent, isLoading, hasValidationErrors, closeModalFn)}
+          ${FormActions(agent, isNewAgent, isLoading, hasValidationErrors)}
         </form>
       </div>
     </div>
@@ -272,107 +205,167 @@ const updateExistingAgent = async (worldName, agent) => {
   }
 };
 
-// Open modal with system prompt loading for edit mode
-export const openAgentModal = async (state, agent = null, e) => {
-  if (e?.stopPropagation) e.stopPropagation();
+// ============================================================================
+// Component Update - Event Handlers
+// ============================================================================
 
-  if (!agent) {
-    return openCreateAgentModal(state, {
-      defaults: {
-        name: '',
-        systemPrompt: '',
-        type: 'assistant',
-        provider: 'ollama',
-        model: 'llama3.2:3b'
-      }
-    });
-  }
-
-  // Edit mode - load system prompt
-  const initialState = openEditAgentModal(state, agent, true);
-
-  try {
-    const worldName = getSelectedWorldName(state) || state.world?.current;
-    const fullAgent = await api.getAgent(worldName, agent.name);
-
-    return openEditAgentModal(initialState, {
-      ...agent,
-      systemPrompt: fullAgent.systemPrompt || ''
-    }, false);
-  } catch (error) {
-    console.error('Error loading agent details:', error);
-    return {
-      ...initialState,
-      agentModal: {
-        ...initialState.agentModal,
+const update = {
+  // Global events for modal control
+  'show-agent-modal': async (state, agent) => {
+    if (!agent) {
+      // Create mode
+      return {
+        ...state,
+        isOpen: true,
+        mode: 'create',
+        agent: {
+          name: '',
+          systemPrompt: '',
+          type: 'assistant',
+          provider: 'ollama',
+          model: 'llama3.2:3b'
+        },
         isLoading: false,
-        error: `Failed to load agent details: ${error.message}`
-      }
-    };
-  }
-};
-
-// Handle modal close and save operations
-export const closeAgentModalHandler = async (state, save, e) => {
-  if (e?.preventDefault) e.preventDefault();
-
-  if (!save || !state.agentModal?.agent) {
-    return closeAgentModal(state);
-  }
-
-  const agent = state.agentModal.agent;
-  const isNewAgent = AgentValidation.isNewAgent(agent);
-  const validation = AgentValidation.validateAgent(agent);
-
-  if (!validation.isValid) {
-    return {
-      ...state,
-      agentModal: {
-        ...state.agentModal,
-        error: 'Please fix validation errors before saving',
-        validationErrors: Object.values(validation.errors)
-      }
-    };
-  }
-
-  try {
-    const worldName = getSelectedWorldName(state) || state.world?.current;
-
-    if (isNewAgent) {
-      await createNewAgent(worldName, agent);
-    } else {
-      await updateExistingAgent(worldName, agent);
+        error: null,
+        validationErrors: []
+      };
     }
 
-    const updatedAgents = await api.getAgents(worldName);
+    // Edit mode - load system prompt
+    const loadingState = {
+      ...state,
+      isOpen: true,
+      mode: 'edit',
+      agent: { ...agent },
+      isLoading: true,
+      error: null,
+      validationErrors: []
+    };
+
+    try {
+      const worldName = getCurrentWorldName();
+      const fullAgent = await api.getAgent(worldName, agent.name);
+
+      return {
+        ...loadingState,
+        agent: {
+          ...agent,
+          systemPrompt: fullAgent.systemPrompt || ''
+        },
+        isLoading: false
+      };
+    } catch (error) {
+      console.error('Error loading agent details:', error);
+      return {
+        ...loadingState,
+        isLoading: false,
+        error: `Failed to load agent details: ${error.message}`
+      };
+    }
+  },
+
+  'hide-agent-modal': (state) => ({
+    ...state,
+    isOpen: false,
+    agent: null,
+    error: null,
+    validationErrors: []
+  }),
+
+  // Form input handlers
+  'update-agent-name': (state, e) => {
+    const name = e.target.value;
+    const updatedAgent = { ...state.agent, name };
+    const validation = AgentValidation.validateAgent(updatedAgent);
 
     return {
-      ...closeAgentModal(state),
-      agents: updatedAgents
+      ...state,
+      agent: updatedAgent,
+      validationErrors: validation.isValid ? [] : Object.values(validation.errors)
     };
-  } catch (error) {
-    console.error('Error saving agent:', error);
+  },
+
+  'update-agent-system-prompt': (state, e) => {
+    const systemPrompt = e.target.value;
+    const updatedAgent = { ...state.agent, systemPrompt };
+    const validation = AgentValidation.validateAgent(updatedAgent);
+
     return {
       ...state,
-      agentModal: {
-        ...state.agentModal,
-        error: `Failed to save agent: ${error.message}`
-      }
+      agent: updatedAgent,
+      validationErrors: validation.isValid ? [] : Object.values(validation.errors)
     };
+  },
+
+  // Form submission
+  'save-agent': async (state, e) => {
+    if (e?.preventDefault) e.preventDefault();
+
+    const agent = state.agent;
+    const isNewAgent = AgentValidation.isNewAgent(agent);
+    const validation = AgentValidation.validateAgent(agent);
+
+    if (!validation.isValid) {
+      return {
+        ...state,
+        error: 'Please fix validation errors before saving',
+        validationErrors: Object.values(validation.errors)
+      };
+    }
+
+    try {
+      const worldName = getCurrentWorldName();
+
+      if (isNewAgent) {
+        await createNewAgent(worldName, agent);
+      } else {
+        await updateExistingAgent(worldName, agent);
+      }
+
+      // Notify parent component of agent update
+      app.run('agent-updated', { worldName, agent });
+
+      // Close modal
+      return {
+        ...state,
+        isOpen: false,
+        agent: null,
+        error: null,
+        validationErrors: []
+      };
+    } catch (error) {
+      console.error('Error saving agent:', error);
+      return {
+        ...state,
+        error: `Failed to save agent: ${error.message}`
+      };
+    }
+  },
+
+  // Clear agent memory
+  'clear-agent-memory': async (state, agent) => {
+    try {
+      const worldName = getCurrentWorldName();
+      await api.clearAgentMemory(worldName, agent.name);
+
+      // Notify parent component
+      app.run('agent-memory-cleared', { worldName, agentName: agent.name });
+
+      return state;
+    } catch (error) {
+      console.error('Error clearing agent memory:', error);
+      return {
+        ...state,
+        error: `Failed to clear agent memory: ${error.message}`
+      };
+    }
   }
 };
 
 // ============================================================================
-// Exports
+// Component Export
 // ============================================================================
 
-export {
-  updateModalAgent,
-  setModalError,
-  closeAgentModal,
-  openCreateAgentModal,
-  openEditAgentModal,
-  createInitialModalState
-};
+export default new Component(state, view, update, { global_event: true });
 
 

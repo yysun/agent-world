@@ -38,7 +38,6 @@
  * @property {boolean} needScroll - Auto-scroll trigger
  * @property {boolean} isSending - Sending message state
  * @property {string} theme - Current theme
- * @property {Object} agentModal - Agent modal state
  */
 
 /**
@@ -58,8 +57,7 @@ export function createInitialState() {
     quickMessage: '',
     needScroll: false,
     isSending: false,
-    theme: 'system',
-    agentModal: { isOpen: false, mode: 'create', agent: null }
+    theme: 'system'
   };
 }
 

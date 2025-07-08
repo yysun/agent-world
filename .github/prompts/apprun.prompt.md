@@ -26,6 +26,10 @@ export const AgentModal = (agent, close) => {
 ```
 
 ### Full Page Components (With state/lifecycle)
+
+Define state, view and update using functions and export Component w/o class.
+
+
 ```js
 // Async state initialization with API calls
 const state = async () => {
@@ -67,8 +71,17 @@ const update = {
   '/,#': state => state
 };
 
+// Create a new AppRun Component instance without using class
 // Exporting the component instance with global event handling
 export default new Component(state, view, update, {global_event: true});
+
+
+
+// attach the visible component to the DOM element
+home.start('#main');
+
+// Attach the modal component (invisible by default) to the DOM element
+agentModal.mount('#agent-modal');
 ```
 
 ## Event Handling Patterns

@@ -11,7 +11,6 @@ export { initializeState } from './init-state.js';
 export { selectWorld } from './select-world.js';
 export {
   displayAgentMemory,
-  clearAgentMemory,
-  clearAgentMemoryFromModal
+  clearAgentMemory
 } from './agent-actions.js';
 
