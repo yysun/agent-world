@@ -27,7 +27,7 @@
  */
 
 import * as api from '../api.js';
-import { AgentValidation } from '../types/agent-types.js';
+import { AgentValidation } from '../app-state.js';
 import {
   openCreateAgentModal,
   openEditAgentModal,
@@ -37,6 +37,13 @@ import {
 } from '../utils/agent-modal-state.js';
 
 const { html, run } = window["apprun"];
+
+// Helper function to get selected world name from new state structure
+const getSelectedWorldName = (state) => {
+  if (!state.selectedWorldId) return null;
+  const world = state.worlds?.find(w => w.id === state.selectedWorldId);
+  return world ? world.name : null;
+};
 
 // ============================================================================
 // UI Components
@@ -204,7 +211,7 @@ export const openAgentModal = async (state, agent = null, e) => {
     const initialState = openEditAgentModal(state, agent, true);
 
     try {
-      const worldName = state.worldName || state.world?.current;
+      const worldName = getSelectedWorldName(state) || state.world?.current;
       const fullAgent = await api.getAgent(worldName, agent.name);
 
       return openEditAgentModal(initialState, {
@@ -255,7 +262,7 @@ export const closeAgentModalHandler = async (state, save, e) => {
   }
 
   try {
-    const worldName = state.worldName || state.world?.current;
+    const worldName = getSelectedWorldName(state) || state.world?.current;
 
     if (isNewAgent) {
       await createNewAgent(worldName, agent);

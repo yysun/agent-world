@@ -2,15 +2,15 @@
 /**
  * Home Page Component - Main interface for Agent World
  *
- * Architecture: REST API + SSE streaming with AppRun framework
+ * Architecture: REST API + SSE streaming with AppRun framework using unified app-state
  * Features: World selection, agent grid, real-time chat, theme toggle
  * Components: WorldCard, AgentCard, AgentModal, Message
  * 
- * Recent Fixes:
- * - Fixed world chips agent count display
- * - Fixed duplicate message prevention via server-side filtering
- * - Consolidated redundant code and comments
- * - Added conversation control buttons (scroll to top, clear messages)
+ * Recent Changes:
+ * - Updated to use unified AppState structure from app-state.js
+ * - Type-safe state management with //@ts-check
+ * - Simplified state operations using core types
+ * - Removed redundant state transformations
  */
 
 const { Component, html, run } = window["apprun"];
@@ -20,6 +20,7 @@ import {
   initializeState, selectWorld,
   displayAgentMemory, clearAgentMemory, clearAgentMemoryFromModal
 } from './update/index.js';
+import { addMessage, clearMessages as clearMessagesState } from './app-state.js';
 import {
   sendChatMessage,
   handleStreamStart, handleStreamChunk, handleStreamEnd, handleStreamError,
@@ -35,9 +36,10 @@ const USER_ID = 'human';
 
 // Initial state with theme initialization
 const state = async () => {
+  const initialState = await initializeState();
   const theme = localStorage.getItem('theme') || 'system';
   applyTheme(theme);
-  return await initializeState();
+  return { ...initialState, theme };
 };
 
 // Input handlers
@@ -54,21 +56,21 @@ const onQuickKeypress = (state, e) => {
 // Send message with error handling using generator pattern for loading states
 const sendQuickMessage = async function* (state) {
   const message = state.quickMessage?.trim();
+  const selectedWorldName = getSelectedWorldName(state);
 
-  if (!message || !state.worldName) {
+  if (!message || !selectedWorldName) {
     const errorText = !message ? 'Please enter a message' : 'No world selected';
+    const errorMessage = {
+      id: Date.now() + Math.random(),
+      role: 'system',
+      content: errorText,
+      createdAt: new Date(),
+      sender: 'System'
+    };
+
     return {
       ...state,
-      wsError: errorText,
-      messages: [...state.messages, {
-        id: Date.now() + Math.random(),
-        type: 'error',
-        sender: 'System',
-        text: errorText,
-        timestamp: new Date().toISOString(),
-        worldName: state.worldName,
-        hasError: true
-      }],
+      messages: [...state.messages, errorMessage],
       needScroll: true
     };
   }
@@ -76,12 +78,11 @@ const sendQuickMessage = async function* (state) {
   // Add user message immediately and show sending state
   const userMessage = {
     id: Date.now() + Math.random(),
-    type: 'user-message',
+    role: 'user',
+    content: message,
+    createdAt: new Date(),
     sender: USER_ID,
-    text: message,
-    timestamp: new Date().toISOString(),
-    worldName: state.worldName,
-    sending: true // Add sending indicator
+    sending: true
   };
 
   // Yield initial state with user message and sending indicator
@@ -89,41 +90,35 @@ const sendQuickMessage = async function* (state) {
     ...state,
     messages: [...state.messages, userMessage],
     quickMessage: '',
-    wsError: null,
     needScroll: true,
     isSending: true
   };
 
   try {
-    await sendChatMessage(state.worldName, message, USER_ID);
+    await sendChatMessage(selectedWorldName, message, USER_ID);
 
     // Return final state with sending completed
     return {
       ...state,
       messages: [...state.messages, { ...userMessage, sending: false }],
       quickMessage: '',
-      wsError: null,
       needScroll: true,
       isSending: false
     };
   } catch (error) {
     console.error('Failed to send message:', error);
+    const errorMessage = {
+      id: Date.now() + Math.random(),
+      role: 'system',
+      content: 'Failed to send message: ' + error.message,
+      createdAt: new Date(),
+      sender: 'System'
+    };
+
     return {
       ...state,
-      messages: [...state.messages,
-      { ...userMessage, sending: false },
-      {
-        id: Date.now() + Math.random(),
-        type: 'error',
-        sender: 'System',
-        text: 'Failed to send message: ' + error.message,
-        timestamp: new Date().toISOString(),
-        worldName: state.worldName,
-        hasError: true
-      }
-      ],
+      messages: [...state.messages, { ...userMessage, sending: false }, errorMessage],
       quickMessage: '',
-      wsError: 'Failed to send message',
       needScroll: true,
       isSending: false
     };
@@ -138,11 +133,7 @@ const scrollToTop = (state) => {
 
 // Clear messages function
 const clearMessages = (state) => {
-  return {
-    ...state,
-    messages: [],
-    wsError: null
-  };
+  return clearMessagesState(state);
 };
 
 // Modal update handlers
@@ -174,6 +165,23 @@ const scrollToBottom = (state) => {
   }
 };
 
+// Helper functions to get computed values from new state structure
+const getSelectedWorldName = (state) => {
+  if (!state.selectedWorldId) return null;
+  const world = state.worlds.find(w => w.id === state.selectedWorldId);
+  return world ? world.name : null;
+};
+
+const getQuickMessage = (state) => {
+  // For now, we'll store this as a simple property
+  return state.quickMessage || '';
+};
+
+const getNeedScroll = (state) => {
+  // For now, we'll store this as a simple property
+  return state.needScroll || false;
+};
+
 // Main view
 const view = (state) => {
   if (state.needScroll) scrollToBottom(state);
@@ -185,14 +193,17 @@ const view = (state) => {
           <span class="logo">Agent World</span>
         </div>
         <div class="world-chips">
-          ${state.worlds?.map(world => html`
+          ${state.worlds?.map(world => {
+    const selectedWorldName = getSelectedWorldName(state);
+    const isSelected = world.name === selectedWorldName;
+    return html`
             <button 
-              class="world-chip ${world.name === state.worldName ? 'active' : ''}"
+              class="world-chip ${isSelected ? 'active' : ''}"
               @click=${run('selectWorld', world.name)}
             >
               ${world.name}
-              <span class="world-chip-count">${world.name === state.worldName ? (state.agents?.length || 0) : (world.agentCount || 0)}</span>
-              ${world.name === state.worldName ? html`
+              <span class="world-chip-count">${isSelected ? (state.agents?.length || 0) : (world.agentCount || 0)}</span>
+              ${isSelected ? html`
                 <button 
                   class="world-chip-add-btn" 
                   title="Add agent to this world"
@@ -204,7 +215,7 @@ const view = (state) => {
                 </button>
               ` : ''}
             </button>
-          `)}
+          `})}
         </div>
         <div class="header-right">
           <button class="theme-toggle" @click=${run(toggleTheme)}>
@@ -228,7 +239,7 @@ const view = (state) => {
             ${state.messages?.length > 0 ?
       state.messages.map(message => Message(message)) :
       html`<div class="conversation-placeholder">
-                ${state.worldName ? 'Start a conversation by typing a message below' : 'Select a world to start chatting'}
+                ${getSelectedWorldName(state) ? 'Start a conversation by typing a message below' : 'Select a world to start chatting'}
               </div>`
     }
           </div>
@@ -253,7 +264,7 @@ const view = (state) => {
             <input
               type="text"
               class="simple-input"
-              placeholder="${state.worldName ? 'Quick message...' : 'Select a world first...'}"
+              placeholder="${getSelectedWorldName(state) ? 'Quick message...' : 'Select a world first...'}"
               value="${state.quickMessage || ''}"
               @input=${run('onQuickInput')}
               @keypress=${run('onQuickKeypress')}

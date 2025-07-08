@@ -6,7 +6,7 @@
  * Uses simple state updates without complex loading patterns.
  */
 
-import { AgentValidation } from '../types/agent-types.js';
+import { AgentValidation } from '../app-state.js';
 
 /**
  * Create initial modal state (simple format)
