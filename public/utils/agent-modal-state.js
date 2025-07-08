@@ -1,15 +1,16 @@
 /**
- * Agent Modal State Management
+ * Agent Modal State Management - Simplified AppRun Pattern
  * 
  * Unified state management for agent modal operations.
  * Replaces the showAgentModel + editingAgent pattern with a single modal state object.
+ * Uses simple state updates without complex loading patterns.
  */
 
 import { AgentValidation } from '../types/agent-types.js';
 
 /**
- * Create initial modal state
- * @returns {AgentModalState}
+ * Create initial modal state (simple format)
+ * @returns {Object} Modal state format
  */
 export function createInitialModalState() {
   return {
@@ -25,21 +26,26 @@ export function createInitialModalState() {
 /**
  * Open modal for creating new agent
  * @param {Object} state - current app state
+ * @param {Object} [options] - create options and defaults
  * @returns {Object} updated state
  */
-export function openCreateAgentModal(state) {
+export function openCreateAgentModal(state, options = {}) {
+  // Use simple defaults
+  const defaults = {
+    name: '',
+    systemPrompt: '',
+    type: 'assistant',
+    provider: 'ollama',
+    model: 'llama3.2:3b',
+    ...options.defaults
+  };
+
   return {
     ...state,
     agentModal: {
       isOpen: true,
       mode: 'create',
-      agent: {
-        name: 'New Agent',
-        systemPrompt: '',
-        type: 'assistant',
-        provider: 'openai',
-        model: 'gpt-4'
-      },
+      agent: defaults,
       isLoading: false,
       error: null,
       validationErrors: []
@@ -51,56 +57,21 @@ export function openCreateAgentModal(state) {
  * Open modal for editing existing agent
  * @param {Object} state - current app state
  * @param {Object} agent - agent to edit
- * @returns {Promise<Object>} updated state
+ * @param {boolean} [isLoading] - whether the modal is in loading state
+ * @returns {Object} updated state
  */
-export async function openEditAgentModal(state, agent) {
-  // Start with loading state
-  const loadingState = {
+export function openEditAgentModal(state, agent, isLoading = false) {
+  return {
     ...state,
     agentModal: {
       isOpen: true,
       mode: 'edit',
-      agent: null,
-      isLoading: true,
+      agent: { ...agent },
+      isLoading,
       error: null,
       validationErrors: []
     }
   };
-
-  try {
-    // Import API dynamically to avoid circular dependencies
-    const { getAgent } = await import('../api.js');
-
-    // Fetch full agent data
-    const fullAgent = await getAgent(state.worldName, agent.name);
-
-    return {
-      ...state,
-      agentModal: {
-        isOpen: true,
-        mode: 'edit',
-        agent: fullAgent,
-        isLoading: false,
-        error: null,
-        validationErrors: []
-      }
-    };
-  } catch (error) {
-    console.error('Error fetching full agent details:', error);
-
-    // Fallback to provided agent data
-    return {
-      ...state,
-      agentModal: {
-        isOpen: true,
-        mode: 'edit',
-        agent: agent,
-        isLoading: false,
-        error: `Failed to load agent details: ${error.message}`,
-        validationErrors: []
-      }
-    };
-  }
 }
 
 /**
@@ -152,22 +123,6 @@ export function setModalError(state, error) {
       ...state.agentModal,
       error,
       isLoading: false
-    }
-  };
-}
-
-/**
- * Set modal loading state
- * @param {Object} state - current app state
- * @param {boolean} isLoading - loading state
- * @returns {Object} updated state
- */
-export function setModalLoading(state, isLoading) {
-  return {
-    ...state,
-    agentModal: {
-      ...state.agentModal,
-      isLoading
     }
   };
 }

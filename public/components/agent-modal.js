@@ -1,14 +1,23 @@
 /**
- * Agent Modal Component
+ * Agent Modal Component - Enhanced with System Prompt Loading
  * 
  * Modal dialog for creating and editing agents with system prompt configuration.
  * Features clean separation of UI components and business logic, form validation,
  * error handling, and loading states.
  * 
- * Architecture:
+ * Enhanced Architecture:
  * - Modular UI components: ModalHeader, ErrorDisplay, SystemPromptForm, FormActions
  * - Business logic in handler functions with generator pattern for loading states
  * - AppRun functional patterns with immutable state updates
+ * - Standardized state schema with backward compatibility
+ * - Mode-specific optimizations for create vs edit
+ * - System prompt loading: Loads from separate file when editing agents
+ * 
+ * System Prompt Storage:
+ * - Create mode: System prompt entered directly and saved with agent
+ * - Edit mode: System prompt loaded separately from system-prompt.md file
+ * - Loading state shows placeholder while fetching system prompt
+ * - Error handling for failed system prompt loading
  * 
  * Usage:
  * ```javascript
@@ -24,8 +33,7 @@ import {
   openEditAgentModal,
   closeAgentModal,
   updateModalAgent,
-  setModalError,
-  setModalLoading
+  setModalError
 } from '../utils/agent-modal-state.js';
 
 const { html, run } = window["apprun"];
@@ -47,7 +55,6 @@ const ModalHeader = (agent, isNewAgent, closeModalFn) => html`
           placeholder="Agent Name"
           value="${agent?.name || ''}"
           @input=${run('updateModalAgentName')}
-          @keydown=${(e) => { if (e.key === 'Enter') e.preventDefault(); }}
         >
       </div>
     ` : html`
@@ -81,16 +88,23 @@ const ErrorDisplay = (error, validationErrors) => html`
 /**
  * System Prompt Form - main textarea for system prompt editing
  */
-const SystemPromptForm = (systemPrompt) => html`
+const SystemPromptForm = (systemPrompt, isLoading) => html`
   <div class="form-group">
-    <textarea
-      id="agent-system-prompt"
-      class="form-textarea"
-      rows="20"
-      placeholder="Define the agent's behavior and personality..."
-      .value=${systemPrompt}
-      @input=${run('updateModalAgentSystemPrompt')}
-    >${systemPrompt}</textarea>
+    ${isLoading ? html`
+      <div class="loading-placeholder">
+        <div class="loading-spinner"></div>
+        <span>Loading system prompt...</span>
+      </div>
+    ` : html`
+      <textarea
+        id="agent-system-prompt"
+        class="form-textarea"
+        rows="20"
+        placeholder="Define the agent's behavior and personality..."
+        .value=${systemPrompt || ''}
+        @input=${run('updateModalAgentSystemPrompt')}
+      >${systemPrompt || ''}</textarea>
+    `}
   </div>
 `;
 
@@ -144,6 +158,7 @@ export const AgentModal = (modalState, closeModalFn) => {
   const isNewAgent = AgentValidation.isNewAgent(agent);
   const systemPrompt = agent?.systemPrompt || '';
   const hasValidationErrors = validationErrors.length > 0;
+  const isLoadingSystemPrompt = isLoading && !isNewAgent && !systemPrompt;
 
   return html`
     <div class="modal-overlay" @click=${run(closeModalFn, false)}>
@@ -151,8 +166,8 @@ export const AgentModal = (modalState, closeModalFn) => {
         ${ModalHeader(agent, isNewAgent, closeModalFn)}
         ${ErrorDisplay(error, validationErrors)}
         
-        <form class="agent-form" @submit=${(e) => { e.preventDefault(); run(closeModalFn, true)(e); }}>
-          ${SystemPromptForm(systemPrompt)}
+        <form class="agent-form" @submit=${run(closeModalFn, true)}>
+          ${SystemPromptForm(systemPrompt, isLoadingSystemPrompt)}
           ${FormActions(agent, isNewAgent, isLoading, hasValidationErrors, closeModalFn)}
         </form>
       </div>
@@ -165,33 +180,60 @@ export const AgentModal = (modalState, closeModalFn) => {
 // ============================================================================
 
 /**
- * Open Agent Modal - determines create vs edit mode, handles loading states
+ * Open Agent Modal - Enhanced to load system prompt for editing
  */
-export const openAgentModal = async function* (state, agent = null) {
-  if (!agent) {
-    return openCreateAgentModal(state);
-  } else {
-    // Show loading state while fetching full agent data
-    yield {
-      ...state,
-      agentModal: {
-        isOpen: true,
-        mode: 'edit',
-        agent: null,
-        isLoading: true,
-        error: null,
-        validationErrors: []
-      }
-    };
+export const openAgentModal = async (state, agent = null, e) => {
+  // Handle event propagation if event is provided
+  if (e && e.stopPropagation) {
+    e.stopPropagation();
+  }
 
-    return await openEditAgentModal(state, agent);
+  if (!agent) {
+    // Create mode
+    return openCreateAgentModal(state, {
+      defaults: {
+        name: '',
+        systemPrompt: '',
+        type: 'assistant',
+        provider: 'ollama',
+        model: 'llama3.2:3b'
+      }
+    });
+  } else {
+    // Edit mode - first open with loading state, then load system prompt
+    const initialState = openEditAgentModal(state, agent, true);
+
+    try {
+      const worldName = state.worldName || state.world?.current;
+      const fullAgent = await api.getAgent(worldName, agent.name);
+
+      return openEditAgentModal(initialState, {
+        ...agent,
+        systemPrompt: fullAgent.systemPrompt || ''
+      }, false);
+    } catch (error) {
+      console.error('Error loading agent details:', error);
+      return {
+        ...initialState,
+        agentModal: {
+          ...initialState.agentModal,
+          isLoading: false,
+          error: `Failed to load agent details: ${error.message}`
+        }
+      };
+    }
   }
 };
 
 /**
- * Close Agent Modal - handles cancel and save operations with loading states
+ * Close Agent Modal - Simplified without loading states
  */
-export const closeAgentModalHandler = async function* (state, save) {
+export const closeAgentModalHandler = async (state, save, e) => {
+  // Handle form submission event if provided
+  if (e && e.preventDefault) {
+    e.preventDefault();
+  }
+
   if (!save || !state.agentModal?.agent) {
     return closeAgentModal(state);
   }
@@ -202,21 +244,27 @@ export const closeAgentModalHandler = async function* (state, save) {
   // Validate agent before saving
   const validation = AgentValidation.validateAgent(agent);
   if (!validation.isValid) {
-    return setModalError(state, 'Please fix validation errors before saving');
+    return {
+      ...state,
+      agentModal: {
+        ...state.agentModal,
+        error: 'Please fix validation errors before saving',
+        validationErrors: Object.values(validation.errors)
+      }
+    };
   }
 
-  // Show loading state
-  yield setModalLoading(state, true);
-
   try {
+    const worldName = state.worldName || state.world?.current;
+
     if (isNewAgent) {
-      await createNewAgent(state.worldName, agent);
+      await createNewAgent(worldName, agent);
     } else {
-      await updateExistingAgent(state.worldName, agent);
+      await updateExistingAgent(worldName, agent);
     }
 
     // Refresh agents list and close modal
-    const updatedAgents = await api.getAgents(state.worldName);
+    const updatedAgents = await api.getAgents(worldName);
 
     return {
       ...closeAgentModal(state),
@@ -225,7 +273,13 @@ export const closeAgentModalHandler = async function* (state, save) {
 
   } catch (error) {
     console.error('Error saving agent:', error);
-    return setModalError(state, `Failed to save agent: ${error.message}`);
+    return {
+      ...state,
+      agentModal: {
+        ...state.agentModal,
+        error: `Failed to save agent: ${error.message}`
+      }
+    };
   }
 };
 

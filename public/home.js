@@ -96,7 +96,7 @@ const sendQuickMessage = async function* (state) {
 
   try {
     await sendChatMessage(state.worldName, message, USER_ID);
-    
+
     // Return final state with sending completed
     return {
       ...state,
@@ -110,17 +110,17 @@ const sendQuickMessage = async function* (state) {
     console.error('Failed to send message:', error);
     return {
       ...state,
-      messages: [...state.messages, 
-        { ...userMessage, sending: false },
-        {
-          id: Date.now() + Math.random(),
-          type: 'error',
-          sender: 'System',
-          text: 'Failed to send message: ' + error.message,
-          timestamp: new Date().toISOString(),
-          worldName: state.worldName,
-          hasError: true
-        }
+      messages: [...state.messages,
+      { ...userMessage, sending: false },
+      {
+        id: Date.now() + Math.random(),
+        type: 'error',
+        sender: 'System',
+        text: 'Failed to send message: ' + error.message,
+        timestamp: new Date().toISOString(),
+        worldName: state.worldName,
+        hasError: true
+      }
       ],
       quickMessage: '',
       wsError: 'Failed to send message',
@@ -156,6 +156,14 @@ const updateModalAgentSystemPrompt = (state, e) => {
   return updateModalAgent(state, { systemPrompt });
 };
 
+// Handler specifically for create modal (handles event propagation)
+const openAgentModalCreate = (state, e) => {
+  if (e && e.stopPropagation) {
+    e.stopPropagation();
+  }
+  return openAgentModal(state, null, e);
+};
+
 // Auto-scroll after DOM updates
 const scrollToBottom = (state) => {
   if (state?.needScroll) {
@@ -188,7 +196,7 @@ const view = (state) => {
                 <button 
                   class="world-chip-add-btn" 
                   title="Add agent to this world"
-                  @click=${run(openAgentModal, null)}
+                  @click=${run('openAgentModalCreate')}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <path d="M12 5v14M5 12h14"/>
@@ -275,6 +283,7 @@ const update = {
   handleComplete,
   incrementAgentMemorySize,
   openAgentModal,
+  openAgentModalCreate,
   closeAgentModal: closeAgentModalHandler,
   updateModalAgentName,
   updateModalAgentSystemPrompt,

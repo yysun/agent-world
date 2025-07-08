@@ -97,6 +97,17 @@ const updateModalAgentName = (state, e) => {
 };
 ```
 
+```js
+// Using run() directly
+@click=${run(openAgentModal, null)}
+
+// call e.stopPropagation() in the handler
+const openAgentModal = (state, agent, e) => {
+  e.stopPropagation();
+  return ({...state,  editingAgent: agent, showModal: true });
+};
+```
+
 
 ### Conditional Rendering
 ```js

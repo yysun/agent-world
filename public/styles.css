@@ -594,6 +594,33 @@ body {
   font-style: italic;
 }
 
+/* Loading placeholder for modal content */
+.loading-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  min-height: 300px;
+}
+
+.loading-placeholder .loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--bg-tertiary);
+  border-top: 2px solid var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 0.5rem;
+}
+
+.loading-placeholder span {
+  color: var(--text-tertiary);
+  font-size: 0.875rem;
+}
+
 /* Agent grid */
 .agent-grid {
   display: flex;
