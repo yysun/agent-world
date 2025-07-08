@@ -36,7 +36,7 @@
  */
 
 import * as api from '../api.js';
-import { closeAgentModal } from '../utils/agent-modal-state.js';
+import { closeAgentModal } from '../components/agent-modal.js';
 
 export const displayAgentMemory = async (state, agent) => {
   // If agent doesn't have memory array but has memorySize > 0, fetch full agent data

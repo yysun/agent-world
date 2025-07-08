@@ -27,8 +27,7 @@ import {
   handleMessage, handleConnectionStatus, handleError, handleComplete,
   incrementAgentMemorySize
 } from './sse-client.js';
-import { AgentModal, openAgentModal, closeAgentModalHandler } from './components/agent-modal.js';
-import { updateModalAgent } from './utils/agent-modal-state.js';
+import { AgentModal, openAgentModal, closeAgentModalHandler, updateModalAgent } from './components/agent-modal.js';
 import { AgentCard } from './components/agent-card.js';
 import Message from './components/message.js';
 

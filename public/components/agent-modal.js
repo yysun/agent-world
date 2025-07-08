@@ -1,23 +1,15 @@
 /**
- * Agent Modal Component - Enhanced with System Prompt Loading
+ * Agent Modal Component - Consolidated State Management and UI
  * 
- * Modal dialog for creating and editing agents with system prompt configuration.
- * Features clean separation of UI components and business logic, form validation,
- * error handling, and loading states.
+ * Complete modal solution for creating and editing agents with system prompt configuration.
+ * Includes state management, UI components, and business logic in a single consolidated file.
  * 
- * Enhanced Architecture:
- * - Modular UI components: ModalHeader, ErrorDisplay, SystemPromptForm, FormActions
- * - Business logic in handler functions with generator pattern for loading states
- * - AppRun functional patterns with immutable state updates
- * - Standardized state schema with backward compatibility
- * - Mode-specific optimizations for create vs edit
- * - System prompt loading: Loads from separate file when editing agents
- * 
- * System Prompt Storage:
- * - Create mode: System prompt entered directly and saved with agent
- * - Edit mode: System prompt loaded separately from system-prompt.md file
- * - Loading state shows placeholder while fetching system prompt
- * - Error handling for failed system prompt loading
+ * Features:
+ * - Modular UI components with clean separation
+ * - Integrated state management functions
+ * - Form validation and error handling
+ * - System prompt loading for edit mode
+ * - AppRun functional patterns with immutable updates
  * 
  * Usage:
  * ```javascript
@@ -28,21 +20,101 @@
 
 import * as api from '../api.js';
 import { AgentValidation } from '../app-state.js';
-import {
-  openCreateAgentModal,
-  openEditAgentModal,
-  closeAgentModal,
-  updateModalAgent,
-  setModalError
-} from '../utils/agent-modal-state.js';
 
 const { html, run } = window["apprun"];
 
-// Helper function to get selected world name from new state structure
+// ============================================================================
+// State Management - Modal State Operations
+// ============================================================================
+
+const createInitialModalState = () => ({
+  isOpen: false,
+  mode: 'create',
+  agent: null,
+  isLoading: false,
+  error: null,
+  validationErrors: []
+});
+
+const openCreateAgentModal = (state, options = {}) => {
+  const defaults = {
+    name: '',
+    systemPrompt: '',
+    type: 'assistant',
+    provider: 'ollama',
+    model: 'llama3.2:3b',
+    ...options.defaults
+  };
+
+  return {
+    ...state,
+    agentModal: {
+      isOpen: true,
+      mode: 'create',
+      agent: defaults,
+      isLoading: false,
+      error: null,
+      validationErrors: []
+    }
+  };
+};
+
+const openEditAgentModal = (state, agent, isLoading = false) => ({
+  ...state,
+  agentModal: {
+    isOpen: true,
+    mode: 'edit',
+    agent: { ...agent },
+    isLoading,
+    error: null,
+    validationErrors: []
+  }
+});
+
+const closeAgentModal = (state) => ({
+  ...state,
+  agentModal: createInitialModalState()
+});
+
+const updateModalAgent = (state, updates) => {
+  if (!state.agentModal?.agent) return state;
+
+  const updatedAgent = { ...state.agentModal.agent, ...updates };
+  const validation = AgentValidation.validateAgent(updatedAgent);
+
+  return {
+    ...state,
+    agentModal: {
+      ...state.agentModal,
+      agent: updatedAgent,
+      validationErrors: validation.isValid ? [] : Object.values(validation.errors)
+    }
+  };
+};
+
+const setModalError = (state, error) => ({
+  ...state,
+  agentModal: {
+    ...state.agentModal,
+    error,
+    isLoading: false
+  }
+});
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+// Get selected world name from state
 const getSelectedWorldName = (state) => {
   if (!state.selectedWorldId) return null;
   const world = state.worlds?.find(w => w.id === state.selectedWorldId);
   return world ? world.name : null;
+};
+
+const getSubmitButtonText = (isNewAgent, isLoading) => {
+  if (isLoading) return 'Saving...';
+  return isNewAgent ? 'Create Agent' : 'Update Agent';
 };
 
 // ============================================================================
@@ -139,15 +211,6 @@ const FormActions = (agent, isNewAgent, isLoading, hasValidationErrors, closeMod
 `;
 
 // ============================================================================
-// UI Helpers
-// ============================================================================
-
-const getSubmitButtonText = (isNewAgent, isLoading) => {
-  if (isLoading) return 'Saving...';
-  return isNewAgent ? 'Create Agent' : 'Update Agent';
-};
-
-// ============================================================================
 // Main Modal Component
 // ============================================================================
 
@@ -183,20 +246,37 @@ export const AgentModal = (modalState, closeModalFn) => {
 };
 
 // ============================================================================
-// Business Logic
+// Business Logic & API Operations
 // ============================================================================
 
-/**
- * Open Agent Modal - Enhanced to load system prompt for editing
- */
-export const openAgentModal = async (state, agent = null, e) => {
-  // Handle event propagation if event is provided
-  if (e && e.stopPropagation) {
-    e.stopPropagation();
+// Create agent with all data in single API call
+const createNewAgent = async (worldName, agent) => {
+  const createData = {
+    name: agent.name,
+    systemPrompt: agent.systemPrompt || '',
+    type: agent.type || 'assistant',
+    provider: agent.provider || 'ollama',
+    model: agent.model || 'llama3.2:3b'
+  };
+  await api.createAgent(worldName, createData);
+};
+
+// Update agent's system prompt and properties
+const updateExistingAgent = async (worldName, agent) => {
+  const updateData = {};
+  if (agent.systemPrompt !== undefined) {
+    updateData.systemPrompt = agent.systemPrompt;
   }
+  if (Object.keys(updateData).length > 0) {
+    await api.updateAgent(worldName, agent.name, updateData);
+  }
+};
+
+// Open modal with system prompt loading for edit mode
+export const openAgentModal = async (state, agent = null, e) => {
+  if (e?.stopPropagation) e.stopPropagation();
 
   if (!agent) {
-    // Create mode
     return openCreateAgentModal(state, {
       defaults: {
         name: '',
@@ -206,40 +286,35 @@ export const openAgentModal = async (state, agent = null, e) => {
         model: 'llama3.2:3b'
       }
     });
-  } else {
-    // Edit mode - first open with loading state, then load system prompt
-    const initialState = openEditAgentModal(state, agent, true);
+  }
 
-    try {
-      const worldName = getSelectedWorldName(state) || state.world?.current;
-      const fullAgent = await api.getAgent(worldName, agent.name);
+  // Edit mode - load system prompt
+  const initialState = openEditAgentModal(state, agent, true);
 
-      return openEditAgentModal(initialState, {
-        ...agent,
-        systemPrompt: fullAgent.systemPrompt || ''
-      }, false);
-    } catch (error) {
-      console.error('Error loading agent details:', error);
-      return {
-        ...initialState,
-        agentModal: {
-          ...initialState.agentModal,
-          isLoading: false,
-          error: `Failed to load agent details: ${error.message}`
-        }
-      };
-    }
+  try {
+    const worldName = getSelectedWorldName(state) || state.world?.current;
+    const fullAgent = await api.getAgent(worldName, agent.name);
+
+    return openEditAgentModal(initialState, {
+      ...agent,
+      systemPrompt: fullAgent.systemPrompt || ''
+    }, false);
+  } catch (error) {
+    console.error('Error loading agent details:', error);
+    return {
+      ...initialState,
+      agentModal: {
+        ...initialState.agentModal,
+        isLoading: false,
+        error: `Failed to load agent details: ${error.message}`
+      }
+    };
   }
 };
 
-/**
- * Close Agent Modal - Simplified without loading states
- */
+// Handle modal close and save operations
 export const closeAgentModalHandler = async (state, save, e) => {
-  // Handle form submission event if provided
-  if (e && e.preventDefault) {
-    e.preventDefault();
-  }
+  if (e?.preventDefault) e.preventDefault();
 
   if (!save || !state.agentModal?.agent) {
     return closeAgentModal(state);
@@ -247,9 +322,8 @@ export const closeAgentModalHandler = async (state, save, e) => {
 
   const agent = state.agentModal.agent;
   const isNewAgent = AgentValidation.isNewAgent(agent);
-
-  // Validate agent before saving
   const validation = AgentValidation.validateAgent(agent);
+
   if (!validation.isValid) {
     return {
       ...state,
@@ -270,14 +344,12 @@ export const closeAgentModalHandler = async (state, save, e) => {
       await updateExistingAgent(worldName, agent);
     }
 
-    // Refresh agents list and close modal
     const updatedAgents = await api.getAgents(worldName);
 
     return {
       ...closeAgentModal(state),
       agents: updatedAgents
     };
-
   } catch (error) {
     console.error('Error saving agent:', error);
     return {
@@ -290,34 +362,17 @@ export const closeAgentModalHandler = async (state, save, e) => {
   }
 };
 
-/**
- * Create New Agent - creates agent with all data in single API call
- */
-async function createNewAgent(worldName, agent) {
-  const createData = {
-    name: agent.name,
-    systemPrompt: agent.systemPrompt || '',
-    type: agent.type || 'assistant',
-    provider: agent.provider || 'ollama',
-    model: agent.model || 'llama3.2:3b'
-  };
+// ============================================================================
+// Exports
+// ============================================================================
 
-  await api.createAgent(worldName, createData);
-}
-
-/**
- * Update Existing Agent - updates agent's system prompt and properties
- */
-async function updateExistingAgent(worldName, agent) {
-  const updateData = {};
-
-  if (agent.systemPrompt !== undefined) {
-    updateData.systemPrompt = agent.systemPrompt;
-  }
-
-  if (Object.keys(updateData).length > 0) {
-    await api.updateAgent(worldName, agent.name, updateData);
-  }
-}
+export {
+  updateModalAgent,
+  setModalError,
+  closeAgentModal,
+  openCreateAgentModal,
+  openEditAgentModal,
+  createInitialModalState
+};
 
 
