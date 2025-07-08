@@ -1,30 +1,42 @@
 //@ts-check
 /**
- * World Actions Module - Complete world and state management
+ * Home Update Module - Complete home page state management
  *
- * Consolidated AppRun-based module providing:
- * - World/agent selection and data fetching via REST API
- * - Message handling and state updates with validation
- * - AppState initialization and persistence (localStorage)
- * - Type-safe operations with comprehensive error handling
+ * Consolidated module providing:
+ * - Input field state management for quick messages
+ * - Message sending with generator pattern for loading states
+ * - Navigation utilities (scroll, clear messages)
+ * - State helper utilities for computed values
+ * - UI interaction handlers
+ * - Application state initialization and world management
+ * - Agent management and validation utilities
+ * - Complete state operations for home page functionality
  * 
  * Key Features:
- * - Single source of truth for world-related operations
- * - Automatic data validation and error recovery
- * - Complete AppState management utilities
+ * - Generator-based async state updates for smooth UI
+ * - Comprehensive error handling with user feedback
+ * - Auto-scroll functionality for conversation area
+ * - State persistence and validation
+ * - Single source of truth for home-related operations
  * 
- * TypeScript definitions available in world-actions.d.ts
+ * TypeScript definitions available in home-update.d.ts
  */
 
 import * as api from '../api.js';
+import { sendChatMessage } from '../sse-client.js';
 
+const USER_ID = 'human';
+
+// ============================================================================
 // State Initialization
+// ============================================================================
 
 /**
  * Create initial application state
+ * @returns {import('./home-update').AppState} - Initial state with proper types
  */
 export function createInitialState() {
-  return {
+  return /** @type {import('./home-update').AppState} */ ({
     worlds: [],
     selectedWorldId: null,
     agents: [],
@@ -37,7 +49,7 @@ export function createInitialState() {
     needScroll: false,
     isSending: false,
     theme: 'system'
-  };
+  });
 }
 
 /**
@@ -58,12 +70,24 @@ export const initializeState = async () => {
     const persistedWorldName = localStorage.getItem('selectedWorldName');
     let selectedWorld = null;
 
-    if (persistedWorldName && state.worlds.find(w => w.name === persistedWorldName)) {
-      selectedWorld = state.worlds.find(w => w.name === persistedWorldName);
-    } else if (state.worlds.length > 0) {
-      selectedWorld = state.worlds[0];
+    if (persistedWorldName) {
+      // Find the world with the persisted name
+      const worlds = /** @type {import('../../core/types').World[]} */ (state.worlds);
+      for (const world of worlds) {
+        if (world.name === persistedWorldName) {
+          selectedWorld = world;
+          break;
+        }
+      }
+    }
+    
+    // Fallback to first world if none found
+    if (!selectedWorld && state.worlds.length > 0) {
+      const worlds = /** @type {import('../../core/types').World[]} */ (state.worlds);
+      selectedWorld = worlds[0];
     }
 
+    // Apply the world selection if found
     if (selectedWorld) {
       // Use the main selectWorld function instead of internal helper
       state = await selectWorld(state, selectedWorld.name);
@@ -80,10 +104,17 @@ export const initializeState = async () => {
   }
 };
 
+// ============================================================================
 // Data Validation Functions
+// ============================================================================
 
 /**
  * Validate if data is a valid World object
+ */
+/**
+ * Validate if data is a valid World object
+ * @param {any} data - The data to validate
+ * @returns {data is import('../../core/types').World} - Type guard for World
  */
 export function isValidWorld(data) {
   return data != null &&
@@ -118,7 +149,9 @@ export function isValidMessage(data) {
     typeof data.content === 'string';
 }
 
+// ============================================================================
 // World Management Functions
+// ============================================================================
 
 /**
  * Internal helper to set selected world state
@@ -134,6 +167,12 @@ function selectWorldState(state, worldId) {
 
 /**
  * Update worlds in state with validation
+ */
+/**
+ * Update the worlds in the application state
+ * @param {import('./home-update').AppState} state - Current application state
+ * @param {any[]} worldsData - Array of world data from API
+ * @returns {import('./home-update').AppState} - Updated state with valid worlds
  */
 export function updateWorlds(state, worldsData) {
   try {
@@ -187,7 +226,9 @@ export const selectWorld = async (state, worldName) => {
   return newState;
 };
 
+// ============================================================================
 // Agent Management Functions
+// ============================================================================
 
 /**
  * Update agents in selected world with validation
@@ -226,7 +267,9 @@ export function selectAgent(state, agentId) {
   }
 }
 
+// ============================================================================
 // Message Management Functions
+// ============================================================================
 
 /**
  * Add a message to the messages list
@@ -258,7 +301,9 @@ export function clearMessages(state) {
   };
 }
 
+// ============================================================================
 // State Management Functions
+// ============================================================================
 
 /**
  * Set agent being edited in modal
@@ -300,7 +345,9 @@ export function setUpdating(state, updating) {
   };
 }
 
+// ============================================================================
 // Agent Validation Utilities
+// ============================================================================
 
 /**
  * Agent validation utilities
@@ -340,6 +387,137 @@ export const AgentValidation = {
   isNewAgent(agent) {
     return !agent?.id;
   }
+};
+
+// ============================================================================
+// Input Handlers
+// ============================================================================
+
+/**
+ * Handle quick input field changes
+ */
+export const onQuickInput = (state, e) => ({ ...state, quickMessage: e.target.value });
+
+/**
+ * Handle keypress events in quick input field
+ */
+export const onQuickKeypress = (state, e) => {
+  if (e.key === 'Enter') {
+    const message = e.target.value.trim();
+    e.target.value = '';
+    return message ? sendQuickMessage({ ...state, quickMessage: message }) : state;
+  }
+};
+
+/**
+ * Send message with error handling using generator pattern for loading states
+ */
+export const sendQuickMessage = async function* (state) {
+  const message = state.quickMessage?.trim();
+  const selectedWorldName = getSelectedWorldName(state);
+
+  if (!message || !selectedWorldName) {
+    const errorText = !message ? 'Please enter a message' : 'No world selected';
+    const errorMessage = {
+      id: Date.now() + Math.random(),
+      role: 'system',
+      content: errorText,
+      createdAt: new Date(),
+      sender: 'System'
+    };
+
+    return {
+      ...state,
+      messages: [...state.messages, errorMessage],
+      needScroll: true
+    };
+  }
+
+  // Add user message immediately and show sending state
+  const userMessage = {
+    id: Date.now() + Math.random(),
+    role: 'user',
+    content: message,
+    createdAt: new Date(),
+    sender: USER_ID,
+    sending: true
+  };
+
+  // Yield initial state with user message and sending indicator
+  yield {
+    ...state,
+    messages: [...state.messages, userMessage],
+    quickMessage: '',
+    needScroll: true,
+    isSending: true
+  };
+
+  try {
+    await sendChatMessage(selectedWorldName, message, USER_ID);
+
+    // Return final state with sending completed
+    return {
+      ...state,
+      messages: [...state.messages, { ...userMessage, sending: false }],
+      quickMessage: '',
+      needScroll: true,
+      isSending: false
+    };
+  } catch (error) {
+    console.error('Failed to send message:', error);
+    const errorMessage = {
+      id: Date.now() + Math.random(),
+      role: 'system',
+      content: 'Failed to send message: ' + error.message,
+      createdAt: new Date(),
+      sender: 'System'
+    };
+
+    return {
+      ...state,
+      messages: [...state.messages, { ...userMessage, sending: false }, errorMessage],
+      quickMessage: '',
+      needScroll: true,
+      isSending: false
+    };
+  }
+};
+
+// ============================================================================
+// Navigation Utilities
+// ============================================================================
+
+/**
+ * Scroll to top of page
+ */
+export const scrollToTop = (state) => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  return state;
+};
+
+/**
+ * Auto-scroll to bottom after DOM updates
+ */
+export const scrollToBottom = (state) => {
+  if (state?.needScroll) {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      state.needScroll = false;
+    });
+  }
+};
+
+// ============================================================================
+// State Helper Utilities
+// ============================================================================
+
+/**
+ * Get selected world name from state structure
+ */
+export const getSelectedWorldName = (state) => {
+  if (!state.selectedWorldId) return null;
+  const world = state.worlds.find(w => w.id === state.selectedWorldId);
+  return world ? world.name : null;
 };
 
 // Export all functions for AppRun integration

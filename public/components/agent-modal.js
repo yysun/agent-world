@@ -26,7 +26,7 @@
  */
 
 import * as api from '../api.js';
-import { AgentValidation } from '../update/world-actions.js';
+import { AgentValidation } from '../update/home-update.js';
 
 const { Component, html, run, app } = window["apprun"];
 

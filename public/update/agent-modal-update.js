@@ -1,24 +1,38 @@
 //@ts-check
 /**
- * Agent Actions Module - Agent Memory Display and Management
+ * Agent Modal Update Module - Complete agent modal and memory management
  *
  * Consolidated module providing:
+ * - Agent modal opening and closing operations
+ * - Agent creation and editing workflow management
+ * - Agent refresh operations after modal updates
+ * - Memory count updates after clearing operations
+ * - Global event coordination between modal and parent components
  * - Agent memory display in conversation area with chat-like formatting
  * - Memory clearing functionality with actual API calls
- * - Smart memory loading for AgentInfo objects (fetches full Agent data when needed)
+ * - Smart memory loading for AgentInfo objects
  * - Real-time memory count updates and state synchronization
- * - Proper error handling and user feedback
  * 
  * Key Features:
+ * - Global AppRun event coordination (show-agent-modal, hide-agent-modal)
+ * - Agent refresh after CRUD operations
+ * - Memory count synchronization
  * - Chat-like interface with role-based message styling
  * - Automatic full agent data fetching when memory array is missing
  * - Backward compatibility with both AgentInfo and full Agent objects
  * - Memory operations with proper API integration and state updates
+ * - Error handling and user feedback
  * 
- * TypeScript definitions available in agent-actions.d.ts
+ * TypeScript definitions available in agent-modal-update.d.ts
  */
 
 import * as api from '../api.js';
+
+const { app } = window["apprun"];
+
+// ============================================================================
+// Agent Memory Display and Management
+// ============================================================================
 
 /**
  * Display agent memory in chat-like conversation format.
@@ -31,10 +45,11 @@ export const displayAgentMemory = async (state, agent) => {
   // If agent doesn't have memory array but has memorySize > 0, fetch full agent data
   if (!hasMemoryArray && agent && 'memorySize' in agent && agent.memorySize > 0) {
     try {
-      if (!state.worldName) {
+      const worldName = getSelectedWorldName(state);
+      if (!worldName) {
         throw new Error('No world selected');
       }
-      const fullAgent = await api.getAgent(state.worldName, agent.name);
+      const fullAgent = await api.getAgent(worldName, agent.name);
       agent = fullAgent;
     } catch (error) {
       console.error('Failed to fetch agent memory:', error);
@@ -44,7 +59,7 @@ export const displayAgentMemory = async (state, agent) => {
         sender: 'System',
         text: `Failed to load memories for agent "${agent?.name || 'Unknown'}": ${error.message}`,
         timestamp: new Date().toISOString(),
-        worldName: state.worldName
+        worldName: getSelectedWorldName(state)
       };
 
       return {
@@ -62,7 +77,7 @@ export const displayAgentMemory = async (state, agent) => {
       sender: 'System',
       text: `Agent "${agent?.name || 'Unknown'}" has no memories yet.`,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName
+      worldName: getSelectedWorldName(state)
     };
 
     return {
@@ -110,7 +125,7 @@ export const displayAgentMemory = async (state, agent) => {
       sender: sender,
       text: memoryText,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName
+      worldName: getSelectedWorldName(state)
     };
   });
 
@@ -126,15 +141,16 @@ export const displayAgentMemory = async (state, agent) => {
  */
 export const clearAgentMemory = async (state, agent) => {
   try {
-    if (!state.worldName) {
+    const worldName = getSelectedWorldName(state);
+    if (!worldName) {
       throw new Error('No world selected');
     }
 
     // Call the actual API to clear agent memory
-    await api.clearAgentMemory(state.worldName, agent.name);
+    await api.clearAgentMemory(worldName, agent.name);
 
     // Refresh agents list to update memory counts
-    const updatedAgents = await api.getAgents(state.worldName);
+    const updatedAgents = await api.getAgents(worldName);
 
     const confirmMessage = {
       id: Date.now() + Math.random(),
@@ -142,7 +158,7 @@ export const clearAgentMemory = async (state, agent) => {
       sender: 'System',
       text: `Successfully cleared all memories for agent "${agent.name}".`,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName
+      worldName: worldName
     };
 
     return {
@@ -160,7 +176,7 @@ export const clearAgentMemory = async (state, agent) => {
       sender: 'System',
       text: `Failed to clear memories for agent "${agent.name}": ${error.message}`,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName,
+      worldName: getSelectedWorldName(state),
       hasError: true
     };
 
@@ -178,15 +194,16 @@ export const clearAgentMemory = async (state, agent) => {
  */
 export const clearAgentMemoryFromModal = async (state, agent) => {
   try {
-    if (!state.worldName) {
+    const worldName = getSelectedWorldName(state);
+    if (!worldName) {
       throw new Error('No world selected');
     }
 
     // Call the actual API to clear agent memory
-    await api.clearAgentMemory(state.worldName, agent.name);
+    await api.clearAgentMemory(worldName, agent.name);
 
     // Refresh agents list to update memory counts
-    const updatedAgents = await api.getAgents(state.worldName);
+    const updatedAgents = await api.getAgents(worldName);
 
     const confirmMessage = {
       id: Date.now() + Math.random(),
@@ -194,11 +211,10 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
       sender: 'System',
       text: `Successfully cleared all memories for agent "${agent.name}" from modal.`,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName
+      worldName: worldName
     };
 
     // Close modal using global event
-    const { app } = window["apprun"];
     app.run('hide-agent-modal');
 
     return {
@@ -216,12 +232,11 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
       sender: 'System',
       text: `Failed to clear memories for agent "${agent.name}": ${error.message}`,
       timestamp: new Date().toISOString(),
-      worldName: state.worldName,
+      worldName: getSelectedWorldName(state),
       hasError: true
     };
 
     // Close modal using global event even on error
-    const { app } = window["apprun"];
     app.run('hide-agent-modal');
 
     return {
@@ -230,6 +245,87 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
       needScroll: true
     };
   }
+};
+
+// ============================================================================
+// Modal Control Functions
+// ============================================================================
+
+/**
+ * Open agent modal with existing agent context
+ */
+export const openAgentModal = (state, agent) => {
+  const worldName = getSelectedWorldName(state);
+  app.run('show-agent-modal', { agent, worldName });
+  return state;
+};
+
+/**
+ * Open agent modal for creating new agent
+ */
+export const openAgentModalCreate = (state, e) => {
+  if (e && e.stopPropagation) {
+    e.stopPropagation();
+  }
+  const worldName = getSelectedWorldName(state);
+  app.run('show-agent-modal', { agent: null, worldName });
+  return state;
+};
+
+/**
+ * Close agent modal
+ */
+export const closeAgentModal = (state) => {
+  app.run('hide-agent-modal');
+  return state;
+};
+
+// ============================================================================
+// Agent Management Functions
+// ============================================================================
+
+/**
+ * Handle agent updates from modal - refresh agent list
+ */
+export const handleAgentUpdated = async (state, { worldName, agent }) => {
+  try {
+    const updatedAgents = await api.getAgents(worldName);
+    return {
+      ...state,
+      agents: updatedAgents
+    };
+  } catch (error) {
+    console.error('Error refreshing agents:', error);
+    return state;
+  }
+};
+
+/**
+ * Handle agent memory cleared from modal - update memory counts
+ */
+export const handleAgentMemoryCleared = (state, { worldName, agentName }) => {
+  // Update the agent's memory count in the current agents list
+  const updatedAgents = state.agents.map(agent =>
+    agent.name === agentName ? { ...agent, memoryCount: 0 } : agent
+  );
+
+  return {
+    ...state,
+    agents: updatedAgents
+  };
+};
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Get selected world name from state structure
+ */
+const getSelectedWorldName = (state) => {
+  if (!state.selectedWorldId) return null;
+  const world = state.worlds.find(w => w.id === state.selectedWorldId);
+  return world ? world.name : null;
 };
 
 // Export all functions for AppRun integration

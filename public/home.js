@@ -1,16 +1,28 @@
 //@ts-check
 /**
- * Home Page Component - Main interface for Agent World
+ *import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
+import * as api from './api.js';
+import {
+  initializeState, selectWorld, addMessage, clearMessages as clearMessagesState,
+  onQuickInput, onQuickKeypress, sendQuickMessage,
+  scrollToTop, clearMessages, getSelectedWorldName, scrollToBottom
+} from './update/home-update.js';
+import {
+  displayAgentMemory, clearAgentMemory,
+  openAgentModal, openAgentModalCreate, closeAgentModal,
+  handleAgentUpdated, handleAgentMemoryCleared
+} from './update/agent-modal-update.js';onent - Main interface for Agent World
  *
- * Architecture: REST API + SSE streaming with AppRun framework using unified app-state
+ * Architecture: REST API + SSE streaming with AppRun framework using modular state management
  * Features: World selection, agent grid, real-time chat, theme toggle
  * Components: WorldCard, AgentCard, AgentModal, Message
  * 
  * Recent Changes:
- * - Updated to use unified AppState structure from world-actions.js
- * - Type-safe state management with //@ts-check
- * - Simplified state operations using core types
- * - Removed redundant state transformations
+ * - Refactored to use modular state update functions from dedicated modules
+ * - Home UI functions moved to ./update/home-update.js
+ * - Agent modal functions moved to ./update/agent-modal-update.js
+ * - Improved separation of concerns and maintainability
+ * - Type-safe state management with proper TypeScript definitions
  */
 
 const { Component, html, run, app } = window["apprun"];
@@ -18,10 +30,15 @@ const { Component, html, run, app } = window["apprun"];
 import { applyTheme, toggleTheme, getThemeIcon } from './theme.js';
 import * as api from './api.js';
 import {
-  initializeState, selectWorld,
-  displayAgentMemory, clearAgentMemory
-} from './update/index.js';
-import { addMessage, clearMessages as clearMessagesState } from './update/world-actions.js';
+  initializeState, selectWorld, addMessage, clearMessages as clearMessagesState,
+  onQuickInput, onQuickKeypress, sendQuickMessage,
+  scrollToTop, clearMessages, getSelectedWorldName, scrollToBottom
+} from './update/home-update.js';
+import {
+  displayAgentMemory, clearAgentMemory,
+  openAgentModal, openAgentModalCreate, closeAgentModal,
+  handleAgentUpdated, handleAgentMemoryCleared
+} from './update/agent-modal-update.js';
 import {
   sendChatMessage,
   handleStreamStart, handleStreamChunk, handleStreamEnd, handleStreamError,
@@ -42,166 +59,6 @@ const state = async () => {
   applyTheme(theme);
   return { ...initialState, theme };
 };
-
-// Input handlers
-const onQuickInput = (state, e) => ({ ...state, quickMessage: e.target.value });
-
-const onQuickKeypress = (state, e) => {
-  if (e.key === 'Enter') {
-    const message = e.target.value.trim();
-    e.target.value = '';
-    return message ? sendQuickMessage({ ...state, quickMessage: message }) : state;
-  }
-};
-
-// Send message with error handling using generator pattern for loading states
-const sendQuickMessage = async function* (state) {
-  const message = state.quickMessage?.trim();
-  const selectedWorldName = getSelectedWorldName(state);
-
-  if (!message || !selectedWorldName) {
-    const errorText = !message ? 'Please enter a message' : 'No world selected';
-    const errorMessage = {
-      id: Date.now() + Math.random(),
-      role: 'system',
-      content: errorText,
-      createdAt: new Date(),
-      sender: 'System'
-    };
-
-    return {
-      ...state,
-      messages: [...state.messages, errorMessage],
-      needScroll: true
-    };
-  }
-
-  // Add user message immediately and show sending state
-  const userMessage = {
-    id: Date.now() + Math.random(),
-    role: 'user',
-    content: message,
-    createdAt: new Date(),
-    sender: USER_ID,
-    sending: true
-  };
-
-  // Yield initial state with user message and sending indicator
-  yield {
-    ...state,
-    messages: [...state.messages, userMessage],
-    quickMessage: '',
-    needScroll: true,
-    isSending: true
-  };
-
-  try {
-    await sendChatMessage(selectedWorldName, message, USER_ID);
-
-    // Return final state with sending completed
-    return {
-      ...state,
-      messages: [...state.messages, { ...userMessage, sending: false }],
-      quickMessage: '',
-      needScroll: true,
-      isSending: false
-    };
-  } catch (error) {
-    console.error('Failed to send message:', error);
-    const errorMessage = {
-      id: Date.now() + Math.random(),
-      role: 'system',
-      content: 'Failed to send message: ' + error.message,
-      createdAt: new Date(),
-      sender: 'System'
-    };
-
-    return {
-      ...state,
-      messages: [...state.messages, { ...userMessage, sending: false }, errorMessage],
-      quickMessage: '',
-      needScroll: true,
-      isSending: false
-    };
-  }
-};
-
-// Scroll to top function
-const scrollToTop = (state) => {
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  return state;
-};
-
-// Clear messages function
-const clearMessages = (state) => {
-  return clearMessagesState(state);
-};
-
-// Modal event handlers - use global events
-const openAgentModal = (state, agent) => {
-  const worldName = getSelectedWorldName(state);
-  app.run('show-agent-modal', { agent, worldName });
-  return state;
-};
-
-const openAgentModalCreate = (state, e) => {
-  if (e && e.stopPropagation) {
-    e.stopPropagation();
-  }
-  const worldName = getSelectedWorldName(state);
-  app.run('show-agent-modal', { agent: null, worldName });
-  return state;
-};
-
-const closeAgentModal = (state) => {
-  app.run('hide-agent-modal');
-  return state;
-};
-
-// Handle agent updates from modal
-const handleAgentUpdated = async (state, { worldName, agent }) => {
-  try {
-    const updatedAgents = await api.getAgents(worldName);
-    return {
-      ...state,
-      agents: updatedAgents
-    };
-  } catch (error) {
-    console.error('Error refreshing agents:', error);
-    return state;
-  }
-};
-
-// Handle agent memory cleared from modal
-const handleAgentMemoryCleared = (state, { worldName, agentName }) => {
-  // Update the agent's memory count in the current agents list
-  const updatedAgents = state.agents.map(agent =>
-    agent.name === agentName ? { ...agent, memoryCount: 0 } : agent
-  );
-
-  return {
-    ...state,
-    agents: updatedAgents
-  };
-};
-
-// Auto-scroll after DOM updates
-const scrollToBottom = (state) => {
-  if (state?.needScroll) {
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-      state.needScroll = false;
-    });
-  }
-};
-
-// Helper functions to get computed values from new state structure
-const getSelectedWorldName = (state) => {
-  if (!state.selectedWorldId) return null;
-  const world = state.worlds.find(w => w.id === state.selectedWorldId);
-  return world ? world.name : null;
-};
-
 
 // Main view
 const view = (state) => {

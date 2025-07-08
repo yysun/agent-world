@@ -580,144 +580,6 @@ declare module "core/agent-storage" {
      */
     export function deleteAgentFromDisk(rootPath: string, worldId: string, agentId: string): Promise<boolean>;
 }
-declare module "core/events" {
-    /**
-     * Unified Events Module - World and Agent Event Functions
-     *
-     * Features:
-     * - Direct World.eventEmitter event publishing and subscription with type safety
-     * - Agent subscription and message processing logic with world context
-     * - Natural event isolation per World instance ensuring no cross-world interference
-     * - Zero dependencies on existing event systems or complex abstractions
-     * - Type-safe event handling with proper interfaces and validation
-     * - High-level message broadcasting with sender attribution and timestamping
-     * - Fixed auto-mention functionality with proper self-mention removal order
-     * - Preserved newline handling in LLM streaming responses for proper formatting
-     *
-     * Core Functions:
-     * World Events:
-     * - publishMessage: Emit message events to World.eventEmitter with automatic ID generation
-     * - subscribeToMessages: Subscribe to World.eventEmitter message events with cleanup
-     * - publishSSE: Emit SSE events for streaming responses with structured data
-     * - subscribeToSSE: Subscribe to SSE streaming events with proper typing
-     * - broadcastToWorld: High-level message broadcasting with default sender handling
-     *
-     * Agent Events:
-     * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering and reset logic
-     * - resetLLMCallCountIfNeeded: Reset LLM call count for human/system messages with agent state persistence
-     * - processAgentMessage: Handle agent message processing with world context and memory persistence
-     * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
-     * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
-     * - shouldAutoMention: Determine if agent should auto-mention sender (fixed bug for all sender types)
-     * - getValidMentions: Get all paragraph beginning mentions excluding self-mentions
-     * - isSenderMentionedAtBeginning: Check if specific sender is mentioned at paragraph beginning
-     *
-     * Auto-Mention Logic (Enhanced to Prevent Loops):
-     * - Step 1: Remove self-mentions from response beginning (prevents agent self-mention)
-     * - Step 2: Add auto-mention for sender only if NO valid mentions exist at paragraph beginnings
-     * - Fixed bug: Auto-mention all valid senders (human or agent), not just agents
-     * - Fixed bug: Only skip auto-mention if ANY valid mentions exist at paragraph beginnings (excluding self)
-     * - Uses extractParagraphBeginningMentions for consistent mention detection
-     * - Prevents agent loops (e.g., @gm->@pro->@gm) by checking for ANY mention at beginning
-     * - Allows redirections (e.g., @gm->@con) by preserving explicit mentions
-     * - Handles case-insensitive matching while preserving original case
-     * - Ensures published message matches stored memory content
-     * - Preserves original formatting including newlines and whitespace structure
-     *
-     * Event Structure:
-     * - Message Events: WorldMessageEvent with content, sender, timestamp, and messageId
-     * - SSE Events: WorldSSEEvent with agentName, type, content, error, and usage data
-     * - Automatic timestamp generation and unique ID assignment for all events
-     * - Structured event data ensuring consistency across all event consumers
-     *
-     * Implementation Details:
-     * - Uses World.eventEmitter.emit() and .on() directly for maximum performance
-     * - No abstraction layers or complex providers reducing complexity and overhead
-     * - Events are naturally scoped to World instance preventing event leakage
-     * - Ready for agent subscription and LLM integration with consistent interfaces
-     * - Subscription functions return cleanup callbacks for proper memory management
-     * - All events include timestamps and unique IDs for debugging and tracing
-     * - Newline preservation in LLM responses maintains proper text formatting
-     * - LLM call count reset happens before shouldAgentRespond for accurate turn limit checking
-     * - Agent state persistence ensures turn count resets are saved to disk immediately
-     * - LLM call count is saved to disk after every LLM call and memory save operation
-     */
-    import { World, Agent, WorldMessageEvent, WorldSSEEvent } from "core/types";
-    /**
-     * Message publishing using World.eventEmitter
-     */
-    export function publishMessage(world: World, content: string, sender: string): void;
-    /**
-     * Message subscription using World.eventEmitter
-     */
-    export function subscribeToMessages(world: World, handler: (event: WorldMessageEvent) => void): () => void;
-    /**
-     * SSE events using World.eventEmitter
-     */
-    export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void;
-    /**
-     * SSE subscription using World.eventEmitter
-     */
-    export function subscribeToSSE(world: World, handler: (event: WorldSSEEvent) => void): () => void;
-    /**
-     * Broadcast message to all agents in world
-     */
-    export function broadcastToWorld(world: World, message: string, sender?: string): void;
-    /**
-     * Auto-mention utility functions for processAgentMessage
-     */
-    /**
-     * Check if response already has ANY mention at the beginning using extractParagraphBeginningMentions logic
-     * This prevents auto-mention loops by detecting any existing mention, not just the sender's
-     */
-    export function hasAnyMentionAtBeginning(response: string): boolean;
-    /**
-     * Add auto-mention at the beginning of response, preserving case if found elsewhere
-     * Modified to check for ANY mention at beginning to prevent loops
-     */
-    export function addAutoMention(response: string, sender: string): string;
-    /**
-     * Get all valid mentions at the beginning of every paragraph, excluding self-mentions
-     * This is used to determine if auto-mention should be added
-     */
-    export function getValidMentions(response: string, agentId: string): string[];
-    /**
-     * Check if the specific sender is mentioned at the beginning of the response
-     * This is more specific than hasAnyMentionAtBeginning - only checks for the sender
-     */
-    export function isSenderMentionedAtBeginning(response: string, sender: string): boolean;
-    /**
-     * Determine if agent should auto-mention the sender based on message context
-     * Fixed bug: Should auto-mention sender regardless of sender type (human or agent)
-     * Fixed bug: Only add auto-mention if NO valid mentions exist at paragraph beginnings
-     */
-    export function shouldAutoMention(response: string, sender: string, agentId: string): boolean;
-    /**
-     * Remove all consecutive self-mentions from response beginning (case-insensitive)
-     */
-    export function removeSelfMentions(response: string, agentId: string): string;
-    /**
-     * Agent subscription with automatic processing
-     */
-    export function subscribeAgentToMessages(world: World, agent: Agent): () => void;
-    /**
-     * Save incoming message to agent memory (independent of LLM processing)
-     */
-    export function saveIncomingMessageToMemory(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
-    /**
-     * Agent message processing logic (enhanced from src/agent.ts)
-     */
-    export function processAgentMessage(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
-    /**
-     * Reset LLM call count for human and system messages with agent state persistence
-     * This should be called before shouldAgentRespond to ensure proper turn limit checking
-     */
-    export function resetLLMCallCountIfNeeded(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
-    /**
-     * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
-     */
-    export function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean>;
-}
 declare module "core/llm-config" {
     /**
      * LLM Configuration Module - Browser-Safe Provider Configuration Management
@@ -884,6 +746,144 @@ declare module "core/llm-manager" {
      * Returns the number of items that were cleared
      */
     export function clearLLMQueue(): number;
+}
+declare module "core/events" {
+    /**
+     * Unified Events Module - World and Agent Event Functions
+     *
+     * Features:
+     * - Direct World.eventEmitter event publishing and subscription with type safety
+     * - Agent subscription and message processing logic with world context
+     * - Natural event isolation per World instance ensuring no cross-world interference
+     * - Zero dependencies on existing event systems or complex abstractions
+     * - Type-safe event handling with proper interfaces and validation
+     * - High-level message broadcasting with sender attribution and timestamping
+     * - Fixed auto-mention functionality with proper self-mention removal order
+     * - Preserved newline handling in LLM streaming responses for proper formatting
+     *
+     * Core Functions:
+     * World Events:
+     * - publishMessage: Emit message events to World.eventEmitter with automatic ID generation
+     * - subscribeToMessages: Subscribe to World.eventEmitter message events with cleanup
+     * - publishSSE: Emit SSE events for streaming responses with structured data
+     * - subscribeToSSE: Subscribe to SSE streaming events with proper typing
+     * - broadcastToWorld: High-level message broadcasting with default sender handling
+     *
+     * Agent Events:
+     * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering and reset logic
+     * - resetLLMCallCountIfNeeded: Reset LLM call count for human/system messages with agent state persistence
+     * - processAgentMessage: Handle agent message processing with world context and memory persistence
+     * - shouldAgentRespond: Message filtering logic with world-specific turn limits and mention detection
+     * - saveIncomingMessageToMemory: Passive memory storage independent of LLM processing
+     * - shouldAutoMention: Determine if agent should auto-mention sender (fixed bug for all sender types)
+     * - getValidMentions: Get all paragraph beginning mentions excluding self-mentions
+     * - isSenderMentionedAtBeginning: Check if specific sender is mentioned at paragraph beginning
+     *
+     * Auto-Mention Logic (Enhanced to Prevent Loops):
+     * - Step 1: Remove self-mentions from response beginning (prevents agent self-mention)
+     * - Step 2: Add auto-mention for sender only if NO valid mentions exist at paragraph beginnings
+     * - Fixed bug: Auto-mention all valid senders (human or agent), not just agents
+     * - Fixed bug: Only skip auto-mention if ANY valid mentions exist at paragraph beginnings (excluding self)
+     * - Uses extractParagraphBeginningMentions for consistent mention detection
+     * - Prevents agent loops (e.g., @gm->@pro->@gm) by checking for ANY mention at beginning
+     * - Allows redirections (e.g., @gm->@con) by preserving explicit mentions
+     * - Handles case-insensitive matching while preserving original case
+     * - Ensures published message matches stored memory content
+     * - Preserves original formatting including newlines and whitespace structure
+     *
+     * Event Structure:
+     * - Message Events: WorldMessageEvent with content, sender, timestamp, and messageId
+     * - SSE Events: WorldSSEEvent with agentName, type, content, error, and usage data
+     * - Automatic timestamp generation and unique ID assignment for all events
+     * - Structured event data ensuring consistency across all event consumers
+     *
+     * Implementation Details:
+     * - Uses World.eventEmitter.emit() and .on() directly for maximum performance
+     * - No abstraction layers or complex providers reducing complexity and overhead
+     * - Events are naturally scoped to World instance preventing event leakage
+     * - Ready for agent subscription and LLM integration with consistent interfaces
+     * - Subscription functions return cleanup callbacks for proper memory management
+     * - All events include timestamps and unique IDs for debugging and tracing
+     * - Newline preservation in LLM responses maintains proper text formatting
+     * - LLM call count reset happens before shouldAgentRespond for accurate turn limit checking
+     * - Agent state persistence ensures turn count resets are saved to disk immediately
+     * - LLM call count is saved to disk after every LLM call and memory save operation
+     */
+    import { World, Agent, WorldMessageEvent, WorldSSEEvent } from "core/types";
+    /**
+     * Message publishing using World.eventEmitter
+     */
+    export function publishMessage(world: World, content: string, sender: string): void;
+    /**
+     * Message subscription using World.eventEmitter
+     */
+    export function subscribeToMessages(world: World, handler: (event: WorldMessageEvent) => void): () => void;
+    /**
+     * SSE events using World.eventEmitter
+     */
+    export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void;
+    /**
+     * SSE subscription using World.eventEmitter
+     */
+    export function subscribeToSSE(world: World, handler: (event: WorldSSEEvent) => void): () => void;
+    /**
+     * Broadcast message to all agents in world
+     */
+    export function broadcastToWorld(world: World, message: string, sender?: string): void;
+    /**
+     * Auto-mention utility functions for processAgentMessage
+     */
+    /**
+     * Check if response already has ANY mention at the beginning using extractParagraphBeginningMentions logic
+     * This prevents auto-mention loops by detecting any existing mention, not just the sender's
+     */
+    export function hasAnyMentionAtBeginning(response: string): boolean;
+    /**
+     * Add auto-mention at the beginning of response, preserving case if found elsewhere
+     * Modified to check for ANY mention at beginning to prevent loops
+     */
+    export function addAutoMention(response: string, sender: string): string;
+    /**
+     * Get all valid mentions at the beginning of every paragraph, excluding self-mentions
+     * This is used to determine if auto-mention should be added
+     */
+    export function getValidMentions(response: string, agentId: string): string[];
+    /**
+     * Check if the specific sender is mentioned at the beginning of the response
+     * This is more specific than hasAnyMentionAtBeginning - only checks for the sender
+     */
+    export function isSenderMentionedAtBeginning(response: string, sender: string): boolean;
+    /**
+     * Determine if agent should auto-mention the sender based on message context
+     * Fixed bug: Should auto-mention sender regardless of sender type (human or agent)
+     * Fixed bug: Only add auto-mention if NO valid mentions exist at paragraph beginnings
+     */
+    export function shouldAutoMention(response: string, sender: string, agentId: string): boolean;
+    /**
+     * Remove all consecutive self-mentions from response beginning (case-insensitive)
+     */
+    export function removeSelfMentions(response: string, agentId: string): string;
+    /**
+     * Agent subscription with automatic processing
+     */
+    export function subscribeAgentToMessages(world: World, agent: Agent): () => void;
+    /**
+     * Save incoming message to agent memory (independent of LLM processing)
+     */
+    export function saveIncomingMessageToMemory(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
+    /**
+     * Agent message processing logic (enhanced from src/agent.ts)
+     */
+    export function processAgentMessage(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
+    /**
+     * Reset LLM call count for human and system messages with agent state persistence
+     * This should be called before shouldAgentRespond to ensure proper turn limit checking
+     */
+    export function resetLLMCallCountIfNeeded(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<void>;
+    /**
+     * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
+     */
+    export function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean>;
 }
 declare module "core/managers" {
     import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, WorldData } from "core/types";
