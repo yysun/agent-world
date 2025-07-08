@@ -1,46 +1,39 @@
+//@ts-check
 /**
- * Agent Actions Module - Agent Memory Display Fix
+ * Agent Actions Module - Agent Memory Display and Management
  *
- * Handles agent-related actions and memory management:
- * - Display agent memory in conversation area
- * - Clear agent memory functionality with actual API calls
- * - Memory format parsing and chat-like display
- * - Automatic full agent data fetching when memory is not loaded
- * - Agent memory count updates after clearing memory or receiving messages
- *
- * Core Fix:
- * - Fixed issue where clicking agent card showed "no memories" despite having memories
- * - Added automatic full agent data fetching when memory array is missing but memorySize > 0
- * - Agent cards now properly load and display conversation history
- * - Fixed conversation area not updating when switching between agents (messages now replace instead of append)
- * - Maintains backward compatibility with both AgentInfo (memorySize) and full Agent (memory) objects
- * - Added agent memory count refresh after clearing memory operations
- *
- * Memory Display Features:
- * - Chat-like interface for agent memories
- * - User messages: right-aligned, 80% width, darker gray background
- * - Assistant messages: left-aligned, 80% width, standard background
- * - Automatic detection of message roles from memory structure
- * - Support for string, object with content/text/message properties, and JSON fallback
- * - Smart loading: fetches full agent data if memory array is missing but memorySize > 0
- * - Real-time memory count updates on agent cards
- *
- * Implementation:
- * - Proper memory content parsing for different formats
- * - System messages for empty memory states
- * - Role detection for user/assistant message styling
- * - Real API calls for memory clearing functionality
- * - Async agent data loading for complete memory access
- * - Error handling for failed agent data fetches
- * - Agent list refresh after memory operations to update counts
+ * Consolidated module providing:
+ * - Agent memory display in conversation area with chat-like formatting
+ * - Memory clearing functionality with actual API calls
+ * - Smart memory loading for AgentInfo objects (fetches full Agent data when needed)
+ * - Real-time memory count updates and state synchronization
+ * - Proper error handling and user feedback
+ * 
+ * Key Features:
+ * - Chat-like interface with role-based message styling
+ * - Automatic full agent data fetching when memory array is missing
+ * - Backward compatibility with both AgentInfo and full Agent objects
+ * - Memory operations with proper API integration and state updates
+ * 
+ * TypeScript definitions available in agent-actions.d.ts
  */
 
 import * as api from '../api.js';
 
+/**
+ * Display agent memory in chat-like conversation format.
+ * Handles different memory formats and automatically fetches full agent data if needed.
+ */
 export const displayAgentMemory = async (state, agent) => {
+  // Type guard to check if agent has full memory data
+  const hasMemoryArray = agent && 'memory' in agent;
+
   // If agent doesn't have memory array but has memorySize > 0, fetch full agent data
-  if (!agent?.memory && agent?.memorySize > 0) {
+  if (!hasMemoryArray && agent && 'memorySize' in agent && agent.memorySize > 0) {
     try {
+      if (!state.worldName) {
+        throw new Error('No world selected');
+      }
       const fullAgent = await api.getAgent(state.worldName, agent.name);
       agent = fullAgent;
     } catch (error) {
@@ -61,7 +54,8 @@ export const displayAgentMemory = async (state, agent) => {
     }
   }
 
-  if (!agent || !agent.memory || agent.memory.length === 0) {
+  // Check if agent has memory after potential fetch
+  if (!agent || !('memory' in agent) || !agent.memory || agent.memory.length === 0) {
     const noMemoryMessage = {
       id: Date.now() + Math.random(),
       type: 'system',
@@ -89,9 +83,9 @@ export const displayAgentMemory = async (state, agent) => {
       // If memory is an object, try to extract meaningful content
       if (memory.content) {
         memoryText = memory.content;
-      } else if (memory.text) {
+      } else if ('text' in memory && typeof memory.text === 'string') {
         memoryText = memory.text;
-      } else if (memory.message) {
+      } else if ('message' in memory && typeof memory.message === 'string') {
         memoryText = memory.message;
       } else {
         // Fallback: stringify the object in a readable way
@@ -99,10 +93,10 @@ export const displayAgentMemory = async (state, agent) => {
       }
 
       // Determine if this is a user or assistant message based on the memory structure
-      if (memory.role === 'user' || memory.type === 'user' || memory.sender === 'user') {
+      if (memory.role === 'user' || ('type' in memory && memory.type === 'user') || ('sender' in memory && memory.sender === 'user')) {
         messageType = 'memory-user';
-        sender = memory.sender;
-      } else if (memory.role === 'assistant' || memory.type === 'assistant' || memory.sender === 'assistant') {
+        sender = (memory.sender && typeof memory.sender === 'string') ? memory.sender : 'User';
+      } else if (memory.role === 'assistant' || ('type' in memory && memory.type === 'assistant') || ('sender' in memory && memory.sender === 'assistant')) {
         messageType = 'memory-assistant';
         sender = agent.name;
       }
@@ -126,8 +120,16 @@ export const displayAgentMemory = async (state, agent) => {
   };
 };
 
+/**
+ * Clear agent memory with API call and state update.
+ * Refreshes agent list to show updated memory counts.
+ */
 export const clearAgentMemory = async (state, agent) => {
   try {
+    if (!state.worldName) {
+      throw new Error('No world selected');
+    }
+
     // Call the actual API to clear agent memory
     await api.clearAgentMemory(state.worldName, agent.name);
 
@@ -170,8 +172,16 @@ export const clearAgentMemory = async (state, agent) => {
   }
 };
 
+/**
+ * Clear agent memory from modal with API call, state update, and modal close.
+ * Ensures modal is closed even if the operation fails.
+ */
 export const clearAgentMemoryFromModal = async (state, agent) => {
   try {
+    if (!state.worldName) {
+      throw new Error('No world selected');
+    }
+
     // Call the actual API to clear agent memory
     await api.clearAgentMemory(state.worldName, agent.name);
 
@@ -221,3 +231,5 @@ export const clearAgentMemoryFromModal = async (state, agent) => {
     };
   }
 };
+
+// Export all functions for AppRun integration

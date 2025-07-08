@@ -7,7 +7,7 @@
  * Components: WorldCard, AgentCard, AgentModal, Message
  * 
  * Recent Changes:
- * - Updated to use unified AppState structure from app-state.js
+ * - Updated to use unified AppState structure from world-actions.js
  * - Type-safe state management with //@ts-check
  * - Simplified state operations using core types
  * - Removed redundant state transformations
@@ -21,7 +21,7 @@ import {
   initializeState, selectWorld,
   displayAgentMemory, clearAgentMemory
 } from './update/index.js';
-import { addMessage, clearMessages as clearMessagesState } from './app-state.js';
+import { addMessage, clearMessages as clearMessagesState } from './update/world-actions.js';
 import {
   sendChatMessage,
   handleStreamStart, handleStreamChunk, handleStreamEnd, handleStreamError,
@@ -139,7 +139,8 @@ const clearMessages = (state) => {
 
 // Modal event handlers - use global events
 const openAgentModal = (state, agent) => {
-  app.run('show-agent-modal', agent);
+  const worldName = getSelectedWorldName(state);
+  app.run('show-agent-modal', { agent, worldName });
   return state;
 };
 
@@ -147,7 +148,8 @@ const openAgentModalCreate = (state, e) => {
   if (e && e.stopPropagation) {
     e.stopPropagation();
   }
-  app.run('show-agent-modal', null);
+  const worldName = getSelectedWorldName(state);
+  app.run('show-agent-modal', { agent: null, worldName });
   return state;
 };
 
@@ -200,15 +202,6 @@ const getSelectedWorldName = (state) => {
   return world ? world.name : null;
 };
 
-const getQuickMessage = (state) => {
-  // For now, we'll store this as a simple property
-  return state.quickMessage || '';
-};
-
-const getNeedScroll = (state) => {
-  // For now, we'll store this as a simple property
-  return state.needScroll || false;
-};
 
 // Main view
 const view = (state) => {

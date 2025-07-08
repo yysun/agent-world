@@ -6,19 +6,27 @@
  * 
  * Features:
  * - Standalone AppRun Component with state/view/update pattern
- * - Internal state management with global event communication
+ * - Internal state management with world context preservation
  * - Form validation and error handling
  * - System prompt loading for edit mode
  * - Complete encapsulation with callback events
+ * - Robust error handling for missing world context
  * 
  * Communication:
- * - Open: app.run('show-agent-modal', agent)
+ * - Open: app.run('show-agent-modal', { agent, worldName })
  * - Close: app.run('hide-agent-modal')
  * - Updates: app.run('agent-updated', updatedAgent)
+ * 
+ * Changes:
+ * - Consolidated getCurrentWorldName() dependency by storing worldName in modal state
+ * - Removed redundant currentWorld property
+ * - Enhanced payload handling to support both old and new calling formats
+ * - Added comprehensive error handling for missing world name
+ * - Simplified API operation functions with validation
  */
 
 import * as api from '../api.js';
-import { AgentValidation } from '../app-state.js';
+import { AgentValidation } from '../update/world-actions.js';
 
 const { Component, html, run, app } = window["apprun"];
 
@@ -30,10 +38,10 @@ const state = () => ({
   isOpen: false,
   mode: 'create', // 'create' | 'edit'
   agent: null,
+  worldName: null, // Store world name in modal state
   isLoading: false,
   error: null,
-  validationErrors: [],
-  currentWorld: null
+  validationErrors: []
 });
 
 // ============================================================================
@@ -43,14 +51,6 @@ const state = () => ({
 const getSubmitButtonText = (isNewAgent, isLoading) => {
   if (isLoading) return 'Saving...';
   return isNewAgent ? 'Create Agent' : 'Update Agent';
-};
-
-const getCurrentWorldName = () => {
-  // Get current world from global app state
-  const appState = app.state;
-  if (!appState?.selectedWorldId) return null;
-  const world = appState.worlds?.find(w => w.id === appState.selectedWorldId);
-  return world ? world.name : null;
 };
 
 // ============================================================================
@@ -152,7 +152,7 @@ const FormActions = (agent, isNewAgent, isLoading, hasValidationErrors) => html`
 
 const view = (state) => {
   if (!state.isOpen) {
-    return '';
+    return '<div></div>'; // Render nothing if modal is closed
   }
 
   const { agent, isLoading, error, validationErrors } = state;
@@ -182,8 +182,9 @@ const view = (state) => {
 // Business Logic & API Operations
 // ============================================================================
 
-// Create agent with all data in single API call
 const createNewAgent = async (worldName, agent) => {
+  if (!worldName) throw new Error('World name is required');
+
   const createData = {
     name: agent.name,
     systemPrompt: agent.systemPrompt || '',
@@ -194,8 +195,9 @@ const createNewAgent = async (worldName, agent) => {
   await api.createAgent(worldName, createData);
 };
 
-// Update agent's system prompt and properties
 const updateExistingAgent = async (worldName, agent) => {
+  if (!worldName) throw new Error('World name is required');
+
   const updateData = {};
   if (agent.systemPrompt !== undefined) {
     updateData.systemPrompt = agent.systemPrompt;
@@ -211,13 +213,40 @@ const updateExistingAgent = async (worldName, agent) => {
 
 const update = {
   // Global events for modal control
-  'show-agent-modal': async (state, agent) => {
+  'show-agent-modal': async (state, payload) => {
+    // Handle both old format (agent only) and new format ({ agent, worldName })
+    let agent, worldName;
+
+    if (payload && typeof payload === 'object') {
+      if (payload.agent !== undefined) {
+        // New format: { agent, worldName }
+        agent = payload.agent;
+        worldName = payload.worldName;
+      } else {
+        // Old format: agent object directly
+        agent = payload;
+        worldName = null;
+      }
+    } else {
+      agent = payload;
+      worldName = null;
+    }
+
+    if (!worldName) {
+      return {
+        ...state,
+        isOpen: true,
+        error: 'World name is required to open agent modal'
+      };
+    }
+
     if (!agent) {
       // Create mode
       return {
         ...state,
         isOpen: true,
         mode: 'create',
+        worldName,
         agent: {
           name: '',
           systemPrompt: '',
@@ -236,6 +265,7 @@ const update = {
       ...state,
       isOpen: true,
       mode: 'edit',
+      worldName,
       agent: { ...agent },
       isLoading: true,
       error: null,
@@ -243,7 +273,6 @@ const update = {
     };
 
     try {
-      const worldName = getCurrentWorldName();
       const fullAgent = await api.getAgent(worldName, agent.name);
 
       return {
@@ -268,6 +297,7 @@ const update = {
     ...state,
     isOpen: false,
     agent: null,
+    worldName: null,
     error: null,
     validationErrors: []
   }),
@@ -301,7 +331,14 @@ const update = {
   'save-agent': async (state, e) => {
     if (e?.preventDefault) e.preventDefault();
 
-    const agent = state.agent;
+    const { agent, worldName } = state;
+    if (!worldName) {
+      return {
+        ...state,
+        error: 'World name is required to save agent'
+      };
+    }
+
     const isNewAgent = AgentValidation.isNewAgent(agent);
     const validation = AgentValidation.validateAgent(agent);
 
@@ -314,8 +351,6 @@ const update = {
     }
 
     try {
-      const worldName = getCurrentWorldName();
-
       if (isNewAgent) {
         await createNewAgent(worldName, agent);
       } else {
@@ -330,6 +365,7 @@ const update = {
         ...state,
         isOpen: false,
         agent: null,
+        worldName: null,
         error: null,
         validationErrors: []
       };
@@ -344,8 +380,15 @@ const update = {
 
   // Clear agent memory
   'clear-agent-memory': async (state, agent) => {
+    const { worldName } = state;
+    if (!worldName) {
+      return {
+        ...state,
+        error: 'World name is required to clear agent memory'
+      };
+    }
+
     try {
-      const worldName = getCurrentWorldName();
       await api.clearAgentMemory(worldName, agent.name);
 
       // Notify parent component

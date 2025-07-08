@@ -1,48 +1,27 @@
 //@ts-check
 /**
- * Unified Application State - Type-safe state management using core types
+ * World Actions Module - Complete world and state management
+ *
+ * Consolidated AppRun-based module providing:
+ * - World/agent selection and data fetching via REST API
+ * - Message handling and state updates with validation
+ * - AppState initialization and persistence (localStorage)
+ * - Type-safe operations with comprehensive error handling
  * 
- * Features:
- * - Single source of truth for application state
- * - Direct use of core types from agent-world.d.ts
- * - Simple error handling with basic validation
- * - TypeScript checking via //@ts-check directive
+ * Key Features:
+ * - Single source of truth for world-related operations
+ * - Automatic data validation and error recovery
+ * - Complete AppState management utilities
  * 
- * State Structure:
- * - worlds: Available worlds list
- * - selectedWorldId: Currently selected world ID
- * - agents: Agents in selected world
- * - selectedAgentId: Currently selected agent ID
- * - messages: Chat messages
- * - editingAgent: Agent being edited in modal
- * - loading: General loading state
- * - updating: Update operation in progress
+ * TypeScript definitions available in world-actions.d.ts
  */
 
-// Import core types from agent-world module declarations
-/** @typedef {import('core/types').World} World */
-/** @typedef {import('core/types').Agent} Agent */
-/** @typedef {import('core/types').AgentMessage} AgentMessage */
+import * as api from '../api.js';
 
-/**
- * @typedef {Object} AppState
- * @property {World[]} worlds - Available worlds
- * @property {string | null} selectedWorldId - Currently selected world ID
- * @property {Agent[]} agents - Agents in selected world
- * @property {string | null} selectedAgentId - Currently selected agent ID
- * @property {AgentMessage[]} messages - Chat messages
- * @property {Agent | null} editingAgent - Agent being edited in modal
- * @property {boolean} loading - General loading state
- * @property {boolean} updating - Update operation in progress
- * @property {string} quickMessage - Current input message
- * @property {boolean} needScroll - Auto-scroll trigger
- * @property {boolean} isSending - Sending message state
- * @property {string} theme - Current theme
- */
+// State Initialization
 
 /**
  * Create initial application state
- * @returns {AppState}
  */
 export function createInitialState() {
   return {
@@ -62,9 +41,49 @@ export function createInitialState() {
 }
 
 /**
+ * Initialize application state with REST API
+ */
+export const initializeState = async () => {
+  // Start with initial state
+  let state = createInitialState();
+  state.loading = true;
+
+  try {
+    // Load worlds using REST API
+    const worldsData = await api.getWorlds();
+    state = updateWorlds(state, worldsData);
+    state.loading = false;
+
+    // Get persisted world name from localStorage
+    const persistedWorldName = localStorage.getItem('selectedWorldName');
+    let selectedWorld = null;
+
+    if (persistedWorldName && state.worlds.find(w => w.name === persistedWorldName)) {
+      selectedWorld = state.worlds.find(w => w.name === persistedWorldName);
+    } else if (state.worlds.length > 0) {
+      selectedWorld = state.worlds[0];
+    }
+
+    if (selectedWorld) {
+      // Use the main selectWorld function instead of internal helper
+      state = await selectWorld(state, selectedWorld.name);
+    }
+
+    return state;
+  } catch (error) {
+    console.error('Failed to initialize state:', error);
+    return {
+      ...state,
+      loading: false,
+      // Simple error handling - just log and continue
+    };
+  }
+};
+
+// Data Validation Functions
+
+/**
  * Validate if data is a valid World object
- * @param {unknown} data
- * @returns {data is World}
  */
 export function isValidWorld(data) {
   return data != null &&
@@ -77,8 +96,6 @@ export function isValidWorld(data) {
 
 /**
  * Validate if data is a valid Agent object
- * @param {unknown} data
- * @returns {data is Agent}
  */
 export function isValidAgent(data) {
   return data != null &&
@@ -91,8 +108,6 @@ export function isValidAgent(data) {
 
 /**
  * Validate if data is a valid AgentMessage object
- * @param {unknown} data
- * @returns {data is AgentMessage}
  */
 export function isValidMessage(data) {
   return data != null &&
@@ -103,11 +118,22 @@ export function isValidMessage(data) {
     typeof data.content === 'string';
 }
 
+// World Management Functions
+
+/**
+ * Internal helper to set selected world state
+ */
+function selectWorldState(state, worldId) {
+  return {
+    ...state,
+    selectedWorldId: worldId,
+    selectedAgentId: null,
+    agents: []
+  };
+}
+
 /**
  * Update worlds in state with validation
- * @param {AppState} state
- * @param {unknown[]} worldsData
- * @returns {AppState}
  */
 export function updateWorlds(state, worldsData) {
   try {
@@ -123,37 +149,48 @@ export function updateWorlds(state, worldsData) {
 }
 
 /**
- * Select a world by ID
- * @param {AppState} state
- * @param {string} worldId
- * @returns {AppState}
+ * Select world and load its data (main export for external use)
  */
-export function selectWorld(state, worldId) {
-  try {
-    const world = state.worlds.find(w => w.id === worldId);
-    if (!world) {
-      console.error('World not found:', worldId);
-      return state;
-    }
-
-    return {
-      ...state,
-      selectedWorldId: worldId,
-      agents: [], // Clear agents when switching worlds
-      selectedAgentId: null,
-      editingAgent: null
-    };
-  } catch (error) {
-    console.error('Failed to select world:', error);
+export const selectWorld = async (state, worldName) => {
+  // Find world by name to get ID
+  const world = state.worlds.find(w => w.name === worldName);
+  if (!world) {
+    console.error('World not found:', worldName);
     return state;
   }
-}
+
+  if (world.id === state.selectedWorldId) return state;
+
+  // Save selected world to localStorage
+  if (worldName) {
+    localStorage.setItem('selectedWorldName', worldName);
+  } else {
+    localStorage.removeItem('selectedWorldName');
+  }
+
+  // Update state with selected world
+  let newState = selectWorldState(state, world.id);
+  newState = clearMessages(newState);
+
+  if (world.id) {
+    try {
+      // Get agents for this world using REST API
+      const agentsData = await api.getAgents(worldName);
+      newState = updateAgents(newState, agentsData);
+    } catch (error) {
+      console.error('Failed to fetch world data:', error);
+      // Simple error handling - just log and continue with empty agents
+      newState = updateAgents(newState, []);
+    }
+  }
+
+  return newState;
+};
+
+// Agent Management Functions
 
 /**
  * Update agents in selected world with validation
- * @param {AppState} state
- * @param {unknown[]} agentsData
- * @returns {AppState}
  */
 export function updateAgents(state, agentsData) {
   try {
@@ -170,9 +207,6 @@ export function updateAgents(state, agentsData) {
 
 /**
  * Select an agent by ID
- * @param {AppState} state
- * @param {string} agentId
- * @returns {AppState}
  */
 export function selectAgent(state, agentId) {
   try {
@@ -192,11 +226,10 @@ export function selectAgent(state, agentId) {
   }
 }
 
+// Message Management Functions
+
 /**
  * Add a message to the messages list
- * @param {AppState} state
- * @param {unknown} messageData
- * @returns {AppState}
  */
 export function addMessage(state, messageData) {
   try {
@@ -217,8 +250,6 @@ export function addMessage(state, messageData) {
 
 /**
  * Clear all messages
- * @param {AppState} state
- * @returns {AppState}
  */
 export function clearMessages(state) {
   return {
@@ -227,11 +258,10 @@ export function clearMessages(state) {
   };
 }
 
+// State Management Functions
+
 /**
  * Set agent being edited in modal
- * @param {AppState} state
- * @param {Agent | null} agent
- * @returns {AppState}
  */
 export function setEditingAgent(state, agent) {
   try {
@@ -252,9 +282,6 @@ export function setEditingAgent(state, agent) {
 
 /**
  * Set loading state
- * @param {AppState} state
- * @param {boolean} loading
- * @returns {AppState}
  */
 export function setLoading(state, loading) {
   return {
@@ -265,9 +292,6 @@ export function setLoading(state, loading) {
 
 /**
  * Set updating state
- * @param {AppState} state
- * @param {boolean} updating
- * @returns {AppState}
  */
 export function setUpdating(state, updating) {
   return {
@@ -276,14 +300,14 @@ export function setUpdating(state, updating) {
   };
 }
 
+// Agent Validation Utilities
+
 /**
  * Agent validation utilities
  */
 export const AgentValidation = {
   /**
-   * Validates agent data
-   * @param {Agent} agent - agent to validate
-   * @returns {{isValid: boolean, errors: Object}} validation result
+   * Validates agent data and returns validation result with errors
    */
   validateAgent(agent) {
     const errors = {};
@@ -312,10 +336,10 @@ export const AgentValidation = {
 
   /**
    * Checks if agent is new (no id)
-   * @param {Agent} agent - agent to check
-   * @returns {boolean} true if agent is new
    */
   isNewAgent(agent) {
     return !agent?.id;
   }
 };
+
+// Export all functions for AppRun integration

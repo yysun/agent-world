@@ -11,7 +11,7 @@
     "start": "npm run cli",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
-    "dev": "LOG_LEVEL=debug npx tsx --watch cli/index.ts",
+    "dev": "LOG_LEVEL=debug npx tsx --watch server/index.ts",
     "test": "jest --config jest.config.js",
     "test:integration": "jest --config jest.integration.config.js",
     "test:all": "npm run test && npm run test:integration",

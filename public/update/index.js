@@ -7,8 +7,7 @@
  * Uses REST API + SSE message handlers only (no WebSocket dependency).
  */
 
-export { initializeState } from './init-state.js';
-export { selectWorld } from './select-world.js';
+export { initializeState, selectWorld } from './world-actions.js';
 export {
   displayAgentMemory,
   clearAgentMemory
