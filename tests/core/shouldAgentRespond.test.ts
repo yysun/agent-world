@@ -6,6 +6,7 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { shouldAgentRespond } from '../../core/events';
 import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../core/types';
+import { createMockAgent } from './mock-helpers';
 
 // Mock dependencies
 jest.mock('../../core/agent-storage', () => ({
@@ -49,7 +50,7 @@ describe('shouldAgentRespond', () => {
       turnLimit: 5
     } as World;
 
-    mockAgent = {
+    mockAgent = createMockAgent({
       id: 'test-agent',
       name: 'Test Agent',
       type: 'assistant',
@@ -62,7 +63,7 @@ describe('shouldAgentRespond', () => {
       lastActive: new Date(),
       llmCallCount: 0,
       memory: []
-    };
+    });
   });
 
   describe('Paragraph Beginning Mention Rules', () => {

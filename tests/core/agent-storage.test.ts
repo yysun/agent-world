@@ -21,14 +21,15 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 // We need to unmock agent-storage for this test since we're testing it
 jest.unmock('../../core/agent-storage');
 
-import { 
-  loadAllAgentsFromDisk, 
-  loadAgentFromDisk, 
-  saveAgentToDisk, 
-  deleteAgentFromDisk, 
-  agentExistsOnDisk 
+import {
+  loadAllAgentsFromDisk,
+  loadAgentFromDisk,
+  saveAgentToDisk,
+  deleteAgentFromDisk,
+  agentExistsOnDisk
 } from '../../core/agent-storage';
 import { Agent, LLMProvider } from '../../core/types';
+import { createMockAgent } from './mock-helpers';
 
 // Get the global fs mock from setup
 const fs = require('fs').promises;
@@ -50,17 +51,17 @@ describe('Core Agent Storage with Mocks', () => {
     test('should return empty array when no agents exist', async () => {
       // Mock empty directory
       fs.readdir.mockResolvedValue([]);
-      
+
       const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
       expect(loadedAgents).toEqual([]);
     });
 
     test('should load single agent correctly with mocked files', async () => {
       const agentId = 'test-agent-1';
-      
+
       // Mock directory listing
       fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
-      
+
       // Mock agent files
       fs.readFile.mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
@@ -96,10 +97,10 @@ describe('Core Agent Storage with Mocks', () => {
 
     test('should handle corrupted agent files gracefully with mocks', async () => {
       const agentId = 'corrupted-agent';
-      
+
       // Mock directory listing
       fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
-      
+
       // Mock corrupted config file
       fs.readFile.mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
@@ -116,10 +117,10 @@ describe('Core Agent Storage with Mocks', () => {
 
     test('should preserve agent memory with Date objects using mocks', async () => {
       const agentId = 'memory-agent';
-      
+
       // Mock directory listing
       fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
-      
+
       // Mock agent files with memory
       fs.readFile.mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
@@ -160,14 +161,14 @@ describe('Core Agent Storage with Mocks', () => {
     test('should return null for non-existent agent', async () => {
       // Mock file access failure
       fs.readFile.mockRejectedValue(new Error('ENOENT: no such file or directory'));
-      
+
       const loadedAgent = await loadAgentFromDisk('test-data/worlds', worldId, 'non-existent');
       expect(loadedAgent).toBeNull();
     });
 
     test('should load agent with all data correctly using mocks', async () => {
       const agentId = 'mock-agent';
-      
+
       // Mock agent files
       fs.readFile.mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
@@ -204,7 +205,7 @@ describe('Core Agent Storage with Mocks', () => {
   describe('saveAgentToDisk', () => {
     test('should create proper directory structure with mocks', async () => {
       const agentId = 'save-agent';
-      const agent: Agent = {
+      const agent = createMockAgent({
         id: agentId,
         name: 'Test Agent',
         type: 'test',
@@ -216,7 +217,7 @@ describe('Core Agent Storage with Mocks', () => {
         lastActive: new Date(),
         llmCallCount: 0,
         memory: []
-      };
+      });
 
       await saveAgentToDisk('test-data/worlds', worldId, agent);
 
@@ -232,7 +233,7 @@ describe('Core Agent Storage with Mocks', () => {
 
     test('should handle agents with complex memory using mocks', async () => {
       const agentId = 'complex-memory-agent';
-      const agent: Agent = {
+      const agent = createMockAgent({
         id: agentId,
         name: 'Test Agent',
         type: 'test',
@@ -256,7 +257,7 @@ describe('Core Agent Storage with Mocks', () => {
             createdAt: new Date()
           }
         ]
-      };
+      });
 
       // Should not throw and should save successfully
       await expect(saveAgentToDisk('test-data/worlds', worldId, agent)).resolves.toBeUndefined();
@@ -270,14 +271,14 @@ describe('Core Agent Storage with Mocks', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
       fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
-      
+
       const result = await deleteAgentFromDisk('test-data/worlds', worldId, 'non-existent');
       expect(result).toBe(false);
     });
 
     test('should delete agent and return true with mocks', async () => {
       const agentId = 'delete-agent';
-      
+
       // Mock successful access
       fs.access.mockResolvedValue(undefined);
 
@@ -296,14 +297,14 @@ describe('Core Agent Storage with Mocks', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
       fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
-      
+
       const exists = await agentExistsOnDisk('test-data/worlds', worldId, 'non-existent');
       expect(exists).toBe(false);
     });
 
     test('should return true for existing agent with mocks', async () => {
       const agentId = 'existing-agent';
-      
+
       // Mock successful access
       fs.access.mockResolvedValue(undefined);
 
@@ -320,10 +321,10 @@ describe('Core Agent Storage with Mocks', () => {
   describe('Enhanced Error Scenarios', () => {
     test('should handle file read permission errors', async () => {
       const agentId = 'permission-test';
-      
+
       // Mock directory listing
       fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
-      
+
       // Mock permission error for config file
       fs.readFile.mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
@@ -339,7 +340,7 @@ describe('Core Agent Storage with Mocks', () => {
     });
 
     test('should handle disk full errors during save', async () => {
-      const agent: Agent = {
+      const agent = createMockAgent({
         id: 'save-error-test',
         name: 'Save Error Agent',
         type: 'test',
@@ -353,7 +354,7 @@ describe('Core Agent Storage with Mocks', () => {
         lastActive: new Date('2023-01-01T00:00:00Z'),
         llmCallCount: 0,
         memory: []
-      };
+      });
 
       // Mock disk full error
       const diskError = new Error('ENOSPC: no space left on device');

@@ -70,6 +70,23 @@ export interface Agent {
   lastLLMCall?: Date;
   memory: AgentMessage[];
   world?: World;
+
+  // LLM operation methods (R2.1)
+  generateResponse(messages: AgentMessage[]): Promise<string>;
+  streamResponse(messages: AgentMessage[]): Promise<string>;
+
+  // Memory management methods (R2.2)
+  addToMemory(message: AgentMessage): Promise<void>;
+  getMemorySize(): number;
+  archiveMemory(): Promise<void>;
+  getMemorySlice(start: number, end: number): AgentMessage[];
+  searchMemory(query: string): AgentMessage[];
+
+  // Message processing methods (R2.3)
+  shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean>;
+  processMessage(messageEvent: WorldMessageEvent): Promise<void>;
+  extractMentions(content: string): string[];
+  isMentioned(content: string): boolean;
 }
 
 // deprecated
@@ -82,7 +99,8 @@ export interface MessageData {
   agentName?: string;
 }
 
-// Event System Types
+// Event System Types - Enhanced with Mapped Types
+
 export interface MessageEventPayload {
   content: string;
   sender: string;
@@ -109,13 +127,44 @@ export interface SSEEventPayload {
   };
 }
 
+export interface WorldEventPayload {
+  action: string;
+  worldId?: string;
+  agentId?: string;
+  data?: any;
+}
+
+/**
+ * Event payload mapping for type-safe event handling
+ * Maps each EventType to its corresponding payload type
+ */
+export type EventPayloadMap = {
+  [EventType.MESSAGE]: MessageEventPayload;
+  [EventType.SYSTEM]: SystemEventPayload;
+  [EventType.SSE]: SSEEventPayload;
+  [EventType.WORLD]: WorldEventPayload;
+};
+
+/**
+ * Type-safe event structure using conditional types
+ * Ensures payload type matches the event type
+ */
+export type TypedEvent<T extends EventType> = {
+  id: string;
+  type: T;
+  timestamp: string;
+  sender: string;
+  senderType: SenderType;
+  payload: EventPayloadMap[T];
+};
+
 export interface Event {
   id: string;
   type: EventType;
   timestamp: string;
   sender: string;
   senderType: SenderType;
-  payload: MessageEventPayload | SystemEventPayload | SSEEventPayload;
+  payload: MessageEventPayload | SystemEventPayload | SSEEventPayload | WorldEventPayload;
 }
 
 export enum EventType {
@@ -132,9 +181,12 @@ export enum SenderType {
   HUMAN = 'human'
 }
 
-// Agent Operation Types
-export interface CreateAgentParams {
-  id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
+// Agent Operation Types - Enhanced with TypeScript Utility Types
+
+/**
+ * Base agent parameters - single source of truth for agent properties
+ */
+export interface BaseAgentParams {
   name: string;
   type: string;
   provider: LLMProvider;
@@ -144,48 +196,69 @@ export interface CreateAgentParams {
   maxTokens?: number;
 }
 
-export interface UpdateAgentParams {
-  name?: string;
-  type?: string;
+/**
+ * Agent creation parameters - extends base with optional ID
+ */
+export interface CreateAgentParams extends BaseAgentParams {
+  id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
+}
+
+/**
+ * Agent update parameters - partial base with additional status field
+ */
+export interface UpdateAgentParams extends Partial<BaseAgentParams> {
   status?: 'active' | 'inactive' | 'error';
-  provider?: LLMProvider;
-  model?: string;
-  systemPrompt?: string;
-  temperature?: number;
-  maxTokens?: number;
 }
-
-export interface AgentInfo {
-  id: string;
-  name: string;
-  type: string;
-  model: string;
-  status?: string;
-  createdAt?: Date;
-  lastActive?: Date;
-  memorySize: number;
-  llmCallCount: number;
-}
-
-// World Management Types
 
 /**
- * World creation parameters
+ * Agent information type - derived from Agent interface for consistency
+ * Uses Pick utility type to ensure automatic synchronization with Agent changes
  */
-export interface CreateWorldParams {
+export type AgentInfo = Pick<Agent,
+  'id' | 'name' | 'type' | 'model' | 'status' | 'createdAt' | 'lastActive' | 'llmCallCount'
+> & {
+  memorySize: number; // Computed field - derived from memory.length
+}
+
+/**
+ * Storage-safe agent type - excludes runtime methods for persistence
+ * Uses Omit utility type to remove all methods, keeping only data properties
+ */
+export type AgentStorage = Omit<Agent,
+  | 'generateResponse'
+  | 'streamResponse'
+  | 'addToMemory'
+  | 'getMemorySize'
+  | 'archiveMemory'
+  | 'getMemorySlice'
+  | 'searchMemory'
+  | 'shouldRespond'
+  | 'processMessage'
+  | 'extractMentions'
+  | 'isMentioned'
+  | 'world' // Exclude circular reference for storage
+>
+
+// World Management Types - Enhanced with TypeScript Utility Types
+
+/**
+ * Base world parameters - single source of truth for world properties
+ */
+export interface BaseWorldParams {
   name: string;
   description?: string;
   turnLimit?: number;
 }
 
 /**
- * World update parameters (partial update support)
+ * World creation parameters - identical to base for now
  */
-export interface UpdateWorldParams {
-  name?: string;
-  description?: string;
-  turnLimit?: number;
-}
+export interface CreateWorldParams extends BaseWorldParams { }
+
+/**
+ * World update parameters - partial base for flexible updates
+ */
+export interface UpdateWorldParams extends Partial<BaseWorldParams> { }
 
 /**
  * Enhanced World interface with flattened configuration
@@ -204,6 +277,10 @@ export interface World {
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
 
+  // Unified interfaces (R3.2, R4.2)
+  storage: StorageManager;
+  messageProcessor: MessageProcessor;
+
   // Agent operation methods
   createAgent(params: CreateAgentParams): Promise<Agent>;
   getAgent(agentName: string): Promise<Agent | null>;
@@ -218,6 +295,71 @@ export interface World {
   save(): Promise<void>;
   delete(): Promise<boolean>;
   reload(): Promise<void>;
+
+  // Utility methods (R1.1)
+  getTurnLimit(): number;
+  getCurrentTurnCount(): number;
+  hasReachedTurnLimit(): boolean;
+  resetTurnCount(): void;
+
+  // Event methods (R1.2)
+  publishMessage(content: string, sender: string): void;
+  subscribeToMessages(handler: (event: WorldMessageEvent) => void): () => void;
+  broadcastMessage(message: string, sender?: string): void;
+  publishSSE(data: Partial<WorldSSEEvent>): void;
+  subscribeToSSE(handler: (event: WorldSSEEvent) => void): () => void;
+
+  // Agent subscription methods (R1.3)
+  subscribeAgent(agent: Agent): () => void;
+  unsubscribeAgent(agentId: string): void;
+  getSubscribedAgents(): string[];
+  isAgentSubscribed(agentId: string): boolean;
+}
+
+/**
+ * Storage-safe world data type - excludes runtime objects for persistence
+ */
+export type WorldStorage = Pick<World, 'id' | 'name' | 'description' | 'turnLimit'>
+
+// World Data for Storage (moved from world-storage.ts)
+export interface WorldData {
+  id: string;
+  name: string;
+  description?: string;
+  turnLimit: number;
+}
+
+// Unified Storage Interface (R3.1)
+export interface StorageManager {
+  // World operations
+  saveWorld(worldData: WorldData): Promise<void>;
+  loadWorld(worldId: string): Promise<WorldData | null>;
+  deleteWorld(worldId: string): Promise<boolean>;
+  listWorlds(): Promise<WorldData[]>;
+
+  // Agent operations
+  saveAgent(worldId: string, agent: Agent): Promise<void>;
+  loadAgent(worldId: string, agentId: string): Promise<Agent | null>;
+  deleteAgent(worldId: string, agentId: string): Promise<boolean>;
+  listAgents(worldId: string): Promise<Agent[]>;
+
+  // Batch operations
+  saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;
+  loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]>;
+
+  // Integrity operations
+  validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;
+  repairData(worldId: string, agentId?: string): Promise<boolean>;
+}
+
+// Message Processing Interface (R4.1)
+export interface MessageProcessor {
+  extractMentions(content: string): string[];
+  extractParagraphBeginningMentions(content: string): string[];
+  determineSenderType(sender: string | undefined): SenderType;
+  shouldAutoMention(response: string, sender: string, agentId: string): boolean;
+  addAutoMention(response: string, sender: string): string;
+  removeSelfMentions(response: string, agentId: string): string;
 }
 
 /**

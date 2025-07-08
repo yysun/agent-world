@@ -19,6 +19,7 @@
 
 import { describe, test, expect, beforeEach, beforeAll, jest, afterEach } from '@jest/globals';
 import { World, Agent, WorldMessageEvent, AgentMessage, LLMProvider } from '../../core/types';
+import { createMockAgent } from './mock-helpers';
 
 // Mock dependencies
 const mockSaveAgentMemoryToDisk = jest.fn();
@@ -68,7 +69,7 @@ describe('processAgentMessage', () => {
       turnLimit: 5
     } as World;
 
-    mockAgent = {
+    mockAgent = createMockAgent({
       id: 'test-agent',
       name: 'Test Agent',
       type: 'assistant',
@@ -81,7 +82,7 @@ describe('processAgentMessage', () => {
       lastActive: new Date(),
       llmCallCount: 0,
       memory: []
-    };
+    });
 
     messageEvent = {
       content: 'Hello, please help me',
@@ -474,7 +475,7 @@ describe('resetLLMCallCountIfNeeded', () => {
       turnLimit: 5
     } as World;
 
-    mockAgent = {
+    mockAgent = createMockAgent({
       id: 'test-agent',
       name: 'Test Agent',
       type: 'assistant',
@@ -487,7 +488,7 @@ describe('resetLLMCallCountIfNeeded', () => {
       lastActive: new Date(),
       llmCallCount: 0,
       memory: []
-    };
+    });
 
     // Default mock responses
     (mockSaveAgentConfigToDisk as any).mockResolvedValue(undefined);

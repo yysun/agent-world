@@ -40,64 +40,80 @@
 import { LLMProvider } from './types';
 
 /**
- * Provider-specific configuration interfaces
+ * Provider-specific configuration interfaces - Enhanced with TypeScript Utility Types
  */
-export interface OpenAIConfig {
-  apiKey: string;
-}
 
-export interface AnthropicConfig {
-  apiKey: string;
-}
-
-export interface GoogleConfig {
-  apiKey: string;
-}
-
-export interface AzureConfig {
-  apiKey: string;
-  endpoint: string;
-  deployment: string;
+/**
+ * Base configuration interface for all providers
+ */
+export interface BaseLLMConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  endpoint?: string;
+  deployment?: string;
   apiVersion?: string;
 }
 
-export interface XAIConfig {
-  apiKey: string;
-}
+/**
+ * OpenAI configuration - requires only API key
+ */
+export type OpenAIConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
 
-export interface OpenAICompatibleConfig {
-  apiKey: string;
-  baseUrl: string;
-}
+/**
+ * Anthropic configuration - requires only API key
+ */
+export type AnthropicConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
 
-export interface OllamaConfig {
-  baseUrl: string;
-}
+/**
+ * Google configuration - requires only API key
+ */
+export type GoogleConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
+
+/**
+ * Azure configuration - requires API key, endpoint, and deployment
+ */
+export type AzureConfig = Required<Pick<BaseLLMConfig, 'apiKey' | 'endpoint' | 'deployment'>> &
+  Partial<Pick<BaseLLMConfig, 'apiVersion'>>;
+
+/**
+ * XAI configuration - requires only API key
+ */
+export type XAIConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
+
+/**
+ * OpenAI-Compatible configuration - requires API key and base URL
+ */
+export type OpenAICompatibleConfig = Required<Pick<BaseLLMConfig, 'apiKey' | 'baseUrl'>>;
+
+/**
+ * Ollama configuration - requires only base URL
+ */
+export type OllamaConfig = Required<Pick<BaseLLMConfig, 'baseUrl'>>;
+
+/**
+ * Provider configuration mapping for type-safe access
+ */
+export type ProviderConfigMap = {
+  [LLMProvider.OPENAI]: OpenAIConfig;
+  [LLMProvider.ANTHROPIC]: AnthropicConfig;
+  [LLMProvider.GOOGLE]: GoogleConfig;
+  [LLMProvider.AZURE]: AzureConfig;
+  [LLMProvider.XAI]: XAIConfig;
+  [LLMProvider.OPENAI_COMPATIBLE]: OpenAICompatibleConfig;
+  [LLMProvider.OLLAMA]: OllamaConfig;
+};
 
 /**
  * Union type for all provider configurations
  */
-export type ProviderConfig =
-  | OpenAIConfig
-  | AnthropicConfig
-  | GoogleConfig
-  | AzureConfig
-  | XAIConfig
-  | OpenAICompatibleConfig
-  | OllamaConfig;
+export type ProviderConfig = ProviderConfigMap[keyof ProviderConfigMap];
 
 /**
- * Global configuration store
+ * Global configuration store - uses mapped type for type safety
  */
-interface LLMProviderConfigs {
-  [LLMProvider.OPENAI]?: OpenAIConfig;
-  [LLMProvider.ANTHROPIC]?: AnthropicConfig;
-  [LLMProvider.GOOGLE]?: GoogleConfig;
-  [LLMProvider.AZURE]?: AzureConfig;
-  [LLMProvider.XAI]?: XAIConfig;
-  [LLMProvider.OPENAI_COMPATIBLE]?: OpenAICompatibleConfig;
-  [LLMProvider.OLLAMA]?: OllamaConfig;
-}
+type LLMProviderConfigs = {
+  [K in LLMProvider]?: ProviderConfigMap[K];
+};
 
 /**
  * Global configuration store instance
@@ -109,14 +125,7 @@ let providerConfigs: LLMProviderConfigs = {};
  */
 export function configureLLMProvider<T extends LLMProvider>(
   provider: T,
-  config: T extends LLMProvider.OPENAI ? OpenAIConfig :
-    T extends LLMProvider.ANTHROPIC ? AnthropicConfig :
-    T extends LLMProvider.GOOGLE ? GoogleConfig :
-    T extends LLMProvider.AZURE ? AzureConfig :
-    T extends LLMProvider.XAI ? XAIConfig :
-    T extends LLMProvider.OPENAI_COMPATIBLE ? OpenAICompatibleConfig :
-    T extends LLMProvider.OLLAMA ? OllamaConfig :
-    never
+  config: ProviderConfigMap[T]
 ): void {
   // Validate configuration before storing
   validateProviderConfig(provider, config as any);
@@ -130,15 +139,7 @@ export function configureLLMProvider<T extends LLMProvider>(
  */
 export function getLLMProviderConfig<T extends LLMProvider>(
   provider: T
-): T extends LLMProvider.OPENAI ? OpenAIConfig :
-  T extends LLMProvider.ANTHROPIC ? AnthropicConfig :
-  T extends LLMProvider.GOOGLE ? GoogleConfig :
-  T extends LLMProvider.AZURE ? AzureConfig :
-  T extends LLMProvider.XAI ? XAIConfig :
-  T extends LLMProvider.OPENAI_COMPATIBLE ? OpenAICompatibleConfig :
-  T extends LLMProvider.OLLAMA ? OllamaConfig :
-  never {
-
+): ProviderConfigMap[T] {
   const config = providerConfigs[provider];
 
   if (!config) {
@@ -149,7 +150,7 @@ export function getLLMProviderConfig<T extends LLMProvider>(
     );
   }
 
-  return config as any;
+  return config as ProviderConfigMap[T];
 }
 
 /**

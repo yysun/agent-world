@@ -1,6 +1,6 @@
 {
   "name": "agent-world",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -16,7 +16,7 @@
     "test:integration": "jest --config jest.integration.config.js",
     "test:all": "npm run test && npm run test:integration",
     "check": "tsc --noEmit",
-    "build": "node esbuild.config.js"
+    "build": "tsc --declaration --emitDeclarationOnly --noEmit false --module esnext --outFile public/agent-world.d.ts"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [

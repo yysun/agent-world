@@ -49,16 +49,27 @@ export {
   shouldAgentRespond
 } from './events';
 
-// Core types and utilities
+// Core types and utilities - Enhanced with TypeScript Utility Types
 export type {
+  // Base interfaces
   World,
-  CreateWorldParams,
-  UpdateWorldParams,
   Agent,
   AgentMessage,
+  // Enhanced parameter types
+  BaseAgentParams,
   CreateAgentParams,
   UpdateAgentParams,
-  AgentInfo
+  BaseWorldParams,
+  CreateWorldParams,
+  UpdateWorldParams,
+  // Derived types using utility types
+  AgentInfo,
+  AgentStorage,
+  WorldStorage,
+  // Enhanced event types
+  EventPayloadMap,
+  TypedEvent,
+  WorldEventPayload
 } from './types';
 export type { WorldInfo } from './managers';
 export type { WorldData } from './world-storage';

@@ -250,6 +250,20 @@ export function createMockAgent(overrides: Partial<Agent> = {}): Agent {
     lastActive: new Date('2023-01-01T00:00:00Z'),
     llmCallCount: 0,
     memory: [],
+
+    // Required method implementations
+    generateResponse: jest.fn<(messages: AgentMessage[]) => Promise<string>>().mockResolvedValue('Mock response'),
+    streamResponse: jest.fn<(messages: AgentMessage[]) => Promise<string>>().mockResolvedValue('Mock stream response'),
+    addToMemory: jest.fn<(message: AgentMessage) => Promise<void>>().mockResolvedValue(),
+    getMemorySize: jest.fn<() => number>().mockReturnValue(0),
+    archiveMemory: jest.fn<() => Promise<void>>().mockResolvedValue(),
+    getMemorySlice: jest.fn<(start: number, end: number) => AgentMessage[]>().mockReturnValue([]),
+    searchMemory: jest.fn<(query: string) => AgentMessage[]>().mockReturnValue([]),
+    shouldRespond: jest.fn<(messageEvent: any) => Promise<boolean>>().mockResolvedValue(false),
+    processMessage: jest.fn<(messageEvent: any) => Promise<void>>().mockResolvedValue(),
+    extractMentions: jest.fn<(content: string) => string[]>().mockReturnValue([]),
+    isMentioned: jest.fn<(content: string) => boolean>().mockReturnValue(false),
+
     ...overrides
   };
 }
