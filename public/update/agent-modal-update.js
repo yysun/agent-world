@@ -110,10 +110,10 @@ export const displayAgentMemory = async (state, agent) => {
 
       // Determine if this is a user or assistant message based on the memory structure
       if (memory.role === 'user' || ('type' in memory && memory.type === 'user') || ('sender' in memory && memory.sender === 'user')) {
-        messageType = 'memory-user';
+        messageType = 'user';
         sender = (memory.sender && typeof memory.sender === 'string') ? memory.sender : 'User';
       } else if (memory.role === 'assistant' || ('type' in memory && memory.type === 'assistant') || ('sender' in memory && memory.sender === 'assistant')) {
-        messageType = 'memory-assistant';
+        messageType = 'agent';
         sender = agent.name;
       }
     } else {

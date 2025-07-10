@@ -1,3 +1,24 @@
+/*
+================================================================================
+AGENT WORLD - STYLES.CSS
+================================================================================
+
+BEM Architecture: .message with elements (__sender, __content, __indicators, __details)
+and modifiers (--user, --agent, --system, --error, --streaming, --bubble)
+Memory messages use base types: memory-user → user, memory-assistant → agent
+
+Color Scheme:
+- User: Orange (#f97316) | Agent: Primary accent | System: Yellow (#eab308)
+- Error: Red (#ef4444) | Streaming: Green (#10b981)
+
+Layout:
+- Reduced padding and margins for tighter message spacing
+- Agent messages indented 2rem for visual hierarchy
+- Compact line height and sender spacing
+
+================================================================================
+*/
+
 /* Reset and base styles */
 * {
   margin: 0;
@@ -885,94 +906,156 @@ body {
   height: 16px;
 }
 
-.conversation-message {
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
+/* =======================================================================
+   Message System - BEM Architecture (.message, .message__*, .message--*)
+   ======================================================================= */
+
+/* Base Component */
+.message {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
   background-color: var(--bg-tertiary);
   border-radius: 8px;
   border-left: 3px solid var(--accent-primary);
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  transition: all 0.3s ease;
+  position: relative;
 }
 
-.conversation-message.streaming {
-  border-left-color: #10b981;
+.message:last-child {
+  margin-bottom: 0;
+}
+
+/* Component Elements */
+.message__sender {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: color 0.3s ease;
+}
+
+.message__content {
+  color: var(--text-primary);
+  line-height: 1.3;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  transition: color 0.3s ease;
+  margin: 0;
+}
+
+.message__indicators {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.message__details {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background-color: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+  color: #dc2626;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+[data-theme="dark"] .message__details {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+/* Type Modifiers */
+.message--user {
+  border-left-color: #f97316;
+  background-color: var(--bg-secondary);
+}
+
+.message--user .message__sender {
+  color: #f97316;
+}
+
+.message--agent {
+  border-left-color: var(--accent-primary);
+  margin-left: 2rem;
+}
+
+.message--agent .message__sender {
+  color: var(--accent-primary);
+}
+
+.message--system {
+  border-left-color: #eab308;
   background-color: var(--bg-accent);
 }
 
-.conversation-message.error {
+.message--system .message__sender {
+  color: #eab308;
+}
+
+.message--error {
   border-left-color: #ef4444;
   background-color: #fef2f2;
 }
 
-[data-theme="dark"] .conversation-message.error {
+.message--error .message__sender {
+  color: #ef4444;
+}
+
+[data-theme="dark"] .message--error {
   background-color: rgba(239, 68, 68, 0.1);
 }
 
-.conversation-message.user-message,
-.conversation-message.human {
-  border-left-color: #f97316;
+/* State Modifiers */
+.message--streaming {
+  border-left-color: #10b981;
+  background-color: var(--bg-accent);
 }
 
-.conversation-message.system {
-  border-left-color: #eab308;
+.message--streaming .message__sender {
+  color: #10b981;
 }
 
-/* Memory chat-like messages */
-.conversation-message.memory-user {
-  margin-left: 0;
-  margin-right: 10%;
-  background-color: var(--bg-secondary);
-  color: var(--text-primary);
+.message--bubble {
   border-left: none;
-  border-radius: 18px 18px 18px 4px;
-  text-align: left;
+  border-radius: 18px;
+  max-width: 85%;
 }
 
-.conversation-message.memory-assistant {
-  margin-left: 10%;
-  margin-right: 0;
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-left: 3px solid var(--accent-primary);
-  border-radius: 18px 18px 4px 18px;
-  text-align: left;
-}
-
-.conversation-message.memory-user .message-sender {
-  color: var(--text-tertiary);
-}
-
-.conversation-message.memory-assistant .message-sender {
-  color: var(--text-tertiary);
-}
-
-.conversation-message:last-child {
-  margin-bottom: 0;
-}
-
-.message-sender {
-  font-size: 0.75rem;
-  color: var(--text-tertiary);
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  transition: color 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.streaming-indicator {
+/* Status Indicators */
+.message__streaming-indicator {
   color: #10b981;
   font-size: 0.5rem;
   animation: pulse 1.5s ease-in-out infinite;
 }
 
-.error-indicator {
+.message__error-indicator {
   color: #ef4444;
   font-size: 0.75rem;
   animation: pulse-error 2s ease-in-out infinite;
+}
+
+.message__cursor {
+  color: var(--accent-primary);
+  font-weight: bold;
+  animation: blink 1s step-end infinite;
+}
+
+/* Animations */
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes pulse-error {
@@ -987,32 +1070,6 @@ body {
   }
 }
 
-@keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.message-text {
-  color: var(--text-primary);
-  line-height: 1.5;
-  transition: color 0.3s ease;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.cursor {
-  animation: blink 1s step-end infinite;
-  color: var(--accent-primary);
-  font-weight: bold;
-}
-
 @keyframes blink {
 
   0%,
@@ -1025,6 +1082,8 @@ body {
     opacity: 0;
   }
 }
+
+
 
 /* Simple input container */
 .simple-input-container {
@@ -2074,21 +2133,6 @@ body {
   .btn {
     width: 100%;
   }
-}
-
-.error-details {
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  background-color: rgba(239, 68, 68, 0.1);
-  border-radius: 4px;
-  color: #dc2626;
-  font-size: 0.8rem;
-  font-style: italic;
-}
-
-[data-theme="dark"] .error-details {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
 }
 
 /* Agent memory section styles */

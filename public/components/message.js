@@ -1,35 +1,46 @@
 /**
- * Message Component - Display individual conversation messages
- *
- * Features: Displays different message types (user, agent, system, error),
- * streaming indicator for real-time messages, error indicator and details
- * for error messages, visual styling with colored left borders
- *
- * Implementation: Function-based component with conditional rendering
- * for streaming and error states, red left border for error messages
- *
- * Changes:
- * - Added error message support with red left border styling
- * - Added error indicator (⚠) for error messages
- * - Added error details display for additional error information
- * - Enhanced message type styling with error state handling
+ * Message Component - BEM-based conversation message display
+ * 
+ * BEM Structure: .message with elements (__sender, __content, __indicators, __details)
+ * and modifiers (--user, --agent, --system, --error, --streaming)
+ * Memory messages use base types: memory-user → user, memory-assistant → agent
  */
 
 const { html, run } = window.apprun;
 
+const getMessageType = (message) => {
+  if (message.role === 'user' || message.type === 'user' || message.type === 'human') return 'user';
+  if (message.role === 'assistant' || message.type === 'agent') return 'agent';
+  if (message.type === 'system') return 'system';
+  if (message.type === 'error' || message.hasError) return 'error';
+  return 'agent';
+};
+
+const buildClasses = (message, showStreaming) => {
+  const classes = ['message', `message--${getMessageType(message)}`];
+  if (showStreaming) classes.push('message--streaming');
+  if (message.hasError) classes.push('message--error');
+  return classes.join(' ');
+};
+
 export default (message) => {
   if (message.streamComplete) return '';
+
   const showStreaming = message.isStreaming && !message.streamComplete;
-  const messageClass = message.role === 'user' ? 'user human' : message.type;
+  const hasErrorDetails = message.hasError && message.errorMessage && message.errorMessage !== message.text;
+
   return html`
-  <div class="conversation-message ${messageClass} ${showStreaming ? 'streaming' : ''} ${message.hasError ? 'error' : ''}">
-    <div class="message-sender">
-      ${message.sender}
-      ${showStreaming ? html`<span class="streaming-indicator">●</span>` : ''}
-      ${message.hasError ? html`<span class="error-indicator">⚠</span>` : ''}
+    <div class="${buildClasses(message, showStreaming)}">
+      <div class="message__sender">
+        ${message.sender}
+        <div class="message__indicators">
+          ${showStreaming ? html`<span class="message__streaming-indicator">●</span>` : ''}
+          ${message.hasError ? html`<span class="message__error-indicator">⚠</span>` : ''}
+        </div>
+      </div>
+      <div class="message__content">${message.text}${showStreaming ? html`<span class="message__cursor">|</span>` : ''}
+      </div>
+      ${hasErrorDetails ? html`<div class="message__details">${message.errorMessage}</div>` : ''}
     </div>
-    <div class="message-text">${message.text}${showStreaming ? html`<span class="cursor">|</span>` : ''}</div>
-    ${message.hasError && message.errorMessage && message.errorMessage !== message.text ? html`<div class="error-details">${message.errorMessage}</div>` : ''}
-  </div>
-`;
+  `;
 };
