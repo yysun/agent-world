@@ -140,6 +140,7 @@ const view = (state) => {
         <div class="simple-input-container">
           <div class="simple-input-wrapper">
             <input
+              id="quick-input"
               type="text"
               class="simple-input"
               placeholder="${getSelectedWorldName(state) ? 'Quick message...' : 'Select a world first...'}"

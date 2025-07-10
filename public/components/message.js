@@ -20,8 +20,9 @@ const { html, run } = window.apprun;
 export default (message) => {
   if (message.streamComplete) return '';
   const showStreaming = message.isStreaming && !message.streamComplete;
+  const messageClass = message.role === 'user' ? 'user human' : message.type;
   return html`
-  <div class="conversation-message ${message.type} ${showStreaming ? 'streaming' : ''} ${message.hasError ? 'error' : ''}">
+  <div class="conversation-message ${messageClass} ${showStreaming ? 'streaming' : ''} ${message.hasError ? 'error' : ''}">
     <div class="message-sender">
       ${message.sender}
       ${showStreaming ? html`<span class="streaming-indicator">●</span>` : ''}

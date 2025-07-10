@@ -1,4 +1,5 @@
 //@ts-check
+/// <reference path="../agent-world.d.ts" />
 /**
  * Agent Modal Update Module - Complete agent modal and memory management
  *

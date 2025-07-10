@@ -1,3 +1,6 @@
+//@ts-check
+/// <reference path="../agent-world.d.ts" />
+
 /**
  * Home Update Module - TypeScript Type Definitions
  * 

@@ -433,11 +433,16 @@ export const sendQuickMessage = async function* (state) {
     };
   }
 
+  const input = document.getElementById('quick-input');
+  if (input instanceof HTMLInputElement) {
+    input.value = '';
+  }
+
   // Add user message immediately and show sending state
   const userMessage = {
     id: Date.now() + Math.random(),
     role: 'user',
-    content: message,
+    text: message,
     createdAt: new Date(),
     sender: USER_ID,
     sending: true

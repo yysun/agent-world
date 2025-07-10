@@ -1,3 +1,6 @@
+//@ts-check
+/// <reference path="../agent-world.d.ts" />
+
 /**
  * Agent Modal Update Module - TypeScript Type Definitions
  * 
