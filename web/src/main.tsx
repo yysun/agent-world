@@ -4,6 +4,7 @@ import Home from './Home';
 import About from './About';
 import Contact from './Contact';
 
+import 'papercss/dist/paper.css';
 import './styles.css';
 
 app.render('#root', <Layout />);
