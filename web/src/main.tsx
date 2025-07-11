@@ -4,9 +4,11 @@ import Home from './Home';
 import About from './About';
 import Contact from './Contact';
 
+import './styles.css';
+
 app.render('#root', <Layout />);
 
-const element = '#my-app';
+const element = '#pages';
 new Home().start(element);
 new About().mount(element);
 new Contact().mount(element);
