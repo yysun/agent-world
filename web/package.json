@@ -16,6 +16,6 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "papercss": "^1.9.2"
+    "doodle.css": "^0.0.2"
   }
 }
