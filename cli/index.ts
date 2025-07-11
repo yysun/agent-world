@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
+
 /**
  * Agent World CLI Entry Point - Dual-Mode Console Interface
  * 
@@ -15,6 +19,7 @@
  * - Color Helpers: Consistent styling with simplified color functions
  * - Timer Management: Smart prompt restoration and exit handling
  * - Debug Logging: Configurable log levels using core logger module
+ * - Environment Variables: Automatically loads .env file for API keys and configuration
  *
  * ARCHITECTURE:
  * - Uses commander.js for argument parsing and mode detection

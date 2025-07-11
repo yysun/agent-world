@@ -6,10 +6,15 @@
  * - Environment-based LLM provider configuration
  * - Category-based logging with configurable levels
  * - Health check endpoint and proper error handling
+ * - Environment Variables: Automatically loads .env file for API keys and configuration
  * 
  * Configuration: AGENT_WORLD_DATA_PATH, LOG_LEVEL, LLM provider keys
  * Endpoints: /health + API routes from ./api.ts
  */
+
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Set data path for core modules
 if (!process.env.AGENT_WORLD_DATA_PATH) {

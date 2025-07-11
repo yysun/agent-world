@@ -1,3 +1,7 @@
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
+
 /**
  * WebSocket Server for Agent World
  *
@@ -9,6 +13,7 @@
  * - Connection-specific world state and event listener cleanup
  * - World refresh logic after command execution with state updates
  * - Comprehensive debug logging with Pino for WebSocket operations
+ * - Environment Variables: Automatically loads .env file for configuration
  *
  * WebSocket Connection State:
  * - World subscription per connection using commands layer subscribeWorld()
