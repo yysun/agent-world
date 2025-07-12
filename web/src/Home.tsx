@@ -56,8 +56,20 @@ export default class HomeComponent extends Component {
       {/* Banner */}
       <div class="row">
         <div class="col banner-col">
-          <h1 class="banner-title">PICK YOUR WORLD</h1>
+          <h1 class="banner-title">CREATE OR PICK YOUR WORLD</h1>
         </div>
+      </div>
+
+
+      {/* Add New World Button */}
+      <div class="add-world-container">
+        <button
+          class="btn add-world-btn"
+          onclick={() => this.run('add-new-world')}
+          title="Add New World"
+        >
+          <span class="plus-icon">+</span>
+        </button>
       </div>
 
       {/* World Carousel */}
@@ -162,6 +174,11 @@ export default class HomeComponent extends Component {
     'enter-world': (state, world) => {
       console.log('Entering world:', world);
       // TODO: Navigate to the selected world
+      return state;
+    },
+    'add-new-world': state => {
+      console.log('Adding new world');
+      // TODO: Open dialog or navigate to world creation
       return state;
     }
   };
