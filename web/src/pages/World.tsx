@@ -1,20 +1,116 @@
+/**
+ * World Component - Displays world interface with agents and chat
+ * Features: Two-row layout with agent list and chat interface
+ * Implementation: AppRun component with state management, sprite sheet for agents
+ */
+
 import { app, Component } from 'apprun';
 
 export default class WorldComponent extends Component {
-  state = 'World';
+  state = {
+    worldName: 'World',
+    agents: [
+      { id: 1, name: 'Agent Alpha', spriteIndex: 0 },
+      { id: 2, name: 'Agent Beta', spriteIndex: 1 },
+      { id: 3, name: 'Agent Gamma', spriteIndex: 2 },
+      { id: 4, name: 'Agent Delta', spriteIndex: 3 },
+      { id: 5, name: 'Agent Echo', spriteIndex: 4 },
+      { id: 6, name: 'Agent Fox', spriteIndex: 5 }
+    ],
+    messages: [
+      { id: 1, sender: 'Agent Alpha', content: 'Hello! Welcome to the world.', timestamp: new Date() },
+      { id: 2, sender: 'User', content: 'Hi there!', timestamp: new Date() }
+    ],
+    userInput: ''
+  };
 
-  view = state => <div>
-    <h1>{state}</h1>
-  </div>;
+  view = state => (
+    <div className="world-container">
+      <h1 className="world-title">{state.worldName}</h1>
+
+      <div className="world-layout">
+        {/* Top Row - Agents */}
+        <div className="fieldset agents-row">
+          <div className="agents-list">
+            {state.agents.map(agent => (
+              <div key={agent.id} className="agent-item">
+                <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
+                <div className="agent-name">{agent.name}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Bottom Row - Chat Interface */}
+        <fieldset className="fieldset chat-row">
+          <legend>Chat</legend>
+          <div className="chat-container">
+            {/* Conversation Area */}
+            <div className="conversation-area">
+              {state.messages.map(message => (
+                <div key={message.id} className={`message ${message.sender === 'User' ? 'user-message' : 'agent-message'}`}>
+                  <div className="message-sender">{message.sender}</div>
+                  <div className="message-content">{message.content}</div>
+                  <div className="message-timestamp">
+                    {message.timestamp.toLocaleTimeString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* User Input Area */}
+            <div className="input-area">
+              <div className="input-container">
+                <input
+                  type="text"
+                  className="message-input"
+                  placeholder="Type your message..."
+                  value={state.userInput}
+                  onInput={e => app.run('updateInput', e.target.value)}
+                  onKeyPress={e => e.key === 'Enter' && app.run('sendMessage')}
+                />
+                <button
+                  className="send-button"
+                  onClick={() => app.run('sendMessage')}
+                  disabled={!state.userInput.trim()}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+    </div>
+  );
 
   update = {
     '/World': (state, name) => {
-      if (name) {
-        name = decodeURIComponent(name);
-        return `${name}`;
-      } else {
-        return 'New World';
-      }
+      const worldName = name ? decodeURIComponent(name) : 'New World';
+      return {
+        ...state,
+        worldName
+      };
+    },
+    'updateInput': (state, value) => ({
+      ...state,
+      userInput: value
+    }),
+    'sendMessage': (state) => {
+      if (!state.userInput.trim()) return state;
+
+      const newMessage = {
+        id: state.messages.length + 1,
+        sender: 'User',
+        content: state.userInput,
+        timestamp: new Date()
+      };
+
+      return {
+        ...state,
+        messages: [...state.messages, newMessage],
+        userInput: ''
+      };
     }
   };
 }

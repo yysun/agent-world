@@ -63,9 +63,7 @@ html {
 }
 
 body {
-  max-width: 800px;
   margin: auto;
-  padding: 1em;
   font-family: 'Short Stack', cursive;
   font-size: 2em;
   line-height: 1.5;
@@ -436,4 +434,358 @@ h2 {
 
 .settings-btn:hover .gear-icon {
   color: var(--accent-secondary);
+}
+
+/* World Component Styles - Two-row layout with agents and chat */
+.world-container {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0.5rem 2rem;
+  min-height: 100vh;
+}
+
+.world-title {
+  text-align: center;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  font-size: 2.5rem;
+  margin-top: 0;
+}
+
+.world-layout {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.5rem;
+  height: calc(100vh - 100px);
+  min-height: 700px;
+}
+
+/* Fieldset styling */
+.fieldset {
+  border: none;
+  border-radius: 12px;
+  margin: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.fieldset legend {
+  font-family: 'Short Stack', cursive;
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: var(--text-primary);
+  padding: 0 1rem;
+  background-color: transparent;
+  border: none;
+  border-radius: 8px;
+}
+
+/* Top Row - Agents */
+.agents-row {
+  height: auto;
+  min-height: 100px;
+}
+
+.agents-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.agent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0.75rem;
+  border-radius: 8px;
+}
+
+.agent-item:hover {
+  transform: translateY(-2px) scale(1.05);
+}
+
+/* Sprite sheet implementation */
+.agent-sprite {
+  width: 80px;
+  height: 80px;
+  background-image: url('../imgs/agent-sprites.png');
+  background-size: 240px 240px;
+  background-repeat: no-repeat;
+  transition: all 0.2s ease;
+}
+
+.sprite-0 {
+  background-position: 0 0;
+}
+
+.sprite-1 {
+  background-position: -80px 0;
+}
+
+.sprite-2 {
+  background-position: -160px 0;
+}
+
+.sprite-3 {
+  background-position: 0 -80px;
+}
+
+.sprite-4 {
+  background-position: -80px -80px;
+}
+
+.sprite-5 {
+  background-position: -160px -80px;
+}
+
+.agent-name {
+  font-weight: bold;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* Bottom Row - Chat Interface */
+.chat-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Conversation Area */
+.conversation-area {
+  flex: 1;
+  padding: 0.5rem 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background-color: transparent;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+  min-height: 400px;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: 12px;
+  max-width: 70%;
+}
+
+.user-message {
+  align-self: flex-end;
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.agent-message {
+  align-self: flex-start;
+  background-color: var(--bg-accent);
+  border: 1px solid var(--border-secondary);
+  color: var(--text-primary);
+}
+
+.message-sender {
+  font-weight: bold;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.message-content {
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.message-timestamp {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  text-align: right;
+}
+
+/* User Input Area */
+.input-area {
+  padding: 0;
+  background-color: transparent;
+}
+
+.input-container {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.message-input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 2px solid var(--border-primary);
+  border-radius: 4px;
+  font-family: 'Short Stack', cursive;
+  font-size: 0.85rem;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: border-color 0.2s ease;
+}
+
+.message-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.message-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.send-button {
+  padding: 0.4rem 0.8rem;
+  background-color: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-family: 'Short Stack', cursive;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: var(--accent-secondary);
+  transform: translateY(-1px);
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive design for smaller screens */
+@media only screen and (max-width: 768px) {
+  .world-container {
+    max-width: 100%;
+    padding: 1rem;
+  }
+
+  .world-layout {
+    height: calc(100vh - 120px);
+    gap: 1rem;
+  }
+
+  .agents-list {
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .agent-sprite {
+    width: 60px;
+    height: 60px;
+    background-size: 180px 180px;
+  }
+
+  .sprite-0 {
+    background-position: 0 0;
+  }
+
+  .sprite-1 {
+    background-position: -60px 0;
+  }
+
+  .sprite-2 {
+    background-position: -120px 0;
+  }
+
+  .sprite-3 {
+    background-position: 0 -60px;
+  }
+
+  .sprite-4 {
+    background-position: -60px -60px;
+  }
+
+  .sprite-5 {
+    background-position: -120px -60px;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .world-title {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  .conversation-area {
+    min-height: 250px;
+  }
+}
+
+@media only screen and (max-width: 480px) {
+  .world-container {
+    padding: 0.5rem;
+  }
+
+  .input-container {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .message-input {
+    width: 100%;
+  }
+
+  .send-button {
+    width: 100%;
+  }
+
+  .agents-list {
+    gap: 0.75rem;
+  }
+
+  .agent-sprite {
+    width: 50px;
+    height: 50px;
+    background-size: 150px 150px;
+  }
+
+  .sprite-0 {
+    background-position: 0 0;
+  }
+
+  .sprite-1 {
+    background-position: -50px 0;
+  }
+
+  .sprite-2 {
+    background-position: -100px 0;
+  }
+
+  .sprite-3 {
+    background-position: 0 -50px;
+  }
+
+  .sprite-4 {
+    background-position: -50px -50px;
+  }
+
+  .sprite-5 {
+    background-position: -100px -50px;
+  }
 }
