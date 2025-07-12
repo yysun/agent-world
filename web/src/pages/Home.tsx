@@ -134,26 +134,21 @@ export default class HomeComponent extends Component {
               {state.worlds[state.currentIndex].description}
             </p>
             <div class="action-buttons">
-              <button
-                class="btn add-world-btn"
-                onclick={() => this.run('add-new-world')}
-                title="Add New World"
-              >
-                <span class="plus-icon">+</span>
-              </button>
-              <button
-                class="btn btn-primary enter-btn"
-                onclick={() => this.run('enter-world', state.worlds[state.currentIndex])}
-              >
-                Enter {state.worlds[state.currentIndex].name}
-              </button>
-              <button
-                class="btn settings-btn"
-                onclick={() => this.run('open-settings')}
-                title="Settings"
-              >
-                <span class="gear-icon">⚙</span>
-              </button>
+              <a href="/World">
+                <button class="btn add-world-btn" title="Add New World">
+                  <span class="plus-icon">+</span>
+                </button>
+              </a>
+              <a href={'/World/' + state.worlds[state.currentIndex].name}>
+                <button class="btn btn-primary enter-btn">
+                  Enter {state.worlds[state.currentIndex].name}
+                </button>
+              </a>
+              <a href="/Settings">
+                <button class="btn settings-btn" title="Settings">
+                  <span class="gear-icon">⚙</span>
+                </button>
+              </a>
             </div>
           </div>
         </div>
@@ -175,21 +170,6 @@ export default class HomeComponent extends Component {
       const index = state.worlds.findIndex(w => w.id === world.id);
       return { ...state, currentIndex: index };
     },
-    'enter-world': (state, world) => {
-      console.log('Entering world:', world);
-      // TODO: Navigate to the selected world
-      return state;
-    },
-    'add-new-world': state => {
-      console.log('Adding new world');
-      // TODO: Open dialog or navigate to world creation
-      return state;
-    },
-    'open-settings': state => {
-      console.log('Opening settings');
-      // TODO: Open settings dialog or navigate to settings
-      return state;
-    }
   };
 }
 

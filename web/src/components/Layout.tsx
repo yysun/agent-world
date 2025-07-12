@@ -8,6 +8,6 @@ import app from 'apprun';
 //   item && item.parentElement.classList.add('active');
 // });
 
-export default () => <div class="doodle-container" id="main">
-  <div class="doodle-container" id="pages"></div>
+export default () => <div id="main">
+  <div id="pages"></div>
 </div>;

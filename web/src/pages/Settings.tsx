@@ -1,14 +1,14 @@
 import { app, Component } from 'apprun';
 
-export default class ContactComponent extends Component {
-  state = 'Contact';
+export default class SettingsComponent extends Component {
+  state = 'Settings';
 
   view = state => <div>
     <h1>{state}</h1>
   </div>;
 
   update = {
-    '/Contact': state => state,
+    '/Settings': state => state,
   };
 }
 
