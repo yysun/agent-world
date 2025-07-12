@@ -56,20 +56,8 @@ export default class HomeComponent extends Component {
       {/* Banner */}
       <div class="row">
         <div class="col banner-col">
-          <h1 class="banner-title">CREATE OR PICK YOUR WORLD</h1>
+          <h1 class="banner-title">PICK YOUR WORLD</h1>
         </div>
-      </div>
-
-
-      {/* Add New World Button */}
-      <div class="add-world-container">
-        <button
-          class="btn add-world-btn"
-          onclick={() => this.run('add-new-world')}
-          title="Add New World"
-        >
-          <span class="plus-icon">+</span>
-        </button>
       </div>
 
       {/* World Carousel */}
@@ -145,12 +133,28 @@ export default class HomeComponent extends Component {
             <p class="description-text">
               {state.worlds[state.currentIndex].description}
             </p>
-            <button
-              class="btn btn-primary enter-btn"
-              onclick={() => this.run('enter-world', state.worlds[state.currentIndex])}
-            >
-              Enter {state.worlds[state.currentIndex].name}
-            </button>
+            <div class="action-buttons">
+              <button
+                class="btn add-world-btn"
+                onclick={() => this.run('add-new-world')}
+                title="Add New World"
+              >
+                <span class="plus-icon">+</span>
+              </button>
+              <button
+                class="btn btn-primary enter-btn"
+                onclick={() => this.run('enter-world', state.worlds[state.currentIndex])}
+              >
+                Enter {state.worlds[state.currentIndex].name}
+              </button>
+              <button
+                class="btn settings-btn"
+                onclick={() => this.run('open-settings')}
+                title="Settings"
+              >
+                <span class="gear-icon">⚙</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -179,6 +183,11 @@ export default class HomeComponent extends Component {
     'add-new-world': state => {
       console.log('Adding new world');
       // TODO: Open dialog or navigate to world creation
+      return state;
+    },
+    'open-settings': state => {
+      console.log('Opening settings');
+      // TODO: Open settings dialog or navigate to settings
       return state;
     }
   };

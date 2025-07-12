@@ -364,12 +364,7 @@ h2 {
   border-color: var(--border-secondary);
 }
 
-/* Add new world button */
-.add-world-container {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
+/* Add new world button (now in action buttons container) */
 
 .add-world-btn {
   background: none;
@@ -397,5 +392,44 @@ h2 {
 }
 
 .add-world-btn:hover .plus-icon {
+  color: var(--accent-secondary);
+}
+
+/* Action buttons container */
+.action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* Settings button */
+.settings-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.settings-btn:hover {
+  transform: scale(1.1);
+}
+
+.gear-icon {
+  color: var(--accent-primary);
+  font-size: 1.25rem;
+  font-weight: bold;
+  line-height: 1;
+  transition: all 0.3s ease;
+}
+
+.settings-btn:hover .gear-icon {
   color: var(--accent-secondary);
 }
