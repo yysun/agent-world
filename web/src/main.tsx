@@ -15,5 +15,3 @@ new Home().start(element);
 new Agent().mount(element);
 new World().mount(element);
 new Settings().mount(element);
-
-app.route(location.pathname);
