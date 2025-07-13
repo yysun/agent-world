@@ -30,7 +30,7 @@ export default class WorldComponent extends Component {
 
       <div className="world-layout">
         {/* Top Row - Agents */}
-        <div className="fieldset agents-row">
+        <div className="agents-row">
           <div className="agents-list">
             {state.agents.map(agent => (
               <div key={agent.id} className="agent-item">
@@ -42,7 +42,7 @@ export default class WorldComponent extends Component {
         </div>
 
         {/* Bottom Row - Chat Interface */}
-        <fieldset className="fieldset chat-row">
+        <fieldset className="chat-row">
           <legend>Chat</legend>
           <div className="chat-container">
             {/* Conversation Area */}
