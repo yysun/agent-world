@@ -33,7 +33,7 @@ export default class WorldComponent extends Component {
         <div className="agents-row">
           <div className="agents-list">
             {state.agents.map(agent => (
-              <div key={agent.id} className="agent-item">
+              <div key={`agent-${agent.id}`} className="agent-item">
                 <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
                 <div className="agent-name">{agent.name}</div>
               </div>
