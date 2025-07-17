@@ -91,7 +91,7 @@ export default class HomeComponent extends Component {
                 return (
                   <button
                     class={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'}`}
-                    onclick={() => this.run('select-world', world)}
+                    onclick={() => this.run(isCenter ? 'enter-world' : 'select-world', world)}
                   >
                     <span class="world-name">
                       {world.name}
@@ -169,6 +169,11 @@ export default class HomeComponent extends Component {
     'select-world': (state, world) => {
       const index = state.worlds.findIndex(w => w.id === world.id);
       return { ...state, currentIndex: index };
+    },
+    'enter-world': (state, world) => {
+      // Navigate to the world page
+      window.location.href = '/World/' + world.name;
+      return state;
     },
   };
 }
