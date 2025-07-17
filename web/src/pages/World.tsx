@@ -42,44 +42,61 @@ export default class WorldComponent extends Component {
         </div>
 
         {/* Bottom Row - Chat Interface */}
-        <fieldset className="chat-row">
-          <legend>Chat</legend>
-          <div className="chat-container">
-            {/* Conversation Area */}
-            <div className="conversation-area">
-              {state.messages.map(message => (
-                <div key={message.id} className={`message ${message.sender === 'User' ? 'user-message' : 'agent-message'}`}>
-                  <div className="message-sender">{message.sender}</div>
-                  <div className="message-content">{message.content}</div>
-                  <div className="message-timestamp">
-                    {message.timestamp.toLocaleTimeString()}
+        <div className="chat-row">
+          {/* chat interface */}
+          <fieldset>
+            <legend>Chat</legend>
+            <div className="chat-container">
+              {/* Conversation Area */}
+              <div className="conversation-area">
+                {state.messages.map(message => (
+                  <div key={message.id} className={`message ${message.sender === 'User' ? 'user-message' : 'agent-message'}`}>
+                    <div className="message-sender">{message.sender}</div>
+                    <div className="message-content">{message.content}</div>
+                    <div className="message-timestamp">
+                      {message.timestamp.toLocaleTimeString()}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
 
-            {/* User Input Area */}
-            <div className="input-area">
-              <div className="input-container">
-                <input
-                  type="text"
-                  className="message-input"
-                  placeholder="Type your message..."
-                  value={state.userInput}
-                  onInput={e => app.run('updateInput', e.target.value)}
-                  onKeyPress={e => e.key === 'Enter' && app.run('sendMessage')}
-                />
-                <button
-                  className="send-button"
-                  onClick={() => app.run('sendMessage')}
-                  disabled={!state.userInput.trim()}
-                >
-                  Send
-                </button>
+              {/* User Input Area */}
+              <div className="input-area">
+                <div className="input-container">
+                  <input
+                    type="text"
+                    className="message-input"
+                    placeholder="Type your message..."
+                    value={state.userInput}
+                    onInput={e => app.run('updateInput', e.target.value)}
+                    onKeyPress={e => e.key === 'Enter' && app.run('sendMessage')}
+                  />
+                  <button
+                    className="send-button"
+                    onClick={() => app.run('sendMessage')}
+                    disabled={!state.userInput.trim()}
+                  >
+                    Send
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </fieldset>
+          </fieldset>
+
+          {/* chat settings */}
+          <fieldset>
+            <legend>Chat Settings</legend>
+            <div className="chat-settings">
+              <label>
+                <input
+                  type="checkbox"
+
+                />
+                Enable Notifications
+              </label>
+            </div>
+          </fieldset>
+        </div>
       </div>
     </div>
   );
