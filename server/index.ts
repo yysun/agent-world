@@ -30,14 +30,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'http';
 import apiRouter from './api';
+import open from 'open';
 
 // ES modules setup
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuration
-const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || 'localhost';
+const PORT = Number(process.env.PORT) || 0;
+const HOST = process.env.HOST || '127.0.0.1';
 const logLevel = (process.env.LOG_LEVEL || 'error') as LogLevel;
 
 // Initialize logger (now synchronous)
@@ -138,10 +139,16 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
     configureLLMProvidersFromEnv();
 
     const server = app.listen(port, host, () => {
-      console.log(`🌐 Web server running at http://${host}:${port}`);
-      console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-      console.log(`🚀 HTTP server running with REST API and SSE chat`);
-      resolve(server);
+      const serverAddress = server.address();
+      if (serverAddress && typeof serverAddress === 'object') {
+        const actualPort = serverAddress.port;
+        const url = `http://${host}:${actualPort}`;
+        console.log(`🌐 Web server running at ${url}`);
+        console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
+        console.log(`🚀 HTTP server running with REST API and SSE chat`);
+        open(url);
+        resolve(server);
+      }
     });
 
     server.on('error', reject);

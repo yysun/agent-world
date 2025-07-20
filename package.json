@@ -14,6 +14,7 @@
     "dev": "LOG_LEVEL=debug npx tsx --watch server/index.ts",
     "test": "jest --config jest.config.js",
     "test:integration": "jest --config jest.integration.config.js",
+    "test:server": "NODE_ENV=test tsx server/index.ts",
     "test:all": "npm run test && npm run test:integration",
     "check": "tsc --noEmit",
     "build": "tsc --declaration --emitDeclarationOnly --noEmit false --module esnext --outFile public/agent-world.d.ts"
@@ -55,6 +56,7 @@
     "typescript": "^5.8.3",
     "uuid": "^11.1.0",
     "ws": "^8.18.2",
+    "open": "^10.1.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {
