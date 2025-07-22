@@ -7,170 +7,230 @@
  * - Responsive world cards with center/side positioning
  * - Interactive world selection with description display
  * - Indicator dots for world navigation
+ * - Real-time API integration for world data
+ * - Loading and error states for better UX
  * 
  * Implementation:
- * - AppRun component with state management
+ * - AppRun component with TypeScript interfaces
  * - Dynamic visibility logic for optimal world display
  * - Highlighted arrow states for better UX
  * - Responsive design for mobile and desktop
+ * - Async API calls with proper error handling
  * 
  * Recent Changes:
- * - Modified carousel to always show at least 3 items
- * - Added highlighted state for navigation arrows at boundaries
- * - Improved responsive layout for world cards
- * - Enhanced visual feedback for navigation states
+ * - Replaced mock data with API calls to getWorlds()
+ * - Added proper TypeScript typing with HomeState interface
+ * - Added loading, error, and empty states handling
+ * - Fixed type errors and improved type safety
+ * - Enhanced error handling with retry functionality
  */
 
 import { app, Component } from 'apprun';
+import { getWorlds, type World } from '../api';
 
-interface World {
-  id: string;
-  name: string;
-  description: string;
+interface HomeState {
+  worlds: World[];
+  currentIndex: number;
+  loading: boolean;
+  error: string | null;
 }
 
-export default class HomeComponent extends Component {
-  state = {
-    worlds: [
-      {
-        id: 'city',
-        name: 'City',
-        description: 'A bustling metropolis filled with towering skyscrapers, busy streets, and endless opportunities. Navigate through corporate intrigue and urban adventures.'
-      },
-      {
-        id: 'mystic-forest',
-        name: 'Mystic Forest',
-        description: 'An enchanted woodland realm where ancient magic flows through towering trees and mystical creatures roam freely. Discover hidden secrets and magical artifacts.'
-      },
-      {
-        id: 'cyber-ocean',
-        name: 'Cyber Ocean',
-        description: 'A digital seascape where data flows like waves and AI entities swim through streams of code. Explore the depths of cyberspace and virtual reality.'
-      }
-    ],
-    currentIndex: 1
+export default class HomeComponent extends Component<HomeState> {
+  state: HomeState = {
+    worlds: [],
+    currentIndex: 0,
+    loading: true,
+    error: null
   };
 
-  view = state => (
-    <div class="container">
-      {/* Banner */}
-      <div class="row">
-        <div class="col banner-col">
-          <h1 class="banner-title">PICK YOUR WORLD</h1>
-        </div>
-      </div>
-
-      {/* World Carousel */}
-      <div class="row carousel-row">
-        <div class="col">
-          <div class="world-carousel">
-
-            {/* Left Arrow */}
-            <button
-              class={`btn carousel-arrow`}
-              onclick={() => this.run('prev-world')}
-            >
-              ‹
-            </button>
-
-            {/* World Cards */}
-            <div class="world-cards">
-              {state.worlds.map((world, index) => {
-                const isCenter = index === state.currentIndex;
-                // Show at least 3 items: if we have 3 or fewer worlds, show all
-                // If we have more than 3, show center + 1 on each side
-                let isVisible = false;
-                if (state.worlds.length <= 3) {
-                  isVisible = true; // Show all when 3 or fewer
-                } else {
-                  isVisible = Math.abs(index - state.currentIndex) <= 1;
-                }
-
-                if (!isVisible) return null;
-
-                return (
-                  <button
-                    class={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'}`}
-                    onclick={() => this.run(isCenter ? 'enter-world' : 'select-world', world)}
-                  >
-                    <span class="world-name">
-                      {world.name}
-                    </span>
-                  </button>
-                );
-              })}
+  view = (state: HomeState) => {
+    if (state.loading) {
+      return (
+        <div class="container">
+          <div class="row">
+            <div class="col">
+              <div class="loading-message">Loading worlds...</div>
             </div>
-
-            {/* Right Arrow */}
-            <button
-              class={`btn carousel-arrow`}
-              onclick={() => this.run('next-world')}
-            >
-              ›
-            </button>
           </div>
+        </div>
+      );
+    }
 
-          {/* World Indicator Dots */}
-          <div class="world-indicators">
-            {state.worlds.map((world, index) => (
+    if (state.error) {
+      return (
+        <div class="container">
+          <div class="row">
+            <div class="col">
+              <div class="error-message">
+                <h3>Error loading worlds</h3>
+                <p>{state.error}</p>
+                <button class="btn btn-primary" $onclick='/' >
+                  Retry
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (state.worlds.length === 0) {
+      return (
+        <div class="container">
+          <div class="row">
+            <div class="col">
+              <div class="no-worlds-message">
+                <h3>No worlds found</h3>
+                <p>Create your first world to get started!</p>
+                <a href="/World">
+                  <button class="btn btn-primary">Create World</button>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div class="container">
+        {/* Banner */}
+        <div class="row">
+          <div class="col banner-col">
+            <h1 class="banner-title">PICK YOUR WORLD</h1>
+          </div>
+        </div>
+
+        {/* World Carousel */}
+        <div class="row carousel-row">
+          <div class="col">
+            <div class="world-carousel">
+
+              {/* Left Arrow */}
               <button
-                class={`world-dot ${index === state.currentIndex ? 'active' : ''}`}
-                onclick={() => this.run('select-world', world)}
-                title={world.name}
-              />
-            ))}
+                class={`btn carousel-arrow`}
+                onclick={() => this.run('prev-world')}
+              >
+                ‹
+              </button>
+
+              {/* World Cards */}
+              <div class="world-cards">
+                {state.worlds.map((world, index) => {
+                  const isCenter = index === state.currentIndex;
+                  // Show at least 3 items: if we have 3 or fewer worlds, show all
+                  // If we have more than 3, show center + 1 on each side
+                  let isVisible = false;
+                  if (state.worlds.length <= 3) {
+                    isVisible = true; // Show all when 3 or fewer
+                  } else {
+                    isVisible = Math.abs(index - state.currentIndex) <= 1;
+                  }
+
+                  if (!isVisible) return null;
+
+                  return (
+                    <button
+                      class={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'}`}
+                      onclick={() => this.run(isCenter ? 'enter-world' : 'select-world', world)}
+                    >
+                      <span class="world-name">
+                        {world.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Right Arrow */}
+              <button
+                class={`btn carousel-arrow`}
+                onclick={() => this.run('next-world')}
+              >
+                ›
+              </button>
+            </div>
+
+            {/* World Description */}
+            <div class="world-indicators">
+              {state.worlds.map((world, index) => (
+                <button
+                  class={`world-dot ${index === state.currentIndex ? 'active' : ''}`}
+                  onclick={() => this.run('select-world', world)}
+                  title={world.name}
+                />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* World Description */}
-      <div class="row">
-        <div class="col">
-          <div class="description-card">
-            <h4 class="description-title">
-              {state.worlds[state.currentIndex].name}
-            </h4>
-            <p class="description-text">
-              {state.worlds[state.currentIndex].description}
-            </p>
-            <div class="action-buttons">
-              <a href="/World">
-                <button class="btn add-world-btn" title="Add New World">
-                  <span class="plus-icon">+</span>
-                </button>
-              </a>
-              <a href={'/World/' + state.worlds[state.currentIndex].name}>
-                <button class="btn btn-primary enter-btn">
-                  Enter {state.worlds[state.currentIndex].name}
-                </button>
-              </a>
-              <a href="/Settings">
-                <button class="btn settings-btn" title="Settings">
-                  <span class="gear-icon">⚙</span>
-                </button>
-              </a>
+        {/* World Description */}
+        <div class="row">
+          <div class="col">
+            <div class="description-card">
+              <h4 class="description-title">
+                {state.worlds[state.currentIndex]?.name || 'Unknown World'}
+              </h4>
+              <p class="description-text">
+                {state.worlds[state.currentIndex]?.description || 'No description available'}
+              </p>
+              <div class="action-buttons">
+                <a href="/World">
+                  <button class="btn add-world-btn" title="Add New World">
+                    <span class="plus-icon">+</span>
+                  </button>
+                </a>
+                <a href={'/World/' + (state.worlds[state.currentIndex]?.name || '')}>
+                  <button class="btn btn-primary enter-btn">
+                    Enter {state.worlds[state.currentIndex]?.name || 'World'}
+                  </button>
+                </a>
+                <a href="/Settings">
+                  <button class="btn settings-btn" title="Settings">
+                    <span class="gear-icon">⚙</span>
+                  </button>
+                </a>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   update = {
-    '/': state => state,
-    'prev-world': state => ({
+    '/': async function* load_worlds(state: HomeState): AsyncGenerator<HomeState>  {
+      try {
+        yield { ...state, loading: true, error: null };
+        const worlds = await getWorlds();
+        yield {
+          ...state,
+          worlds: worlds || [],
+          loading: false,
+          error: null,
+          currentIndex: worlds && worlds.length > 0 ? 0 : 0
+        };
+      } catch (error: any) {
+        yield {
+          ...state,
+          loading: false,
+          error: error.message || 'Failed to load worlds'
+        };
+      }
+    },
+    'prev-world': (state: HomeState): HomeState => ({
       ...state,
       currentIndex: state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1
     }),
-    'next-world': state => ({
+    'next-world': (state: HomeState): HomeState => ({
       ...state,
       currentIndex: state.currentIndex < state.worlds.length - 1 ? state.currentIndex + 1 : 0
     }),
-    'select-world': (state, world) => {
-      const index = state.worlds.findIndex(w => w.id === world.id);
-      return { ...state, currentIndex: index };
+    'select-world': (state: HomeState, world: World): HomeState => {
+      const index = state.worlds.findIndex(w => w.name === world.name);
+      return { ...state, currentIndex: index >= 0 ? index : state.currentIndex };
     },
-    'enter-world': (state, world) => {
+    'enter-world': (state: HomeState, world: World): HomeState => {
       // Navigate to the world page
       window.location.href = '/World/' + world.name;
       return state;

@@ -8,10 +8,12 @@ import Settings from './pages/Settings';
 import 'doodle.css/doodle.css';
 import './styles.css';
 
+app.basePath = ''; // temp, wait for apprun 3.37.1
 app.render('#root', <Layout />);
+app.addComponents('#pages', {
+  '/': Home,
+  '/World': World,
+  '/Agent': Agent,
+  '/Settings': Settings,
+});
 
-const element = '#pages';
-new Home().start(element);
-new Agent().mount(element);
-new World().mount(element);
-new Settings().mount(element);

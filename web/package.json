@@ -6,14 +6,14 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "vite dev --port 8080",
+    "dev": "vite dev --port 8080 --open",
     "build": "vite build --outDir ../public"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "apprun": "^3.36.1",
+    "apprun": "^3.37.1",
     "vite": "^6.3.5"
   },
   "dependencies": {
