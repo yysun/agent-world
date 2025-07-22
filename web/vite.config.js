@@ -8,6 +8,8 @@ export default defineConfig({
         changeOrigin: true,
         secure: false
       }
-    }
+    },
+    // SPA mode - serve index.html for all routes
+    historyApiFallback: true
   }
 })

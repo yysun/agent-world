@@ -30,7 +30,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'http';
 import apiRouter from './api';
-import open from 'open';
 
 // ES modules setup
 const __filename = fileURLToPath(import.meta.url);
@@ -102,7 +101,7 @@ app.use((req, res, next) => {
 
 // Static files and API routes
 app.use(express.static(path.join(__dirname, '../public')));
-app.use('/', apiRouter);
+app.use('/api', apiRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -120,6 +119,11 @@ app.get('/health', (req, res) => {
       error: 'Failed to get server health'
     });
   }
+});
+
+// SPA fallback - serve index.html for all non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 // Error handling middleware
@@ -146,7 +150,6 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
         console.log(`🌐 Web server running at ${url}`);
         console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
         console.log(`🚀 HTTP server running with REST API and SSE chat`);
-        open(url);
         resolve(server);
       }
     });
