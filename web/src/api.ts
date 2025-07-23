@@ -279,15 +279,6 @@ async function clearAgentMemory(worldName: string, agentName: string): Promise<v
   });
 }
 
-/**
- * Comprehensive world update function for bulk operations
- */
-async function updateWorldComprehensive(worldName: string, updateData: Partial<World>): Promise<World> {
-  // For now, this is the same as updateWorld since we implemented basic world updates
-  // In the future, this could handle complex operations like agent bulk updates
-  return updateWorld(worldName, updateData);
-}
-
 // Export the API functions
 export type { World, Agent, Message, AgentMemory };
 
@@ -301,7 +292,6 @@ export {
   createWorld,
   updateWorld,
   deleteWorld,
-  updateWorldComprehensive,
 
   // Agent management
   getAgents,

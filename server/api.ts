@@ -17,11 +17,12 @@
  *   - Regular message timer: 5s
  * - Fixed streaming timeout logic to prevent ending during active LLM responses
  * - Optimized world existence checks to use getWorldConfig instead of deprecated getWorld for performance
+ * - Extracted world retrieval and error handling into reusable getWorldOrError utility function
  */
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, getFullWorld, publishMessage } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 
@@ -50,6 +51,17 @@ async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: s
   if (excludeAgent && agentName === excludeAgent) return true;
   const existingAgent = await world.getAgent(agentName);
   return !existingAgent;
+}
+
+async function getWorldOrError(res: Response, worldName: string): Promise<any | null> {
+  const world = await getWorldConfig(ROOT_PATH, worldName);
+
+  if (!world) {
+    sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+    return null;
+  }
+
+  return world;
 }
 
 // Validation schemas
@@ -102,11 +114,7 @@ router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<vo
   try {
     const { worldName } = req.params;
     const world = await getFullWorld(ROOT_PATH, worldName);
-
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    if (!world) return;
 
     // Convert Map to array for JSON serialization
     const agents = Array.from(world.agents.values());
@@ -187,11 +195,8 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       return;
     }
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const { name, description } = validation.data;
 
@@ -233,11 +238,8 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
   try {
     const { worldName } = req.params;
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     // Delete the world
     const deleted = await world.delete();
@@ -257,12 +259,8 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
 router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
     const worldName = req.params.worldName;
-    const world = await getFullWorld(ROOT_PATH, worldName);
-
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const agents = await world.listAgents();
     res.json(agents);
@@ -276,12 +274,8 @@ router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Pro
 router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, agentName } = req.params;
-    const world = await getFullWorld(ROOT_PATH, worldName);
-
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const agent = await world.getAgent(agentName);
     if (!agent) {
@@ -312,11 +306,8 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
     const { name, type, provider, model, systemPrompt, apiKey, baseUrl, temperature, maxTokens } = validation.data;
     const agentId = toKebabCase(name);
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     // Check if agent name is unique
     const isUnique = await isAgentNameUnique(world, agentId);
@@ -360,12 +351,8 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     }
 
     const { status, config, systemPrompt, clearMemory } = validation.data;
-    const world = await getFullWorld(ROOT_PATH, worldName);
-
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const existingAgent = await world.getAgent(agentName);
     if (!existingAgent) {
@@ -412,11 +399,8 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   try {
     const { worldName, agentName } = req.params;
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     // Check if agent exists
     const existingAgent = await world.getAgent(agentName);
@@ -444,11 +428,8 @@ router.get('/worlds/:worldName/agents/:agentName/memory', async (req: Request, r
   try {
     const { worldName, agentName } = req.params;
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const agent = await world.getAgent(agentName);
     if (!agent) {
@@ -478,11 +459,8 @@ router.post('/worlds/:worldName/agents/:agentName/memory', async (req: Request, 
 
     const { messages } = validation.data;
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
 
     const agent = await world.getAgent(agentName);
     if (!agent) {
@@ -527,10 +505,7 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
     const { worldName, agentName } = req.params;
 
     const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    if (!world) return;
 
     const agent = await world.getAgent(agentName);
     if (!agent) {
