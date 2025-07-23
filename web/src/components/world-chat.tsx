@@ -4,7 +4,7 @@
  * Features:
  * - Real-time message display with streaming indicators
  * - User input handling with send functionality
- * - Message filtering for completed and streaming messages
+ * - Message filtering for completed, streaming, and regular messages
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
  * - Send button state management
@@ -13,7 +13,7 @@
  * - Functional component using AppRun JSX
  * - Props-based state management from parent World component
  * - AppRun $ directive pattern for event handling
- * - Message filtering logic for SSE streams
+ * - Message filtering logic for SSE streams and regular messages
  * - Proper createdAt formatting
  * 
  * Changes:
@@ -21,6 +21,7 @@
  * - Maintained all original chat functionality
  * - Added proper TypeScript interfaces for props
  * - Updated to use AppRun $ directive pattern ($onclick, $oninput, $onkeypress)
+ * - Fixed message filtering to show regular non-streaming messages (e.g., GM turn limit notifications)
  */
 
 import { app } from 'apprun';
@@ -71,9 +72,11 @@ export default function WorldChat(props: WorldChatProps) {
                 if (message.sender === 'HUMAN' || message.type === 'user') {
                   return true;
                 }
-                // For agent messages: show completed streams OR currently streaming
+                // For agent messages: show completed streams OR currently streaming OR regular non-streaming messages
                 // This shows final messages but prevents duplication during streaming
-                return message.streamComplete === true || (message.isStreaming === true && !message.streamComplete);
+                return message.streamComplete === true ||
+                  (message.isStreaming === true && !message.streamComplete) ||
+                  (message.streamComplete === undefined && message.isStreaming === undefined);
               })
               .map((message, index) => (
                 <div key={message.id || index} className={`message ${message.sender === 'HUMAN' || message.type === 'user' ? 'user-message' : 'agent-message'}`}>

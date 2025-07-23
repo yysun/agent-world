@@ -35,6 +35,8 @@
  * - Default selectedSettingsTarget set to 'world' for immediate world info display
  * - Simplified agent tracking using messageCount only (removed memorySize)
  * - Consolidated to use createdAt field exclusively (removed timestamp redundancy)
+ * - Local agent messageCount updates: analyzes incoming messages to identify sender and increments count
+ * - Real-time badge updates: messageCount reflects agent activity during live chat sessions
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -64,6 +66,9 @@
  * - Removed memorySize dependency from SSE client and frontend for simplification
  * - Consolidated agent tracking to use messageCount only
  * - Consolidated timestamp/createdAt fields to use createdAt exclusively throughout codebase
+ * - Enhanced agent message badge updates: automatically increment messageCount when agents send messages
+ * - Added local state updates for agent messageCount in handleMessage only
+ * - Streamlined message tracking: removed duplicate logic, handleMessage handles all agent count updates
  */
 
 import { app, Component } from 'apprun';
@@ -497,7 +502,46 @@ export default class WorldComponent extends Component<WorldComponentState> {
       return handleStreamError(state as any, data) as WorldComponentState;
     },
     'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleMessage(state as any, data) as WorldComponentState;
+      // First, handle the message as normal
+      const updatedState = handleMessage(state as any, data) as WorldComponentState;
+
+      // Extract agent name and message content from the message data
+      const messageData = data.data || {};
+      const agentName = messageData.sender || messageData.agentName;
+      const messageContent = messageData.content || messageData.message;
+
+      if (agentName && messageContent && messageContent.trim() && agentName !== 'HUMAN') {
+        // Update the agent's messageCount in the local state only
+        const updatedAgents = updatedState.agents.map(agent => {
+          if (agent.name === agentName) {
+            return {
+              ...agent,
+              messageCount: agent.messageCount + 1
+            };
+          }
+          return agent;
+        });
+
+        // Update world object with updated agents
+        const updatedWorld = updatedState.world ? {
+          ...updatedState.world,
+          agents: updatedAgents
+        } : null;
+
+        // Update selected agent if it's the same one
+        const updatedSelectedAgent = updatedState.selectedAgent?.name === agentName
+          ? { ...updatedState.selectedAgent, messageCount: updatedState.selectedAgent.messageCount + 1 }
+          : updatedState.selectedAgent;
+
+        return {
+          ...updatedState,
+          world: updatedWorld,
+          agents: updatedAgents,
+          selectedAgent: updatedSelectedAgent
+        };
+      }
+
+      return updatedState;
     },
     'handleConnectionStatus': (state: WorldComponentState, data: any): WorldComponentState => {
       return handleConnectionStatus(state as any, data) as WorldComponentState;

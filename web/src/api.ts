@@ -251,22 +251,6 @@ async function getAgentMemory(worldName: string, agentName: string): Promise<Age
 }
 
 /**
- * Append messages to agent memory
- */
-async function appendAgentMemory(worldName: string, agentName: string, messages: Message[]): Promise<AgentMemory> {
-  if (!worldName || !agentName || !messages) {
-    throw new Error('World name, agent name, and messages are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`, {
-    method: 'POST',
-    body: JSON.stringify({ messages }),
-  });
-
-  return response.json();
-}
-
-/**
  * Clear agent memory
  */
 async function clearAgentMemory(worldName: string, agentName: string): Promise<void> {
@@ -302,6 +286,5 @@ export {
 
   // Agent memory management
   getAgentMemory,
-  appendAgentMemory,
   clearAgentMemory,
 };
