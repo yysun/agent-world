@@ -42,7 +42,7 @@
  */
 
 import { app, Component } from 'apprun';
-import { getAgents, getAgentMemory, type Agent, type Message } from '../api';
+import { getWorld, getAgentMemory, type Agent, type Message } from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -281,14 +281,14 @@ export default class WorldComponent extends Component<WorldComponentState> {
           error: null
         };
 
-        // Load agents data
-        const agents = await getAgents(worldName);
+        // Load world data including agents
+        const world = await getWorld(worldName);
 
         // Transform agents with UI properties
-        const worldAgents: WorldAgent[] = agents.map((agent, index) => ({
+        const worldAgents: WorldAgent[] = world.agents.map((agent, index) => ({
           ...agent,
           spriteIndex: index % 9, // Cycle through 9 sprite indices
-          messageCount: agent.memorySize || 0, // Use agent's memorySize property
+          messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
           memorySize: agent.memorySize || 0 // Ensure memorySize is present
         }));
 
