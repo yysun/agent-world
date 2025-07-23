@@ -39,7 +39,7 @@ interface Agent {
 interface Message {
   role: string;
   content: string;
-  timestamp?: string;
+  createdAt?: string;
   [key: string]: any;
 }
 

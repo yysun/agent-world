@@ -14,7 +14,7 @@
  * - Props-based state management from parent World component
  * - AppRun $ directive pattern for event handling
  * - Message filtering logic for SSE streams
- * - Proper timestamp formatting
+ * - Proper createdAt formatting
  * 
  * Changes:
  * - Extracted from World component for better separation of concerns
@@ -29,7 +29,7 @@ interface Message {
   id?: string | number;
   sender: string;
   text: string;
-  timestamp: string;
+  createdAt: string;
   type?: string;
   streamComplete?: boolean;
   isStreaming?: boolean;
@@ -80,7 +80,7 @@ export default function WorldChat(props: WorldChatProps) {
                   <div className="message-sender">{message.sender === 'HUMAN' || message.type === 'user' ? 'User' : message.sender}</div>
                   <div className="message-content">{message.text}</div>
                   <div className="message-timestamp">
-                    {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : 'Now'}
+                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                   </div>
                   {message.isStreaming && <div className="streaming-indicator">Typing...</div>}
                   {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}

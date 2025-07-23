@@ -49,7 +49,7 @@ interface SSEMessageData extends SSEBaseData {
     agentName?: string;
     content?: string;
     message?: string;
-    timestamp?: string;
+    createdAt?: string;
     worldName?: string;
   };
 }
@@ -379,7 +379,7 @@ interface MessageData {
     agentName?: string;
     content?: string;
     message?: string;
-    timestamp?: string;
+    createdAt?: string;
     worldName?: string;
   };
 }
@@ -395,7 +395,7 @@ export interface SSEComponentState {
     type: string;
     sender: string;
     text: string;
-    timestamp: string;
+    createdAt: string;
     worldName?: string;
     isStreaming?: boolean;
     streamComplete?: boolean;
@@ -425,7 +425,7 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
       type: 'agent-stream',
       sender: sender || 'Agent',
       text: '',
-      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       worldName: worldName || state.worldName,
       isStreaming: true,
       messageId: messageId
@@ -449,7 +449,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       messages[i] = {
         ...messages[i],
         text: content || '',
-        timestamp: new Date().toISOString()
+        createdAt: new Date().toISOString()
       };
 
       return {
@@ -468,7 +468,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       type: 'agent-stream',
       sender: sender || 'Agent',
       text: content || '',
-      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       worldName: data.worldName || state.worldName,
       isStreaming: true,
       messageId: messageId
@@ -533,7 +533,7 @@ export const handleMessage = <T extends SSEComponentState>(state: T, data: Messa
     type: messageData.type || 'message',
     sender: messageData.sender || messageData.agentName || 'Agent',
     text: messageData.content || messageData.message || '',
-    timestamp: messageData.timestamp || new Date().toISOString(),
+    createdAt: messageData.createdAt || new Date().toISOString(),
     worldName: messageData.worldName || state.worldName
   };
 
@@ -563,7 +563,7 @@ export const handleError = <T extends SSEComponentState>(state: T, error: ErrorD
     type: 'error',
     sender: 'System',
     text: errorMessage,
-    timestamp: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     worldName: state.worldName,
     hasError: true
   };

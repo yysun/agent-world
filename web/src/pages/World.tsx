@@ -12,7 +12,7 @@
  * - Real-time SSE chat streaming with agent responses
  * - Live streaming message updates with visual indicators
  * - Smart message filtering: shows completed messages + active streams without duplication
- * - Agent memory deduplication using messageMap with timestamp-based sorting
+ * - Agent memory deduplication using messageMap with createdAt-based sorting
  * - Interactive settings panel: click gear for world settings, click agent for agent settings
  * - Dynamic settings content based on selection (world vs agent)
  * - Modular component architecture using WorldChat and WorldSettings components
@@ -27,13 +27,14 @@
  * - Full TypeScript SSE client integration
  * - Real-time streaming chat with proper error handling
  * - Intelligent message filtering preserves conversation history while preventing duplication
- * - MessageMap deduplication system using timestamp+text keys for unique message identification
- * - Chronological message ordering with timestamp-based ascending sort
+ * - MessageMap deduplication system using createdAt+text keys for unique message identification
+ * - Chronological message ordering with createdAt-based ascending sort
  * - Uses AppRun $ directive pattern for all event handling (click, input, keypress)
  * - Settings state management with selectedSettingsTarget and selectedAgent
  * - Component composition with WorldChat and WorldSettings for separation of concerns
  * - Default selectedSettingsTarget set to 'world' for immediate world info display
  * - Simplified agent tracking using messageCount only (removed memorySize)
+ * - Consolidated to use createdAt field exclusively (removed timestamp redundancy)
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -52,7 +53,7 @@
  * - Implemented proper chat message sending with SSE responses
  * - Fixed message display: shows completed agent messages + live streams, prevents duplication
  * - Added messageMap deduplication system in '/World' handler for agent memory consolidation
- * - Implemented timestamp-based ascending sort for chronological message display
+ * - Implemented createdAt-based ascending sort for chronological message display
  * - Updated to use $ directive pattern throughout (gear button, agent clicks)
  * - Added dynamic settings panel with world/agent selection
  * - Removed notification checkbox, replaced with contextual settings
@@ -62,6 +63,7 @@
  * - Set world settings as default display in settings panel for better UX
  * - Removed memorySize dependency from SSE client and frontend for simplification
  * - Consolidated agent tracking to use messageCount only
+ * - Consolidated timestamp/createdAt fields to use createdAt exclusively throughout codebase
  */
 
 import { app, Component } from 'apprun';
@@ -271,8 +273,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
           // Add agent's memory items to messageMap for deduplication
           if (agent.memory && Array.isArray(agent.memory)) {
             agent.memory.forEach((memoryItem: any) => {
-              // Use a combination of timestamp and text as unique key to avoid duplicates
-              const messageKey = `${memoryItem.timestamp || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
+              // Use a combination of createdAt and text as unique key to avoid duplicates
+              const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
 
               // Only add if not already in map
               if (!messageMap.has(messageKey)) {
@@ -280,7 +282,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   id: memoryItem.id || messageKey,
                   sender: agent.name,
                   text: memoryItem.text || memoryItem.content || '',
-                  timestamp: memoryItem.timestamp || new Date().toISOString(),
+                  createdAt: memoryItem.createdAt || new Date().toISOString(),
                   type: 'agent',
                   streamComplete: true
                 });
@@ -302,10 +304,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
           };
         }));
 
-        // Convert messageMap to array and sort by timestamp ascending
+        // Convert messageMap to array and sort by createdAt ascending
         const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
-          const timeA = new Date(a.timestamp).getTime();
-          const timeB = new Date(b.timestamp).getTime();
+          const timeA = new Date(a.createdAt).getTime();
+          const timeB = new Date(b.createdAt).getTime();
           return timeA - timeB;
         });
 
@@ -452,7 +454,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         type: 'user',
         sender: 'HUMAN',
         text: messageText,
-        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
         worldName: state.worldName
       };
 
