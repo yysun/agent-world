@@ -12,7 +12,7 @@ app.render('#root', <Layout />);
 app.addComponents('#pages', {
   '/': Home,
   '/World': World,
-  '/Agent': Agent,
-  '/Settings': Settings,
+  // '/Agent': Agent,
+  // '/Settings': Settings,
 });
 

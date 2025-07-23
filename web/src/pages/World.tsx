@@ -6,7 +6,7 @@
  * - World name displayed as chat legend instead of header
  * - Full-height chat and settings layout using remaining screen space
  * - Back navigation to worlds list
- * - Message badges showing agent activity using memorySize
+ * - Message badges showing agent activity using messageCount
  * - Real-time data loading from API
  * - Loading and error state management
  * - Real-time SSE chat streaming with agent responses
@@ -33,6 +33,7 @@
  * - Settings state management with selectedSettingsTarget and selectedAgent
  * - Component composition with WorldChat and WorldSettings for separation of concerns
  * - Default selectedSettingsTarget set to 'world' for immediate world info display
+ * - Simplified agent tracking using messageCount only (removed memorySize)
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -40,7 +41,7 @@
  * - Implemented async data fetching with error handling
  * - Added proper TypeScript interfaces
  * - Enhanced state management following AppRun patterns
- * - Updated to use agent.memorySize for message count display
+ * - Updated to use messageCount for message count display
  * - Moved agent list to header row alongside world name for compact layout
  * - Removed world title from header, centered agents
  * - Changed chat legend to display world name
@@ -59,6 +60,8 @@
  * - Refactored to use WorldChat and WorldSettings components for better separation of concerns
  * - Maintained all functionality while improving component modularity
  * - Set world settings as default display in settings panel for better UX
+ * - Removed memorySize dependency from SSE client and frontend for simplification
+ * - Consolidated agent tracking to use messageCount only
  */
 
 import { app, Component } from 'apprun';
@@ -73,7 +76,6 @@ import {
   handleConnectionStatus,
   handleError,
   handleComplete,
-  incrementAgentMemorySize,
   type SSEComponentState
 } from '../sse-client';
 import WorldChat from '../components/world-chat';
@@ -83,7 +85,6 @@ import WorldSettings from '../components/world-settings';
 interface WorldAgent extends Agent {
   spriteIndex: number;
   messageCount: number;
-  memorySize: number; // Ensure this is included for SSE compatibility
 }
 
 interface WorldComponentState extends SSEComponentState {
@@ -285,8 +286,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
           return {
             ...agent,
             spriteIndex: index % 9, // Cycle through 9 sprite indices
-            messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
-            memorySize: agent.memorySize || 0 // Ensure memorySize is present
+            messageCount: agent.memory?.length || 0 // Use agent's memory length for message count
           };
         });
 
@@ -412,9 +412,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     },
     'handleComplete': (state: WorldComponentState, data: any): WorldComponentState => {
       return handleComplete(state as any, data) as WorldComponentState;
-    },
-    'incrementAgentMemorySize': (state: WorldComponentState, data: any): WorldComponentState => {
-      return incrementAgentMemorySize(state as any, data) as WorldComponentState;
     }
   };
 }

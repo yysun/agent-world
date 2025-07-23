@@ -4,7 +4,7 @@
  * Features:
  * - Dynamic settings display based on selection (world vs agent)
  * - World settings: name, agent count, message count (shown by default)
- * - Agent settings: name, message count, memory size
+ * - Agent settings: name, message count (simplified)
  * - World settings displayed as default state
  * 
  * Implementation:
@@ -20,6 +20,8 @@
  * - Implemented dynamic legend and content
  * - Removed notification checkbox as per requirements
  * - World settings now shown by default instead of prompt message
+ * - Removed memorySize from agent settings for simplification
+ * - Consolidated to use messageCount only for tracking agent activity
  */
 
 import { app } from 'apprun';
@@ -28,7 +30,6 @@ interface WorldAgent {
   id?: string;
   name: string;
   messageCount: number;
-  memorySize: number;
 }
 
 interface WorldSettingsProps {
@@ -67,10 +68,6 @@ export default function WorldSettings(props: WorldSettingsProps) {
             <div className="setting-item">
               <label>Message Count:</label>
               <span>{selectedAgent.messageCount}</span>
-            </div>
-            <div className="setting-item">
-              <label>Memory Size:</label>
-              <span>{selectedAgent.memorySize}</span>
             </div>
           </div>
         ) : selectedSettingsTarget === 'world' ? (

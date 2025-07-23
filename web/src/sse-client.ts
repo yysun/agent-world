@@ -10,6 +10,8 @@
  * - Added type safety for all SSE data structures
  * - Enhanced AppRun integration with typed events
  * - Improved error handling with typed error responses
+ * - Removed memorySize tracking for simplified agent management
+ * - Consolidated to use messageCount only for agent activity tracking
  */
 
 import app from 'apprun';
@@ -183,12 +185,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           messageId,
           sender: agentName,
           content: finalContent,
-          worldName: eventData.worldName || streamingState.currentWorldName
-        });
-
-        // Increment agent memorySize after stream completion
-        publishEvent('incrementAgentMemorySize', {
-          agentId: agentName,
           worldName: eventData.worldName || streamingState.currentWorldName
         });
 
@@ -392,11 +388,6 @@ interface ErrorData {
   message: string;
 }
 
-interface IncrementAgentMemorySizeData {
-  agentId: string;
-  worldName?: string;
-}
-
 // Base state interface for AppRun components using SSE
 export interface SSEComponentState {
   messages: Array<{
@@ -411,11 +402,6 @@ export interface SSEComponentState {
     hasError?: boolean;
     errorMessage?: string;
     messageId?: string;
-  }>;
-  agents?: Array<{
-    id?: string;
-    name: string;
-    memorySize: number;
   }>;
   worldName?: string;
   connectionStatus?: string;
@@ -595,26 +581,5 @@ export const handleComplete = <T extends SSEComponentState>(state: T, payload: a
   return {
     ...state,
     connectionStatus: 'completed'
-  };
-};
-
-// Handle incrementing agent memory size after stream completion
-export const incrementAgentMemorySize = <T extends SSEComponentState>(state: T, data: IncrementAgentMemorySizeData): T => {
-  const { agentId, worldName } = data;
-
-  // Find the agent in the state and increment its memorySize
-  const agents = (state.agents || []).map(agent => {
-    if (agent.id === agentId || agent.name === agentId) {
-      return {
-        ...agent,
-        memorySize: (agent.memorySize || 0) + 1
-      };
-    }
-    return agent;
-  });
-
-  return {
-    ...state,
-    agents
   };
 };
