@@ -537,7 +537,8 @@ export const handleMessage = <T extends SSEComponentState>(state: T, data: Messa
   return {
     ...state,
     messages: [...(state.messages || []), newMessage],
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
 

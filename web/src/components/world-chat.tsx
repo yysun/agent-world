@@ -6,6 +6,7 @@
  * - User input handling with send functionality
  * - Message filtering for completed, streaming, and regular messages
  * - Agent-specific message filtering: shows only selected agent's messages when agent is selected
+ * - System message display: always shows GM/system messages regardless of agent selection
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
  * - Send button state management
@@ -17,6 +18,7 @@
  * - Message filtering logic for SSE streams and regular messages
  * - Conditional message filtering based on selectedAgent prop
  * - Always shows user messages regardless of selected agent
+ * - Always shows system/GM messages (turn limits, notifications) regardless of agent selection
  * - Proper createdAt formatting
  * 
  * Changes:
@@ -27,6 +29,7 @@
  * - Fixed message filtering to show regular non-streaming messages (e.g., GM turn limit notifications)
  * - Added selectedAgent prop for agent-specific message filtering
  * - Enhanced message filtering: filters by selected agent while always showing user messages
+ * - Fixed system message filtering to always show GM/system messages regardless of agent selection
  */
 
 import { app } from 'apprun';
@@ -85,7 +88,7 @@ export default function WorldChat(props: WorldChatProps) {
             messages
               .filter(message => {
                 // Always show user messages
-                if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user') {
+                if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user' || message.sender === 'system' || message.sender === 'SYSTEM') {
                   return true;
                 }
 

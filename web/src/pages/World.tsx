@@ -413,7 +413,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         ...state,
         selectedSettingsTarget: 'agent',
         selectedAgent: agent,
-        userInput: state.userInput || '@' + agent.name + ' ' // Pre-fill input with agent mention 
+        userInput: '@' + agent.name + ' ' // Pre-fill input with agent mention 
       };
     },
 
