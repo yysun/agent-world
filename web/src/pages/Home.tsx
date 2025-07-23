@@ -36,12 +36,15 @@ interface HomeState {
 }
 
 export default class HomeComponent extends Component<HomeState> {
-  state: HomeState = {
-    worlds: [],
-    currentIndex: 0,
-    loading: true,
-    error: null
-  };
+  state = async () => {
+    const worlds = await getWorlds();
+    return {
+      worlds,
+      currentIndex: 0,
+      loading: false,
+      error: null
+    };
+  }
 
   view = (state: HomeState) => {
     if (state.loading) {
@@ -109,7 +112,7 @@ export default class HomeComponent extends Component<HomeState> {
               {/* Left Arrow */}
               <button
                 class={`btn carousel-arrow`}
-                onclick={() => this.run('prev-world')}
+                $onclick='prev-world'
               >
                 ‹
               </button>
@@ -132,7 +135,7 @@ export default class HomeComponent extends Component<HomeState> {
                   return (
                     <button
                       class={`btn world-card-btn ${isCenter ? 'btn-primary center' : 'btn-secondary side'}`}
-                      onclick={() => this.run(isCenter ? 'enter-world' : 'select-world', world)}
+                      $onclick={isCenter ? ['enter-world', world] : ['select-world', world]}
                     >
                       <span class="world-name">
                         {world.name}
@@ -145,7 +148,7 @@ export default class HomeComponent extends Component<HomeState> {
               {/* Right Arrow */}
               <button
                 class={`btn carousel-arrow`}
-                onclick={() => this.run('next-world')}
+                $onclick='next-world'
               >
                 ›
               </button>
@@ -156,7 +159,7 @@ export default class HomeComponent extends Component<HomeState> {
               {state.worlds.map((world, index) => (
                 <button
                   class={`world-dot ${index === state.currentIndex ? 'active' : ''}`}
-                  onclick={() => this.run('select-world', world)}
+                  $onclick={['select-world', world]}
                   title={world.name}
                 />
               ))}
@@ -199,25 +202,6 @@ export default class HomeComponent extends Component<HomeState> {
   };
 
   update = {
-    '/': async function* load_worlds(state: HomeState): AsyncGenerator<HomeState>  {
-      try {
-        yield { ...state, loading: true, error: null };
-        const worlds = await getWorlds();
-        yield {
-          ...state,
-          worlds: worlds || [],
-          loading: false,
-          error: null,
-          currentIndex: worlds && worlds.length > 0 ? 0 : 0
-        };
-      } catch (error: any) {
-        yield {
-          ...state,
-          loading: false,
-          error: error.message || 'Failed to load worlds'
-        };
-      }
-    },
     'prev-world': (state: HomeState): HomeState => ({
       ...state,
       currentIndex: state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1
@@ -230,10 +214,9 @@ export default class HomeComponent extends Component<HomeState> {
       const index = state.worlds.findIndex(w => w.name === world.name);
       return { ...state, currentIndex: index >= 0 ? index : state.currentIndex };
     },
-    'enter-world': (state: HomeState, world: World): HomeState => {
+    'enter-world': (state: HomeState, world: World): void => { // no return - no render needed
       // Navigate to the world page
       window.location.href = '/World/' + world.name;
-      return state;
     },
   };
 }
