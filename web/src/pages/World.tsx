@@ -17,6 +17,9 @@
  * - Dynamic settings content based on selection (world vs agent)
  * - Modular component architecture using WorldChat and WorldSettings components
  * - World settings displayed by default in settings panel
+ * - Agent selection highlighting: enlarged and highlighted avatar when selected for settings
+ * - Message filtering: when agent selected, chat shows only that agent's messages + user messages
+ * - Agent deselection: click selected agent again to deselect and show all messages
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -37,6 +40,9 @@
  * - Consolidated to use createdAt field exclusively (removed timestamp redundancy)
  * - Local agent messageCount updates: analyzes incoming messages to identify sender and increments count
  * - Real-time badge updates: messageCount reflects agent activity during live chat sessions
+ * - CSS-based agent highlighting with .selected class for visual emphasis
+ * - Conditional message filtering in WorldChat component based on selectedAgent prop
+ * - Toggle selection logic: clicking selected agent deselects it and shows all world messages
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -69,6 +75,10 @@
  * - Enhanced agent message badge updates: automatically increment messageCount when agents send messages
  * - Added local state updates for agent messageCount in handleMessage only
  * - Streamlined message tracking: removed duplicate logic, handleMessage handles all agent count updates
+ * - Added agent selection highlighting with CSS styling and selected class management
+ * - Implemented message filtering in WorldChat component based on selectedAgent
+ * - Added toggle selection behavior: clicking selected agent deselects and shows all messages
+ * - Enhanced visual feedback with enlarged avatars and highlight effects for selected agents
  */
 
 import { app, Component } from 'apprun';
@@ -212,8 +222,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <div className="no-agents">No agents in this world</div>
             ) : (
               state.agents.map((agent, index) => {
+                const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                 return (
-                  <div key={`agent-${agent.id || index}`} className="agent-item" $onclick={['select-agent-settings', agent]}>
+                  <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
                     <div className="agent-sprite-container">
                       <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
                       {/* Show badge always for testing - change back to agent.messageCount > 0 later */}
@@ -244,6 +255,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isSending={state.isSending}
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
+              selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
             />
 
             {/* chat settings */}
@@ -377,11 +389,23 @@ export default class WorldComponent extends Component<WorldComponentState> {
       selectedAgent: null
     }),
 
-    'select-agent-settings': (state: WorldComponentState, agent: WorldAgent): WorldComponentState => ({
-      ...state,
-      selectedSettingsTarget: 'agent',
-      selectedAgent: agent
-    }),
+    'select-agent-settings': (state: WorldComponentState, agent: WorldAgent): WorldComponentState => {
+      // If clicking on already selected agent, deselect it (show world settings)
+      if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
+        return {
+          ...state,
+          selectedSettingsTarget: 'world',
+          selectedAgent: null
+        };
+      }
+
+      // Otherwise, select the agent
+      return {
+        ...state,
+        selectedSettingsTarget: 'agent',
+        selectedAgent: agent
+      };
+    },
 
     // Clear messages handlers
     'clear-agent-messages': async (state: WorldComponentState, agent: WorldAgent): Promise<WorldComponentState> => {

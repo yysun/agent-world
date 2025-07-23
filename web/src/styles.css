@@ -574,6 +574,16 @@ h2 {
   transform: translateY(-2px) scale(1.05);
 }
 
+.agent-item.selected {
+  transform: scale(1.2);
+  box-shadow: 0 0 15px rgba(52, 144, 220, 0.5);
+  background-color: rgba(52, 144, 220, 0.1);
+}
+
+.agent-item.selected .agent-sprite {
+  transform: scale(1.1);
+}
+
 .agent-sprite-container {
   position: relative;
   display: inline-block;

@@ -5,6 +5,7 @@
  * - Real-time message display with streaming indicators
  * - User input handling with send functionality
  * - Message filtering for completed, streaming, and regular messages
+ * - Agent-specific message filtering: shows only selected agent's messages when agent is selected
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
  * - Send button state management
@@ -14,6 +15,8 @@
  * - Props-based state management from parent World component
  * - AppRun $ directive pattern for event handling
  * - Message filtering logic for SSE streams and regular messages
+ * - Conditional message filtering based on selectedAgent prop
+ * - Always shows user messages regardless of selected agent
  * - Proper createdAt formatting
  * 
  * Changes:
@@ -22,6 +25,8 @@
  * - Added proper TypeScript interfaces for props
  * - Updated to use AppRun $ directive pattern ($onclick, $oninput, $onkeypress)
  * - Fixed message filtering to show regular non-streaming messages (e.g., GM turn limit notifications)
+ * - Added selectedAgent prop for agent-specific message filtering
+ * - Enhanced message filtering: filters by selected agent while always showing user messages
  */
 
 import { app } from 'apprun';
@@ -49,6 +54,9 @@ interface WorldChatProps {
     spriteIndex: number;
     name: string;
   } | null;
+  selectedAgent?: {
+    name: string;
+  } | null;
 }
 
 export default function WorldChat(props: WorldChatProps) {
@@ -59,7 +67,8 @@ export default function WorldChat(props: WorldChatProps) {
     messagesLoading,
     isSending,
     isWaiting,
-    activeAgent
+    activeAgent,
+    selectedAgent
   } = props;
 
   return (
@@ -79,6 +88,12 @@ export default function WorldChat(props: WorldChatProps) {
                 if (message.sender === 'HUMAN' || message.type === 'user') {
                   return true;
                 }
+
+                // If an agent is selected for settings, filter to show only that agent's messages
+                if (selectedAgent && message.sender !== selectedAgent.name) {
+                  return false;
+                }
+
                 // For agent messages: 
                 // Show completed streams (streamComplete === true) 
                 // OR show currently streaming messages that are not yet complete (isStreaming === true && streamComplete !== true)
