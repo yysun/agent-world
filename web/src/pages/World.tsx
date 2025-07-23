@@ -65,7 +65,7 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorld, getAgentMemory, type Agent, type Message } from '../api';
+import { getWorld, getAgentMemory, clearAgentMemory, type Agent, type Message } from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -85,10 +85,15 @@ import WorldSettings from '../components/world-settings';
 interface WorldAgent extends Agent {
   spriteIndex: number;
   messageCount: number;
+  provider?: string;
+  model?: string;
+  temperature?: number;
+  systemPrompt?: string;
 }
 
 interface WorldComponentState extends SSEComponentState {
   worldName: string;
+  world: { name: string; agents: WorldAgent[]; llmCallLimit?: number } | null;
   agents: WorldAgent[];
   userInput: string;
   loading: boolean;
@@ -107,6 +112,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
   state = async (): Promise<WorldComponentState> => {
     return {
       worldName: 'World',
+      world: null,
       agents: [],
       messages: [],
       userInput: '',
@@ -229,11 +235,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
             {/* chat settings */}
             <WorldSettings
-              worldName={state.worldName}
-              agentCount={state.agents.length}
-              messageCount={state.messages.length}
+              world={state.world}
               selectedSettingsTarget={state.selectedSettingsTarget}
               selectedAgent={state.selectedAgent}
+              totalMessages={state.messages.length}
             />
           </div>
         </div>
@@ -262,7 +267,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         const messageMap = new Map();
 
         // Transform agents with UI properties and collect their memory items
-        const worldAgents: WorldAgent[] = world.agents.map((agent, index) => {
+        const worldAgents: WorldAgent[] = await Promise.all(world.agents.map(async (agent, index) => {
           // Add agent's memory items to messageMap for deduplication
           if (agent.memory && Array.isArray(agent.memory)) {
             agent.memory.forEach((memoryItem: any) => {
@@ -283,12 +288,19 @@ export default class WorldComponent extends Component<WorldComponentState> {
             });
           }
 
+          // Use system prompt directly from agent data
+          const systemPrompt = agent.systemPrompt || '';
+
           return {
             ...agent,
             spriteIndex: index % 9, // Cycle through 9 sprite indices
-            messageCount: agent.memory?.length || 0 // Use agent's memory length for message count
+            messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
+            provider: agent.provider,
+            model: agent.model,
+            temperature: agent.temperature,
+            systemPrompt: systemPrompt
           };
-        });
+        }));
 
         // Convert messageMap to array and sort by timestamp ascending
         const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
@@ -300,6 +312,11 @@ export default class WorldComponent extends Component<WorldComponentState> {
         yield {
           ...state,
           worldName,
+          world: {
+            name: worldName,
+            agents: worldAgents,
+            llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit // Use turnLimit as fallback
+          },
           agents: worldAgents,
           messages: sortedMessages,
           agentsLoading: false,
@@ -313,6 +330,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         yield {
           ...state,
           worldName,
+          world: { name: worldName, agents: [], llmCallLimit: undefined },
           loading: false,
           error: error.message || 'Failed to load world data',
           selectedSettingsTarget: 'world',
@@ -345,6 +363,81 @@ export default class WorldComponent extends Component<WorldComponentState> {
       selectedSettingsTarget: 'agent',
       selectedAgent: agent
     }),
+
+    // Clear messages handlers
+    'clear-agent-messages': async (state: WorldComponentState, agent: WorldAgent): Promise<WorldComponentState> => {
+      try {
+        await clearAgentMemory(state.worldName, agent.name);
+
+        // Update agent's message count and remove agent's messages from display
+        const updatedAgents = state.agents.map(a =>
+          a.id === agent.id ? { ...a, messageCount: 0 } : a
+        );
+
+        // Remove agent's messages from the message list
+        const filteredMessages = state.messages.filter(msg => msg.sender !== agent.name);
+
+        // Update selected agent if it's the same one
+        const updatedSelectedAgent = state.selectedAgent?.id === agent.id
+          ? { ...state.selectedAgent, messageCount: 0 }
+          : state.selectedAgent;
+
+        // Update world object with updated agents
+        const updatedWorld = state.world ? {
+          ...state.world,
+          agents: updatedAgents
+        } : null;
+
+        return {
+          ...state,
+          world: updatedWorld,
+          agents: updatedAgents,
+          messages: filteredMessages,
+          selectedAgent: updatedSelectedAgent
+        };
+      } catch (error: any) {
+        return {
+          ...state,
+          error: error.message || 'Failed to clear agent messages'
+        };
+      }
+    },
+
+    'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      try {
+        // Clear messages for all agents
+        await Promise.all(
+          state.agents.map(agent => clearAgentMemory(state.worldName, agent.name))
+        );
+
+        // Update all agents' message counts
+        const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));
+
+        // Update selected agent if any
+        const updatedSelectedAgent = state.selectedAgent
+          ? { ...state.selectedAgent, messageCount: 0 }
+          : null;
+
+        // Update world object with updated agents
+        const updatedWorld = state.world ? {
+          ...state.world,
+          agents: updatedAgents
+        } : null;
+
+        return {
+          ...state,
+          world: updatedWorld,
+          agents: updatedAgents,
+          messages: [], // Clear all messages
+          selectedAgent: updatedSelectedAgent
+        };
+      } catch (error: any) {
+        return {
+          ...state,
+          error: error.message || 'Failed to clear world messages'
+        };
+      }
+    },
     // Send message action
     'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
       if (!state.userInput.trim()) return state;
