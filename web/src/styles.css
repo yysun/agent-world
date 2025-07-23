@@ -761,8 +761,8 @@ h2 {
 
 .message-sender {
   font-weight: bold;
-  font-size: 0.9rem;
-  opacity: 0.8;
+  font-size: 1.2rem;
+  opacity: 0.9;
 }
 
 .message-content {

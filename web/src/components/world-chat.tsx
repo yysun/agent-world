@@ -85,7 +85,7 @@ export default function WorldChat(props: WorldChatProps) {
             messages
               .filter(message => {
                 // Always show user messages
-                if (message.sender === 'HUMAN' || message.type === 'user') {
+                if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user') {
                   return true;
                 }
 
@@ -110,8 +110,8 @@ export default function WorldChat(props: WorldChatProps) {
                 return false; // Filter out incomplete or duplicate messages
               })
               .map((message, index) => (
-                <div key={message.id || index} className={`message ${message.sender === 'HUMAN' || message.type === 'user' ? 'user-message' : 'agent-message'}`}>
-                  <div className="message-sender">{message.sender === 'HUMAN' || message.type === 'user' ? 'User' : message.sender}</div>
+                <div key={message.id || index} className={`message ${(message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message'}`}>
+                  <div className="message-sender">{message.sender || (message.type === 'user' ? 'User' : 'Agent')}</div>
                   <div className="message-content">{message.text}</div>
                   <div className="message-timestamp">
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}

@@ -303,12 +303,21 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
               // Only add if not already in map
               if (!messageMap.has(messageKey)) {
+                // Preserve original sender from memory, fallback to agent name if not available
+                const originalSender = memoryItem.sender || agent.name;
+
+                // Determine message type based on sender - only HUMAN messages should be 'user' type
+                let messageType = 'agent';
+                if (originalSender === 'HUMAN' || originalSender === 'USER') {
+                  messageType = 'user';
+                }
+
                 messageMap.set(messageKey, {
                   id: memoryItem.id || messageKey,
-                  sender: agent.name,
+                  sender: originalSender,
                   text: memoryItem.text || memoryItem.content || '',
                   createdAt: memoryItem.createdAt || new Date().toISOString(),
-                  type: 'agent',
+                  type: messageType,
                   streamComplete: true
                 });
               }
@@ -403,7 +412,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
       return {
         ...state,
         selectedSettingsTarget: 'agent',
-        selectedAgent: agent
+        selectedAgent: agent,
+        userInput: state.userInput || '@' + agent.name + ' ' // Pre-fill input with agent mention 
       };
     },
 
