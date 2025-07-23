@@ -113,6 +113,18 @@ async function getWorlds(): Promise<World[]> {
 }
 
 /**
+ * Get a specific world with its agents
+ */
+async function getWorld(worldName: string): Promise<World & { agents: Agent[] }> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}`);
+  return response.json();
+}
+
+/**
  * Create a new world
  */
 async function createWorld(worldData: World): Promise<World> {
@@ -285,6 +297,7 @@ export {
 
   // World management
   getWorlds,
+  getWorld,
   createWorld,
   updateWorld,
   deleteWorld,

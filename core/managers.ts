@@ -422,10 +422,12 @@ export async function getFullWorld(rootPath: string, worldId: string): Promise<W
   // Create runtime World with fresh EventEmitter and methods
   const world = worldDataToWorld(worldData, rootPath);
 
-  // Load agents into world runtime (subscription handled by startWorld)
-  const agents = await loadAllAgentsFromDisk(rootPath, worldId);
-  for (const agent of agents) {
-    world.agents.set(agent.id, agent);
+  // Load agents into world runtime - use normalizedWorldId consistently
+  const agents = await loadAllAgentsFromDisk(rootPath, normalizedWorldId);
+  for (const agentData of agents) {
+    // Enhance agent data with methods before adding to world
+    const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
+    world.agents.set(enhancedAgent.id, enhancedAgent);
   }
 
   return world;

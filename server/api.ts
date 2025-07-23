@@ -97,6 +97,33 @@ const MemoryAppendSchema = z.object({
 
 const router = express.Router();
 
+// GET /worlds/:worldName - Get specific world with agents
+router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const world = await getFullWorld(ROOT_PATH, worldName);
+
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Convert Map to array for JSON serialization
+    const agents = Array.from(world.agents.values());
+
+    res.json({
+      name: world.name,
+      description: world.description,
+      id: world.id,
+      agents: agents,
+      turnLimit: world.turnLimit,
+    });
+  } catch (error) {
+    logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to get world', 'WORLD_GET_ERROR');
+  }
+});
+
 // GET /worlds - List worlds or create default
 router.get('/worlds', async (req, res) => {
   try {
