@@ -108,8 +108,10 @@ interface WorldComponentState extends SSEComponentState {
   agentsLoading: boolean;
   messagesLoading: boolean;
   isSending: boolean;
+  isWaiting: boolean;
   selectedSettingsTarget: 'world' | 'agent' | null;
   selectedAgent: WorldAgent | null;
+  activeAgent: { spriteIndex: number; name: string } | null;
 }
 
 export default class WorldComponent extends Component<WorldComponentState> {
@@ -128,8 +130,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
       agentsLoading: true,
       messagesLoading: false,
       isSending: false,
+      isWaiting: false,
       selectedSettingsTarget: 'world',
-      selectedAgent: null
+      selectedAgent: null,
+      activeAgent: null
     };
   };
 
@@ -238,6 +242,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
               userInput={state.userInput}
               messagesLoading={state.messagesLoading}
               isSending={state.isSending}
+              isWaiting={state.isWaiting}
+              activeAgent={state.activeAgent}
             />
 
             {/* chat settings */}
@@ -264,7 +270,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
           ...state,
           worldName,
           loading: true,
-          error: null
+          error: null,
+          isWaiting: false,
+          activeAgent: null
         };
 
         // Load world data including agents
@@ -329,8 +337,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
           agentsLoading: false,
           loading: false,
           error: null,
+          isWaiting: false,
           selectedSettingsTarget: 'world',
-          selectedAgent: null
+          selectedAgent: null,
+          activeAgent: null
         };
 
       } catch (error: any) {
@@ -340,8 +350,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
           world: { name: worldName, agents: [], llmCallLimit: undefined },
           loading: false,
           error: error.message || 'Failed to load world data',
+          isWaiting: false,
           selectedSettingsTarget: 'world',
-          selectedAgent: null
+          selectedAgent: null,
+          activeAgent: null
         };
       }
     },
@@ -463,12 +475,13 @@ export default class WorldComponent extends Component<WorldComponentState> {
         worldName: state.worldName
       };
 
-      // Add user message and clear input immediately
+      // Add user message, clear input, and show waiting indicator
       const newState = {
         ...state,
         messages: [...state.messages, userMessage],
         userInput: '',
-        isSending: true
+        isSending: true,
+        isWaiting: true
       };
 
       try {
@@ -478,11 +491,13 @@ export default class WorldComponent extends Component<WorldComponentState> {
         return {
           ...newState,
           isSending: false
+          // isWaiting will be set to false when streaming starts
         };
       } catch (error: any) {
         return {
           ...newState,
           isSending: false,
+          isWaiting: false,
           error: error.message || 'Failed to send message'
         };
       }
@@ -490,29 +505,37 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
     // SSE Event Handlers - wrapped for WorldComponentState compatibility
     'handleStreamStart': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleStreamStart(state as any, data) as WorldComponentState;
+      const baseState = handleStreamStart(state as any, data) as WorldComponentState;
+
+      // Find the agent that's starting to stream
+      // data structure: { messageId, sender, worldName }
+      const agentName = data.sender;
+      const agent = state.agents.find(a => a.name === agentName);
+
+      // Hide waiting indicator when streaming starts and set active agent
+      return {
+        ...baseState,
+        isWaiting: false,
+        activeAgent: agent ? { spriteIndex: agent.spriteIndex, name: agent.name } : null
+      };
     },
     'handleStreamChunk': (state: WorldComponentState, data: any): WorldComponentState => {
       return handleStreamChunk(state as any, data) as WorldComponentState;
     },
     'handleStreamEnd': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleStreamEnd(state as any, data) as WorldComponentState;
-    },
-    'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleStreamError(state as any, data) as WorldComponentState;
-    },
-    'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
-      // First, handle the message as normal
-      const updatedState = handleMessage(state as any, data) as WorldComponentState;
+      const baseState = handleStreamEnd(state as any, data) as WorldComponentState;
 
-      // Extract agent name and message content from the message data
-      const messageData = data.data || {};
-      const agentName = messageData.sender || messageData.agentName;
-      const messageContent = messageData.content || messageData.message;
+      // Extract agent name from the stream end data
+      const agentName = data.sender;
 
-      if (agentName && messageContent && messageContent.trim() && agentName !== 'HUMAN') {
-        // Update the agent's messageCount in the local state only
-        const updatedAgents = updatedState.agents.map(agent => {
+      let finalState = {
+        ...baseState,
+        activeAgent: null // Clear active agent when streaming ends
+      };
+
+      // Update agent's messageCount when stream completes
+      if (agentName && agentName !== 'HUMAN') {
+        const updatedAgents = finalState.agents.map(agent => {
           if (agent.name === agentName) {
             return {
               ...agent,
@@ -523,25 +546,36 @@ export default class WorldComponent extends Component<WorldComponentState> {
         });
 
         // Update world object with updated agents
-        const updatedWorld = updatedState.world ? {
-          ...updatedState.world,
+        const updatedWorld = finalState.world ? {
+          ...finalState.world,
           agents: updatedAgents
         } : null;
 
         // Update selected agent if it's the same one
-        const updatedSelectedAgent = updatedState.selectedAgent?.name === agentName
-          ? { ...updatedState.selectedAgent, messageCount: updatedState.selectedAgent.messageCount + 1 }
-          : updatedState.selectedAgent;
+        const updatedSelectedAgent = finalState.selectedAgent?.name === agentName
+          ? { ...finalState.selectedAgent, messageCount: finalState.selectedAgent.messageCount + 1 }
+          : finalState.selectedAgent;
 
-        return {
-          ...updatedState,
+        finalState = {
+          ...finalState,
           world: updatedWorld,
           agents: updatedAgents,
           selectedAgent: updatedSelectedAgent
         };
       }
 
-      return updatedState;
+      return finalState;
+    },
+    'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
+      const baseState = handleStreamError(state as any, data) as WorldComponentState;
+      // Clear active agent when streaming errors
+      return {
+        ...baseState,
+        activeAgent: null
+      };
+    },
+    'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
+      return handleMessage(state as any, data) as WorldComponentState;
     },
     'handleConnectionStatus': (state: WorldComponentState, data: any): WorldComponentState => {
       return handleConnectionStatus(state as any, data) as WorldComponentState;

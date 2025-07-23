@@ -481,18 +481,15 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
   const { messageId, sender, content } = data;
 
-  const messages = (state.messages || []).map(msg => {
+  // Filter out the streaming message to prevent duplication
+  const messages = (state.messages || []).filter(msg => {
+    // Remove the streaming message that matches the messageId or sender
     if (msg.isStreaming &&
       (msg.messageId === messageId ||
         (!messageId && msg.sender === sender && msg.type === 'agent-stream'))) {
-      return {
-        ...msg,
-        isStreaming: false,
-        streamComplete: true,
-        text: content !== undefined ? content : msg.text
-      };
+      return false; // Remove this message
     }
-    return msg;
+    return true; // Keep all other messages
   });
 
   return {

@@ -44,6 +44,11 @@ interface WorldChatProps {
   userInput: string;
   messagesLoading: boolean;
   isSending: boolean;
+  isWaiting: boolean;
+  activeAgent?: {
+    spriteIndex: number;
+    name: string;
+  } | null;
 }
 
 export default function WorldChat(props: WorldChatProps) {
@@ -52,7 +57,9 @@ export default function WorldChat(props: WorldChatProps) {
     messages,
     userInput,
     messagesLoading,
-    isSending
+    isSending,
+    isWaiting,
+    activeAgent
   } = props;
 
   return (
@@ -72,11 +79,20 @@ export default function WorldChat(props: WorldChatProps) {
                 if (message.sender === 'HUMAN' || message.type === 'user') {
                   return true;
                 }
-                // For agent messages: show completed streams OR currently streaming OR regular non-streaming messages
-                // This shows final messages but prevents duplication during streaming
-                return message.streamComplete === true ||
-                  (message.isStreaming === true && !message.streamComplete) ||
-                  (message.streamComplete === undefined && message.isStreaming === undefined);
+                // For agent messages: 
+                // Show completed streams (streamComplete === true) 
+                // OR show currently streaming messages that are not yet complete (isStreaming === true && streamComplete !== true)
+                // OR show regular non-streaming messages (no streaming properties)
+                if (message.isStreaming === true && message.streamComplete !== true) {
+                  return true; // Currently streaming
+                }
+                if (message.streamComplete === true) {
+                  return true; // Completed stream
+                }
+                if (message.streamComplete === undefined && message.isStreaming === undefined) {
+                  return true; // Regular message (like GM notifications)
+                }
+                return false; // Filter out incomplete or duplicate messages
               })
               .map((message, index) => (
                 <div key={message.id || index} className={`message ${message.sender === 'HUMAN' || message.type === 'user' ? 'user-message' : 'agent-message'}`}>
@@ -85,10 +101,30 @@ export default function WorldChat(props: WorldChatProps) {
                   <div className="message-timestamp">
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                   </div>
-                  {message.isStreaming && <div className="streaming-indicator">Typing...</div>}
+                  {message.isStreaming && (
+                    <div className="streaming-indicator">
+                      <div className="streaming-content">
+                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                        <span>responding ...</span>
+                      </div>
+                    </div>
+                  )}
                   {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
                 </div>
               ))
+          )}
+
+          {/* Waiting indicator - three dots when waiting for streaming to start */}
+          {isWaiting && (
+            <div className="message user-message waiting-message">
+              <div className="message-content">
+                <div className="waiting-dots">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
