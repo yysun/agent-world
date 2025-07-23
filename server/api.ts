@@ -16,11 +16,12 @@
  *   - Error completion timer: 2s
  *   - Regular message timer: 5s
  * - Fixed streaming timeout logic to prevent ending during active LLM responses
+ * - Optimized world existence checks to use getWorldConfig instead of deprecated getWorld for performance
  */
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getFullWorld, publishMessage } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, getFullWorld, publishMessage } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 
@@ -131,7 +132,7 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
     const worldId = toKebabCase(name);
 
     // Check if world already exists
-    const existingWorld = await getFullWorld(ROOT_PATH, worldId);
+    const existingWorld = await getWorldConfig(ROOT_PATH, worldId);
     if (existingWorld) {
       sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
       return;
@@ -170,7 +171,7 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
     // If name is being changed, check for duplicates
     if (name && name !== world.name) {
       const newWorldId = toKebabCase(name);
-      const existingWorld = await getFullWorld(ROOT_PATH, newWorldId);
+      const existingWorld = await getWorldConfig(ROOT_PATH, newWorldId);
       if (existingWorld) {
         sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
         return;
@@ -538,8 +539,8 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     const { message, sender } = validation.data;
 
     // Check if world exists before setting up SSE stream
-    const world = await getFullWorld(ROOT_PATH, worldName);
-    if (!world) {
+    const worldExists = await getWorldConfig(ROOT_PATH, worldName);
+    if (!worldExists) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
