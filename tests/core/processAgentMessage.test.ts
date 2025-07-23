@@ -117,8 +117,8 @@ describe('processAgentMessage', () => {
 
       await processAgentMessage(mockWorld, agentWithLowCallCount, humanMessage);
 
-      // Should only increment by 1 (reset + increment handled inside processAgentMessage)
-      expect(agentWithLowCallCount.llmCallCount).toBe(1);
+      // Should only increment by 1 (reset happens in subscribeAgentToMessages, not here)
+      expect(agentWithLowCallCount.llmCallCount).toBe(3);
       expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithLowCallCount);
     });
 
@@ -137,8 +137,8 @@ describe('processAgentMessage', () => {
 
       await processAgentMessage(mockWorld, agentWithLowCallCount, systemMessage);
 
-      // Should only increment by 1 (reset + increment handled inside processAgentMessage)
-      expect(agentWithLowCallCount.llmCallCount).toBe(1);
+      // Should only increment by 1 (reset happens in subscribeAgentToMessages, not here)
+      expect(agentWithLowCallCount.llmCallCount).toBe(2);
     });
 
     test('should increment LLM call count for agent messages', async () => {

@@ -288,6 +288,9 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       return;
     }
 
+    // Reset LLM call count if needed (for human/system messages)
+    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
+
     // Automatic message processing
     logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
     if (await shouldAgentRespond(world, agent, messageEvent)) {
@@ -349,8 +352,6 @@ export async function processAgentMessage(
   const messageId = generateId();
 
   try {
-    // Reset LLM call count if needed (for human/system messages)
-    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
 
     // Always save incoming message to memory (regardless of response decision)
     await saveIncomingMessageToMemory(world, agent, messageEvent);
