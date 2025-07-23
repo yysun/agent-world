@@ -447,6 +447,8 @@ h2 {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.5rem;
+  height: 120px;
+  min-height: 120px;
 }
 
 .world-nav-buttons {
@@ -537,7 +539,7 @@ h2 {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 0.5rem;
-  height: calc(100vh - 100px);
+  height: calc(100vh - 140px);
   min-height: 700px;
   width: 100%;
   max-width: none;
@@ -549,7 +551,8 @@ h2 {
   min-height: 100px;
 }
 
-.agents-list {
+.agents-list,
+.agents-list-centered {
   display: flex;
   flex-wrap: wrap;
   gap: 1.5rem;
@@ -579,10 +582,10 @@ h2 {
 
 /* Sprite sheet implementation */
 .agent-sprite {
-  width: 80px;
-  height: 80px;
+  width: 60px;
+  height: 60px;
   background-image: url('../imgs/agent-sprites.png');
-  background-size: 240px 240px;
+  background-size: 180px 180px;
   background-repeat: no-repeat;
   transition: all 0.2s ease;
 }
@@ -594,12 +597,12 @@ h2 {
   background-color: var(--accent-primary);
   color: white;
   border-radius: 50%;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: bold;
 }
 
@@ -608,35 +611,35 @@ h2 {
 }
 
 .sprite-1 {
-  background-position: -80px 0;
+  background-position: -60px 0;
 }
 
 .sprite-2 {
-  background-position: -160px 0;
+  background-position: -120px 0;
 }
 
 .sprite-3 {
-  background-position: 0 -80px;
+  background-position: 0 -60px;
 }
 
 .sprite-4 {
-  background-position: -80px -80px;
+  background-position: -60px -60px;
 }
 
 .sprite-5 {
-  background-position: -160px -80px;
+  background-position: -120px -60px;
 }
 
 .sprite-6 {
-  background-position: 0 -160px;
+  background-position: 0 -120px;
 }
 
 .sprite-7 {
-  background-position: -80px -160px;
+  background-position: -60px -120px;
 }
 
 .sprite-8 {
-  background-position: -160px -160px;
+  background-position: -120px -120px;
 }
 
 .agent-name {
@@ -656,6 +659,11 @@ h2 {
   width: 100% !important;
   max-width: none !important;
   box-sizing: border-box;
+}
+
+.chat-row.full-height {
+  height: calc(100vh - 140px);
+  min-height: 500px;
 }
 
 .box {
@@ -680,23 +688,27 @@ h2 {
 }
 
 /* Chat fieldset - takes up most of the space */
-.chat-row fieldset:first-child {
+.chat-row fieldset:first-child,
+.chat-fieldset {
   flex: 3;
   display: flex;
   flex-direction: column;
   min-height: 0;
   width: auto;
   max-width: none;
+  height: 100%;
 }
 
 /* Chat settings fieldset - takes up less space */
-.chat-row fieldset:last-child {
+.chat-row fieldset:last-child,
+.settings-fieldset {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 200px;
   max-width: 350px;
   width: auto;
+  height: 100%;
 }
 
 /* Conversation Area */
@@ -876,35 +888,46 @@ h2 {
   }
 
   .world-layout {
-    height: calc(100vh - 120px);
+    height: calc(100vh - 140px);
     gap: 1rem;
   }
 
   .chat-row {
     flex-direction: column;
     gap: 0.5rem;
+    height: calc(100vh - 160px);
   }
 
-  .chat-row fieldset:first-child {
+  .chat-row.full-height {
+    height: calc(100vh - 160px);
+    min-height: 400px;
+  }
+
+  .chat-row fieldset:first-child,
+  .chat-fieldset {
     flex: 1;
     min-height: 300px;
+    height: auto;
   }
 
-  .chat-row fieldset:last-child {
+  .chat-row fieldset:last-child,
+  .settings-fieldset {
     flex: none;
     min-width: auto;
     max-width: none;
+    height: auto;
   }
 
-  .agents-list {
+  .agents-list,
+  .agents-list-centered {
     gap: 1rem;
     justify-content: center;
   }
 
   .agent-sprite {
-    width: 60px;
-    height: 60px;
-    background-size: 180px 180px;
+    width: 50px;
+    height: 50px;
+    background-size: 150px 150px;
   }
 
   .sprite-0 {
@@ -912,35 +935,35 @@ h2 {
   }
 
   .sprite-1 {
-    background-position: -60px 0;
+    background-position: -50px 0;
   }
 
   .sprite-2 {
-    background-position: -120px 0;
+    background-position: -100px 0;
   }
 
   .sprite-3 {
-    background-position: 0 -60px;
+    background-position: 0 -50px;
   }
 
   .sprite-4 {
-    background-position: -60px -60px;
+    background-position: -50px -50px;
   }
 
   .sprite-5 {
-    background-position: -120px -60px;
+    background-position: -100px -50px;
   }
 
   .sprite-6 {
-    background-position: 0 -120px;
+    background-position: 0 -100px;
   }
 
   .sprite-7 {
-    background-position: -60px -120px;
+    background-position: -50px -100px;
   }
 
   .sprite-8 {
-    background-position: -120px -120px;
+    background-position: -100px -100px;
   }
 
   .message {
@@ -1002,14 +1025,15 @@ h2 {
     width: 100%;
   }
 
-  .agents-list {
+  .agents-list,
+  .agents-list-centered {
     gap: 0.75rem;
   }
 
   .agent-sprite {
-    width: 50px;
-    height: 50px;
-    background-size: 150px 150px;
+    width: 40px;
+    height: 40px;
+    background-size: 120px 120px;
   }
 
   .sprite-0 {
@@ -1017,35 +1041,35 @@ h2 {
   }
 
   .sprite-1 {
-    background-position: -50px 0;
+    background-position: -40px 0;
   }
 
   .sprite-2 {
-    background-position: -100px 0;
+    background-position: -80px 0;
   }
 
   .sprite-3 {
-    background-position: 0 -50px;
+    background-position: 0 -40px;
   }
 
   .sprite-4 {
-    background-position: -50px -50px;
+    background-position: -40px -40px;
   }
 
   .sprite-5 {
-    background-position: -100px -50px;
+    background-position: -80px -40px;
   }
 
   .sprite-6 {
-    background-position: 0 -100px;
+    background-position: 0 -80px;
   }
 
   .sprite-7 {
-    background-position: -50px -100px;
+    background-position: -40px -80px;
   }
 
   .sprite-8 {
-    background-position: -100px -100px;
+    background-position: -80px -80px;
   }
 
   .message-badge {
