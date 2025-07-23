@@ -12,6 +12,7 @@
  * - Real-time SSE chat streaming with agent responses
  * - Live streaming message updates with visual indicators
  * - Smart message filtering: shows completed messages + active streams without duplication
+ * - Agent memory deduplication using messageMap with timestamp-based sorting
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -22,6 +23,9 @@
  * - Full TypeScript SSE client integration
  * - Real-time streaming chat with proper error handling
  * - Intelligent message filtering preserves conversation history while preventing duplication
+ * - MessageMap deduplication system using timestamp+text keys for unique message identification
+ * - Chronological message ordering with timestamp-based ascending sort
+ * - Uses AppRun $ directive for event handling (maintained original pattern)
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -39,6 +43,9 @@
  * - Enhanced message display with streaming indicators and error states
  * - Implemented proper chat message sending with SSE responses
  * - Fixed message display: shows completed agent messages + live streams, prevents duplication
+ * - Added messageMap deduplication system in '/World' handler for agent memory consolidation
+ * - Implemented timestamp-based ascending sort for chronological message display
+ * - Maintained inline chat and settings areas using AppRun $ directive pattern
  */
 
 import { app, Component } from 'apprun';
@@ -144,7 +151,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
           </div>
           <div className="error-state">
             <p>Error: {state.error}</p>
-            <button $onclick="retry-load-data">Retry</button>
+            <button $onclick={['/World', state.worldName]}>Retry</button>
           </div>
         </div>
       );
@@ -284,18 +291,51 @@ export default class WorldComponent extends Component<WorldComponentState> {
         // Load world data including agents
         const world = await getWorld(worldName);
 
-        // Transform agents with UI properties
-        const worldAgents: WorldAgent[] = world.agents.map((agent, index) => ({
-          ...agent,
-          spriteIndex: index % 9, // Cycle through 9 sprite indices
-          messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
-          memorySize: agent.memorySize || 0 // Ensure memorySize is present
-        }));
+        // Create messageMap to deduplicate messages from all agents
+        const messageMap = new Map();
+
+        // Transform agents with UI properties and collect their memory items
+        const worldAgents: WorldAgent[] = world.agents.map((agent, index) => {
+          // Add agent's memory items to messageMap for deduplication
+          if (agent.memory && Array.isArray(agent.memory)) {
+            agent.memory.forEach((memoryItem: any) => {
+              // Use a combination of timestamp and text as unique key to avoid duplicates
+              const messageKey = `${memoryItem.timestamp || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
+
+              // Only add if not already in map
+              if (!messageMap.has(messageKey)) {
+                messageMap.set(messageKey, {
+                  id: memoryItem.id || messageKey,
+                  sender: agent.name,
+                  text: memoryItem.text || memoryItem.content || '',
+                  timestamp: memoryItem.timestamp || new Date().toISOString(),
+                  type: 'agent',
+                  streamComplete: true
+                });
+              }
+            });
+          }
+
+          return {
+            ...agent,
+            spriteIndex: index % 9, // Cycle through 9 sprite indices
+            messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
+            memorySize: agent.memorySize || 0 // Ensure memorySize is present
+          };
+        });
+
+        // Convert messageMap to array and sort by timestamp ascending
+        const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
+          const timeA = new Date(a.timestamp).getTime();
+          const timeB = new Date(b.timestamp).getTime();
+          return timeA - timeB;
+        });
 
         yield {
           ...state,
           worldName,
           agents: worldAgents,
+          messages: sortedMessages,
           agentsLoading: false,
           loading: false,
           error: null
@@ -309,11 +349,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
           error: error.message || 'Failed to load world data'
         };
       }
-    },
-
-    // Retry loading data after error
-    'retry-load-data': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
-      yield* this.update['/World'](state, state.worldName);
     },
 
     // Update user input
