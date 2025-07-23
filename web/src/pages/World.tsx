@@ -13,6 +13,10 @@
  * - Live streaming message updates with visual indicators
  * - Smart message filtering: shows completed messages + active streams without duplication
  * - Agent memory deduplication using messageMap with timestamp-based sorting
+ * - Interactive settings panel: click gear for world settings, click agent for agent settings
+ * - Dynamic settings content based on selection (world vs agent)
+ * - Modular component architecture using WorldChat and WorldSettings components
+ * - World settings displayed by default in settings panel
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -25,7 +29,10 @@
  * - Intelligent message filtering preserves conversation history while preventing duplication
  * - MessageMap deduplication system using timestamp+text keys for unique message identification
  * - Chronological message ordering with timestamp-based ascending sort
- * - Uses AppRun $ directive for event handling (maintained original pattern)
+ * - Uses AppRun $ directive pattern for all event handling (click, input, keypress)
+ * - Settings state management with selectedSettingsTarget and selectedAgent
+ * - Component composition with WorldChat and WorldSettings for separation of concerns
+ * - Default selectedSettingsTarget set to 'world' for immediate world info display
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -45,7 +52,13 @@
  * - Fixed message display: shows completed agent messages + live streams, prevents duplication
  * - Added messageMap deduplication system in '/World' handler for agent memory consolidation
  * - Implemented timestamp-based ascending sort for chronological message display
- * - Maintained inline chat and settings areas using AppRun $ directive pattern
+ * - Updated to use $ directive pattern throughout (gear button, agent clicks)
+ * - Added dynamic settings panel with world/agent selection
+ * - Removed notification checkbox, replaced with contextual settings
+ * - Enhanced settings to show world or agent-specific information
+ * - Refactored to use WorldChat and WorldSettings components for better separation of concerns
+ * - Maintained all functionality while improving component modularity
+ * - Set world settings as default display in settings panel for better UX
  */
 
 import { app, Component } from 'apprun';
@@ -63,6 +76,8 @@ import {
   incrementAgentMemorySize,
   type SSEComponentState
 } from '../sse-client';
+import WorldChat from '../components/world-chat';
+import WorldSettings from '../components/world-settings';
 
 // Extended Agent interface for UI-specific properties
 interface WorldAgent extends Agent {
@@ -80,6 +95,8 @@ interface WorldComponentState extends SSEComponentState {
   agentsLoading: boolean;
   messagesLoading: boolean;
   isSending: boolean;
+  selectedSettingsTarget: 'world' | 'agent' | null;
+  selectedAgent: WorldAgent | null;
 }
 
 export default class WorldComponent extends Component<WorldComponentState> {
@@ -96,7 +113,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
       error: null,
       agentsLoading: true,
       messagesLoading: false,
-      isSending: false
+      isSending: false,
+      selectedSettingsTarget: 'world',
+      selectedAgent: null
     };
   };
 
@@ -176,7 +195,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
             ) : (
               state.agents.map((agent, index) => {
                 return (
-                  <div key={`agent-${agent.id || index}`} className="agent-item">
+                  <div key={`agent-${agent.id || index}`} className="agent-item" $onclick={['select-agent-settings', agent]}>
                     <div className="agent-sprite-container">
                       <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
                       {/* Show badge always for testing - change back to agent.messageCount > 0 later */}
@@ -189,7 +208,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
             )}
           </div>
           <div className="world-nav-buttons">
-            <button className="world-settings-btn" title="World Settings">
+            <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
               <span className="world-gear-icon">⚙</span>
             </button>
           </div>
@@ -199,75 +218,22 @@ export default class WorldComponent extends Component<WorldComponentState> {
           {/* Chat Interface */}
           <div className="chat-row full-height">
             {/* chat interface */}
-            <fieldset className="chat-fieldset">
-              <legend>{state.worldName}</legend>
-              <div className="chat-container">
-                {/* Conversation Area */}
-                <div className="conversation-area" ref={e => e.scrollTop = e.scrollHeight}>
-                  {state.messagesLoading ? (
-                    <div className="loading-messages">Loading messages...</div>
-                  ) : state.messages.length === 0 ? (
-                    <div className="no-messages">No messages yet. Start a conversation!</div>
-                  ) : (
-                    state.messages
-                      .filter(message => {
-                        // Always show user messages
-                        if (message.sender === 'HUMAN' || message.type === 'user') {
-                          return true;
-                        }
-                        // For agent messages: show completed streams OR currently streaming
-                        // This shows final messages but prevents duplication during streaming
-                        return message.streamComplete === true || (message.isStreaming === true && !message.streamComplete);
-                      })
-                      .map((message, index) => (
-                        <div key={message.id || index} className={`message ${message.sender === 'HUMAN' || message.type === 'user' ? 'user-message' : 'agent-message'}`}>
-                          <div className="message-sender">{message.sender === 'HUMAN' || message.type === 'user' ? 'User' : message.sender}</div>
-                          <div className="message-content">{message.text}</div>
-                          <div className="message-timestamp">
-                            {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : 'Now'}
-                          </div>
-                          {message.isStreaming && <div className="streaming-indicator">Typing...</div>}
-                          {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                        </div>
-                      ))
-                  )}
-                </div>
-
-                {/* User Input Area */}
-                <div className="input-area">
-                  <div className="input-container">
-                    <input
-                      type="text"
-                      className="message-input"
-                      placeholder="Type your message..."
-                      value={state.userInput}
-                      $oninput='update-input'
-                      $onkeypress='key-press'
-                    />
-                    <button
-                      className="send-button"
-                      $onclick="send-message"
-                      disabled={!state.userInput.trim() || state.isSending}
-                    >
-                      {state.isSending ? 'Sending...' : 'Send'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </fieldset>
+            <WorldChat
+              worldName={state.worldName}
+              messages={state.messages}
+              userInput={state.userInput}
+              messagesLoading={state.messagesLoading}
+              isSending={state.isSending}
+            />
 
             {/* chat settings */}
-            <fieldset className="settings-fieldset">
-              <legend>Settings</legend>
-              <div className="chat-settings">
-                <label>
-                  <input
-                    type="checkbox"
-                  />
-                  Enable Notifications
-                </label>
-              </div>
-            </fieldset>
+            <WorldSettings
+              worldName={state.worldName}
+              agentCount={state.agents.length}
+              messageCount={state.messages.length}
+              selectedSettingsTarget={state.selectedSettingsTarget}
+              selectedAgent={state.selectedAgent}
+            />
           </div>
         </div>
       </div>
@@ -338,7 +304,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
           messages: sortedMessages,
           agentsLoading: false,
           loading: false,
-          error: null
+          error: null,
+          selectedSettingsTarget: 'world',
+          selectedAgent: null
         };
 
       } catch (error: any) {
@@ -346,7 +314,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
           ...state,
           worldName,
           loading: false,
-          error: error.message || 'Failed to load world data'
+          error: error.message || 'Failed to load world data',
+          selectedSettingsTarget: 'world',
+          selectedAgent: null
         };
       }
     },
@@ -356,11 +326,25 @@ export default class WorldComponent extends Component<WorldComponentState> {
       ...state,
       userInput: e.target.value
     }),
+
     'key-press': (state: WorldComponentState, e) => {
       if (e.key === 'Enter' && state.userInput.trim()) {
         app.run('send-message');
       }
     },
+
+    // Settings selection handlers
+    'select-world-settings': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      selectedSettingsTarget: 'world',
+      selectedAgent: null
+    }),
+
+    'select-agent-settings': (state: WorldComponentState, agent: WorldAgent): WorldComponentState => ({
+      ...state,
+      selectedSettingsTarget: 'agent',
+      selectedAgent: agent
+    }),
     // Send message action
     'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
       if (!state.userInput.trim()) return state;
