@@ -114,11 +114,11 @@ export default function WorldSettings(props: WorldSettingsProps) {
               <span>
                 <span className="setting-value">{selectedAgent.messageCount}</span>
                 <button
-                  className="clear-messages-btn"
+                  className="action-btn"
                   $onclick={handleClearMessages}
                   title="Clear agent messages"
                 >
-                  <span className="clear-message-icon">🗑️</span>
+                  <span className="btn-icon">×</span>
                 </button>
               </span>
             </div>
@@ -135,7 +135,16 @@ export default function WorldSettings(props: WorldSettingsProps) {
               <span className="setting-value">{selectedAgent.temperature !== undefined ? selectedAgent.temperature : 'N/A'}</span>
             </div>
             <div className="setting-item">
-              <label>System Prompt:</label>
+              <div className="setting-label-row">
+                <label>System Prompt:</label>
+                <button
+                  className="action-btn edit-prompt-btn"
+                  $onclick={() => app.run('edit-agent-prompt', selectedAgent)}
+                  title="Edit system prompt"
+                >
+                  <span className="btn-icon">⚙</span>
+                </button>
+              </div>
               <span className="system-prompt-preview">
                 {selectedAgent.systemPrompt ?
                   (selectedAgent.systemPrompt.length > 100 ?
@@ -154,18 +163,27 @@ export default function WorldSettings(props: WorldSettingsProps) {
             </div>
             <div className="setting-item">
               <label>Agents Count:</label>
-              <span className="setting-value">{world.agents.length}</span>
+              <span>
+                <span className="setting-value">{world.agents.length}</span>
+                <button
+                  className="action-btn"
+                  $onclick={() => app.run('add-agent')}
+                  title="Add new agent"
+                >
+                  <span className="btn-icon">+</span>
+                </button>
+              </span>
             </div>
             <div className="setting-item">
               <label>Total Messages:</label>
               <span>
                 <span className="setting-value">{totalMessages}</span>
                 <button
-                  className="clear-messages-btn"
+                  className="action-btn"
                   $onclick={handleClearMessages}
                   title="Clear all messages"
                 >
-                  <span className="clear-message-icon">🗑️</span>
+                  <span className="btn-icon">×</span>
                 </button>
               </span>
             </div>
