@@ -8,6 +8,7 @@
  * - Agent-specific message filtering: shows only selected agent's messages when agent is selected using fromAgentId
  * - System message display: always shows GM/system messages regardless of agent selection
  * - User-entered message filtering: can hide messages marked with userEntered flag when viewing settings
+ * - Cross-agent message detection: identifies and styles messages where sender differs from source agent
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
  * - Send button state management
@@ -33,6 +34,7 @@
  * - Fixed system message filtering to always show GM/system messages regardless of agent selection
  * - Added hideUserEnteredMessages prop to filter out user-entered messages when viewing settings
  * - Updated message filtering to use fromAgentId instead of sender name for more reliable agent identification
+ * - Added cross-agent message detection and styling for messages from different agents' memories
  */
 
 import { app } from 'apprun';
@@ -82,6 +84,36 @@ export default function WorldChat(props: WorldChatProps) {
     hideUserEnteredMessages = false
   } = props;
 
+  // Helper function to determine if a message has sender/agent mismatch
+  const hasSenderAgentMismatch = (message: Message): boolean => {
+    // Only check messages that have fromAgentId (came from agent memory)
+    if (!message.fromAgentId) return false;
+
+    // If sender is HUMAN/USER, it's normal for it to be in any agent's memory
+    if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user') {
+      return false;
+    }
+
+    // If sender is system/SYSTEM, it's normal for it to be in any agent's memory
+    if (message.sender === 'system' || message.sender === 'SYSTEM') {
+      return false;
+    }
+
+    // For agent messages: if the sender name doesn't contain the fromAgentId or vice versa,
+    // it might be a cross-agent message in memory
+    // This is a simple heuristic - you could make it more sophisticated
+    const senderLower = message.sender.toLowerCase();
+    const agentIdLower = message.fromAgentId.toLowerCase();
+
+    // If sender name contains agent id or agent id contains sender name, they likely match
+    if (senderLower.includes(agentIdLower) || agentIdLower.includes(senderLower)) {
+      return false;
+    }
+
+    // Otherwise, it's likely a mismatch (cross-agent message)
+    return true;
+  };
+
   return (
     <fieldset className="chat-fieldset">
       <legend>{worldName}</legend>
@@ -125,24 +157,40 @@ export default function WorldChat(props: WorldChatProps) {
                 }
                 return false; // Filter out incomplete or duplicate messages
               })
-              .map((message, index) => (
-                <div key={message.id || index} className={`message ${(message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message'}`}>
-                  <div className="message-sender">{message.sender || (message.type === 'user' ? 'User' : 'Agent')}</div>
-                  <div className="message-content">{message.text}</div>
-                  <div className="message-timestamp">
-                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                  </div>
-                  {message.isStreaming && (
-                    <div className="streaming-indicator">
-                      <div className="streaming-content">
-                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                        <span>responding ...</span>
-                      </div>
+              .map((message, index) => {
+                // Check if this is a cross-agent message
+                const isCrossAgentMessage = hasSenderAgentMismatch(message);
+
+                const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';
+                const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
+                const messageClasses = `message ${baseMessageClass} ${crossAgentClass}`.trim();
+
+                return (
+                  <div key={message.id || index} className={messageClasses}>
+                    <div className="message-sender">
+                      {message.sender || (message.type === 'user' ? 'User' : 'Agent')}
+                      {isCrossAgentMessage && message.fromAgentId && (
+                        <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
+                          → {message.fromAgentId}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                </div>
-              ))
+                    <div className="message-content">{message.text}</div>
+                    <div className="message-timestamp">
+                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
+                    </div>
+                    {message.isStreaming && (
+                      <div className="streaming-indicator">
+                        <div className="streaming-content">
+                          <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                          <span>responding ...</span>
+                        </div>
+                      </div>
+                    )}
+                    {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                  </div>
+                );
+              })
           )}
 
           {/* Waiting indicator - three dots when waiting for streaming to start */}

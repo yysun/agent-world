@@ -743,20 +743,24 @@ h2 {
   gap: 0.25rem;
   padding: 1rem;
   border-radius: 12px;
-  max-width: 70%;
+  max-width: 100%;
 }
 
 .user-message {
   align-self: flex-end;
   background-color: var(--accent-primary);
   color: white;
+  width: auto;
+  max-width: 70%;
 }
 
 .agent-message {
   align-self: flex-start;
   background-color: var(--bg-accent);
   border: 1px solid var(--border-secondary);
+  border-left: 3px solid #2196f3;
   color: var(--text-primary);
+  width: 100%;
 }
 
 .message-sender {
@@ -978,7 +982,8 @@ h2 {
   }
 
   .message {
-    max-width: 85%;
+    width: 100%;
+    max-width: 100%;
   }
 
   .conversation-area {
@@ -1290,4 +1295,37 @@ h2 {
   color: var(--text-tertiary);
   font-style: italic;
   font-size: 0.9rem;
+}
+
+/* Cross-agent message styling */
+.cross-agent-message {
+  border-left: 3px solid #ff9800 !important;
+  /* background-color: rgba(255, 152, 0, 0.1); */
+  position: relative;
+}
+
+.source-agent-indicator {
+  font-size: 0.8em;
+  color: #666;
+  font-style: italic;
+  margin-left: 0.5rem;
+  opacity: 0.8;
+}
+
+.source-agent-indicator:hover {
+  opacity: 1;
+}
+
+/* Additional styling for cross-agent messages */
+.cross-agent-message .message-sender {
+  position: relative;
+}
+
+.cross-agent-message::before {
+  content: "🔗";
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.6;
 }
