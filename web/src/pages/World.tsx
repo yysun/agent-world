@@ -159,25 +159,26 @@ export default class WorldComponent extends Component<WorldComponentState> {
     if (state.loading) {
       return (
         <div className="world-container">
-          <div className="world-header">
-            <div className="world-nav-buttons">
-              <a href="/">
-                <button className="back-button" title="Back to Worlds">
-                  <span className="world-back-icon">←</span>
-                </button>
-              </a>
+          <div className="world-columns">
+            <div className="chat-column">
+              <div className="agents-section">
+                <div className="agents-row">
+                  <div className="loading-agents">Loading...</div>
+                </div>
+              </div>
+              <div className="loading-state">
+                <p>Loading world data...</p>
+              </div>
             </div>
-            <div className="agents-list-centered">
-              <div className="loading-agents">Loading...</div>
+            <div className="settings-column">
+              <div className="settings-section">
+                <div className="settings-row">
+                  <button className="world-settings-btn" title="World Settings">
+                    <span className="world-gear-icon">⚙</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="world-nav-buttons">
-              <button className="world-settings-btn" title="World Settings">
-                <span className="world-gear-icon">⚙</span>
-              </button>
-            </div>
-          </div>
-          <div className="loading-state">
-            <p>Loading world data...</p>
           </div>
         </div>
       );
@@ -186,26 +187,27 @@ export default class WorldComponent extends Component<WorldComponentState> {
     if (state.error) {
       return (
         <div className="world-container">
-          <div className="world-header">
-            <div className="world-nav-buttons">
-              <a href="/">
-                <button className="back-button" title="Back to Worlds">
-                  <span className="world-back-icon">←</span>
-                </button>
-              </a>
+          <div className="world-columns">
+            <div className="chat-column">
+              <div className="agents-section">
+                <div className="agents-row">
+                  <div className="no-agents">Error</div>
+                </div>
+              </div>
+              <div className="error-state">
+                <p>Error: {state.error}</p>
+                <button $onclick={['/World', state.worldName]}>Retry</button>
+              </div>
             </div>
-            <div className="agents-list-centered">
-              <div className="no-agents">Error</div>
+            <div className="settings-column">
+              <div className="settings-section">
+                <div className="settings-row">
+                  <button className="world-settings-btn" title="World Settings">
+                    <span className="world-gear-icon">⚙</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="world-nav-buttons">
-              <button className="world-settings-btn" title="World Settings">
-                <span className="world-gear-icon">⚙</span>
-              </button>
-            </div>
-          </div>
-          <div className="error-state">
-            <p>Error: {state.error}</p>
-            <button $onclick={['/World', state.worldName]}>Retry</button>
           </div>
         </div>
       );
@@ -214,46 +216,37 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // Main content view
     return (
       <div className="world-container">
-        <div className="world-header">
-          <div className="world-nav-buttons">
-            <a href="/">
-              <button className="back-button" title="Back to Worlds">
-                <span className="world-back-icon">←</span>
-              </button>
-            </a>
-          </div>
-          <div className="agents-list-centered">
-            {state.agentsLoading ? (
-              <div className="loading-agents">Loading agents...</div>
-            ) : state.agents.length === 0 ? (
-              <div className="no-agents">No agents in this world</div>
-            ) : (
-              state.agents.map((agent, index) => {
-                const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
-                return (
-                  <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
-                    <div className="agent-sprite-container">
-                      <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
-                      {/* Show badge always for testing - change back to agent.messageCount > 0 later */}
-                      <div className="message-badge">{agent.messageCount}</div>
-                    </div>
-                    <div className="agent-name">{agent.name}</div>
+        <div className="world-columns">
+          {/* Chat Column */}
+          <div className="chat-column">
+            {/* Agents Section */}
+            <div className="agents-section">
+              <div className="agents-row">
+                {state.agentsLoading ? (
+                  <div className="loading-agents">Loading agents...</div>
+                ) : state.agents.length === 0 ? (
+                  <div className="no-agents">No agents in this world</div>
+                ) : (
+                  <div className="agents-list">
+                    {state.agents.map((agent, index) => {
+                      const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
+                      return (
+                        <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
+                          <div className="agent-sprite-container">
+                            <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
+                            {/* Show badge always for testing - change back to agent.messageCount > 0 later */}
+                            <div className="message-badge">{agent.messageCount}</div>
+                          </div>
+                          <div className="agent-name">{agent.name}</div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })
-            )}
-          </div>
-          <div className="world-nav-buttons">
-            <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
-              <span className="world-gear-icon">⚙</span>
-            </button>
-          </div>
-        </div>
+                )}
+              </div>
+            </div>
 
-        <div className="world-layout">
-          {/* Chat Interface */}
-          <div className="chat-row full-height">
-            {/* chat interface */}
+            {/* Chat Interface */}
             <WorldChat
               worldName={state.worldName}
               messages={state.messages}
@@ -264,8 +257,20 @@ export default class WorldComponent extends Component<WorldComponentState> {
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
             />
+          </div>
 
-            {/* chat settings */}
+          {/* Settings Column */}
+          <div className="settings-column">
+            {/* Settings Button Section */}
+            <div className="settings-section">
+              <div className="settings-row">
+                <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
+                  <span className="world-gear-icon">⚙</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Settings Interface */}
             <WorldSettings
               world={state.world}
               selectedSettingsTarget={state.selectedSettingsTarget}
