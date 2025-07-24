@@ -1,13 +1,13 @@
 /**
- * Unit tests for processAgentMessage function
+ * Unit Tests for Agent Message Processing
  * 
  * Features:
+ * - Tests for processAgentMessage function - core message processing logic
  * - Tests LLM call count reset logic for human/system messages
  * - Tests auto-mention functionality with self-mention removal
  * - Tests pass command handling and redirection
  * - Tests memory persistence and agent state saving
- * - Tests error handling and recovery
- * - All file I/O and LLM operations are mocked for unit testing
+ * - Tests error handling and recovery scenarios
  * 
  * Implementation:
  * - Mocks all external dependencies (agent-storage, llm-manager)
@@ -18,8 +18,8 @@
  */
 
 import { describe, test, expect, beforeEach, beforeAll, jest, afterEach } from '@jest/globals';
-import { World, Agent, WorldMessageEvent, AgentMessage, LLMProvider } from '../../core/types';
-import { createMockAgent } from './mock-helpers';
+import { World, Agent, WorldMessageEvent, AgentMessage, LLMProvider } from '../../../core/types';
+import { createMockAgent } from '../mock-helpers';
 
 // Mock dependencies
 const mockSaveAgentMemoryToDisk = jest.fn();
@@ -27,20 +27,20 @@ const mockSaveAgentConfigToDisk = jest.fn();
 const mockStreamAgentResponse = jest.fn();
 
 // Mock modules that will be dynamically imported
-jest.mock('../../core/agent-storage', () => ({
+jest.mock('../../../core/agent-storage', () => ({
   saveAgentMemoryToDisk: mockSaveAgentMemoryToDisk,
   saveAgentConfigToDisk: mockSaveAgentConfigToDisk
 }));
 
-jest.mock('../../core/llm-manager', () => ({
+jest.mock('../../../core/llm-manager', () => ({
   streamAgentResponse: mockStreamAgentResponse
 }));
 
 // Import the new function to test
-import { processAgentMessage, resetLLMCallCountIfNeeded } from '../../core/events';
+import { processAgentMessage, resetLLMCallCountIfNeeded } from '../../../core/events';
 
 // Spy on the events module functions after import
-import * as events from '../../core/events';
+import * as events from '../../../core/events';
 const mockPublishMessage = jest.spyOn(events, 'publishMessage').mockImplementation(() => { });
 const mockPublishSSE = jest.spyOn(events, 'publishSSE').mockImplementation(() => { });
 

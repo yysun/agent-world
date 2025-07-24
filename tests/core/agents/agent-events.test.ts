@@ -3,8 +3,9 @@
  *
  * Features:
  * - Tests for agent subscription management with real event emitters
- * - Tests for message filtering and response logic as complete units
- * - Tests for memory persistence with mocked file I/O operations only
+ * - Tests for message publishing and event emission
+ * - Tests for memory persistence with mocked file I/O operations
+ * - Tests for complete event flow including subscription and message processing
  *
  * Implementation:
  * - Uses real EventEmitter and world events for integration testing
@@ -12,12 +13,15 @@
  * - Tests complete event flow including subscription and message processing
  * - Validates real event emitter behavior and agent response logic
  * - Uses spies for tracking calls without breaking functionality
+ * 
+ * Note: Auto-mention utilities, response logic, and message processing 
+ * have been extracted to focused test files in the same directory.
  */
 
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import './setup';
-import { Agent, World, LLMProvider, WorldMessageEvent } from '../../core/types';
-import { resetAllMocks, createMockAgent, setupMockEnvironment, cleanupMockEnvironment } from './mock-helpers';
+import '../setup';
+import { Agent, World, LLMProvider, WorldMessageEvent } from '../../../core/types';
+import { resetAllMocks, createMockAgent, setupMockEnvironment, cleanupMockEnvironment } from '../mock-helpers';
 import { EventEmitter } from 'events';
 
 // Import the actual implementation for testing as a complete unit
@@ -27,19 +31,16 @@ import {
   shouldAgentRespond,
   saveIncomingMessageToMemory,
   publishMessage,
-  subscribeToMessages,
-  hasAnyMentionAtBeginning,
-  addAutoMention,
-  removeSelfMentions
-} from '../../core/events';
+  subscribeToMessages
+} from '../../../core/events';
 
 // Mock only file I/O and LLM calls using unstable_mockModule for dynamic imports
 beforeAll(async () => {
-  await jest.unstable_mockModule('../../core/llm-manager', () => ({
+  await jest.unstable_mockModule('../../../core/llm-manager', () => ({
     streamAgentResponse: jest.fn()
   }));
 
-  await jest.unstable_mockModule('../../core/agent-storage', () => ({
+  await jest.unstable_mockModule('../../../core/agent-storage', () => ({
     saveAgentToDisk: jest.fn(),
     loadAgentFromDisk: jest.fn(),
     saveAgentMemoryToDisk: jest.fn(),
@@ -47,19 +48,19 @@ beforeAll(async () => {
   }));
 });
 
-jest.doMock('../../core/llm-manager', () => ({
+jest.doMock('../../../core/llm-manager', () => ({
   streamAgentResponse: jest.fn()
 }));
 
-jest.doMock('../../core/agent-storage', () => ({
+jest.doMock('../../../core/agent-storage', () => ({
   saveAgentToDisk: jest.fn(),
   loadAgentFromDisk: jest.fn(),
   saveAgentMemoryToDisk: jest.fn(),
   saveAgentConfigToDisk: jest.fn()
 }));
 
-const mockAgentStorage = require('../../core/agent-storage');
-const mockLLMManager = require('../../core/llm-manager');
+const mockAgentStorage = require('../../../core/agent-storage');
+const mockLLMManager = require('../../../core/llm-manager');
 
 describe('Agent Events Module', () => {
   let mockAgent: Agent;
@@ -123,7 +124,7 @@ describe('Agent Events Module', () => {
       const unsubscribe = subscribeAgentToMessages(mockWorld, mockAgent);
 
       // Get dynamic import mocks to track calls
-      const { streamAgentResponse: dynamicLLMResponse } = await import('../../core/llm-manager');
+      const { streamAgentResponse: dynamicLLMResponse } = await import('../../../core/llm-manager');
 
       // Publish a message that should trigger response
       const testMessage = '@test-agent Hello from user!';
@@ -171,8 +172,8 @@ describe('Agent Events Module', () => {
       expect(shouldRespond).toBe(true);
 
       // Get the dynamic import mocks to check their call counts
-      const { streamAgentResponse: dynamicLLMResponse } = await import('../../core/llm-manager');
-      const { saveAgentConfigToDisk: dynamicSaveConfig } = await import('../../core/agent-storage');
+      const { streamAgentResponse: dynamicLLMResponse } = await import('../../../core/llm-manager');
+      const { saveAgentConfigToDisk: dynamicSaveConfig } = await import('../../../core/agent-storage');
 
       await processAgentMessage(mockWorld, mockAgent, testMessageEvent);
 
@@ -198,7 +199,7 @@ describe('Agent Events Module', () => {
       mockAgent.llmCallCount = 0;
 
       // Get dynamic import and make it reject
-      const { streamAgentResponse: dynamicLLMResponse } = await import('../../core/llm-manager');
+      const { streamAgentResponse: dynamicLLMResponse } = await import('../../../core/llm-manager');
       (dynamicLLMResponse as any).mockRejectedValue(new Error('Request timeout'));
 
       // Function should not throw despite LLM failure
@@ -242,7 +243,7 @@ describe('Agent Events Module', () => {
 
     test('should handle memory save failures gracefully', async () => {
       // Get dynamic import and make it reject
-      const { saveAgentMemoryToDisk } = await import('../../core/agent-storage');
+      const { saveAgentMemoryToDisk } = await import('../../../core/agent-storage');
       (saveAgentMemoryToDisk as any).mockRejectedValue(new Error('Memory save failed'));
 
       // Function should not throw despite save failure
@@ -355,114 +356,6 @@ describe('Agent Events Module', () => {
 
       await saveIncomingMessageToMemory(mockWorld, mockAgent, longMessageEvent);
       expect(mockAgent.memory[mockAgent.memory.length - 1].content).toHaveLength(longContent.length);
-    });
-  });
-
-  describe('Auto-Mention Utility Functions', () => {
-    describe('hasAnyMentionAtBeginning', () => {
-      test('should detect any mention at beginning', () => {
-        expect(hasAnyMentionAtBeginning('@human hello')).toBe(true);
-        expect(hasAnyMentionAtBeginning('@gm hello')).toBe(true);
-        expect(hasAnyMentionAtBeginning('@pro hello')).toBe(true);
-      });
-
-      test('should not detect mentions in middle', () => {
-        expect(hasAnyMentionAtBeginning('hello @human')).toBe(false);
-        expect(hasAnyMentionAtBeginning('I think @gm should help')).toBe(false);
-      });
-
-      test('should handle empty strings', () => {
-        expect(hasAnyMentionAtBeginning('')).toBe(false);
-        expect(hasAnyMentionAtBeginning('   ')).toBe(false);
-      });
-
-      test('should handle mentions with newlines', () => {
-        expect(hasAnyMentionAtBeginning('@human\n hello')).toBe(true);
-        expect(hasAnyMentionAtBeginning('@gm\t hello')).toBe(true);
-      });
-    });
-
-    describe('addAutoMention', () => {
-      test('should add auto-mention when no mention exists', () => {
-        expect(addAutoMention('Hello there!', 'human')).toBe('@human Hello there!');
-        expect(addAutoMention('How can I help?', 'gm')).toBe('@gm How can I help?');
-      });
-
-      test('should NOT add auto-mention when ANY mention exists at beginning', () => {
-        expect(addAutoMention('@gm Hello there!', 'human')).toBe('@gm Hello there!');
-        expect(addAutoMention('@pro Please help', 'gm')).toBe('@pro Please help');
-        expect(addAutoMention('@con Take this task', 'human')).toBe('@con Take this task');
-      });
-
-      test('should handle empty strings', () => {
-        expect(addAutoMention('', 'human')).toBe('');
-        expect(addAutoMention('   ', 'gm')).toBe('   ');
-      });
-
-      test('should trim response but preserve original structure', () => {
-        expect(addAutoMention('  Hello there!  ', 'human')).toBe('@human Hello there!');
-      });
-    });
-
-    describe('removeSelfMentions', () => {
-      test('should remove self-mentions from beginning', () => {
-        expect(removeSelfMentions('@alice I should handle this.', 'alice')).toBe('I should handle this.');
-        expect(removeSelfMentions('@gm @gm I will help.', 'gm')).toBe('I will help.');
-      });
-
-      test('should be case-insensitive', () => {
-        expect(removeSelfMentions('@Alice @ALICE @alice I can help.', 'alice')).toBe('I can help.');
-      });
-
-      test('should preserve mentions in middle', () => {
-        expect(removeSelfMentions('@alice I think @alice should work with @bob.', 'alice')).toBe('I think @alice should work with @bob.');
-      });
-
-      test('should handle empty strings', () => {
-        expect(removeSelfMentions('', 'alice')).toBe('');
-        expect(removeSelfMentions('   ', 'gm')).toBe('   ');
-      });
-    });
-
-    describe('Loop Prevention Integration', () => {
-      test('should prevent @gm->@pro->@gm loops', () => {
-        // Simulate @pro responding to @gm
-        let response = '@gm I will work on this task.';
-
-        // Step 1: Remove self-mentions (pro removes @pro mentions, but there are none)
-        response = removeSelfMentions(response, 'pro');
-        expect(response).toBe('@gm I will work on this task.');
-
-        // Step 2: Add auto-mention (should NOT add @gm because @gm already exists)
-        response = addAutoMention(response, 'gm');
-        expect(response).toBe('@gm I will work on this task.');
-      });
-
-      test('should allow @gm->@con redirections', () => {
-        // Simulate @gm redirecting to @con
-        let response = '@con Please handle this request.';
-
-        // Step 1: Remove self-mentions (gm removes @gm mentions, but there are none)
-        response = removeSelfMentions(response, 'gm');
-        expect(response).toBe('@con Please handle this request.');
-
-        // Step 2: Add auto-mention (should NOT add auto-mention because @con already exists)
-        response = addAutoMention(response, 'human');
-        expect(response).toBe('@con Please handle this request.');
-      });
-
-      test('should add auto-mention when no mention exists', () => {
-        // Normal response without any mentions
-        let response = 'I understand your request.';
-
-        // Step 1: Remove self-mentions
-        response = removeSelfMentions(response, 'gm');
-        expect(response).toBe('I understand your request.');
-
-        // Step 2: Add auto-mention (should add because no mention exists)
-        response = addAutoMention(response, 'human');
-        expect(response).toBe('@human I understand your request.');
-      });
     });
   });
 });

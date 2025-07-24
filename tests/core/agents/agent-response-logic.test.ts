@@ -1,22 +1,33 @@
 /**
- * Unit tests for shouldAgentRespond function
- * Tests the new paragraph-beginning mention rule and existing agent response logic
+ * Unit Tests for Agent Response Logic
+ *
+ * Features:
+ * - Tests for shouldAgentRespond function - determines when agents should respond to messages
+ * - Tests for paragraph-beginning mention rule and response logic
+ * - Tests for turn limit logic and agent self-filtering
+ * - Tests for public message handling and agent-to-agent communication
+ *
+ * Implementation:
+ * - Tests agent response decision logic in isolation
+ * - Mocks file I/O operations and event publishing
+ * - Tests edge cases and complex mention scenarios
+ * - Validates agent response behavior patterns
  */
 
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
-import { shouldAgentRespond } from '../../core/events';
-import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../core/types';
-import { createMockAgent } from './mock-helpers';
+import { shouldAgentRespond } from '../../../core/events';
+import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../../core/types';
+import { createMockAgent } from '../mock-helpers';
 
 // Mock dependencies
-jest.mock('../../core/agent-storage', () => ({
+jest.mock('../../../core/agent-storage', () => ({
   saveAgentConfigToDisk: jest.fn(),
   saveAgentMemoryToDisk: jest.fn(),
   saveAgentToDisk: jest.fn()
 }));
 
-jest.mock('../../core/events', () => {
-  const originalModule = jest.requireActual('../../core/events') as any;
+jest.mock('../../../core/events', () => {
+  const originalModule = jest.requireActual('../../../core/events') as any;
   return {
     ...originalModule,
     subscribeToMessages: jest.fn(),
@@ -25,7 +36,7 @@ jest.mock('../../core/events', () => {
   };
 });
 
-jest.mock('../../core/llm-manager', () => ({
+jest.mock('../../../core/llm-manager', () => ({
   streamAgentResponse: jest.fn()
 }));
 
