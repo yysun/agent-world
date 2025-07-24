@@ -110,30 +110,6 @@ export function setupAISDKMocks(): void {
     createAnthropic: jest.fn<any>().mockReturnValue({}),
     createGoogle: jest.fn<any>().mockReturnValue({})
   }));
-
-  // Mock OpenAI SDK directly
-  jest.doMock('openai', () => ({
-    default: jest.fn<any>().mockImplementation(() => ({
-      chat: {
-        completions: {
-          create: jest.fn<any>().mockResolvedValue({
-            choices: [{ message: { content: 'Mock OpenAI response' } }]
-          })
-        }
-      }
-    }))
-  }));
-
-  // Mock Anthropic SDK
-  jest.doMock('@anthropic-ai/sdk', () => ({
-    default: jest.fn<any>().mockImplementation(() => ({
-      messages: {
-        create: jest.fn<any>().mockResolvedValue({
-          content: [{ text: 'Mock Anthropic response' }]
-        })
-      }
-    }))
-  }));
 }
 
 /**
