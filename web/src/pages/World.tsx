@@ -511,7 +511,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
     'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
       if (!state.userInput.trim()) return state;
 
-      (document.activeElement as HTMLElement)?.blur(); // Remove focus from input
+      // (document.activeElement as HTMLElement)?.blur(); // Remove focus from input
 
       // Store the user input before clearing it
       const messageText = state.userInput;
