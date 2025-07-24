@@ -1,1 +1,0 @@
-WebSockets is no longer used in the project. The code has been refactored to use Server-Sent Events (SSE) for real-time communication. 
