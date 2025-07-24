@@ -37,43 +37,13 @@
  */
 
 import { app } from 'apprun';
-
-interface Message {
-  id?: string | number;
-  sender: string;
-  text: string;
-  createdAt: string;
-  type?: string;
-  streamComplete?: boolean;
-  isStreaming?: boolean;
-  hasError?: boolean;
-  errorMessage?: string;
-  userEntered?: boolean;
-  fromAgentId?: string;
-}
-
-interface WorldChatProps {
-  worldName: string;
-  messages: Message[];
-  userInput: string;
-  messagesLoading: boolean;
-  isSending: boolean;
-  isWaiting: boolean;
-  activeAgent?: {
-    spriteIndex: number;
-    name: string;
-  } | null;
-  selectedAgent?: {
-    id?: string;
-    name: string;
-  } | null;
-}
+import type { Message, WorldChatProps } from '../types';
 
 export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
-    messages,
-    userInput,
+    messages = [], // Default to empty array if undefined
+    userInput = '', // Default to empty string if undefined
     messagesLoading,
     isSending,
     isWaiting,
@@ -206,7 +176,7 @@ export default function WorldChat(props: WorldChatProps) {
               type="text"
               className="message-input"
               placeholder="Type your message..."
-              value={userInput}
+              value={userInput || ''}
               $oninput='update-input'
               $onkeypress='key-press'
             />

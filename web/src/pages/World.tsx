@@ -22,6 +22,9 @@
  * - Agent deselection: click selected agent again to deselect and show all messages
  * - User-entered message tracking: messages typed by user in current session have userEntered flag
  * - Settings view state management: removes userEntered messages from state when viewing world or agent settings
+ * - Agent Edit Popup: Modal for creating new agents and editing existing agents
+ * - Agent CRUD Operations: Create, update, and delete agents with confirmation dialogs
+ * - Functional Component Pattern: AgentEdit as presentation component with all state in World
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -45,6 +48,10 @@
  * - CSS-based agent highlighting with .selected class for visual emphasis
  * - Conditional message filtering in WorldChat component based on selectedAgent prop
  * - Toggle selection logic: clicking selected agent deselects it and shows all world messages
+ * - Agent edit popup state management with formData and validation
+ * - Keyboard support: Escape key closes agent edit popup
+ * - Responsive modal design for mobile and desktop
+ * - Modular update handlers: agent-related handlers extracted to separate update module
  * 
  * Changes:
  * - Replaced mock data with API calls to api.ts
@@ -86,10 +93,21 @@
  * - Added fromAgentId field to messages mapped from agent memory for reliable agent identification
  * - Updated message filtering to use fromAgentId instead of sender name for better accuracy
  * - Changed userEntered message handling: messages are removed from state when entering settings mode instead of filtered during display
+ * - Added AgentEdit functional component for creating and editing agents
+ * - Implemented agent edit popup with modal overlay and form fields
+ * - Added agentEdit state management to WorldComponentState
+ * - Moved gear button from system prompt to agent name line in settings
+ * - Added delete button next to gear button for agent deletion
+ * - Implemented CRUD operations for agents with placeholder API calls
+ * - Added keyboard support for agent edit popup (Escape key to close)
+ * - Integrated responsive modal design with proper error handling and validation
+ * - Extracted agent-related event handlers to separate world-update.ts module for better code organization
+ * - Imported agent handlers from world-update.ts while preserving component-specific logic (userInput pre-fill)
+ * - Maintained all existing functionality while improving modularity and separation of concerns
  */
 
 import { app, Component } from 'apprun';
-import { getWorld, getAgentMemory, clearAgentMemory, type Agent, type Message } from '../api';
+import { getWorld } from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -99,41 +117,39 @@ import {
   handleMessage,
   handleConnectionStatus,
   handleError,
-  handleComplete,
-  type SSEComponentState
+  handleComplete
 } from '../sse-client';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
-
-// Extended Agent interface for UI-specific properties
-interface WorldAgent extends Agent {
-  spriteIndex: number;
-  messageCount: number;
-  provider?: string;
-  model?: string;
-  temperature?: number;
-  systemPrompt?: string;
-}
-
-interface WorldComponentState extends SSEComponentState {
-  worldName: string;
-  world: { name: string; agents: WorldAgent[]; llmCallLimit?: number } | null;
-  agents: WorldAgent[];
-  userInput: string;
-  loading: boolean;
-  error: string | null;
-  agentsLoading: boolean;
-  messagesLoading: boolean;
-  isSending: boolean;
-  isWaiting: boolean;
-  selectedSettingsTarget: 'world' | 'agent' | null;
-  selectedAgent: WorldAgent | null;
-  activeAgent: { spriteIndex: number; name: string } | null;
-}
+import AgentEdit from '../components/agent-edit';
+import { agentUpdateHandlers } from '../updates/world-update';
+import type { WorldComponentState, Agent } from '../types';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
   is_global_event = () => true;
+
+  mounted = (props: any, children: any[], state: WorldComponentState) => {
+    // Add keyboard event listener for escape key
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        app.run('close-agent-edit');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Store cleanup function for unmount
+    (this as any)._keydownHandler = handleKeyDown;
+  };
+
+  unmounted = () => {
+    // Cleanup keyboard listener
+    if ((this as any)._keydownHandler) {
+      document.removeEventListener('keydown', (this as any)._keydownHandler);
+      delete (this as any)._keydownHandler;
+    }
+  };
 
   state = async (): Promise<WorldComponentState> => {
     return {
@@ -150,7 +166,26 @@ export default class WorldComponent extends Component<WorldComponentState> {
       isWaiting: false,
       selectedSettingsTarget: 'world',
       selectedAgent: null,
-      activeAgent: null
+      activeAgent: null,
+      agentEdit: {
+        isOpen: false,
+        mode: 'create',
+        selectedAgent: null,
+        formData: {
+          name: '',
+          description: '',
+          provider: '',
+          model: '',
+          temperature: 0.7,
+          systemPrompt: ''
+        },
+        loading: false,
+        error: null
+      },
+      // Required SSE state properties
+      connectionStatus: 'disconnected',
+      wsError: null,
+      needScroll: false
     };
   };
 
@@ -224,7 +259,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <div className="agents-row">
                 {state.agentsLoading ? (
                   <div className="loading-agents">Loading agents...</div>
-                ) : state.agents.length === 0 ? (
+                ) : !state.agents?.length ? (
                   <div className="no-agents">No agents in this world</div>
                 ) : (
                   <div className="agents-list">
@@ -265,7 +300,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
             <div className="settings-section">
               <div className="settings-row">
                 <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
-                  <span className="world-gear-icon">⚙</span>
+                  <span className="world-gear-icon">⊕</span>
                 </button>
               </div>
             </div>
@@ -275,10 +310,21 @@ export default class WorldComponent extends Component<WorldComponentState> {
               world={state.world}
               selectedSettingsTarget={state.selectedSettingsTarget}
               selectedAgent={state.selectedAgent}
-              totalMessages={state.messages.length}
+              totalMessages={(state.messages || []).length}
             />
           </div>
         </div>
+
+        {/* Agent Edit Popup */}
+        <AgentEdit
+          isOpen={state.agentEdit.isOpen}
+          mode={state.agentEdit.mode}
+          selectedAgent={state.agentEdit.selectedAgent}
+          worldName={state.worldName}
+          formData={state.agentEdit.formData}
+          loading={state.agentEdit.loading}
+          error={state.agentEdit.error}
+        />
       </div>
     );
   };
@@ -306,7 +352,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         const messageMap = new Map();
 
         // Transform agents with UI properties and collect their memory items
-        const worldAgents: WorldAgent[] = await Promise.all(world.agents.map(async (agent, index) => {
+        const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
           // Add agent's memory items to messageMap for deduplication
           if (agent.memory && Array.isArray(agent.memory)) {
             agent.memory.forEach((memoryItem: any) => {
@@ -344,11 +390,19 @@ export default class WorldComponent extends Component<WorldComponentState> {
             ...agent,
             spriteIndex: index % 9, // Cycle through 9 sprite indices
             messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
-            provider: agent.provider,
-            model: agent.model,
-            temperature: agent.temperature,
-            systemPrompt: systemPrompt
-          };
+            provider: agent.provider || 'openai',
+            model: agent.model || 'gpt-4',
+            temperature: agent.temperature ?? 0.7,
+            systemPrompt: systemPrompt,
+            description: agent.description || '',
+            // Ensure required core properties
+            type: agent.type || 'default',
+            status: agent.status || 'active',
+            llmCallCount: agent.llmCallCount || 0,
+            memory: agent.memory || [],
+            createdAt: agent.createdAt || new Date(),
+            lastActive: agent.lastActive || new Date()
+          } as Agent;
         }));
 
         // Convert messageMap to array and sort by createdAt ascending
@@ -399,122 +453,34 @@ export default class WorldComponent extends Component<WorldComponentState> {
     }),
 
     'key-press': (state: WorldComponentState, e) => {
-      if (e.key === 'Enter' && state.userInput.trim()) {
+      if (e.key === 'Enter' && (state.userInput || '').trim()) {
         app.run('send-message');
       }
     },
 
-    // Settings selection handlers
-    'select-world-settings': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      selectedSettingsTarget: 'world',
-      selectedAgent: null,
-      messages: state.messages.filter(message => !message.userEntered)
-    }),
+    // Spread agent-related handlers from world-update.ts
+    ...agentUpdateHandlers,
 
-    'select-agent-settings': (state: WorldComponentState, agent: WorldAgent): WorldComponentState => {
-      // If clicking on already selected agent, deselect it (show world settings)
-      if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
+    // Override select-agent-settings to add component-specific userInput pre-fill logic
+    'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
+      const baseResult = agentUpdateHandlers['select-agent-settings'](state, agent);
+      // Add the userInput pre-fill logic that was specific to World component
+      if (baseResult.selectedSettingsTarget === 'agent' && baseResult.selectedAgent) {
         return {
-          ...state,
-          selectedSettingsTarget: 'world',
-          selectedAgent: null,
-          messages: state.messages.filter(message => !message.userEntered)
+          ...baseResult,
+          userInput: '@' + baseResult.selectedAgent.name + ' '
         };
       }
-
-      // Otherwise, select the agent
-      return {
-        ...state,
-        selectedSettingsTarget: 'agent',
-        selectedAgent: agent,
-        userInput: '@' + agent.name + ' ', // Pre-fill input with agent mention 
-        messages: state.messages.filter(message => !message.userEntered)
-      };
-    },
-
-    // Clear messages handlers
-    'clear-agent-messages': async (state: WorldComponentState, agent: WorldAgent): Promise<WorldComponentState> => {
-      try {
-        await clearAgentMemory(state.worldName, agent.name);
-
-        // Update agent's message count and remove agent's messages from display
-        const updatedAgents = state.agents.map(a =>
-          a.id === agent.id ? { ...a, messageCount: 0 } : a
-        );
-
-        // Remove agent's messages from the message list
-        const filteredMessages = state.messages.filter(msg => msg.sender !== agent.name);
-
-        // Update selected agent if it's the same one
-        const updatedSelectedAgent = state.selectedAgent?.id === agent.id
-          ? { ...state.selectedAgent, messageCount: 0 }
-          : state.selectedAgent;
-
-        // Update world object with updated agents
-        const updatedWorld = state.world ? {
-          ...state.world,
-          agents: updatedAgents
-        } : null;
-
-        return {
-          ...state,
-          world: updatedWorld,
-          agents: updatedAgents,
-          messages: filteredMessages,
-          selectedAgent: updatedSelectedAgent
-        };
-      } catch (error: any) {
-        return {
-          ...state,
-          error: error.message || 'Failed to clear agent messages'
-        };
-      }
-    },
-
-    'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      try {
-        // Clear messages for all agents
-        await Promise.all(
-          state.agents.map(agent => clearAgentMemory(state.worldName, agent.name))
-        );
-
-        // Update all agents' message counts
-        const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));
-
-        // Update selected agent if any
-        const updatedSelectedAgent = state.selectedAgent
-          ? { ...state.selectedAgent, messageCount: 0 }
-          : null;
-
-        // Update world object with updated agents
-        const updatedWorld = state.world ? {
-          ...state.world,
-          agents: updatedAgents
-        } : null;
-
-        return {
-          ...state,
-          world: updatedWorld,
-          agents: updatedAgents,
-          messages: [], // Clear all messages
-          selectedAgent: updatedSelectedAgent
-        };
-      } catch (error: any) {
-        return {
-          ...state,
-          error: error.message || 'Failed to clear world messages'
-        };
-      }
+      return baseResult;
     },
     // Send message action
     'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      if (!state.userInput.trim()) return state;
+      if (!(state.userInput || '').trim()) return state;
 
       // (document.activeElement as HTMLElement)?.blur(); // Remove focus from input
 
       // Store the user input before clearing it
-      const messageText = state.userInput;
+      const messageText = state.userInput || '';
 
       const userMessage = {
         id: Date.now() + Math.random(),
@@ -529,7 +495,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       // Add user message, clear input, and show waiting indicator
       const newState = {
         ...state,
-        messages: [...state.messages, userMessage],
+        messages: [...(state.messages || []), userMessage],
         userInput: '',
         isSending: true,
         isWaiting: true

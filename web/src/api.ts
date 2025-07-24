@@ -14,46 +14,27 @@
  * - Memory management for agents
  * - Clean separation: Chat functionality moved to sse-client.js
  * - Full TypeScript support with proper interfaces
+ * - Consolidated types using centralized types/index.ts
  * 
  * Changes:
  * - Added TypeScript interfaces for all data types
  * - Fixed type errors with proper typing
  * - Maintained all existing CRUD functionality
  * - Enhanced type safety for better development experience
+ * - Eliminated duplicate interface definitions
+ * - Reused consolidated types for consistency
  */
 
-// TypeScript interfaces
-interface World {
-  id?: string;
-  name: string;
-  description?: string;
-}
-
-interface Agent {
-  id?: string;
-  name: string;
-  description?: string;
-  [key: string]: any;
-}
-
-interface Message {
-  role: string;
-  content: string;
-  createdAt?: string;
-  [key: string]: any;
-}
-
-interface AgentMemory {
-  messages: Message[];
-  [key: string]: any;
-}
-
-interface ApiRequestOptions {
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string;
-  [key: string]: any;
-}
+import type {
+  World,
+  Agent,
+  Message,
+  AgentMemoryResponse,
+  AgentFormData,
+  WorldFormData,
+  ApiResponse,
+  ApiRequestOptions
+} from './types';
 
 interface ErrorResponse {
   error: string;
@@ -241,7 +222,7 @@ async function deleteAgent(worldName: string, agentName: string): Promise<void> 
 /**
  * Get agent memory
  */
-async function getAgentMemory(worldName: string, agentName: string): Promise<AgentMemory> {
+async function getAgentMemory(worldName: string, agentName: string): Promise<AgentMemoryResponse> {
   if (!worldName || !agentName) {
     throw new Error('World name and agent name are required');
   }
@@ -264,8 +245,6 @@ async function clearAgentMemory(worldName: string, agentName: string): Promise<v
 }
 
 // Export the API functions
-export type { World, Agent, Message, AgentMemory };
-
 export {
   // Core API function
   apiRequest,

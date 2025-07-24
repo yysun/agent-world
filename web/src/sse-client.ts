@@ -12,10 +12,22 @@
  * - Improved error handling with typed error responses
  * - Removed memorySize tracking for simplified agent management
  * - Consolidated to use messageCount only for agent activity tracking
+ * - Consolidated types using centralized types/index.ts
+ * - Eliminated duplicate interface definitions
  */
 
 import app from 'apprun';
 import { apiRequest } from './api';
+import type {
+  SSEComponentState,
+  Message,
+  StreamStartData,
+  StreamChunkData,
+  StreamEndData,
+  StreamErrorData,
+  MessageData,
+  ErrorData
+} from './types';
 
 // TypeScript interfaces for SSE data structures
 interface SSEBaseData {
@@ -341,74 +353,6 @@ export async function sendChatMessage(
   processStream();
 
   return cleanup;
-}
-
-// TypeScript interfaces for AppRun state and event data
-interface StreamStartData {
-  messageId: string;
-  sender: string;
-  worldName?: string;
-}
-
-interface StreamChunkData {
-  messageId: string;
-  sender: string;
-  content: string;
-  isAccumulated: boolean;
-  worldName?: string;
-}
-
-interface StreamEndData {
-  messageId: string;
-  sender: string;
-  content: string;
-  worldName?: string;
-}
-
-interface StreamErrorData {
-  messageId: string;
-  sender: string;
-  error: string;
-  worldName?: string;
-}
-
-interface MessageData {
-  data?: {
-    type?: string;
-    sender?: string;
-    agentName?: string;
-    content?: string;
-    message?: string;
-    createdAt?: string;
-    worldName?: string;
-  };
-}
-
-interface ErrorData {
-  message: string;
-}
-
-// Base state interface for AppRun components using SSE
-export interface SSEComponentState {
-  messages: Array<{
-    id: number | string;
-    type: string;
-    sender: string;
-    text: string;
-    createdAt: string;
-    worldName?: string;
-    isStreaming?: boolean;
-    streamComplete?: boolean;
-    hasError?: boolean;
-    errorMessage?: string;
-    messageId?: string;
-    userEntered?: boolean;
-    fromAgentId?: string;
-  }>;
-  worldName?: string;
-  connectionStatus?: string;
-  wsError?: string | null;
-  needScroll?: boolean;
 }
 
 /**
