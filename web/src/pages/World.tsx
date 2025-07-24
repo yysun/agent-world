@@ -1,109 +1,28 @@
 /**
- * World Component - Displays world interface with agents and chat
+ * World Component - Real-time world interface with agents and chat
  * 
- * Features:
- * - Centered agent list in header without world title
- * - World name displayed as chat legend instead of header
- * - Full-height chat and settings layout using remaining screen space
- * - Back navigation to worlds list
- * - Message badges showing agent activity using messageCount
- * - Real-time data loading from API
- * - Loading and error state management
- * - Real-time SSE chat streaming with agent responses
- * - Live streaming message updates with visual indicators
- * - Smart message filtering: shows completed messages + active streams without duplication
- * - Agent memory deduplication using messageMap with createdAt-based sorting
- * - Interactive settings panel: click gear for world settings, click agent for agent settings
- * - Dynamic settings content based on selection (world vs agent)
- * - Modular component architecture using WorldChat and WorldSettings components
- * - World settings displayed by default in settings panel
- * - Agent selection highlighting: enlarged and highlighted avatar when selected for settings
- * - Message filtering: when agent selected, chat shows only that agent's messages + user messages using fromAgentId
- * - Agent deselection: click selected agent again to deselect and show all messages
- * - User-entered message tracking: messages typed by user in current session have userEntered flag
- * - Settings view state management: removes userEntered messages from state when viewing world or agent settings
- * - Agent Edit Popup: Modal for creating new agents and editing existing agents
- * - Agent CRUD Operations: Create, update, and delete agents with confirmation dialogs
- * - Functional Component Pattern: AgentEdit as presentation component with all state in World
+ * Core Features:
+ * - Centered agent list with message badges showing activity count
+ * - Real-time SSE chat streaming with agent responses and visual indicators
+ * - Interactive settings panel for world/agent configuration
+ * - Agent selection highlighting with message filtering
+ * - Agent Edit popup for CRUD operations with modal design
+ * - Smart message deduplication using messageMap with createdAt sorting
  * 
- * Implementation:
- * - AppRun MVU (Model-View-Update) architecture
- * - Async state initialization with API data loading
- * - State-driven conditional rendering with guard clauses
- * - Immutable state updates with spread operator
- * - API integration for agents data
- * - Full TypeScript SSE client integration
- * - Real-time streaming chat with proper error handling
- * - Intelligent message filtering preserves conversation history while preventing duplication
- * - MessageMap deduplication system using createdAt+text keys for unique message identification
- * - Chronological message ordering with createdAt-based ascending sort
- * - Uses AppRun $ directive pattern for all event handling (click, input, keypress)
- * - Settings state management with selectedSettingsTarget and selectedAgent
- * - Component composition with WorldChat and WorldSettings for separation of concerns
- * - Default selectedSettingsTarget set to 'world' for immediate world info display
- * - Simplified agent tracking using messageCount only (removed memorySize)
- * - Consolidated to use createdAt field exclusively (removed timestamp redundancy)
- * - Local agent messageCount updates: analyzes incoming messages to identify sender and increments count
- * - Real-time badge updates: messageCount reflects agent activity during live chat sessions
- * - CSS-based agent highlighting with .selected class for visual emphasis
- * - Conditional message filtering in WorldChat component based on selectedAgent prop
- * - Toggle selection logic: clicking selected agent deselects it and shows all world messages
- * - Agent edit popup state management with formData and validation
+ * Architecture:
+ * - AppRun MVU pattern with async state initialization
+ * - Modular components: WorldChat, WorldSettings, AgentEdit
+ * - TypeScript SSE client integration with proper error handling
+ * - Extracted agent handlers to world-update.ts module
+ * - State-driven rendering with loading/error states
+ * 
+ * Key Implementations:
+ * - Message filtering: shows agent-specific messages when agent selected
+ * - Real-time badge updates: increments messageCount on agent activity
+ * - Toggle selection: click selected agent to deselect and show all messages
  * - Keyboard support: Escape key closes agent edit popup
- * - Responsive modal design for mobile and desktop
- * - Modular update handlers: agent-related handlers extracted to separate update module
- * 
- * Changes:
- * - Replaced mock data with API calls to api.ts
- * - Added loading and error states for better UX
- * - Implemented async data fetching with error handling
- * - Added proper TypeScript interfaces
- * - Enhanced state management following AppRun patterns
- * - Updated to use messageCount for message count display
- * - Moved agent list to header row alongside world name for compact layout
- * - Removed world title from header, centered agents
- * - Changed chat legend to display world name
- * - Added full-height layout classes for better space utilization
- * - Integrated TypeScript SSE client for real-time chat streaming
- * - Added SSE event handlers for streaming messages
- * - Enhanced message display with streaming indicators and error states
- * - Implemented proper chat message sending with SSE responses
- * - Fixed message display: shows completed agent messages + live streams, prevents duplication
- * - Added messageMap deduplication system in '/World' handler for agent memory consolidation
- * - Implemented createdAt-based ascending sort for chronological message display
- * - Updated to use $ directive pattern throughout (gear button, agent clicks)
- * - Added dynamic settings panel with world/agent selection
- * - Removed notification checkbox, replaced with contextual settings
- * - Enhanced settings to show world or agent-specific information
- * - Refactored to use WorldChat and WorldSettings components for better separation of concerns
- * - Maintained all functionality while improving component modularity
- * - Set world settings as default display in settings panel for better UX
- * - Removed settings view message filtering logic: userEntered messages now removed from state when entering settings mode
- * - Enhanced state management: userEntered messages filtered at state level rather than display level for better performance
- * - Removed memorySize dependency from SSE client and frontend for simplification
- * - Consolidated agent tracking to use messageCount only
- * - Consolidated timestamp/createdAt fields to use createdAt exclusively throughout codebase
- * - Enhanced agent message badge updates: automatically increment messageCount when agents send messages
- * - Added local state updates for agent messageCount in handleMessage only
- * - Streamlined message tracking: removed duplicate logic, handleMessage handles all agent count updates
- * - Added agent selection highlighting with CSS styling and selected class management
- * - Implemented message filtering in WorldChat component based on selectedAgent
- * - Added toggle selection behavior: clicking selected agent deselects and shows all messages
- * - Enhanced visual feedback with enlarged avatars and highlight effects for selected agents
- * - Added fromAgentId field to messages mapped from agent memory for reliable agent identification
- * - Updated message filtering to use fromAgentId instead of sender name for better accuracy
- * - Changed userEntered message handling: messages are removed from state when entering settings mode instead of filtered during display
- * - Added AgentEdit functional component for creating and editing agents
- * - Implemented agent edit popup with modal overlay and form fields
- * - Added agentEdit state management to WorldComponentState
- * - Moved gear button from system prompt to agent name line in settings
- * - Added delete button next to gear button for agent deletion
- * - Implemented CRUD operations for agents with placeholder API calls
- * - Added keyboard support for agent edit popup (Escape key to close)
- * - Integrated responsive modal design with proper error handling and validation
- * - Extracted agent-related event handlers to separate world-update.ts module for better code organization
- * - Imported agent handlers from world-update.ts while preserving component-specific logic (userInput pre-fill)
- * - Maintained all existing functionality while improving modularity and separation of concerns
+ * - Agent memory consolidation with fromAgentId tracking
+ * - User input pre-fill with @agent mentions when agent selected
  */
 
 import { app, Component } from 'apprun';
@@ -129,28 +48,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
   is_global_event = () => true;
 
-  mounted = (props: any, children: any[], state: WorldComponentState) => {
-    // Add keyboard event listener for escape key
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        app.run('close-agent-edit');
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    // Store cleanup function for unmount
-    (this as any)._keydownHandler = handleKeyDown;
-  };
-
-  unmounted = () => {
-    // Cleanup keyboard listener
-    if ((this as any)._keydownHandler) {
-      document.removeEventListener('keydown', (this as any)._keydownHandler);
-      delete (this as any)._keydownHandler;
-    }
-  };
-
   state = async (): Promise<WorldComponentState> => {
     return {
       worldName: 'World',
@@ -160,7 +57,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       userInput: '',
       loading: true,
       error: null,
-      agentsLoading: true,
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
@@ -182,7 +78,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
         loading: false,
         error: null
       },
-      // Required SSE state properties
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -252,12 +147,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
     return (
       <div className="world-container">
         <div className="world-columns">
-          {/* Chat Column */}
           <div className="chat-column">
-            {/* Agents Section */}
             <div className="agents-section">
               <div className="agents-row">
-                {state.agentsLoading ? (
+                {state.loading ? (
                   <div className="loading-agents">Loading agents...</div>
                 ) : !state.agents?.length ? (
                   <div className="no-agents">No agents in this world</div>
@@ -269,7 +162,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
                         <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
                           <div className="agent-sprite-container">
                             <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
-                            {/* Show badge always for testing - change back to agent.messageCount > 0 later */}
                             <div className="message-badge">{agent.messageCount}</div>
                           </div>
                           <div className="agent-name">{agent.name}</div>
@@ -281,7 +173,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
               </div>
             </div>
 
-            {/* Chat Interface */}
             <WorldChat
               worldName={state.worldName}
               messages={state.messages}
@@ -294,9 +185,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
             />
           </div>
 
-          {/* Settings Column */}
           <div className="settings-column">
-            {/* Settings Button Section */}
             <div className="settings-section">
               <div className="settings-row">
                 <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
@@ -305,7 +194,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
               </div>
             </div>
 
-            {/* Settings Interface */}
             <WorldSettings
               world={state.world}
               selectedSettingsTarget={state.selectedSettingsTarget}
@@ -315,7 +203,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
           </div>
         </div>
 
-        {/* Agent Edit Popup */}
         <AgentEdit
           isOpen={state.agentEdit.isOpen}
           mode={state.agentEdit.mode}
@@ -335,7 +222,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       const worldName = name ? decodeURIComponent(name) : 'New World';
 
       try {
-        // Initial state with world name
         yield {
           ...state,
           worldName,
@@ -345,26 +231,16 @@ export default class WorldComponent extends Component<WorldComponentState> {
           activeAgent: null
         };
 
-        // Load world data including agents
         const world = await getWorld(worldName);
-
-        // Create messageMap to deduplicate messages from all agents
         const messageMap = new Map();
 
-        // Transform agents with UI properties and collect their memory items
         const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
-          // Add agent's memory items to messageMap for deduplication
           if (agent.memory && Array.isArray(agent.memory)) {
             agent.memory.forEach((memoryItem: any) => {
-              // Use a combination of createdAt and text as unique key to avoid duplicates
               const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
 
-              // Only add if not already in map
               if (!messageMap.has(messageKey)) {
-                // Preserve original sender from memory, fallback to agent name if not available
                 const originalSender = memoryItem.sender || agent.name;
-
-                // Determine message type based on sender - only HUMAN messages should be 'user' type
                 let messageType = 'agent';
                 if (originalSender === 'HUMAN' || originalSender === 'USER') {
                   messageType = 'user';
@@ -377,25 +253,23 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   createdAt: memoryItem.createdAt || new Date().toISOString(),
                   type: messageType,
                   streamComplete: true,
-                  fromAgentId: agent.id // Add fromAgentId to track which agent this message came from
+                  fromAgentId: agent.id
                 });
               }
             });
           }
 
-          // Use system prompt directly from agent data
           const systemPrompt = agent.systemPrompt || '';
 
           return {
             ...agent,
-            spriteIndex: index % 9, // Cycle through 9 sprite indices
-            messageCount: agent.memory?.length || 0, // Use agent's memory length for message count
+            spriteIndex: index % 9,
+            messageCount: agent.memory?.length || 0,
             provider: agent.provider || 'openai',
             model: agent.model || 'gpt-4',
             temperature: agent.temperature ?? 0.7,
             systemPrompt: systemPrompt,
             description: agent.description || '',
-            // Ensure required core properties
             type: agent.type || 'default',
             status: agent.status || 'active',
             llmCallCount: agent.llmCallCount || 0,
@@ -405,7 +279,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
           } as Agent;
         }));
 
-        // Convert messageMap to array and sort by createdAt ascending
         const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
           const timeA = new Date(a.createdAt).getTime();
           const timeB = new Date(b.createdAt).getTime();
@@ -418,11 +291,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
           world: {
             name: worldName,
             agents: worldAgents,
-            llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit // Use turnLimit as fallback
+            llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
           },
           agents: worldAgents,
           messages: sortedMessages,
-          agentsLoading: false,
           loading: false,
           error: null,
           isWaiting: false,
@@ -458,13 +330,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
       }
     },
 
-    // Spread agent-related handlers from world-update.ts
     ...agentUpdateHandlers,
 
-    // Override select-agent-settings to add component-specific userInput pre-fill logic
     'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
       const baseResult = agentUpdateHandlers['select-agent-settings'](state, agent);
-      // Add the userInput pre-fill logic that was specific to World component
       if (baseResult.selectedSettingsTarget === 'agent' && baseResult.selectedAgent) {
         return {
           ...baseResult,
@@ -477,9 +346,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
       if (!(state.userInput || '').trim()) return state;
 
-      // (document.activeElement as HTMLElement)?.blur(); // Remove focus from input
-
-      // Store the user input before clearing it
       const messageText = state.userInput || '';
 
       const userMessage = {
@@ -492,7 +358,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
         userEntered: true
       };
 
-      // Add user message, clear input, and show waiting indicator
       const newState = {
         ...state,
         messages: [...(state.messages || []), userMessage],
@@ -502,13 +367,11 @@ export default class WorldComponent extends Component<WorldComponentState> {
       };
 
       try {
-        // Send message via SSE using the stored message text
         await sendChatMessage(state.worldName, messageText, 'HUMAN');
 
         return {
           ...newState,
           isSending: false
-          // isWaiting will be set to false when streaming starts
         };
       } catch (error: any) {
         return {
@@ -523,13 +386,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // SSE Event Handlers - wrapped for WorldComponentState compatibility
     'handleStreamStart': (state: WorldComponentState, data: any): WorldComponentState => {
       const baseState = handleStreamStart(state as any, data) as WorldComponentState;
-
-      // Find the agent that's starting to stream
-      // data structure: { messageId, sender, worldName }
       const agentName = data.sender;
       const agent = state.agents.find(a => a.name === agentName);
 
-      // Hide waiting indicator when streaming starts and set active agent
       return {
         ...baseState,
         isWaiting: false,
@@ -541,16 +400,13 @@ export default class WorldComponent extends Component<WorldComponentState> {
     },
     'handleStreamEnd': (state: WorldComponentState, data: any): WorldComponentState => {
       const baseState = handleStreamEnd(state as any, data) as WorldComponentState;
-
-      // Extract agent name from the stream end data
       const agentName = data.sender;
 
       let finalState = {
         ...baseState,
-        activeAgent: null // Clear active agent when streaming ends
+        activeAgent: null
       };
 
-      // Update agent's messageCount when stream completes
       if (agentName && agentName !== 'HUMAN') {
         const updatedAgents = finalState.agents.map(agent => {
           if (agent.name === agentName) {
@@ -562,13 +418,11 @@ export default class WorldComponent extends Component<WorldComponentState> {
           return agent;
         });
 
-        // Update world object with updated agents
         const updatedWorld = finalState.world ? {
           ...finalState.world,
           agents: updatedAgents
         } : null;
 
-        // Update selected agent if it's the same one
         const updatedSelectedAgent = finalState.selectedAgent?.name === agentName
           ? { ...finalState.selectedAgent, messageCount: finalState.selectedAgent.messageCount + 1 }
           : finalState.selectedAgent;
@@ -585,7 +439,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     },
     'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
       const baseState = handleStreamError(state as any, data) as WorldComponentState;
-      // Clear active agent when streaming errors
       return {
         ...baseState,
         activeAgent: null

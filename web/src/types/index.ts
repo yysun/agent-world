@@ -130,7 +130,6 @@ export interface WorldComponentState extends SSEComponentState {
   userInput?: string; // Made optional to handle undefined cases
   loading: boolean;
   error: string | null;
-  agentsLoading: boolean;
   messagesLoading: boolean;
   isSending: boolean;
   isWaiting: boolean;
