@@ -19,7 +19,7 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 
 // We need to unmock agent-storage for this test since we're testing it
-jest.unmock('../../core/agent-storage');
+jest.unmock('../../../core/agent-storage');
 
 import {
   loadAllAgentsFromDisk,
@@ -27,9 +27,9 @@ import {
   saveAgentToDisk,
   deleteAgentFromDisk,
   agentExistsOnDisk
-} from '../../core/agent-storage';
-import { Agent, LLMProvider } from '../../core/types';
-import { createMockAgent } from './mock-helpers';
+} from '../../../core/agent-storage';
+import { Agent, LLMProvider } from '../../../core/types';
+import { createMockAgent } from '../mock-helpers';
 
 // Get the global fs mock from setup
 const fs = require('fs').promises;

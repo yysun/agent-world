@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect } from '@jest/globals';
-import { generateId, toKebabCase, extractMentions, extractParagraphBeginningMentions, determineSenderType, getWorldTurnLimit, prepareMessagesForLLM } from '../../core/utils.js';
+import { generateId, toKebabCase, extractMentions, extractParagraphBeginningMentions, determineSenderType, getWorldTurnLimit, prepareMessagesForLLM } from '../../../core/utils.js';
 
 describe('Core Utilities', () => {
   describe('generateId', () => {
