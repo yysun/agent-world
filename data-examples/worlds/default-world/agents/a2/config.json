@@ -9,6 +9,6 @@
   "maxTokens": 1000,
   "createdAt": "2025-07-01T20:40:37.509Z",
   "lastActive": "2025-07-01T20:40:37.509Z",
-  "llmCallCount": 0,
-  "memory": []
+  "llmCallCount": 1,
+  "lastLLMCall": "2025-07-24T20:54:12.136Z"
 }

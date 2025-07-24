@@ -133,7 +133,8 @@ async function configureLogger(logLevel?: string): Promise<void> {
       cli: 'error',      // Always keep CLI at error level
       core: level,       // Core modules use global level
       events: 'error',   // Keep events at error level (too verbose)
-      llm: level         // LLM module uses global level
+      llm: level,        // LLM module uses global level
+      streaming: level   // Include streaming flag logs
     }
   });
 
