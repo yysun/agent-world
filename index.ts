@@ -17,6 +17,6 @@ export * from './core/index';
 // Package information
 export const PACKAGE_INFO = {
   name: 'agent-world',
-  version: '3.0.0',
-  description: 'A TypeScript-native agent management system with world-centric access patterns'
+  version: '0.3.0',
+  description: 'A agent management system for building AI agent teams with just words.',
 } as const;

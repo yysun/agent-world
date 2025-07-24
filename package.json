@@ -1,6 +1,6 @@
 {
   "name": "agent-world",
-  "version": "3.0.0",
+  "version": "0.2.0",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
