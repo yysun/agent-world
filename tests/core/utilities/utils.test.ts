@@ -2,9 +2,10 @@
  * Unit Tests for Core Utilities
  *
  * Features:
- * - Tests for generateId function
- * - Tests for toKebabCase function
- * - Tests for type definitions
+ * - Tests for generateId function (UUID generation)
+ * - Tests for toKebabCase function (string conversion)
+ * - Tests for determineSenderType function (sender classification)
+ * - Tests for getWorldTurnLimit function (configuration handling)
  * - Pure unit tests with no external dependencies
  *
  * Implementation:
@@ -12,10 +13,15 @@
  * - No file I/O or LLM dependencies
  * - Tests edge cases and error conditions
  * - Validates utility function behavior
+ * 
+ * Changes:
+ * - Extracted mention extraction tests to mention-extraction.test.ts
+ * - Extracted message formatting tests to message-formatting.test.ts
+ * - Focused on core utility functions only
  */
 
 import { describe, test, expect } from '@jest/globals';
-import { generateId, toKebabCase, extractMentions, extractParagraphBeginningMentions, determineSenderType, getWorldTurnLimit, prepareMessagesForLLM } from '../../../core/utils.js';
+import { generateId, toKebabCase, determineSenderType, getWorldTurnLimit } from '../../../core/utils.js';
 
 describe('Core Utilities', () => {
   describe('generateId', () => {
@@ -97,107 +103,6 @@ describe('Core Utilities', () => {
     });
   });
 
-  describe('extractMentions', () => {
-    test('should extract single mention', () => {
-      expect(extractMentions('Hello @alice')).toEqual(['alice']);
-      expect(extractMentions('@bob how are you?')).toEqual(['bob']);
-      expect(extractMentions('Hi @charlie-test')).toEqual(['charlie-test']);
-    });
-
-    test('should extract only first mention when multiple present', () => {
-      expect(extractMentions('Hello @alice @bob @charlie')).toEqual(['alice']);
-      expect(extractMentions('@first @second @third')).toEqual(['first']);
-      expect(extractMentions('Hey @agent1 and @agent2')).toEqual(['agent1']);
-    });
-
-    test('should handle case-insensitive mentions', () => {
-      expect(extractMentions('Hello @Alice')).toEqual(['alice']);
-      expect(extractMentions('@BOB how are you?')).toEqual(['bob']);
-      expect(extractMentions('Hi @ChArLiE')).toEqual(['charlie']);
-    });
-
-    test('should handle mentions with special characters', () => {
-      expect(extractMentions('Hello @agent-1')).toEqual(['agent-1']);
-      expect(extractMentions('@test_agent')).toEqual(['test_agent']);
-      expect(extractMentions('@agent_with-mixed')).toEqual(['agent_with-mixed']);
-    });
-
-    test('should handle edge cases', () => {
-      expect(extractMentions('')).toEqual([]);
-      expect(extractMentions('No mentions here')).toEqual([]);
-      expect(extractMentions('@')).toEqual([]);
-      expect(extractMentions('@ invalid')).toEqual([]);
-      expect(extractMentions('@123')).toEqual(['123']);
-    });
-
-    test('should handle invalid mention formats', () => {
-      expect(extractMentions('@agent@invalid')).toEqual(['agent']);
-      expect(extractMentions('@@double')).toEqual(['double']);
-      expect(extractMentions('@agent with spaces @second')).toEqual(['agent']);
-    });
-  });
-
-  describe('extractParagraphBeginningMentions', () => {
-    test('should extract mentions at start of string', () => {
-      expect(extractParagraphBeginningMentions('@pro, what do you think?')).toEqual(['pro']);
-      expect(extractParagraphBeginningMentions('@alice how are you?')).toEqual(['alice']);
-      expect(extractParagraphBeginningMentions('@bob-test please help')).toEqual(['bob-test']);
-    });
-
-    test('should extract mentions after newlines', () => {
-      expect(extractParagraphBeginningMentions('Hello everyone!\n@pro, please respond.')).toEqual(['pro']);
-      expect(extractParagraphBeginningMentions('First line\n\n@alice what do you think?')).toEqual(['alice']);
-      expect(extractParagraphBeginningMentions('Text\n  @bob with spaces')).toEqual(['bob']);
-    });
-
-    test('should ignore mentions in middle of text', () => {
-      expect(extractParagraphBeginningMentions('hi @pro, what do you think?')).toEqual([]);
-      expect(extractParagraphBeginningMentions('I think @alice should handle this.')).toEqual([]);
-      expect(extractParagraphBeginningMentions('Please ask @bob about this.')).toEqual([]);
-    });
-
-    test('should handle multiple paragraphs correctly', () => {
-      const content = 'Hello everyone!\n@pro, please respond.\n\nAlso, we need input from someone else.';
-      expect(extractParagraphBeginningMentions(content)).toEqual(['pro']);
-    });
-
-    test('should extract multiple valid mentions', () => {
-      const content = '@alice, please start.\n@bob, you handle the next part.';
-      expect(extractParagraphBeginningMentions(content)).toEqual(['alice', 'bob']);
-    });
-
-    test('should be case-insensitive', () => {
-      expect(extractParagraphBeginningMentions('@Alice, hello')).toEqual(['alice']);
-      expect(extractParagraphBeginningMentions('@BOB how are you?')).toEqual(['bob']);
-      expect(extractParagraphBeginningMentions('Hi\n@ChArLiE test')).toEqual(['charlie']);
-    });
-
-    test('should handle whitespace after newlines', () => {
-      expect(extractParagraphBeginningMentions('Hello\n   @pro with spaces')).toEqual(['pro']);
-      expect(extractParagraphBeginningMentions('Text\n\t@alice with tab')).toEqual(['alice']);
-      expect(extractParagraphBeginningMentions('Line\n\n  @bob multiple spaces')).toEqual(['bob']);
-    });
-
-    test('should handle mixed valid and invalid mentions', () => {
-      const content = '@alice, please start. Then ask @bob.\n@charlie, you handle the final part.';
-      expect(extractParagraphBeginningMentions(content)).toEqual(['alice', 'charlie']);
-    });
-
-    test('should handle edge cases', () => {
-      expect(extractParagraphBeginningMentions('')).toEqual([]);
-      expect(extractParagraphBeginningMentions('No mentions here')).toEqual([]);
-      expect(extractParagraphBeginningMentions('@')).toEqual([]);
-      expect(extractParagraphBeginningMentions('@ invalid')).toEqual([]);
-      expect(extractParagraphBeginningMentions('@123')).toEqual(['123']);
-    });
-
-    test('should handle special characters in mentions', () => {
-      expect(extractParagraphBeginningMentions('@agent-1, hello')).toEqual(['agent-1']);
-      expect(extractParagraphBeginningMentions('@test_agent please respond')).toEqual(['test_agent']);
-      expect(extractParagraphBeginningMentions('@agent_with-mixed chars')).toEqual(['agent_with-mixed']);
-    });
-  });
-
   describe('determineSenderType', () => {
     test('should identify human senders', () => {
       expect(determineSenderType('human')).toBe('human');
@@ -252,96 +157,6 @@ describe('Core Utilities', () => {
     test('should handle negative turn limit', () => {
       const world = { turnLimit: -1 } as any;
       expect(getWorldTurnLimit(world)).toBe(-1); // Negative values are truthy
-    });
-  });
-
-  describe('prepareMessagesForLLM', () => {
-    test('should prepare messages with system prompt', () => {
-      const agent = {
-        systemPrompt: 'You are a helpful assistant.',
-        id: 'test-agent'
-      } as any;
-
-      const messageData = {
-        content: 'Hello world',
-        sender: 'user'
-      } as any;
-
-      const messages = prepareMessagesForLLM(agent, messageData);
-
-      expect(messages).toHaveLength(2);
-      expect(messages[0].role).toBe('system');
-      expect(messages[0].content).toBe('You are a helpful assistant.');
-      expect(messages[1].role).toBe('user');
-      expect(messages[1].content).toBe('Hello world');
-      expect(messages[1].sender).toBe('user');
-    });
-
-    test('should prepare messages without system prompt', () => {
-      const agent = {
-        id: 'test-agent'
-      } as any;
-
-      const messageData = {
-        content: 'Hello world',
-        sender: 'user'
-      } as any;
-
-      const messages = prepareMessagesForLLM(agent, messageData);
-
-      expect(messages).toHaveLength(1);
-      expect(messages[0].role).toBe('user');
-      expect(messages[0].content).toBe('Hello world');
-    });
-
-    test('should include conversation history', () => {
-      const agent = {
-        systemPrompt: 'You are a helpful assistant.',
-        id: 'test-agent'
-      } as any;
-
-      const messageData = {
-        content: 'Current message',
-        sender: 'user'
-      } as any;
-
-      const history = [
-        { role: 'user', content: 'Previous message', createdAt: new Date() },
-        { role: 'assistant', content: 'Previous response', createdAt: new Date() }
-      ] as any;
-
-      const messages = prepareMessagesForLLM(agent, messageData, history);
-
-      expect(messages).toHaveLength(4);
-      expect(messages[0].role).toBe('system');
-      expect(messages[1].content).toBe('Previous message');
-      expect(messages[2].content).toBe('Previous response');
-      expect(messages[3].content).toBe('Current message');
-    });
-
-    test('should handle message with payload content', () => {
-      const agent = { id: 'test-agent' } as any;
-      const messageData = {
-        payload: { content: 'Payload content' },
-        sender: 'user'
-      } as any;
-
-      const messages = prepareMessagesForLLM(agent, messageData);
-
-      expect(messages).toHaveLength(1);
-      expect(messages[0].content).toBe('Payload content');
-    });
-
-    test('should handle empty content', () => {
-      const agent = { id: 'test-agent' } as any;
-      const messageData = {
-        sender: 'user'
-      } as any;
-
-      const messages = prepareMessagesForLLM(agent, messageData);
-
-      expect(messages).toHaveLength(1);
-      expect(messages[0].content).toBe('');
     });
   });
 });

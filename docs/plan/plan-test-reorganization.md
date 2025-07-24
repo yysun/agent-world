@@ -91,19 +91,22 @@ mkdir -p tests/core/{agents,storage,utilities,shared}
 
 **Phase 1 Status: ✅ COMPLETE** - All shared infrastructure successfully created and validated.
 
-### Phase 2: Simple Moves (Low Risk, No Content Changes)
+### Phase 2: Simple Moves (Low Risk, No Content Changes) ✅
 **Goal**: Move existing complete files without modification
 
-#### Step 2.1: Storage Migration
-- [ ] **storage/agent-storage.test.ts** (moved, ~300 lines)
-  - [ ] Move current agent-storage.test.ts to storage folder
-  - [ ] Update import paths only
-  - [ ] Verify tests still pass
+#### Step 2.1: Storage Migration ✅
+- [x] **storage/agent-storage.test.ts** (moved, 14 tests passing)
+  - [x] Move current agent-storage.test.ts to storage folder
+  - [x] Update import paths from ../../ to ../../../
+  - [x] Update mock-helpers import path to ../mock-helpers  
+  - [x] Verify tests still pass
 
-#### Step 2.2: Utilities Migration  
-- [ ] Move existing utils.test.ts to utilities/ folder
-- [ ] Update import paths
-- [ ] Verify tests still pass
+#### Step 2.2: Utilities Migration ✅
+- [x] Move existing utils.test.ts to utilities/ folder (41 tests passing)
+- [x] Update import paths from ../../ to ../../../
+- [x] Verify tests still pass
+
+**Phase 2 Status: ✅ COMPLETE** - 149 tests passing, no regressions, ready for Phase 3.
 
 ### Phase 3: Utility Extraction (Medium Risk, Content Splitting)
 **Goal**: Split utilities logically before tackling complex agent tests
