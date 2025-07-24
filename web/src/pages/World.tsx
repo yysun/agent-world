@@ -18,8 +18,10 @@
  * - Modular component architecture using WorldChat and WorldSettings components
  * - World settings displayed by default in settings panel
  * - Agent selection highlighting: enlarged and highlighted avatar when selected for settings
- * - Message filtering: when agent selected, chat shows only that agent's messages + user messages
+ * - Message filtering: when agent selected, chat shows only that agent's messages + user messages using fromAgentId
  * - Agent deselection: click selected agent again to deselect and show all messages
+ * - User-entered message tracking: messages typed by user in current session have userEntered flag
+ * - Settings view filtering: hides userEntered messages when viewing world or agent settings
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -79,6 +81,8 @@
  * - Implemented message filtering in WorldChat component based on selectedAgent
  * - Added toggle selection behavior: clicking selected agent deselects and shows all messages
  * - Enhanced visual feedback with enlarged avatars and highlight effects for selected agents
+ * - Added fromAgentId field to messages mapped from agent memory for reliable agent identification
+ * - Updated message filtering to use fromAgentId instead of sender name for better accuracy
  */
 
 import { app, Component } from 'apprun';
@@ -256,6 +260,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
+              hideUserEnteredMessages={state.selectedSettingsTarget !== null}
             />
 
             {/* chat settings */}
@@ -318,7 +323,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   text: memoryItem.text || memoryItem.content || '',
                   createdAt: memoryItem.createdAt || new Date().toISOString(),
                   type: messageType,
-                  streamComplete: true
+                  streamComplete: true,
+                  fromAgentId: agent.id // Add fromAgentId to track which agent this message came from
                 });
               }
             });
@@ -506,7 +512,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
         sender: 'HUMAN',
         text: messageText,
         createdAt: new Date().toISOString(),
-        worldName: state.worldName
+        worldName: state.worldName,
+        userEntered: true
       };
 
       // Add user message, clear input, and show waiting indicator

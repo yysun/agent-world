@@ -402,6 +402,8 @@ export interface SSEComponentState {
     hasError?: boolean;
     errorMessage?: string;
     messageId?: string;
+    userEntered?: boolean;
+    fromAgentId?: string;
   }>;
   worldName?: string;
   connectionStatus?: string;
@@ -417,18 +419,27 @@ export interface SSEComponentState {
 // Handle streaming start events
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
   const { messageId, sender, worldName } = data;
+  const senderName = sender || 'Agent';
+
+  // Find agent ID by sender name if state has agents
+  let fromAgentId: string | undefined;
+  if ('agents' in state && Array.isArray((state as any).agents)) {
+    const agent = (state as any).agents.find((a: any) => a.name === senderName);
+    fromAgentId = agent?.id;
+  }
 
   return {
     ...state,
     messages: [...(state.messages || []), {
       id: Date.now() + Math.random(),
       type: 'agent-stream',
-      sender: sender || 'Agent',
+      sender: senderName,
       text: '',
       createdAt: new Date().toISOString(),
       worldName: worldName || state.worldName,
       isStreaming: true,
-      messageId: messageId
+      messageId: messageId,
+      fromAgentId: fromAgentId
     }],
     needScroll: true
   };
@@ -525,13 +536,23 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
 // Handle regular messages
 export const handleMessage = <T extends SSEComponentState>(state: T, data: MessageData): T => {
   const messageData = data.data || {};
+  const senderName = messageData.sender || messageData.agentName || 'Agent';
+
+  // Find agent ID by sender name if state has agents
+  let fromAgentId: string | undefined;
+  if ('agents' in state && Array.isArray((state as any).agents)) {
+    const agent = (state as any).agents.find((a: any) => a.name === senderName);
+    fromAgentId = agent?.id;
+  }
+
   const newMessage = {
     id: Date.now() + Math.random(),
     type: messageData.type || 'message',
-    sender: messageData.sender || messageData.agentName || 'Agent',
+    sender: senderName,
     text: messageData.content || messageData.message || '',
     createdAt: messageData.createdAt || new Date().toISOString(),
-    worldName: messageData.worldName || state.worldName
+    worldName: messageData.worldName || state.worldName,
+    fromAgentId: fromAgentId
   };
 
   return {

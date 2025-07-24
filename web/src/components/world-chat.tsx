@@ -5,8 +5,9 @@
  * - Real-time message display with streaming indicators
  * - User input handling with send functionality
  * - Message filtering for completed, streaming, and regular messages
- * - Agent-specific message filtering: shows only selected agent's messages when agent is selected
+ * - Agent-specific message filtering: shows only selected agent's messages when agent is selected using fromAgentId
  * - System message display: always shows GM/system messages regardless of agent selection
+ * - User-entered message filtering: can hide messages marked with userEntered flag when viewing settings
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
  * - Send button state management
@@ -30,6 +31,8 @@
  * - Added selectedAgent prop for agent-specific message filtering
  * - Enhanced message filtering: filters by selected agent while always showing user messages
  * - Fixed system message filtering to always show GM/system messages regardless of agent selection
+ * - Added hideUserEnteredMessages prop to filter out user-entered messages when viewing settings
+ * - Updated message filtering to use fromAgentId instead of sender name for more reliable agent identification
  */
 
 import { app } from 'apprun';
@@ -44,6 +47,8 @@ interface Message {
   isStreaming?: boolean;
   hasError?: boolean;
   errorMessage?: string;
+  userEntered?: boolean;
+  fromAgentId?: string;
 }
 
 interface WorldChatProps {
@@ -58,8 +63,10 @@ interface WorldChatProps {
     name: string;
   } | null;
   selectedAgent?: {
+    id?: string;
     name: string;
   } | null;
+  hideUserEnteredMessages?: boolean;
 }
 
 export default function WorldChat(props: WorldChatProps) {
@@ -71,7 +78,8 @@ export default function WorldChat(props: WorldChatProps) {
     isSending,
     isWaiting,
     activeAgent,
-    selectedAgent
+    selectedAgent,
+    hideUserEnteredMessages = false
   } = props;
 
   return (
@@ -87,13 +95,18 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             messages
               .filter(message => {
-                // Always show user messages
+                // Hide user-entered messages when viewing settings (world or agent)
+                if (hideUserEnteredMessages && message.userEntered) {
+                  return false;
+                }
+
+                // Always show user messages (unless they're userEntered and we're hiding those)
                 if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user' || message.sender === 'system' || message.sender === 'SYSTEM') {
                   return true;
                 }
 
                 // If an agent is selected for settings, filter to show only that agent's messages
-                if (selectedAgent && message.sender !== selectedAgent.name) {
+                if (selectedAgent?.id && message.fromAgentId !== selectedAgent.id) {
                   return false;
                 }
 
