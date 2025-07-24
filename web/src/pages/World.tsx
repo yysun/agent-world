@@ -21,7 +21,7 @@
  * - Message filtering: when agent selected, chat shows only that agent's messages + user messages using fromAgentId
  * - Agent deselection: click selected agent again to deselect and show all messages
  * - User-entered message tracking: messages typed by user in current session have userEntered flag
- * - Settings view filtering: hides userEntered messages when viewing world or agent settings
+ * - Settings view state management: removes userEntered messages from state when viewing world or agent settings
  * 
  * Implementation:
  * - AppRun MVU (Model-View-Update) architecture
@@ -71,6 +71,8 @@
  * - Refactored to use WorldChat and WorldSettings components for better separation of concerns
  * - Maintained all functionality while improving component modularity
  * - Set world settings as default display in settings panel for better UX
+ * - Removed settings view message filtering logic: userEntered messages now removed from state when entering settings mode
+ * - Enhanced state management: userEntered messages filtered at state level rather than display level for better performance
  * - Removed memorySize dependency from SSE client and frontend for simplification
  * - Consolidated agent tracking to use messageCount only
  * - Consolidated timestamp/createdAt fields to use createdAt exclusively throughout codebase
@@ -83,6 +85,7 @@
  * - Enhanced visual feedback with enlarged avatars and highlight effects for selected agents
  * - Added fromAgentId field to messages mapped from agent memory for reliable agent identification
  * - Updated message filtering to use fromAgentId instead of sender name for better accuracy
+ * - Changed userEntered message handling: messages are removed from state when entering settings mode instead of filtered during display
  */
 
 import { app, Component } from 'apprun';
@@ -260,7 +263,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
-              hideUserEnteredMessages={state.selectedSettingsTarget !== null}
             />
 
             {/* chat settings */}
@@ -401,7 +403,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
     'select-world-settings': (state: WorldComponentState): WorldComponentState => ({
       ...state,
       selectedSettingsTarget: 'world',
-      selectedAgent: null
+      selectedAgent: null,
+      messages: state.messages.filter(message => !message.userEntered)
     }),
 
     'select-agent-settings': (state: WorldComponentState, agent: WorldAgent): WorldComponentState => {
@@ -410,7 +413,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
         return {
           ...state,
           selectedSettingsTarget: 'world',
-          selectedAgent: null
+          selectedAgent: null,
+          messages: state.messages.filter(message => !message.userEntered)
         };
       }
 
@@ -419,7 +423,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
         ...state,
         selectedSettingsTarget: 'agent',
         selectedAgent: agent,
-        userInput: '@' + agent.name + ' ' // Pre-fill input with agent mention 
+        userInput: '@' + agent.name + ' ', // Pre-fill input with agent mention 
+        messages: state.messages.filter(message => !message.userEntered)
       };
     },
 

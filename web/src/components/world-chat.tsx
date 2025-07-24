@@ -7,7 +7,6 @@
  * - Message filtering for completed, streaming, and regular messages
  * - Agent-specific message filtering: shows only selected agent's messages when agent is selected using fromAgentId
  * - System message display: always shows GM/system messages regardless of agent selection
- * - User-entered message filtering: can hide messages marked with userEntered flag when viewing settings
  * - Cross-agent message detection: identifies and styles messages where sender differs from source agent
  * - Scroll-to-bottom behavior for new messages
  * - Loading states for messages
@@ -32,7 +31,7 @@
  * - Added selectedAgent prop for agent-specific message filtering
  * - Enhanced message filtering: filters by selected agent while always showing user messages
  * - Fixed system message filtering to always show GM/system messages regardless of agent selection
- * - Added hideUserEnteredMessages prop to filter out user-entered messages when viewing settings
+ * - Removed hideUserEnteredMessages prop - userEntered messages are now filtered from state in parent component
  * - Updated message filtering to use fromAgentId instead of sender name for more reliable agent identification
  * - Added cross-agent message detection and styling for messages from different agents' memories
  */
@@ -68,7 +67,6 @@ interface WorldChatProps {
     id?: string;
     name: string;
   } | null;
-  hideUserEnteredMessages?: boolean;
 }
 
 export default function WorldChat(props: WorldChatProps) {
@@ -80,8 +78,7 @@ export default function WorldChat(props: WorldChatProps) {
     isSending,
     isWaiting,
     activeAgent,
-    selectedAgent,
-    hideUserEnteredMessages = false
+    selectedAgent
   } = props;
 
   // Helper function to determine if a message has sender/agent mismatch
@@ -127,12 +124,7 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             messages
               .filter(message => {
-                // Hide user-entered messages when viewing settings (world or agent)
-                if (hideUserEnteredMessages && message.userEntered) {
-                  return false;
-                }
-
-                // Always show user messages (unless they're userEntered and we're hiding those)
+                // Always show user messages
                 if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user' || message.sender === 'system' || message.sender === 'SYSTEM') {
                   return true;
                 }
