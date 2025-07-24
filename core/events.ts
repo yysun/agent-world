@@ -389,9 +389,17 @@ export async function processAgentMessage(
       logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Call LLM for response with streaming
-    const { streamAgentResponse } = await import('./llm-manager');
-    const response = await streamAgentResponse(world, agent, messages);
+    // Call LLM for response - use streaming or non-streaming based on global flag
+    const { isStreamingEnabled } = await import('./streaming-flag');
+    let response: string;
+    
+    if (isStreamingEnabled()) {
+      const { streamAgentResponse } = await import('./llm-manager');
+      response = await streamAgentResponse(world, agent, messages);
+    } else {
+      const { generateAgentResponse } = await import('./llm-manager');
+      response = await generateAgentResponse(world, agent, messages);
+    }
 
     // Check for pass command in response first
     const passCommandRegex = /<world>pass<\/world>/i;

@@ -39,7 +39,17 @@ dotenv.config();
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, LLMProvider, initializeLogger } from '../core/index.js';
+import { 
+  listWorlds, 
+  subscribeWorld, 
+  World, 
+  ClientConnection, 
+  createCategoryLogger, 
+  LLMProvider, 
+  initializeLogger,
+  setStreamingEnabled,
+  getStreamingStatus
+} from '../core/index.js';
 import type { LoggerConfig, LogLevel } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
@@ -214,6 +224,10 @@ interface CLIOptions {
 // Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
+
+  // Set streaming flag OFF for pipeline mode
+  setStreamingEnabled(false);
+  logger.debug(`Pipeline mode - streaming flag set to: ${getStreamingStatus()}`);
 
   try {
     let world: World | null = null;
@@ -458,6 +472,11 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
+  
+  // Set streaming flag ON for interactive mode (preserve existing behavior)
+  setStreamingEnabled(true);
+  logger.debug(`Interactive mode - streaming flag set to: ${getStreamingStatus()}`);
+  
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
 
