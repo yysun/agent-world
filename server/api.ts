@@ -22,7 +22,7 @@
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld, enableStreaming, disableStreaming } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 
@@ -528,7 +528,7 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
   }
 });
 
-// Helper function to handle non-streaming chat response
+// Helper function to handle non-streaming chat response (aligned with CLI pipeline mode)
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   // Check if world exists
   const worldExists = await getWorldConfig(ROOT_PATH, worldName);
@@ -537,144 +537,112 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
     return;
   }
 
-  // Collect response data
-  let responseContent = '';
-  let responseSender = '';
-  let isComplete = false;
-  let hasError = false;
-  let errorMessage = '';
-
-  // Set up response collection with timeout
-  const responsePromise = new Promise<void>((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    
-    const completeResponse = () => {
-      clearTimeout(timer);
-      isComplete = true;
-      resolve();
-    };
-
-    const handleError = (error: string) => {
-      clearTimeout(timer);
-      hasError = true;
-      errorMessage = error;
-      reject(new Error(error));
-    };
-
-    // Create temporary client connection
-    const client: ClientConnection = {
-      isOpen: true,
-      onWorldEvent: (eventType: string, eventData: any) => {
-        // Handle streaming chunk events - collect content
-        if (eventType === 'sse' && eventData.type === 'chunk' && eventData.content) {
-          if (!responseSender) {
-            responseSender = eventData.agentName || eventData.sender || 'agent';
-          }
-          responseContent += eventData.content;
-          
-          // Reset timeout on each chunk
-          clearTimeout(timer);
-          timer = setTimeout(() => {
-            completeResponse();
-          }, 5000);
-        }
-
-        // Handle streaming end events
-        if (eventType === 'sse' && eventData.type === 'end') {
-          completeResponse();
-        }
-
-        // Handle streaming error events
-        if (eventType === 'sse' && eventData.type === 'error') {
-          handleError(eventData.error || eventData.message || 'Unknown error');
-        }
-
-        // Handle regular message events (non-streaming responses)
-        if (eventType === 'message' && eventData.content) {
-          // Skip user messages to prevent echo
-          if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
-            return;
-          }
-          
-          if (!responseContent) {
-            responseContent = eventData.content;
-            responseSender = eventData.sender || 'agent';
-          }
-          
-          // Set completion timer for regular messages
-          clearTimeout(timer);
-          timer = setTimeout(() => {
-            completeResponse();
-          }, 3000);
-        }
-
-        // Handle system/world events
-        if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-          if (!responseContent) {
-            responseContent = eventData.message;
-            responseSender = 'system';
-          }
-          
-          clearTimeout(timer);
-          timer = setTimeout(() => {
-            completeResponse();
-          }, 3000);
-        }
-      },
-      onError: (error: string) => {
-        handleError(error);
-      }
-    };
-
-    // Subscribe to world
-    subscribeWorld(worldName, ROOT_PATH, client).then(subscription => {
-      if (!subscription) {
-        handleError('Failed to subscribe to world');
-        return;
-      }
-
-      // Send message to world
-      try {
-        publishMessage(subscription.world, message, sender);
-        
-        // Set initial timeout for response
-        timer = setTimeout(() => {
-          completeResponse();
-        }, 15000);
-        
-      } catch (error) {
-        handleError(error instanceof Error ? error.message : String(error));
-      }
-      
-      // Auto-cleanup subscription
-      setTimeout(() => {
-        if (subscription) {
-          subscription.unsubscribe();
-        }
-      }, 20000);
-      
-    }).catch(error => {
-      handleError(error instanceof Error ? error.message : String(error));
-    });
-  });
+  // Disable streaming to match CLI pipeline mode behavior
+  disableStreaming();
 
   try {
-    // Wait for response
+    // Collect response data
+    let responseContent = '';
+    let responseSender = '';
+    let isComplete = false;
+    let hasError = false;
+    let errorMessage = '';
+
+    // Set up response collection with timeout
+    const responsePromise = new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      
+      const completeResponse = () => {
+        clearTimeout(timer);
+        isComplete = true;
+        resolve();
+      };
+
+      const handleError = (error: string) => {
+        clearTimeout(timer);
+        hasError = true;
+        errorMessage = error;
+        reject(new Error(error));
+      };
+
+      // Create client connection using CLI pipeline pattern
+      const client: ClientConnection = {
+        isOpen: true,
+        onWorldEvent: (eventType: string, eventData: any) => {
+          // Skip system success messages (following CLI pattern)
+          if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+          // Handle system/world events
+          if ((eventType === 'system' || eventType === 'world') && eventData.message) {
+            if (eventData.message.toLowerCase().includes('error')) {
+              handleError(eventData.message);
+            }
+          }
+
+          // Handle message events (main response from agents)
+          if (eventType === 'message' && eventData.content) {
+            // Skip user messages to prevent echo
+            if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
+              return;
+            }
+            
+            responseContent = eventData.content;
+            responseSender = eventData.sender || 'agent';
+            completeResponse();
+          }
+        },
+        onError: (error: string) => {
+          handleError(error);
+        }
+      };
+
+      // Set timeout for response
+      timer = setTimeout(() => {
+        if (!isComplete) {
+          handleError('Request timeout - no response received within 15 seconds');
+        }
+      }, 15000);
+
+      // Subscribe to world and send message
+      subscribeWorld(worldName, ROOT_PATH, client).then(subscription => {
+        if (!subscription) {
+          handleError('Failed to subscribe to world');
+          return;
+        }
+
+        // Send the message
+        publishMessage(subscription.world, message, sender).catch(error => {
+          handleError(`Failed to publish message: ${error instanceof Error ? error.message : error}`);
+        });
+      }).catch(error => {
+        handleError(`Failed to connect to world: ${error instanceof Error ? error.message : error}`);
+      });
+    });
+
+    // Wait for response to complete
     await responsePromise;
-    
-    // Send JSON response
+
+    if (hasError) {
+      sendError(res, 500, errorMessage, 'CHAT_ERROR');
+      return;
+    }
+
+    // Send successful response
     res.json({
       success: true,
       message: 'Message processed successfully',
       data: {
-        sender: responseSender || 'agent',
-        content: responseContent || '',
+        sender: responseSender,
+        content: responseContent || 'No response received',
         timestamp: new Date().toISOString()
       }
     });
-    
+
   } catch (error) {
-    sendError(res, 500, errorMessage || 'Failed to process chat message', 'CHAT_PROCESSING_ERROR');
+    sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
+  } finally {
+    // Re-enable streaming for other requests
+    enableStreaming();
   }
 }
 
