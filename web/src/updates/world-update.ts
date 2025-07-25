@@ -27,7 +27,7 @@
  * - Reused core types for consistency
  */
 
-import { clearAgentMemory } from '../api';
+import { clearAgentMemory, createAgent, updateAgent, deleteAgent, getAgents } from '../api';
 import type {
   WorldComponentState,
   Agent,
@@ -230,38 +230,26 @@ export const saveAgent = async function* (state: WorldComponentState): AsyncGene
       }
     };
 
-    // TODO: Implement API call for save agent
-    // For now, simulate save
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Update agents list (placeholder logic)
-    const newAgent: Agent = {
-      id: state.agentEdit.mode === 'create' ? `agent-${Date.now()}` : state.agentEdit.selectedAgent?.id,
+    // Prepare agent data for API call
+    const agentData = {
       name: state.agentEdit.formData.name,
       description: state.agentEdit.formData.description,
-      provider: state.agentEdit.formData.provider as any, // Type assertion for form compatibility
+      provider: state.agentEdit.formData.provider as any,
       model: state.agentEdit.formData.model,
       temperature: state.agentEdit.formData.temperature,
       systemPrompt: state.agentEdit.formData.systemPrompt,
-      messageCount: state.agentEdit.selectedAgent?.messageCount || 0,
-      spriteIndex: state.agentEdit.selectedAgent?.spriteIndex || state.agents.length % 9,
-      // Required properties from core interface
-      type: 'default',
-      status: 'active',
-      llmCallCount: 0,
-      memory: [],
-      createdAt: new Date(),
-      lastActive: new Date()
+      type: 'default'
     };
 
-    let updatedAgents: Agent[];
+    // Call appropriate API endpoint
     if (state.agentEdit.mode === 'create') {
-      updatedAgents = [...state.agents, newAgent];
-    } else {
-      updatedAgents = state.agents.map(agent =>
-        agent.id === newAgent.id ? newAgent : agent
-      );
+      await createAgent(state.worldName, agentData);
+    } else if (state.agentEdit.selectedAgent) {
+      await updateAgent(state.worldName, state.agentEdit.selectedAgent.name, agentData);
     }
+
+    // Refresh agents list from API to ensure sync
+    const updatedAgents = await getAgents(state.worldName);
 
     const updatedWorld = state.world ? {
       ...state.world,
@@ -311,11 +299,11 @@ export const deleteAgent = async function* (state: WorldComponentState, agentId?
       }
     };
 
-    // TODO: Implement API call for delete agent
-    // For now, simulate delete
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Call API to delete the agent
+    await deleteAgent(state.worldName, state.agentEdit.selectedAgent.name);
 
-    const updatedAgents = state.agents.filter(agent => agent.id !== agentId);
+    // Refresh agents list from API to ensure sync
+    const updatedAgents = await getAgents(state.worldName);
 
     const updatedWorld = state.world ? {
       ...state.world,
