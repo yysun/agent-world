@@ -58,7 +58,7 @@ export default class HomeComponent extends Component<HomeState> {
         loading: false,
         error: null
       }
-    };
+    } as HomeState;
   }
 
   view = (state: HomeState) => {

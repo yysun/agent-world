@@ -27,25 +27,15 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorld } from '../api';
-import {
-  sendChatMessage,
-  handleStreamStart,
-  handleStreamChunk,
-  handleStreamEnd,
-  handleStreamError,
-  handleMessage,
-  handleConnectionStatus,
-  handleError,
-  handleComplete
-} from '../sse-client';
+import type { WorldComponentState, Agent } from '../types';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { agentUpdateHandlers } from '../updates/world-update-agent';
 import { worldUpdateHandlers } from '../updates/world-update-world';
-import type { WorldComponentState, Agent } from '../types';
+import { worldInitHandlers } from '../updates/world-update-init';
+import { worldMessageHandlers } from '../updates/world-update-messages';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
@@ -242,118 +232,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
   update = {
     // Route handler - loads world data when navigating to world page
-    '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
-      const worldName = name ? decodeURIComponent(name) : 'New World';
-
-      try {
-        yield {
-          ...state,
-          worldName,
-          loading: true,
-          error: null,
-          isWaiting: false,
-          activeAgent: null
-        };
-
-        const world = await getWorld(worldName);
-        const messageMap = new Map();
-
-        const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
-          if (agent.memory && Array.isArray(agent.memory)) {
-            agent.memory.forEach((memoryItem: any) => {
-              const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
-
-              if (!messageMap.has(messageKey)) {
-                const originalSender = memoryItem.sender || agent.name;
-                let messageType = 'agent';
-                if (originalSender === 'HUMAN' || originalSender === 'USER') {
-                  messageType = 'user';
-                }
-
-                messageMap.set(messageKey, {
-                  id: memoryItem.id || messageKey,
-                  sender: originalSender,
-                  text: memoryItem.text || memoryItem.content || '',
-                  createdAt: memoryItem.createdAt || new Date().toISOString(),
-                  type: messageType,
-                  streamComplete: true,
-                  fromAgentId: agent.id
-                });
-              }
-            });
-          }
-
-          const systemPrompt = agent.systemPrompt || '';
-
-          return {
-            ...agent,
-            spriteIndex: index % 9,
-            messageCount: agent.memory?.length || 0,
-            provider: agent.provider || 'openai',
-            model: agent.model || 'gpt-4',
-            temperature: agent.temperature ?? 0.7,
-            systemPrompt: systemPrompt,
-            description: agent.description || '',
-            type: agent.type || 'default',
-            status: agent.status || 'active',
-            llmCallCount: agent.llmCallCount || 0,
-            memory: agent.memory || [],
-            createdAt: agent.createdAt || new Date(),
-            lastActive: agent.lastActive || new Date()
-          } as Agent;
-        }));
-
-        const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
-          const timeA = new Date(a.createdAt).getTime();
-          const timeB = new Date(b.createdAt).getTime();
-          return timeA - timeB;
-        });
-
-        yield {
-          ...state,
-          worldName,
-          world: {
-            name: worldName,
-            agents: worldAgents,
-            llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
-          },
-          agents: worldAgents,
-          messages: sortedMessages,
-          loading: false,
-          error: null,
-          isWaiting: false,
-          selectedSettingsTarget: 'world',
-          selectedAgent: null,
-          activeAgent: null
-        };
-
-      } catch (error: any) {
-        yield {
-          ...state,
-          worldName,
-          world: { name: worldName, agents: [], llmCallLimit: undefined },
-          loading: false,
-          error: error.message || 'Failed to load world data',
-          isWaiting: false,
-          selectedSettingsTarget: 'world',
-          selectedAgent: null,
-          activeAgent: null
-        };
-      }
-    },
-
-    // Update user input
-    'update-input': (state: WorldComponentState, e): WorldComponentState => ({
-      ...state,
-      userInput: e.target.value
-    }),
-
-    'key-press': (state: WorldComponentState, e) => {
-      if (e.key === 'Enter' && (state.userInput || '').trim()) {
-        app.run('send-message');
-      }
-    },
-
+    ...worldInitHandlers,
+    ...worldMessageHandlers,
     ...agentUpdateHandlers,
     ...worldUpdateHandlers,
 
@@ -368,119 +248,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       return baseResult;
     },
     // Send message action
-    'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      if (!(state.userInput || '').trim()) return state;
-
-      const messageText = state.userInput || '';
-
-      const userMessage = {
-        id: Date.now() + Math.random(),
-        type: 'user',
-        sender: 'HUMAN',
-        text: messageText,
-        createdAt: new Date().toISOString(),
-        worldName: state.worldName,
-        userEntered: true
-      };
-
-      const newState = {
-        ...state,
-        messages: [...(state.messages || []), userMessage],
-        userInput: '',
-        isSending: true,
-        isWaiting: true
-      };
-
-      try {
-        await sendChatMessage(state.worldName, messageText, 'HUMAN');
-
-        return {
-          ...newState,
-          isSending: false
-        };
-      } catch (error: any) {
-        return {
-          ...newState,
-          isSending: false,
-          isWaiting: false,
-          error: error.message || 'Failed to send message'
-        };
-      }
-    },
-
-    // SSE Event Handlers - wrapped for WorldComponentState compatibility
-    'handleStreamStart': (state: WorldComponentState, data: any): WorldComponentState => {
-      const baseState = handleStreamStart(state as any, data) as WorldComponentState;
-      const agentName = data.sender;
-      const agent = state.agents.find(a => a.name === agentName);
-
-      return {
-        ...baseState,
-        isWaiting: false,
-        activeAgent: agent ? { spriteIndex: agent.spriteIndex, name: agent.name } : null
-      };
-    },
-    'handleStreamChunk': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleStreamChunk(state as any, data) as WorldComponentState;
-    },
-    'handleStreamEnd': (state: WorldComponentState, data: any): WorldComponentState => {
-      const baseState = handleStreamEnd(state as any, data) as WorldComponentState;
-      const agentName = data.sender;
-
-      let finalState = {
-        ...baseState,
-        activeAgent: null
-      };
-
-      if (agentName && agentName !== 'HUMAN') {
-        const updatedAgents = finalState.agents.map(agent => {
-          if (agent.name === agentName) {
-            return {
-              ...agent,
-              messageCount: agent.messageCount + 1
-            };
-          }
-          return agent;
-        });
-
-        const updatedWorld = finalState.world ? {
-          ...finalState.world,
-          agents: updatedAgents
-        } : null;
-
-        const updatedSelectedAgent = finalState.selectedAgent?.name === agentName
-          ? { ...finalState.selectedAgent, messageCount: finalState.selectedAgent.messageCount + 1 }
-          : finalState.selectedAgent;
-
-        finalState = {
-          ...finalState,
-          world: updatedWorld,
-          agents: updatedAgents,
-          selectedAgent: updatedSelectedAgent
-        };
-      }
-
-      return finalState;
-    },
-    'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
-      const baseState = handleStreamError(state as any, data) as WorldComponentState;
-      return {
-        ...baseState,
-        activeAgent: null
-      };
-    },
-    'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleMessage(state as any, data) as WorldComponentState;
-    },
-    'handleConnectionStatus': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleConnectionStatus(state as any, data) as WorldComponentState;
-    },
-    'handleError': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleError(state as any, data) as WorldComponentState;
-    },
-    'handleComplete': (state: WorldComponentState, data: any): WorldComponentState => {
-      return handleComplete(state as any, data) as WorldComponentState;
-    }
+    // ...existing code...
   };
 }
 
