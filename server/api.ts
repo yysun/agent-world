@@ -954,9 +954,11 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     const { message, sender, stream } = validation.data;
 
     // Route to appropriate handler based on stream flag
+    // Default behavior is streaming (stream defaults to true when omitted)
     if (stream === false) {
       await handleNonStreamingChat(res, worldName, message, sender);
     } else {
+      // stream === true (either explicitly set or defaulted when omitted)
       await handleStreamingChat(req, res, worldName, message, sender);
     }
 
