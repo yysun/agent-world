@@ -22,7 +22,7 @@
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld, enableStreaming, disableStreaming } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 
@@ -89,7 +89,8 @@ const AgentCreateSchema = z.object({
 
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
-  sender: z.string().default("HUMAN")
+  sender: z.string().default("HUMAN"),
+  stream: z.boolean().optional().default(true)
 });
 
 const AgentUpdateSchema = z.object({
@@ -527,7 +528,419 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
   }
 });
 
-// POST /worlds/:worldName/chat - Send message with SSE streaming
+// Helper function to handle non-streaming chat response (aligned with CLI pipeline mode)
+async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
+  // Check if world exists
+  const worldExists = await getWorldConfig(ROOT_PATH, worldName);
+  if (!worldExists) {
+    sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+    return;
+  }
+
+  // Disable streaming to match CLI pipeline mode behavior
+  disableStreaming();
+
+  try {
+    // Collect response data
+    let responseContent = '';
+    let responseSender = '';
+    let isComplete = false;
+    let hasError = false;
+    let errorMessage = '';
+
+    // Set up response collection with timeout
+    const responsePromise = new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      
+      const completeResponse = () => {
+        clearTimeout(timer);
+        isComplete = true;
+        resolve();
+      };
+
+      const handleError = (error: string) => {
+        clearTimeout(timer);
+        hasError = true;
+        errorMessage = error;
+        reject(new Error(error));
+      };
+
+      // Create client connection using CLI pipeline pattern
+      const client: ClientConnection = {
+        isOpen: true,
+        onWorldEvent: (eventType: string, eventData: any) => {
+          // Skip system success messages (following CLI pattern)
+          if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+          // Handle system/world events
+          if ((eventType === 'system' || eventType === 'world') && eventData.message) {
+            if (eventData.message.toLowerCase().includes('error')) {
+              handleError(eventData.message);
+            }
+          }
+
+          // Handle message events (main response from agents)
+          if (eventType === 'message' && eventData.content) {
+            // Skip user messages to prevent echo
+            if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
+              return;
+            }
+            
+            responseContent = eventData.content;
+            responseSender = eventData.sender || 'agent';
+            completeResponse();
+          }
+        },
+        onError: (error: string) => {
+          handleError(error);
+        }
+      };
+
+      // Set timeout for response
+      timer = setTimeout(() => {
+        if (!isComplete) {
+          handleError('Request timeout - no response received within 15 seconds');
+        }
+      }, 15000);
+
+      // Subscribe to world and send message
+      subscribeWorld(worldName, ROOT_PATH, client).then(subscription => {
+        if (!subscription) {
+          handleError('Failed to subscribe to world');
+          return;
+        }
+
+        // Send the message
+        publishMessage(subscription.world, message, sender).catch(error => {
+          handleError(`Failed to publish message: ${error instanceof Error ? error.message : error}`);
+        });
+      }).catch(error => {
+        handleError(`Failed to connect to world: ${error instanceof Error ? error.message : error}`);
+      });
+    });
+
+    // Wait for response to complete
+    await responsePromise;
+
+    if (hasError) {
+      sendError(res, 500, errorMessage, 'CHAT_ERROR');
+      return;
+    }
+
+    // Send successful response
+    res.json({
+      success: true,
+      message: 'Message processed successfully',
+      data: {
+        sender: responseSender,
+        content: responseContent || 'No response received',
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
+  } finally {
+    // Re-enable streaming for other requests
+    enableStreaming();
+  }
+}
+
+// Helper function to handle streaming chat response  
+async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
+  // Check if world exists before setting up SSE stream
+  const worldExists = await getWorldConfig(ROOT_PATH, worldName);
+  if (!worldExists) {
+    sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+    return;
+  }
+
+  // Set up SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
+
+  // Initialize streaming state
+  const streaming = {
+    isActive: false,
+    content: '',
+    sender: undefined as string | undefined,
+    messageId: undefined as string | undefined,
+    wait: undefined as ((delay: number) => void) | undefined,
+    stopWait: undefined as (() => void) | undefined
+  };
+
+  // Timer management
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const setupTimer = (callback: () => void, delay: number = 5000): void => {
+    clearTimer();
+    timer = setTimeout(callback, delay);
+  };
+
+  const clearTimer = (): void => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
+  // Setup streaming callbacks
+  streaming.wait = (delay: number) => {
+    // Clear any existing timer before setting up new one
+    clearTimer();
+    setupTimer(() => {
+      // Only timeout if streaming is not active or has stalled
+      if (streaming.isActive) {
+        logger.debug('Streaming appears stalled - timing out...');
+        resetStreamingState();
+      }
+      handleStreamingComplete();
+    }, delay);
+  };
+
+  streaming.stopWait = () => {
+    clearTimer();
+  };
+
+  const resetStreamingState = (): void => {
+    streaming.isActive = false;
+    streaming.content = '';
+    streaming.sender = undefined;
+    streaming.messageId = undefined;
+  };
+
+  const handleStreamingComplete = (): void => {
+    // Send completion event
+    sendSSE(JSON.stringify({
+      type: 'complete',
+      message: 'Operation completed'
+    }));
+    res.end();
+  };
+
+  // Handle streaming events
+  const handleStreamingEvents = (eventType: string, eventData: any): boolean => {
+    if (eventType !== 'sse') return false;
+
+    // Handle chunk events
+    if (eventData.type === 'chunk' && eventData.content) {
+      if (!streaming.isActive) {
+        streaming.isActive = true;
+        streaming.content = '';
+        streaming.sender = eventData.agentName || eventData.sender;
+        streaming.messageId = eventData.messageId;
+
+        // Send start event
+        sendSSE(JSON.stringify({
+          type: 'sse',
+          data: {
+            type: 'start',
+            sender: streaming.sender,
+            messageId: streaming.messageId
+          }
+        }));
+
+        if (streaming.stopWait) {
+          streaming.stopWait();
+        }
+      }
+
+      if (streaming.messageId === eventData.messageId) {
+        streaming.content += eventData.content;
+
+        // Send chunk event
+        sendSSE(JSON.stringify({
+          type: 'sse',
+          data: {
+            type: 'chunk',
+            content: eventData.content,
+            sender: streaming.sender,
+            messageId: streaming.messageId
+          }
+        }));
+
+        // Reset stall timer with each chunk (clear previous and set new)
+        if (streaming.wait) {
+          streaming.wait(5000); // 5 second stall timeout between chunks
+        }
+      }
+      return true;
+    }
+
+    // Handle end events
+    if (eventData.type === 'end' &&
+      streaming.isActive &&
+      streaming.messageId === eventData.messageId) {
+
+      // Send end event
+      sendSSE(JSON.stringify({
+        type: 'sse',
+        data: {
+          type: 'end',
+          sender: streaming.sender,
+          messageId: streaming.messageId,
+          content: streaming.content
+        }
+      }));
+
+      resetStreamingState();
+
+      // Set completion timer (clear previous and set new) - shorter since streaming is complete
+      if (streaming.wait) {
+        streaming.wait(3000); // 3 second completion timeout
+      }
+      return true;
+    }
+
+    // Handle error events
+    if (eventData.type === 'error' &&
+      streaming.isActive &&
+      streaming.messageId === eventData.messageId) {
+
+      // Send error event
+      sendSSE(JSON.stringify({
+        type: 'sse',
+        data: {
+          type: 'error',
+          error: eventData.error || eventData.message,
+          sender: streaming.sender,
+          messageId: streaming.messageId
+        }
+      }));
+
+      resetStreamingState();
+
+      // Set completion timer (clear previous and set new) - shorter since there's an error
+      if (streaming.wait) {
+        streaming.wait(2000); // 2 second completion timeout for errors
+      }
+      return true;
+    }
+
+    return false;
+  };
+
+  // Helper function to send SSE data
+  const sendSSE = (data: string) => {
+    res.write(`data: ${data}\n\n`);
+  };
+
+  // Create client connection using only onWorldEvent
+  const client: ClientConnection = {
+    isOpen: true,
+    onWorldEvent: (eventType: string, eventData: any) => {
+      // Handle streaming events first
+      if (handleStreamingEvents(eventType, eventData)) {
+        return;
+      }
+
+      // Skip user messages to prevent echo
+      if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
+        return;
+      }
+
+      // Filter out success messages
+      if (eventData.content && eventData.content.includes('Success message sent')) {
+        return;
+      }
+
+      // Handle system messages
+      if ((eventType === 'system' || eventType === 'world') && eventData.message) {
+        sendSSE(JSON.stringify({
+          type: eventType,
+          data: {
+            message: eventData.message,
+            sender: 'system'
+          }
+        }));
+      }
+
+      // Handle regular messages
+      if (eventType === 'message' && eventData.content) {
+        sendSSE(JSON.stringify({
+          type: 'message',
+          data: {
+            content: eventData.content,
+            sender: eventData.sender || 'agent',
+            timestamp: eventData.timestamp
+          }
+        }));
+
+        // Setup completion timer for non-streaming messages (clear previous and set new)
+        if (streaming.wait) {
+          streaming.wait(5000); // 5 second completion timeout for regular messages
+        }
+      }
+    },
+    onError: (error: string) => {
+      logger.error(`World error: ${error}`);
+      sendSSE(JSON.stringify({
+        type: 'error',
+        message: error
+      }));
+      res.end();
+    }
+  };
+
+  // Subscribe to world
+  const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
+  // World existence already checked above, so subscription should not be null
+  if (!subscription) {
+    logger.error('Unexpected: subscription is null after world existence check');
+    sendSSE(JSON.stringify({
+      type: 'error',
+      message: 'Failed to subscribe to world'
+    }));
+    res.end();
+    return;
+  }
+
+  // Send initial connection event
+  sendSSE(JSON.stringify({
+    type: 'connected',
+    payload: { worldName }
+  }));
+
+  // Send message to world
+  try {
+    publishMessage(subscription.world, message, sender);
+
+    // Send success response
+    sendSSE(JSON.stringify({
+      type: 'response',
+      success: true,
+      message: 'Message sent to world',
+      data: { sender }
+    }));
+
+    // Set initial wait timer to allow for LLM response
+    if (streaming.wait) {
+      streaming.wait(15000); // 15 second timeout for initial response
+    }
+
+  } catch (error) {
+    sendSSE(JSON.stringify({
+      type: 'error',
+      message: 'Failed to send message',
+      data: { error: error instanceof Error ? error.message : String(error) }
+    }));
+    res.end();
+  }
+
+  // Cleanup on client disconnect
+  req.on('close', () => {
+    logger.debug('Chat client disconnected, cleaning up');
+    clearTimer();
+    if (subscription) {
+      subscription.unsubscribe();
+    }
+  });
+}
+
+// POST /worlds/:worldName/chat - Send message with optional streaming
 router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
@@ -538,298 +951,16 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
       return;
     }
 
-    const { message, sender } = validation.data;
+    const { message, sender, stream } = validation.data;
 
-    // Check if world exists before setting up SSE stream
-    const worldExists = await getWorldConfig(ROOT_PATH, worldName);
-    if (!worldExists) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
+    // Route to appropriate handler based on stream flag
+    // Default behavior is streaming (stream defaults to true when omitted)
+    if (stream === false) {
+      await handleNonStreamingChat(res, worldName, message, sender);
+    } else {
+      // stream === true (either explicitly set or defaulted when omitted)
+      await handleStreamingChat(req, res, worldName, message, sender);
     }
-
-    // Set up SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
-
-    // Initialize streaming state
-    const streaming = {
-      isActive: false,
-      content: '',
-      sender: undefined as string | undefined,
-      messageId: undefined as string | undefined,
-      wait: undefined as ((delay: number) => void) | undefined,
-      stopWait: undefined as (() => void) | undefined
-    };
-
-    // Timer management
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const setupTimer = (callback: () => void, delay: number = 5000): void => {
-      clearTimer();
-      timer = setTimeout(callback, delay);
-    };
-
-    const clearTimer = (): void => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-    };
-
-    // Setup streaming callbacks
-    streaming.wait = (delay: number) => {
-      // Clear any existing timer before setting up new one
-      clearTimer();
-      setupTimer(() => {
-        // Only timeout if streaming is not active or has stalled
-        if (streaming.isActive) {
-          logger.debug('Streaming appears stalled - timing out...');
-          resetStreamingState();
-        }
-        handleStreamingComplete();
-      }, delay);
-    };
-
-    streaming.stopWait = () => {
-      clearTimer();
-    };
-
-    const resetStreamingState = (): void => {
-      streaming.isActive = false;
-      streaming.content = '';
-      streaming.sender = undefined;
-      streaming.messageId = undefined;
-    };
-
-    const handleStreamingComplete = (): void => {
-      // Send completion event
-      sendSSE(JSON.stringify({
-        type: 'complete',
-        message: 'Operation completed'
-      }));
-      res.end();
-    };
-
-    // Handle streaming events
-    const handleStreamingEvents = (eventType: string, eventData: any): boolean => {
-      if (eventType !== 'sse') return false;
-
-      // Handle chunk events
-      if (eventData.type === 'chunk' && eventData.content) {
-        if (!streaming.isActive) {
-          streaming.isActive = true;
-          streaming.content = '';
-          streaming.sender = eventData.agentName || eventData.sender;
-          streaming.messageId = eventData.messageId;
-
-          // Send start event
-          sendSSE(JSON.stringify({
-            type: 'sse',
-            data: {
-              type: 'start',
-              sender: streaming.sender,
-              messageId: streaming.messageId
-            }
-          }));
-
-          if (streaming.stopWait) {
-            streaming.stopWait();
-          }
-        }
-
-        if (streaming.messageId === eventData.messageId) {
-          streaming.content += eventData.content;
-
-          // Send chunk event
-          sendSSE(JSON.stringify({
-            type: 'sse',
-            data: {
-              type: 'chunk',
-              content: eventData.content,
-              sender: streaming.sender,
-              messageId: streaming.messageId
-            }
-          }));
-
-          // Reset stall timer with each chunk (clear previous and set new)
-          if (streaming.wait) {
-            streaming.wait(5000); // 5 second stall timeout between chunks
-          }
-        }
-        return true;
-      }
-
-      // Handle end events
-      if (eventData.type === 'end' &&
-        streaming.isActive &&
-        streaming.messageId === eventData.messageId) {
-
-        // Send end event
-        sendSSE(JSON.stringify({
-          type: 'sse',
-          data: {
-            type: 'end',
-            sender: streaming.sender,
-            messageId: streaming.messageId,
-            content: streaming.content
-          }
-        }));
-
-        resetStreamingState();
-
-        // Set completion timer (clear previous and set new) - shorter since streaming is complete
-        if (streaming.wait) {
-          streaming.wait(3000); // 3 second completion timeout
-        }
-        return true;
-      }
-
-      // Handle error events
-      if (eventData.type === 'error' &&
-        streaming.isActive &&
-        streaming.messageId === eventData.messageId) {
-
-        // Send error event
-        sendSSE(JSON.stringify({
-          type: 'sse',
-          data: {
-            type: 'error',
-            error: eventData.error || eventData.message,
-            sender: streaming.sender,
-            messageId: streaming.messageId
-          }
-        }));
-
-        resetStreamingState();
-
-        // Set completion timer (clear previous and set new) - shorter since there's an error
-        if (streaming.wait) {
-          streaming.wait(2000); // 2 second completion timeout for errors
-        }
-        return true;
-      }
-
-      return false;
-    };
-
-    // Helper function to send SSE data
-    const sendSSE = (data: string) => {
-      res.write(`data: ${data}\n\n`);
-    };
-
-    // Create client connection using only onWorldEvent
-    const client: ClientConnection = {
-      isOpen: true,
-      onWorldEvent: (eventType: string, eventData: any) => {
-        // Handle streaming events first
-        if (handleStreamingEvents(eventType, eventData)) {
-          return;
-        }
-
-        // Skip user messages to prevent echo
-        if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
-          return;
-        }
-
-        // Filter out success messages
-        if (eventData.content && eventData.content.includes('Success message sent')) {
-          return;
-        }
-
-        // Handle system messages
-        if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-          sendSSE(JSON.stringify({
-            type: eventType,
-            data: {
-              message: eventData.message,
-              sender: 'system'
-            }
-          }));
-        }
-
-        // Handle regular messages
-        if (eventType === 'message' && eventData.content) {
-          sendSSE(JSON.stringify({
-            type: 'message',
-            data: {
-              content: eventData.content,
-              sender: eventData.sender || 'agent',
-              timestamp: eventData.timestamp
-            }
-          }));
-
-          // Setup completion timer for non-streaming messages (clear previous and set new)
-          if (streaming.wait) {
-            streaming.wait(5000); // 5 second completion timeout for regular messages
-          }
-        }
-      },
-      onError: (error: string) => {
-        logger.error(`World error: ${error}`);
-        sendSSE(JSON.stringify({
-          type: 'error',
-          message: error
-        }));
-        res.end();
-      }
-    };
-
-    // Subscribe to world
-    const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
-    // World existence already checked above, so subscription should not be null
-    if (!subscription) {
-      logger.error('Unexpected: subscription is null after world existence check');
-      sendSSE(JSON.stringify({
-        type: 'error',
-        message: 'Failed to subscribe to world'
-      }));
-      res.end();
-      return;
-    }
-
-    // Send initial connection event
-    sendSSE(JSON.stringify({
-      type: 'connected',
-      payload: { worldName }
-    }));
-
-    // Send message to world
-    try {
-      publishMessage(subscription.world, message, sender);
-
-      // Send success response
-      sendSSE(JSON.stringify({
-        type: 'response',
-        success: true,
-        message: 'Message sent to world',
-        data: { sender }
-      }));
-
-      // Set initial wait timer to allow for LLM response
-      if (streaming.wait) {
-        streaming.wait(15000); // 15 second timeout for initial response
-      }
-
-    } catch (error) {
-      sendSSE(JSON.stringify({
-        type: 'error',
-        message: 'Failed to send message',
-        data: { error: error instanceof Error ? error.message : String(error) }
-      }));
-      res.end();
-    }
-
-    // Cleanup on client disconnect
-    req.on('close', () => {
-      logger.debug('Chat client disconnected, cleaning up');
-      clearTimer();
-      if (subscription) {
-        subscription.unsubscribe();
-      }
-    });
 
   } catch (error) {
     logger.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
