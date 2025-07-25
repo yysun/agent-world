@@ -144,41 +144,6 @@ export interface WorldComponentState extends SSEComponentState {
   needScroll: boolean;
 }
 
-// Component Props Interfaces (consolidated from components)
-export interface WorldChatProps {
-  worldName: string;
-  messages?: Message[]; // Made optional with default in component
-  userInput?: string; // Made optional with default in component
-  messagesLoading: boolean;
-  isSending: boolean;
-  isWaiting: boolean;
-  activeAgent?: {
-    spriteIndex: number;
-    name: string;
-  } | null;
-  selectedAgent?: {
-    id?: string;
-    name: string;
-  } | null;
-}
-
-export interface WorldSettingsProps {
-  world: World | null;
-  selectedSettingsTarget: 'world' | 'agent' | null;
-  selectedAgent: Agent | null;
-  totalMessages: number;
-}
-
-export interface AgentEditProps {
-  isOpen: boolean;
-  mode: 'create' | 'edit';
-  selectedAgent: Agent | null;
-  worldName: string;
-  formData: AgentEditState['formData'];
-  loading: boolean;
-  error: string | null;
-}
-
 // API Response Types (consolidated from api.ts)
 export interface ApiResponse<T = any> {
   data?: T;

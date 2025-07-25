@@ -37,7 +37,26 @@
  */
 
 import { app } from 'apprun';
-import type { Message, WorldChatProps } from '../types';
+import type { Message } from '../types';
+
+// Component Props Interfaces (consolidated from components)
+export interface WorldChatProps {
+  worldName: string;
+  messages?: Message[]; // Made optional with default in component
+  userInput?: string; // Made optional with default in component
+  messagesLoading: boolean;
+  isSending: boolean;
+  isWaiting: boolean;
+  activeAgent?: {
+    spriteIndex: number;
+    name: string;
+  } | null;
+  selectedAgent?: {
+    id?: string;
+    name: string;
+  } | null;
+}
+
 
 export default function WorldChat(props: WorldChatProps) {
   const {

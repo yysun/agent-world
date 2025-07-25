@@ -26,7 +26,8 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorlds, type World } from '../api';
+import { getWorlds} from '../api';
+import type { World } from '../types';
 
 interface HomeState {
   worlds: World[];

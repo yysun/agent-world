@@ -27,8 +27,17 @@
  */
 
 import { app } from 'apprun';
-import type { AgentEditProps } from '../types';
+import type { Agent, AgentEditState } from '../types';
 
+export interface AgentEditProps {
+  isOpen: boolean;
+  mode: 'create' | 'edit';
+  selectedAgent: Agent | null;
+  worldName: string;
+  formData: AgentEditState['formData'];
+  loading: boolean;
+  error: string | null;
+}
 export default function AgentEdit(props: AgentEditProps) {
   const {
     isOpen,

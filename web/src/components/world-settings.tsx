@@ -44,7 +44,14 @@
  */
 
 import { app } from 'apprun';
-import type { WorldSettingsProps } from '../types';
+import type { World, Agent } from '../types';
+
+export interface WorldSettingsProps {
+  world: World | null;
+  selectedSettingsTarget: 'world' | 'agent' | null;
+  selectedAgent: Agent | null;
+  totalMessages: number;
+}
 
 export default function WorldSettings(props: WorldSettingsProps) {
   const {
