@@ -26,14 +26,16 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorlds } from '../api';
-import type { World } from '../types';
+import { getWorlds, createWorld, updateWorld, deleteWorld } from '../api';
+import WorldEdit from '../components/world-edit';
+import type { World, WorldEditState } from '../types';
 
 interface HomeState {
   worlds: World[];
   currentIndex: number;
   loading: boolean;
   error: string | null;
+  worldEdit: WorldEditState;
 }
 
 export default class HomeComponent extends Component<HomeState> {
@@ -43,7 +45,19 @@ export default class HomeComponent extends Component<HomeState> {
       worlds,
       currentIndex: 0,
       loading: false,
-      error: null
+      error: null,
+      worldEdit: {
+        isOpen: false,
+        mode: 'create',
+        selectedWorld: null,
+        formData: {
+          name: '',
+          description: '',
+          turnLimit: 5
+        },
+        loading: false,
+        error: null
+      }
     };
   }
 
@@ -86,9 +100,7 @@ export default class HomeComponent extends Component<HomeState> {
               <div class="no-worlds-message">
                 <h3>No worlds found</h3>
                 <p>Create your first world to get started!</p>
-                <a href="/World">
-                  <button class="btn btn-primary">Create World</button>
-                </a>
+                <button class="btn btn-primary" $onclick="open-world-create">Create World</button>
               </div>
             </div>
           </div>
@@ -177,11 +189,9 @@ export default class HomeComponent extends Component<HomeState> {
                 {state.worlds[state.currentIndex]?.description || 'No description available'}
               </p>
               <div class="action-buttons">
-                <a href="/World">
-                  <button class="btn add-world-btn" title="Add New World">
-                    <span class="plus-icon">+</span>
-                  </button>
-                </a>
+                <button class="btn add-world-btn" title="Add New World" $onclick="open-world-create">
+                  <span class="plus-icon">+</span>
+                </button>
                 <a href={'/World/' + (state.worlds[state.currentIndex]?.name || '')}>
                   <button class="btn btn-primary enter-btn">
                     Enter {state.worlds[state.currentIndex]?.name || 'World'}
@@ -198,6 +208,16 @@ export default class HomeComponent extends Component<HomeState> {
             </div>
           </div>
         </div>
+
+        {/* World Edit Modal */}
+        <WorldEdit
+          isOpen={state.worldEdit.isOpen}
+          mode={state.worldEdit.mode}
+          selectedWorld={state.worldEdit.selectedWorld}
+          formData={state.worldEdit.formData}
+          loading={state.worldEdit.loading}
+          error={state.worldEdit.error}
+        />
       </div>
     );
   };
@@ -218,6 +238,158 @@ export default class HomeComponent extends Component<HomeState> {
     'enter-world': (state: HomeState, world: World): void => { // no return - no render needed
       // Navigate to the world page
       window.location.href = '/World/' + world.name;
+    },
+
+    // World Edit Event Handlers
+    'open-world-create': (state: HomeState): HomeState => ({
+      ...state,
+      worldEdit: {
+        ...state.worldEdit,
+        isOpen: true,
+        mode: 'create',
+        selectedWorld: null,
+        formData: {
+          name: '',
+          description: '',
+          turnLimit: 5
+        },
+        error: null
+      }
+    }),
+
+    'open-world-edit': (state: HomeState, world: World): HomeState => ({
+      ...state,
+      worldEdit: {
+        ...state.worldEdit,
+        isOpen: true,
+        mode: 'edit',
+        selectedWorld: world,
+        formData: {
+          name: world.name,
+          description: world.description || '',
+          turnLimit: world.turnLimit || 5
+        },
+        error: null
+      }
+    }),
+
+    'close-world-edit': (state: HomeState): HomeState => ({
+      ...state,
+      worldEdit: {
+        ...state.worldEdit,
+        isOpen: false,
+        error: null
+      }
+    }),
+
+    'update-world-form': (state: HomeState, field: string, e: Event): HomeState => {
+      const target = e.target as HTMLInputElement;
+      const value = field === 'turnLimit' ? parseInt(target.value) || 5 : target.value;
+      
+      return {
+        ...state,
+        worldEdit: {
+          ...state.worldEdit,
+          formData: {
+            ...state.worldEdit.formData,
+            [field]: value
+          },
+          error: null
+        }
+      };
+    },
+
+    'save-world': async (state: HomeState): Promise<HomeState> => {
+      const { mode, formData, selectedWorld } = state.worldEdit;
+      
+      if (!formData.name.trim()) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            error: 'World name is required'
+          }
+        };
+      }
+
+      try {
+        // Set loading state
+        const loadingState = {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            loading: true,
+            error: null
+          }
+        };
+        app.run('#', loadingState);
+
+        let updatedWorld: World;
+        if (mode === 'create') {
+          updatedWorld = await createWorld({
+            name: formData.name,
+            description: formData.description,
+            turnLimit: formData.turnLimit,
+            agents: []
+          });
+        } else {
+          updatedWorld = await updateWorld(selectedWorld!.name, {
+            name: formData.name,
+            description: formData.description,
+            turnLimit: formData.turnLimit
+          });
+        }
+
+        // Refresh world list
+        const worlds = await getWorlds();
+        
+        return {
+          ...state,
+          worlds,
+          worldEdit: {
+            ...state.worldEdit,
+            isOpen: false,
+            loading: false,
+            error: null
+          }
+        };
+      } catch (error) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            loading: false,
+            error: error instanceof Error ? error.message : 'Failed to save world'
+          }
+        };
+      }
+    },
+
+    'delete-world': async (state: HomeState, worldName: string): Promise<HomeState> => {
+      if (!worldName) return state;
+      
+      if (!confirm(`Are you sure you want to delete "${worldName}"? This action cannot be undone.`)) {
+        return state;
+      }
+
+      try {
+        await deleteWorld(worldName);
+        
+        // Refresh world list
+        const worlds = await getWorlds();
+        const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
+        
+        return {
+          ...state,
+          worlds,
+          currentIndex: Math.max(0, newCurrentIndex)
+        };
+      } catch (error) {
+        return {
+          ...state,
+          error: error instanceof Error ? error.message : 'Failed to delete world'
+        };
+      }
     },
   };
 }

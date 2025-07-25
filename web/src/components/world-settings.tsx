@@ -146,7 +146,16 @@ export default function WorldSettings(props: WorldSettingsProps) {
           <div className="world-settings">
             <div className="setting-item">
               <label>World Name:</label>
-              <span className="setting-value">{world.name}</span>
+              <span>
+                <span className="setting-value">{world.name}</span>
+                <button
+                  className="action-btn"
+                  $onclick="open-world-edit"
+                  title="Edit world"
+                >
+                  <span className="btn-icon">⚙</span>
+                </button>
+              </span>
             </div>
             <div className="setting-item">
               <label>Agents Count:</label>
