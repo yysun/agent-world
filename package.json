@@ -1,24 +1,21 @@
 {
   "name": "agent-world",
   "version": "0.3.0",
-  "main": "dist/index.js",
+  "main": "index.ts",
   "type": "module",
   "bin": {
-    "agent-world": "npx tsx ./cli/index.ts",
-    "agent-world-server": "npx tsx ./server/index.ts"
+    "agent-world": "start.js"
   },
   "scripts": {
-    "start": "npm run server & open http://localhost:3000",
+    "start": "node start.js",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
     "dev": "concurrently \"npm run server\" \"cd web && npm run dev\"",
     "test": "jest --config jest.config.js",
-    "test:integration": "jest --config jest.integration.config.js",
-    "test:server": "NODE_ENV=test tsx server/index.ts",
-    "test:all": "npm run test && npm run test:integration",
     "check": "tsc --noEmit",
     "build": "cd web && npm run build",
-    "web": "cd web && npm run dev"
+    "web": "cd web && npm run dev",
+    "pkill": "pkill -f tsx"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [
@@ -51,9 +48,11 @@
     "express": "^4.21.2",
     "idb": "^8.0.3",
     "ollama-ai-provider": "^1.2.0",
+    "open": "^10.2.0",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",
     "terminal-kit": "^3.1.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "uuid": "^11.1.0",
     "ws": "^8.18.2",
@@ -75,8 +74,7 @@
     "jest": "^29.5.0",
     "nodemon": "^3.1.10",
     "tmp": "^0.2.0",
-    "ts-jest": "^29.1.0",
-    "tsx": "^4.19.2"
+    "ts-jest": "^29.1.0"
   },
   "engines": {
     "node": ">=20.0.0"

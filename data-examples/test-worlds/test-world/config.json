@@ -1,6 +1,0 @@
-{
-  "id": "test-world",
-  "name": "test-world",
-  "description": "Test world for WebSocket tests",
-  "turnLimit": 5
-}

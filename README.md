@@ -101,12 +101,20 @@ Each Agent World has a collection of agents that can communicate through a share
 ## Installation & Setup
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 20+ 
 - An API key for your preferred LLM provider
+
+### Quick Start
+```bash
+git clone https://github.com/yysun/agent-world.git
+cd agent-world
+npm install
+npm start
+```
 
 ### Environment Setup
 
-Copy the `.env.example` file to `.env` and set your API keys
+Modify `.env` and set your API keys
 
 ```bash
 # Required if Choose one or more
@@ -120,20 +128,10 @@ export OLLAMA_BASE_URL="http://localhost:11434"
 
 ### World Setup
 
-Copy the `data-example` directory to `data`
+Modify files under the `data` directory
 - this is where agent worlds are stored
 - you can add and edit your own worlds here
 
-
-
-### Commands
-```bash
-# Start web server (localhost:3000)
-npm start
-
-# Start interactive CLI
-npm run cli
-```
 
 ## Learn More
 

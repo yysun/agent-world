@@ -1,3 +1,4 @@
+#!/usr/bin/env -S node --import tsx
 /**
  * Web Server - Express.js HTTP Server with REST API and SSE
  * 
@@ -16,12 +17,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Set data path for core modules
-if (!process.env.AGENT_WORLD_DATA_PATH) {
-  process.env.AGENT_WORLD_DATA_PATH = './data/worlds';
-}
-
-// Imports
+import open from 'open';
 import { initializeLogger, createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 import express, { Request, Response, NextFunction } from 'express';
@@ -151,6 +147,7 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
         console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
         console.log(`🚀 HTTP server running with REST API and SSE chat`);
         resolve(server);
+        open(url);
       }
     });
 

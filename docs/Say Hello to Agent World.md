@@ -81,12 +81,11 @@ Agent World isn’t just a dev tool; it’s a petri dish for studying how rules 
 
 ---
 
-## Try It in 3 Commands
+## Try It 
 
 ```bash
-git clone https://github.com/yysun/agent-world
-cd agent-world && npm install
-npm run sandbox        # opens a chat UI with sample prompts
+mkdir agent-world && cd agent-world
+npx yysun/agent-world@latest        # opens a chat UI with sample prompts
 ```
 
 Paste a prompt; agents spring to life. Change a single line; press ↵—they behave differently *instantly*.

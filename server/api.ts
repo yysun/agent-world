@@ -19,17 +19,19 @@
  * - Optimized world existence checks to use getWorldConfig instead of deprecated getWorld for performance
  * - Extracted world retrieval and error handling into reusable getWorldOrError utility function
  */
-
+import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld, enableStreaming, disableStreaming } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
-
 const logger = createCategoryLogger('api');
 
 const DEFAULT_WORLD_NAME = 'Default World';
-const ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH ||'./data/worlds';
+const ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
+
+console.log('🌐 API initialized with root path:', ROOT_PATH);
 
 // Utility functions
 function sendError(res: Response, status: number, message: string, code?: string, details?: any) {
@@ -611,9 +613,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         }
 
         // Send the message
-        publishMessage(subscription.world, message, sender).catch(error => {
-          handleError(`Failed to publish message: ${error instanceof Error ? error.message : error}`);
-        });
+        publishMessage(subscription.world, message, sender);
       }).catch(error => {
         handleError(`Failed to connect to world: ${error instanceof Error ? error.message : error}`);
       });

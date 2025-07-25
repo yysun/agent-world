@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --import tsx
 
 // Load environment variables from .env file
 import dotenv from 'dotenv';
@@ -36,16 +36,16 @@ dotenv.config();
  * Interactive: cli --root /data/worlds --world myworld
  * Debug Mode: cli --root /data/worlds --world myworld --logLevel debug
  */
-
+import path from 'path';
 import { program } from 'commander';
 import readline from 'readline';
-import { 
-  listWorlds, 
-  subscribeWorld, 
-  World, 
-  ClientConnection, 
-  createCategoryLogger, 
-  LLMProvider, 
+import {
+  listWorlds,
+  subscribeWorld,
+  World,
+  ClientConnection,
+  createCategoryLogger,
+  LLMProvider,
   initializeLogger,
   enableStreaming,
   disableStreaming
@@ -212,7 +212,8 @@ function configureLLMProvidersFromEnv(): void {
   }
 }
 
-const DEFAULT_ROOT_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH ||'./data/worlds';
+const DEFAULT_ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
 
 interface CLIOptions {
   root?: string;
@@ -470,7 +471,7 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
-  
+
   enableStreaming();
 
   const globalState: GlobalState = createGlobalState();
