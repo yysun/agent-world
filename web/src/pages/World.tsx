@@ -26,7 +26,7 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorld } from '../api';
+import { getWorld, updateWorld, deleteWorld } from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -41,6 +41,7 @@ import {
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
+import WorldEdit from '../components/world-edit';
 import { agentUpdateHandlers } from '../updates/world-update';
 import type { WorldComponentState, Agent } from '../types';
 
@@ -74,6 +75,18 @@ export default class WorldComponent extends Component<WorldComponentState> {
           model: '',
           temperature: 0.7,
           systemPrompt: ''
+        },
+        loading: false,
+        error: null
+      },
+      worldEdit: {
+        isOpen: false,
+        mode: 'edit',
+        selectedWorld: null,
+        formData: {
+          name: '',
+          description: '',
+          turnLimit: 5
         },
         loading: false,
         error: null
@@ -212,6 +225,15 @@ export default class WorldComponent extends Component<WorldComponentState> {
           loading={state.agentEdit.loading}
           error={state.agentEdit.error}
         />
+
+        <WorldEdit
+          isOpen={state.worldEdit.isOpen}
+          mode={state.worldEdit.mode}
+          selectedWorld={state.worldEdit.selectedWorld}
+          formData={state.worldEdit.formData}
+          loading={state.worldEdit.loading}
+          error={state.worldEdit.error}
+        />
       </div>
     );
   };
@@ -331,6 +353,145 @@ export default class WorldComponent extends Component<WorldComponentState> {
     },
 
     ...agentUpdateHandlers,
+
+    // World Edit Event Handlers
+    'open-world-edit': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      worldEdit: {
+        ...state.worldEdit,
+        isOpen: true,
+        mode: 'edit',
+        selectedWorld: state.world,
+        formData: {
+          name: state.world?.name || '',
+          description: state.world?.description || '',
+          turnLimit: state.world?.turnLimit || 5
+        },
+        error: null
+      }
+    }),
+
+    'close-world-edit': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      worldEdit: {
+        ...state.worldEdit,
+        isOpen: false,
+        error: null
+      }
+    }),
+
+    'update-world-form': (state: WorldComponentState, field: string, e: Event): WorldComponentState => {
+      const target = e.target as HTMLInputElement;
+      const value = field === 'turnLimit' ? parseInt(target.value) || 5 : target.value;
+      
+      return {
+        ...state,
+        worldEdit: {
+          ...state.worldEdit,
+          formData: {
+            ...state.worldEdit.formData,
+            [field]: value
+          },
+          error: null
+        }
+      };
+    },
+
+    'save-world': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      const { formData, selectedWorld } = state.worldEdit;
+      
+      if (!formData.name.trim()) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            error: 'World name is required'
+          }
+        };
+      }
+
+      if (!selectedWorld) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            error: 'No world selected for editing'
+          }
+        };
+      }
+
+      try {
+        // Set loading state
+        const loadingState = {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            loading: true,
+            error: null
+          }
+        };
+        app.run('#', loadingState);
+
+        const updatedWorld = await updateWorld(selectedWorld.name, {
+          name: formData.name,
+          description: formData.description,
+          turnLimit: formData.turnLimit
+        });
+
+        // If world name changed, redirect to new world name
+        if (formData.name !== selectedWorld.name) {
+          window.location.href = '/World/' + encodeURIComponent(formData.name);
+          return state; // Return early since we're redirecting
+        }
+
+        return {
+          ...state,
+          world: {
+            ...state.world!,
+            ...updatedWorld
+          },
+          worldEdit: {
+            ...state.worldEdit,
+            isOpen: false,
+            loading: false,
+            error: null
+          }
+        };
+      } catch (error) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            loading: false,
+            error: error instanceof Error ? error.message : 'Failed to save world'
+          }
+        };
+      }
+    },
+
+    'delete-world': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
+      if (!worldName) return state;
+      
+      if (!confirm(`Are you sure you want to delete "${worldName}"? This action cannot be undone.`)) {
+        return state;
+      }
+
+      try {
+        await deleteWorld(worldName);
+        
+        // Redirect to home page after deletion
+        window.location.href = '/';
+        return state; // Return early since we're redirecting
+      } catch (error) {
+        return {
+          ...state,
+          worldEdit: {
+            ...state.worldEdit,
+            error: error instanceof Error ? error.message : 'Failed to delete world'
+          }
+        };
+      }
+    },
 
     'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
       const baseResult = agentUpdateHandlers['select-agent-settings'](state, agent);

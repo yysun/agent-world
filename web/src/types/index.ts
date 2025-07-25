@@ -113,6 +113,20 @@ export interface AgentEditState {
   error: string | null;
 }
 
+// World Edit State Management
+export interface WorldEditState {
+  isOpen: boolean;
+  mode: 'create' | 'edit';
+  selectedWorld: World | null;
+  formData: {
+    name: string;
+    description: string;
+    turnLimit: number;
+  };
+  loading: boolean;
+  error: string | null;
+}
+
 // Base SSE Component State (consolidated from sse-client.ts)
 export interface SSEComponentState {
   messages: Message[];
@@ -137,6 +151,7 @@ export interface WorldComponentState extends SSEComponentState {
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;
   agentEdit: AgentEditState;
+  worldEdit: WorldEditState;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
