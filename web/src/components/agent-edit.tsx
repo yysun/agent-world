@@ -2,7 +2,7 @@
  * Agent Edit Component - Modal popup for creating and editing agents
  * 
  * Features:
- * - Functional component with no internal state
+ * - Functional component with no internal state, fully AppRun compliant
  * - Dual-purpose: create new agents and edit existing agents
  * - Modal overlay with backdrop click to close
  * - Form fields: name, description, provider, model, temperature, system prompt
@@ -10,19 +10,19 @@
  * - Props-based data flow from World component
  * 
  * Implementation:
- * - Follows WorldChat and WorldSettings functional component pattern
+ * - Follows AppRun MVU architecture (Model-View-Update)
  * - All state managed by parent World component
- * - Uses app.run() for all events (save, cancel, delete, field updates)
- * - Conditional rendering based on isOpen prop
+ * - Uses $ directive pattern for consistent event handling
+ * - Conditional rendering with guard clause
  * - Responsive design with mobile support
- * - Semantic HTML and proper form structure
+ * - TypeScript interfaces for type safety
  * 
  * Event Flow:
- * - Form field changes: app.run('update-agent-form', field, value)
- * - Save button: app.run('save-agent')
- * - Cancel button: app.run('close-agent-edit')
- * - Delete button: app.run('delete-agent') (edit mode only)
- * - Backdrop click: app.run('close-agent-edit')
+ * - Form field changes: $oninput={['update-agent-form', field]}
+ * - Save button: $onclick="save-agent"
+ * - Cancel button: $onclick="close-agent-edit"
+ * - Delete button: $onclick={['delete-agent', agentId]} (edit mode only)
+ * - Backdrop click: $onclick="close-agent-edit"
  * - Escape key: handled by World component
  */
 

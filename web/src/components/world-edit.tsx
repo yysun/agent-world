@@ -12,18 +12,24 @@
  * Implementation:
  * - Follows AgentEdit functional component pattern
  * - All state managed by parent component (Home or World)
- * - Uses app.run() for all events (save, cancel, delete, field updates)
+ * - Uses $on directives for all state updates
  * - Conditional rendering based on isOpen prop
  * - Responsive design with mobile support
  * - Semantic HTML and proper form structure
  * 
  * Event Flow:
- * - Form field changes: app.run('update-world-form', field, value)
- * - Save button: app.run('save-world')
- * - Cancel button: app.run('close-world-edit')
- * - Delete button: app.run('delete-world') (edit mode only)
- * - Backdrop click: app.run('close-world-edit')
+ * - Form field changes: $oninput={['update-world-form-field', field]}
+ * - Save button: $onclick="save-world"
+ * - Cancel button: $onclick="close-world-edit"
+ * - Delete button: $onclick={['delete-world', worldName]} (edit mode only)
+ * - Backdrop click: $onclick="close-world-edit"
  * - Escape key: handled by parent component
+ * 
+ * Expected Parent Update Handlers:
+ * - 'update-world-form-field': (state, field, event) => updates formData[field]
+ * - 'save-world': (state) => validates and saves world data
+ * - 'close-world-edit': (state) => closes modal and resets form
+ * - 'delete-world': (state, worldName) => deletes world and closes modal
  */
 
 import { app } from 'apprun';
@@ -92,7 +98,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   className="form-input"
                   placeholder="Enter world name"
                   value={formData.name}
-                  $oninput={['update-world-form', 'name']}
+                  $oninput={['update-world-form-field', 'name']}
                   disabled={loading}
                 />
               </div>
@@ -105,7 +111,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   className="form-input"
                   placeholder="Brief description of the world"
                   value={formData.description}
-                  $oninput={['update-world-form', 'description']}
+                  $oninput={['update-world-form-field', 'description']}
                   disabled={loading}
                 />
               </div>
@@ -120,7 +126,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   min="1"
                   max="50"
                   value={formData.turnLimit}
-                  $oninput={['update-world-form', 'turnLimit']}
+                  $oninput={['update-world-form-field', 'turnLimit']}
                   disabled={loading}
                 />
               </div>
