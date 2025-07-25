@@ -26,7 +26,7 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorlds} from '../api';
+import { getWorlds } from '../api';
 import type { World } from '../types';
 
 interface HomeState {
@@ -109,7 +109,6 @@ export default class HomeComponent extends Component<HomeState> {
         <div class="row carousel-row">
           <div class="col">
             <div class="world-carousel">
-
               {/* Left Arrow */}
               <button
                 class={`btn carousel-arrow`}
@@ -145,7 +144,6 @@ export default class HomeComponent extends Component<HomeState> {
                   );
                 })}
               </div>
-
               {/* Right Arrow */}
               <button
                 class={`btn carousel-arrow`}
@@ -189,11 +187,13 @@ export default class HomeComponent extends Component<HomeState> {
                     Enter {state.worlds[state.currentIndex]?.name || 'World'}
                   </button>
                 </a>
-                <a href="/Settings">
-                  <button class="btn settings-btn" title="Settings">
-                    <span class="gear-icon">⚙</span>
-                  </button>
-                </a>
+                <button
+                  class="btn add-world-btn delete-world-btn"
+                  title="Delete World"
+                  $onclick={['delete-world', state.worlds[state.currentIndex]?.name]}
+                >
+                  <span class="plus-icon">×</span>
+                </button>
               </div>
             </div>
           </div>
