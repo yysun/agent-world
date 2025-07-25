@@ -4,11 +4,13 @@
 
 ## Why Agent World?
 
-Traditional AI frameworks force you to write hundreds of lines of code just to make agents talk to each other. Agent World lets you create intelligent agent teams using nothing but plain English prompts.
+Traditional AI frameworks force you to write hundreds of lines of code just to make agents talk to each other. Agent World lets you create intelligent agent teams using nothing but plain natural language.
+
+Audio introduction: [Listen here](https://yysun.github.io/agent-world)
 
 **Other frameworks:**
-- Install SDKs → write classes → handle loops → deploy containers
-- 300+ lines of code before "Hello, world"
+- Install SDKs → write code → handle loops → deploy containers
+- Learn Python/TypeScript before "Hello, world"
 
 **Agent World:**
 - Write prompts → for multiple agents → communicating in a shared world
