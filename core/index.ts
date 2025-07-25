@@ -81,6 +81,12 @@ export { LLMProvider } from './types';
 export { logger, createCategoryLogger, getCategoryLogLevel, initializeLogger } from './logger';
 export { generateId, toKebabCase } from './utils';
 
+// Streaming control
+export {
+  enableStreaming,
+  disableStreaming,
+} from './events';
+
 // Subscription system
 export * from './subscription.js';
 

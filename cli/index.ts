@@ -39,7 +39,17 @@ dotenv.config();
 
 import { program } from 'commander';
 import readline from 'readline';
-import { listWorlds, subscribeWorld, World, ClientConnection, createCategoryLogger, LLMProvider, initializeLogger } from '../core/index.js';
+import { 
+  listWorlds, 
+  subscribeWorld, 
+  World, 
+  ClientConnection, 
+  createCategoryLogger, 
+  LLMProvider, 
+  initializeLogger,
+  enableStreaming,
+  disableStreaming
+} from '../core/index.js';
 import type { LoggerConfig, LogLevel } from '../core/index.js';
 import { processCLIInput } from './commands.js';
 import {
@@ -123,7 +133,7 @@ async function configureLogger(logLevel?: string): Promise<void> {
       cli: 'error',      // Always keep CLI at error level
       core: level,       // Core modules use global level
       events: 'error',   // Keep events at error level (too verbose)
-      llm: level         // LLM module uses global level
+      llm: level,        // LLM module uses global level
     }
   });
 
@@ -214,6 +224,8 @@ interface CLIOptions {
 // Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
+
+  disableStreaming();
 
   try {
     let world: World | null = null;
@@ -458,6 +470,9 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
+  
+  enableStreaming();
+
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
 

@@ -1,7 +1,5 @@
-import { createCategoryLogger } from './logger';
 
-// Create events category logger
-const logger = createCategoryLogger('events');
+
 
 /**
  * Unified Events Module - World and Agent Event Functions
@@ -68,7 +66,18 @@ const logger = createCategoryLogger('events');
 import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
 import { generateId } from './utils.js';
 
-// World Events Functions (from world-events.ts)
+let globalStreamingEnabled = true;
+export function enableStreaming(): void {
+  globalStreamingEnabled = true;
+}
+
+export function disableStreaming(): void {
+  globalStreamingEnabled = false;
+}
+
+// Create events category logger
+import { createCategoryLogger } from './logger';
+const logger = createCategoryLogger('events');
 
 /**
  * Message publishing using World.eventEmitter
@@ -389,9 +398,22 @@ export async function processAgentMessage(
       logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Call LLM for response with streaming
-    const { streamAgentResponse } = await import('./llm-manager');
-    const response = await streamAgentResponse(world, agent, messages);
+    // Call LLM for response - use streaming or non-streaming based on global flag
+    logger.debug('Calling LLM for response:', {
+      agentId: agent.id,
+      worldId: world.id,
+      messageId,
+      messages: messages.map(m => ({ sender: m.sender, content: m.content })) // Log only sender and content for brevity
+    });
+
+    let response: string;
+    if (globalStreamingEnabled) {
+      const { streamAgentResponse } = await import('./llm-manager');
+      response = await streamAgentResponse(world, agent, messages);
+    } else {
+      const { generateAgentResponse } = await import('./llm-manager');
+      response = await generateAgentResponse(world, agent, messages);
+    }
 
     // Check for pass command in response first
     const passCommandRegex = /<world>pass<\/world>/i;
