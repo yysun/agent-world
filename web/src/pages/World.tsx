@@ -206,6 +206,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
           <WorldEdit
             world={state.selectedWorldForEdit}
             mode={state.worldEditMode}
+            parentComponent={this}
           />
         }
       </div>

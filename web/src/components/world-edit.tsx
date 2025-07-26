@@ -34,12 +34,14 @@ import api from '../api';
 interface WorldEditProps {
   world?: World | null;
   mode?: 'create' | 'edit' | 'delete';
+  parentComponent?: any;
 }
 
 // Initialize component state from props
 const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
   mode: props.mode || 'create',
   world: props.world || getDefaultWorldData(),
+  parentComponent: props.parentComponent,
   loading: false,
 });
 
@@ -53,6 +55,7 @@ const getDefaultWorldData = (): Partial<World> => ({
 export interface WorldEditState {
   mode: 'create' | 'edit' | 'delete';
   world: Partial<World>;
+  parentComponent?: any;
   loading: boolean;
   error?: string | null;
   successMessage?: string | null;
@@ -133,8 +136,12 @@ export const deleteWorld = async function* (state: WorldEditState): AsyncGenerat
 };
 
 // Close modal function
-export const closeModal = (): void => {
-  app.run('close-world-edit');
+export const closeModal = (state?: WorldEditState): void => {
+  if (state?.parentComponent && typeof state.parentComponent.run === 'function') {
+    state.parentComponent.run('close-world-edit');
+  } else {
+    app.run('close-world-edit');
+  }
 };
 
 export default class WorldEdit extends Component<WorldEditState> {
@@ -144,6 +151,7 @@ export default class WorldEdit extends Component<WorldEditState> {
   state: WorldEditState = {
     mode: 'create' as const,
     world: getDefaultWorldData(),
+    parentComponent: undefined,
     loading: false,
     error: null,
     successMessage: null
@@ -153,7 +161,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     // Success message view
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={[closeModal]}>
+        <div className="modal-backdrop" $onclick={() => closeModal(state)}>
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
             <div className="modal-body">
               <div className="success-message">
@@ -183,13 +191,13 @@ export default class WorldEdit extends Component<WorldEditState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={[closeModal]}>
+      <div className="modal-backdrop" $onclick={() => closeModal(state)}>
         <div className="modal-content" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
               className="modal-close-btn"
-              $onclick={[closeModal]}
+              $onclick={() => closeModal(state)}
               title="Close"
             >
               ×
@@ -269,7 +277,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={[closeModal]}
+                    $onclick={() => closeModal(state)}
                     disabled={state.loading}
                   >
                     Cancel
@@ -298,7 +306,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                   <div className="modal-primary-actions">
                     <button
                       className="btn btn-secondary"
-                      $onclick={[closeModal]}
+                      $onclick={() => closeModal(state)}
                       disabled={state.loading}
                     >
                       Cancel
@@ -318,7 +326,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={[closeModal]}
+                    $onclick={() => closeModal(state)}
                     disabled={state.loading}
                   >
                     Cancel
