@@ -1,30 +1,115 @@
+````prompt
 # AppRun Component Creation Guide
 
 ## Core Architecture Patterns
 
 AppRun follows the State-View-Update architecture with TypeScript support. Choose the appropriate component pattern based on your needs:
 
-### **Class Components (Container/Smart Components)**
-Use for components that manage state, handle side effects, and coordinate data flow.
+### **Stateful Class Components (Self-Contained)**
+Use for components that manage their own state internally, handle side effects, and coordinate with parents via global events. Modern pattern using `mounted` lifecycle.
+
+### **Container Class Components (Legacy)**
+Use for components that manage state, handle side effects, and coordinate data flow using traditional state initialization.
 
 ### **Functional Components (Presentation/Dumb Components)**
 Use for components that only render UI based on props with minimal logic.
 
 ## Component Patterns
 
-### **Pattern 1: Class-Based Container Component**
+### **Pattern 1: Stateful Class Component (Modern - Recommended)**
 
-#### **State Interface**
+Use `mounted` lifecycle to receive props and convert to initial state. Functions defined at module level for better testing.
+
+#### **Module-Level Functions (separate file)**
 ```typescript
-interface ComponentState {
-  data: DataType[];
+// component-functions.ts
+export interface ComponentState {
+  mode: 'create' | 'edit' | 'delete';
+  formData: FormType;
   loading: boolean;
   error: string | null;
-  // UI state
-  selectedItem: DataType | null;
-  isEditing: boolean;
+  successMessage: string | null;
+}
+
+export interface ComponentProps {
+  mode?: string;
+  initialData?: FormType;
+}
+
+export const initializeState = (props: ComponentProps): ComponentState => ({
+  mode: props.mode || 'create',
+  formData: props.initialData || getDefaultFormData(),
+  loading: false,
+  error: null,
+  successMessage: null
+});
+
+export const saveData = async function* (state: ComponentState): AsyncGenerator<ComponentState> {
+  yield { ...state, loading: true, error: null };
+  try {
+    await performSave(state.formData);
+    yield { 
+      ...state, 
+      loading: false, 
+      successMessage: 'Data saved successfully!' 
+    };
+    setTimeout(() => app.run('data-saved'), 2000);
+  } catch (error) {
+    yield { ...state, loading: false, error: error.message };
+  }
+};
+
+export const closeModal = (): void => {
+  app.run('close-modal');
+};
+```
+
+#### **Component Structure**
+```typescript
+// component.tsx
+import { initializeState, saveData, closeModal, type ComponentState, type ComponentProps } from './component-functions';
+
+export default class MyComponent extends Component<ComponentState> {
+  declare props: Readonly<ComponentProps>;
+  mounted = (props: ComponentProps): ComponentState => initializeState(props);
+
+  view = (state: ComponentState) => {
+    // Guard clauses
+    if (state.successMessage) {
+      return (
+        <div className="modal-backdrop" $onclick={[closeModal]}>
+          <div className="success-message">
+            <p>{state.successMessage}</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="modal-backdrop" $onclick={[closeModal]}>
+        <form>
+          <input
+            value={state.formData.name}
+            $bind="formData.name"
+            disabled={state.loading}
+          />
+          <button 
+            $onclick={[saveData]} 
+            disabled={state.loading}
+          >
+            {state.loading ? 'Saving...' : 'Save'}
+          </button>
+          <button $onclick={[closeModal]}>Cancel</button>
+        </form>
+      </div>
+    );
+  };
 }
 ```
+
+### **Pattern 2: Legacy Container Component**
+
+Traditional pattern with state initialization function.
 
 #### **Component Structure**
 ```typescript
@@ -94,7 +179,7 @@ export default class MyComponent extends Component<ComponentState> {
 }
 ```
 
-### **Pattern 2: Functional Presentation Component**
+### **Pattern 3: Functional Presentation Component**
 
 ```typescript
 interface ComponentProps {
@@ -153,8 +238,33 @@ $onclick={['action-name', data]}
 $oninput={['update-field', 'fieldName']}
 $onchange={['update-dropdown', 'provider']}
 
-// Direct function references (functions that return new state)
-$onclick={updateFunction}
+// Direct function references (modern pattern - recommended)
+$onclick={[saveFunction]}
+$onclick={[deleteFunction]}
+$onclick={[closeModal]}
+```
+
+### **✅ DO: Use $bind for Two-Way Data Binding**
+
+```typescript
+// Automatic form field binding (modern pattern)
+<input 
+  value={state.formData.name}
+  $bind="formData.name"
+/>
+
+<textarea 
+  value={state.formData.description}
+  $bind="formData.description"
+/>
+
+<select 
+  value={state.formData.provider}
+  $bind="formData.provider"
+>
+  <option value="openai">OpenAI</option>
+  <option value="anthropic">Anthropic</option>
+</select>
 ```
 
 ### **✅ DO: Use Regular Properties for Non-State Actions**
@@ -184,11 +294,53 @@ onclick="action-name"  // Use $onclick for state updates
 
 // ❌ Don't use arrow functions for simple state updates
 $onclick={(e) => ({ ...state, field: e.target.value })}
+
+// ❌ Don't use manual form handlers when $bind is available
+$oninput={(e) => updateField('name', e)}  // Use $bind="formData.name" instead
 ```
 
 ## Update Function Patterns
 
-### **State Update Functions**
+### **Module-Level State Update Functions (Modern - Recommended)**
+```typescript
+// Export functions for direct references in $on directives
+export const saveData = async function* (state: State): AsyncGenerator<State> {
+  yield { ...state, loading: true, error: null };
+  try {
+    await performSave(state.formData);
+    yield { 
+      ...state, 
+      loading: false, 
+      successMessage: 'Data saved successfully!' 
+    };
+    // Global event for parent coordination
+    setTimeout(() => app.run('data-saved'), 2000);
+  } catch (error) {
+    yield { ...state, loading: false, error: error.message };
+  }
+};
+
+export const deleteData = async function* (state: State): AsyncGenerator<State> {
+  yield { ...state, loading: true, error: null };
+  try {
+    await performDelete(state.formData.id);
+    yield { 
+      ...state, 
+      loading: false, 
+      successMessage: 'Data deleted successfully!' 
+    };
+    setTimeout(() => app.run('data-deleted'), 2000);
+  } catch (error) {
+    yield { ...state, loading: false, error: error.message };
+  }
+};
+
+export const closeModal = (): void => {
+  app.run('close-modal');  // Global event for parent
+};
+```
+
+### **Legacy Update Functions (Traditional Pattern)**
 ```typescript
 // Synchronous state update
 'action-name': (state: State, payload?: any): State => ({
@@ -230,7 +382,74 @@ $onclick={(e) => ({ ...state, field: e.target.value })}
 
 ## Component Composition Patterns
 
-### **Container + Presentation Pattern**
+### **Parent-Child with Global Events (Modern - Recommended)**
+```typescript
+// Parent Component (simplified state)
+export default class WorldComponent extends Component<WorldState> {
+  view = (state: WorldState) => (
+    <div>
+      {/* Core world UI */}
+      <div className="world-content">
+        {state.agents.map(agent => (
+          <div key={agent.id} $onclick={['open-agent-edit', agent]}>
+            {agent.name}
+          </div>
+        ))}
+      </div>
+
+      {/* Conditional modal rendering */}
+      {state.showAgentEdit && 
+        <AgentEdit 
+          agent={state.selectedAgent} 
+          mode={state.editMode}
+          worldName={state.worldName}
+        />
+      }
+    </div>
+  );
+
+  update = {
+    'open-agent-edit': (state, agent) => ({
+      ...state,
+      showAgentEdit: true,
+      editMode: 'edit',
+      selectedAgent: agent
+    }),
+
+    'close-agent-edit': (state) => ({
+      ...state,
+      showAgentEdit: false
+    }),
+
+    // Global events from child components
+    'agent-saved': async (state) => {
+      const agents = await getAgents(state.worldName);
+      return { ...state, agents, showAgentEdit: false };
+    },
+
+    'agent-deleted': async (state) => {
+      const agents = await getAgents(state.worldName);
+      return { ...state, agents, showAgentEdit: false };
+    }
+  };
+}
+
+// Self-contained child component
+export default class AgentEdit extends Component<AgentEditState> {
+  mounted = (props) => initializeState(props);
+
+  view = (state) => (
+    <div className="modal-backdrop" $onclick={[closeModal]}>
+      <form>
+        <input $bind="formData.name" />
+        <button $onclick={[saveAgent]}>Save</button>
+      </form>
+    </div>
+  );
+}
+```
+
+### **Container + Presentation Pattern (Legacy)**
 ```typescript
 // Container Component (manages state)
 export default class WorldComponent extends Component<WorldState> {
@@ -342,28 +561,43 @@ view = (state: State) => {
 
 ## Best Practices Summary
 
-### **Component Design**
-- Use class components for state management and coordination
-- Use functional components for presentation and simple logic
+### **Component Design (Modern Patterns)**
+- **Prefer stateful class components** with `mounted` lifecycle for self-contained components
+- **Use module-level functions** for state updates to enable easy testing
+- **Use $bind for form fields** instead of manual event handlers
+- **Use direct function references** in $on directives: `$onclick={[saveFunction]}`
+- **Use global events** for parent-child coordination
 - Implement guard clauses for loading/error/empty states
 - Follow single responsibility principle
 
-### **Event Handling**
-- `$on` directives for state updates only
-- Regular properties for DOM manipulation and side effects
-- Use tuple actions to pass data: `$onclick={['action', data]}`
-- Avoid arrow functions in JSX for state updates
+### **Event Handling (Updated Rules)**
+- **$bind for two-way data binding**: `$bind="formData.fieldName"`
+- **$on directives with direct function references**: `$onclick={[functionRef]}`
+- **String/tuple actions for legacy patterns**: `$onclick="action-name"` or `$onclick={['action', data]}`
+- **Regular properties for DOM manipulation**: `onclick={(e) => e.stopPropagation()}`
+- **Global events for coordination**: `app.run('component-saved')`
 
-### **State Management**
+### **State Management (Enhanced)**
+- **Module-level functions** return new state or use async generators
+- **$bind automatically handles** form field updates
+- **Global events coordinate** between parent and child components
 - Always use immutable updates with spread operator
-- Include loading, error, and data states
+- Include loading, error, and success message states
 - Use async generators for progressive updates
 - Implement defensive programming with null checks
 
+### **Architecture Patterns**
+- **Self-contained components** manage their own form state using `mounted`
+- **Parent components** use simple boolean flags for conditional rendering
+- **Module-level functions** enable easy unit testing
+- **Global events** provide loose coupling between components
+- **Success messages** with auto-close functionality
+- **Modal patterns** with backdrop click to close
+
 ### **Type Safety**
-- Define comprehensive state interfaces
-- Use proper TypeScript types for all functions
-- Type event handlers correctly
+- Define comprehensive state interfaces with success message states
+- Use proper TypeScript types for all module-level functions
+- Type component props correctly for mounted pattern
 - Provide default values for optional props
 
-This guide covers all AppRun patterns found in modern applications and provides clear rules for consistent development.
+This guide covers modern AppRun patterns with emphasis on stateful components, module-level functions, $bind for forms, and global event coordination.
