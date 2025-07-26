@@ -199,6 +199,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
             agent={state.selectedAgentForEdit}
             mode={state.agentEditMode}
             worldName={state.worldName}
+            parentComponent={this}
           />
         }
 

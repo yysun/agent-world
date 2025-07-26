@@ -9,21 +9,23 @@
  * - Direct function references in $on directives for better performance
  * - Modal overlay with backdrop click to close
  * - Form validation and error handling
+ * - Parent component integration for coordinated modal management
  * 
  * Implementation:
  * - AppRun class component using mounted pattern for props-to-state initialization
- * - Module-level functions imported from agent-edit-functions.ts
- * - Direct function references: $oninput={[updateField, 'name']}
+ * - Module-level functions defined in same file for consolidation
+ * - Direct function references: $onclick={closeModal}
  * - Global events for parent coordination: 'agent-saved', 'agent-deleted'
+ * - Parent component.run() calls when parentComponent prop provided
  * - Success messages shown before auto-closing modal
  * - All business logic testable independently of UI
  * 
  * Event Flow:
- * - Form field changes: $oninput={[updateField, field]}
+ * - Form field changes: $bind="agent.name"
  * - Save button: $onclick={[saveAgent]}
  * - Delete button: $onclick={[deleteAgent]}
- * - Cancel/Close: $onclick={[closeModal]}
- * - Backdrop click: $onclick={[closeModal]}
+ * - Cancel/Close: $onclick={closeModal}
+ * - Backdrop click: $onclick={closeModal}
  */
 
 import { app, Component } from 'apprun';
@@ -35,6 +37,7 @@ interface AgentEditProps {
   agent?: Agent | null;
   mode?: 'create' | 'edit' | 'delete';
   worldName: string;
+  parentComponent?: any;
 }
 
 // Initialize component state from props
@@ -42,6 +45,7 @@ const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
   mode: props.mode || 'create',
   worldName: props.worldName,
   agent: props.agent || defaultAgentData,
+  parentComponent: props.parentComponent,
   loading: false,
 });
 
@@ -58,6 +62,7 @@ export interface AgentEditState {
   mode: 'create' | 'edit' | 'delete';
   worldName: string;
   agent: Partial<Agent>;
+  parentComponent?: any;
   loading: boolean;
   error?: string | null;
   successMessage?: string | null;
@@ -133,8 +138,12 @@ export const deleteAgent = async function* (state: AgentEditState): AsyncGenerat
 };
 
 // Close modal function
-export const closeModal = (): void => {
-  app.run('close-agent-edit');
+export const closeModal = (state?: AgentEditState): void => {
+  if (state?.parentComponent && typeof state.parentComponent.run === 'function') {
+    state.parentComponent.run('close-agent-edit');
+  } else {
+    app.run('close-agent-edit');
+  }
 };
 
 
@@ -149,6 +158,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     mode: 'create',
     worldName: '',
     agent: defaultAgentData,
+    parentComponent: undefined,
     loading: true,
   };
 
@@ -171,7 +181,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     // Success message view
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={[closeModal]}>
+        <div className="modal-backdrop" $onclick={closeModal}>
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
             <div className="modal-body">
               <div className="success-message">
@@ -198,13 +208,13 @@ export default class AgentEdit extends Component<AgentEditState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={[closeModal]}>
+      <div className="modal-backdrop" $onclick={closeModal}>
         <div className="modal-content" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
               className="modal-close-btn"
-              $onclick={[closeModal]}
+              $onclick={closeModal}
               title="Close"
             >
               ×
@@ -338,7 +348,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={[closeModal]}
+                    $onclick={closeModal}
                     disabled={state.loading}
                   >
                     Cancel
@@ -367,7 +377,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                   <div className="modal-primary-actions">
                     <button
                       className="btn btn-secondary"
-                      $onclick={[closeModal]}
+                      $onclick={closeModal}
                       disabled={state.loading}
                     >
                       Cancel
@@ -387,7 +397,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={[closeModal]}
+                    $onclick={closeModal}
                     disabled={state.loading}
                   >
                     Cancel

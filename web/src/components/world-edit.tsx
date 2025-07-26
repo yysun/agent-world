@@ -161,7 +161,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     // Success message view
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={() => closeModal(state)}>
+        <div className="modal-backdrop" $onclick={closeModal}>
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
             <div className="modal-body">
               <div className="success-message">
@@ -191,13 +191,13 @@ export default class WorldEdit extends Component<WorldEditState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={() => closeModal(state)}>
+      <div className="modal-backdrop" $onclick={closeModal}>
         <div className="modal-content" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
               className="modal-close-btn"
-              $onclick={() => closeModal(state)}
+              $onclick={closeModal}
               title="Close"
             >
               ×
@@ -277,7 +277,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={() => closeModal(state)}
+                    $onclick={closeModal}
                     disabled={state.loading}
                   >
                     Cancel
@@ -306,7 +306,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                   <div className="modal-primary-actions">
                     <button
                       className="btn btn-secondary"
-                      $onclick={() => closeModal(state)}
+                      $onclick={closeModal}
                       disabled={state.loading}
                     >
                       Cancel
@@ -326,7 +326,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
-                    $onclick={() => closeModal(state)}
+                    $onclick={closeModal}
                     disabled={state.loading}
                   >
                     Cancel
