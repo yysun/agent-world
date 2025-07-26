@@ -107,15 +107,23 @@ async function getWorld(worldName: string): Promise<World & { agents: Agent[] }>
 
 /**
  * Create a new world
+ * Accepts Partial<World> and fills in required fields (like agents) with defaults if missing.
  */
-async function createWorld(worldData: World): Promise<World> {
+async function createWorld(worldData: Partial<World>): Promise<World> {
   if (!worldData || !worldData.name) {
     throw new Error('World data with name is required');
   }
+  // Ensure required fields are present
+  const completeWorld: World = {
+    name: worldData.name,
+    description: worldData.description || '',
+    turnLimit: worldData.turnLimit ?? 5,
+    agents: worldData.agents ?? [],
+  };
 
   const response = await apiRequest('/worlds', {
     method: 'POST',
-    body: JSON.stringify(worldData),
+    body: JSON.stringify(completeWorld),
   });
 
   return response.json();
@@ -177,7 +185,7 @@ async function getAgent(worldName: string, agentName: string): Promise<Agent> {
 /**
  * Create a new agent in a world
  */
-async function createAgent(worldName: string, agentData: Agent): Promise<Agent> {
+async function createAgent(worldName: string, agentData: Partial<Agent>): Promise<Agent> {
   if (!worldName || !agentData) {
     throw new Error('World name and agent data are required');
   }

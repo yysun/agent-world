@@ -15,20 +15,13 @@
 
 import { app } from 'apprun';
 import { createAgent, updateAgent, deleteAgent as deleteAgentAPI } from '../api';
-import type { Agent } from '../types';
+import type { Agent, LLMProvider } from '../types';
 
 // AgentEdit Component State Interface
 export interface AgentEditState {
   mode: 'create' | 'edit' | 'delete';
   worldName: string;
-  formData: {
-    name: string;
-    description: string;
-    provider: string;
-    model: string;
-    temperature: number;
-    systemPrompt: string;
-  };
+  formData: Partial<Agent>;
   loading: boolean;
   error: string | null;
   successMessage: string | null;
@@ -41,21 +34,11 @@ export interface AgentEditProps {
   worldName: string;
 }
 
-// Helper function to map agent to form data
-const mapAgentToForm = (agent: Agent) => ({
-  name: agent.name,
-  description: agent.description || '',
-  provider: agent.provider || 'ollama',
-  model: agent.model || 'llama3.2:3b',
-  temperature: agent.temperature || 0.7,
-  systemPrompt: agent.systemPrompt || ''
-});
-
 // Helper function to get default form data
-const getDefaultFormData = () => ({
+const getDefaultFormData = (): Partial<Agent> => ({
   name: '',
   description: '',
-  provider: 'ollama',
+  provider: 'ollama' as LLMProvider,
   model: 'llama3.2:3b',
   temperature: 0.7,
   systemPrompt: ''
@@ -150,7 +133,7 @@ export const closeModal = (): void => {
 export const initializeState = (props: AgentEditProps): AgentEditState => ({
   mode: props.mode || 'create',
   worldName: props.worldName,
-  formData: props.agent ? mapAgentToForm(props.agent) : getDefaultFormData(),
+  formData: props.agent || getDefaultFormData(),
   loading: false,
   error: null,
   successMessage: null

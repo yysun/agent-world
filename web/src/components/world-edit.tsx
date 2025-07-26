@@ -39,9 +39,8 @@ import {
 
 export default class WorldEdit extends Component<WorldEditState> {
   
-  mounted = (props: WorldEditProps): WorldEditState => {
-    return initializeState(props);
-  };
+  declare props: Readonly<WorldEditProps>;
+  mounted = (props: WorldEditProps): WorldEditState => initializeState(props);
 
   view = (state: WorldEditState) => {
     // Success message view

@@ -38,10 +38,8 @@ import {
 } from './agent-edit-functions';
 
 export default class AgentEdit extends Component<AgentEditState> {
-  
-  mounted = (props: AgentEditProps): AgentEditState => {
-    return initializeState(props);
-  };
+  declare props: Readonly<AgentEditProps>;
+  mounted = (props: AgentEditProps): AgentEditState => initializeState(props);
 
   view = (state: AgentEditState) => {
     // Success message view

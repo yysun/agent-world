@@ -20,11 +20,7 @@ import type { World } from '../types';
 // WorldEdit Component State Interface
 export interface WorldEditState {
   mode: 'create' | 'edit' | 'delete';
-  formData: {
-    name: string;
-    description: string;
-    turnLimit: number;
-  };
+  formData: Partial<World>
   loading: boolean;
   error: string | null;
   successMessage: string | null;
@@ -36,15 +32,8 @@ export interface WorldEditProps {
   mode?: 'create' | 'edit' | 'delete';
 }
 
-// Helper function to map world to form data
-const mapWorldToForm = (world: World) => ({
-  name: world.name,
-  description: world.description || '',
-  turnLimit: world.turnLimit || 5
-});
-
 // Helper function to get default form data
-const getDefaultFormData = () => ({
+const getDefaultFormData = (): Partial<World> => ({
   name: '',
   description: '',
   turnLimit: 5
@@ -144,7 +133,7 @@ export const closeModal = (): void => {
 // Initialize component state from props
 export const initializeState = (props: WorldEditProps): WorldEditState => ({
   mode: props.mode || 'create',
-  formData: props.world ? mapWorldToForm(props.world) : getDefaultFormData(),
+  formData: props.world || getDefaultFormData(),
   loading: false,
   error: null,
   successMessage: null
