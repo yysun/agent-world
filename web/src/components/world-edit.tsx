@@ -28,7 +28,6 @@
 
 import { app, Component } from 'apprun';
 import { 
-  updateField, 
   saveWorld, 
   deleteWorld, 
   closeModal, 
@@ -118,7 +117,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       className="form-input"
                       placeholder="Enter world name"
                       value={state.formData.name}
-                      $oninput={[updateField, 'name']}
+                      $bind="formData.name"
                       disabled={state.loading}
                     />
                   </div>
@@ -131,7 +130,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       className="form-input"
                       placeholder="Brief description of the world"
                       value={state.formData.description}
-                      $oninput={[updateField, 'description']}
+                      $bind="formData.description"
                       disabled={state.loading}
                     />
                   </div>
@@ -146,7 +145,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       min="1"
                       max="50"
                       value={state.formData.turnLimit}
-                      $oninput={[updateField, 'turnLimit']}
+                      $bind="formData.turnLimit"
                       disabled={state.loading}
                     />
                   </div>
