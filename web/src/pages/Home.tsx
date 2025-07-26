@@ -26,16 +26,19 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorlds, createWorld, updateWorld, deleteWorld } from '../api';
+import { getWorlds } from '../api';
 import WorldEdit from '../components/world-edit';
-import type { World, WorldEditState } from '../types';
+import type { World } from '../types';
 
 interface HomeState {
   worlds: World[];
   currentIndex: number;
   loading: boolean;
   error: string | null;
-  worldEdit: WorldEditState;
+  // Simplified world edit state - just boolean flags and mode
+  showWorldEdit: boolean;
+  worldEditMode: 'create' | 'edit' | 'delete';
+  selectedWorldForEdit: World | null;
 }
 
 export default class HomeComponent extends Component<HomeState> {
@@ -46,18 +49,10 @@ export default class HomeComponent extends Component<HomeState> {
       currentIndex: 0,
       loading: false,
       error: null,
-      worldEdit: {
-        isOpen: false,
-        mode: 'create',
-        selectedWorld: null,
-        formData: {
-          name: '',
-          description: '',
-          turnLimit: 5
-        },
-        loading: false,
-        error: null
-      }
+      // Simplified world edit state
+      showWorldEdit: false,
+      worldEditMode: 'create',
+      selectedWorldForEdit: null,
     } as HomeState;
   }
 
@@ -200,7 +195,7 @@ export default class HomeComponent extends Component<HomeState> {
                 <button
                   class="btn add-world-btn delete-world-btn"
                   title="Delete World"
-                  $onclick={['delete-world', state.worlds[state.currentIndex]?.name]}
+                  $onclick={['open-world-delete', state.worlds[state.currentIndex]]}
                 >
                   <span class="plus-icon">×</span>
                 </button>
@@ -210,14 +205,12 @@ export default class HomeComponent extends Component<HomeState> {
         </div>
 
         {/* World Edit Modal */}
-        <WorldEdit
-          isOpen={state.worldEdit.isOpen}
-          mode={state.worldEdit.mode}
-          selectedWorld={state.worldEdit.selectedWorld}
-          formData={state.worldEdit.formData}
-          loading={state.worldEdit.loading}
-          error={state.worldEdit.error}
-        />
+        {state.showWorldEdit && 
+          <WorldEdit
+            world={state.selectedWorldForEdit}
+            mode={state.worldEditMode}
+          />
+        }
       </div>
     );
   };
@@ -240,156 +233,54 @@ export default class HomeComponent extends Component<HomeState> {
       window.location.href = '/World/' + world.name;
     },
 
-    // World Edit Event Handlers
+    // Simplified World Edit Event Handlers
     'open-world-create': (state: HomeState): HomeState => ({
       ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        isOpen: true,
-        mode: 'create',
-        selectedWorld: null,
-        formData: {
-          name: '',
-          description: '',
-          turnLimit: 5
-        },
-        error: null
-      }
+      showWorldEdit: true,
+      worldEditMode: 'create',
+      selectedWorldForEdit: null
     }),
 
     'open-world-edit': (state: HomeState, world: World): HomeState => ({
       ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        isOpen: true,
-        mode: 'edit',
-        selectedWorld: world,
-        formData: {
-          name: world.name,
-          description: world.description || '',
-          turnLimit: world.turnLimit || 5
-        },
-        error: null
-      }
+      showWorldEdit: true,
+      worldEditMode: 'edit',
+      selectedWorldForEdit: world
+    }),
+
+    'open-world-delete': (state: HomeState, world: World): HomeState => ({
+      ...state,
+      showWorldEdit: true,
+      worldEditMode: 'delete',
+      selectedWorldForEdit: world
     }),
 
     'close-world-edit': (state: HomeState): HomeState => ({
       ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        isOpen: false,
-        error: null
-      }
+      showWorldEdit: false
     }),
 
-    'update-world-form': (state: HomeState, field: string, e: Event): HomeState => {
-      const target = e.target as HTMLInputElement;
-      const value = field === 'turnLimit' ? parseInt(target.value) || 5 : target.value;
-      
+    'world-saved': async (state: HomeState): Promise<HomeState> => {
+      // Refresh worlds list and close modal
+      const worlds = await getWorlds();
       return {
         ...state,
-        worldEdit: {
-          ...state.worldEdit,
-          formData: {
-            ...state.worldEdit.formData,
-            [field]: value
-          },
-          error: null
-        }
+        worlds,
+        showWorldEdit: false
       };
     },
 
-    'save-world': async (state: HomeState): Promise<HomeState> => {
-      const { mode, formData, selectedWorld } = state.worldEdit;
-      
-      if (!formData.name.trim()) {
-        return {
-          ...state,
-          worldEdit: {
-            ...state.worldEdit,
-            error: 'World name is required'
-          }
-        };
-      }
-
-      try {
-        // Set loading state
-        const loadingState = {
-          ...state,
-          worldEdit: {
-            ...state.worldEdit,
-            loading: true,
-            error: null
-          }
-        };
-
-        let updatedWorld: World;
-        if (mode === 'create') {
-          updatedWorld = await createWorld({
-            name: formData.name,
-            description: formData.description,
-            turnLimit: formData.turnLimit,
-            agents: []
-          });
-        } else {
-          updatedWorld = await updateWorld(selectedWorld!.name, {
-            name: formData.name,
-            description: formData.description,
-            turnLimit: formData.turnLimit
-          });
-        }
-
-        // Refresh world list
-        const worlds = await getWorlds();
-        
-        return {
-          ...state,
-          worlds,
-          worldEdit: {
-            ...state.worldEdit,
-            isOpen: false,
-            loading: false,
-            error: null
-          }
-        };
-      } catch (error) {
-        return {
-          ...state,
-          worldEdit: {
-            ...state.worldEdit,
-            loading: false,
-            error: error instanceof Error ? error.message : 'Failed to save world'
-          }
-        };
-      }
-    },
-
-    'delete-world': async (state: HomeState, worldName: string): Promise<HomeState> => {
-      if (!worldName) return state;
-      
-      if (!confirm(`Are you sure you want to delete "${worldName}"? This action cannot be undone.`)) {
-        return state;
-      }
-
-      try {
-        await deleteWorld(worldName);
-        
-        // Refresh world list
-        const worlds = await getWorlds();
-        const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
-        
-        return {
-          ...state,
-          worlds,
-          currentIndex: Math.max(0, newCurrentIndex)
-        };
-      } catch (error) {
-        return {
-          ...state,
-          error: error instanceof Error ? error.message : 'Failed to delete world'
-        };
-      }
-    },
+    'world-deleted': async (state: HomeState): Promise<HomeState> => {
+      // Refresh worlds list and close modal
+      const worlds = await getWorlds();
+      const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
+      return {
+        ...state,
+        worlds,
+        currentIndex: Math.max(0, newCurrentIndex),
+        showWorldEdit: false
+      };
+    }
   };
 }
 
