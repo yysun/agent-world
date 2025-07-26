@@ -26,7 +26,7 @@
  * - Backdrop click: $onclick={[closeModal]}
  */
 
-import { Component } from 'apprun';
+import { app, Component } from 'apprun';
 import { 
   updateField, 
   saveWorld, 

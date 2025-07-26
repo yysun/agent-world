@@ -27,145 +27,35 @@
 import { updateWorld, deleteWorld } from '../api';
 import type { WorldComponentState } from '../types';
 
-// World Edit Event Handlers
+// World Edit Event Handlers (Updated for simplified state)
 export const openWorldEdit = (state: WorldComponentState): WorldComponentState => ({
   ...state,
-  worldEdit: {
-    ...state.worldEdit,
-    isOpen: true,
-    mode: 'edit',
-    selectedWorld: state.world,
-    formData: {
-      name: state.world?.name || '',
-      description: state.world?.description || '',
-      turnLimit: state.world?.turnLimit || 5
-    },
-    error: null
-  }
+  showWorldEdit: true,
+  worldEditMode: 'edit',
+  selectedWorldForEdit: state.world
 });
 
 export const closeWorldEdit = (state: WorldComponentState): WorldComponentState => ({
   ...state,
-  worldEdit: {
-    ...state.worldEdit,
-    isOpen: false,
-    error: null
-  }
+  showWorldEdit: false
 });
 
 export const updateWorldForm = (state: WorldComponentState, field: string, e: Event): WorldComponentState => {
-  const target = e.target as HTMLInputElement;
-  const value = field === 'turnLimit' ? parseInt(target.value) || 5 : target.value;
-
-  return {
-    ...state,
-    worldEdit: {
-      ...state.worldEdit,
-      formData: {
-        ...state.worldEdit.formData,
-        [field]: value
-      },
-      error: null
-    }
-  };
+  // This function is no longer needed as the WorldEdit component handles its own form state
+  // Keeping for backward compatibility but it won't be called
+  return state;
 };
 
 export const saveWorld = async (state: WorldComponentState): Promise<WorldComponentState> => {
-  const { formData, selectedWorld } = state.worldEdit;
-
-  if (!formData.name.trim()) {
-    return {
-      ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        error: 'World name is required'
-      }
-    };
-  }
-
-  if (!selectedWorld) {
-    return {
-      ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        error: 'No world selected for editing'
-      }
-    };
-  }
-
-  try {
-    // Set loading state
-    const loadingState = {
-      ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        loading: true,
-        error: null
-      }
-    };
-
-    // Note: In the actual implementation, this would be handled by the caller
-    // app.run('#', loadingState);
-
-    const updatedWorld = await updateWorld(selectedWorld.name, {
-      name: formData.name,
-      description: formData.description,
-      turnLimit: formData.turnLimit
-    });
-
-    // If world name changed, redirect to new world name
-    if (formData.name !== selectedWorld.name) {
-      window.location.href = '/World/' + encodeURIComponent(formData.name);
-      return state; // Return early since we're redirecting
-    }
-
-    return {
-      ...state,
-      world: {
-        ...state.world!,
-        ...updatedWorld
-      },
-      worldEdit: {
-        ...state.worldEdit,
-        isOpen: false,
-        loading: false,
-        error: null
-      }
-    };
-  } catch (error) {
-    return {
-      ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to save world'
-      }
-    };
-  }
+  // This function is no longer needed as the WorldEdit component handles its own save logic
+  // Keeping for backward compatibility but it won't be called
+  return state;
 };
 
 export const deleteWorldHandler = async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
-  if (!worldName) return state;
-
-  if (!confirm(`Are you sure you want to delete "${worldName}"? This action cannot be undone.`)) {
-    return state;
-  }
-
-  try {
-    await deleteWorld(worldName);
-
-    // Redirect to home page after deletion
-    window.location.href = '/';
-    return state; // Return early since we're redirecting
-  } catch (error) {
-    return {
-      ...state,
-      worldEdit: {
-        ...state.worldEdit,
-        error: error instanceof Error ? error.message : 'Failed to delete world'
-      }
-    };
-  }
+  // This function is no longer needed as the WorldEdit component handles its own delete logic
+  // Keeping for backward compatibility but it won't be called
+  return state;
 };
 
 // Export object with all handler functions for easy import

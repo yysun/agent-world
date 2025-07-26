@@ -32,8 +32,9 @@ import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
-import { agentUpdateHandlers } from '../updates/world-update-agent';
-import { worldUpdateHandlers } from '../updates/world-update-world';
+// Temporarily comment out old handlers that still reference complex state
+// import { agentUpdateHandlers } from '../updates/world-update-agent';
+// import { worldUpdateHandlers } from '../updates/world-update-world';
 import { worldInitHandlers } from '../updates/world-update-init';
 import { worldMessageHandlers } from '../updates/world-update-messages';
 import { getAgents } from '../api';
@@ -212,18 +213,30 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // Route handler - loads world data when navigating to world page
     ...worldInitHandlers,
     ...worldMessageHandlers,
-    ...agentUpdateHandlers,
-    ...worldUpdateHandlers,
+    // Temporarily comment out old handlers
+    // ...agentUpdateHandlers,
+    // ...worldUpdateHandlers,
 
     'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
-      const baseResult = agentUpdateHandlers['select-agent-settings'](state, agent);
-      if (baseResult.selectedSettingsTarget === 'agent' && baseResult.selectedAgent) {
+      // If clicking on already selected agent, deselect it (show world settings)
+      if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
         return {
-          ...baseResult,
-          userInput: '@' + baseResult.selectedAgent.name + ' '
+          ...state,
+          selectedSettingsTarget: 'world',
+          selectedAgent: null,
+          messages: (state.messages || []).filter(message => !message.userEntered),
+          userInput: ''
         };
       }
-      return baseResult;
+
+      // Otherwise, select the agent
+      return {
+        ...state,
+        selectedSettingsTarget: 'agent',
+        selectedAgent: agent,
+        messages: (state.messages || []).filter(message => !message.userEntered),
+        userInput: '@' + agent.name + ' '
+      };
     },
 
     // New simplified agent edit event handlers
