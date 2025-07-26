@@ -21,7 +21,7 @@ import type { Agent, LLMProvider } from '../types';
 export interface AgentEditState {
   mode: 'create' | 'edit' | 'delete';
   worldName: string;
-  formData: Partial<Agent>;
+  agent: Partial<Agent>;
   loading: boolean;
   error: string | null;
   successMessage: string | null;
@@ -34,8 +34,8 @@ export interface AgentEditProps {
   worldName: string;
 }
 
-// Helper function to get default form data
-const getDefaultFormData = (): Partial<Agent> => ({
+// Helper function to get default agent data
+const getDefaultAgentData = (): Partial<Agent> => ({
   name: '',
   description: '',
   provider: 'ollama' as LLMProvider,
@@ -44,22 +44,10 @@ const getDefaultFormData = (): Partial<Agent> => ({
   systemPrompt: ''
 });
 
-// Form field update function
-export const updateField = (state: AgentEditState, field: string, e: Event): AgentEditState => {
-  const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-  const value = field === 'temperature' ? parseFloat(target.value) || 0.7 : target.value;
-  
-  return {
-    ...state,
-    formData: { ...state.formData, [field]: value },
-    error: null
-  };
-};
-
 // Save agent function (handles both create and update)
 export const saveAgent = async function* (state: AgentEditState): AsyncGenerator<AgentEditState> {
   // Form validation
-  if (!state.formData.name.trim()) {
+  if (!state.agent.name.trim()) {
     yield { ...state, error: 'Agent name is required' };
     return;
   }
@@ -69,9 +57,9 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
 
   try {
     if (state.mode === 'create') {
-      await createAgent(state.worldName, state.formData);
+      await createAgent(state.worldName, state.agent);
     } else {
-      await updateAgent(state.worldName, state.formData.name, state.formData);
+      await updateAgent(state.worldName, state.agent.name, state.agent);
     }
     
     const successMessage = state.mode === 'create' 
@@ -101,7 +89,7 @@ export const deleteAgent = async function* (state: AgentEditState): AsyncGenerat
   yield { ...state, loading: true, error: null };
 
   try {
-    await deleteAgentAPI(state.worldName, state.formData.name);
+    await deleteAgentAPI(state.worldName, state.agent.name);
     
     // Show success message
     yield { 
@@ -133,7 +121,7 @@ export const closeModal = (): void => {
 export const initializeState = (props: AgentEditProps): AgentEditState => ({
   mode: props.mode || 'create',
   worldName: props.worldName,
-  formData: props.agent || getDefaultFormData(),
+  agent: props.agent || getDefaultAgentData(),
   loading: false,
   error: null,
   successMessage: null
