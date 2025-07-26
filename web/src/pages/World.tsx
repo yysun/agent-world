@@ -32,9 +32,6 @@ import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
-// Temporarily comment out old handlers that still reference complex state
-// import { agentUpdateHandlers } from '../updates/world-update-agent';
-// import { worldUpdateHandlers } from '../updates/world-update-world';
 import { worldInitHandlers } from '../updates/world-update-init';
 import { worldMessageHandlers } from '../updates/world-update-messages';
 import { getAgents } from '../api';
@@ -213,9 +210,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // Route handler - loads world data when navigating to world page
     ...worldInitHandlers,
     ...worldMessageHandlers,
-    // Temporarily comment out old handlers
-    // ...agentUpdateHandlers,
-    // ...worldUpdateHandlers,
 
     // New simplified agent edit event handlers
     'open-agent-create': (state: WorldComponentState): WorldComponentState => ({
