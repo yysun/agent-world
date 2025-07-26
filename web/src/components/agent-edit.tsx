@@ -28,7 +28,6 @@
 
 import { app, Component } from 'apprun';
 import { 
-  updateField, 
   saveAgent, 
   deleteAgent, 
   closeModal, 
@@ -116,7 +115,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       className="form-input"
                       placeholder="Enter agent name"
                       value={state.formData.name}
-                      $oninput={[updateField, 'name']}
+                      $bind="formData.name"
                       disabled={state.loading}
                     />
                   </div>
@@ -129,7 +128,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       className="form-input"
                       placeholder="Brief description of the agent"
                       value={state.formData.description}
-                      $oninput={[updateField, 'description']}
+                      $bind="formData.description"
                       disabled={state.loading}
                     />
                   </div>
@@ -145,7 +144,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       id="agent-provider"
                       className="form-select"
                       value={state.formData.provider}
-                      $onchange={[updateField, 'provider']}
+                      $bind="formData.provider"
                       disabled={state.loading}
                     >
                       <option value="">Select provider</option>
@@ -165,7 +164,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       className="form-input"
                       placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
                       value={state.formData.model}
-                      $oninput={[updateField, 'model']}
+                      $bind="formData.model"
                       disabled={state.loading}
                     />
                   </div>
@@ -181,7 +180,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       max="2"
                       step="0.1"
                       value={state.formData.temperature}
-                      $oninput={[updateField, 'temperature']}
+                      $bind="formData.temperature"
                       disabled={state.loading}
                     />
                   </div>
@@ -198,7 +197,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       placeholder="Enter the system prompt for this agent..."
                       rows={8}
                       value={state.formData.systemPrompt}
-                      $oninput={[updateField, 'systemPrompt']}
+                      $bind="formData.systemPrompt"
                       disabled={state.loading}
                     />
                   </div>
