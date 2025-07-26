@@ -32,8 +32,7 @@ import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
-import { worldInitHandlers } from '../updates/world-update-init';
-import { worldMessageHandlers } from '../updates/world-update-messages';
+import { worldUpdateHandlers } from './World.update';
 import { getAgents } from '../api';
 
 export default class WorldComponent extends Component<WorldComponentState> {
@@ -188,9 +187,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
           </div>
         </div>
 
-        {state.showAgentEdit && 
-          <AgentEdit 
-            agent={state.selectedAgentForEdit} 
+        {state.showAgentEdit &&
+          <AgentEdit
+            agent={state.selectedAgentForEdit}
             mode={state.agentEditMode}
             worldName={state.worldName}
           />
@@ -207,9 +206,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
   };
 
   update = {
-    // Route handler - loads world data when navigating to world page
-    ...worldInitHandlers,
-    ...worldMessageHandlers,
+    // Route handler and message handlers (merged)
+    ...worldUpdateHandlers,
 
     // New simplified agent edit event handlers
     'open-agent-create': (state: WorldComponentState): WorldComponentState => ({
@@ -241,20 +239,20 @@ export default class WorldComponent extends Component<WorldComponentState> {
     'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
       // Refresh agents list and close modal
       const agents = await getAgents(state.worldName);
-      return { 
-        ...state, 
-        agents, 
-        showAgentEdit: false 
+      return {
+        ...state,
+        agents,
+        showAgentEdit: false
       };
     },
 
     'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
       // Refresh agents list and close modal
       const agents = await getAgents(state.worldName);
-      return { 
-        ...state, 
-        agents, 
-        showAgentEdit: false 
+      return {
+        ...state,
+        agents,
+        showAgentEdit: false
       };
     },
 

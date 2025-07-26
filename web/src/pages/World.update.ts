@@ -1,19 +1,28 @@
 /**
- * World Message Handlers
+ * World Update Handlers
  *
- * Extracted from WorldComponent (World.tsx)
- * Handles message send and receive logic, including SSE events.
+ * Combines world initialization and message handling logic.
  *
  * Features:
+ * - Loads world and agent data
+ * - Deduplicates and sorts messages
+ * - Handles loading and error states
  * - User message sending
  * - SSE event handlers for chat streaming
  * - Agent message count updates
  * - Error handling for message send/receive
+ * - Agent/world message clearing
+ * - Settings selection handlers
+ *
+ * Implementation:
+ * - Merged from world-update-init.ts and world-update-messages.ts on 2025-07-25
  *
  * Changes:
- * - Extracted from World.tsx on 2025-07-25
+ * - Initial merge of world-update-init.ts and world-update-messages.ts
  */
+
 import { app } from 'apprun';
+import { getWorld, clearAgentMemory } from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -26,10 +35,110 @@ import {
   handleComplete
 } from '../sse-client';
 import type { WorldComponentState, Agent } from '../types';
-import { clearAgentMemory } from '../api';
 
-export const worldMessageHandlers = {
-  // Update user input
+export const worldUpdateHandlers = {
+  // World Initialization Handler
+  '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
+    const worldName = name ? decodeURIComponent(name) : 'New World';
+
+    try {
+      yield {
+        ...state,
+        worldName,
+        loading: true,
+        error: null,
+        isWaiting: false,
+        activeAgent: null
+      };
+
+      const world = await getWorld(worldName);
+      const messageMap = new Map();
+
+      const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
+        if (agent.memory && Array.isArray(agent.memory)) {
+          agent.memory.forEach((memoryItem: any) => {
+            const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
+
+            if (!messageMap.has(messageKey)) {
+              const originalSender = memoryItem.sender || agent.name;
+              let messageType = 'agent';
+              if (originalSender === 'HUMAN' || originalSender === 'USER') {
+                messageType = 'user';
+              }
+
+              messageMap.set(messageKey, {
+                id: memoryItem.id || messageKey,
+                sender: originalSender,
+                text: memoryItem.text || memoryItem.content || '',
+                createdAt: memoryItem.createdAt || new Date().toISOString(),
+                type: messageType,
+                streamComplete: true,
+                fromAgentId: agent.id
+              });
+            }
+          });
+        }
+
+        const systemPrompt = agent.systemPrompt || '';
+
+        return {
+          ...agent,
+          spriteIndex: index % 9,
+          messageCount: agent.memory?.length || 0,
+          provider: agent.provider || 'openai',
+          model: agent.model || 'gpt-4',
+          temperature: agent.temperature ?? 0.7,
+          systemPrompt: systemPrompt,
+          description: agent.description || '',
+          type: agent.type || 'default',
+          status: agent.status || 'active',
+          llmCallCount: agent.llmCallCount || 0,
+          memory: agent.memory || [],
+          createdAt: agent.createdAt || new Date(),
+          lastActive: agent.lastActive || new Date()
+        } as Agent;
+      }));
+
+      const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeA - timeB;
+      });
+
+      yield {
+        ...state,
+        worldName,
+        world: {
+          name: worldName,
+          agents: worldAgents,
+          llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
+        },
+        agents: worldAgents,
+        messages: sortedMessages,
+        loading: false,
+        error: null,
+        isWaiting: false,
+        selectedSettingsTarget: 'world',
+        selectedAgent: null,
+        activeAgent: null
+      };
+
+    } catch (error: any) {
+      yield {
+        ...state,
+        worldName,
+        world: { name: worldName, agents: [], llmCallLimit: undefined },
+        loading: false,
+        error: error.message || 'Failed to load world data',
+        isWaiting: false,
+        selectedSettingsTarget: 'world',
+        selectedAgent: null,
+        activeAgent: null
+      };
+    }
+  },
+
+  // Message Handlers
   'update-input': (state: WorldComponentState, e): WorldComponentState => ({
     ...state,
     userInput: e.target.value
@@ -37,12 +146,10 @@ export const worldMessageHandlers = {
 
   'key-press': (state: WorldComponentState, e) => {
     if (e.key === 'Enter' && (state.userInput || '').trim()) {
-      // Use apprun app.run outside this handler
       app.run('send-message');
     }
   },
 
-  // Send message action
   'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
     if (!(state.userInput || '').trim()) return state;
 
@@ -157,25 +264,21 @@ export const worldMessageHandlers = {
     return handleComplete(state as any, data) as WorldComponentState;
   },
 
-  // Agent Message Clearing Handlers (moved from world-update-agent.ts)
+  // Agent Message Clearing Handlers
   'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
     try {
       await clearAgentMemory(state.worldName, agent.name);
 
-      // Update agent's message count and remove agent's messages from display
       const updatedAgents = state.agents.map(a =>
         a.id === agent.id ? { ...a, messageCount: 0 } : a
       );
 
-      // Remove agent's messages from the message list
       const filteredMessages = (state.messages || []).filter(msg => msg.sender !== agent.name);
 
-      // Update selected agent if it's the same one
       const updatedSelectedAgent = state.selectedAgent?.id === agent.id
         ? { ...state.selectedAgent, messageCount: 0 }
         : state.selectedAgent;
 
-      // Update world object with updated agents
       const updatedWorld = state.world ? {
         ...state.world,
         agents: updatedAgents
@@ -198,20 +301,16 @@ export const worldMessageHandlers = {
 
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
     try {
-      // Clear messages for all agents
       await Promise.all(
         state.agents.map(agent => clearAgentMemory(state.worldName, agent.name))
       );
 
-      // Update all agents' message counts
       const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));
 
-      // Update selected agent if any
       const updatedSelectedAgent = state.selectedAgent
         ? { ...state.selectedAgent, messageCount: 0 }
         : null;
 
-      // Update world object with updated agents
       const updatedWorld = state.world ? {
         ...state.world,
         agents: updatedAgents
@@ -221,7 +320,7 @@ export const worldMessageHandlers = {
         ...state,
         world: updatedWorld,
         agents: updatedAgents,
-        messages: [], // Clear all messages
+        messages: [],
         selectedAgent: updatedSelectedAgent
       };
     } catch (error: any) {
@@ -232,7 +331,7 @@ export const worldMessageHandlers = {
     }
   },
 
-  // Settings selection handlers (moved from world-update-agent.ts)
+  // Settings selection handlers
   'select-world-settings': (state: WorldComponentState): WorldComponentState => ({
     ...state,
     selectedSettingsTarget: 'world',
@@ -241,7 +340,6 @@ export const worldMessageHandlers = {
   }),
 
   'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
-    // If clicking on already selected agent, deselect it (show world settings)
     if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
       return {
         ...state,
@@ -252,7 +350,6 @@ export const worldMessageHandlers = {
       };
     }
 
-    // Otherwise, select the agent
     return {
       ...state,
       selectedSettingsTarget: 'agent',
