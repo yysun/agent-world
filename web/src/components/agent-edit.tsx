@@ -63,9 +63,9 @@ export default class AgentEdit extends Component<AgentEditState> {
     
     let title: string;
     if (isDeleteMode) {
-      title = `Delete ${state.formData.name || 'Agent'}`;
+      title = `Delete ${state.agent.name || 'Agent'}`;
     } else if (isEditMode) {
-      title = `Edit ${state.formData.name || 'Agent'}`;
+      title = `Edit ${state.agent.name || 'Agent'}`;
     } else {
       title = 'Create New Agent';
     }
@@ -95,7 +95,7 @@ export default class AgentEdit extends Component<AgentEditState> {
               // Delete confirmation view
               <div className="delete-confirmation">
                 <h3>Delete Agent</h3>
-                <p>Are you sure you want to delete "{state.formData.name}"?</p>
+                <p>Are you sure you want to delete "{state.agent.name}"?</p>
                 <p>This action cannot be undone.</p>
               </div>
             ) : (
@@ -112,8 +112,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                       type="text"
                       className="form-input"
                       placeholder="Enter agent name"
-                      value={state.formData.name}
-                      $bind="formData.name"
+                      value={state.agent.name}
+                      $bind="agent.name"
                       disabled={state.loading}
                     />
                   </div>
@@ -125,8 +125,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                       type="text"
                       className="form-input"
                       placeholder="Brief description of the agent"
-                      value={state.formData.description}
-                      $bind="formData.description"
+                      value={state.agent.description}
+                      $bind="agent.description"
                       disabled={state.loading}
                     />
                   </div>
@@ -141,8 +141,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                     <select
                       id="agent-provider"
                       className="form-select"
-                      value={state.formData.provider}
-                      $bind="formData.provider"
+                      value={state.agent.provider}
+                      $bind="agent.provider"
                       disabled={state.loading}
                     >
                       <option value="">Select provider</option>
@@ -161,8 +161,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                       type="text"
                       className="form-input"
                       placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
-                      value={state.formData.model}
-                      $bind="formData.model"
+                      value={state.agent.model}
+                      $bind="agent.model"
                       disabled={state.loading}
                     />
                   </div>
@@ -177,8 +177,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                       min="0"
                       max="2"
                       step="0.1"
-                      value={state.formData.temperature}
-                      $bind="formData.temperature"
+                      value={state.agent.temperature}
+                      $bind="agent.temperature"
                       disabled={state.loading}
                     />
                   </div>
@@ -194,8 +194,8 @@ export default class AgentEdit extends Component<AgentEditState> {
                       className="form-textarea"
                       placeholder="Enter the system prompt for this agent..."
                       rows={8}
-                      value={state.formData.systemPrompt}
-                      $bind="formData.systemPrompt"
+                      value={state.agent.systemPrompt}
+                      $bind="agent.systemPrompt"
                       disabled={state.loading}
                     />
                   </div>
@@ -252,7 +252,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                     <button
                       className="btn btn-primary"
                       $onclick={[saveAgent]}
-                      disabled={state.loading || !state.formData.name.trim()}
+                      disabled={state.loading || !state.agent.name.trim()}
                     >
                       {state.loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
                     </button>

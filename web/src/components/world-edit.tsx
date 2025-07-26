@@ -67,9 +67,9 @@ export default class WorldEdit extends Component<WorldEditState> {
     
     let title: string;
     if (isDeleteMode) {
-      title = `Delete ${state.formData.name || 'World'}`;
+      title = `Delete ${state.world.name || 'World'}`;
     } else if (isEditMode) {
-      title = `Edit ${state.formData.name || 'World'}`;
+      title = `Edit ${state.world.name || 'World'}`;
     } else {
       title = 'Create New World';
     }
@@ -99,7 +99,7 @@ export default class WorldEdit extends Component<WorldEditState> {
               // Delete confirmation view
               <div className="delete-confirmation">
                 <h3>Delete World</h3>
-                <p>Are you sure you want to delete "{state.formData.name}"?</p>
+                <p>Are you sure you want to delete "{state.world.name}"?</p>
                 <p>This action cannot be undone and will delete all agents and messages in this world.</p>
               </div>
             ) : (
@@ -116,8 +116,8 @@ export default class WorldEdit extends Component<WorldEditState> {
                       type="text"
                       className="form-input"
                       placeholder="Enter world name"
-                      value={state.formData.name}
-                      $bind="formData.name"
+                      value={state.world.name}
+                      $bind="world.name"
                       disabled={state.loading}
                     />
                   </div>
@@ -129,8 +129,8 @@ export default class WorldEdit extends Component<WorldEditState> {
                       type="text"
                       className="form-input"
                       placeholder="Brief description of the world"
-                      value={state.formData.description}
-                      $bind="formData.description"
+                      value={state.world.description}
+                      $bind="world.description"
                       disabled={state.loading}
                     />
                   </div>
@@ -144,8 +144,8 @@ export default class WorldEdit extends Component<WorldEditState> {
                       placeholder="5"
                       min="1"
                       max="50"
-                      value={state.formData.turnLimit}
-                      $bind="formData.turnLimit"
+                      value={state.world.turnLimit}
+                      $bind="world.turnLimit"
                       disabled={state.loading}
                     />
                   </div>
@@ -202,7 +202,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                     <button
                       className="btn btn-primary"
                       $onclick={[saveWorld]}
-                      disabled={state.loading || !state.formData.name.trim()}
+                      disabled={state.loading || !state.world.name.trim()}
                     >
                       {state.loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
                     </button>
