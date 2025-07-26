@@ -1,219 +1,271 @@
 /**
- * Agent Edit Component - Modal popup for creating and editing agents
+ * Agent Edit Component - Self-contained AppRun class component for agent CRUD operations
  * 
  * Features:
- * - Functional component with no internal state, fully AppRun compliant
- * - Dual-purpose: create new agents and edit existing agents
+ * - Self-contained class component with internal state management using mounted lifecycle
+ * - Handles all three modes: create, edit, and delete agents
+ * - Module-level state update functions for easy testing and better organization
+ * - Success messaging with auto-close functionality for all operations
+ * - Direct function references in $on directives for better performance
  * - Modal overlay with backdrop click to close
- * - Form fields: name, description, provider, model, temperature, system prompt
- * - AppRun $ directive pattern for all event handling
- * - Props-based data flow from World component
+ * - Form validation and error handling
  * 
  * Implementation:
- * - Follows AppRun MVU architecture (Model-View-Update)
- * - All state managed by parent World component
- * - Uses $ directive pattern for consistent event handling
- * - Conditional rendering with guard clause
- * - Responsive design with mobile support
- * - TypeScript interfaces for type safety
+ * - AppRun class component using mounted pattern for props-to-state initialization
+ * - Module-level functions imported from agent-edit-functions.ts
+ * - Direct function references: $oninput={[updateField, 'name']}
+ * - Global events for parent coordination: 'agent-saved', 'agent-deleted'
+ * - Success messages shown before auto-closing modal
+ * - All business logic testable independently of UI
  * 
  * Event Flow:
- * - Form field changes: $oninput={['update-agent-form', field]}
- * - Save button: $onclick="save-agent"
- * - Cancel button: $onclick="close-agent-edit"
- * - Delete button: $onclick={['delete-agent', agentId]} (edit mode only)
- * - Backdrop click: $onclick="close-agent-edit"
- * - Escape key: handled by World component
+ * - Form field changes: $oninput={[updateField, field]}
+ * - Save button: $onclick={[saveAgent]}
+ * - Delete button: $onclick={[deleteAgent]}
+ * - Cancel/Close: $onclick={[closeModal]}
+ * - Backdrop click: $onclick={[closeModal]}
  */
 
-import { app } from 'apprun';
-import type { Agent, AgentEditState } from '../types';
+import { Component } from 'apprun';
+import { 
+  updateField, 
+  saveAgent, 
+  deleteAgent, 
+  closeModal, 
+  initializeState,
+  type AgentEditState,
+  type AgentEditProps
+} from './agent-edit-functions';
 
-export interface AgentEditProps {
-  isOpen: boolean;
-  mode: 'create' | 'edit';
-  selectedAgent: Agent | null;
-  worldName: string;
-  formData: AgentEditState['formData'];
-  loading: boolean;
-  error: string | null;
-}
-export default function AgentEdit(props: AgentEditProps) {
-  const {
-    isOpen,
-    mode,
-    selectedAgent,
-    worldName,
-    formData,
-    loading,
-    error
-  } = props;
+export default class AgentEdit extends Component<AgentEditState> {
+  
+  mounted = (props: AgentEditProps): AgentEditState => {
+    return initializeState(props);
+  };
 
-  // Guard clause - don't render if not open
-  if (!isOpen) return null;
-
-  const isEditMode = mode === 'edit';
-  const title = isEditMode ? `Edit ${selectedAgent?.name || 'Agent'}` : 'Create New Agent';
-
-  return (
-    <div className="modal-backdrop" $onclick="close-agent-edit">
-      <div className="modal-content" onclick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">{title}</h2>
-          <button
-            className="modal-close-btn"
-            $onclick="close-agent-edit"
-            title="Close"
-          >
-            ×
-          </button>
+  view = (state: AgentEditState) => {
+    // Success message view
+    if (state.successMessage) {
+      return (
+        <div className="modal-backdrop" $onclick={[closeModal]}>
+          <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+            <div className="modal-body">
+              <div className="success-message">
+                <h3>Success!</h3>
+                <p>{state.successMessage}</p>
+                <div className="loading-spinner">Closing...</div>
+              </div>
+            </div>
+          </div>
         </div>
+      );
+    }
 
-        <div className="modal-body">
-          {error && (
-            <div className="error-message">
-              {error}
-            </div>
-          )}
+    const isEditMode = state.mode === 'edit';
+    const isDeleteMode = state.mode === 'delete';
+    
+    let title: string;
+    if (isDeleteMode) {
+      title = `Delete ${state.formData.name || 'Agent'}`;
+    } else if (isEditMode) {
+      title = `Edit ${state.formData.name || 'Agent'}`;
+    } else {
+      title = 'Create New Agent';
+    }
 
-          <form className="agent-form">
-            {/* Basic Information Section */}
-            <div className="form-section">
-              <h3 className="section-title">Basic Information</h3>
+    return (
+      <div className="modal-backdrop" $onclick={[closeModal]}>
+        <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2 className="modal-title">{title}</h2>
+            <button
+              className="modal-close-btn"
+              $onclick={[closeModal]}
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
 
-              <div className="form-group">
-                <label htmlFor="agent-name">Agent Name *</label>
-                <input
-                  id="agent-name"
-                  type="text"
-                  className="form-input"
-                  placeholder="Enter agent name"
-                  value={formData.name}
-                  $oninput={['update-agent-form', 'name']}
-                  disabled={loading}
-                />
+          <div className="modal-body">
+            {state.error && (
+              <div className="error-message">
+                {state.error}
               </div>
-
-              <div className="form-group">
-                <label htmlFor="agent-description">Description</label>
-                <input
-                  id="agent-description"
-                  type="text"
-                  className="form-input"
-                  placeholder="Brief description of the agent"
-                  value={formData.description}
-                  $oninput={['update-agent-form', 'description']}
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            {/* LLM Configuration Section */}
-            <div className="form-section">
-              <h3 className="section-title">LLM Configuration</h3>
-
-              <div className="form-group">
-                <label htmlFor="agent-provider">Provider</label>
-                <select
-                  id="agent-provider"
-                  className="form-select"
-                  value={formData.provider}
-                  $onchange={['update-agent-form', 'provider']}
-                  disabled={loading}
-                >
-                  <option value="">Select provider</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="google">Google</option>
-                  <option value="microsoft">Microsoft</option>
-                  <option value="local">Local</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="agent-model">Model</label>
-                <input
-                  id="agent-model"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. gpt-4, claude-3-sonnet"
-                  value={formData.model}
-                  $oninput={['update-agent-form', 'model']}
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="agent-temperature">Temperature</label>
-                <input
-                  id="agent-temperature"
-                  type="number"
-                  className="form-input"
-                  placeholder="0.0 - 2.0"
-                  min="0"
-                  max="2"
-                  step="0.1"
-                  value={formData.temperature}
-                  $oninput={['update-agent-form', 'temperature']}
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            {/* System Prompt Section */}
-            <div className="form-section">
-              <h3 className="section-title">System Prompt</h3>
-
-              <div className="form-group">
-                {/* <label htmlFor="agent-prompt">System Prompt</label> */}
-                <textarea
-                  id="agent-prompt"
-                  className="form-textarea"
-                  placeholder="Enter the system prompt for this agent..."
-                  rows={8}
-                  value={formData.systemPrompt}
-                  $oninput={['update-agent-form', 'systemPrompt']}
-                  disabled={loading}
-                />
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <div className="modal-footer">
-          <div className="modal-actions">
-            {/* Delete button - only show in edit mode */}
-            {isEditMode && (
-              <button
-                className="btn btn-danger"
-                $onclick={['delete-agent', selectedAgent?.id]}
-                disabled={loading}
-                title="Delete agent"
-              >
-                {loading ? 'Deleting...' : 'Delete'}
-              </button>
             )}
 
-            <div className="modal-primary-actions">
-              <button
-                className="btn btn-secondary"
-                $onclick="close-agent-edit"
-                disabled={loading}
-              >
-                Cancel
-              </button>
+            {isDeleteMode ? (
+              // Delete confirmation view
+              <div className="delete-confirmation">
+                <h3>Delete Agent</h3>
+                <p>Are you sure you want to delete "{state.formData.name}"?</p>
+                <p>This action cannot be undone.</p>
+              </div>
+            ) : (
+              // Form view for create and edit modes
+              <form className="agent-form">
+                {/* Basic Information Section */}
+                <div className="form-section">
+                  <h3 className="section-title">Basic Information</h3>
 
-              <button
-                className="btn btn-primary"
-                $onclick="save-agent"
-                disabled={loading || !formData.name.trim()}
-              >
-                {loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
-              </button>
+                  <div className="form-group">
+                    <label htmlFor="agent-name">Agent Name *</label>
+                    <input
+                      id="agent-name"
+                      type="text"
+                      className="form-input"
+                      placeholder="Enter agent name"
+                      value={state.formData.name}
+                      $oninput={[updateField, 'name']}
+                      disabled={state.loading}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="agent-description">Description</label>
+                    <input
+                      id="agent-description"
+                      type="text"
+                      className="form-input"
+                      placeholder="Brief description of the agent"
+                      value={state.formData.description}
+                      $oninput={[updateField, 'description']}
+                      disabled={state.loading}
+                    />
+                  </div>
+                </div>
+
+                {/* LLM Configuration Section */}
+                <div className="form-section">
+                  <h3 className="section-title">LLM Configuration</h3>
+
+                  <div className="form-group">
+                    <label htmlFor="agent-provider">Provider</label>
+                    <select
+                      id="agent-provider"
+                      className="form-select"
+                      value={state.formData.provider}
+                      $onchange={[updateField, 'provider']}
+                      disabled={state.loading}
+                    >
+                      <option value="">Select provider</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google</option>
+                      <option value="microsoft">Microsoft</option>
+                      <option value="ollama">Ollama (Local)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="agent-model">Model</label>
+                    <input
+                      id="agent-model"
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
+                      value={state.formData.model}
+                      $oninput={[updateField, 'model']}
+                      disabled={state.loading}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="agent-temperature">Temperature</label>
+                    <input
+                      id="agent-temperature"
+                      type="number"
+                      className="form-input"
+                      placeholder="0.0 - 2.0"
+                      min="0"
+                      max="2"
+                      step="0.1"
+                      value={state.formData.temperature}
+                      $oninput={[updateField, 'temperature']}
+                      disabled={state.loading}
+                    />
+                  </div>
+                </div>
+
+                {/* System Prompt Section */}
+                <div className="form-section">
+                  <h3 className="section-title">System Prompt</h3>
+
+                  <div className="form-group">
+                    <textarea
+                      id="agent-prompt"
+                      className="form-textarea"
+                      placeholder="Enter the system prompt for this agent..."
+                      rows={8}
+                      value={state.formData.systemPrompt}
+                      $oninput={[updateField, 'systemPrompt']}
+                      disabled={state.loading}
+                    />
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          <div className="modal-footer">
+            <div className="modal-actions">
+              {isDeleteMode ? (
+                // Delete mode buttons
+                <div className="modal-primary-actions">
+                  <button
+                    className="btn btn-secondary"
+                    $onclick={[closeModal]}
+                    disabled={state.loading}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="btn btn-danger"
+                    $onclick={[deleteAgent]}
+                    disabled={state.loading}
+                  >
+                    {state.loading ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              ) : (
+                // Create/Edit mode buttons
+                <>
+                  {/* Delete button - only show in edit mode */}
+                  {isEditMode && (
+                    <button
+                      className="btn btn-danger"
+                      $onclick={[deleteAgent]}
+                      disabled={state.loading}
+                      title="Delete agent"
+                    >
+                      {state.loading ? 'Deleting...' : 'Delete'}
+                    </button>
+                  )}
+
+                  <div className="modal-primary-actions">
+                    <button
+                      className="btn btn-secondary"
+                      $onclick={[closeModal]}
+                      disabled={state.loading}
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      className="btn btn-primary"
+                      $onclick={[saveAgent]}
+                      disabled={state.loading || !state.formData.name.trim()}
+                    >
+                      {state.loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 }
