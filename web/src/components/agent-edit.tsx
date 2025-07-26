@@ -145,12 +145,12 @@ export default class AgentEdit extends Component<AgentEditState> {
   declare props: Readonly<AgentEditProps>;
   mounted = (props: AgentEditProps): AgentEditState => getStateFromProps(props);
 
-  state: AgentEditState  = {
-  mode: 'create',
-  worldName: '',
-  agent: defaultAgentData,
-  loading: true,
-};
+  state: AgentEditState = {
+    mode: 'create',
+    worldName: '',
+    agent: defaultAgentData,
+    loading: true,
+  };
 
   view = (state: AgentEditState) => {
     if (state.loading) {
@@ -331,10 +331,10 @@ export default class AgentEdit extends Component<AgentEditState> {
             )}
           </div>
 
-                    <div className="modal-footer">
+          <div className="modal-footer">
             <div className="modal-actions">
               {isDeleteMode ? (
-                // Delete mode buttons
+                // Delete mode buttons - centered
                 <div className="modal-primary-actions">
                   <button
                     className="btn btn-secondary"
@@ -352,20 +352,17 @@ export default class AgentEdit extends Component<AgentEditState> {
                     {state.loading ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
-              ) : (
-                // Create/Edit mode buttons
+              ) : isEditMode ? (
+                // Edit mode buttons - delete on left, primary actions on right
                 <>
-                  {/* Delete button - only show in edit mode */}
-                  {isEditMode && (
-                    <button
-                      className="btn btn-danger"
-                      $onclick={[deleteAgent]}
-                      disabled={state.loading}
-                      title="Delete agent"
-                    >
-                      {state.loading ? 'Deleting...' : 'Delete'}
-                    </button>
-                  )}
+                  <button
+                    className="btn btn-danger"
+                    $onclick={[deleteAgent]}
+                    disabled={state.loading}
+                    title="Delete agent"
+                  >
+                    {state.loading ? 'Deleting...' : 'Delete'}
+                  </button>
 
                   <div className="modal-primary-actions">
                     <button
@@ -381,10 +378,29 @@ export default class AgentEdit extends Component<AgentEditState> {
                       $onclick={[saveAgent]}
                       disabled={state.loading || !state.agent.name.trim()}
                     >
-                      {state.loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
+                      {state.loading ? 'Saving...' : 'Update'}
                     </button>
                   </div>
                 </>
+              ) : (
+                // Create mode buttons - align to right with margin-left: auto
+                <div className="modal-primary-actions" style="margin-left: auto;">
+                  <button
+                    className="btn btn-secondary"
+                    $onclick={[closeModal]}
+                    disabled={state.loading}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="btn btn-primary"
+                    $onclick={[saveAgent]}
+                    disabled={state.loading || !state.agent.name.trim()}
+                  >
+                    {state.loading ? 'Saving...' : 'Create'}
+                  </button>
+                </div>
               )}
             </div>
           </div>

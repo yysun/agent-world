@@ -37,10 +37,13 @@ import {
 import type { WorldComponentState, Agent } from '../types';
 
 export const worldUpdateHandlers = {
-  // World Initialization Handler
-  '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
-    const worldName = name ? decodeURIComponent(name) : 'New World';
 
+  '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
+    if (!name) {
+      location.href = '/';
+      return;
+    }
+    const worldName = decodeURIComponent(name);
     try {
       yield {
         ...state,
@@ -50,10 +53,23 @@ export const worldUpdateHandlers = {
         isWaiting: false,
         activeAgent: null
       };
-
       const world = await api.getWorld(worldName);
-      const messageMap = new Map();
 
+      if (!world) {
+        yield {
+          ...state,
+          worldName,
+          loading: false,
+          error: 'World not found',
+          isWaiting: false,
+          selectedSettingsTarget: 'world',
+          selectedAgent: null,
+          activeAgent: null
+        };
+        return;
+      }
+
+      const messageMap = new Map();
       const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
         if (agent.memory && Array.isArray(agent.memory)) {
           agent.memory.forEach((memoryItem: any) => {

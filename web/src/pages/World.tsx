@@ -133,27 +133,36 @@ export default class WorldComponent extends Component<WorldComponentState> {
         <div className="world-columns">
           <div className="chat-column">
             <div className="agents-section">
-              <div className="agents-row">
-                {state.loading ? (
-                  <div className="loading-agents">Loading agents...</div>
-                ) : !state.agents?.length ? (
-                  <div className="no-agents">No agents in this world</div>
-                ) : (
-                  <div className="agents-list">
-                    {state.agents.map((agent, index) => {
-                      const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
-                      return (
-                        <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
-                          <div className="agent-sprite-container">
-                            <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
-                            <div className="message-badge">{agent.messageCount}</div>
+              <div className="agents-row agents-row-with-back">
+                <div className="back-button-container">
+                  <a href="/">
+                    <button className="back-button" title="Back to Worlds">
+                      <span className="world-back-icon">←</span>
+                    </button>
+                  </a>
+                </div>
+                <div className="agents-list-container">
+                  {state.loading ? (
+                    <div className="loading-agents">Loading agents...</div>
+                  ) : !state.agents?.length ? (
+                    <div className="no-agents">No agents in this world</div>
+                  ) : (
+                    <div className="agents-list">
+                      {state.agents.map((agent, index) => {
+                        const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
+                        return (
+                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
+                            <div className="agent-sprite-container">
+                              <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
+                              <div className="message-badge">{agent.messageCount}</div>
+                            </div>
+                            <div className="agent-name">{agent.name}</div>
                           </div>
-                          <div className="agent-name">{agent.name}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

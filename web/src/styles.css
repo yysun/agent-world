@@ -400,6 +400,40 @@ h2 {
   color: var(--accent-secondary);
 }
 
+
+.back-button {
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  font-size: 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Short Stack', cursive;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.back-button:hover {
+  color: var(--accent-secondary);
+  transform: scale(1.1);
+}
+
+.world-back-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: all 0.3s ease;
+}
+
+
+
 /* Action buttons container */
 .action-buttons {
   display: flex;
@@ -487,12 +521,34 @@ h2 {
   padding: 1rem 0;
 }
 
+
 .agents-row {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
   min-height: 100px;
+}
+
+.agents-row-with-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.back-button-container {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-right: 1.5rem;
+}
+
+.agents-list-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .agents-list {

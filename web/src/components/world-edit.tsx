@@ -265,7 +265,7 @@ export default class WorldEdit extends Component<WorldEditState> {
           <div className="modal-footer">
             <div className="modal-actions">
               {isDeleteMode ? (
-                // Delete mode buttons
+                // Delete mode buttons - centered
                 <div className="modal-primary-actions">
                   <button
                     className="btn btn-secondary"
@@ -283,20 +283,17 @@ export default class WorldEdit extends Component<WorldEditState> {
                     {state.loading ? 'Deleting...' : 'Delete'}
                   </button>
                 </div>
-              ) : (
-                // Create/Edit mode buttons
+              ) : isEditMode ? (
+                // Edit mode buttons - delete on left, primary actions on right
                 <>
-                  {/* Delete button - only show in edit mode */}
-                  {isEditMode && (
-                    <button
-                      className="btn btn-danger"
-                      $onclick={[deleteWorld]}
-                      disabled={state.loading}
-                      title="Delete world"
-                    >
-                      {state.loading ? 'Deleting...' : 'Delete'}
-                    </button>
-                  )}
+                  <button
+                    className="btn btn-danger"
+                    $onclick={[deleteWorld]}
+                    disabled={state.loading}
+                    title="Delete world"
+                  >
+                    {state.loading ? 'Deleting...' : 'Delete'}
+                  </button>
 
                   <div className="modal-primary-actions">
                     <button
@@ -312,10 +309,29 @@ export default class WorldEdit extends Component<WorldEditState> {
                       $onclick={[saveWorld]}
                       disabled={state.loading || !state.world.name.trim()}
                     >
-                      {state.loading ? 'Saving...' : (isEditMode ? 'Update' : 'Create')}
+                      {state.loading ? 'Saving...' : 'Update'}
                     </button>
                   </div>
                 </>
+              ) : (
+                // Create mode buttons - align to right with margin-left: auto
+                <div className="modal-primary-actions" style="margin-left: auto;">
+                  <button
+                    className="btn btn-secondary"
+                    $onclick={[closeModal]}
+                    disabled={state.loading}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    className="btn btn-primary"
+                    $onclick={[saveWorld]}
+                    disabled={state.loading || !state.world.name.trim()}
+                  >
+                    {state.loading ? 'Saving...' : 'Create'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
