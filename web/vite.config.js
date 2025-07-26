@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  build: {
+    emptyOutDir: true, // Set to false to prevent clearing the output directory
+  },
   server: {
     proxy: {
       '/api': {
