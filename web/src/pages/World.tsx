@@ -37,8 +37,6 @@ import api from '../api';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
-  is_global_event = () => true;
-
   state = async (): Promise<WorldComponentState> => {
     return {
       worldName: 'World',
@@ -245,26 +243,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showAgentEdit: false
     }),
 
-    'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      // Refresh agents list and close modal
-      const agents = await api.getAgents(state.worldName);
-      return {
-        ...state,
-        agents,
-        showAgentEdit: false
-      };
-    },
-
-    'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      // Refresh agents list and close modal
-      const agents = await api.getAgents(state.worldName);
-      return {
-        ...state,
-        agents,
-        showAgentEdit: false
-      };
-    },
-
     // World edit event handlers (simplified)
     'open-world-edit': (state: WorldComponentState): WorldComponentState => ({
       ...state,
@@ -277,16 +255,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       ...state,
       showWorldEdit: false
     }),
-
-    'world-saved': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showWorldEdit: false
-    }),
-
-    'world-deleted': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      showWorldEdit: false
-    })
   };
 }
 
