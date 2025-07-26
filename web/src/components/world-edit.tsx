@@ -265,8 +265,8 @@ export default class WorldEdit extends Component<WorldEditState> {
           <div className="modal-footer">
             <div className="modal-actions">
               {isDeleteMode ? (
-                // Delete mode buttons - centered
-                <div className="modal-primary-actions">
+                // Delete mode buttons - align to right like create mode
+                <div className="modal-primary-actions" style="margin-left: auto;">
                   <button
                     className="btn btn-secondary"
                     $onclick={[closeModal]}
