@@ -18,7 +18,7 @@
  * - Semantic HTML and proper form structure
  * 
  * Event Flow:
- * - Form field changes: $oninput={['update-world-form-field', field]}
+ * - Form field changes: $oninput={['update-world-form', field]}
  * - Save button: $onclick="save-world"
  * - Cancel button: $onclick="close-world-edit"
  * - Delete button: $onclick={['delete-world', worldName]} (edit mode only)
@@ -26,7 +26,7 @@
  * - Escape key: handled by parent component
  * 
  * Expected Parent Update Handlers:
- * - 'update-world-form-field': (state, field, event) => updates formData[field]
+ * - 'update-world-form': (state, field, event) => updates formData[field]
  * - 'save-world': (state) => validates and saves world data
  * - 'close-world-edit': (state) => closes modal and resets form
  * - 'delete-world': (state, worldName) => deletes world and closes modal
@@ -98,7 +98,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   className="form-input"
                   placeholder="Enter world name"
                   value={formData.name}
-                  $oninput={['update-world-form-field', 'name']}
+                  $oninput={['update-world-form', 'name']}
                   disabled={loading}
                 />
               </div>
@@ -111,7 +111,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   className="form-input"
                   placeholder="Brief description of the world"
                   value={formData.description}
-                  $oninput={['update-world-form-field', 'description']}
+                  $oninput={['update-world-form', 'description']}
                   disabled={loading}
                 />
               </div>
@@ -126,7 +126,7 @@ export default function WorldEdit(props: WorldEditProps) {
                   min="1"
                   max="50"
                   value={formData.turnLimit}
-                  $oninput={['update-world-form-field', 'turnLimit']}
+                  $oninput={['update-world-form', 'turnLimit']}
                   disabled={loading}
                 />
               </div>

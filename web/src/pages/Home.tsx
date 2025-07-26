@@ -322,7 +322,6 @@ export default class HomeComponent extends Component<HomeState> {
             error: null
           }
         };
-        app.run('#', loadingState);
 
         let updatedWorld: World;
         if (mode === 'create') {
