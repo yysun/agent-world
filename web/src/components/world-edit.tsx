@@ -12,14 +12,14 @@
  * 
  * Implementation:
  * - AppRun class component using mounted pattern for props-to-state initialization
- * - Module-level functions imported from world-edit-functions.ts
- * - Direct function references: $oninput={[updateField, 'name']}
+ * - Module-level functions defined in same file for consolidation
+ * - Direct function references: $onclick={[saveWorld]}
  * - Global events for parent coordination: 'world-saved', 'world-deleted'
  * - Success messages shown before auto-closing modal
  * - All business logic testable independently of UI
  * 
  * Event Flow:
- * - Form field changes: $oninput={[updateField, field]}
+ * - Form field changes: $bind="world.name"
  * - Save button: $onclick={[saveWorld]}
  * - Delete button: $onclick={[deleteWorld]}
  * - Cancel/Close: $onclick={[closeModal]}
@@ -27,19 +27,127 @@
  */
 
 import { app, Component } from 'apprun';
-import { 
-  saveWorld, 
-  deleteWorld, 
-  closeModal, 
-  initializeState,
-  type WorldEditState,
-  type WorldEditProps
-} from './world-edit-functions';
+import type { World } from '../types';
+import api from '../api';
+
+// Props interface for the component initialization
+interface WorldEditProps {
+  world?: World | null;
+  mode?: 'create' | 'edit' | 'delete';
+}
+
+// Initialize component state from props
+const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
+  mode: props.mode || 'create',
+  world: props.world || getDefaultWorldData(),
+  loading: false,
+});
+
+// Helper function to get default world data
+const getDefaultWorldData = (): Partial<World> => ({
+  name: '',
+  description: '',
+  turnLimit: 5
+});
+
+export interface WorldEditState {
+  mode: 'create' | 'edit' | 'delete';
+  world: Partial<World>;
+  loading: boolean;
+  error?: string | null;
+  successMessage?: string | null;
+}
+
+// Save world function (handles both create and update)
+export const saveWorld = async function* (state: WorldEditState): AsyncGenerator<WorldEditState> {
+  // Form validation
+  if (!state.world.name.trim()) {
+    yield { ...state, error: 'World name is required' };
+    return;
+  }
+
+  // Set loading state
+  yield { ...state, loading: true, error: null };
+
+  try {
+    if (state.mode === 'create') {
+      await api.createWorld(state.world);
+    } else {
+      // For update, we need the original world name, which should be preserved from initialization
+      await api.updateWorld(state.world.name, state.world);
+    }
+
+    const successMessage = state.mode === 'create'
+      ? 'World created successfully!'
+      : 'World updated successfully!';
+
+    // Show success message
+    yield { ...state, loading: false, successMessage };
+
+    // Auto-close after showing success message
+    setTimeout(() => {
+      if (state.mode === 'create') {
+        // Redirect to new world
+        window.location.href = '/World/' + encodeURIComponent(state.world.name);
+      } else {
+        app.run('world-saved');
+      }
+    }, 2000);
+
+  } catch (error: any) {
+    yield {
+      ...state,
+      loading: false,
+      error: error.message || 'Failed to save world'
+    };
+  }
+};
+
+// Delete world function
+export const deleteWorld = async function* (state: WorldEditState): AsyncGenerator<WorldEditState> {
+  // Set loading state
+  yield { ...state, loading: true, error: null };
+
+  try {
+    await api.deleteWorld(state.world.name);
+
+    // Show success message
+    yield {
+      ...state,
+      loading: false,
+      successMessage: 'World deleted successfully!'
+    };
+
+    // Auto-close and redirect to home after showing success message
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 2000);
+
+  } catch (error: any) {
+    yield {
+      ...state,
+      loading: false,
+      error: error.message || 'Failed to delete world'
+    };
+  }
+};
+
+// Close modal function
+export const closeModal = (): void => {
+  app.run('close-world-edit');
+};
 
 export default class WorldEdit extends Component<WorldEditState> {
-  
   declare props: Readonly<WorldEditProps>;
-  mounted = (props: WorldEditProps): WorldEditState => initializeState(props);
+  mounted = (props: WorldEditProps): WorldEditState => getStateFromProps(props);
+
+  state: WorldEditState = {
+    mode: 'create' as const,
+    world: getDefaultWorldData(),
+    loading: false,
+    error: null,
+    successMessage: null
+  };
 
   view = (state: WorldEditState) => {
     // Success message view
@@ -52,8 +160,8 @@ export default class WorldEdit extends Component<WorldEditState> {
                 <h3>Success!</h3>
                 <p>{state.successMessage}</p>
                 <div className="loading-spinner">
-                  {state.mode === 'create' ? 'Redirecting to new world...' : 
-                   state.mode === 'delete' ? 'Redirecting to home...' : 'Closing...'}
+                  {state.mode === 'create' ? 'Redirecting to new world...' :
+                    state.mode === 'delete' ? 'Redirecting to home...' : 'Closing...'}
                 </div>
               </div>
             </div>
@@ -64,7 +172,7 @@ export default class WorldEdit extends Component<WorldEditState> {
 
     const isEditMode = state.mode === 'edit';
     const isDeleteMode = state.mode === 'delete';
-    
+
     let title: string;
     if (isDeleteMode) {
       title = `Delete ${state.world.name || 'World'}`;

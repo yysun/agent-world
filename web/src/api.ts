@@ -47,7 +47,7 @@ const API_BASE_URL = '/api';
 /**
  * Generic fetch wrapper with error handling
  */
-async function apiRequest(endpoint: string, options: ApiRequestOptions = {}): Promise<Response> {
+export async function apiRequest(endpoint: string, options: ApiRequestOptions = {}): Promise<Response> {
   const url = `${API_BASE_URL}${endpoint}`;
 
   try {
@@ -230,19 +230,19 @@ async function deleteAgent(worldName: string, agentName: string): Promise<void> 
 /**
  * Get agent memory
  */
-async function getAgentMemory(worldName: string, agentName: string): Promise<AgentMemoryResponse> {
-  if (!worldName || !agentName) {
-    throw new Error('World name and agent name are required');
-  }
+// async function getAgentMemory(worldName: string, agentName: string): Promise<AgentMemoryResponse> {
+//   if (!worldName || !agentName) {
+//     throw new Error('World name and agent name are required');
+//   }
 
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`);
-  return response.json();
-}
+//   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`);
+//   return response.json();
+// }
 
 /**
  * Clear agent memory
  */
-async function clearAgentMemory(worldName: string, agentName: string): Promise<void> {
+export async function clearAgentMemory(worldName: string, agentName: string): Promise<void> {
   if (!worldName || !agentName) {
     throw new Error('World name and agent name are required');
   }
@@ -253,7 +253,7 @@ async function clearAgentMemory(worldName: string, agentName: string): Promise<v
 }
 
 // Export the API functions
-export {
+export default {
   // Core API function
   apiRequest,
 
@@ -272,6 +272,6 @@ export {
   deleteAgent,
 
   // Agent memory management
-  getAgentMemory,
+  // getAgentMemory,
   clearAgentMemory,
 };

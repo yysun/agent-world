@@ -22,7 +22,7 @@
  */
 
 import { app } from 'apprun';
-import { getWorld, clearAgentMemory } from '../api';
+import api from '../api';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -51,7 +51,7 @@ export const worldUpdateHandlers = {
         activeAgent: null
       };
 
-      const world = await getWorld(worldName);
+      const world = await api.getWorld(worldName);
       const messageMap = new Map();
 
       const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
@@ -267,7 +267,7 @@ export const worldUpdateHandlers = {
   // Agent Message Clearing Handlers
   'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
     try {
-      await clearAgentMemory(state.worldName, agent.name);
+      await api.clearAgentMemory(state.worldName, agent.name);
 
       const updatedAgents = state.agents.map(a =>
         a.id === agent.id ? { ...a, messageCount: 0 } : a
@@ -302,7 +302,7 @@ export const worldUpdateHandlers = {
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
     try {
       await Promise.all(
-        state.agents.map(agent => clearAgentMemory(state.worldName, agent.name))
+        state.agents.map(agent => api.clearAgentMemory(state.worldName, agent.name))
       );
 
       const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));

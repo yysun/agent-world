@@ -26,7 +26,7 @@
  */
 
 import { app, Component } from 'apprun';
-import { getWorlds } from '../api';
+import api from '../api';
 import WorldEdit from '../components/world-edit';
 import type { World } from '../types';
 
@@ -43,7 +43,7 @@ interface HomeState {
 
 export default class HomeComponent extends Component<HomeState> {
   state = async () => {
-    const worlds = await getWorlds();
+    const worlds = await api.getWorlds();
     return {
       worlds,
       currentIndex: 0,
@@ -262,7 +262,7 @@ export default class HomeComponent extends Component<HomeState> {
 
     'world-saved': async (state: HomeState): Promise<HomeState> => {
       // Refresh worlds list and close modal
-      const worlds = await getWorlds();
+      const worlds = await api.getWorlds();
       return {
         ...state,
         worlds,
@@ -272,7 +272,7 @@ export default class HomeComponent extends Component<HomeState> {
 
     'world-deleted': async (state: HomeState): Promise<HomeState> => {
       // Refresh worlds list and close modal
-      const worlds = await getWorlds();
+      const worlds = await api.getWorlds();
       const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
       return {
         ...state,

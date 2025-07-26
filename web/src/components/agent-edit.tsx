@@ -27,20 +27,147 @@
  */
 
 import { app, Component } from 'apprun';
-import { 
-  saveAgent, 
-  deleteAgent, 
-  closeModal, 
-  initializeState,
-  type AgentEditState,
-  type AgentEditProps
-} from './agent-edit-functions';
+import type { Agent, LLMProvider } from '../types';
+import api from '../api';
+
+// Props interface for the component initialization
+interface AgentEditProps {
+  agent?: Agent | null;
+  mode?: 'create' | 'edit' | 'delete';
+  worldName: string;
+}
+
+// Initialize component state from props
+const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
+  mode: props.mode || 'create',
+  worldName: props.worldName,
+  agent: props.agent || defaultAgentData,
+  loading: false,
+});
+
+export const defaultAgentData: Partial<Agent> = {
+  name: '',
+  description: '',
+  provider: 'ollama' as LLMProvider,
+  model: 'llama3.2:3b',
+  temperature: 0.7,
+  systemPrompt: ''
+};
+
+export interface AgentEditState {
+  mode: 'create' | 'edit' | 'delete';
+  worldName: string;
+  agent: Partial<Agent>;
+  loading: boolean;
+  error?: string | null;
+  successMessage?: string | null;
+}
+
+
+// Save agent function (handles both create and update)
+export const saveAgent = async function* (state: AgentEditState): AsyncGenerator<AgentEditState> {
+  // Form validation
+  if (!state.agent.name.trim()) {
+    yield { ...state, error: 'Agent name is required' };
+    return;
+  }
+
+  // Set loading state
+  yield { ...state, loading: true, error: null };
+
+  try {
+    if (state.mode === 'create') {
+      await api.createAgent(state.worldName, state.agent);
+    } else {
+      await api.updateAgent(state.worldName, state.agent.name, state.agent);
+    }
+
+    const successMessage = state.mode === 'create'
+      ? 'Agent created successfully!'
+      : 'Agent updated successfully!';
+
+    // Show success message
+    yield { ...state, loading: false, successMessage };
+
+    // Auto-close after showing success message
+    setTimeout(() => {
+      app.run('agent-saved');
+    }, 2000);
+
+  } catch (error: any) {
+    yield {
+      ...state,
+      loading: false,
+      error: error.message || 'Failed to save agent'
+    };
+  }
+};
+
+// Delete agent function
+export const deleteAgent = async function* (state: AgentEditState): AsyncGenerator<AgentEditState> {
+  // Set loading state
+  yield { ...state, loading: true, error: null };
+
+  try {
+    await api.deleteAgent(state.worldName, state.agent.name);
+
+    // Show success message
+    yield {
+      ...state,
+      loading: false,
+      successMessage: 'Agent deleted successfully!'
+    };
+
+    // Auto-close after showing success message
+    setTimeout(() => {
+      app.run('agent-deleted');
+    }, 2000);
+
+  } catch (error: any) {
+    yield {
+      ...state,
+      loading: false,
+      error: error.message || 'Failed to delete agent'
+    };
+  }
+};
+
+// Close modal function
+export const closeModal = (): void => {
+  app.run('close-agent-edit');
+};
+
+
+
+
 
 export default class AgentEdit extends Component<AgentEditState> {
   declare props: Readonly<AgentEditProps>;
-  mounted = (props: AgentEditProps): AgentEditState => initializeState(props);
+  mounted = (props: AgentEditProps): AgentEditState => getStateFromProps(props);
+
+  state: AgentEditState  = {
+  mode: 'create',
+  worldName: '',
+  agent: defaultAgentData,
+  loading: true,
+};
 
   view = (state: AgentEditState) => {
+    if (state.loading) {
+      return (
+        <div className="modal-backdrop">
+          <div className="modal-content">
+            <div className="modal-body">
+              <div className="loading-spinner">
+                {state.mode === 'create' ? 'Creating agent...' :
+                  state.mode === 'edit' ? 'Updating agent...' : 'Deleting agent...'}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // Success message view
     if (state.successMessage) {
       return (
@@ -60,7 +187,7 @@ export default class AgentEdit extends Component<AgentEditState> {
 
     const isEditMode = state.mode === 'edit';
     const isDeleteMode = state.mode === 'delete';
-    
+
     let title: string;
     if (isDeleteMode) {
       title = `Delete ${state.agent.name || 'Agent'}`;
@@ -204,7 +331,7 @@ export default class AgentEdit extends Component<AgentEditState> {
             )}
           </div>
 
-          <div className="modal-footer">
+                    <div className="modal-footer">
             <div className="modal-actions">
               {isDeleteMode ? (
                 // Delete mode buttons

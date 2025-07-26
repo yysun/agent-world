@@ -33,7 +33,7 @@ import WorldSettings from '../components/world-settings';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
-import { getAgents } from '../api';
+import api from '../api';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
@@ -238,7 +238,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
     'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
       // Refresh agents list and close modal
-      const agents = await getAgents(state.worldName);
+      const agents = await api.getAgents(state.worldName);
       return {
         ...state,
         agents,
@@ -248,7 +248,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
     'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
       // Refresh agents list and close modal
-      const agents = await getAgents(state.worldName);
+      const agents = await api.getAgents(state.worldName);
       return {
         ...state,
         agents,
