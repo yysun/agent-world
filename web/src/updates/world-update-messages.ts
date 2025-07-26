@@ -26,6 +26,7 @@ import {
   handleComplete
 } from '../sse-client';
 import type { WorldComponentState, Agent } from '../types';
+import { clearAgentMemory } from '../api';
 
 export const worldMessageHandlers = {
   // Update user input
@@ -154,5 +155,110 @@ export const worldMessageHandlers = {
   },
   'handleComplete': (state: WorldComponentState, data: any): WorldComponentState => {
     return handleComplete(state as any, data) as WorldComponentState;
+  },
+
+  // Agent Message Clearing Handlers (moved from world-update-agent.ts)
+  'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
+    try {
+      await clearAgentMemory(state.worldName, agent.name);
+
+      // Update agent's message count and remove agent's messages from display
+      const updatedAgents = state.agents.map(a =>
+        a.id === agent.id ? { ...a, messageCount: 0 } : a
+      );
+
+      // Remove agent's messages from the message list
+      const filteredMessages = (state.messages || []).filter(msg => msg.sender !== agent.name);
+
+      // Update selected agent if it's the same one
+      const updatedSelectedAgent = state.selectedAgent?.id === agent.id
+        ? { ...state.selectedAgent, messageCount: 0 }
+        : state.selectedAgent;
+
+      // Update world object with updated agents
+      const updatedWorld = state.world ? {
+        ...state.world,
+        agents: updatedAgents
+      } : null;
+
+      return {
+        ...state,
+        world: updatedWorld,
+        agents: updatedAgents,
+        messages: filteredMessages,
+        selectedAgent: updatedSelectedAgent
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to clear agent messages'
+      };
+    }
+  },
+
+  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    try {
+      // Clear messages for all agents
+      await Promise.all(
+        state.agents.map(agent => clearAgentMemory(state.worldName, agent.name))
+      );
+
+      // Update all agents' message counts
+      const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));
+
+      // Update selected agent if any
+      const updatedSelectedAgent = state.selectedAgent
+        ? { ...state.selectedAgent, messageCount: 0 }
+        : null;
+
+      // Update world object with updated agents
+      const updatedWorld = state.world ? {
+        ...state.world,
+        agents: updatedAgents
+      } : null;
+
+      return {
+        ...state,
+        world: updatedWorld,
+        agents: updatedAgents,
+        messages: [], // Clear all messages
+        selectedAgent: updatedSelectedAgent
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to clear world messages'
+      };
+    }
+  },
+
+  // Settings selection handlers (moved from world-update-agent.ts)
+  'select-world-settings': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    selectedSettingsTarget: 'world',
+    selectedAgent: null,
+    messages: (state.messages || []).filter(message => !message.userEntered)
+  }),
+
+  'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
+    // If clicking on already selected agent, deselect it (show world settings)
+    if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
+      return {
+        ...state,
+        selectedSettingsTarget: 'world',
+        selectedAgent: null,
+        messages: (state.messages || []).filter(message => !message.userEntered),
+        userInput: ''
+      };
+    }
+
+    // Otherwise, select the agent
+    return {
+      ...state,
+      selectedSettingsTarget: 'agent',
+      selectedAgent: agent,
+      messages: (state.messages || []).filter(message => !message.userEntered),
+      userInput: '@' + agent.name + ' '
+    };
   }
 };

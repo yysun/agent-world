@@ -217,28 +217,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // ...agentUpdateHandlers,
     // ...worldUpdateHandlers,
 
-    'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
-      // If clicking on already selected agent, deselect it (show world settings)
-      if (state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id) {
-        return {
-          ...state,
-          selectedSettingsTarget: 'world',
-          selectedAgent: null,
-          messages: (state.messages || []).filter(message => !message.userEntered),
-          userInput: ''
-        };
-      }
-
-      // Otherwise, select the agent
-      return {
-        ...state,
-        selectedSettingsTarget: 'agent',
-        selectedAgent: agent,
-        messages: (state.messages || []).filter(message => !message.userEntered),
-        userInput: '@' + agent.name + ' '
-      };
-    },
-
     // New simplified agent edit event handlers
     'open-agent-create': (state: WorldComponentState): WorldComponentState => ({
       ...state,
