@@ -200,16 +200,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
         {state.showWorldEdit &&
           <WorldEdit
-            isOpen={state.showWorldEdit}
+            world={state.selectedWorldForEdit}
             mode={state.worldEditMode}
-            selectedWorld={state.selectedWorldForEdit}
-            formData={{
-              name: state.world?.name || '',
-              description: state.world?.description || '',
-              turnLimit: state.world?.turnLimit || 5
-            }}
-            loading={false}
-            error={null}
           />
         }
       </div>
