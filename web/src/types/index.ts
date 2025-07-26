@@ -150,8 +150,16 @@ export interface WorldComponentState extends SSEComponentState {
   selectedSettingsTarget: 'world' | 'agent' | null;
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;
-  agentEdit: AgentEditState;
-  worldEdit: WorldEditState;
+  
+  // Simplified agent edit state - just boolean flags and mode
+  showAgentEdit: boolean;
+  agentEditMode: 'create' | 'edit' | 'delete';
+  selectedAgentForEdit: Agent | null;
+  
+  // Simplified world edit state - just boolean flags and mode
+  showWorldEdit: boolean;
+  worldEditMode: 'create' | 'edit' | 'delete';
+  selectedWorldForEdit: World | null;
 
   // Additional missing properties from SSE state
   connectionStatus: string;

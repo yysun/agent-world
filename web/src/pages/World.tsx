@@ -36,6 +36,7 @@ import { agentUpdateHandlers } from '../updates/world-update-agent';
 import { worldUpdateHandlers } from '../updates/world-update-world';
 import { worldInitHandlers } from '../updates/world-update-init';
 import { worldMessageHandlers } from '../updates/world-update-messages';
+import { getAgents } from '../api';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
@@ -56,33 +57,14 @@ export default class WorldComponent extends Component<WorldComponentState> {
       selectedSettingsTarget: 'world',
       selectedAgent: null,
       activeAgent: null,
-      agentEdit: {
-        isOpen: false,
-        mode: 'create',
-        selectedAgent: null,
-        formData: {
-          name: '',
-          description: '',
-          provider: '',
-          model: '',
-          temperature: 0.7,
-          systemPrompt: ''
-        },
-        loading: false,
-        error: null
-      },
-      worldEdit: {
-        isOpen: false,
-        mode: 'edit',
-        selectedWorld: null,
-        formData: {
-          name: '',
-          description: '',
-          turnLimit: 5
-        },
-        loading: false,
-        error: null
-      },
+      // Simplified agent edit state - just boolean flags and mode
+      showAgentEdit: false,
+      agentEditMode: 'create',
+      selectedAgentForEdit: null,
+      // Simplified world edit state
+      showWorldEdit: false,
+      worldEditMode: 'edit',
+      selectedWorldForEdit: null,
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -208,24 +190,28 @@ export default class WorldComponent extends Component<WorldComponentState> {
           </div>
         </div>
 
-        <AgentEdit
-          isOpen={state.agentEdit.isOpen}
-          mode={state.agentEdit.mode}
-          selectedAgent={state.agentEdit.selectedAgent}
-          worldName={state.worldName}
-          formData={state.agentEdit.formData}
-          loading={state.agentEdit.loading}
-          error={state.agentEdit.error}
-        />
+        {state.showAgentEdit && 
+          <AgentEdit 
+            agent={state.selectedAgentForEdit} 
+            mode={state.agentEditMode}
+            worldName={state.worldName}
+          />
+        }
 
-        <WorldEdit
-          isOpen={state.worldEdit.isOpen}
-          mode={state.worldEdit.mode}
-          selectedWorld={state.worldEdit.selectedWorld}
-          formData={state.worldEdit.formData}
-          loading={state.worldEdit.loading}
-          error={state.worldEdit.error}
-        />
+        {state.showWorldEdit &&
+          <WorldEdit
+            isOpen={state.showWorldEdit}
+            mode={state.worldEditMode}
+            selectedWorld={state.selectedWorldForEdit}
+            formData={{
+              name: state.world?.name || '',
+              description: state.world?.description || '',
+              turnLimit: state.world?.turnLimit || 5
+            }}
+            loading={false}
+            error={null}
+          />
+        }
       </div>
     );
   };
@@ -247,8 +233,76 @@ export default class WorldComponent extends Component<WorldComponentState> {
       }
       return baseResult;
     },
-    // Send message action
-    // ...existing code...
+
+    // New simplified agent edit event handlers
+    'open-agent-create': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showAgentEdit: true,
+      agentEditMode: 'create',
+      selectedAgentForEdit: null
+    }),
+
+    'open-agent-edit': (state: WorldComponentState, agent: Agent): WorldComponentState => ({
+      ...state,
+      showAgentEdit: true,
+      agentEditMode: 'edit',
+      selectedAgentForEdit: agent
+    }),
+
+    'open-agent-delete': (state: WorldComponentState, agent: Agent): WorldComponentState => ({
+      ...state,
+      showAgentEdit: true,
+      agentEditMode: 'delete',
+      selectedAgentForEdit: agent
+    }),
+
+    'close-agent-edit': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showAgentEdit: false
+    }),
+
+    'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      // Refresh agents list and close modal
+      const agents = await getAgents(state.worldName);
+      return { 
+        ...state, 
+        agents, 
+        showAgentEdit: false 
+      };
+    },
+
+    'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      // Refresh agents list and close modal
+      const agents = await getAgents(state.worldName);
+      return { 
+        ...state, 
+        agents, 
+        showAgentEdit: false 
+      };
+    },
+
+    // World edit event handlers (simplified)
+    'open-world-edit': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showWorldEdit: true,
+      worldEditMode: 'edit',
+      selectedWorldForEdit: state.world
+    }),
+
+    'close-world-edit': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showWorldEdit: false
+    }),
+
+    'world-saved': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showWorldEdit: false
+    }),
+
+    'world-deleted': (state: WorldComponentState): WorldComponentState => ({
+      ...state,
+      showWorldEdit: false
+    })
   };
 }
 

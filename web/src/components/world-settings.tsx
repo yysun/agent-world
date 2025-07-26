@@ -91,7 +91,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
                 <span className="setting-value">{selectedAgent.name}</span>
                 <button
                   className="action-btn"
-                  $onclick={['open-agent-edit', 'edit', selectedAgent]}
+                  $onclick={['open-agent-edit', selectedAgent]}
                   title="Edit agent"
                 >
                   <span className="btn-icon">⚙</span>
@@ -163,7 +163,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
                 <span className="setting-value">{world.agents.length}</span>
                 <button
                   className="action-btn"
-                  $onclick={['open-agent-edit', 'create']}
+                  $onclick="open-agent-create"
                   title="Add new agent"
                 >
                   <span className="btn-icon">+</span>
