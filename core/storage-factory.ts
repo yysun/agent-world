@@ -168,11 +168,14 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       validateIntegrity,
       repairData,
       close,
-      getDatabaseStats
+      getDatabaseStats,
+      initializeWithDefaults
     } = await import('./sqlite-storage.js');
+    const { initializeSchema } = await import('./sqlite-schema.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
-    // Eagerly initialize
-    await getDatabaseStats(ctx); // This will trigger schema init
+    // Ensure schema is created before any queries
+    await initializeSchema(ctx.schemaCtx);
+    await initializeWithDefaults(ctx); // Ensure default world and agent
     storage = {
       saveWorld: (worldData: any) => saveWorld(ctx, worldData),
       loadWorld: (worldId: string) => loadWorld(ctx, worldId),

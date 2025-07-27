@@ -1,4 +1,37 @@
 /**
+ * Utility to initialize the database schema and insert a default world and agent if not present.
+ * This is useful for first-time setup or testing.
+ */
+export async function initializeWithDefaults(ctx: SQLiteStorageContext): Promise<void> {
+  await ensureInitialized(ctx);
+  // Insert default world if not exists
+  const defaultWorldId = 'default-world';
+  const world = await get(ctx, `SELECT id FROM worlds WHERE id = ?`, defaultWorldId);
+  if (!world) {
+    await run(ctx, `
+      INSERT INTO worlds (id, name, description, turn_limit, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `, defaultWorldId, 'Default World', 'The default world for Agent World system.', 100);
+  }
+  // Insert default agent if not exists
+  const defaultAgentId = 'default-agent';
+  const agent = await get(ctx, `SELECT id FROM agents WHERE id = ? AND world_id = ?`, defaultAgentId, defaultWorldId);
+  if (!agent) {
+    await run(ctx, `
+      INSERT INTO agents (
+        id, world_id, name, type, status, provider, model, system_prompt,
+        temperature, max_tokens, llm_call_count, last_active, last_llm_call
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+      defaultAgentId, defaultWorldId, 'Default Agent', 'assistant', 'active',
+      'openai', 'gpt-3.5-turbo', 'You are a helpful assistant.',
+      0.7, 2048, 0, new Date().toISOString(), new Date().toISOString()
+    );
+  }
+}
+
+// ...existing code...
+/**
  * SQLite Storage Implementation for Agent World System
  *
  * Features:
