@@ -1,6 +1,5 @@
 // ...existing code...
 import type { StorageManager } from './types';
-import { SQLiteStorage } from './sqlite-storage.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
@@ -153,8 +152,43 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       cacheSize: config.sqlite?.cacheSize || -64000,
       enableForeignKeys: config.sqlite?.enableForeignKeys !== false
     };
-    storage = new SQLiteStorage(sqliteConfig);
-    await (storage as SQLiteStorage).initialize();
+    // Use function-based API
+    const {
+      createSQLiteStorageContext,
+      saveWorld,
+      loadWorld,
+      deleteWorld,
+      listWorlds,
+      saveAgent,
+      loadAgent,
+      deleteAgent,
+      listAgents,
+      saveAgentsBatch,
+      loadAgentsBatch,
+      validateIntegrity,
+      repairData,
+      close,
+      getDatabaseStats
+    } = await import('./sqlite-storage.js');
+    const ctx = createSQLiteStorageContext(sqliteConfig);
+    // Eagerly initialize
+    await getDatabaseStats(ctx); // This will trigger schema init
+    storage = {
+      saveWorld: (worldData: any) => saveWorld(ctx, worldData),
+      loadWorld: (worldId: string) => loadWorld(ctx, worldId),
+      deleteWorld: (worldId: string) => deleteWorld(ctx, worldId),
+      listWorlds: () => listWorlds(ctx),
+      saveAgent: (worldId: string, agent: any) => saveAgent(ctx, worldId, agent),
+      loadAgent: (worldId: string, agentId: string) => loadAgent(ctx, worldId, agentId),
+      deleteAgent: (worldId: string, agentId: string) => deleteAgent(ctx, worldId, agentId),
+      listAgents: (worldId: string) => listAgents(ctx, worldId),
+      saveAgentsBatch: (worldId: string, agents: any[]) => saveAgentsBatch(ctx, worldId, agents),
+      loadAgentsBatch: (worldId: string, agentIds: string[]) => loadAgentsBatch(ctx, worldId, agentIds),
+      validateIntegrity: (worldId: string, agentId?: string) => validateIntegrity(ctx, worldId, agentId),
+      repairData: (worldId: string, agentId?: string) => repairData(ctx, worldId, agentId),
+      close: () => close(ctx),
+      getDatabaseStats: () => getDatabaseStats(ctx)
+    } as any;
   } else {
     storage = createFileStorageAdapter(config.rootPath);
   }
@@ -172,12 +206,12 @@ export async function createStorageFromEnv(): Promise<StorageManager> {
     rootPath,
     sqlite: type === 'sqlite'
       ? {
-          database: process.env.AGENT_WORLD_SQLITE_DATABASE || './data/database.db',
-          enableWAL: process.env.AGENT_WORLD_SQLITE_WAL !== 'false',
-          busyTimeout: parseInt(process.env.AGENT_WORLD_SQLITE_TIMEOUT || '30000'),
-          cacheSize: parseInt(process.env.AGENT_WORLD_SQLITE_CACHE || '-64000'),
-          enableForeignKeys: process.env.AGENT_WORLD_SQLITE_FK !== 'false'
-        }
+        database: process.env.AGENT_WORLD_SQLITE_DATABASE || './data/database.db',
+        enableWAL: process.env.AGENT_WORLD_SQLITE_WAL !== 'false',
+        busyTimeout: parseInt(process.env.AGENT_WORLD_SQLITE_TIMEOUT || '30000'),
+        cacheSize: parseInt(process.env.AGENT_WORLD_SQLITE_CACHE || '-64000'),
+        enableForeignKeys: process.env.AGENT_WORLD_SQLITE_FK !== 'false'
+      }
       : undefined
   };
 
