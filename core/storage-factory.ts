@@ -1,4 +1,23 @@
-// ...existing code...
+/**
+ * Storage Factory
+ *
+ * Provides a unified interface for file-based and SQLite-based storage backends for agent-world.
+ *
+ * Features:
+ * - Dynamically loads file or SQLite storage based on configuration or environment variables.
+ * - Caches storage instances for reuse and performance.
+ * - Utility functions for migration, cache management, and storage recommendations.
+ * - Default storage is now SQLite (was file-based previously).
+ *
+ * Implementation:
+ * - File storage uses dynamic imports and disk-based JSON files.
+ * - SQLite storage uses a schema, context, and migration helpers.
+ * - Exposes migration helpers and cache utilities.
+ *
+ * Changes:
+ * - 2025-07-27: Default storage type changed to SQLite.
+ * - See git history for previous changes.
+ */
 import type { StorageManager } from './types';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
@@ -201,7 +220,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
 }
 
 export async function createStorageFromEnv(): Promise<StorageManager> {
-  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'file';
+  // Default to 'sqlite' unless overridden by env
+  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
   const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 
   const config: StorageConfig = {
@@ -288,7 +308,7 @@ export async function needsStorageMigration(
 
 // Default config (for reference)
 export const DEFAULT_STORAGE_CONFIG: Partial<StorageConfig> = {
-  type: 'file',
+  type: 'sqlite',
   sqlite: {
     database: 'agent-world.db',
     enableWAL: true,
