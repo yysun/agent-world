@@ -64,8 +64,8 @@ export type {
   UpdateWorldParams,
   // Derived types using utility types
   AgentInfo,
+  AgentData,
   AgentStorage,
-  WorldStorage,
   // Enhanced event types
   EventPayloadMap,
   TypedEvent,
