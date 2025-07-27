@@ -21,12 +21,11 @@
  *
  * World Functions:
  * - createWorld: Create new world with configuration
- * - getWorld: Load world configuration only (lightweight)
- * - getFullWorld: Load world with EventEmitter reconstruction and agent subscriptions
+ * - getWorld: Load world with EventEmitter reconstruction and agent subscriptions (complete functionality)
  * - updateWorld: Update world configuration
  * - deleteWorld: Remove world and all associated data
  * - listWorlds: Get all world IDs and basic info
- * - getWorldConfig: Get world configuration without runtime objects
+ * - getWorldConfig: Get world configuration without runtime objects (lightweight)
  *
  * Agent Functions:
  * - createAgent: Create new agent with configuration and system prompt
@@ -376,34 +375,14 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
   return worldDataToWorld(worldData, rootPath);
 }
 
-/**
- * Load world configuration only (lightweight operation)
- * Automatically converts worldId to kebab-case for consistent lookup
- * Note: For full world with agents and events, use subscription layer
- * @deprecated Use getWorldConfig for explicit lightweight access or subscribeWorld for full world
- */
-export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
 
-  // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = toKebabCase(worldId);
-
-  const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
-
-  if (!worldData) {
-    return null;
-  }
-
-  return worldDataToWorld(worldData, rootPath);
-}
 
 /**
- * Load full world by ID with EventEmitter reconstruction and agent loading
+ * Load world by ID with EventEmitter reconstruction and agent loading
  * This is the function used by the subscription layer for complete world setup
  * Automatically converts worldId to kebab-case for consistent lookup
  */
-export async function getFullWorld(rootPath: string, worldId: string): Promise<World | null> {
+export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
