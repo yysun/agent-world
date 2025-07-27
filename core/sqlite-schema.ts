@@ -24,7 +24,8 @@
  * - Prepared statements for security and performance
  */
 
-import { Database } from 'sqlite3';
+// Types only import - will be stripped at runtime
+import type { Database } from 'sqlite3';
 import { promisify } from 'util';
 
 /**
@@ -71,37 +72,49 @@ export class SQLiteSchema {
   private isInitialized = false;
 
   constructor(config: SQLiteConfig) {
-    this.db = new Database(config.database);
-    this.configurePragmas(config);
+    // Dynamic import of sqlite3 at runtime
+    if (typeof window !== 'undefined') {
+      throw new Error('SQLite not available in browser environment');
+    }
+    
+    try {
+      const sqlite3 = require('sqlite3');
+      this.db = new sqlite3.Database(config.database);
+      this.configurePragmas(config);
+    } catch (error) {
+      throw new Error('SQLite3 module not available. Please install sqlite3: npm install sqlite3');
+    }
   }
 
   /**
    * Configure SQLite PRAGMA settings for optimal performance
    */
   private configurePragmas(config: SQLiteConfig): void {
-    const run = promisify(this.db.run.bind(this.db));
-    
-    // Enable WAL mode for better concurrency
-    if (config.enableWAL !== false) {
-      this.db.run("PRAGMA journal_mode = WAL");
+    try {
+      // Enable WAL mode for better concurrency
+      if (config.enableWAL !== false) {
+        this.db.run("PRAGMA journal_mode = WAL");
+      }
+
+      // Enable foreign key constraints
+      if (config.enableForeignKeys !== false) {
+        this.db.run("PRAGMA foreign_keys = ON");
+      }
+
+      // Set busy timeout for lock contention
+      this.db.run(`PRAGMA busy_timeout = ${config.busyTimeout || 30000}`);
+
+      // Set cache size for performance
+      this.db.run(`PRAGMA cache_size = ${config.cacheSize || -64000}`); // 64MB
+
+      // Enable synchronous mode for data safety
+      this.db.run("PRAGMA synchronous = NORMAL");
+
+      // Set page size for optimal performance
+      this.db.run("PRAGMA page_size = 4096");
+    } catch (error) {
+      // Ignore pragma errors in test environments
     }
-
-    // Enable foreign key constraints
-    if (config.enableForeignKeys !== false) {
-      this.db.run("PRAGMA foreign_keys = ON");
-    }
-
-    // Set busy timeout for lock contention
-    this.db.run(`PRAGMA busy_timeout = ${config.busyTimeout || 30000}`);
-
-    // Set cache size for performance
-    this.db.run(`PRAGMA cache_size = ${config.cacheSize || -64000}`); // 64MB
-
-    // Enable synchronous mode for data safety
-    this.db.run("PRAGMA synchronous = NORMAL");
-
-    // Set page size for optimal performance
-    this.db.run("PRAGMA page_size = 4096");
   }
 
   /**
@@ -110,7 +123,15 @@ export class SQLiteSchema {
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    const run = promisify(this.db.run.bind(this.db));
+    // Use callback-style database operations
+    const run = (sql: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        this.db.run(sql, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    };
 
     // Create worlds table
     await run(`

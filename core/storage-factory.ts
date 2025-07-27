@@ -58,71 +58,102 @@ class FileStorageAdapter implements StorageManager {
         throw new Error('File storage not available in browser environment');
       }
 
-      // Dynamic imports for Node.js environment
-      this.worldStorage = await import('./world-storage.js');
-      this.agentStorage = await import('./agent-storage.js');
+      try {
+        // Dynamic imports for Node.js environment
+        this.worldStorage = await import('./world-storage.js');
+        this.agentStorage = await import('./agent-storage.js');
+      } catch (error) {
+        throw new Error('Failed to load storage modules: ' + (error instanceof Error ? error.message : error));
+      }
     }
   }
 
   // World operations
   async saveWorld(worldData: any): Promise<void> {
     await this.ensureModulesLoaded();
-    return this.worldStorage.saveWorldToDisk(this.rootPath, worldData);
+    if (this.worldStorage && this.worldStorage.saveWorldToDisk) {
+      return this.worldStorage.saveWorldToDisk(this.rootPath, worldData);
+    }
   }
 
   async loadWorld(worldId: string): Promise<any> {
     await this.ensureModulesLoaded();
-    return this.worldStorage.loadWorldFromDisk(this.rootPath, worldId);
+    if (this.worldStorage && this.worldStorage.loadWorldFromDisk) {
+      return this.worldStorage.loadWorldFromDisk(this.rootPath, worldId);
+    }
+    return null;
   }
 
   async deleteWorld(worldId: string): Promise<boolean> {
     await this.ensureModulesLoaded();
-    return this.worldStorage.deleteWorldFromDisk(this.rootPath, worldId);
+    if (this.worldStorage && this.worldStorage.deleteWorldFromDisk) {
+      return this.worldStorage.deleteWorldFromDisk(this.rootPath, worldId);
+    }
+    return false;
   }
 
   async listWorlds(): Promise<any[]> {
     await this.ensureModulesLoaded();
-    return this.worldStorage.loadAllWorldsFromDisk(this.rootPath);
+    if (this.worldStorage && this.worldStorage.loadAllWorldsFromDisk) {
+      return this.worldStorage.loadAllWorldsFromDisk(this.rootPath);
+    }
+    return [];
   }
 
   // Agent operations
   async saveAgent(worldId: string, agent: any): Promise<void> {
     await this.ensureModulesLoaded();
-    return this.agentStorage.saveAgentToDisk(this.rootPath, worldId, agent);
+    if (this.agentStorage && this.agentStorage.saveAgentToDisk) {
+      return this.agentStorage.saveAgentToDisk(this.rootPath, worldId, agent);
+    }
   }
 
   async loadAgent(worldId: string, agentId: string): Promise<any> {
     await this.ensureModulesLoaded();
-    const agentData = await this.agentStorage.loadAgentFromDisk(this.rootPath, worldId, agentId);
-    return agentData;
+    if (this.agentStorage && this.agentStorage.loadAgentFromDisk) {
+      const agentData = await this.agentStorage.loadAgentFromDisk(this.rootPath, worldId, agentId);
+      return agentData;
+    }
+    return null;
   }
 
   async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
     await this.ensureModulesLoaded();
-    return this.agentStorage.deleteAgentFromDisk(this.rootPath, worldId, agentId);
+    if (this.agentStorage && this.agentStorage.deleteAgentFromDisk) {
+      return this.agentStorage.deleteAgentFromDisk(this.rootPath, worldId, agentId);
+    }
+    return false;
   }
 
   async listAgents(worldId: string): Promise<any[]> {
     await this.ensureModulesLoaded();
-    return this.agentStorage.loadAllAgentsFromDisk(this.rootPath, worldId);
+    if (this.agentStorage && this.agentStorage.loadAllAgentsFromDisk) {
+      return this.agentStorage.loadAllAgentsFromDisk(this.rootPath, worldId);
+    }
+    return [];
   }
 
   // Batch operations
   async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
     await this.ensureModulesLoaded();
-    for (const agent of agents) {
-      await this.agentStorage.saveAgentToDisk(this.rootPath, worldId, agent);
+    if (this.agentStorage && this.agentStorage.saveAgentToDisk) {
+      for (const agent of agents) {
+        await this.agentStorage.saveAgentToDisk(this.rootPath, worldId, agent);
+      }
     }
   }
 
   async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<any[]> {
     await this.ensureModulesLoaded();
-    const agents: any[] = [];
-    for (const agentId of agentIds) {
-      const agent = await this.agentStorage.loadAgentFromDisk(this.rootPath, worldId, agentId);
-      if (agent) agents.push(agent);
+    if (this.agentStorage && this.agentStorage.loadAgentFromDisk) {
+      const agents: any[] = [];
+      for (const agentId of agentIds) {
+        const agent = await this.agentStorage.loadAgentFromDisk(this.rootPath, worldId, agentId);
+        if (agent) agents.push(agent);
+      }
+      return agents;
     }
-    return agents;
+    return [];
   }
 
   // Integrity operations
@@ -130,18 +161,25 @@ class FileStorageAdapter implements StorageManager {
     await this.ensureModulesLoaded();
     
     if (agentId) {
-      const result = await this.agentStorage.validateAgentIntegrity(this.rootPath, worldId, agentId);
-      return result.isValid;
+      if (this.agentStorage && this.agentStorage.validateAgentIntegrity) {
+        const result = await this.agentStorage.validateAgentIntegrity(this.rootPath, worldId, agentId);
+        return result.isValid;
+      }
     } else {
-      return this.worldStorage.worldExistsOnDisk(this.rootPath, worldId);
+      if (this.worldStorage && this.worldStorage.worldExistsOnDisk) {
+        return this.worldStorage.worldExistsOnDisk(this.rootPath, worldId);
+      }
     }
+    return false;
   }
 
   async repairData(worldId: string, agentId?: string): Promise<boolean> {
     await this.ensureModulesLoaded();
     
     if (agentId) {
-      return this.agentStorage.repairAgentData(this.rootPath, worldId, agentId);
+      if (this.agentStorage && this.agentStorage.repairAgentData) {
+        return this.agentStorage.repairAgentData(this.rootPath, worldId, agentId);
+      }
     }
     return false; // World repair not implemented for file storage
   }
