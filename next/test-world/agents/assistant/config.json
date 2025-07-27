@@ -1,0 +1,12 @@
+{
+  "id": "assistant",
+  "name": "Assistant",
+  "type": "general",
+  "status": "inactive",
+  "provider": "openai",
+  "model": "gpt-3.5-turbo",
+  "createdAt": "2025-07-27T19:16:34.474Z",
+  "lastActive": "2025-07-27T19:16:34.474Z",
+  "llmCallCount": 0,
+  "memory": []
+}

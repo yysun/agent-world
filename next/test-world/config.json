@@ -1,0 +1,6 @@
+{
+  "id": "test-world",
+  "name": "Test World",
+  "description": "A test world for the demo",
+  "turnLimit": 5
+}

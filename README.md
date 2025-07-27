@@ -28,6 +28,7 @@ Paste that prompt. Agents come alive instantly.
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
 - ✅ Multiple AI Providers - Use different models for different agents
+- ✅ Modern Web Interface - React + Next.js frontend with real-time chat
 
 ## What You Can Build
 
@@ -105,6 +106,19 @@ Each Agent World has a collection of agents that can communicate through a share
 - An API key for your preferred LLM provider
 
 ### Quick Start
+
+**Option 1: Next.js Web Interface (Recommended)**
+```bash
+git clone https://github.com/yysun/agent-world.git
+cd agent-world
+npm install
+
+# Start the Next.js web interface
+cd next
+npm run dev
+```
+
+**Option 2: CLI Interface**
 ```bash
 git clone https://github.com/yysun/agent-world.git
 cd agent-world
@@ -112,9 +126,70 @@ npm install
 npm start
 ```
 
+**Option 3: CLI Interface**
+```bash
+git clone https://github.com/yysun/agent-world.git
+cd agent-world
+npm install
+npm run cli
+```
+
+## Project Structure (npm workspaces)
+
+This project uses npm workspaces with two main packages:
+
+- **`core/`** - Reusable agent management library
+  - World-mediated agent management system
+  - Event-driven architecture
+  - LLM provider abstraction
+  - Cross-platform compatibility (Node.js/Browser)
+
+- **`next/`** - Next.js web application
+  - React frontend with Tailwind CSS
+  - API routes for CRUD operations
+  - Real-time chat with streaming support
+  - Modern, minimalistic UI
+
+### Cross-workspace imports
+```typescript
+// In next/ workspace
+import { createWorld, listAgents, publishMessage } from '@agent-world/core';
+```
+
+### Web Interface Features
+
+The Next.js workspace provides a modern web interface with:
+
+- **Home Page**: World selector and creator with clean card-based UI
+- **World Page**: Chat interface with agent management sidebar
+  - Real-time messaging with agents
+  - Toggle between streaming and non-streaming modes
+  - Agent creation with custom system prompts
+  - Responsive design with Tailwind CSS
+
+### API Endpoints
+
+The Next.js workspace exposes REST APIs for integration:
+
+```
+GET    /api/worlds                     # List all worlds
+POST   /api/worlds                     # Create new world
+GET    /api/worlds/:id                 # Get world details
+PUT    /api/worlds/:id                 # Update world
+DELETE /api/worlds/:id                 # Delete world
+
+GET    /api/worlds/:id/agents          # List agents in world
+POST   /api/worlds/:id/agents          # Create new agent
+GET    /api/worlds/:id/agents/:agentId # Get agent details
+PUT    /api/worlds/:id/agents/:agentId # Update agent
+DELETE /api/worlds/:id/agents/:agentId # Delete agent
+
+POST   /api/worlds/:id/chat            # Send message (streaming/non-streaming)
+```
+
 ### Environment Setup
 
-Modify `.env` and set your API keys
+Export your API keys as environment variables 
 
 ```bash
 # Required if Choose one or more
@@ -126,11 +201,27 @@ export GOOGLE_API_KEY="your-key-here"
 export OLLAMA_BASE_URL="http://localhost:11434"
 ```
 
-### World Setup
+Or create a `.env` file in your working directory with:
 
-Modify files under the `data` directory
-- this is where agent worlds are stored
-- you can add and edit your own worlds here
+```env
+OPENAI_API_KEY=your-key-here
+ANTHROPIC_API_KEY=your-key-here
+GOOGLE_API_KEY=your-key-here
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+### World Database Setup
+
+The worlds are stored in the SQLite database under the `data` directory. You can change the database path by setting the environment variable `AGENT_WORLD_SQLITE_DATABASE`.
+
+
+Or, you can change the storage type to file-based by setting the environment variable `AGENT_WORLD_STORAGE_TYPE` to `file`. And set the `AGENT_WORLD_DATA_PATH` to your desired directory.
+
+```bash
+# Use file storage
+export AGENT_WORLD_STORAGE_TYPE=file
+export AGENT_WORLD_DATA_PATH=./data/worlds
+```
 
 
 ## Learn More
