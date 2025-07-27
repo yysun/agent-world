@@ -22,7 +22,7 @@
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getFullWorld, enableStreaming, disableStreaming } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 const logger = createCategoryLogger('api');
@@ -56,7 +56,7 @@ async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: s
 }
 
 async function getWorldOrError(res: Response, worldName: string): Promise<any | null> {
-  const world = await getWorldConfig(ROOT_PATH, worldName);
+  const world = await getWorld(ROOT_PATH, worldName);
 
   if (!world) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
@@ -116,7 +116,7 @@ const router = express.Router();
 router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
-    const world = await getFullWorld(ROOT_PATH, worldName);
+    const world = await getWorld(ROOT_PATH, worldName);
     if (!world) return;
 
     // Convert Map to array for JSON serialization
@@ -507,7 +507,7 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
   try {
     const { worldName, agentName } = req.params;
 
-    const world = await getFullWorld(ROOT_PATH, worldName);
+    const world = await getWorld(ROOT_PATH, worldName);
     if (!world) return;
 
     const agent = await world.getAgent(agentName);
