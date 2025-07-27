@@ -67,16 +67,19 @@ export interface SQLiteSchemaContext {
   isInitialized: boolean;
 }
 
-export function createSQLiteSchemaContext(config: SQLiteConfig): SQLiteSchemaContext {
+export async function createSQLiteSchemaContext(config: SQLiteConfig): Promise<SQLiteSchemaContext> {
   if (typeof window !== 'undefined') {
     throw new Error('SQLite not available in browser environment');
   }
   try {
-    const sqlite3 = require('sqlite3');
+    // Use dynamic import for ESM compatibility
+    const sqlite3Module = await import('sqlite3');
+    const sqlite3 = sqlite3Module.default || sqlite3Module;
     const db = new sqlite3.Database(config.database);
     configurePragmas({ db, config });
     return { db, config, isInitialized: false };
   } catch (error) {
+    console.error('[sqlite-schema] Failed to import or initialize sqlite3:', error);
     throw new Error('SQLite3 module not available. Please install sqlite3: npm install sqlite3');
   }
 }

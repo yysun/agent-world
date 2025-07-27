@@ -170,7 +170,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       close,
       getDatabaseStats
     } = await import('./sqlite-storage.js');
-    const ctx = createSQLiteStorageContext(sqliteConfig);
+    const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Eagerly initialize
     await getDatabaseStats(ctx); // This will trigger schema init
     storage = {

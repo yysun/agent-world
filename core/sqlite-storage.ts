@@ -98,14 +98,15 @@ export interface ArchiveExportOptions {
 
 
 // Context object for function-based storage
+
 export interface SQLiteStorageContext {
-  schemaCtx: ReturnType<typeof createSQLiteSchemaContext>;
+  schemaCtx: Awaited<ReturnType<typeof createSQLiteSchemaContext>>;
   db: Database;
   isInitialized: boolean;
 }
 
-export function createSQLiteStorageContext(config: SQLiteConfig): SQLiteStorageContext {
-  const schemaCtx = createSQLiteSchemaContext(config);
+export async function createSQLiteStorageContext(config: SQLiteConfig): Promise<SQLiteStorageContext> {
+  const schemaCtx = await createSQLiteSchemaContext(config);
   return {
     schemaCtx,
     db: schemaCtx.db,
