@@ -163,11 +163,20 @@ export default class WorldEdit extends Component<WorldEditState> {
       return (
         <div className="modal-backdrop" $onclick={closeModal}>
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Success!</h2>
+              <button
+                className="modal-close-btn"
+                $onclick={closeModal}
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
             <div className="modal-body">
               <div className="success-message">
-                <h3>Success!</h3>
-                <p>{state.successMessage}</p>
-                <div className="loading-spinner">
+                <p style="font-size: 1rem;">{state.successMessage}</p>
+                <div className="loading-spinner" style="font-size: 0.9rem;">
                   {state.mode === 'create' ? 'Redirecting to new world...' :
                     state.mode === 'delete' ? 'Redirecting to home...' : 'Closing...'}
                 </div>
@@ -214,9 +223,8 @@ export default class WorldEdit extends Component<WorldEditState> {
             {isDeleteMode ? (
               // Delete confirmation view
               <div className="delete-confirmation">
-                <h3>Delete World</h3>
-                <p>Are you sure you want to delete "{state.world.name}"?</p>
-                <p>This action cannot be undone and will delete all agents and messages in this world.</p>
+                <p style="font-size: 1rem;">Are you sure you want to delete <span style="font-size: 1.2rem;">"{state.world.name}"</span>?</p>
+                <p style="font-size: 1rem;">This action cannot be undone and will delete all agents and messages in this world.</p>
               </div>
             ) : (
               // Form view for create and edit modes
@@ -234,7 +242,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       placeholder="Enter world name"
                       value={state.world.name}
                       $bind="world.name"
-                      disabled={state.loading}
+                      disabled={state.loading || isEditMode}
                     />
                   </div>
 

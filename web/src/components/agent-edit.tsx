@@ -55,7 +55,7 @@ export const defaultAgentData: Partial<Agent> = {
   provider: 'ollama' as LLMProvider,
   model: 'llama3.2:3b',
   temperature: 0.7,
-  systemPrompt: ''
+  systemPrompt: 'You are a helpful assistant.',
 };
 
 export interface AgentEditState {
@@ -183,11 +183,20 @@ export default class AgentEdit extends Component<AgentEditState> {
       return (
         <div className="modal-backdrop" $onclick={closeModal}>
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Success!</h2>
+              <button
+                className="modal-close-btn"
+                $onclick={closeModal}
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
             <div className="modal-body">
               <div className="success-message">
-                <h3>Success!</h3>
-                <p>{state.successMessage}</p>
-                <div className="loading-spinner">Closing...</div>
+                <p style="font-size: 1rem;">{state.successMessage}</p>
+                <div className="loading-spinner" style="font-size: 0.9rem;">Closing...</div>
               </div>
             </div>
           </div>
@@ -231,9 +240,8 @@ export default class AgentEdit extends Component<AgentEditState> {
             {isDeleteMode ? (
               // Delete confirmation view
               <div className="delete-confirmation">
-                <h3>Delete Agent</h3>
-                <p>Are you sure you want to delete "{state.agent.name}"?</p>
-                <p>This action cannot be undone.</p>
+                <p style="font-size: 1rem;">Are you sure you want to delete <span style="font-size: 1.2rem;">"{state.agent.name}"</span>?</p>
+                <p style="font-size: 1rem;">This action cannot be undone.</p>
               </div>
             ) : (
               // Form view for create and edit modes
@@ -251,11 +259,11 @@ export default class AgentEdit extends Component<AgentEditState> {
                       placeholder="Enter agent name"
                       value={state.agent.name}
                       $bind="agent.name"
-                      disabled={state.loading}
+                      disabled={state.loading || isEditMode}
                     />
                   </div>
 
-                  <div className="form-group">
+                  {/* <div className="form-group">
                     <label htmlFor="agent-description">Description</label>
                     <input
                       id="agent-description"
@@ -266,7 +274,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                       $bind="agent.description"
                       disabled={state.loading}
                     />
-                  </div>
+                  </div> */}
                 </div>
 
                 {/* LLM Configuration Section */}

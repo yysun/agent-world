@@ -261,24 +261,27 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false
     }),
 
-    'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    'agent-saved':  (state: WorldComponentState): void => {
       // Refresh agents list and close modal
-      const agents = await api.getAgents(state.worldName);
-      return {
-        ...state,
-        agents,
-        showAgentEdit: false
-      };
+      // const agents = await api.getAgents(state.worldName);
+      // return {
+      //   ...state,
+      //   agents,
+      //   showAgentEdit: false
+      // };
+
+      location.reload(); // Reload to refresh agents list
     },
 
-    'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    'agent-deleted':  (state: WorldComponentState): void => {
       // Refresh agents list and close modal
-      const agents = await api.getAgents(state.worldName);
-      return {
-        ...state,
-        agents,
-        showAgentEdit: false
-      };
+      // const agents = await api.getAgents(state.worldName);
+      // return {
+      //   ...state,
+      //   agents,
+      //   showAgentEdit: false
+      // };
+      location.reload();
     },
 
   };

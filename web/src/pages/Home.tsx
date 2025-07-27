@@ -260,27 +260,29 @@ export default class HomeComponent extends Component<HomeState> {
       ...state,
       showWorldEdit: false
     }),
-    
-    'world-saved': async (state: HomeState): Promise<HomeState> => {
+
+    'world-saved': (state: HomeState): void => {
       // Refresh worlds list and close modal
-      const worlds = await api.getWorlds();
-      return {
-        ...state,
-        worlds,
-        showWorldEdit: false
-      };
+      // const worlds = await api.getWorlds();
+      // return {
+      //   ...state,
+      //   worlds,
+      //   showWorldEdit: false
+      // };
+      location.reload();
     },
 
-    'world-deleted': async (state: HomeState): Promise<HomeState> => {
+    'world-deleted': (state: HomeState): void => {
       // Refresh worlds list and close modal
-      const worlds = await api.getWorlds();
-      const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
-      return {
-        ...state,
-        worlds,
-        currentIndex: Math.max(0, newCurrentIndex),
-        showWorldEdit: false
-      };
+      // const worlds = await api.getWorlds();
+      // const newCurrentIndex = Math.min(state.currentIndex, worlds.length - 1);
+      // return {
+      //   ...state,
+      //   worlds,
+      //   currentIndex: Math.max(0, newCurrentIndex),
+      //   showWorldEdit: false
+      // };
+      location.reload();
     }
 
   };
