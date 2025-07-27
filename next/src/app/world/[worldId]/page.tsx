@@ -55,6 +55,10 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
 
   useEffect(() => {
     if (worldId) {
+      // Reset agent selection when world changes
+      setSelectedAgent(null);
+      setActiveTab('main');
+      
       // Inline loadWorld
       (async () => {
         try {
@@ -242,11 +246,7 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   };
 
 
-  // --- Deselect agent when world changes ---
-  useEffect(() => {
-    setSelectedAgent(null);
-    setActiveTab('main');
-  }, [worldId]);
+
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
