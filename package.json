@@ -3,6 +3,10 @@
   "version": "0.3.0",
   "main": "index.ts",
   "type": "module",
+  "workspaces": [
+    "core",
+    "next"
+  ],
   "bin": {
     "agent-world": "start.js"
   },
