@@ -144,8 +144,8 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
         const actualPort = serverAddress.port;
         const url = `http://${host}:${actualPort}`;
         console.log(`🌐 Web server running at ${url}`);
-        console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
-        console.log(`🚀 HTTP server running with REST API and SSE chat`);
+        // console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
+        // console.log(`🚀 HTTP server running with REST API and SSE chat`);
         resolve(server);
         open(url);
       }
