@@ -22,12 +22,35 @@ Paste that prompt. Agents come alive instantly.
 
 ![GitHub](docs/Screenshot-agents.png)
 
+## Project Structure (npm workspaces)
+
+This project uses npm workspaces with two main packages:
+
+- **`core/`** - Reusable agent management library
+  - World-mediated agent management system
+  - Event-driven architecture
+  - LLM provider abstraction
+  - Cross-platform compatibility (Node.js/Browser)
+
+- **`next/`** - Next.js web application
+  - React frontend with Tailwind CSS
+  - API routes for CRUD operations
+  - Real-time chat with streaming support
+  - Modern, minimalistic UI
+
+### Cross-workspace imports
+```typescript
+// In next/ workspace
+import { createWorld, listAgents, publishMessage } from '@agent-world/core';
+```
+
 ## Why It Works
 
 - ✅ No Code Required - Agents are defined entirely in natural language
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
 - ✅ Multiple AI Providers - Use different models for different agents
+- ✅ Modern Web Interface - React + Next.js frontend with real-time chat
 
 ## What You Can Build
 
@@ -105,11 +128,60 @@ Each Agent World has a collection of agents that can communicate through a share
 - An API key for your preferred LLM provider
 
 ### Quick Start
+
+**Option 1: Next.js Web Interface (Recommended)**
+```bash
+git clone https://github.com/yysun/agent-world.git
+cd agent-world
+npm install
+
+# Start the Next.js web interface
+cd next
+npm run dev
+```
+Open http://localhost:3000 to access the modern web interface with:
+- World creation and management
+- Agent configuration with visual forms
+- Real-time chat interface
+- Streaming and non-streaming chat modes
+
+**Option 2: CLI Interface**
 ```bash
 git clone https://github.com/yysun/agent-world.git
 cd agent-world
 npm install
 npm start
+```
+
+### Web Interface Features
+
+The Next.js workspace provides a modern web interface with:
+
+- **Home Page**: World selector and creator with clean card-based UI
+- **World Page**: Chat interface with agent management sidebar
+  - Real-time messaging with agents
+  - Toggle between streaming and non-streaming modes
+  - Agent creation with custom system prompts
+  - Responsive design with Tailwind CSS
+
+### API Endpoints
+
+The Next.js workspace exposes REST APIs for integration:
+
+```
+GET    /api/worlds                     # List all worlds
+POST   /api/worlds                     # Create new world
+GET    /api/worlds/:id                 # Get world details
+PUT    /api/worlds/:id                 # Update world
+DELETE /api/worlds/:id                 # Delete world
+
+GET    /api/worlds/:id/agents          # List agents in world
+POST   /api/worlds/:id/agents          # Create new agent
+GET    /api/worlds/:id/agents/:agentId # Get agent details
+PUT    /api/worlds/:id/agents/:agentId # Update agent
+DELETE /api/worlds/:id/agents/:agentId # Delete agent
+
+POST   /api/worlds/:id/chat            # Send message (streaming/non-streaming)
 ```
 
 ### Environment Setup
