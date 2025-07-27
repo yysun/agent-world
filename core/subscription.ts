@@ -25,7 +25,7 @@
  */
 
 import { World } from './types.js';
-import { getFullWorld as coreGetFullWorld } from './managers.js';
+import { getWorld as coreGetWorld } from './managers.js';
 import { publishMessage, subscribeAgentToMessages } from './events.js';
 import { toKebabCase } from './utils.js';
 import { createCategoryLogger } from './logger.js';
@@ -54,7 +54,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   let worldEventListeners = setupWorldEventListeners(world, client);
   let currentWorld: World | null = world;
 
-  // Subscribe all loaded agents to world messages (moved from getFullWorld)
+  // Subscribe all loaded agents to world messages (moved from getWorld)
   for (const agent of currentWorld.agents.values()) {
     subscribeAgentToMessages(currentWorld, agent);
   }
@@ -99,7 +99,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       await destroyCurrentWorld();
 
       // Create a completely new world instance
-      const refreshedWorld = await coreGetFullWorld(rootPath, worldId);
+      const refreshedWorld = await coreGetWorld(rootPath, worldId);
       if (!refreshedWorld) {
         throw new Error(`Failed to refresh world: ${worldId}`);
       }
@@ -110,7 +110,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       // Set up new event listeners on the fresh world
       worldEventListeners = setupWorldEventListeners(currentWorld, client);
 
-      // Subscribe all loaded agents to world messages (moved from getFullWorld)
+      // Subscribe all loaded agents to world messages (moved from getWorld)
       for (const agent of currentWorld.agents.values()) {
         subscribeAgentToMessages(currentWorld, agent);
       }
@@ -134,7 +134,7 @@ export async function subscribeWorld(
   try {
     // Load world using core manager (convert to kebab-case internally)
     const worldId = toKebabCase(worldIdentifier);
-    const currentWorld = await coreGetFullWorld(rootPath, worldId);
+    const currentWorld = await coreGetWorld(rootPath, worldId);
 
     if (!currentWorld) {
       if (client.onError) {
@@ -225,7 +225,7 @@ export async function getWorld(
 ): Promise<World | null> {
   try {
     const worldId = toKebabCase(worldIdentifier);
-    return await coreGetFullWorld(rootPath, worldId);
+    return await coreGetWorld(rootPath, worldId);
   } catch (error) {
     logger.error('Failed to get world', {
       worldIdentifier,
