@@ -147,20 +147,22 @@ export default function Home() {
         )}
 
         {/* Worlds Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {worlds.map((world) => (
-            <div
-              key={world.id}
-              onClick={() => selectWorld(world.id)}
-              className="bg-white rounded-lg shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow border-l-4 border-blue-500"
-            >
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">{world.name}</h3>
-              {world.description && (
-                <p className="text-gray-600 text-sm">{world.description}</p>
-              )}
-              <div className="mt-4 text-blue-600 text-sm font-medium">Click to enter →</div>
-            </div>
-          ))}
+        <div className="flex w-full justify-center">
+          <div className="flex flex-wrap justify-center gap-6 max-w-4xl">
+            {worlds.map((world) => (
+              <div
+                key={world.id}
+                onClick={() => selectWorld(world.id)}
+                className="bg-white rounded-lg shadow-md p-6 cursor-pointer hover:shadow-lg transition-shadow border-l-4 border-blue-500 min-w-[280px] max-w-xs flex-1"
+              >
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">{world.name}</h3>
+                {world.description && (
+                  <p className="text-gray-600 text-sm">{world.description}</p>
+                )}
+                <div className="mt-4 text-blue-600 text-sm font-medium">Click to enter →</div>
+              </div>
+            ))}
+          </div>
         </div>
 
         {worlds.length === 0 && !showCreateForm && (
