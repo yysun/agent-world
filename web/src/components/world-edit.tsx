@@ -93,7 +93,7 @@ export const saveWorld = async function* (state: WorldEditState): AsyncGenerator
         // Redirect to new world
         window.location.href = '/World/' + encodeURIComponent(state.world.name);
       } else {
-        app.run('world-saved');
+        state.parentComponent.run('world-saved');
       }
     }, 2000);
 
@@ -123,7 +123,7 @@ export const deleteWorld = async function* (state: WorldEditState): AsyncGenerat
 
     // Auto-close and redirect to home after showing success message
     setTimeout(() => {
-      window.location.href = '/';
+      state.parentComponent.run('world-deleted');
     }, 2000);
 
   } catch (error: any) {

@@ -214,6 +214,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
     );
   };
 
+  // we could select events to be global, but for simplicity we keep them local
+  is_global_event = () => true;
+
   update = {
     // Route handler and message handlers (merged)
     ...worldUpdateHandlers,
@@ -257,6 +260,27 @@ export default class WorldComponent extends Component<WorldComponentState> {
       ...state,
       showWorldEdit: false
     }),
+
+    'agent-saved': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      // Refresh agents list and close modal
+      const agents = await api.getAgents(state.worldName);
+      return {
+        ...state,
+        agents,
+        showAgentEdit: false
+      };
+    },
+
+    'agent-deleted': async (state: WorldComponentState): Promise<WorldComponentState> => {
+      // Refresh agents list and close modal
+      const agents = await api.getAgents(state.worldName);
+      return {
+        ...state,
+        agents,
+        showAgentEdit: false
+      };
+    },
+
   };
 }
 

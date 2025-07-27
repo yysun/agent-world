@@ -96,7 +96,7 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
 
     // Auto-close after showing success message
     setTimeout(() => {
-      app.run('agent-saved');
+      state.parentComponent.run('agent-saved');
     }, 2000);
 
   } catch (error: any) {
@@ -125,7 +125,7 @@ export const deleteAgent = async function* (state: AgentEditState): AsyncGenerat
 
     // Auto-close after showing success message
     setTimeout(() => {
-      app.run('agent-deleted');
+      state.parentComponent.run('agent-deleted');
     }, 2000);
 
   } catch (error: any) {
