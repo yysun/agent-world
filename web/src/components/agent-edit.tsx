@@ -246,24 +246,79 @@ export default class AgentEdit extends Component<AgentEditState> {
             ) : (
               // Form view for create and edit modes
               <form className="agent-form">
-                {/* Basic Information Section */}
+                {/* First row: Name and Temperature */}
                 <div className="form-section">
-                  <h3 className="section-title">Basic Information</h3>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="agent-name">Agent Name *</label>
+                      <input
+                        id="agent-name"
+                        type="text"
+                        className="form-input"
+                        placeholder="Enter agent name"
+                        value={state.agent.name}
+                        $bind="agent.name"
+                        disabled={state.loading || isEditMode}
+                      />
+                    </div>
 
-                  <div className="form-group">
-                    <label htmlFor="agent-name">Agent Name *</label>
-                    <input
-                      id="agent-name"
-                      type="text"
-                      className="form-input"
-                      placeholder="Enter agent name"
-                      value={state.agent.name}
-                      $bind="agent.name"
-                      disabled={state.loading || isEditMode}
-                    />
+                    <div className="form-group">
+                      <label htmlFor="agent-temperature">Temperature</label>
+                      <input
+                        id="agent-temperature"
+                        type="number"
+                        className="form-input"
+                        placeholder="0.0 - 2.0"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={state.agent.temperature}
+                        $bind="agent.temperature"
+                        disabled={state.loading}
+                      />
+                    </div>
                   </div>
+                </div>
 
-                  {/* <div className="form-group">
+                {/* Second row: Provider and Model */}
+                <div className="form-section">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="agent-provider">Provider</label>
+                      <select
+                        id="agent-provider"
+                        className="form-select"
+                        value={state.agent.provider}
+                        $bind="agent.provider"
+                        disabled={state.loading}
+                      >
+                        <option value="">Select provider</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="google">Google</option>
+                        <option value="microsoft">Azure-OpenAI</option>
+                        <option value="ollama">Ollama (Local)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="agent-model">Model</label>
+                      <input
+                        id="agent-model"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
+                        value={state.agent.model}
+                        $bind="agent.model"
+                        disabled={state.loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Third row: Description - Full width */}
+                {/* <div className="form-section">
+                  <div className="form-group">
                     <label htmlFor="agent-description">Description</label>
                     <input
                       id="agent-description"
@@ -274,66 +329,13 @@ export default class AgentEdit extends Component<AgentEditState> {
                       $bind="agent.description"
                       disabled={state.loading}
                     />
-                  </div> */}
-                </div>
-
-                {/* LLM Configuration Section */}
-                <div className="form-section">
-                  <h3 className="section-title">LLM Configuration</h3>
-
-                  <div className="form-group">
-                    <label htmlFor="agent-provider">Provider</label>
-                    <select
-                      id="agent-provider"
-                      className="form-select"
-                      value={state.agent.provider}
-                      $bind="agent.provider"
-                      disabled={state.loading}
-                    >
-                      <option value="">Select provider</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="google">Google</option>
-                      <option value="microsoft">Microsoft</option>
-                      <option value="ollama">Ollama (Local)</option>
-                    </select>
                   </div>
-
-                  <div className="form-group">
-                    <label htmlFor="agent-model">Model</label>
-                    <input
-                      id="agent-model"
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
-                      value={state.agent.model}
-                      $bind="agent.model"
-                      disabled={state.loading}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="agent-temperature">Temperature</label>
-                    <input
-                      id="agent-temperature"
-                      type="number"
-                      className="form-input"
-                      placeholder="0.0 - 2.0"
-                      min="0"
-                      max="2"
-                      step="0.1"
-                      value={state.agent.temperature}
-                      $bind="agent.temperature"
-                      disabled={state.loading}
-                    />
-                  </div>
-                </div>
+                </div> */}
 
                 {/* System Prompt Section */}
                 <div className="form-section">
-                  <h3 className="section-title">System Prompt</h3>
-
                   <div className="form-group">
+                    <label htmlFor="agent-prompt">System Prompt</label>
                     <textarea
                       id="agent-prompt"
                       className="form-textarea"

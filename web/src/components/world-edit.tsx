@@ -231,7 +231,6 @@ export default class WorldEdit extends Component<WorldEditState> {
               <form className="world-form">
                 {/* Basic Information Section */}
                 <div className="form-section">
-                  <h3 className="section-title">World Configuration</h3>
 
                   <div className="form-group">
                     <label htmlFor="world-name">World Name *</label>
