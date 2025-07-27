@@ -31,7 +31,7 @@ const DEFAULT_WORLD_NAME = 'Default World';
 const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH ||'./data/worlds';
 const ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
 
-console.log('🌐 API initialized with root path:', ROOT_PATH);
+// console.log('🌐 API initialized with root path:', ROOT_PATH);
 
 // Utility functions
 function sendError(res: Response, status: number, message: string, code?: string, details?: any) {

@@ -99,16 +99,17 @@ export async function loadWorldFromDisk(root: string, worldId: string): Promise<
   try {
     const worldDir = getWorldDir(root, worldId);
     const configPath = path.join(worldDir, 'config.json');
-
     const configData = await readJsonFile<any>(configPath);
-
+    // Validate required fields
+    if (!configData || !configData.id && !configData.name || !configData.name || typeof configData.turnLimit === 'undefined') {
+      return null;
+    }
     const worldData: WorldData = {
       id: configData.id || configData.name, // Support migration from old format
       name: configData.name,
       description: configData.description,
       turnLimit: configData.turnLimit || 5
     };
-
     return worldData;
   } catch {
     return null;

@@ -1,3 +1,6 @@
+V0.4
+- Added SQLite storage 
+
 V0.3
 - Improved Web UI
 

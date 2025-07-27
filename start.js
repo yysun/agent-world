@@ -40,30 +40,31 @@ function copyDirSync(src, dest) {
   }
 }
 
-// 1. Ensure 'data' folder exists
-if (!fs.existsSync(dataDir)) {
-  if (fs.existsSync(dataExamplesDir)) {
-    console.log("[start.js] 'data' folder not found. Copying 'data-examples' to 'data'...");
-    copyDirSync(dataExamplesDir, dataDir);
-  } else {
-    console.error("[start.js] ERROR: 'data-examples' folder not found. Cannot create 'data' folder.");
-    process.exit(1);
-  }
-}
+// // 1. Ensure 'data' folder exists
+// if (!fs.existsSync(dataDir)) {
+//   if (fs.existsSync(dataExamplesDir)) {
+//     console.log("[start.js] 'data' folder not found. Copying 'data-examples' to 'data'...");
+//     copyDirSync(dataExamplesDir, dataDir);
+//   } else {
+//     console.error("[start.js] ERROR: 'data-examples' folder not found. Cannot create 'data' folder.");
+//     process.exit(1);
+//   }
+// }
 
-// 2. Ensure '.env' file exists
-if (!fs.existsSync(envFile)) {
-  if (fs.existsSync(envExampleFile)) {
-    console.log("[start.js] '.env' not found. Copying '.env.example' to '.env'...");
-    fs.copyFileSync(envExampleFile, envFile);
-  } else {
-    console.error("[start.js] ERROR: '.env.example' not found. Cannot create '.env'.");
-    process.exit(1);
-  }
-}
+// // 2. Ensure '.env' file exists
+// if (!fs.existsSync(envFile)) {
+//   if (fs.existsSync(envExampleFile)) {
+//     console.log("[start.js] '.env' not found. Copying '.env.example' to '.env'...");
+//     fs.copyFileSync(envExampleFile, envFile);
+//   } else {
+//     console.error("[start.js] ERROR: '.env.example' not found. Cannot create '.env'.");
+//     process.exit(1);
+//   }
+// }
 
 // 3. Launch 'npm run server'
-console.log("[start.js] Launching 'npm run server'...");
+console.log("🟢 Running agent-world inside folder:", cwd);
+// console.log("🚀 Launching the server...");
 const child = spawn('npx', ['tsx', server], { stdio: 'inherit', shell: true });
 child.on('exit', code => {
   process.exit(code);

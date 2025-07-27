@@ -17,6 +17,10 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "doodle.css": "^0.0.2"
+    "@types/dompurify": "^3.0.5",
+    "@types/marked": "^5.0.2",
+    "dompurify": "^3.2.6",
+    "doodle.css": "^0.0.2",
+    "marked": "^16.1.1"
   }
 }
