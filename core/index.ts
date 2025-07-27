@@ -56,10 +56,8 @@ export type {
   Agent,
   AgentMessage,
   // Enhanced parameter types
-  BaseAgentParams,
   CreateAgentParams,
   UpdateAgentParams,
-  BaseWorldParams,
   CreateWorldParams,
   UpdateWorldParams,
   // Derived types using utility types
