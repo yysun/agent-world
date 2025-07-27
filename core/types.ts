@@ -42,6 +42,7 @@
 // Chat Message Types - AI SDK Compatible
 
 import { EventEmitter } from 'events';
+import type { WorldData } from './world-storage';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -181,12 +182,13 @@ export enum SenderType {
   HUMAN = 'human'
 }
 
-// Agent Operation Types - Enhanced with TypeScript Utility Types
+// Agent Operation Types - Simplified Parameter Interfaces
 
 /**
- * Base agent parameters - single source of truth for agent properties
+ * Agent creation parameters - includes all properties needed for new agents
  */
-export interface BaseAgentParams {
+export interface CreateAgentParams {
+  id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
   name: string;
   type: string;
   provider: LLMProvider;
@@ -197,16 +199,9 @@ export interface BaseAgentParams {
 }
 
 /**
- * Agent creation parameters - extends base with optional ID
+ * Agent update parameters - partial for flexible updates with additional status field
  */
-export interface CreateAgentParams extends BaseAgentParams {
-  id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
-}
-
-/**
- * Agent update parameters - partial base with additional status field
- */
-export interface UpdateAgentParams extends Partial<BaseAgentParams> {
+export interface UpdateAgentParams extends Partial<Omit<CreateAgentParams, 'id'>> {
   status?: 'active' | 'inactive' | 'error';
 }
 
@@ -221,6 +216,32 @@ export type AgentInfo = Pick<Agent,
 }
 
 /**
+ * Storage-safe agent data type - clean interface for persistence
+ * Replaces complex AgentStorage with explicit properties
+ */
+export interface AgentData {
+  id: string;
+  name: string;
+  type: string;
+  status?: 'active' | 'inactive' | 'error';
+  provider: LLMProvider;
+  model: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  createdAt?: Date;
+  lastActive?: Date;
+  llmCallCount: number;
+  lastLLMCall?: Date;
+  memory: AgentMessage[];
+}
+
+/**
+ * @deprecated Use AgentData instead for cleaner, more maintainable code
+ * 
+ * AgentStorage uses complex Omit operations making it harder to maintain.
+ * AgentData provides explicit properties for better IDE support and type safety.
+ * 
  * Storage-safe agent type - excludes runtime methods for persistence
  * Uses Omit utility type to remove all methods, keeping only data properties
  */
@@ -239,26 +260,21 @@ export type AgentStorage = Omit<Agent,
   | 'world' // Exclude circular reference for storage
 >
 
-// World Management Types - Enhanced with TypeScript Utility Types
+// World Management Types - Simplified Parameter Interfaces
 
 /**
- * Base world parameters - single source of truth for world properties
+ * World creation parameters
  */
-export interface BaseWorldParams {
+export interface CreateWorldParams {
   name: string;
   description?: string;
   turnLimit?: number;
 }
 
 /**
- * World creation parameters - identical to base for now
+ * World update parameters - partial for flexible updates
  */
-export interface CreateWorldParams extends BaseWorldParams { }
-
-/**
- * World update parameters - partial base for flexible updates
- */
-export interface UpdateWorldParams extends Partial<BaseWorldParams> { }
+export interface UpdateWorldParams extends Partial<CreateWorldParams> { }
 
 /**
  * Enhanced World interface with flattened configuration
@@ -318,16 +334,9 @@ export interface World {
 
 /**
  * Storage-safe world data type - excludes runtime objects for persistence
+ * Consolidation: Use WorldData from world-storage.ts as the single source of truth
  */
-export type WorldStorage = Pick<World, 'id' | 'name' | 'description' | 'turnLimit'>
-
-// World Data for Storage (moved from world-storage.ts)
-export interface WorldData {
-  id: string;
-  name: string;
-  description?: string;
-  turnLimit: number;
-}
+export type { WorldData } from './world-storage';
 
 // Unified Storage Interface (R3.1)
 export interface StorageManager {
@@ -362,15 +371,7 @@ export interface MessageProcessor {
   removeSelfMentions(response: string, agentId: string): string;
 }
 
-/**
- * @deprecated Use World interface directly
- * WorldConfig is deprecated in favor of flattened World structure
- */
-export interface WorldConfig {
-  name: string;
-  description?: string;
-  turnLimit?: number;
-}
+
 
 // Storage Types
 export interface FileStorageOptions {

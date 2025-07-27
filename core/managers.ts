@@ -62,7 +62,8 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, WorldData, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types';
+import type { WorldData } from './world-storage';
 import { toKebabCase } from './utils';
 
 // Dynamic imports for browser/Node.js compatibility
@@ -340,13 +341,9 @@ const moduleInitialization = initializeModules();
 // ========================
 
 /**
- * World listing information
+ * World listing information - extends WorldData with computed agentCount
  */
-export interface WorldInfo {
-  id: string;
-  name: string;
-  description?: string;
-  turnLimit: number;
+export interface WorldInfo extends WorldData {
   agentCount: number;
 }
 

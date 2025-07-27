@@ -56,16 +56,14 @@ export type {
   Agent,
   AgentMessage,
   // Enhanced parameter types
-  BaseAgentParams,
   CreateAgentParams,
   UpdateAgentParams,
-  BaseWorldParams,
   CreateWorldParams,
   UpdateWorldParams,
   // Derived types using utility types
   AgentInfo,
+  AgentData,
   AgentStorage,
-  WorldStorage,
   // Enhanced event types
   EventPayloadMap,
   TypedEvent,
