@@ -16,7 +16,6 @@ export {
   // World operations
   createWorld,
   getWorld,
-  getFullWorld,
   updateWorld,
   deleteWorld,
   listWorlds,
