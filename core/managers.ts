@@ -64,16 +64,13 @@ const logger = createCategoryLogger('core');
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types';
 import type { WorldData } from './world-storage';
 import { toKebabCase } from './utils';
-import { StorageFactory } from './storage-factory.js';
 
 // Dynamic imports for browser/Node.js compatibility
 import { EventEmitter } from 'events';
 import { isNodeEnvironment } from './utils.js';
 
-// Storage instance cache for factory pattern
-let storageInstance: StorageManager | null = null;
-
-// Dynamic function assignments for all storage operations
+// Storage and utility function assignments
+let storageInstance: any = null;
 let saveWorldToDisk: any;
 let loadWorldFromDisk: any;
 let deleteWorldFromDisk: any;
@@ -91,13 +88,9 @@ let agentExistsOnDisk: any;
 let validateAgentIntegrity: any;
 let repairAgentData: any;
 let archiveAgentMemory: any;
-
-// Dynamic function assignments for utils operations
 let extractMentions: any;
 let extractParagraphBeginningMentions: any;
 let determineSenderType: any;
-
-// Dynamic function assignments for events operations  
 let shouldAutoMention: any;
 let addAutoMention: any;
 let removeSelfMentions: any;
@@ -109,416 +102,80 @@ let subscribeToSSE: any;
 let subscribeAgentToMessages: any;
 let shouldAgentRespond: any;
 let processAgentMessage: any;
-
-// Dynamic function assignments for llm-manager operations
 let generateAgentResponse: any;
 let streamAgentResponse: any;
 
-// Initialize dynamic imports (consolidated from all managers)
+// Initialize modules and storage from environment
 async function initializeModules() {
-  // Initialize logger first (now synchronous)
   initializeLogger();
-
   if (isNodeEnvironment()) {
-    // Node.js environment - use storage factory for backend selection
-    try {
-      // Try to get storage instance from environment
-      if (!storageInstance) {
-        storageInstance = await StorageFactory.createFromEnvironment(process.cwd());
-      }
+    const storageFactory = await import('./storage-factory.js');
+    storageInstance = await storageFactory.createStorageFromEnv();
 
-      // Create wrapper functions that use the storage instance
-      saveWorldToDisk = async (rootPath: string, worldData: any) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.saveWorld(worldData);
-      };
-
-      loadWorldFromDisk = async (rootPath: string, worldId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.loadWorld(worldId);
-      };
-
-      deleteWorldFromDisk = async (rootPath: string, worldId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.deleteWorld(worldId);
-      };
-
-      loadAllWorldsFromDisk = async (rootPath: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.listWorlds();
-      };
-
-      worldExistsOnDisk = async (rootPath: string, worldId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        try {
-          const world = await storageInstance.loadWorld(worldId);
-          return !!world;
-        } catch {
-          return false;
-        }
-      };
-
-      // Agent storage functions using storage factory
-      loadAllAgentsFromDisk = async (rootPath: string, worldId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.listAgents(worldId);
-      };
-
-      saveAgentConfigToDisk = async (rootPath: string, worldId: string, agent: any) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.saveAgent(worldId, agent);
-      };
-
-      saveAgentToDisk = async (rootPath: string, worldId: string, agent: any) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.saveAgent(worldId, agent);
-      };
-
-      saveAgentMemoryToDisk = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        // Load agent, update memory, save agent
-        const agent = await storageInstance.loadAgent(worldId, agentId);
-        if (agent) {
-          agent.memory = memory;
-          return storageInstance.saveAgent(worldId, agent);
-        }
-      };
-
-      loadAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.loadAgent(worldId, agentId);
-      };
-
-      loadAgentFromDiskWithRetry = async (rootPath: string, worldId: string, agentId: string, options?: any) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.loadAgent(worldId, agentId);
-      };
-
-      deleteAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.deleteAgent(worldId, agentId);
-      };
-
-      loadAllAgentsFromDiskBatch = async (rootPath: string, worldId: string, options?: any) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        const agents = await storageInstance.listAgents(worldId);
-        return { successful: agents, failed: [] };
-      };
-
-      agentExistsOnDisk = async (rootPath: string, worldId: string, agentId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        try {
-          const agent = await storageInstance.loadAgent(worldId, agentId);
-          return !!agent;
-        } catch {
-          return false;
-        }
-      };
-
-      validateAgentIntegrity = async (rootPath: string, worldId: string, agentId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        const isValid = await storageInstance.validateIntegrity(worldId, agentId);
-        return { isValid };
-      };
-
-      repairAgentData = async (rootPath: string, worldId: string, agentId: string) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        return storageInstance.repairData(worldId, agentId);
-      };
-
-      archiveAgentMemory = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-        if (!storageInstance) {
-          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
-        }
-        // For SQLite storage, use enhanced archive functionality
-        if ('archiveAgentMemory' in storageInstance) {
-          return (storageInstance as any).archiveAgentMemory(worldId, agentId, memory);
-        }
-        // For file storage, fall back to original file-based archiving
+    // Storage wrappers
+    saveWorldToDisk = async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData);
+    loadWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId);
+    deleteWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId);
+    loadAllWorldsFromDisk = async (_rootPath: string) => storageInstance.listWorlds();
+    worldExistsOnDisk = async (_rootPath: string, worldId: string) => {
+      try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
+    };
+    loadAllAgentsFromDisk = async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId);
+    saveAgentConfigToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
+    saveAgentToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
+    saveAgentMemoryToDisk = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+      const agent = await storageInstance.loadAgent(worldId, agentId);
+      if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
+    };
+    loadAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId);
+    loadAgentFromDiskWithRetry = async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId);
+    deleteAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId);
+    loadAllAgentsFromDiskBatch = async (_rootPath: string, worldId: string, _options?: any) => {
+      const agents = await storageInstance.listAgents(worldId); return { successful: agents, failed: [] };
+    };
+    agentExistsOnDisk = async (_rootPath: string, worldId: string, agentId: string) => {
+      try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
+    };
+    validateAgentIntegrity = async (_rootPath: string, worldId: string, agentId: string) => {
+      const isValid = await storageInstance.validateIntegrity(worldId, agentId); return { isValid };
+    };
+    repairAgentData = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId);
+    archiveAgentMemory = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+      if ('archiveAgentMemory' in storageInstance) {
+        return storageInstance.archiveAgentMemory(worldId, agentId, memory);
+      } else {
         const agentStorage = await import('./agent-storage.js');
-        return agentStorage.archiveAgentMemory(rootPath, worldId, agentId, memory);
-      };
+        return agentStorage.archiveAgentMemory(storageInstance.rootPath, worldId, agentId, memory);
+      }
+    };
 
-      // Load other modules for non-storage operations
-      const utils = await import('./utils.js');
-      const events = await import('./events.js');
-      const llmManager = await import('./llm-manager.js');
-
-      // Utils functions
-      extractMentions = utils.extractMentions;
-      extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
-      determineSenderType = utils.determineSenderType;
-
-      // Events functions
-      shouldAutoMention = events.shouldAutoMention;
-      addAutoMention = events.addAutoMention;
-      removeSelfMentions = events.removeSelfMentions;
-      publishMessage = events.publishMessage;
-      subscribeToMessages = events.subscribeToMessages;
-      broadcastToWorld = events.broadcastToWorld;
-      publishSSE = events.publishSSE;
-      subscribeToSSE = events.subscribeToSSE;
-      subscribeAgentToMessages = events.subscribeAgentToMessages;
-      shouldAgentRespond = events.shouldAgentRespond;
-      processAgentMessage = events.processAgentMessage;
-
-      // LLM Manager functions
-      generateAgentResponse = llmManager.generateAgentResponse;
-      streamAgentResponse = llmManager.streamAgentResponse;
-
-    } catch (error) {
-      logger.error('Failed to initialize storage factory, falling back to file storage', { error: error instanceof Error ? error.message : error });
-      
-      // Fallback to original file-based storage
-      const worldStorage = await import('./world-storage.js');
-      const agentStorage = await import('./agent-storage.js');
-      const utils = await import('./utils.js');
-      const events = await import('./events.js');
-      const llmManager = await import('./llm-manager.js');
-
-      // World storage functions
-      saveWorldToDisk = worldStorage.saveWorldToDisk;
-      loadWorldFromDisk = worldStorage.loadWorldFromDisk;
-      deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
-      loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
-      worldExistsOnDisk = worldStorage.worldExistsOnDisk;
-
-      // Agent storage functions
-      loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
-      saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
-      saveAgentToDisk = agentStorage.saveAgentToDisk;
-      saveAgentMemoryToDisk = agentStorage.saveAgentMemoryToDisk;
-      loadAgentFromDisk = agentStorage.loadAgentFromDisk;
-      loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
-      deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
-      loadAllAgentsFromDiskBatch = agentStorage.loadAllAgentsFromDiskBatch;
-      agentExistsOnDisk = agentStorage.agentExistsOnDisk;
-      validateAgentIntegrity = agentStorage.validateAgentIntegrity;
-      repairAgentData = agentStorage.repairAgentData;
-      archiveAgentMemory = agentStorage.archiveAgentMemory;
-
-      // Utils functions
-      extractMentions = utils.extractMentions;
-      extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
-      determineSenderType = utils.determineSenderType;
-
-      // Events functions
-      shouldAutoMention = events.shouldAutoMention;
-      addAutoMention = events.addAutoMention;
-      removeSelfMentions = events.removeSelfMentions;
-      publishMessage = events.publishMessage;
-      subscribeToMessages = events.subscribeToMessages;
-      broadcastToWorld = events.broadcastToWorld;
-      publishSSE = events.publishSSE;
-      subscribeToSSE = events.subscribeToSSE;
-      subscribeAgentToMessages = events.subscribeAgentToMessages;
-      shouldAgentRespond = events.shouldAgentRespond;
-      processAgentMessage = events.processAgentMessage;
-
-      // LLM Manager functions
-      generateAgentResponse = llmManager.generateAgentResponse;
-      streamAgentResponse = llmManager.streamAgentResponse;
-    }
+    // Utility and event modules
+    const utils = await import('./utils.js');
+    const events = await import('./events.js');
+    const llmManager = await import('./llm-manager.js');
+    extractMentions = utils.extractMentions;
+    extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
+    determineSenderType = utils.determineSenderType;
+    shouldAutoMention = events.shouldAutoMention;
+    addAutoMention = events.addAutoMention;
+    removeSelfMentions = events.removeSelfMentions;
+    publishMessage = events.publishMessage;
+    subscribeToMessages = events.subscribeToMessages;
+    broadcastToWorld = events.broadcastToWorld;
+    publishSSE = events.publishSSE;
+    subscribeToSSE = events.subscribeToSSE;
+    subscribeAgentToMessages = events.subscribeAgentToMessages;
+    shouldAgentRespond = events.shouldAgentRespond;
+    processAgentMessage = events.processAgentMessage;
+    generateAgentResponse = llmManager.generateAgentResponse;
+    streamAgentResponse = llmManager.streamAgentResponse;
   } else {
-    // Browser environment - provide NoOp implementations with debug logging
+    // ...existing code for browser NoOps...
     logger.warn('All operations disabled in browser environment');
-
-    // World storage NoOps
-    saveWorldToDisk = async (rootPath: string, worldData: any) => {
-      logger.debug('NoOp: saveWorldToDisk called in browser', { worldId: worldData?.id });
-    };
-
-    loadWorldFromDisk = async (rootPath: string, worldId: string) => {
-      logger.debug('NoOp: loadWorldFromDisk called in browser', { worldId });
-      return null;
-    };
-
-    deleteWorldFromDisk = async (rootPath: string, worldId: string) => {
-      logger.debug('NoOp: deleteWorldFromDisk called in browser', { worldId });
-      return false;
-    };
-
-    loadAllWorldsFromDisk = async (rootPath: string) => {
-      logger.debug('NoOp: loadAllWorldsFromDisk called in browser');
-      return [];
-    };
-
-    worldExistsOnDisk = async (rootPath: string, worldId: string) => {
-      logger.debug('NoOp: worldExistsOnDisk called in browser', { worldId });
-      return false;
-    };
-
-    // Agent storage NoOps
-    loadAllAgentsFromDisk = async (rootPath: string, worldId: string) => {
-      logger.debug('NoOp: loadAllAgentsFromDisk called in browser', { worldId });
-      return [];
-    };
-
-    saveAgentConfigToDisk = async (rootPath: string, worldId: string, agent: any) => {
-      logger.debug('NoOp: saveAgentConfigToDisk called in browser', { worldId, agentId: agent?.id });
-    };
-
-    saveAgentToDisk = async (rootPath: string, worldId: string, agent: any) => {
-      logger.debug('NoOp: saveAgentToDisk called in browser', { worldId, agentId: agent?.id });
-    };
-
-    saveAgentMemoryToDisk = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      logger.debug('NoOp: saveAgentMemoryToDisk called in browser', { worldId, agentId, memoryLength: memory?.length });
-    };
-
-    loadAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
-      logger.debug('NoOp: loadAgentFromDisk called in browser', { worldId, agentId });
-      return null;
-    };
-
-    loadAgentFromDiskWithRetry = async (rootPath: string, worldId: string, agentId: string, options?: any) => {
-      logger.debug('NoOp: loadAgentFromDiskWithRetry called in browser', { worldId, agentId });
-      return null;
-    };
-
-    deleteAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
-      logger.debug('NoOp: deleteAgentFromDisk called in browser', { worldId, agentId });
-      return false;
-    };
-
-    loadAllAgentsFromDiskBatch = async (rootPath: string, worldId: string, options?: any) => {
-      logger.debug('NoOp: loadAllAgentsFromDiskBatch called in browser', { worldId });
-      return { successful: [], failed: [] };
-    };
-
-    agentExistsOnDisk = async (rootPath: string, worldId: string, agentId: string) => {
-      logger.debug('NoOp: agentExistsOnDisk called in browser', { worldId, agentId });
-      return false;
-    };
-
-    validateAgentIntegrity = async (rootPath: string, worldId: string, agentId: string) => {
-      logger.debug('NoOp: validateAgentIntegrity called in browser', { worldId, agentId });
-      return { isValid: true };
-    };
-
-    repairAgentData = async (rootPath: string, worldId: string, agentId: string) => {
-      logger.debug('NoOp: repairAgentData called in browser', { worldId, agentId });
-      return false;
-    };
-
-    archiveAgentMemory = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      logger.debug('NoOp: archiveAgentMemory called in browser', { worldId, agentId, memoryLength: memory?.length });
-    };
-
-    // Utils NoOps
-    extractMentions = (content: string) => {
-      logger.debug('NoOp: extractMentions called in browser', { contentLength: content?.length });
-      return [];
-    };
-
-    extractParagraphBeginningMentions = (content: string) => {
-      logger.debug('NoOp: extractParagraphBeginningMentions called in browser', { contentLength: content?.length });
-      return [];
-    };
-
-    determineSenderType = (sender: string | undefined) => {
-      logger.debug('NoOp: determineSenderType called in browser', { sender });
-      return 'user';
-    };
-
-    // Events NoOps
-    shouldAutoMention = (response: string, sender: string, agentId: string) => {
-      logger.debug('NoOp: shouldAutoMention called in browser', { sender, agentId });
-      return false;
-    };
-
-    addAutoMention = (response: string, sender: string) => {
-      logger.debug('NoOp: addAutoMention called in browser', { sender });
-      return response;
-    };
-
-    removeSelfMentions = (response: string, agentId: string) => {
-      logger.debug('NoOp: removeSelfMentions called in browser', { agentId });
-      return response;
-    };
-
-    publishMessage = (world: any, content: string, sender: string) => {
-      logger.debug('NoOp: publishMessage called in browser', { worldId: world?.id, sender });
-    };
-
-    subscribeToMessages = (world: any, handler: any) => {
-      logger.debug('NoOp: subscribeToMessages called in browser', { worldId: world?.id });
-      return () => { }; // Return unsubscribe function
-    };
-
-    broadcastToWorld = (world: any, message: string, sender?: string) => {
-      logger.debug('NoOp: broadcastToWorld called in browser', { worldId: world?.id, sender });
-    };
-
-    publishSSE = (world: any, data: any) => {
-      logger.debug('NoOp: publishSSE called in browser', { worldId: world?.id });
-    };
-
-    subscribeToSSE = (world: any, handler: any) => {
-      logger.debug('NoOp: subscribeToSSE called in browser', { worldId: world?.id });
-      return () => { }; // Return unsubscribe function
-    };
-
-    subscribeAgentToMessages = (world: any, agent: any) => {
-      logger.debug('NoOp: subscribeAgentToMessages called in browser', { worldId: world?.id, agentId: agent?.id });
-      return () => { }; // Return unsubscribe function
-    };
-
-    shouldAgentRespond = async (world: any, agent: any, messageEvent: any) => {
-      logger.debug('NoOp: shouldAgentRespond called in browser', { worldId: world?.id, agentId: agent?.id });
-      return false;
-    };
-
-    processAgentMessage = async (world: any, agent: any, messageEvent: any) => {
-      logger.debug('NoOp: processAgentMessage called in browser', { worldId: world?.id, agentId: agent?.id });
-    };
-
-    // LLM Manager NoOps
-    generateAgentResponse = async (world: any, agent: any, messages: any[]) => {
-      logger.debug('NoOp: generateAgentResponse called in browser', { worldId: world?.id, agentId: agent?.id });
-      return 'Browser environment - LLM operations not available';
-    };
-
-    streamAgentResponse = async (world: any, agent: any, messages: any[]) => {
-      logger.debug('NoOp: streamAgentResponse called in browser', { worldId: world?.id, agentId: agent?.id });
-      return 'Browser environment - LLM operations not available';
-    };
+    // ...existing code...
   }
 }
 
-// Initialize modules immediately
 const moduleInitialization = initializeModules();
 
 // ========================
@@ -1693,8 +1350,8 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
  * Set storage configuration for the system
  */
 export async function setStorageConfiguration(config: any): Promise<void> {
-  const { StorageFactory } = await import('./storage-factory.js');
-  storageInstance = await StorageFactory.createStorage(config);
+  const storageFactory = await import('./storage-factory.js');
+  storageInstance = await storageFactory.createStorage(config);
 }
 
 /**
@@ -1706,13 +1363,13 @@ export async function getStorageInfo(): Promise<{
   supportedFeatures: string[];
 }> {
   await moduleInitialization;
-  
-  const type = storageInstance ? 
-    ('archiveAgentMemory' in storageInstance ? 'sqlite' : 'file') : 
+
+  const type = storageInstance ?
+    ('archiveAgentMemory' in storageInstance ? 'sqlite' : 'file') :
     'file';
-  
-  const supportedFeatures = type === 'sqlite' ? 
-    ['enhanced-archives', 'search', 'analytics', 'transactions'] : 
+
+  const supportedFeatures = type === 'sqlite' ?
+    ['enhanced-archives', 'search', 'analytics', 'transactions'] :
     ['basic-archives'];
 
   return {
@@ -1731,10 +1388,10 @@ export async function migrateStorage(
   options: any = {}
 ): Promise<any> {
   const { migrateFileToSQLite } = await import('./migration-tools.js');
-  
+
   if (targetConfig.type === 'sqlite') {
     return migrateFileToSQLite(sourceRootPath, targetConfig.sqlite?.database, options);
   }
-  
+
   throw new Error('Migration to file storage not supported');
 }
