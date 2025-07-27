@@ -38,6 +38,7 @@
 
 import { app } from 'apprun';
 import type { Message } from '../types';
+import { renderMarkdown } from '../utils/markdown';
 
 // Component Props Interfaces (consolidated from components)
 export interface WorldChatProps {
@@ -156,7 +157,7 @@ export default function WorldChat(props: WorldChatProps) {
                         </span>
                       )}
                     </div>
-                    <div className="message-content">{message.text}</div>
+                    <div className="message-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }}></div>
                     <div className="message-timestamp">
                       {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                     </div>
