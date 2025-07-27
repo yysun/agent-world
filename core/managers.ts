@@ -64,10 +64,14 @@ const logger = createCategoryLogger('core');
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types';
 import type { WorldData } from './world-storage';
 import { toKebabCase } from './utils';
+import { StorageFactory } from './storage-factory.js';
 
 // Dynamic imports for browser/Node.js compatibility
 import { EventEmitter } from 'events';
 import { isNodeEnvironment } from './utils.js';
+
+// Storage instance cache for factory pattern
+let storageInstance: StorageManager | null = null;
 
 // Dynamic function assignments for all storage operations
 let saveWorldToDisk: any;
@@ -116,55 +120,237 @@ async function initializeModules() {
   initializeLogger();
 
   if (isNodeEnvironment()) {
-    // Node.js environment - use dynamic imports for all functions
-    const worldStorage = await import('./world-storage.js');
-    const agentStorage = await import('./agent-storage.js');
-    const utils = await import('./utils.js');
-    const events = await import('./events.js');
-    const llmManager = await import('./llm-manager.js');
+    // Node.js environment - use storage factory for backend selection
+    try {
+      // Try to get storage instance from environment
+      if (!storageInstance) {
+        storageInstance = await StorageFactory.createFromEnvironment(process.cwd());
+      }
 
-    // World storage functions
-    saveWorldToDisk = worldStorage.saveWorldToDisk;
-    loadWorldFromDisk = worldStorage.loadWorldFromDisk;
-    deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
-    loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
-    worldExistsOnDisk = worldStorage.worldExistsOnDisk;
+      // Create wrapper functions that use the storage instance
+      saveWorldToDisk = async (rootPath: string, worldData: any) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.saveWorld(worldData);
+      };
 
-    // Agent storage functions
-    loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
-    saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
-    saveAgentToDisk = agentStorage.saveAgentToDisk;
-    saveAgentMemoryToDisk = agentStorage.saveAgentMemoryToDisk;
-    loadAgentFromDisk = agentStorage.loadAgentFromDisk;
-    loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
-    deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
-    loadAllAgentsFromDiskBatch = agentStorage.loadAllAgentsFromDiskBatch;
-    agentExistsOnDisk = agentStorage.agentExistsOnDisk;
-    validateAgentIntegrity = agentStorage.validateAgentIntegrity;
-    repairAgentData = agentStorage.repairAgentData;
-    archiveAgentMemory = agentStorage.archiveAgentMemory;
+      loadWorldFromDisk = async (rootPath: string, worldId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.loadWorld(worldId);
+      };
 
-    // Utils functions
-    extractMentions = utils.extractMentions;
-    extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
-    determineSenderType = utils.determineSenderType;
+      deleteWorldFromDisk = async (rootPath: string, worldId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.deleteWorld(worldId);
+      };
 
-    // Events functions
-    shouldAutoMention = events.shouldAutoMention;
-    addAutoMention = events.addAutoMention;
-    removeSelfMentions = events.removeSelfMentions;
-    publishMessage = events.publishMessage;
-    subscribeToMessages = events.subscribeToMessages;
-    broadcastToWorld = events.broadcastToWorld;
-    publishSSE = events.publishSSE;
-    subscribeToSSE = events.subscribeToSSE;
-    subscribeAgentToMessages = events.subscribeAgentToMessages;
-    shouldAgentRespond = events.shouldAgentRespond;
-    processAgentMessage = events.processAgentMessage;
+      loadAllWorldsFromDisk = async (rootPath: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.listWorlds();
+      };
 
-    // LLM Manager functions
-    generateAgentResponse = llmManager.generateAgentResponse;
-    streamAgentResponse = llmManager.streamAgentResponse;
+      worldExistsOnDisk = async (rootPath: string, worldId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        try {
+          const world = await storageInstance.loadWorld(worldId);
+          return !!world;
+        } catch {
+          return false;
+        }
+      };
+
+      // Agent storage functions using storage factory
+      loadAllAgentsFromDisk = async (rootPath: string, worldId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.listAgents(worldId);
+      };
+
+      saveAgentConfigToDisk = async (rootPath: string, worldId: string, agent: any) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.saveAgent(worldId, agent);
+      };
+
+      saveAgentToDisk = async (rootPath: string, worldId: string, agent: any) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.saveAgent(worldId, agent);
+      };
+
+      saveAgentMemoryToDisk = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        // Load agent, update memory, save agent
+        const agent = await storageInstance.loadAgent(worldId, agentId);
+        if (agent) {
+          agent.memory = memory;
+          return storageInstance.saveAgent(worldId, agent);
+        }
+      };
+
+      loadAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.loadAgent(worldId, agentId);
+      };
+
+      loadAgentFromDiskWithRetry = async (rootPath: string, worldId: string, agentId: string, options?: any) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.loadAgent(worldId, agentId);
+      };
+
+      deleteAgentFromDisk = async (rootPath: string, worldId: string, agentId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.deleteAgent(worldId, agentId);
+      };
+
+      loadAllAgentsFromDiskBatch = async (rootPath: string, worldId: string, options?: any) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        const agents = await storageInstance.listAgents(worldId);
+        return { successful: agents, failed: [] };
+      };
+
+      agentExistsOnDisk = async (rootPath: string, worldId: string, agentId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        try {
+          const agent = await storageInstance.loadAgent(worldId, agentId);
+          return !!agent;
+        } catch {
+          return false;
+        }
+      };
+
+      validateAgentIntegrity = async (rootPath: string, worldId: string, agentId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        const isValid = await storageInstance.validateIntegrity(worldId, agentId);
+        return { isValid };
+      };
+
+      repairAgentData = async (rootPath: string, worldId: string, agentId: string) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        return storageInstance.repairData(worldId, agentId);
+      };
+
+      archiveAgentMemory = async (rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+        if (!storageInstance) {
+          storageInstance = await StorageFactory.createFromEnvironment(rootPath);
+        }
+        // For SQLite storage, use enhanced archive functionality
+        if ('archiveAgentMemory' in storageInstance) {
+          return (storageInstance as any).archiveAgentMemory(worldId, agentId, memory);
+        }
+        // For file storage, fall back to original file-based archiving
+        const agentStorage = await import('./agent-storage.js');
+        return agentStorage.archiveAgentMemory(rootPath, worldId, agentId, memory);
+      };
+
+      // Load other modules for non-storage operations
+      const utils = await import('./utils.js');
+      const events = await import('./events.js');
+      const llmManager = await import('./llm-manager.js');
+
+      // Utils functions
+      extractMentions = utils.extractMentions;
+      extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
+      determineSenderType = utils.determineSenderType;
+
+      // Events functions
+      shouldAutoMention = events.shouldAutoMention;
+      addAutoMention = events.addAutoMention;
+      removeSelfMentions = events.removeSelfMentions;
+      publishMessage = events.publishMessage;
+      subscribeToMessages = events.subscribeToMessages;
+      broadcastToWorld = events.broadcastToWorld;
+      publishSSE = events.publishSSE;
+      subscribeToSSE = events.subscribeToSSE;
+      subscribeAgentToMessages = events.subscribeAgentToMessages;
+      shouldAgentRespond = events.shouldAgentRespond;
+      processAgentMessage = events.processAgentMessage;
+
+      // LLM Manager functions
+      generateAgentResponse = llmManager.generateAgentResponse;
+      streamAgentResponse = llmManager.streamAgentResponse;
+
+    } catch (error) {
+      logger.error('Failed to initialize storage factory, falling back to file storage', { error: error instanceof Error ? error.message : error });
+      
+      // Fallback to original file-based storage
+      const worldStorage = await import('./world-storage.js');
+      const agentStorage = await import('./agent-storage.js');
+      const utils = await import('./utils.js');
+      const events = await import('./events.js');
+      const llmManager = await import('./llm-manager.js');
+
+      // World storage functions
+      saveWorldToDisk = worldStorage.saveWorldToDisk;
+      loadWorldFromDisk = worldStorage.loadWorldFromDisk;
+      deleteWorldFromDisk = worldStorage.deleteWorldFromDisk;
+      loadAllWorldsFromDisk = worldStorage.loadAllWorldsFromDisk;
+      worldExistsOnDisk = worldStorage.worldExistsOnDisk;
+
+      // Agent storage functions
+      loadAllAgentsFromDisk = agentStorage.loadAllAgentsFromDisk;
+      saveAgentConfigToDisk = agentStorage.saveAgentConfigToDisk;
+      saveAgentToDisk = agentStorage.saveAgentToDisk;
+      saveAgentMemoryToDisk = agentStorage.saveAgentMemoryToDisk;
+      loadAgentFromDisk = agentStorage.loadAgentFromDisk;
+      loadAgentFromDiskWithRetry = agentStorage.loadAgentFromDiskWithRetry;
+      deleteAgentFromDisk = agentStorage.deleteAgentFromDisk;
+      loadAllAgentsFromDiskBatch = agentStorage.loadAllAgentsFromDiskBatch;
+      agentExistsOnDisk = agentStorage.agentExistsOnDisk;
+      validateAgentIntegrity = agentStorage.validateAgentIntegrity;
+      repairAgentData = agentStorage.repairAgentData;
+      archiveAgentMemory = agentStorage.archiveAgentMemory;
+
+      // Utils functions
+      extractMentions = utils.extractMentions;
+      extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
+      determineSenderType = utils.determineSenderType;
+
+      // Events functions
+      shouldAutoMention = events.shouldAutoMention;
+      addAutoMention = events.addAutoMention;
+      removeSelfMentions = events.removeSelfMentions;
+      publishMessage = events.publishMessage;
+      subscribeToMessages = events.subscribeToMessages;
+      broadcastToWorld = events.broadcastToWorld;
+      publishSSE = events.publishSSE;
+      subscribeToSSE = events.subscribeToSSE;
+      subscribeAgentToMessages = events.subscribeAgentToMessages;
+      shouldAgentRespond = events.shouldAgentRespond;
+      processAgentMessage = events.processAgentMessage;
+
+      // LLM Manager functions
+      generateAgentResponse = llmManager.generateAgentResponse;
+      streamAgentResponse = llmManager.streamAgentResponse;
+    }
   } else {
     // Browser environment - provide NoOp implementations with debug logging
     logger.warn('All operations disabled in browser environment');
@@ -1497,4 +1683,58 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
   const agent = enhanceAgentWithMethods(agentData, rootPath, worldId);
   const { memory, ...config } = agent;
   return config;
+}
+
+// ========================
+// STORAGE CONFIGURATION
+// ========================
+
+/**
+ * Set storage configuration for the system
+ */
+export async function setStorageConfiguration(config: any): Promise<void> {
+  const { StorageFactory } = await import('./storage-factory.js');
+  storageInstance = await StorageFactory.createStorage(config);
+}
+
+/**
+ * Get current storage type information
+ */
+export async function getStorageInfo(): Promise<{
+  type: string;
+  isInitialized: boolean;
+  supportedFeatures: string[];
+}> {
+  await moduleInitialization;
+  
+  const type = storageInstance ? 
+    ('archiveAgentMemory' in storageInstance ? 'sqlite' : 'file') : 
+    'file';
+  
+  const supportedFeatures = type === 'sqlite' ? 
+    ['enhanced-archives', 'search', 'analytics', 'transactions'] : 
+    ['basic-archives'];
+
+  return {
+    type,
+    isInitialized: !!storageInstance,
+    supportedFeatures
+  };
+}
+
+/**
+ * Migrate storage from one type to another
+ */
+export async function migrateStorage(
+  sourceRootPath: string,
+  targetConfig: any,
+  options: any = {}
+): Promise<any> {
+  const { migrateFileToSQLite } = await import('./migration-tools.js');
+  
+  if (targetConfig.type === 'sqlite') {
+    return migrateFileToSQLite(sourceRootPath, targetConfig.sqlite?.database, options);
+  }
+  
+  throw new Error('Migration to file storage not supported');
 }
