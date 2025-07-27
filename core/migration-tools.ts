@@ -23,12 +23,14 @@
  * - Comprehensive error handling and recovery
  * - Progress reporting for long-running migrations
  * - Data validation and integrity checks
+ *
+ * Changes:
+ * - 2025-07-27: Fixed incorrect import and usage of StorageFactory (now uses createStorage directly)
  */
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { StorageFactory, StorageConfig } from './storage-factory.js';
-import { SQLiteStorage } from './sqlite-storage.js';
+import { createStorage, createStorageFromEnv, StorageConfig } from './storage-factory.js';
 import type { StorageManager, WorldData, Agent } from './types';
 import { isNodeEnvironment } from './utils.js';
 
@@ -103,7 +105,7 @@ export interface MigrationResult {
 export class MigrationTools {
   private config: MigrationConfig;
   private sourceStorage?: StorageManager;
-  private targetStorage?: SQLiteStorage;
+  private targetStorage?: StorageManager;
   private progress: MigrationProgress;
   private progressCallback?: (progress: MigrationProgress) => void;
 
@@ -134,7 +136,7 @@ export class MigrationTools {
 
     // Validate source storage
     try {
-      this.sourceStorage = await StorageFactory.createStorage({
+      this.sourceStorage = await createStorage({
         type: 'file',
         rootPath: this.config.sourceRootPath
       });
@@ -149,12 +151,16 @@ export class MigrationTools {
 
     // Validate target storage
     try {
-      this.targetStorage = await StorageFactory.createStorage(this.config.targetConfig) as SQLiteStorage;
-      
+      this.targetStorage = await createStorage(this.config.targetConfig);
+
       // Check if target database already has data
-      const stats = await this.targetStorage.getDatabaseStats();
-      if (stats.worldCount > 0) {
-        this.progress.warnings.push('Target database already contains data - migration will merge with existing data');
+      // SQLite-only: getDatabaseStats
+      const sqliteTarget = this.targetStorage as any;
+      if (typeof sqliteTarget.getDatabaseStats === 'function') {
+        const stats = await sqliteTarget.getDatabaseStats();
+        if (stats.worldCount > 0) {
+          this.progress.warnings.push('Target database already contains data - migration will merge with existing data');
+        }
       }
     } catch (error) {
       errors.push(`Failed to initialize target storage: ${error instanceof Error ? error.message : error}`);
@@ -162,9 +168,9 @@ export class MigrationTools {
 
     // Validate backup location if enabled
     if (this.config.options.createBackup) {
-      const backupPath = this.config.options.backupPath || 
+      const backupPath = this.config.options.backupPath ||
         path.join(path.dirname(this.config.sourceRootPath), `backup-${Date.now()}`);
-      
+
       try {
         await fs.access(path.dirname(backupPath));
       } catch {
@@ -256,7 +262,7 @@ export class MigrationTools {
    * Create backup of source data
    */
   private async createBackup(): Promise<string> {
-    const backupPath = this.config.options.backupPath || 
+    const backupPath = this.config.options.backupPath ||
       path.join(path.dirname(this.config.sourceRootPath), `backup-${Date.now()}`);
 
     await fs.mkdir(backupPath, { recursive: true });
@@ -293,7 +299,7 @@ export class MigrationTools {
     for (const world of worlds) {
       try {
         this.updateProgress('worlds', this.progress.currentStep, this.progress.totalSteps, `Migrating world: ${world.name}`);
-        
+
         await this.targetStorage.saveWorld(world);
         migratedCount++;
       } catch (error) {
@@ -323,12 +329,12 @@ export class MigrationTools {
     for (const world of worlds) {
       try {
         const agents = await this.sourceStorage.listAgents(world.id);
-        
+
         for (const agent of agents) {
           try {
-            this.updateProgress('agents', this.progress.currentStep, this.progress.totalSteps, 
+            this.updateProgress('agents', this.progress.currentStep, this.progress.totalSteps,
               `Migrating agent: ${agent.name} in ${world.name}`);
-            
+
             await this.targetStorage.saveAgent(world.id, agent);
             migratedCount++;
           } catch (error) {
@@ -367,7 +373,7 @@ export class MigrationTools {
     for (const world of worlds) {
       try {
         const agents = await this.sourceStorage!.listAgents(world.id);
-        
+
         for (const agent of agents) {
           try {
             const archiveCount = await this.migrateAgentArchives(world.id, agent);
@@ -433,7 +439,7 @@ export class MigrationTools {
           messageCount: Array.isArray(archiveData) ? archiveData.length : 0,
           startTime: timestamp,
           endTime: timestamp,
-          participants: Array.isArray(archiveData) ? 
+          participants: Array.isArray(archiveData) ?
             [...new Set(archiveData.map((msg: any) => msg.sender).filter(Boolean))] : [],
           tags: this.config.options.archiveMetadata?.addMigrationTags ? ['migration'] : [],
           summary: `Archive migrated from file storage on ${new Date().toISOString()}`
@@ -447,7 +453,13 @@ export class MigrationTools {
           createdAt: new Date(msg.createdAt || timestamp)
         })) : [];
 
-        await this.targetStorage!.archiveAgentMemory(worldId, agent.id, messages, metadata);
+        // SQLite-only: archiveAgentMemory
+        const sqliteTarget = this.targetStorage as any;
+        if (typeof sqliteTarget.archiveAgentMemory === 'function') {
+          await sqliteTarget.archiveAgentMemory(worldId, agent.id, messages, metadata);
+        } else {
+          throw new Error('archiveAgentMemory is not implemented on targetStorage');
+        }
         migratedCount++;
       } catch (error) {
         this.progress.errors.push({
@@ -494,9 +506,11 @@ export class MigrationTools {
 
     // Run database integrity check
     if (this.config.options.validateIntegrity) {
-      const integrity = await this.targetStorage.validateIntegrity('');
-      if (!integrity) {
-        this.progress.warnings.push('Database integrity check failed');
+      if (typeof this.targetStorage.validateIntegrity === 'function') {
+        const integrity = await this.targetStorage.validateIntegrity('');
+        if (!integrity) {
+          this.progress.warnings.push('Database integrity check failed');
+        }
       }
     }
   }
@@ -609,7 +623,7 @@ export async function checkMigrationStatus(
   let targetDataExists = false;
 
   try {
-    const sourceStorage = await StorageFactory.createStorage(sourceConfig);
+    const sourceStorage = await createStorage(sourceConfig);
     const sourceWorlds = await sourceStorage.listWorlds();
     sourceDataExists = sourceWorlds.length > 0;
   } catch {
@@ -617,7 +631,7 @@ export async function checkMigrationStatus(
   }
 
   try {
-    const targetStorage = await StorageFactory.createStorage(targetConfig);
+    const targetStorage = await createStorage(targetConfig);
     const targetWorlds = await targetStorage.listWorlds();
     targetDataExists = targetWorlds.length > 0;
   } catch {

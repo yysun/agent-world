@@ -22,12 +22,16 @@
  * - Timestamp tracking for all operations
  * - Cascading deletes for data consistency
  * - Prepared statements for security and performance
+ * - 2025-07-27: Ensures parent directory for SQLite database exists before opening (prevents SQLITE_CANTOPEN)
  */
 
 // Types only import - will be stripped at runtime
 
 import type { Database } from 'sqlite3';
 import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+
 
 
 export interface SQLiteConfig {
@@ -72,10 +76,16 @@ export async function createSQLiteSchemaContext(config: SQLiteConfig): Promise<S
     throw new Error('SQLite not available in browser environment');
   }
   try {
+    // Ensure parent directory exists for the database file
+    const dbPath = config.database;
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     // Use dynamic import for ESM compatibility
     const sqlite3Module = await import('sqlite3');
     const sqlite3 = sqlite3Module.default || sqlite3Module;
-    const db = new sqlite3.Database(config.database);
+    const db = new sqlite3.Database(dbPath);
     configurePragmas({ db, config });
     return { db, config, isInitialized: false };
   } catch (error) {
@@ -84,6 +94,7 @@ export async function createSQLiteSchemaContext(config: SQLiteConfig): Promise<S
   }
 }
 
+// ...existing code...
 export function configurePragmas(ctx: { db: Database; config: SQLiteConfig }): void {
   const { db, config } = ctx;
   try {
