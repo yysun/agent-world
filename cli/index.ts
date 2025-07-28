@@ -52,6 +52,7 @@ import {
   disableStreaming
 } from '../core/index.js';
 import type { LoggerConfig, LogLevel } from '../core/index.js';
+import { getDefaultRootPath } from '../core/storage-factory.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
@@ -213,8 +214,8 @@ function configureLLMProvidersFromEnv(): void {
   }
 }
 
-const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
-const DEFAULT_ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
+// Get default root path from storage-factory (no local defaults)
+const DEFAULT_ROOT_PATH = getDefaultRootPath();
 
 interface CLIOptions {
   root?: string;
