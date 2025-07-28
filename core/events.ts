@@ -327,10 +327,7 @@ export async function saveIncomingMessageToMemory(
       return;
     }
 
-    // Skip saving system messages (only used for error handling)
-    if (messageEvent.sender === 'system') {
-      return;
-    }
+    // System messages are now saved to memory (do not skip)
 
     // Create user message for memory storage
     const userMessage: AgentMessage = {
