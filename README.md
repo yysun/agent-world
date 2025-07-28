@@ -107,31 +107,14 @@ Each Agent World has a collection of agents that can communicate through a share
 
 ### Quick Start
 
-**Option 1: Next.js Web Interface (Recommended)**
+**Option 1: CLI Interface**
 ```bash
-git clone https://github.com/yysun/agent-world.git
-cd agent-world
-npm install
-
-# Start the Next.js web interface
-cd next
-npm run dev
+npx agent-world
 ```
 
-**Option 2: CLI Interface**
+**Option 2: Web Interface**
 ```bash
-git clone https://github.com/yysun/agent-world.git
-cd agent-world
-npm install
-npm start
-```
-
-**Option 3: CLI Interface**
-```bash
-git clone https://github.com/yysun/agent-world.git
-cd agent-world
-npm install
-npm run cli
+npx agent-world --server
 ```
 
 ## Project Structure (npm workspaces)
@@ -212,8 +195,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 
 ### World Database Setup
 
-The worlds are stored in the SQLite database under the `data` directory. You can change the database path by setting the environment variable `AGENT_WORLD_SQLITE_DATABASE`.
-
+The worlds are stored in the SQLite database under the `~/agent-world` directory. You can change the database path by setting the environment variable `AGENT_WORLD_SQLITE_DATABASE`.
 
 Or, you can change the storage type to file-based by setting the environment variable `AGENT_WORLD_STORAGE_TYPE` to `file`. And set the `AGENT_WORLD_DATA_PATH` to your desired directory.
 
@@ -223,11 +205,10 @@ export AGENT_WORLD_STORAGE_TYPE=file
 export AGENT_WORLD_DATA_PATH=./data/worlds
 ```
 
-
 ## Learn More
 
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
-- **Example Worlds** - Ready-made agent teams in `/data/worlds/`
+
 
 ## Future Plans
 
