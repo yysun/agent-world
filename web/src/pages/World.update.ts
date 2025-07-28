@@ -366,12 +366,18 @@ export const worldUpdateHandlers = {
       };
     }
 
+    // Convert agent.name to kebab-case
+    const kebabName = (agent.name || '')
+      .toLowerCase()
+      .replace(/[_\s]+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+
     return {
       ...state,
       selectedSettingsTarget: 'agent',
       selectedAgent: agent,
       messages: (state.messages || []).filter(message => !message.userEntered),
-      userInput: '@' + agent.name + ' '
+      userInput: '@' + kebabName + ' '
     };
   },
 
