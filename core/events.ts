@@ -343,10 +343,9 @@ export async function saveIncomingMessageToMemory(
     // Add to agent memory
     agent.memory.push(userMessage);
 
-    // Auto-save memory to disk
+    // Auto-save memory using storage factory (database or disk)
     try {
-      const { saveAgentMemoryToDisk } = await import('./agent-storage');
-      await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
+      await world.storage.saveAgent(world.id, agent);
     } catch (error) {
       logger.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -397,8 +396,7 @@ export async function processAgentMessage(
 
     // Auto-save agent state after LLM call count increment
     try {
-      const { saveAgentConfigToDisk } = await import('./agent-storage');
-      await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+      await world.storage.saveAgent(world.id, agent);
     } catch (error) {
       logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -444,8 +442,7 @@ export async function processAgentMessage(
 
     // Auto-save memory after adding final response
     try {
-      const { saveAgentMemoryToDisk } = await import('./agent-storage');
-      await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
+      await world.storage.saveAgent(world.id, agent);
     } catch (error) {
       logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -485,8 +482,7 @@ export async function resetLLMCallCountIfNeeded(
 
       // Auto-save agent state after turn limit reset
       try {
-        const { saveAgentConfigToDisk } = await import('./agent-storage');
-        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
+        await world.storage.saveAgent(world.id, agent);
       } catch (error) {
         logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
       }
