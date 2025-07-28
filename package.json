@@ -8,7 +8,7 @@
     "next"
   ],
   "bin": {
-    "agent-world": "./dist/cli/index.js"
+    "agent-world": "dist/cli/index.js"
   },
   "scripts": {
     "prestart": "npm run build",
