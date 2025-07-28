@@ -841,8 +841,9 @@ legend {
 
 .user-message {
   align-self: flex-end;
-  background-color: var(--accent-primary);
-  color: white;
+  background: none;
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
   width: auto;
   max-width: 70%;
 }
@@ -854,6 +855,11 @@ legend {
   border-left: 3px solid #2196f3;
   color: var(--text-primary);
   width: 100%;
+}
+
+/* System message styling: red left border */
+.agent-message.system-message {
+  border-left: 3px solid #e53935 !important;
 }
 
 .message-sender {
@@ -880,12 +886,29 @@ legend {
   font-weight: bold;
 }
 
-.message-content h1 { font-size: 1.4em; }
-.message-content h2 { font-size: 1.3em; }
-.message-content h3 { font-size: 1.2em; }
-.message-content h4 { font-size: 1.1em; }
-.message-content h5 { font-size: 1.05em; }
-.message-content h6 { font-size: 1em; }
+.message-content h1 {
+  font-size: 1.4em;
+}
+
+.message-content h2 {
+  font-size: 1.3em;
+}
+
+.message-content h3 {
+  font-size: 1.2em;
+}
+
+.message-content h4 {
+  font-size: 1.1em;
+}
+
+.message-content h5 {
+  font-size: 1.05em;
+}
+
+.message-content h6 {
+  font-size: 1em;
+}
 
 .message-content p {
   margin: 0.25rem 0;

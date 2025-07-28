@@ -143,9 +143,11 @@ export default function WorldChat(props: WorldChatProps) {
                 // Check if this is a cross-agent message
                 const isCrossAgentMessage = hasSenderAgentMismatch(message);
 
+                const isSystemMessage = message.sender === 'system' || message.sender === 'SYSTEM';
                 const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';
+                const systemClass = isSystemMessage ? 'system-message' : '';
                 const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
-                const messageClasses = `message ${baseMessageClass} ${crossAgentClass}`.trim();
+                const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
 
                 return (
                   <div key={message.id || index} className={messageClasses}>
