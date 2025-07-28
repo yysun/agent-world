@@ -8,17 +8,17 @@
     "next"
   ],
   "bin": {
-    "agent-world": "start.js"
+    "agent-world": "./dist/cli/index.js"
   },
   "scripts": {
-    "start": "node start.js",
+    "prestart": "npm run build",
+    "start": "node dist/server/index.js",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
-    "dev-old": "concurrently \"npm run server\" \"cd web && npm run dev\"",
+    "dev-web": "concurrently \"npm run server\" \"cd web && npm run dev\"",
     "test": "jest --config jest.config.js",
     "check": "tsc --noEmit",
-    "build": "cd web && npm run build",
-    "web": "cd web && npm run dev",
+    "build": "tsc && cd web && npm run build",
     "pkill": "pkill -f tsx",
     "dev": "cd next && npm run dev"
   },

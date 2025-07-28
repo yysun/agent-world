@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 /**
  * Web Server - Express.js HTTP Server with REST API and SSE
  * 
@@ -25,7 +25,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'http';
-import apiRouter from './api';
+import apiRouter from './api.js';
 
 // ES modules setup
 const __filename = fileURLToPath(import.meta.url);

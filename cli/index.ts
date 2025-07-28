@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 
 // Load environment variables from .env file
 import dotenv from 'dotenv';
@@ -37,6 +37,7 @@ dotenv.config();
  * Debug Mode: cli --root /data/worlds --world myworld --logLevel debug
  */
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { program } from 'commander';
 import readline from 'readline';
 import {
@@ -212,7 +213,7 @@ function configureLLMProvidersFromEnv(): void {
   }
 }
 
-const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH ||'./data/worlds';
+const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
 const DEFAULT_ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
 
 interface CLIOptions {
@@ -522,8 +523,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (worldState?.world) {
           console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
         }
-      } catch (error) {
-        console.error(error(`Error loading world: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      } catch (err) {
+        console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
         process.exit(1);
       }
     } else {
@@ -545,8 +546,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (worldState?.world) {
           console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
         }
-      } catch (error) {
-        console.error(error(`Error loading world: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      } catch (err) {
+        console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
         rl.close();
         return;
       }
@@ -625,8 +626,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             if (worldState?.world) {
               console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
             }
-          } catch (error) {
-            console.error(error(`Error loading world: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          } catch (err) {
+            console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
           }
 
           // Show prompt immediately after world selection
@@ -656,13 +657,13 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             worldState.world = refreshedWorld;
 
             console.log(success('World state refreshed'));
-          } catch (error) {
-            console.error(error(`Error refreshing world: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          } catch (err) {
+            console.error(error(`Error refreshing world: ${err instanceof Error ? err.message : 'Unknown error'}`));
           }
         }
 
-      } catch (error) {
-        console.error(error(`Command error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+      } catch (err) {
+        console.error(error(`Command error: ${err instanceof Error ? err.message : 'Unknown error'}`));
       }
 
       // Set timer based on input type: commands get short delay, messages get longer delay
@@ -713,8 +714,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       rl.close();
     });
 
-  } catch (error) {
-    console.error(boldRed('Error starting interactive mode:'), error instanceof Error ? error.message : error);
+  } catch (err) {
+    console.error(boldRed('Error starting interactive mode:'), err instanceof Error ? err.message : err);
     rl.close();
     process.exit(1);
   }
@@ -733,11 +734,31 @@ async function main(): Promise<void> {
     .option('-w, --world <name>', 'World name to connect to')
     .option('-c, --command <cmd>', 'Command to execute in pipeline mode')
     .option('-l, --logLevel <level>', 'Set log level (trace, debug, info, warn, error)', 'error')
+    .option('-s, --server', 'Launch the server before running CLI')
     .allowUnknownOption()
     .allowExcessArguments()
     .parse();
 
-  const options = program.opts<CLIOptions>();
+  const options = program.opts<CLIOptions & { server?: boolean }>();
+
+  // If --server is specified, launch the server first
+  if (options.server) {
+    const { spawnSync } = await import('child_process');
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const serverPath = path.resolve(__dirname, '../server/index.js');
+    const serverProcess = spawnSync('node', [serverPath], {
+      stdio: 'inherit',
+      cwd: path.dirname(serverPath),
+      env: process.env
+    });
+    if (serverProcess.error) {
+      console.error(boldRed('Failed to launch server:'), serverProcess.error);
+      process.exit(1);
+    }
+    // If server exits, exit CLI as well
+    process.exit(serverProcess.status || 0);
+  }
 
   // Configure logger - set global level first, then CLI-specific level
   await configureLogger(options.logLevel);
