@@ -142,8 +142,11 @@ export function determineSenderType(sender: string | undefined): SenderType {
   if (lowerSender === 'human' || lowerSender === 'user' || lowerSender === 'you') {
     return SenderType.HUMAN;
   }
-  if (lowerSender === 'system' || lowerSender === 'world') {
+  if (lowerSender === 'system') {
     return SenderType.SYSTEM;
+  }
+  if (lowerSender === 'world') {
+    return SenderType.WORLD;
   }
   return SenderType.AGENT;
 }

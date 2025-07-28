@@ -327,6 +327,11 @@ export async function saveIncomingMessageToMemory(
       return;
     }
 
+    // Skip saving system messages (only used for error handling)
+    if (messageEvent.sender === 'system') {
+      return;
+    }
+
     // Create user message for memory storage
     const userMessage: AgentMessage = {
       role: 'user',
@@ -415,39 +420,6 @@ export async function processAgentMessage(
       response = await generateAgentResponse(world, agent, messages);
     }
 
-    // Check for pass command in response first
-    const passCommandRegex = /<world>pass<\/world>/i;
-    if (passCommandRegex.test(response)) {
-      // Add original LLM response to memory for pass commands
-      const assistantMessage: AgentMessage = {
-        role: 'assistant',
-        content: response,
-        createdAt: new Date()
-      };
-      agent.memory.push(assistantMessage);
-
-      // Auto-save memory
-      try {
-        const { saveAgentMemoryToDisk } = await import('./agent-storage');
-        await saveAgentMemoryToDisk(world.rootPath, world.id, agent.id, agent.memory);
-      } catch (error) {
-        logger.warn('Failed to auto-save memory after pass command', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-      }
-
-      // Auto-save agent config after pass command (ensures LLM call count is persisted)
-      try {
-        const { saveAgentConfigToDisk } = await import('./agent-storage');
-        await saveAgentConfigToDisk(world.rootPath, world.id, agent);
-      } catch (error) {
-        logger.warn('Failed to auto-save agent config after pass command', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-      }
-
-      // Publish pass command redirect message
-      const passMessage = `@human ${agent.id} is passing control to you`;
-      publishMessage(world, passMessage, 'system');
-      return;
-    }
-
     // Process auto-mention logic with new requirements
     let finalResponse = response;
 
@@ -497,7 +469,7 @@ export async function processAgentMessage(
 }
 
 /**
- * Reset LLM call count for human and system messages with agent state persistence
+ * Reset LLM call count for human and world messages with agent state persistence
  * This should be called before shouldAgentRespond to ensure proper turn limit checking
  */
 export async function resetLLMCallCountIfNeeded(
@@ -513,7 +485,7 @@ export async function resetLLMCallCountIfNeeded(
     currentCallCount: agent.llmCallCount
   });
 
-  if (senderType === SenderType.HUMAN || senderType === SenderType.SYSTEM) {
+  if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
     if (agent.llmCallCount > 0) {
       logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
       agent.llmCallCount = 0;
@@ -573,9 +545,15 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   const senderType = determineSenderType(messageEvent.sender);
   logger.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
 
-  // Always respond to system messages (except turn limit messages handled above)
-  if (!messageEvent.sender || messageEvent.sender === 'system') {
-    logger.debug('Responding to system message', { agentId: agent.id });
+  // Never respond to system messages (only used for error handling now)
+  if (messageEvent.sender === 'system') {
+    logger.debug('Skipping system message', { agentId: agent.id });
+    return false;
+  }
+
+  // Always respond to world messages (except turn limit messages handled above)
+  if (messageEvent.sender === 'world') {
+    logger.debug('Responding to world message', { agentId: agent.id });
     return true;
   }
 

@@ -115,9 +115,13 @@ describe('Core Utilities', () => {
 
     test('should identify system senders', () => {
       expect(determineSenderType('system')).toBe('system');
-      expect(determineSenderType('world')).toBe('system');
       expect(determineSenderType('SYSTEM')).toBe('system');
-      expect(determineSenderType('World')).toBe('system');
+    });
+
+    test('should identify world senders', () => {
+      expect(determineSenderType('world')).toBe('world');
+      expect(determineSenderType('World')).toBe('world');
+      expect(determineSenderType('WORLD')).toBe('world');
     });
 
     test('should identify agent senders', () => {

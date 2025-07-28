@@ -188,16 +188,28 @@ describe('shouldAgentRespond', () => {
       expect(result).toBe(true); // Agents respond to public messages from humans
     });
 
-    test('should respond to system messages', async () => {
+    test('should respond to world messages', async () => {
       const messageEvent: WorldMessageEvent = {
-        content: 'System message to all agents',
-        sender: 'system',
+        content: 'World message to all agents',
+        sender: 'world',
         timestamp: new Date(),
         messageId: 'msg-10'
       };
 
       const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
       expect(result).toBe(true);
+    });
+
+    test('should NOT respond to system messages', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: 'System error message',
+        sender: 'system',
+        timestamp: new Date(),
+        messageId: 'msg-10-system'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(false);
     });
   });
 
@@ -263,15 +275,15 @@ describe('shouldAgentRespond', () => {
       expect(agentWithHighCallCount.llmCallCount).toBe(3); // Should NOT be reset in shouldAgentRespond
     });
 
-    test('should reset turn count on system messages', async () => {
+    test('should reset turn count on world messages', async () => {
       const agentWithHighCallCount = {
         ...mockAgent,
         llmCallCount: 3 // Will NOT be reset in shouldAgentRespond anymore
       };
 
       const messageEvent: WorldMessageEvent = {
-        content: 'System reset message',
-        sender: 'system',
+        content: 'World reset message',
+        sender: 'world',
         timestamp: new Date(),
         messageId: 'msg-15'
       };
@@ -279,6 +291,24 @@ describe('shouldAgentRespond', () => {
       const result = await shouldAgentRespond(mockWorld, agentWithHighCallCount, messageEvent);
       expect(result).toBe(true);
       expect(agentWithHighCallCount.llmCallCount).toBe(3); // Should NOT be reset in shouldAgentRespond
+    });
+
+    test('should NOT reset turn count on system messages', async () => {
+      const agentWithHighCallCount = {
+        ...mockAgent,
+        llmCallCount: 3
+      };
+
+      const messageEvent: WorldMessageEvent = {
+        content: 'System error message',
+        sender: 'system',
+        timestamp: new Date(),
+        messageId: 'msg-15-system'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, agentWithHighCallCount, messageEvent);
+      expect(result).toBe(false); // Should not respond to system messages
+      expect(agentWithHighCallCount.llmCallCount).toBe(3); // Should NOT be reset
     });
 
     test('should not respond to turn limit messages', async () => {
@@ -350,16 +380,28 @@ describe('shouldAgentRespond', () => {
       expect(result).toBe(true); // Empty content = public message
     });
 
-    test('should handle system sender', async () => {
+    test('should handle world sender', async () => {
       const messageEvent: WorldMessageEvent = {
         content: '@test-agent, hello',
-        sender: 'system', // Use 'system' instead of undefined
+        sender: 'world', // Use 'world' instead of 'system'
         timestamp: new Date(),
         messageId: 'msg-21'
       };
 
       const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
-      expect(result).toBe(true); // Treated as system message
+      expect(result).toBe(true); // Treated as world message
+    });
+
+    test('should NOT respond to system sender', async () => {
+      const messageEvent: WorldMessageEvent = {
+        content: '@test-agent, hello',
+        sender: 'system', // System messages should not be responded to
+        timestamp: new Date(),
+        messageId: 'msg-21-system'
+      };
+
+      const result = await shouldAgentRespond(mockWorld, mockAgent, messageEvent);
+      expect(result).toBe(false); // Should not respond to system messages
     });
 
     test('should handle very long message content', async () => {
