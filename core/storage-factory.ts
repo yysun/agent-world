@@ -221,15 +221,20 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
 
 import * as fs from 'fs';
 
-export async function createStorageFromEnv(): Promise<StorageManager> {
-  // Default to 'sqlite' unless overridden by env
-  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
+export function getDefaultRootPath(): string {
   let rootPath = process.env.AGENT_WORLD_DATA_PATH;
   if (!rootPath) {
     // Default to ~/agent-world if not defined
     const homeDir = process.env.HOME || process.env.USERPROFILE || '';
     rootPath = homeDir ? path.join(homeDir, 'agent-world') : './agent-world';
   }
+  return rootPath;
+}
+
+export async function createStorageFromEnv(): Promise<StorageManager> {
+  // Default to 'sqlite' unless overridden by env
+  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
+  const rootPath = getDefaultRootPath();
   // Ensure the folder exists
   if (isNodeEnvironment() && rootPath && !fs.existsSync(rootPath)) {
     fs.mkdirSync(rootPath, { recursive: true });
