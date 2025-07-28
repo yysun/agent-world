@@ -73,6 +73,13 @@ export default function WorldSettings(props: WorldSettingsProps) {
     }
   };
 
+  // Handle delete agent with confirmation
+  const handleDeleteAgent = (agent: Agent) => {
+    if (confirm(`Are you sure you want to delete agent "${agent.name}"? This action cannot be undone.`)) {
+      app.run('delete-agent', agent);
+    }
+  };
+
   return (
     <fieldset className="settings-fieldset">
       <legend>
@@ -96,13 +103,13 @@ export default function WorldSettings(props: WorldSettingsProps) {
                 >
                   <span className="btn-icon">⚙</span>
                 </button>
-                {/* <button
+                <button
                   className="action-btn"
-                  $onclick={['delete-agent', selectedAgent.id]}
+                  onclick={() => handleDeleteAgent(selectedAgent)}
                   title="Delete agent"
                 >
-                  <span className="btn-icon">x</span>
-                </button> */}
+                  <span className="btn-icon">🗑</span>
+                </button>
               </span>
             </div>
             <div className="setting-item">

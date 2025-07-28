@@ -373,5 +373,42 @@ export const worldUpdateHandlers = {
       messages: (state.messages || []).filter(message => !message.userEntered),
       userInput: '@' + agent.name + ' '
     };
+  },
+
+  // Agent deletion handler
+  'delete-agent': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
+    try {
+      await api.deleteAgent(state.worldName, agent.name);
+
+      // Remove agent from agents array
+      const updatedAgents = state.agents.filter(a => a.id !== agent.id);
+      
+      // Remove agent messages from the message list
+      const filteredMessages = (state.messages || []).filter(msg => msg.sender !== agent.name);
+
+      // Update world to remove the agent
+      const updatedWorld = state.world ? {
+        ...state.world,
+        agents: updatedAgents
+      } : null;
+
+      // Clear selected agent if it was the deleted one
+      const updatedSelectedAgent = state.selectedAgent?.id === agent.id ? null : state.selectedAgent;
+      const updatedSelectedSettingsTarget = state.selectedAgent?.id === agent.id ? 'world' : state.selectedSettingsTarget;
+
+      return {
+        ...state,
+        world: updatedWorld,
+        agents: updatedAgents,
+        messages: filteredMessages,
+        selectedAgent: updatedSelectedAgent,
+        selectedSettingsTarget: updatedSelectedSettingsTarget
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to delete agent'
+      };
+    }
   }
 };
