@@ -71,7 +71,7 @@ import {
   ArchiveMetadata,
   ArchiveStatistics
 } from './sqlite-schema.js';
-import type { StorageManager, WorldData, Agent, AgentMessage } from './types';
+import type { StorageManager, WorldData, Agent, AgentMessage } from './types.js';
 import { toKebabCase } from './utils.js';
 
 /**

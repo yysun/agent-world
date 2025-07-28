@@ -31,7 +31,7 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { createStorage, createStorageFromEnv, StorageConfig } from './storage-factory.js';
-import type { StorageManager, WorldData, Agent } from './types';
+import type { StorageManager, WorldData, Agent } from './types.js';
 import { isNodeEnvironment } from './utils.js';
 
 /**

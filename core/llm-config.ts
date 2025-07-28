@@ -37,7 +37,7 @@
  * - Added comprehensive error handling and validation
  */
 
-import { LLMProvider } from './types';
+import { LLMProvider } from './types.js';
 
 /**
  * Provider-specific configuration interfaces - Enhanced with TypeScript Utility Types

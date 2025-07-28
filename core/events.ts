@@ -76,7 +76,7 @@ export function disableStreaming(): void {
 }
 
 // Create events category logger
-import { createCategoryLogger } from './logger';
+import { createCategoryLogger } from './logger.js';
 const logger = createCategoryLogger('events');
 
 /**
@@ -139,14 +139,7 @@ export function broadcastToWorld(world: World, message: string, sender?: string)
 // Agent Events Functions (from agent-events.ts)
 
 // Import additional dependencies for agent events
-import {
-  getWorldTurnLimit,
-  extractMentions,
-  extractParagraphBeginningMentions,
-  determineSenderType,
-  messageDataToAgentMessage,
-  prepareMessagesForLLM
-} from './utils.js';
+import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, messageDataToAgentMessage, prepareMessagesForLLM } from './utils.js';
 
 /**
  * Auto-mention utility functions for processAgentMessage

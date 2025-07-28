@@ -42,7 +42,7 @@
 // Chat Message Types - AI SDK Compatible
 
 import { EventEmitter } from 'events';
-import type { WorldData } from './world-storage';
+import type { WorldData } from './world-storage.js';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -336,7 +336,7 @@ export interface World {
  * Storage-safe world data type - excludes runtime objects for persistence
  * Consolidation: Use WorldData from world-storage.ts as the single source of truth
  */
-export type { WorldData } from './world-storage';
+export type { WorldData } from './world-storage.js';
 
 // Unified Storage Interface (R3.1)
 export interface StorageManager {

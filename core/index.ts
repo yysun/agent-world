@@ -35,7 +35,7 @@ export {
   getAgentConfig,
   // Message operations
   // Note: Message operations moved to events.js (publishMessage, etc.)
-} from './managers';
+} from './managers.js';
 
 // Event system
 export {
@@ -46,7 +46,7 @@ export {
   subscribeAgentToMessages,
   processAgentMessage,
   shouldAgentRespond
-} from './events';
+} from './events.js';
 
 // Core types and utilities - Enhanced with TypeScript Utility Types
 export type {
@@ -67,22 +67,19 @@ export type {
   EventPayloadMap,
   TypedEvent,
   WorldEventPayload
-} from './types';
-export type { WorldInfo } from './managers';
-export type { WorldData } from './world-storage';
-export type { LoggerConfig, LogLevel } from './logger';
+} from './types.js';
+export type { WorldInfo } from './managers.js';
+export type { WorldData } from './world-storage.js';
+export type { LoggerConfig, LogLevel } from './logger.js';
 
-export { LLMProvider } from './types';
+export { LLMProvider } from './types.js';
 
 // Logging and utilities
-export { logger, createCategoryLogger, getCategoryLogLevel, initializeLogger } from './logger';
-export { generateId, toKebabCase } from './utils';
+export { logger, createCategoryLogger, getCategoryLogLevel, initializeLogger } from './logger.js';
+export { generateId, toKebabCase } from './utils.js';
 
 // Streaming control
-export {
-  enableStreaming,
-  disableStreaming,
-} from './events';
+export { enableStreaming, disableStreaming } from './events.js';
 
 // Subscription system
 export * from './subscription.js';

@@ -61,9 +61,9 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types';
-import type { WorldData } from './world-storage';
-import { toKebabCase } from './utils';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types.js';
+import type { WorldData } from './world-storage.js';
+import { toKebabCase } from './utils.js';
 
 // Dynamic imports for browser/Node.js compatibility
 import { EventEmitter } from 'events';

@@ -29,7 +29,7 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { toKebabCase } from './utils';
+import { toKebabCase } from './utils.js';
 
 /**
  * Serializable world data for storage (flat structure, no EventEmitter, no agents Map)

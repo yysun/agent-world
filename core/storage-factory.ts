@@ -18,7 +18,7 @@
  * - 2025-07-27: Default storage type changed to SQLite.
  * - See git history for previous changes.
  */
-import type { StorageManager } from './types';
+import type { StorageManager } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
