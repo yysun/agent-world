@@ -108,7 +108,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
                   onclick={() => handleDeleteAgent(selectedAgent)}
                   title="Delete agent"
                 >
-                  <span className="btn-icon">🗑</span>
+                  <span className="btn-icon">×</span>
                 </button>
               </span>
             </div>
