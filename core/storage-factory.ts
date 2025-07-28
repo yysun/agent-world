@@ -219,17 +219,28 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
   return storage;
 }
 
+import * as fs from 'fs';
+
 export async function createStorageFromEnv(): Promise<StorageManager> {
   // Default to 'sqlite' unless overridden by env
   const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
-  const rootPath = process.env.AGENT_WORLD_DATA_PATH || './data/worlds';
+  let rootPath = process.env.AGENT_WORLD_DATA_PATH;
+  if (!rootPath) {
+    // Default to ~/agent-world if not defined
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    rootPath = homeDir ? path.join(homeDir, 'agent-world') : './agent-world';
+  }
+  // Ensure the folder exists
+  if (isNodeEnvironment() && rootPath && !fs.existsSync(rootPath)) {
+    fs.mkdirSync(rootPath, { recursive: true });
+  }
 
   const config: StorageConfig = {
     type,
     rootPath,
     sqlite: type === 'sqlite'
       ? {
-        database: process.env.AGENT_WORLD_SQLITE_DATABASE || './data/database.db',
+        database: process.env.AGENT_WORLD_SQLITE_DATABASE || path.join(rootPath, 'database.db'),
         enableWAL: process.env.AGENT_WORLD_SQLITE_WAL !== 'false',
         busyTimeout: parseInt(process.env.AGENT_WORLD_SQLITE_TIMEOUT || '30000'),
         cacheSize: parseInt(process.env.AGENT_WORLD_SQLITE_CACHE || '-64000'),
@@ -238,6 +249,7 @@ export async function createStorageFromEnv(): Promise<StorageManager> {
       : undefined
   };
 
+  console.log('🟢 Storage path:', config.rootPath);
   return createStorage(config);
 }
 
