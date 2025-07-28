@@ -800,13 +800,25 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       streaming.isActive &&
       streaming.messageId === eventData.messageId) {
 
-      // Send error event
+      // Send error event (for SSE clients)
       sendSSE(JSON.stringify({
         type: 'sse',
         data: {
           type: 'error',
           error: eventData.error || eventData.message,
           sender: streaming.sender,
+          messageId: streaming.messageId
+        }
+      }));
+
+      // ALSO send as a chat message so frontend displays it
+      sendSSE(JSON.stringify({
+        type: 'message',
+        data: {
+          content: `[Error] ${eventData.error || eventData.message}`,
+          sender: streaming.sender || 'system',
+          timestamp: new Date().toISOString(),
+          error: true,
           messageId: streaming.messageId
         }
       }));

@@ -72,7 +72,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types';
-import { publishSSE } from './events';
+import { publishSSE, publishMessage } from './events';
 import { generateId } from './utils';
 import { createCategoryLogger } from './logger';
 
@@ -285,13 +285,16 @@ async function executeStreamAgentResponse(
     return fullResponse;
 
   } catch (error) {
-    // Publish SSE error event via world's eventEmitter
+    // Publish SSE error event via world's eventEmitter (for SSE clients)
     publishSSE(world, {
       agentName: agent.id,
       type: 'error',
       error: (error as Error).message,
       messageId
     });
+
+    // Also publish as a regular message so frontend displays it in chat
+    publishMessage(world, `[Error] ${(error as Error).message}`, 'system');
 
     throw error;
   }
