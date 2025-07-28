@@ -25,6 +25,8 @@ import { createMockAgent } from '../mock-helpers';
 const mockSaveAgentMemoryToDisk = jest.fn();
 const mockSaveAgentConfigToDisk = jest.fn();
 const mockStreamAgentResponse = jest.fn();
+const mockPublishMessage = jest.fn();
+const mockPublishSSE = jest.fn();
 
 // Mock modules that will be dynamically imported
 jest.mock('../../../core/agent-storage', () => ({
@@ -36,13 +38,18 @@ jest.mock('../../../core/llm-manager', () => ({
   streamAgentResponse: mockStreamAgentResponse
 }));
 
+// Mock the entire events module to capture internal calls
+jest.mock('../../../core/events', () => {
+  const originalModule = jest.requireActual('../../../core/events') as any;
+  return {
+    ...originalModule,
+    publishMessage: (...args: any[]) => mockPublishMessage(...args),
+    publishSSE: (...args: any[]) => mockPublishSSE(...args)
+  };
+});
+
 // Import the new function to test
 import { processAgentMessage, resetLLMCallCountIfNeeded } from '../../../core/events';
-
-// Spy on the events module functions after import
-import * as events from '../../../core/events';
-const mockPublishMessage = jest.spyOn(events, 'publishMessage').mockImplementation(() => { });
-const mockPublishSSE = jest.spyOn(events, 'publishSSE').mockImplementation(() => { });
 
 describe('processAgentMessage', () => {
   let mockWorld: World;
@@ -122,20 +129,20 @@ describe('processAgentMessage', () => {
       expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithLowCallCount);
     });
 
-    test('should increment LLM call count for system messages', async () => {
+    test('should increment LLM call count for world messages', async () => {
       const agentWithLowCallCount = {
         ...mockAgent,
         llmCallCount: 1
       };
 
-      const systemMessage: WorldMessageEvent = {
-        content: 'System notification',
-        sender: 'system',
+      const worldMessage: WorldMessageEvent = {
+        content: 'World announcement',
+        sender: 'world',
         timestamp: new Date(),
-        messageId: 'msg-system'
+        messageId: 'msg-world'
       };
 
-      await processAgentMessage(mockWorld, agentWithLowCallCount, systemMessage);
+      await processAgentMessage(mockWorld, agentWithLowCallCount, worldMessage);
 
       // Should only increment by 1 (reset happens in subscribeAgentToMessages, not here)
       expect(agentWithLowCallCount.llmCallCount).toBe(2);
@@ -228,6 +235,42 @@ describe('processAgentMessage', () => {
       expect(mockAgent.memory).toHaveLength(1);
       expect(mockAgent.memory[0].role).toBe('assistant');
     });
+
+    test('should not save system messages to memory', async () => {
+      const systemMessage: WorldMessageEvent = {
+        content: 'System error message',
+        sender: 'system',
+        timestamp: new Date(),
+        messageId: 'msg-system'
+      };
+
+      await processAgentMessage(mockWorld, mockAgent, systemMessage);
+
+      // Should only have the LLM response, not the system message
+      expect(mockAgent.memory).toHaveLength(1);
+      expect(mockAgent.memory[0].role).toBe('assistant');
+    });
+
+    test('should save world messages to memory', async () => {
+      const worldMessage: WorldMessageEvent = {
+        content: 'World announcement',
+        sender: 'world',
+        timestamp: new Date(),
+        messageId: 'msg-world'
+      };
+
+      await processAgentMessage(mockWorld, mockAgent, worldMessage);
+
+      // Should have saved both incoming world message and response
+      expect(mockAgent.memory).toHaveLength(2);
+      expect(mockAgent.memory[0]).toEqual({
+        role: 'user',
+        content: 'World announcement',
+        sender: 'world',
+        createdAt: worldMessage.timestamp
+      });
+      expect(mockAgent.memory[1].role).toBe('assistant');
+    });
   });
 
   describe('Auto-Mention Logic', () => {
@@ -296,28 +339,28 @@ describe('processAgentMessage', () => {
     });
   });
 
-  describe('Pass Command Handling', () => {
-    test('should handle pass command and save to memory', async () => {
-      const passResponse = 'I need help with this <world>pass</world>';
-      (mockStreamAgentResponse as any).mockResolvedValue(passResponse);
+  describe('Response Processing - All Content Treated Normally', () => {
+    test('should save response with pass-like content to memory', async () => {
+      const responseWithPassLike = 'I need help with this <world>pass</world>';
+      (mockStreamAgentResponse as any).mockResolvedValue(responseWithPassLike);
 
       await processAgentMessage(mockWorld, mockAgent, messageEvent);
 
-      // Should save original response to memory
+      // Should treat as normal response, not special pass command
       expect(mockAgent.memory[1]).toEqual({
         role: 'assistant',
-        content: passResponse,
+        content: responseWithPassLike,
         createdAt: expect.any(Date)
       });
     });
 
-    test('should handle case-insensitive pass command', async () => {
+    test('should save case-insensitive pass-like content to memory', async () => {
       const passResponse = 'I need help <WORLD>PASS</WORLD>';
       (mockStreamAgentResponse as any).mockResolvedValue(passResponse);
 
       await processAgentMessage(mockWorld, mockAgent, messageEvent);
 
-      // Should save the response with pass command
+      // Should treat as normal response
       expect(mockAgent.memory[1].content).toBe(passResponse);
     });
   });
@@ -513,14 +556,33 @@ describe('resetLLMCallCountIfNeeded', () => {
     expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
   });
 
-  test('should reset LLM call count for system messages', async () => {
+  test('should reset LLM call count for world messages', async () => {
+    const agentWithHighCallCount = {
+      ...mockAgent,
+      llmCallCount: 4
+    };
+
+    const worldMessage: WorldMessageEvent = {
+      content: 'World notification',
+      sender: 'world',
+      timestamp: new Date(),
+      messageId: 'msg-world'
+    };
+
+    await resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, worldMessage);
+
+    expect(agentWithHighCallCount.llmCallCount).toBe(0);
+    expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
+  });
+
+  test('should NOT reset LLM call count for system messages', async () => {
     const agentWithHighCallCount = {
       ...mockAgent,
       llmCallCount: 4
     };
 
     const systemMessage: WorldMessageEvent = {
-      content: 'System notification',
+      content: 'System error notification',
       sender: 'system',
       timestamp: new Date(),
       messageId: 'msg-system'
@@ -528,8 +590,8 @@ describe('resetLLMCallCountIfNeeded', () => {
 
     await resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, systemMessage);
 
-    expect(agentWithHighCallCount.llmCallCount).toBe(0);
-    expect(mockSaveAgentConfigToDisk).toHaveBeenCalledWith('/test/path', 'test-world', agentWithHighCallCount);
+    expect(agentWithHighCallCount.llmCallCount).toBe(4); // Should NOT reset for system messages
+    expect(mockSaveAgentConfigToDisk).not.toHaveBeenCalled();
   });
 
   test('should NOT reset LLM call count for agent messages', async () => {
@@ -610,7 +672,7 @@ describe('resetLLMCallCountIfNeeded', () => {
 
     await expect(resetLLMCallCountIfNeeded(mockWorld, agentWithHighCallCount, messageWithUndefinedSender)).resolves.not.toThrow();
 
-    // Should treat undefined as system message and reset
-    expect(agentWithHighCallCount.llmCallCount).toBe(0);
+    // Should treat undefined as system message and NOT reset (system messages don't reset count anymore)
+    expect(agentWithHighCallCount.llmCallCount).toBe(2);
   });
 });
