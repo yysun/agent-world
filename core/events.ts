@@ -401,10 +401,10 @@ export async function processAgentMessage(
 
     let response: string;
     if (globalStreamingEnabled) {
-      const { streamAgentResponse } = await import('./llm-manager');
+      const { streamAgentResponse } = await import('./llm-manager.js');
       response = await streamAgentResponse(world, agent, messages);
     } else {
-      const { generateAgentResponse } = await import('./llm-manager');
+      const { generateAgentResponse } = await import('./llm-manager.js');
       response = await generateAgentResponse(world, agent, messages);
     }
 
