@@ -36,7 +36,7 @@
  * - Added cross-agent message detection and styling for messages from different agents' memories
  */
 
-import { app } from 'apprun';
+import { app, safeHTML } from 'apprun';
 import type { Message } from '../types';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -157,7 +157,9 @@ export default function WorldChat(props: WorldChatProps) {
                         </span>
                       )}
                     </div>
-                    <div className="message-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(message.text) }}></div>
+                    <div className="message-content">
+                      {safeHTML(renderMarkdown(message.text))}
+                    </div>
                     <div className="message-timestamp">
                       {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                     </div>

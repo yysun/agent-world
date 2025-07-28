@@ -17,7 +17,7 @@
  */
 
 import app from 'apprun';
-import { apiRequest } from './api';
+import { apiRequest } from '../api';
 import type {
   SSEComponentState,
   Message,
@@ -27,7 +27,7 @@ import type {
   StreamErrorData,
   MessageData,
   ErrorData
-} from './types';
+} from '../types';
 
 // TypeScript interfaces for SSE data structures
 interface SSEBaseData {

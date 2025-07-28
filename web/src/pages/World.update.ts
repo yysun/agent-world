@@ -33,7 +33,7 @@ import {
   handleConnectionStatus,
   handleError,
   handleComplete
-} from '../sse-client';
+} from '../utils/sse-client';
 import type { WorldComponentState, Agent } from '../types';
 
 export const worldUpdateHandlers = {
