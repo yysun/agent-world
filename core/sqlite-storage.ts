@@ -24,7 +24,7 @@ export async function initializeWithDefaults(ctx: SQLiteStorageContext): Promise
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       defaultAgentId, defaultWorldId, 'Default Agent', 'assistant', 'active',
-      'openai', 'gpt-3.5-turbo', 'You are a helpful assistant.',
+      'ollam', 'llama3.2:3b', 'You are a helpful assistant.',
       0.7, 2048, 0, new Date().toISOString(), new Date().toISOString()
     );
   }
