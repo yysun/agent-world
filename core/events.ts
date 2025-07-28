@@ -457,14 +457,7 @@ export async function processAgentMessage(
 
   } catch (error) {
     logger.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-
-    // Publish error event via world's eventEmitter
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'error',
-      error: (error as Error).message,
-      messageId
-    });
+    publishMessage(world, `[Error] ${(error as Error).message}`, 'system');
   }
 }
 
