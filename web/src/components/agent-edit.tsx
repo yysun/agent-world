@@ -292,12 +292,12 @@ export default class AgentEdit extends Component<AgentEditState> {
                         $bind="agent.provider"
                         disabled={state.loading}
                       >
-                        <option value="">Select provider</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="google">Google</option>
-                        <option value="microsoft">Azure-OpenAI</option>
-                        <option value="ollama">Ollama (Local)</option>
+                        <option value="" selected={!state.agent.provider}>Select provider</option>
+                        <option value="openai" selected={state.agent.provider === 'openai'}>OpenAI</option>
+                        <option value="anthropic" selected={state.agent.provider === 'anthropic'}>Anthropic</option>
+                        <option value="google" selected={state.agent.provider === 'google'}>Google</option>
+                        <option value="azure" selected={state.agent.provider === 'azure'}>Azure</option>
+                        <option value="ollama" selected={state.agent.provider === 'ollama'}>Ollama</option>
                       </select>
                     </div>
 
