@@ -49,7 +49,8 @@ import {
   LLMProvider,
   initializeLogger,
   enableStreaming,
-  disableStreaming
+  disableStreaming,
+  closeAllStorages
 } from '../core/index.js';
 import type { LoggerConfig, LogLevel } from '../core/index.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
@@ -260,8 +261,9 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
 
     const setupExitTimer = (delay: number = 2000) => {
       if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
+      timeoutId = setTimeout(async () => {
         if (worldSubscription) worldSubscription.unsubscribe();
+        await closeAllStorages();
         process.exit(0);
       }, delay);
     };
@@ -290,6 +292,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       } else {
         // For commands, exit immediately after processing
         if (worldSubscription) worldSubscription.unsubscribe();
+        await closeAllStorages();
         process.exit(result.success ? 0 : 1);
       }
 
@@ -360,6 +363,19 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
   if (worldState?.subscription) {
     worldState.subscription.unsubscribe();
   }
+}
+
+// Clean exit function that properly closes storage
+async function cleanExit(worldState: WorldState | null, exitCode: number = 0): Promise<void> {
+  try {
+    if (worldState) {
+      cleanupWorldSubscription(worldState);
+    }
+    await closeAllStorages();
+  } catch (error) {
+    console.error('Error during cleanup:', error);
+  }
+  process.exit(exitCode);
 }
 
 // World subscription handler
@@ -589,10 +605,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           }
 
           console.log(`\n${boldCyan('Goodbye!')}`);
-          if (worldState) {
-            cleanupWorldSubscription(worldState);
-          }
-          rl.close();
+          await cleanExit(worldState);
           return;
         }
 
@@ -687,31 +700,20 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
     });
 
-    rl.on('close', () => {
+    rl.on('close', async () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
 
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        if (streaming.stopWait) {
-          streaming.stopWait();
-        }
-        cleanupWorldSubscription(worldState);
-      }
-      process.exit(0);
+      await cleanExit(worldState);
     });
 
-    rl.on('SIGINT', () => {
+    rl.on('SIGINT', async () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
 
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        if (streaming.stopWait) {
-          streaming.stopWait();
-        }
-        cleanupWorldSubscription(worldState);
-      }
+      await cleanExit(worldState);
       rl.close();
     });
 
@@ -782,19 +784,22 @@ async function main(): Promise<void> {
 
 // Global error handling
 function setupErrorHandlers() {
-  process.on('unhandledRejection', (error) => {
+  process.on('unhandledRejection', async (error) => {
     console.error(boldRed('Unhandled rejection:'), error);
+    await closeAllStorages();
     process.exit(1);
   });
 
-  process.on('uncaughtException', (error) => {
+  process.on('uncaughtException', async (error) => {
     console.error(boldRed('Uncaught exception:'), error);
+    await closeAllStorages();
     process.exit(1);
   });
 }
 
 setupErrorHandlers();
-main().catch((error) => {
+main().catch(async (error) => {
   console.error(boldRed('CLI error:'), error);
+  await closeAllStorages();
   process.exit(1);
 });

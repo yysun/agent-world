@@ -84,4 +84,7 @@ export { enableStreaming, disableStreaming } from './events.js';
 // Subscription system
 export * from './subscription.js';
 
+// Storage management functions
+export { createStorageFromEnv, closeAllStorages } from './storage-factory.js';
+
 export const VERSION = '3.0.0';

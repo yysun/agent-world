@@ -18,7 +18,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import open from 'open';
-import { initializeLogger, createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
+import { initializeLogger, createCategoryLogger, LLMProvider, LogLevel, closeAllStorages } from '../core/index.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -146,12 +146,67 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
         console.log(`🌐 Web server running at ${url}`);
         // console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
         // console.log(`🚀 HTTP server running with REST API and SSE chat`);
+        
+        // Setup graceful shutdown handling
+        setupGracefulShutdown(server);
+        
         resolve(server);
         open(url);
       }
     });
 
     server.on('error', reject);
+  });
+}
+
+// Graceful shutdown handling
+function setupGracefulShutdown(server: Server): void {
+  let isShuttingDown = false;
+
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    console.log(`\n🔄 Received ${signal}, starting graceful shutdown...`);
+
+    try {
+      // Close HTTP server
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      console.log('✅ HTTP server closed');
+
+      // Close storage connections
+      await closeAllStorages();
+      console.log('✅ Storage connections closed');
+
+      console.log('🏁 Graceful shutdown completed');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error during shutdown:', error);
+      process.exit(1);
+    }
+  };
+
+  // Handle various termination signals
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
+
+  // Handle uncaught exceptions and unhandled rejections
+  process.on('uncaughtException', async (error) => {
+    console.error('❌ Uncaught exception:', error);
+    await closeAllStorages();
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', async (error) => {
+    console.error('❌ Unhandled rejection:', error);
+    await closeAllStorages();
+    process.exit(1);
   });
 }
 
@@ -164,8 +219,9 @@ const isServerBinCommand = process.argv[1].includes('agent-world-server') || cur
 if (isDirectExecution || isServerBinCommand) {
   startWebServer()
     .then(() => console.log('Server started successfully'))
-    .catch((error) => {
+    .catch(async (error) => {
       console.error('Failed to start server:', error);
+      await closeAllStorages();
       process.exit(1);
     });
 }
