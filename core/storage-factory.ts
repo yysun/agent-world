@@ -22,6 +22,26 @@ import type { StorageManager } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
+import * as fs from 'fs';
+import {
+  createSQLiteStorageContext,
+  saveWorld as sqliteSaveWorld,
+  loadWorld as sqliteLoadWorld,
+  deleteWorld as sqliteDeleteWorld,
+  listWorlds as sqliteListWorlds,
+  saveAgent as sqliteSaveAgent,
+  loadAgent as sqliteLoadAgent,
+  deleteAgent as sqliteDeleteAgent,
+  listAgents as sqliteListAgents,
+  saveAgentsBatch as sqliteSaveAgentsBatch,
+  loadAgentsBatch as sqliteLoadAgentsBatch,
+  validateIntegrity as sqliteValidateIntegrity,
+  repairData as sqliteRepairData,
+  close as sqliteClose,
+  getDatabaseStats as sqliteGetDatabaseStats,
+  initializeWithDefaults as sqliteInitializeWithDefaults
+} from './sqlite-storage.js';
+import { initializeSchema } from './sqlite-schema.js';
 
 export interface StorageConfig {
   type: 'file' | 'sqlite';
@@ -171,45 +191,26 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       cacheSize: config.sqlite?.cacheSize || -64000,
       enableForeignKeys: config.sqlite?.enableForeignKeys !== false
     };
-    // Use function-based API
-    const {
-      createSQLiteStorageContext,
-      saveWorld,
-      loadWorld,
-      deleteWorld,
-      listWorlds,
-      saveAgent,
-      loadAgent,
-      deleteAgent,
-      listAgents,
-      saveAgentsBatch,
-      loadAgentsBatch,
-      validateIntegrity,
-      repairData,
-      close,
-      getDatabaseStats,
-      initializeWithDefaults
-    } = await import('./sqlite-storage.js');
-    const { initializeSchema } = await import('./sqlite-schema.js');
+    // Use function-based API with static imports
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Ensure schema is created before any queries
     await initializeSchema(ctx.schemaCtx);
-    await initializeWithDefaults(ctx); // Ensure default world and agent
+    await sqliteInitializeWithDefaults(ctx); // Ensure default world and agent
     storage = {
-      saveWorld: (worldData: any) => saveWorld(ctx, worldData),
-      loadWorld: (worldId: string) => loadWorld(ctx, worldId),
-      deleteWorld: (worldId: string) => deleteWorld(ctx, worldId),
-      listWorlds: () => listWorlds(ctx),
-      saveAgent: (worldId: string, agent: any) => saveAgent(ctx, worldId, agent),
-      loadAgent: (worldId: string, agentId: string) => loadAgent(ctx, worldId, agentId),
-      deleteAgent: (worldId: string, agentId: string) => deleteAgent(ctx, worldId, agentId),
-      listAgents: (worldId: string) => listAgents(ctx, worldId),
-      saveAgentsBatch: (worldId: string, agents: any[]) => saveAgentsBatch(ctx, worldId, agents),
-      loadAgentsBatch: (worldId: string, agentIds: string[]) => loadAgentsBatch(ctx, worldId, agentIds),
-      validateIntegrity: (worldId: string, agentId?: string) => validateIntegrity(ctx, worldId, agentId),
-      repairData: (worldId: string, agentId?: string) => repairData(ctx, worldId, agentId),
-      close: () => close(ctx),
-      getDatabaseStats: () => getDatabaseStats(ctx)
+      saveWorld: (worldData: any) => sqliteSaveWorld(ctx, worldData),
+      loadWorld: (worldId: string) => sqliteLoadWorld(ctx, worldId),
+      deleteWorld: (worldId: string) => sqliteDeleteWorld(ctx, worldId),
+      listWorlds: () => sqliteListWorlds(ctx),
+      saveAgent: (worldId: string, agent: any) => sqliteSaveAgent(ctx, worldId, agent),
+      loadAgent: (worldId: string, agentId: string) => sqliteLoadAgent(ctx, worldId, agentId),
+      deleteAgent: (worldId: string, agentId: string) => sqliteDeleteAgent(ctx, worldId, agentId),
+      listAgents: (worldId: string) => sqliteListAgents(ctx, worldId),
+      saveAgentsBatch: (worldId: string, agents: any[]) => sqliteSaveAgentsBatch(ctx, worldId, agents),
+      loadAgentsBatch: (worldId: string, agentIds: string[]) => sqliteLoadAgentsBatch(ctx, worldId, agentIds),
+      validateIntegrity: (worldId: string, agentId?: string) => sqliteValidateIntegrity(ctx, worldId, agentId),
+      repairData: (worldId: string, agentId?: string) => sqliteRepairData(ctx, worldId, agentId),
+      close: () => sqliteClose(ctx),
+      getDatabaseStats: () => sqliteGetDatabaseStats(ctx)
     } as any;
   } else {
     storage = createFileStorageAdapter(config.rootPath);
@@ -218,8 +219,6 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
   storageCache.set(cacheKey, storage);
   return storage;
 }
-
-import * as fs from 'fs';
 
 export function getDefaultRootPath(): string {
   let rootPath = process.env.AGENT_WORLD_DATA_PATH;

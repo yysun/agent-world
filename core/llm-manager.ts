@@ -79,6 +79,7 @@ import { createCategoryLogger } from './logger.js';
 // Create LLM category logger
 const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config.js';
+import { saveAgentToDisk } from './agent-storage.js';
 
 /**
  * Global LLM call queue to ensure serialized execution
@@ -336,7 +337,6 @@ async function executeGenerateAgentResponse(
 
   // Auto-save agent state after LLM call
   try {
-    const { saveAgentToDisk } = await import('./agent-storage.js');
     await saveAgentToDisk(world.rootPath, world.id, agent);
   } catch (error) {
     logger.warn('Failed to auto-save agent after LLM call', { agentId: agent.id, error: error instanceof Error ? error.message : error });
