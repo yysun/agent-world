@@ -18,6 +18,10 @@
  * - Fixed streaming timeout logic to prevent ending during active LLM responses
  * - Optimized world existence checks to use getWorldConfig instead of deprecated getWorld for performance
  * - Extracted world retrieval and error handling into reusable getWorldOrError utility function
+ * - Fixed PATCH /worlds/:worldName to return complete world data including agents after update
+ *   - Added turnLimit support to WorldUpdateSchema and update logic
+ *   - Response format now consistent with GET /worlds/:worldName endpoint
+ *   - Ensures agents are preserved and included in response to prevent client-side confusion
  */
 import path from 'path';
 import express, { Request, Response } from 'express';
@@ -74,7 +78,8 @@ const WorldCreateSchema = z.object({
 
 const WorldUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().optional()
+  description: z.string().optional(),
+  turnLimit: z.number().min(1).optional()
 });
 
 const AgentCreateSchema = z.object({
@@ -201,7 +206,7 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    const { name, description } = validation.data;
+    const { name, description, turnLimit } = validation.data;
 
     // If name is being changed, check for duplicates
     if (name && name !== world.name) {
@@ -217,19 +222,30 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
+    if (turnLimit !== undefined) updates.turnLimit = turnLimit;
 
     // Apply updates if any
     if (Object.keys(updates).length > 0) {
       // Update world properties directly
       if (updates.name) world.name = updates.name;
       if (updates.description !== undefined) world.description = updates.description;
+      if (updates.turnLimit !== undefined) world.turnLimit = updates.turnLimit;
 
       // Save the world
       await world.save();
-      res.json({ name: world.name, description: world.description });
-    } else {
-      res.json({ name: world.name, description: world.description });
     }
+
+    // Return complete world data including agents (consistent with GET endpoint)
+    // Convert Map to array for JSON serialization
+    const agents = Array.from(world.agents.values());
+
+    res.json({
+      name: world.name,
+      description: world.description,
+      id: world.id,
+      agents: agents,
+      turnLimit: world.turnLimit,
+    });
   } catch (error) {
     logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
