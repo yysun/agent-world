@@ -72,7 +72,7 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types.js';
-import { publishSSE } from './events.js';
+
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 
@@ -208,11 +208,12 @@ export interface LLMConfig {
 export async function streamAgentResponse(
   world: World,
   agent: Agent,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
 ): Promise<string> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
-    return await executeStreamAgentResponse(world, agent, messages);
+    return await executeStreamAgentResponse(world, agent, messages, publishSSE);
   });
 }
 
@@ -222,7 +223,8 @@ export async function streamAgentResponse(
 async function executeStreamAgentResponse(
   world: World,
   agent: Agent,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
 ): Promise<string> {
   const messageId = generateId();
 
@@ -303,7 +305,8 @@ async function executeStreamAgentResponse(
 export async function generateAgentResponse(
   world: World,
   agent: Agent,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void
 ): Promise<string> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {

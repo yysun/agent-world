@@ -13,6 +13,7 @@
  * - High-level message broadcasting with sender attribution and timestamping
  * - Fixed auto-mention functionality with proper self-mention removal order
  * - Preserved newline handling in LLM streaming responses for proper formatting
+ * - Decoupled SSE publishing: publishSSE is now passed as a callback to llm-manager to avoid circular dependency
  *
  * Core Functions:
  * World Events:
@@ -402,7 +403,7 @@ export async function processAgentMessage(
     let response: string;
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
-      response = await streamAgentResponse(world, agent, messages);
+      response = await streamAgentResponse(world, agent, messages, publishSSE);
     } else {
       const { generateAgentResponse } = await import('./llm-manager.js');
       response = await generateAgentResponse(world, agent, messages);
