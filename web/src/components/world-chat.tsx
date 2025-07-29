@@ -59,7 +59,7 @@ export interface WorldChatProps {
   } | null;
 }
 
-
+const debug = false;
 export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
@@ -74,29 +74,9 @@ export default function WorldChat(props: WorldChatProps) {
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
-
     const senderLower = toKebabCase(message.sender);
     const agentIdLower = toKebabCase(message.fromAgentId);
-    // Only check messages that have fromAgentId (came from agent memory)
-    if (!message.fromAgentId) return false;
-
-    // If sender is HUMAN/USER, it's normal for it to be in any agent's memory
-    if (senderLower === 'human') {
-      return false;
-    }
-
-    // If sender is system/SYSTEM, it's normal for it to be in any agent's memory
-    if (senderLower === 'system') {
-      return false;
-    }
-
-    // If sender name contains agent id or agent id contains sender name, they likely match
-    if (senderLower.includes(agentIdLower) || agentIdLower.includes(senderLower)) {
-      return false;
-    }
-
-    // Otherwise, it's likely a mismatch (cross-agent message)
-    return true;
+    return senderLower !== agentIdLower;
   };
 
   return (
@@ -160,12 +140,11 @@ export default function WorldChat(props: WorldChatProps) {
                       </div>
                     )}
                     {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                    <div className="message-debug-info">{JSON.stringify({
+                    {debug && <div className="message-debug-info">{JSON.stringify({
                       type: message.type,
                       sender: message.sender,
                       fromAgentId: message.fromAgentId,
-                    })}</div>
-
+                    })}</div>}
                   </div>
                 );
               })
