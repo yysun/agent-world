@@ -43,7 +43,8 @@ export function generateId(): string {
  * Returns true for Node.js, false for browser
  */
 export function isNodeEnvironment(): boolean {
-  return typeof window === 'undefined' && typeof global !== 'undefined';
+  // Robust Node.js detection: process.versions.node is always present in Node
+  return typeof process !== 'undefined' && !!process.versions && !!process.versions.node;
 }
 
 /**

@@ -236,8 +236,15 @@ export async function createStorageFromEnv(): Promise<StorageManager> {
   const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
   const rootPath = getDefaultRootPath();
   // Ensure the folder exists
-  if (isNodeEnvironment() && rootPath && !fs.existsSync(rootPath)) {
-    fs.mkdirSync(rootPath, { recursive: true });
+  if (
+    isNodeEnvironment() &&
+    rootPath &&
+    typeof fs.existsSync === 'function' &&
+    !fs.existsSync(rootPath)
+  ) {
+    if (typeof fs.mkdirSync === 'function') {
+      fs.mkdirSync(rootPath, { recursive: true });
+    }
   }
 
   const config: StorageConfig = {

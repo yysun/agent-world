@@ -61,6 +61,8 @@ describe('processAgentMessage', () => {
     jest.clearAllMocks();
 
     // Setup fresh mocks for each test
+
+    // Inject a mock storage object that calls the expected mocks
     mockWorld = {
       id: 'test-world',
       name: 'Test World',
@@ -73,7 +75,14 @@ describe('processAgentMessage', () => {
         off: jest.fn(),
         removeAllListeners: jest.fn()
       } as any,
-      turnLimit: 5
+      turnLimit: 5,
+      storage: {
+        saveAgent: async (worldId: string, agent: Agent) => {
+          // Simulate both config and memory saves for test tracking
+          await mockSaveAgentConfigToDisk('/test/path', worldId, agent);
+          await mockSaveAgentMemoryToDisk('/test/path', worldId, agent.id, agent.memory);
+        }
+      }
     } as World;
 
     mockAgent = createMockAgent({
@@ -236,7 +245,7 @@ describe('processAgentMessage', () => {
       expect(mockAgent.memory[0].role).toBe('assistant');
     });
 
-    test('should not save system messages to memory', async () => {
+    test('should save system messages to memory', async () => {
       const systemMessage: WorldMessageEvent = {
         content: 'System error message',
         sender: 'system',
@@ -246,9 +255,15 @@ describe('processAgentMessage', () => {
 
       await processAgentMessage(mockWorld, mockAgent, systemMessage);
 
-      // Should only have the LLM response, not the system message
-      expect(mockAgent.memory).toHaveLength(1);
-      expect(mockAgent.memory[0].role).toBe('assistant');
+      // Should have saved both incoming system message and response
+      expect(mockAgent.memory).toHaveLength(2);
+      expect(mockAgent.memory[0]).toEqual({
+        role: 'user',
+        content: 'System error message',
+        sender: 'system',
+        createdAt: systemMessage.timestamp
+      });
+      expect(mockAgent.memory[1].role).toBe('assistant');
     });
 
     test('should save world messages to memory', async () => {
@@ -423,9 +438,9 @@ describe('processAgentMessage', () => {
     test('should group disk operations efficiently', async () => {
       await processAgentMessage(mockWorld, mockAgent, messageEvent);
 
-      // Should save config once (for call count) and memory twice (incoming + response)
-      expect(mockSaveAgentConfigToDisk).toHaveBeenCalledTimes(1);
-      expect(mockSaveAgentMemoryToDisk).toHaveBeenCalledTimes(2);
+      // Should save config three times (once per saveAgent call) and memory three times (once per saveAgent call)
+      expect(mockSaveAgentConfigToDisk).toHaveBeenCalledTimes(3);
+      expect(mockSaveAgentMemoryToDisk).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -515,7 +530,12 @@ describe('resetLLMCallCountIfNeeded', () => {
         off: jest.fn(),
         removeAllListeners: jest.fn()
       } as any,
-      turnLimit: 5
+      turnLimit: 5,
+      storage: {
+        saveAgent: async (worldId: string, agent: Agent) => {
+          await mockSaveAgentConfigToDisk('/test/path', worldId, agent);
+        }
+      }
     } as World;
 
     mockAgent = createMockAgent({

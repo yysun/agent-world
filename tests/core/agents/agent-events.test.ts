@@ -94,7 +94,14 @@ describe('Agent Events Module', () => {
       name: 'Test World',
       turnLimit: 5,
       rootPath: 'test-data/worlds',
-      eventEmitter: realEventEmitter
+      eventEmitter: realEventEmitter,
+      storage: {
+        saveAgent: async (worldId: string, agent: Agent) => {
+          // Use dynamic import to get the current mock
+          const { saveAgentConfigToDisk } = await import('../../../core/agent-storage');
+          await saveAgentConfigToDisk('test-data/worlds', worldId, agent);
+        }
+      }
     } as World;
 
     mockMessageEvent = {
