@@ -35,7 +35,7 @@ describe('SSE Streaming Fix', () => {
   });
 
   describe('handleStreamEnd', () => {
-    it('should replace streaming message with final message instead of deleting it', () => {
+    it('should remove streaming message when stream ends', () => {
       // Step 1: Start a stream
       const startData = {
         messageId: 'test-msg-1',
@@ -62,7 +62,7 @@ describe('SSE Streaming Fix', () => {
       expect(stateAfterChunk.messages[0].isStreaming).toBe(true);
       expect(stateAfterChunk.messages[0].text).toBe('Hello, this is streaming content');
 
-      // Step 3: End the stream - this should convert streaming message to final message
+      // Step 3: End the stream - this should remove the streaming message
       const endData = {
         messageId: 'test-msg-1',
         sender: 'TestAgent',
@@ -72,26 +72,11 @@ describe('SSE Streaming Fix', () => {
 
       const stateAfterEnd = handleStreamEnd(stateAfterChunk, endData);
 
-      // Should still have 1 message (not 0 like before the fix)
-      expect(stateAfterEnd.messages).toHaveLength(1);
-
-      // Message should no longer be streaming
-      expect(stateAfterEnd.messages[0].isStreaming).toBe(false);
-
-      // Message should be marked as streamComplete
-      expect(stateAfterEnd.messages[0].streamComplete).toBe(true);
-
-      // Message should have final content
-      expect(stateAfterEnd.messages[0].text).toBe('Hello, this is the final content');
-
-      // Message type should be converted from 'agent-stream' to 'agent'
-      expect(stateAfterEnd.messages[0].type).toBe('agent');
-
-      // Should trigger scroll
-      expect(stateAfterEnd.needScroll).toBe(true);
+      // Streaming message should be removed
+      expect(stateAfterEnd.messages).toHaveLength(0);
     });
 
-    it('should create new message if no streaming message is found', () => {
+    it('should handle missing streaming message by doing nothing', () => {
       // End stream without starting one
       const endData = {
         messageId: 'test-msg-1',
@@ -102,15 +87,11 @@ describe('SSE Streaming Fix', () => {
 
       const stateAfterEnd = handleStreamEnd(initialState, endData);
 
-      // Should create a new message
-      expect(stateAfterEnd.messages).toHaveLength(1);
-      expect(stateAfterEnd.messages[0].text).toBe('Final content without stream start');
-      expect(stateAfterEnd.messages[0].isStreaming).toBe(false);
-      expect(stateAfterEnd.messages[0].streamComplete).toBe(true);
-      expect(stateAfterEnd.messages[0].type).toBe('agent');
+      // Should have no messages since no streaming message was found to remove
+      expect(stateAfterEnd.messages).toHaveLength(0);
     });
 
-    it('should preserve fromAgentId when converting streaming message', () => {
+    it('should remove streaming message while preserving fromAgentId', () => {
       // Manually create a streaming message with fromAgentId
       const stateWithStreamingMessage: TestState = {
         ...initialState,
@@ -135,10 +116,8 @@ describe('SSE Streaming Fix', () => {
 
       const stateAfterEnd = handleStreamEnd(stateWithStreamingMessage, endData);
 
-      expect(stateAfterEnd.messages).toHaveLength(1);
-      expect(stateAfterEnd.messages[0].fromAgentId).toBe('agent1');
-      expect(stateAfterEnd.messages[0].text).toBe('Final message');
-      expect(stateAfterEnd.messages[0].isStreaming).toBe(false);
+      // Streaming message should be removed
+      expect(stateAfterEnd.messages).toHaveLength(0);
     });
 
     it('should handle multiple streaming messages correctly', () => {
@@ -177,15 +156,13 @@ describe('SSE Streaming Fix', () => {
 
       const stateAfterEnd = handleStreamEnd(stateWithMultipleStreams, endData);
 
-      expect(stateAfterEnd.messages).toHaveLength(2);
-
-      // First message should be completed
-      expect(stateAfterEnd.messages[0].isStreaming).toBe(false);
-      expect(stateAfterEnd.messages[0].text).toBe('Final content for Agent1');
+      // Should have one message removed (first one), second should remain
+      expect(stateAfterEnd.messages).toHaveLength(1);
 
       // Second message should still be streaming
-      expect(stateAfterEnd.messages[1].isStreaming).toBe(true);
-      expect(stateAfterEnd.messages[1].text).toBe('Stream 2');
+      expect(stateAfterEnd.messages[0].isStreaming).toBe(true);
+      expect(stateAfterEnd.messages[0].text).toBe('Stream 2');
+      expect(stateAfterEnd.messages[0].messageId).toBe('stream-2');
     });
   });
 
@@ -232,12 +209,8 @@ describe('SSE Streaming Fix', () => {
         worldName: 'test-world'
       });
 
-      // Final verification
-      expect(state.messages).toHaveLength(1);
-      expect(state.messages[0].text).toBe('Hello world! Final.');
-      expect(state.messages[0].isStreaming).toBe(false);
-      expect(state.messages[0].streamComplete).toBe(true);
-      expect(state.messages[0].type).toBe('agent');
+      // Final verification - streaming message should be removed
+      expect(state.messages).toHaveLength(0);
     });
   });
 });

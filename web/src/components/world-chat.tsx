@@ -116,26 +116,14 @@ export default function WorldChat(props: WorldChatProps) {
                 if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user' || message.sender === 'system' || message.sender === 'SYSTEM') {
                   return true;
                 }
-
+                if (message.isStreaming === true) {
+                  return true; // Currently streaming
+                }
                 // If an agent is selected for settings, filter to show only that agent's messages
                 if (selectedAgent?.id && message.fromAgentId !== selectedAgent.id) {
                   return false;
                 }
-
-                // For agent messages: 
-                // Show completed streams (streamComplete === true) 
-                // OR show currently streaming messages that are not yet complete (isStreaming === true && streamComplete !== true)
-                // OR show regular non-streaming messages (no streaming properties)
-                if (message.isStreaming === true && message.streamComplete !== true) {
-                  return true; // Currently streaming
-                }
-                if (message.streamComplete === true) {
-                  return true; // Completed stream
-                }
-                if (message.streamComplete === undefined && message.isStreaming === undefined) {
-                  return true; // Regular message (like GM notifications)
-                }
-                return false; // Filter out incomplete or duplicate messages
+                return true;
               })
               .map((message, index) => {
                 // Check if this is a cross-agent message
@@ -172,6 +160,12 @@ export default function WorldChat(props: WorldChatProps) {
                       </div>
                     )}
                     {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                    <div className="message-debug-info">{JSON.stringify({
+                      type: message.type,
+                      sender: message.sender,
+                      fromAgentId: message.fromAgentId,
+                    })}</div>
+
                   </div>
                 );
               })

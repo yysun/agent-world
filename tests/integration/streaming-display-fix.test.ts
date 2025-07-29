@@ -124,18 +124,9 @@ describe('Streaming Display Integration Test', () => {
 
     state = mockSSEHandlers.handleStreamEnd(state, endData);
 
-    // Critical assertions - this is what was broken before the fix
-    expect(state.messages).toHaveLength(1); // Should still have the message, not 0
-    expect(state.messages[0].isStreaming).toBe(false); // Should no longer be streaming
-    expect(state.messages[0].streamComplete).toBe(true); // Should be marked complete
-    expect(state.messages[0].text).toBe('Hello, I am responding to your message with a streaming response. Final.');
-    expect(state.messages[0].type).toBe('agent'); // Should be converted from 'agent-stream'
+    // Critical assertions - handleStreamEnd removes the streaming message
+    expect(state.messages).toHaveLength(0); // Streaming message should be removed
     expect(state.activeAgent).toBeNull(); // activeAgent should be cleared
-    expect(state.needScroll).toBe(true); // Should trigger scroll
-
-    // Verify agent message count was incremented
-    expect(state.agents[0].messageCount).toBe(1);
-    expect(state.world?.agents[0].messageCount).toBe(1);
   });
 
   it('should handle multiple concurrent streams correctly', () => {
@@ -180,7 +171,7 @@ describe('Streaming Display Integration Test', () => {
     expect(state.messages[0].sender).toBe('TestAgent');
     expect(state.messages[1].sender).toBe('SecondAgent');
 
-    // End first stream
+    // End first stream - streaming message should be removed
     state = mockSSEHandlers.handleStreamEnd(state, {
       messageId: 'stream-1',
       sender: 'TestAgent',
@@ -188,9 +179,9 @@ describe('Streaming Display Integration Test', () => {
       worldName: 'test-world'
     });
 
-    expect(state.messages).toHaveLength(2);
-    expect(state.messages[0].isStreaming).toBe(false); // First should be complete
-    expect(state.messages[1].isStreaming).toBe(true);  // Second should still be streaming
+    expect(state.messages).toHaveLength(1); // First message removed, second still streaming
+    expect(state.messages[0].isStreaming).toBe(true);  // Second should still be streaming
+    expect(state.messages[0].sender).toBe('SecondAgent');
 
     // End second stream
     state = mockSSEHandlers.handleStreamEnd(state, {
@@ -200,11 +191,7 @@ describe('Streaming Display Integration Test', () => {
       worldName: 'test-world'
     });
 
-    expect(state.messages).toHaveLength(2);
-    expect(state.messages[0].isStreaming).toBe(false);
-    expect(state.messages[1].isStreaming).toBe(false);
-    expect(state.messages[0].text).toBe('First agent final message');
-    expect(state.messages[1].text).toBe('Second agent final message');
+    expect(state.messages).toHaveLength(0); // Both streaming messages should be removed
   });
 
   it('should properly filter messages in WorldChat component context', () => {
@@ -254,25 +241,19 @@ describe('Streaming Display Integration Test', () => {
       }
 
       // For agent messages: 
-      // Show completed streams (streamComplete === true) 
-      // OR show currently streaming messages that are not yet complete (isStreaming === true && streamComplete !== true)
-      // OR show regular non-streaming messages (no streaming properties)
-      if (message.isStreaming === true && message.streamComplete !== true) {
+      // Show currently streaming messages (isStreaming === true)
+      // Show regular non-streaming messages (no streaming properties)
+      if (message.isStreaming === true) {
         return true; // Currently streaming
       }
-      if (message.streamComplete === true) {
-        return true; // Completed stream
-      }
-      if (message.streamComplete === undefined && message.isStreaming === undefined) {
+      if (message.isStreaming === undefined) {
         return true; // Regular message (like GM notifications)
       }
-      return false; // Filter out incomplete or duplicate messages
+      return false; // Filter out other messages
     });
 
-    expect(filteredMessages).toHaveLength(2); // User message + completed agent message
+    // Since handleStreamEnd removes the streaming message, we only have the user message
+    expect(filteredMessages).toHaveLength(1); // Only user message remains
     expect(filteredMessages[0].sender).toBe('HUMAN');
-    expect(filteredMessages[1].sender).toBe('TestAgent');
-    expect(filteredMessages[1].streamComplete).toBe(true);
-    expect(filteredMessages[1].isStreaming).toBe(false);
   });
 });

@@ -55,7 +55,6 @@ export interface Message {
   createdAt: string;
   worldName?: string;
   isStreaming?: boolean;
-  streamComplete?: boolean;
   hasError?: boolean;
   errorMessage?: string;
   messageId?: string;

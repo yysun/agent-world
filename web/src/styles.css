@@ -699,7 +699,11 @@ h2 {
   font-size: 0.7rem;
   font-weight: bold;
 }
-
+.message-debug-info {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
 .sprite-0 {
   background-position: 0 0;
 }

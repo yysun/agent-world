@@ -434,65 +434,10 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
 
 // Handle streaming end events
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
-  const { messageId, sender, content } = data;
-
-  // Find and replace the streaming message with the final message
-  const messages = [...(state.messages || [])];
-  let streamingMessageFound = false;
-  let fromAgentId: string | undefined;
-
-  // Find the streaming message to replace
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].isStreaming &&
-      (messages[i].messageId === messageId ||
-        (!messageId && messages[i].sender === sender && messages[i].type === 'agent-stream'))) {
-
-      // Preserve the fromAgentId from the streaming message
-      fromAgentId = messages[i].fromAgentId;
-
-      // Replace with final message
-      messages[i] = {
-        ...messages[i],
-        text: content || messages[i].text, // Use final content or keep existing
-        isStreaming: false,
-        streamComplete: true,
-        type: 'agent', // Convert from 'agent-stream' to 'agent'
-        createdAt: new Date().toISOString()
-      };
-
-      streamingMessageFound = true;
-      break;
-    }
-  }
-
-  // If no streaming message was found, create a new final message
-  if (!streamingMessageFound && content) {
-    // Find agent ID by sender name if state has agents
-    if ('agents' in state && Array.isArray((state as any).agents)) {
-      const agent = (state as any).agents.find((a: any) => a.name === sender);
-      fromAgentId = agent?.id;
-    }
-
-    messages.push({
-      id: Date.now() + Math.random(),
-      type: 'agent',
-      sender: sender || 'Agent',
-      text: content,
-      createdAt: new Date().toISOString(),
-      worldName: data.worldName || state.worldName,
-      isStreaming: false,
-      streamComplete: true,
-      messageId: messageId,
-      fromAgentId: fromAgentId
-    });
-  }
-
-  return {
-    ...state,
-    messages,
-    needScroll: true
-  };
-};
+  // remove the streaming message
+  state.messages = state.messages.filter(msg => msg.messageId !== data.messageId);
+  return state;
+}
 
 // Handle streaming error events
 export const handleStreamError = <T extends SSEComponentState>(state: T, data: StreamErrorData): T => {

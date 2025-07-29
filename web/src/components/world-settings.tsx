@@ -180,7 +180,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
                   $onclick={handleClearMessages}
                   title="Clear all messages"
                 >
-                  <span className="btn-icon">×</span>
+                  <span className="btn-icon">-</span>
                 </button>
               </span>
             </div>

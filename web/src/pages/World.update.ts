@@ -73,6 +73,7 @@ export const worldUpdateHandlers = {
       const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
         if (agent.memory && Array.isArray(agent.memory)) {
           agent.memory.forEach((memoryItem: any) => {
+            memoryItem.sender = toKebabCase(memoryItem.sender || agent.name);
             const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
 
             if (!messageMap.has(messageKey)) {
@@ -88,7 +89,6 @@ export const worldUpdateHandlers = {
                 text: memoryItem.text || memoryItem.content || '',
                 createdAt: memoryItem.createdAt || new Date().toISOString(),
                 type: messageType,
-                streamComplete: true,
                 fromAgentId: agent.id
               });
             }
@@ -223,42 +223,10 @@ export const worldUpdateHandlers = {
   },
   'handleStreamEnd': (state: WorldComponentState, data: any): WorldComponentState => {
     const baseState = handleStreamEnd(state as any, data) as WorldComponentState;
-    const agentName = data.sender;
-
-    let finalState = {
+    return {
       ...baseState,
       activeAgent: null
     };
-
-    if (agentName && agentName !== 'HUMAN') {
-      const updatedAgents = finalState.agents.map(agent => {
-        if (agent.name === agentName) {
-          return {
-            ...agent,
-            messageCount: agent.messageCount + 1
-          };
-        }
-        return agent;
-      });
-
-      const updatedWorld = finalState.world ? {
-        ...finalState.world,
-        agents: updatedAgents
-      } : null;
-
-      const updatedSelectedAgent = finalState.selectedAgent?.name === agentName && finalState.selectedAgent
-        ? { ...finalState.selectedAgent, messageCount: finalState.selectedAgent.messageCount + 1 }
-        : finalState.selectedAgent;
-
-      finalState = {
-        ...finalState,
-        world: updatedWorld,
-        agents: updatedAgents,
-        selectedAgent: updatedSelectedAgent
-      };
-    }
-
-    return finalState;
   },
   'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
     const baseState = handleStreamError(state as any, data) as WorldComponentState;
