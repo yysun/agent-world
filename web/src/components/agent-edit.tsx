@@ -146,10 +146,6 @@ export const closeModal = (state?: AgentEditState): void => {
   }
 };
 
-
-
-
-
 export default class AgentEdit extends Component<AgentEditState> {
   declare props: Readonly<AgentEditProps>;
   mounted = (props: AgentEditProps): AgentEditState => getStateFromProps(props);
@@ -195,8 +191,7 @@ export default class AgentEdit extends Component<AgentEditState> {
             </div>
             <div className="modal-body">
               <div className="success-message">
-                <p style="font-size: 1rem;">{state.successMessage}</p>
-                <div className="loading-spinner" style="font-size: 0.9rem;">Closing...</div>
+                <p>{state.successMessage}</p>
               </div>
             </div>
           </div>

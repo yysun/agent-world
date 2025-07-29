@@ -175,11 +175,7 @@ export default class WorldEdit extends Component<WorldEditState> {
             </div>
             <div className="modal-body">
               <div className="success-message">
-                <p style="font-size: 1rem;">{state.successMessage}</p>
-                <div className="loading-spinner" style="font-size: 0.9rem;">
-                  {state.mode === 'create' ? 'Redirecting to new world...' :
-                    state.mode === 'delete' ? 'Redirecting to home...' : 'Closing...'}
-                </div>
+                <p>{state.successMessage}</p>
               </div>
             </div>
           </div>
