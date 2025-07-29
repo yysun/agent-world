@@ -699,11 +699,7 @@ h2 {
   font-size: 0.7rem;
   font-weight: bold;
 }
-.message-debug-info {
-  font-size: 0.6rem;
-  color: var(--text-secondary);
-  margin-top: 0.5rem;
-}
+
 .sprite-0 {
   background-position: 0 0;
 }
@@ -845,24 +841,35 @@ legend {
   padding: 1rem;
   border-radius: 12px;
   max-width: 100%;
+  width: 98%;
 }
 
 .user-message {
-  align-self: flex-end;
+  align-self: flex-start;
   background: none;
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
   width: auto;
-  max-width: 70%;
 }
 
 .agent-message {
-  align-self: flex-start;
+  align-self: flex-end;
   background-color: var(--bg-accent);
   border: 1px solid var(--border-secondary);
   border-left: 3px solid #2196f3;
   color: var(--text-primary);
-  width: 100%;
+}
+
+/* Cross-agent message styling */
+.cross-agent-message {
+  align-self: flex-start;
+  border-left: 3px solid #ff9800 !important;
+}
+
+.message-debug-info {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
 }
 
 /* System message styling: red left border */
@@ -1537,13 +1544,6 @@ legend {
   color: var(--text-tertiary);
   font-style: italic;
   font-size: 0.9rem;
-}
-
-/* Cross-agent message styling */
-.cross-agent-message {
-  border-left: 3px solid #ff9800 !important;
-  /* background-color: rgba(255, 152, 0, 0.1); */
-  position: relative;
 }
 
 .source-agent-indicator {
