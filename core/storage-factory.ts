@@ -2,21 +2,29 @@
  * Storage Factory
  *
  * Provides a unified interface for file-based and SQLite-based storage backends for agent-world.
+ * Handles all environment detection logic for the core module architecture.
  *
  * Features:
- * - Dynamically loads file or SQLite storage based on configuration or environment variables.
- * - Caches storage instances for reuse and performance.
- * - Utility functions for migration, cache management, and storage recommendations.
- * - Default storage is now SQLite (was file-based previously).
+ * - Runtime environment detection (Node.js vs browser) with appropriate backend selection
+ * - Dynamically loads file or SQLite storage based on configuration and environment
+ * - Provides NoOp implementations for browser environments to maintain compatibility
+ * - Caches storage instances for reuse and performance
+ * - Utility functions for migration, cache management, and storage recommendations
+ * - Default storage is SQLite for Node.js environments
+ * - Consolidates all module initialization with environment-specific implementations
  *
  * Implementation:
- * - File storage uses dynamic imports and disk-based JSON files.
- * - SQLite storage uses a schema, context, and migration helpers.
- * - Exposes migration helpers and cache utilities.
+ * - Node.js: File storage uses dynamic imports and disk-based JSON files; SQLite uses schema and migrations
+ * - Browser: Provides NoOp implementations for all storage and utility functions
+ * - Exposes createUtilityModules() for environment-aware loading of utils, events, and llm-manager
+ * - Centralizes environment detection that was previously scattered across managers.ts
  *
- * Changes:
- * - 2025-07-27: Default storage type changed to SQLite.
- * - See git history for previous changes.
+ * Architecture Changes:
+ * - 2025-01-XX: Moved all environment detection logic from managers.ts to storage-factory.ts
+ * - 2025-01-XX: Added createUtilityModules() to provide environment-aware utility function loading
+ * - 2025-01-XX: Added browser-compatible NoOp implementations for all storage and utility operations
+ * - 2025-07-27: Default storage type changed to SQLite
+ * - See git history for previous changes
  */
 import type { StorageManager } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
@@ -37,7 +45,24 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
   async function ensureModulesLoaded() {
     if (!worldStorage || !agentStorage) {
       if (!isNodeEnvironment()) {
-        throw new Error('File storage not available in browser environment');
+        // Provide NoOp implementations for browser environment
+        worldStorage = {
+          saveWorldToDisk: async () => {},
+          loadWorldFromDisk: async () => null,
+          deleteWorldFromDisk: async () => false,
+          loadAllWorldsFromDisk: async () => [],
+          worldExistsOnDisk: async () => false
+        };
+        agentStorage = {
+          saveAgentToDisk: async () => {},
+          loadAgentFromDisk: async () => null,
+          deleteAgentFromDisk: async () => false,
+          loadAllAgentsFromDisk: async () => [],
+          validateAgentIntegrity: async () => ({ isValid: false }),
+          repairAgentData: async () => false,
+          archiveAgentMemory: async () => {}
+        };
+        return;
       }
       try {
         worldStorage = await import('./world-storage.js');
@@ -152,6 +177,48 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
 // Simple in-memory cache for storage instances
 const storageCache = new Map<string, StorageManager>();
 
+// Browser-compatible NoOp storage implementation
+function createBrowserCompatibleStorage(): StorageManager {
+  return {
+    async saveWorld(worldData: any): Promise<void> {
+      // NoOp in browser
+    },
+    async loadWorld(worldId: string): Promise<any> {
+      return null;
+    },
+    async deleteWorld(worldId: string): Promise<boolean> {
+      return false;
+    },
+    async listWorlds(): Promise<any[]> {
+      return [];
+    },
+    async saveAgent(worldId: string, agent: any): Promise<void> {
+      // NoOp in browser
+    },
+    async loadAgent(worldId: string, agentId: string): Promise<any> {
+      return null;
+    },
+    async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
+      return false;
+    },
+    async listAgents(worldId: string): Promise<any[]> {
+      return [];
+    },
+    async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
+      // NoOp in browser
+    },
+    async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<any[]> {
+      return [];
+    },
+    async validateIntegrity(worldId: string, agentId?: string): Promise<boolean> {
+      return false;
+    },
+    async repairData(worldId: string, agentId?: string): Promise<boolean> {
+      return false;
+    }
+  };
+}
+
 export async function createStorage(config: StorageConfig): Promise<StorageManager> {
   const cacheKey = `${config.type}-${config.rootPath}`;
   if (storageCache.has(cacheKey)) {
@@ -162,55 +229,57 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
 
   if (config.type === 'sqlite') {
     if (!isNodeEnvironment()) {
-      throw new Error('SQLite storage not available in browser environment');
+      // Provide NoOp SQLite implementation for browser environment
+      storage = createBrowserCompatibleStorage();
+    } else {
+      const sqliteConfig: SQLiteConfig = {
+        database: config.sqlite?.database || path.join(config.rootPath, 'agent-world.db'),
+        enableWAL: config.sqlite?.enableWAL !== false,
+        busyTimeout: config.sqlite?.busyTimeout || 30000,
+        cacheSize: config.sqlite?.cacheSize || -64000,
+        enableForeignKeys: config.sqlite?.enableForeignKeys !== false
+      };
+      // Use function-based API
+      const {
+        createSQLiteStorageContext,
+        saveWorld,
+        loadWorld,
+        deleteWorld,
+        listWorlds,
+        saveAgent,
+        loadAgent,
+        deleteAgent,
+        listAgents,
+        saveAgentsBatch,
+        loadAgentsBatch,
+        validateIntegrity,
+        repairData,
+        close,
+        getDatabaseStats,
+        initializeWithDefaults
+      } = await import('./sqlite-storage.js');
+      const { initializeSchema } = await import('./sqlite-schema.js');
+      const ctx = await createSQLiteStorageContext(sqliteConfig);
+      // Ensure schema is created before any queries
+      await initializeSchema(ctx.schemaCtx);
+      await initializeWithDefaults(ctx); // Ensure default world and agent
+      storage = {
+        saveWorld: (worldData: any) => saveWorld(ctx, worldData),
+        loadWorld: (worldId: string) => loadWorld(ctx, worldId),
+        deleteWorld: (worldId: string) => deleteWorld(ctx, worldId),
+        listWorlds: () => listWorlds(ctx),
+        saveAgent: (worldId: string, agent: any) => saveAgent(ctx, worldId, agent),
+        loadAgent: (worldId: string, agentId: string) => loadAgent(ctx, worldId, agentId),
+        deleteAgent: (worldId: string, agentId: string) => deleteAgent(ctx, worldId, agentId),
+        listAgents: (worldId: string) => listAgents(ctx, worldId),
+        saveAgentsBatch: (worldId: string, agents: any[]) => saveAgentsBatch(ctx, worldId, agents),
+        loadAgentsBatch: (worldId: string, agentIds: string[]) => loadAgentsBatch(ctx, worldId, agentIds),
+        validateIntegrity: (worldId: string, agentId?: string) => validateIntegrity(ctx, worldId, agentId),
+        repairData: (worldId: string, agentId?: string) => repairData(ctx, worldId, agentId),
+        close: () => close(ctx),
+        getDatabaseStats: () => getDatabaseStats(ctx)
+      } as any;
     }
-    const sqliteConfig: SQLiteConfig = {
-      database: config.sqlite?.database || path.join(config.rootPath, 'agent-world.db'),
-      enableWAL: config.sqlite?.enableWAL !== false,
-      busyTimeout: config.sqlite?.busyTimeout || 30000,
-      cacheSize: config.sqlite?.cacheSize || -64000,
-      enableForeignKeys: config.sqlite?.enableForeignKeys !== false
-    };
-    // Use function-based API
-    const {
-      createSQLiteStorageContext,
-      saveWorld,
-      loadWorld,
-      deleteWorld,
-      listWorlds,
-      saveAgent,
-      loadAgent,
-      deleteAgent,
-      listAgents,
-      saveAgentsBatch,
-      loadAgentsBatch,
-      validateIntegrity,
-      repairData,
-      close,
-      getDatabaseStats,
-      initializeWithDefaults
-    } = await import('./sqlite-storage.js');
-    const { initializeSchema } = await import('./sqlite-schema.js');
-    const ctx = await createSQLiteStorageContext(sqliteConfig);
-    // Ensure schema is created before any queries
-    await initializeSchema(ctx.schemaCtx);
-    await initializeWithDefaults(ctx); // Ensure default world and agent
-    storage = {
-      saveWorld: (worldData: any) => saveWorld(ctx, worldData),
-      loadWorld: (worldId: string) => loadWorld(ctx, worldId),
-      deleteWorld: (worldId: string) => deleteWorld(ctx, worldId),
-      listWorlds: () => listWorlds(ctx),
-      saveAgent: (worldId: string, agent: any) => saveAgent(ctx, worldId, agent),
-      loadAgent: (worldId: string, agentId: string) => loadAgent(ctx, worldId, agentId),
-      deleteAgent: (worldId: string, agentId: string) => deleteAgent(ctx, worldId, agentId),
-      listAgents: (worldId: string) => listAgents(ctx, worldId),
-      saveAgentsBatch: (worldId: string, agents: any[]) => saveAgentsBatch(ctx, worldId, agents),
-      loadAgentsBatch: (worldId: string, agentIds: string[]) => loadAgentsBatch(ctx, worldId, agentIds),
-      validateIntegrity: (worldId: string, agentId?: string) => validateIntegrity(ctx, worldId, agentId),
-      repairData: (worldId: string, agentId?: string) => repairData(ctx, worldId, agentId),
-      close: () => close(ctx),
-      getDatabaseStats: () => getDatabaseStats(ctx)
-    } as any;
   } else {
     storage = createFileStorageAdapter(config.rootPath);
   }
@@ -222,6 +291,11 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
 import * as fs from 'fs';
 
 export function getDefaultRootPath(): string {
+  if (!isNodeEnvironment()) {
+    // In browser environment, return a dummy path
+    return '/browser-storage';
+  }
+  
   let rootPath = process.env.AGENT_WORLD_DATA_PATH;
   if (!rootPath) {
     // Default to ~/agent-world if not defined
@@ -232,12 +306,17 @@ export function getDefaultRootPath(): string {
 }
 
 export async function createStorageFromEnv(): Promise<StorageManager> {
+  // Check environment first
+  if (!isNodeEnvironment()) {
+    // In browser environment, return NoOp storage
+    return createBrowserCompatibleStorage();
+  }
+
   // Default to 'sqlite' unless overridden by env
   const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
   const rootPath = getDefaultRootPath();
   // Ensure the folder exists
   if (
-    isNodeEnvironment() &&
     rootPath &&
     typeof fs.existsSync === 'function' &&
     !fs.existsSync(rootPath)
@@ -341,3 +420,55 @@ export const DEFAULT_STORAGE_CONFIG: Partial<StorageConfig> = {
     enableForeignKeys: true
   }
 };
+
+// Create utility modules with environment detection
+export async function createUtilityModules() {
+  if (!isNodeEnvironment()) {
+    // Browser NoOp implementations
+    return {
+      extractMentions: () => [],
+      extractParagraphBeginningMentions: () => [],
+      determineSenderType: () => 'human',
+      shouldAutoMention: () => false,
+      addAutoMention: (response: string) => response,
+      removeSelfMentions: (response: string) => response,
+      publishMessage: () => {},
+      subscribeToMessages: () => () => {},
+      broadcastToWorld: () => {},
+      publishSSE: () => {},
+      subscribeToSSE: () => () => {},
+      subscribeAgentToMessages: () => () => {},
+      shouldAgentRespond: () => false,
+      processAgentMessage: () => Promise.resolve(),
+      generateAgentResponse: () => Promise.resolve(''),
+      streamAgentResponse: () => Promise.resolve(''),
+      archiveAgentMemory: () => Promise.resolve()
+    };
+  }
+
+  // Node.js implementations
+  const utils = await import('./utils.js');
+  const events = await import('./events.js');
+  const llmManager = await import('./llm-manager.js');
+  const agentStorage = await import('./agent-storage.js');
+
+  return {
+    extractMentions: utils.extractMentions,
+    extractParagraphBeginningMentions: utils.extractParagraphBeginningMentions,
+    determineSenderType: utils.determineSenderType,
+    shouldAutoMention: events.shouldAutoMention,
+    addAutoMention: events.addAutoMention,
+    removeSelfMentions: events.removeSelfMentions,
+    publishMessage: events.publishMessage,
+    subscribeToMessages: events.subscribeToMessages,
+    broadcastToWorld: events.broadcastToWorld,
+    publishSSE: events.publishSSE,
+    subscribeToSSE: events.subscribeToSSE,
+    subscribeAgentToMessages: events.subscribeAgentToMessages,
+    shouldAgentRespond: events.shouldAgentRespond,
+    processAgentMessage: events.processAgentMessage,
+    generateAgentResponse: llmManager.generateAgentResponse,
+    streamAgentResponse: llmManager.streamAgentResponse,
+    archiveAgentMemory: agentStorage.archiveAgentMemory
+  };
+}

@@ -7,15 +7,15 @@
  * - High-level message broadcasting and routing
  * - EventEmitter integration for runtime world instances
  * - Agent event subscriptions handled automatically during world loading
- * - Consolidated dynamic imports with environment detection and NoOp patterns
+ * - Static imports with environment detection delegated to storage-factory
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
  *
  * Performance Optimizations:
- * - Consolidated 50+ scattered dynamic imports into single initialization
+ * - Static imports for all required modules (storage-factory, utility modules)
  * - Pre-initialized function pattern for all module operations
- * - Environment-based NoOp implementations for browser compatibility
+ * - Environment detection handled in storage-factory layer (not in managers)
  * - Single moduleInitialization promise for all async operations
  * - Eliminated per-method import overhead and file system lookups
  *
@@ -48,10 +48,15 @@
  * - Reconstructs EventEmitter and agents Map for runtime World objects
  * - Automatically subscribes agents to world messages during world loading
  * - Storage layer works with plain data objects (no EventEmitter)
- * - Pre-initialized functions for all module operations (storage, utils, events, llm-manager)
+ * - Static imports for all modules with environment detection in storage-factory
  * - Clean separation of storage data from runtime objects
  * - Complete isolation from other internal modules
- * - Unified environment detection with browser-safe NoOp fallbacks
+ * - Unified environment detection handled in storage-factory layer
+ *
+ * Architecture Changes:
+ * - 2025-01-XX: Removed environment detection from managers.ts
+ * - 2025-01-XX: Changed to static imports for storage-factory and utility modules
+ * - 2025-01-XX: Delegated all environment detection to storage-factory.createUtilityModules()
  */
 
 // Import logger and initialize function
@@ -65,9 +70,9 @@ import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentPar
 import type { WorldData } from './world-storage.js';
 import { toKebabCase } from './utils.js';
 
-// Dynamic imports for browser/Node.js compatibility
+// Static imports for all required modules 
 import { EventEmitter } from 'events';
-import { isNodeEnvironment } from './utils.js';
+import { createStorageFromEnv, createUtilityModules } from './storage-factory.js';
 
 // Storage and utility function assignments
 let storageInstance: any = null;
@@ -108,72 +113,66 @@ let streamAgentResponse: any;
 // Initialize modules and storage from environment
 async function initializeModules() {
   initializeLogger();
-  if (isNodeEnvironment()) {
-    const storageFactory = await import('./storage-factory.js');
-    storageInstance = await storageFactory.createStorageFromEnv();
+  
+  // Always initialize storage - environment detection is handled in storage-factory
+  storageInstance = await createStorageFromEnv();
 
-    // Storage wrappers
-    saveWorldToDisk = async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData);
-    loadWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId);
-    deleteWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId);
-    loadAllWorldsFromDisk = async (_rootPath: string) => storageInstance.listWorlds();
-    worldExistsOnDisk = async (_rootPath: string, worldId: string) => {
-      try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
-    };
-    loadAllAgentsFromDisk = async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId);
-    saveAgentConfigToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
-    saveAgentToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
-    saveAgentMemoryToDisk = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      const agent = await storageInstance.loadAgent(worldId, agentId);
-      if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
-    };
-    loadAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId);
-    loadAgentFromDiskWithRetry = async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId);
-    deleteAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId);
-    loadAllAgentsFromDiskBatch = async (_rootPath: string, worldId: string, _options?: any) => {
-      const agents = await storageInstance.listAgents(worldId); return { successful: agents, failed: [] };
-    };
-    agentExistsOnDisk = async (_rootPath: string, worldId: string, agentId: string) => {
-      try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
-    };
-    validateAgentIntegrity = async (_rootPath: string, worldId: string, agentId: string) => {
-      const isValid = await storageInstance.validateIntegrity(worldId, agentId); return { isValid };
-    };
-    repairAgentData = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId);
-    archiveAgentMemory = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      if ('archiveAgentMemory' in storageInstance) {
-        return storageInstance.archiveAgentMemory(worldId, agentId, memory);
-      } else {
-        const agentStorage = await import('./agent-storage.js');
-        return agentStorage.archiveAgentMemory(storageInstance.rootPath, worldId, agentId, memory);
-      }
-    };
+  // Always initialize utility modules - environment detection is handled in storage-factory
+  const utilityModules = await createUtilityModules();
 
-    // Utility and event modules
-    const utils = await import('./utils.js');
-    const events = await import('./events.js');
-    const llmManager = await import('./llm-manager.js');
-    extractMentions = utils.extractMentions;
-    extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
-    determineSenderType = utils.determineSenderType;
-    shouldAutoMention = events.shouldAutoMention;
-    addAutoMention = events.addAutoMention;
-    removeSelfMentions = events.removeSelfMentions;
-    publishMessage = events.publishMessage;
-    subscribeToMessages = events.subscribeToMessages;
-    broadcastToWorld = events.broadcastToWorld;
-    publishSSE = events.publishSSE;
-    subscribeToSSE = events.subscribeToSSE;
-    subscribeAgentToMessages = events.subscribeAgentToMessages;
-    shouldAgentRespond = events.shouldAgentRespond;
-    processAgentMessage = events.processAgentMessage;
-    generateAgentResponse = llmManager.generateAgentResponse;
-    streamAgentResponse = llmManager.streamAgentResponse;
-  } else {
-    // ...existing code for browser NoOps...
-    logger.warn('All operations disabled in browser environment');
-    // ...existing code...
-  }
+  // Storage wrappers
+  saveWorldToDisk = async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData);
+  loadWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId);
+  deleteWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId);
+  loadAllWorldsFromDisk = async (_rootPath: string) => storageInstance.listWorlds();
+  worldExistsOnDisk = async (_rootPath: string, worldId: string) => {
+    try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
+  };
+  loadAllAgentsFromDisk = async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId);
+  saveAgentConfigToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
+  saveAgentToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
+  saveAgentMemoryToDisk = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+    const agent = await storageInstance.loadAgent(worldId, agentId);
+    if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
+  };
+  loadAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId);
+  loadAgentFromDiskWithRetry = async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId);
+  deleteAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId);
+  loadAllAgentsFromDiskBatch = async (_rootPath: string, worldId: string, _options?: any) => {
+    const agents = await storageInstance.listAgents(worldId); return { successful: agents, failed: [] };
+  };
+  agentExistsOnDisk = async (_rootPath: string, worldId: string, agentId: string) => {
+    try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
+  };
+  validateAgentIntegrity = async (_rootPath: string, worldId: string, agentId: string) => {
+    const isValid = await storageInstance.validateIntegrity(worldId, agentId); return { isValid };
+  };
+  repairAgentData = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId);
+  archiveAgentMemory = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+    if ('archiveAgentMemory' in storageInstance) {
+      return storageInstance.archiveAgentMemory(worldId, agentId, memory);
+    } else {
+      return utilityModules.archiveAgentMemory(_rootPath, worldId, agentId, memory);
+    }
+  };
+
+  // Utility and event modules assignment
+  extractMentions = utilityModules.extractMentions;
+  extractParagraphBeginningMentions = utilityModules.extractParagraphBeginningMentions;
+  determineSenderType = utilityModules.determineSenderType;
+  shouldAutoMention = utilityModules.shouldAutoMention;
+  addAutoMention = utilityModules.addAutoMention;
+  removeSelfMentions = utilityModules.removeSelfMentions;
+  publishMessage = utilityModules.publishMessage;
+  subscribeToMessages = utilityModules.subscribeToMessages;
+  broadcastToWorld = utilityModules.broadcastToWorld;
+  publishSSE = utilityModules.publishSSE;
+  subscribeToSSE = utilityModules.subscribeToSSE;
+  subscribeAgentToMessages = utilityModules.subscribeAgentToMessages;
+  shouldAgentRespond = utilityModules.shouldAgentRespond;
+  processAgentMessage = utilityModules.processAgentMessage;
+  generateAgentResponse = utilityModules.generateAgentResponse;
+  streamAgentResponse = utilityModules.streamAgentResponse;
 }
 
 const moduleInitialization = initializeModules();
@@ -1350,8 +1349,8 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
  * Set storage configuration for the system
  */
 export async function setStorageConfiguration(config: any): Promise<void> {
-  const storageFactory = await import('./storage-factory.js');
-  storageInstance = await storageFactory.createStorage(config);
+  const { createStorage } = await import('./storage-factory.js');
+  storageInstance = await createStorage(config);
 }
 
 /**
