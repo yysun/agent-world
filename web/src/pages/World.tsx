@@ -261,7 +261,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false
     }),
 
-    'agent-saved':  (state: WorldComponentState): void => {
+    'agent-saved': (state: WorldComponentState): void => {
       // Refresh agents list and close modal
       // const agents = await api.getAgents(state.worldName);
       // return {
@@ -273,7 +273,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       location.reload(); // Reload to refresh agents list
     },
 
-    'agent-deleted':  (state: WorldComponentState): void => {
+    'agent-deleted': (state: WorldComponentState): void => {
       // Refresh agents list and close modal
       // const agents = await api.getAgents(state.worldName);
       // return {
@@ -282,7 +282,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       //   showAgentEdit: false
       // };
       location.reload();
-    },
+    }
 
   };
 }

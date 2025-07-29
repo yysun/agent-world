@@ -101,7 +101,7 @@ let archiveAgentMemory: any;
 // Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
   initializeLogger();
-  
+
   // Get storage instance and wrappers from storage factory (handles environment detection)
   const {
     storageInstance: storage,

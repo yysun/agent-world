@@ -23,7 +23,7 @@ import { configureLLMProvider } from '../core/llm-config.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { Server } from 'http';
 import apiRouter from './api.js';
 
@@ -155,8 +155,13 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
   });
 }
 
-// Direct execution handling
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Direct execution handling - check both direct execution and npm bin execution
+const currentFileUrl = import.meta.url;
+const entryPointUrl = pathToFileURL(path.resolve(process.argv[1])).href;
+const isDirectExecution = currentFileUrl === entryPointUrl;
+const isServerBinCommand = process.argv[1].includes('agent-world-server') || currentFileUrl.includes('server/index.js');
+
+if (isDirectExecution || isServerBinCommand) {
   startWebServer()
     .then(() => console.log('Server started successfully'))
     .catch((error) => {

@@ -14,7 +14,6 @@
  * - AppRun class component using mounted pattern for props-to-state initialization
  * - Module-level functions defined in same file for consolidation
  * - Direct function references: $onclick={[saveWorld]}
- * - Global events for parent coordination: 'world-saved', 'world-deleted'
  * - Success messages shown before auto-closing modal
  * - All business logic testable independently of UI
  * 
@@ -89,13 +88,13 @@ export const saveWorld = async function* (state: WorldEditState): AsyncGenerator
 
     // Auto-close after showing success message
     setTimeout(() => {
-      // if (state.mode === 'create') {
-      //   // Redirect to new world
-      //   window.location.href = '/World/' + encodeURIComponent(state.world.name);
-      // } else {
-      //   state.parentComponent.run('world-saved');
-      // }
-      location.reload();
+      if (state.mode === 'create') {
+        // Redirect to new world
+        window.location.href = '/World/' + encodeURIComponent(state.world.name);
+      } else {
+        // For edit mode, reload to refresh all data
+        location.reload();
+      }
     }, 2000);
 
   } catch (error: any) {
@@ -124,7 +123,7 @@ export const deleteWorld = async function* (state: WorldEditState): AsyncGenerat
 
     // Auto-close and redirect to home after showing success message
     setTimeout(() => {
-      state.parentComponent.run('world-deleted');
+      location.reload();
     }, 2000);
 
   } catch (error: any) {
@@ -233,7 +232,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 {/* Basic Information Section */}
                 <div className="form-section">
 
-                  <div className="form-group">
+                  <div className={`form-group ${isEditMode ? 'hidden' : ''}`}>
                     <label htmlFor="world-name">World Name *</label>
                     <input
                       id="world-name"
@@ -242,7 +241,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       placeholder="Enter world name"
                       value={state.world.name}
                       $bind="world.name"
-                      disabled={state.loading || isEditMode}
+                      disabled={state.loading}
                     />
                   </div>
 
