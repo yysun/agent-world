@@ -394,14 +394,6 @@ export async function processAgentMessage(
       getLogger().warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Call LLM for response - use streaming or non-streaming based on global flag
-    getLogger().debug('Calling LLM for response:', {
-      agentId: agent.id,
-      worldId: world.id,
-      messageId,
-      messages: messages.map(m => ({ sender: m.sender, content: m.content })) // Log only sender and content for brevity
-    });
-
     let response: string;
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
@@ -461,12 +453,12 @@ export async function resetLLMCallCountIfNeeded(
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   const senderType = determineSenderType(messageEvent.sender);
-  getLogger().debug('Checking if LLM call count reset needed', {
-    agentId: agent.id,
-    sender: messageEvent.sender,
-    senderType,
-    currentCallCount: agent.llmCallCount
-  });
+  // getLogger().debug('Checking if LLM call count reset needed', {
+  //   agentId: agent.id,
+  //   sender: messageEvent.sender,
+  //   senderType,
+  //   currentCallCount: agent.llmCallCount
+  // });
 
   if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
     if (agent.llmCallCount > 0) {
@@ -487,12 +479,12 @@ export async function resetLLMCallCountIfNeeded(
  * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
  */
 export async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
-  getLogger().debug('shouldAgentRespond called', {
-    agentId: agent.id,
-    sender: messageEvent.sender,
-    content: messageEvent.content,
-    llmCallCount: agent.llmCallCount
-  });
+  // getLogger().debug('shouldAgentRespond called ==============================================', {
+  //   agentId: agent.id,
+  //   sender: messageEvent.sender,
+  //   content: messageEvent.content,
+  //   llmCallCount: agent.llmCallCount
+  // });
 
   // Never respond to own messages
   if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
@@ -539,36 +531,29 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
     return true;
   }
 
+  const anyMentions = extractMentions(messageEvent.content);
+
   // Extract @mentions that appear at paragraph beginnings only
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
-  getLogger().debug('Extracted paragraph beginning mentions', { agentId: agent.id, mentions, content: messageEvent.content });
+  getLogger().debug('Extracted paragraph beginning mentions', { mentions, anyMentions });
 
   // For HUMAN/user messages
   if (senderType === SenderType.HUMAN) {
     getLogger().debug('Processing HUMAN message logic', { agentId: agent.id });
     // If no paragraph-beginning mentions, check for any mentions at all
     if (mentions.length === 0) {
-      // If there are no paragraph-beginning mentions but there are mentions elsewhere,
-      // treat as public message (no response)
-      const anyMentions = extractMentions(messageEvent.content);
-      getLogger().debug('No paragraph mentions, checking any mentions', { agentId: agent.id, anyMentions });
-      if (anyMentions.length > 0) {
-        getLogger().debug('Has mentions but not at paragraph beginning - skipping', { agentId: agent.id });
-        return false; // Has mentions but not at paragraph beginning
-      }
-      getLogger().debug('No mentions at all - responding as public message', { agentId: agent.id });
-      return true; // No mentions at all - public message
+      getLogger().debug('No agent mentions - responding as public message', { agentId: agent.id });
+      return true; 
+    } else {
+      const shouldRespond = mentions.includes(agent.id.toLowerCase());
+      getLogger().debug('Agent mentioned - responding tomessage', { agentId: agent.id, mentions, shouldRespond });
+      return shouldRespond;
     }
-
-    // If there are paragraph-beginning mentions, respond if this agent is mentioned
-    const shouldRespond = mentions.includes(agent.id.toLowerCase());
-    getLogger().debug('HUMAN message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
-    return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
   getLogger().debug('Processing AGENT message logic', { agentId: agent.id });
   const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  getLogger().debug('AGENT message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
+  getLogger().debug('AGENT message - should respond: ' + shouldRespond);
   return shouldRespond;
 }
