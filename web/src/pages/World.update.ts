@@ -35,7 +35,7 @@ import {
   handleComplete
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent } from '../types';
-
+import toKebabCase from '../utils/toKebabCase';
 export const worldUpdateHandlers = {
 
   '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
@@ -366,18 +366,12 @@ export const worldUpdateHandlers = {
       };
     }
 
-    // Convert agent.name to kebab-case
-    const kebabName = (agent.name || '')
-      .toLowerCase()
-      .replace(/[_\s]+/g, '-')
-      .replace(/[^a-z0-9-]/g, '');
-
     return {
       ...state,
       selectedSettingsTarget: 'agent',
       selectedAgent: agent,
       messages: (state.messages || []).filter(message => !message.userEntered),
-      userInput: '@' + kebabName + ' '
+      userInput: '@' + toKebabCase(agent.name || '') + ' '
     };
   },
 

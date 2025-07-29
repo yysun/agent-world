@@ -38,6 +38,7 @@
 
 import { app, safeHTML } from 'apprun';
 import type { Message } from '../types';
+import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
 
 // Component Props Interfaces (consolidated from components)
@@ -73,24 +74,21 @@ export default function WorldChat(props: WorldChatProps) {
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
+
+    const senderLower = toKebabCase(message.sender);
+    const agentIdLower = toKebabCase(message.fromAgentId);
     // Only check messages that have fromAgentId (came from agent memory)
     if (!message.fromAgentId) return false;
 
     // If sender is HUMAN/USER, it's normal for it to be in any agent's memory
-    if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user') {
+    if (senderLower === 'human') {
       return false;
     }
 
     // If sender is system/SYSTEM, it's normal for it to be in any agent's memory
-    if (message.sender === 'system' || message.sender === 'SYSTEM') {
+    if (senderLower === 'system') {
       return false;
     }
-
-    // For agent messages: if the sender name doesn't contain the fromAgentId or vice versa,
-    // it might be a cross-agent message in memory
-    // This is a simple heuristic - you could make it more sophisticated
-    const senderLower = message.sender.toLowerCase();
-    const agentIdLower = message.fromAgentId.toLowerCase();
 
     // If sender name contains agent id or agent id contains sender name, they likely match
     if (senderLower.includes(agentIdLower) || agentIdLower.includes(senderLower)) {
