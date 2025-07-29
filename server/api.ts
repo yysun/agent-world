@@ -29,13 +29,13 @@ import { z } from 'zod';
 import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
+import { getDefaultRootPath } from '../core/storage-factory.js';
 const logger = createCategoryLogger('api');
 
 const DEFAULT_WORLD_NAME = 'Default World';
-const AGENT_WORLD_DATA_PATH = process.env.AGENT_WORLD_DATA_PATH ||'./data/worlds';
-const ROOT_PATH = path.join(process.cwd(), AGENT_WORLD_DATA_PATH);
 
-// console.log('🌐 API initialized with root path:', ROOT_PATH);
+// Get default root path from storage-factory (no local defaults)
+const ROOT_PATH = getDefaultRootPath();
 
 // Utility functions
 function sendError(res: Response, status: number, message: string, code?: string, details?: any) {
@@ -73,7 +73,8 @@ async function getWorldOrError(res: Response, worldName: string): Promise<any | 
 // Validation schemas
 const WorldCreateSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().optional()
+  description: z.string().optional(),
+  turnLimit: z.number().min(1).optional()
 });
 
 const WorldUpdateSchema = z.object({
@@ -90,7 +91,7 @@ const AgentCreateSchema = z.object({
   systemPrompt: z.string().optional(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
-  temperature: z.number().min(0).max(2).optional(),
+  temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().min(1).optional()
 });
 
@@ -103,7 +104,11 @@ const ChatMessageSchema = z.object({
 const AgentUpdateSchema = z.object({
   status: z.enum(["active", "inactive"]).optional(),
   config: z.object({}).optional(),
+  provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).default('openai'),
+  model: z.string().default('gpt-4'),
   systemPrompt: z.string().optional(),
+  temperature: z.number().min(0).max(1).optional(),
+  // maxTokens: z.number().min(1).optional(),
   clearMemory: z.boolean().optional()
 });
 
@@ -386,16 +391,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     }
 
     // Prepare and apply updates
-    const updates: any = {};
-    if (status !== undefined) updates.status = status;
-    if (config !== undefined) {
-      // Spread config properties directly since Agent interface is flattened
-      Object.assign(updates, config);
-    }
-    if (systemPrompt !== undefined) {
-      updates.systemPrompt = systemPrompt;
-    }
-
+    const updates: any = validation.data;
     let updatedAgent = existingAgent;
     if (Object.keys(updates).length > 0) {
       const updateResult = await world.updateAgent(agentName, updates);
@@ -569,7 +565,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
     // Set up response collection with timeout
     const responsePromise = new Promise<void>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout>;
-      
+
       const completeResponse = () => {
         clearTimeout(timer);
         isComplete = true;
@@ -603,7 +599,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
             if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
               return;
             }
-            
+
             responseContent = eventData.content;
             responseSender = eventData.sender || 'agent';
             completeResponse();
