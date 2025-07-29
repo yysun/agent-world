@@ -75,14 +75,12 @@ export const worldUpdateHandlers = {
           agent.memory.forEach((memoryItem: any) => {
             memoryItem.sender = toKebabCase(memoryItem.sender || agent.name);
             const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
-
             if (!messageMap.has(messageKey)) {
               const originalSender = memoryItem.sender || agent.name;
               let messageType = 'agent';
               if (originalSender === 'HUMAN' || originalSender === 'USER') {
                 messageType = 'user';
               }
-
               messageMap.set(messageKey, {
                 id: memoryItem.id || messageKey,
                 sender: originalSender,
@@ -95,23 +93,10 @@ export const worldUpdateHandlers = {
           });
         }
 
-        const systemPrompt = agent.systemPrompt || '';
-
         return {
           ...agent,
           spriteIndex: index % 9,
           messageCount: agent.memory?.length || 0,
-          provider: agent.provider || 'openai',
-          model: agent.model || 'gpt-4',
-          temperature: agent.temperature ?? 0.7,
-          systemPrompt: systemPrompt,
-          description: agent.description || '',
-          type: agent.type || 'default',
-          status: agent.status || 'active',
-          llmCallCount: agent.llmCallCount || 0,
-          memory: agent.memory || [],
-          createdAt: agent.createdAt || new Date(),
-          lastActive: agent.lastActive || new Date()
         } as Agent;
       }));
 
