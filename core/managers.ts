@@ -476,7 +476,7 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
       const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await llmManager.streamAgentResponse(world, agentData, messages);
+      return await llmManager.streamAgentResponse(world, agentData, messages, events.publishSSE);
     },
     completeChat: async (messages: any[], options?: any) => {
       await moduleInitialization;
@@ -1055,7 +1055,7 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     async streamResponse(messages: AgentMessage[]): Promise<string> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return llmManager.streamAgentResponse(agent.world, agent, messages);
+      return llmManager.streamAgentResponse(agent.world, agent, messages, events.publishSSE);
     },
 
     // Memory management methods (R2.2)
