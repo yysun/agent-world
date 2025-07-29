@@ -14,7 +14,6 @@
  * - AppRun class component using mounted pattern for props-to-state initialization
  * - Module-level functions defined in same file for consolidation
  * - Direct function references: $onclick={[saveWorld]}
- * - Global events for parent coordination: 'world-saved', 'world-deleted'
  * - Success messages shown before auto-closing modal
  * - All business logic testable independently of UI
  * 
@@ -124,7 +123,7 @@ export const deleteWorld = async function* (state: WorldEditState): AsyncGenerat
 
     // Auto-close and redirect to home after showing success message
     setTimeout(() => {
-      state.parentComponent.run('world-deleted');
+      location.reload();
     }, 2000);
 
   } catch (error: any) {
