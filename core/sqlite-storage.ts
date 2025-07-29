@@ -1,9 +1,11 @@
 /**
  * Utility to initialize the database schema and insert a default world and agent if not present.
  * This is useful for first-time setup or testing.
+ * Modified to avoid recreating deleted agents - only creates defaults if no agents exist at all.
  */
 export async function initializeWithDefaults(ctx: SQLiteStorageContext): Promise<void> {
   await ensureInitialized(ctx);
+  
   // Insert default world if not exists
   const defaultWorldId = 'default-world';
   const world = await get(ctx, `SELECT id FROM worlds WHERE id = ?`, defaultWorldId);
@@ -13,10 +15,13 @@ export async function initializeWithDefaults(ctx: SQLiteStorageContext): Promise
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     `, defaultWorldId, 'Default World', 'The default world for Agent World system.', 100);
   }
-  // Insert default agent if not exists
-  const defaultAgentId = 'default-agent';
-  const agent = await get(ctx, `SELECT id FROM agents WHERE id = ? AND world_id = ?`, defaultAgentId, defaultWorldId);
-  if (!agent) {
+  
+  // Only insert default agent if NO agents exist in the default world
+  // This prevents recreation of intentionally deleted agents
+  const existingAgents = await all(ctx, `SELECT id FROM agents WHERE world_id = ?`, defaultWorldId);
+  
+  if (existingAgents.length === 0) {
+    const defaultAgentId = 'default-agent';
     await run(ctx, `
       INSERT INTO agents (
         id, world_id, name, type, status, provider, model, system_prompt,
@@ -174,6 +179,8 @@ async function get(ctx: SQLiteStorageContext, sql: string, ...params: any[]): Pr
     });
   });
 }
+
+export { get }; // Export for use in storage factory
 
 async function all(ctx: SQLiteStorageContext, sql: string, ...params: any[]): Promise<any[]> {
   return new Promise((resolve, reject) => {

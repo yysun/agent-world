@@ -296,13 +296,20 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       repairData,
       close,
       getDatabaseStats,
-      initializeWithDefaults
+      initializeWithDefaults,
+      get
     } = await import('./sqlite-storage.js');
     const { initializeSchema } = await import('./sqlite-schema.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Ensure schema is created before any queries
     await initializeSchema(ctx.schemaCtx);
-    await initializeWithDefaults(ctx); // Ensure default world and agent
+    
+    // Only initialize defaults on first database creation
+    // Check if database was just created by seeing if there are any worlds at all
+    const existingWorlds = await get(ctx, `SELECT COUNT(*) as count FROM worlds`);
+    if (existingWorlds && existingWorlds.count === 0) {
+      await initializeWithDefaults(ctx); // First-time setup only
+    }
     storage = {
       saveWorld: (worldData: any) => saveWorld(ctx, worldData),
       loadWorld: (worldId: string) => loadWorld(ctx, worldId),
