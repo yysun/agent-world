@@ -36,7 +36,7 @@ const PORT = Number(process.env.PORT) || 0;
 const HOST = process.env.HOST || '127.0.0.1';
 const logLevel = (process.env.LOG_LEVEL || 'error') as LogLevel;
 
-// Initialize logger (now synchronous)
+// Initialize logger with environment variable support
 initializeLogger({ globalLevel: logLevel });
 const serverLogger = createCategoryLogger('server');
 serverLogger.debug('Server logger initialized', { logLevel });

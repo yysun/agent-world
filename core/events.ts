@@ -76,9 +76,11 @@ export function disableStreaming(): void {
   globalStreamingEnabled = false;
 }
 
-// Create events category logger
+// Create events category logger - use dynamic access to always get current logger
 import { createCategoryLogger } from './logger.js';
-const logger = createCategoryLogger('events');
+function getLogger() {
+  return createCategoryLogger('events');
+}
 
 /**
  * Message publishing using World.eventEmitter
@@ -275,10 +277,10 @@ export function removeSelfMentions(response: string, agentId: string): string {
  * Agent subscription with automatic processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
-  logger.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
+  getLogger().debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
 
   const handler = async (messageEvent: WorldMessageEvent) => {
-    logger.debug('Agent received message event', {
+    getLogger().debug('Agent received message event', {
       agentId: agent.id,
       sender: messageEvent.sender,
       content: messageEvent.content,
@@ -287,7 +289,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
 
     // Skip messages from this agent itself
     if (messageEvent.sender === agent.id) {
-      logger.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
+      getLogger().debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
       return;
     }
 
@@ -295,12 +297,12 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     await resetLLMCallCountIfNeeded(world, agent, messageEvent);
 
     // Automatic message processing
-    logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
+    getLogger().debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
     if (await shouldAgentRespond(world, agent, messageEvent)) {
-      logger.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
+      getLogger().debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
       await processAgentMessage(world, agent, messageEvent);
     } else {
-      logger.debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
+      getLogger().debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
     }
   };
 
@@ -338,10 +340,10 @@ export async function saveIncomingMessageToMemory(
     try {
       await world.storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      getLogger().warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   } catch (error) {
-    logger.warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    getLogger().warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
   }
 }
 
@@ -366,7 +368,7 @@ export async function processAgentMessage(
       // Get last 10 messages from agent memory
       conversationHistory = agent.memory.slice(-10);
     } catch (error) {
-      logger.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      getLogger().warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Create MessageData for compatibility with utility functions
@@ -389,11 +391,11 @@ export async function processAgentMessage(
     try {
       await world.storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      getLogger().warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Call LLM for response - use streaming or non-streaming based on global flag
-    logger.debug('Calling LLM for response:', {
+    getLogger().debug('Calling LLM for response:', {
       agentId: agent.id,
       worldId: world.id,
       messageId,
@@ -435,7 +437,7 @@ export async function processAgentMessage(
     try {
       await world.storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      getLogger().warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Step 4: Publish final response
@@ -444,7 +446,7 @@ export async function processAgentMessage(
     }
 
   } catch (error) {
-    logger.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    getLogger().error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     publishMessage(world, `[Error] ${(error as Error).message}`, 'system');
   }
 }
@@ -459,7 +461,7 @@ export async function resetLLMCallCountIfNeeded(
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   const senderType = determineSenderType(messageEvent.sender);
-  logger.debug('Checking if LLM call count reset needed', {
+  getLogger().debug('Checking if LLM call count reset needed', {
     agentId: agent.id,
     sender: messageEvent.sender,
     senderType,
@@ -468,14 +470,14 @@ export async function resetLLMCallCountIfNeeded(
 
   if (senderType === SenderType.HUMAN || senderType === SenderType.WORLD) {
     if (agent.llmCallCount > 0) {
-      logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
+      getLogger().debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
       agent.llmCallCount = 0;
 
       // Auto-save agent state after turn limit reset
       try {
         await world.storage.saveAgent(world.id, agent);
       } catch (error) {
-        logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+        getLogger().warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
       }
     }
   }
@@ -485,7 +487,7 @@ export async function resetLLMCallCountIfNeeded(
  * Enhanced message filtering logic (matches src/agent.ts shouldRespondToMessage)
  */
 export async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
-  logger.debug('shouldAgentRespond called', {
+  getLogger().debug('shouldAgentRespond called', {
     agentId: agent.id,
     sender: messageEvent.sender,
     content: messageEvent.content,
@@ -494,7 +496,7 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Never respond to own messages
   if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
-    logger.debug('Skipping own message', { agentId: agent.id, sender: messageEvent.sender });
+    getLogger().debug('Skipping own message', { agentId: agent.id, sender: messageEvent.sender });
     return false;
   }
 
@@ -503,16 +505,16 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Never respond to turn limit messages (prevents endless loops)
   if (content.includes('Turn limit reached')) {
-    logger.debug('Skipping turn limit message', { agentId: agent.id });
+    getLogger().debug('Skipping turn limit message', { agentId: agent.id });
     return false;
   }
 
   // Check turn limit based on LLM call count using world-specific turn limit
   const worldTurnLimit = getWorldTurnLimit(world);
-  logger.debug('Checking turn limit', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
+  getLogger().debug('Checking turn limit', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
 
   if (agent.llmCallCount >= worldTurnLimit) {
-    logger.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
+    getLogger().debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     // Send turn limit message with agentName as sender
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
 
@@ -523,50 +525,50 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Determine sender type for message handling logic
   const senderType = determineSenderType(messageEvent.sender);
-  logger.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
+  getLogger().debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
 
   // Never respond to system messages (only used for error handling now)
   if (messageEvent.sender === 'system') {
-    logger.debug('Skipping system message', { agentId: agent.id });
+    getLogger().debug('Skipping system message', { agentId: agent.id });
     return false;
   }
 
   // Always respond to world messages (except turn limit messages handled above)
   if (messageEvent.sender === 'world') {
-    logger.debug('Responding to world message', { agentId: agent.id });
+    getLogger().debug('Responding to world message', { agentId: agent.id });
     return true;
   }
 
   // Extract @mentions that appear at paragraph beginnings only
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
-  logger.debug('Extracted paragraph beginning mentions', { agentId: agent.id, mentions, content: messageEvent.content });
+  getLogger().debug('Extracted paragraph beginning mentions', { agentId: agent.id, mentions, content: messageEvent.content });
 
   // For HUMAN/user messages
   if (senderType === SenderType.HUMAN) {
-    logger.debug('Processing HUMAN message logic', { agentId: agent.id });
+    getLogger().debug('Processing HUMAN message logic', { agentId: agent.id });
     // If no paragraph-beginning mentions, check for any mentions at all
     if (mentions.length === 0) {
       // If there are no paragraph-beginning mentions but there are mentions elsewhere,
       // treat as public message (no response)
       const anyMentions = extractMentions(messageEvent.content);
-      logger.debug('No paragraph mentions, checking any mentions', { agentId: agent.id, anyMentions });
+      getLogger().debug('No paragraph mentions, checking any mentions', { agentId: agent.id, anyMentions });
       if (anyMentions.length > 0) {
-        logger.debug('Has mentions but not at paragraph beginning - skipping', { agentId: agent.id });
+        getLogger().debug('Has mentions but not at paragraph beginning - skipping', { agentId: agent.id });
         return false; // Has mentions but not at paragraph beginning
       }
-      logger.debug('No mentions at all - responding as public message', { agentId: agent.id });
+      getLogger().debug('No mentions at all - responding as public message', { agentId: agent.id });
       return true; // No mentions at all - public message
     }
 
     // If there are paragraph-beginning mentions, respond if this agent is mentioned
     const shouldRespond = mentions.includes(agent.id.toLowerCase());
-    logger.debug('HUMAN message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
+    getLogger().debug('HUMAN message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
     return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  logger.debug('Processing AGENT message logic', { agentId: agent.id });
+  getLogger().debug('Processing AGENT message logic', { agentId: agent.id });
   const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  logger.debug('AGENT message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
+  getLogger().debug('AGENT message - checking if agent mentioned', { agentId: agent.id, mentions, shouldRespond });
   return shouldRespond;
 }

@@ -62,15 +62,10 @@ import {
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
-// Initialize logger system with default configuration: all categories at 'error' level
+// Initialize logger system with environment variable support
 initializeLogger({
-  globalLevel: 'error',
-  categoryLevels: {
-    cli: 'error',
-    core: 'error',
-    events: 'error',
-    llm: 'error'
-  }
+  globalLevel: 'error'
+  // Let environment variables (LOG_EVENTS, LOG_CORE, etc.) override category levels
 });
 
 // Create CLI category logger after initialization
@@ -128,20 +123,15 @@ async function configureLogger(logLevel?: string): Promise<void> {
   // Use the centralized logger configuration from core
   const level = (logLevel || 'error') as LogLevel;
 
-  // Reinitialize logger with new configuration
+  // Reinitialize logger with new configuration, respecting environment variables
   initializeLogger({
-    globalLevel: level,
-    categoryLevels: {
-      cli: 'error',      // Always keep CLI at error level
-      core: level,       // Core modules use global level
-      events: 'error',   // Keep events at error level (too verbose)
-      llm: level,        // LLM module uses global level
-    }
+    globalLevel: level
+    // Let environment variables (LOG_EVENTS, LOG_CORE, etc.) override category levels
   });
 
   // Only log the debug message if we're actually at debug level for global
   if (level === 'debug' || level === 'trace') {
-    logger.debug(`Global log level set to: ${level}, CLI log level: error`);
+    logger.debug(`Global log level set to: ${level}, environment variables respected`);
   }
 }
 
