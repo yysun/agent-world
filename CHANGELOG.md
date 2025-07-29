@@ -1,6 +1,6 @@
 v0.4.3
-- Launched CLI interface from `npx agent-world`
-- Launched Web interface from `npx agent-world --server`
+- Launched CLI interface from `npx agent-world`: pipeline, command and interaction modes
+- Launched Web interface from `npx agent-world-server`
 - Use user's home directory for database: `~/agent-world/database.db`
 - Bug fixes and performance improvements
 

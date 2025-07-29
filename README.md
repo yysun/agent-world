@@ -107,14 +107,23 @@ Each Agent World has a collection of agents that can communicate through a share
 
 ### Quick Start
 
-**Option 1: CLI Interface**
+**Option 1: Web Interface**
+```bash
+npx agent-world-server
+```
+
+**Option 2: CLI Interface**
+1. Interactive Mode
 ```bash
 npx agent-world
 ```
-
-**Option 2: Web Interface**
+2. Command Mode
 ```bash
-npx agent-world --server
+npx agent-world -w default-world "hi" 
+```
+3. Pipeline Mode
+```bash
+echo "hi" | npx agent-world -w default-world
 ```
 
 ## Project Structure (npm workspaces)
