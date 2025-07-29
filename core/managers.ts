@@ -75,6 +75,7 @@ import type { WorldData } from './world-storage.js';
 import { EventEmitter } from 'events';
 import * as events from './events.js';
 import * as llmManager from './llm-manager.js';
+import * as storageFactory from './storage-factory.js';
 import * as utils from './utils.js';
 
 // Storage and utility function assignments - initialized from storage factory
@@ -102,7 +103,6 @@ async function initializeModules() {
   initializeLogger();
 
   // Get storage instance and wrappers from storage factory (handles environment detection)
-  const storageFactory = await import('./storage-factory.js');
   const {
     storageInstance: storage,
     saveWorldToDisk: saveWorld,
@@ -476,12 +476,7 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
       const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await llmManager.streamAgentResponse(
-        world,
-        agentData,
-        messages,
-        (worldArg, data) => events.publishSSE(worldArg, data)
-      );
+      return await llmManager.streamAgentResponse(world, agentData, messages, events.publishSSE);
     },
     completeChat: async (messages: any[], options?: any) => {
       await moduleInitialization;
@@ -1060,12 +1055,7 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     async streamResponse(messages: AgentMessage[]): Promise<string> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return llmManager.streamAgentResponse(
-        agent.world,
-        agent,
-        messages,
-        (worldArg, data) => events.publishSSE(worldArg, data)
-      );
+      return llmManager.streamAgentResponse(agent.world, agent, messages, events.publishSSE);
     },
 
     // Memory management methods (R2.2)
@@ -1329,7 +1319,6 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
  * Set storage configuration for the system
  */
 export async function setStorageConfiguration(config: any): Promise<void> {
-  const storageFactory = await import('./storage-factory.js');
   storageInstance = await storageFactory.createStorage(config);
 }
 
