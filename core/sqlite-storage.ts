@@ -187,9 +187,15 @@ async function all(ctx: SQLiteStorageContext, sql: string, ...params: any[]): Pr
 // WORLD OPERATIONS
 export async function saveWorld(ctx: SQLiteStorageContext, worldData: WorldData): Promise<void> {
   await ensureInitialized(ctx);
+  // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
-    INSERT OR REPLACE INTO worlds (id, name, description, turn_limit, updated_at)
+    INSERT INTO worlds (id, name, description, turn_limit, updated_at)
     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      description = excluded.description,
+      turn_limit = excluded.turn_limit,
+      updated_at = CURRENT_TIMESTAMP
   `, worldData.id, worldData.name, worldData.description, worldData.turnLimit);
 }
 
