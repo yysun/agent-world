@@ -24,7 +24,7 @@ export async function initializeWithDefaults(ctx: SQLiteStorageContext): Promise
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       defaultAgentId, defaultWorldId, 'Default Agent', 'assistant', 'active',
-      'ollam', 'llama3.2:3b', 'You are a helpful assistant.',
+      'ollama', 'llama3.2:3b', 'You are a helpful assistant.',
       0.7, 2048, 0, new Date().toISOString(), new Date().toISOString()
     );
   }
