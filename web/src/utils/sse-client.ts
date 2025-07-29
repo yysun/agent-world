@@ -28,6 +28,7 @@ import type {
   MessageData,
   ErrorData
 } from '../types';
+import { isWorldComponentState } from '../types';
 
 // TypeScript interfaces for SSE data structures
 interface SSEBaseData {
@@ -367,8 +368,8 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
 
   // Find agent ID by sender name if state has agents
   let fromAgentId: string | undefined;
-  if ('agents' in state && Array.isArray((state as any).agents)) {
-    const agent = (state as any).agents.find((a: any) => a.name === senderName);
+  if (isWorldComponentState(state) && state.world && Array.isArray(state.world.agents)) {
+    const agent = state.world.agents.find((a: any) => a.name === senderName);
     fromAgentId = agent?.id;
   }
 
@@ -470,8 +471,8 @@ export const handleMessage = <T extends SSEComponentState>(state: T, data: Messa
 
   // Find agent ID by sender name if state has agents
   let fromAgentId: string | undefined;
-  if ('agents' in state && Array.isArray((state as any).agents)) {
-    const agent = (state as any).agents.find((a: any) => a.name === senderName);
+  if (isWorldComponentState(state) && state.world && Array.isArray(state.world.agents)) {
+    const agent = state.world.agents.find((a: any) => a.name === senderName);
     fromAgentId = agent?.id;
   }
 

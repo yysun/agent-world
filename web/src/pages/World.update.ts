@@ -129,7 +129,6 @@ export const worldUpdateHandlers = {
           agents: worldAgents,
           llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
         },
-        agents: worldAgents,
         messages: sortedMessages,
         loading: false,
         error: null,
@@ -210,7 +209,7 @@ export const worldUpdateHandlers = {
   'handleStreamStart': (state: WorldComponentState, data: any): WorldComponentState => {
     const baseState = handleStreamStart(state as any, data) as WorldComponentState;
     const agentName = data.sender;
-    const agent = state.agents.find(a => a.name === agentName);
+    const agent = state.world?.agents.find(a => a.name === agentName);
 
     return {
       ...baseState,
@@ -253,7 +252,7 @@ export const worldUpdateHandlers = {
     try {
       await api.clearAgentMemory(state.worldName, agent.name);
 
-      const updatedAgents = state.agents.map(a =>
+      const updatedAgents = state.world?.agents.map(a =>
         a.id === agent.id ? { ...a, messageCount: 0 } : a
       );
 
@@ -265,13 +264,12 @@ export const worldUpdateHandlers = {
 
       const updatedWorld = state.world ? {
         ...state.world,
-        agents: updatedAgents
+        agents: updatedAgents ?? []
       } : null;
 
       return {
         ...state,
         world: updatedWorld,
-        agents: updatedAgents,
         messages: filteredMessages,
         selectedAgent: updatedSelectedAgent
       };
@@ -286,10 +284,10 @@ export const worldUpdateHandlers = {
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
     try {
       await Promise.all(
-        state.agents.map(agent => api.clearAgentMemory(state.worldName, agent.name))
+        (state.world?.agents ?? []).map(agent => api.clearAgentMemory(state.worldName, agent.name))
       );
 
-      const updatedAgents = state.agents.map(agent => ({ ...agent, messageCount: 0 }));
+      const updatedAgents = (state.world?.agents ?? []).map(agent => ({ ...agent, messageCount: 0 }));
 
       const updatedSelectedAgent = state.selectedAgent
         ? { ...state.selectedAgent, messageCount: 0 }
@@ -297,13 +295,12 @@ export const worldUpdateHandlers = {
 
       const updatedWorld = state.world ? {
         ...state.world,
-        agents: updatedAgents
+        agents: updatedAgents ?? []
       } : null;
 
       return {
         ...state,
         world: updatedWorld,
-        agents: updatedAgents,
         messages: [],
         selectedAgent: updatedSelectedAgent
       };
@@ -349,7 +346,7 @@ export const worldUpdateHandlers = {
       await api.deleteAgent(state.worldName, agent.name);
 
       // Remove agent from agents array
-      const updatedAgents = state.agents.filter(a => a.id !== agent.id);
+      const updatedAgents = (state.world?.agents ?? []).filter(a => a.id !== agent.id);
 
       // Remove agent messages from the message list
       const filteredMessages = (state.messages || []).filter(msg => msg.sender !== agent.name);
@@ -357,7 +354,7 @@ export const worldUpdateHandlers = {
       // Update world to remove the agent
       const updatedWorld = state.world ? {
         ...state.world,
-        agents: updatedAgents
+        agents: updatedAgents ?? []
       } : null;
 
       // Clear selected agent if it was the deleted one
@@ -367,7 +364,6 @@ export const worldUpdateHandlers = {
       return {
         ...state,
         world: updatedWorld,
-        agents: updatedAgents,
         messages: filteredMessages,
         selectedAgent: updatedSelectedAgent,
         selectedSettingsTarget: updatedSelectedSettingsTarget

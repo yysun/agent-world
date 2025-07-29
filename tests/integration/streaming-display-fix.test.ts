@@ -38,19 +38,7 @@ describe('Streaming Display Integration Test', () => {
         ],
         llmCallLimit: 10
       },
-      agents: [
-        {
-          id: 'agent-1',
-          name: 'TestAgent',
-          type: 'default',
-          provider: 'ollama' as any,
-          model: 'llama3.2:3b',
-          llmCallCount: 0,
-          memory: [],
-          spriteIndex: 0,
-          messageCount: 0
-        }
-      ],
+      // agents property removed; use world.agents only
       messages: [],
       userInput: '',
       loading: false,
@@ -146,7 +134,6 @@ describe('Streaming Display Integration Test', () => {
     // Add second agent to state
     const initialState = {
       ...mockWorldState,
-      agents: [...mockWorldState.agents, agent2],
       world: {
         ...mockWorldState.world!,
         agents: [...mockWorldState.world!.agents, agent2]

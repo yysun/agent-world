@@ -139,7 +139,6 @@ export interface SSEComponentState {
 export interface WorldComponentState extends SSEComponentState {
   worldName: string;
   world: World | null;
-  agents: Agent[];
   userInput?: string; // Made optional to handle undefined cases
   loading: boolean;
   error: string | null;
@@ -149,12 +148,12 @@ export interface WorldComponentState extends SSEComponentState {
   selectedSettingsTarget: 'world' | 'agent' | null;
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;
-  
+
   // Simplified agent edit state - just boolean flags and mode
   showAgentEdit: boolean;
   agentEditMode: 'create' | 'edit' | 'delete';
   selectedAgentForEdit: Agent | null;
-  
+
   // Simplified world edit state - just boolean flags and mode
   showWorldEdit: boolean;
   worldEditMode: 'create' | 'edit' | 'delete';
@@ -280,7 +279,7 @@ export function isWorldComponentState(obj: any): obj is WorldComponentState {
   return obj && typeof obj === 'object' &&
     typeof obj.worldName === 'string' &&
     Array.isArray(obj.messages) &&
-    Array.isArray(obj.agents);
+    obj.world && Array.isArray(obj.world.agents);
 }
 
 // Constants for UI configuration

@@ -142,11 +142,11 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 <div className="agents-list-container">
                   {state.loading ? (
                     <div className="loading-agents">Loading agents...</div>
-                  ) : !state.agents?.length ? (
+                  ) : !(state.world?.agents?.length) ? (
                     <div className="no-agents">No agents in this world</div>
                   ) : (
                     <div className="agents-list">
-                      {state.agents.map((agent, index) => {
+                      {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         return (
                           <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
