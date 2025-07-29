@@ -100,7 +100,7 @@ let archiveAgentMemory: any;
 // Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
   initializeLogger();
-  
+
   // Get storage instance and wrappers from storage factory (handles environment detection)
   const storageFactory = await import('./storage-factory.js');
   const {
@@ -476,7 +476,12 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
       const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await llmManager.generateAgentResponse(world, agentData, messages);
+      return await llmManager.streamAgentResponse(
+        world,
+        agentData,
+        messages,
+        (worldArg, data) => events.publishSSE(worldArg, data)
+      );
     },
     completeChat: async (messages: any[], options?: any) => {
       await moduleInitialization;
@@ -1055,7 +1060,12 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     async streamResponse(messages: AgentMessage[]): Promise<string> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return llmManager.generateAgentResponse(agent.world, agent, messages);
+      return llmManager.streamAgentResponse(
+        agent.world,
+        agent,
+        messages,
+        (worldArg, data) => events.publishSSE(worldArg, data)
+      );
     },
 
     // Memory management methods (R2.2)
