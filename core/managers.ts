@@ -7,15 +7,15 @@
  * - High-level message broadcasting and routing
  * - EventEmitter integration for runtime world instances
  * - Agent event subscriptions handled automatically during world loading
- * - Consolidated dynamic imports with environment detection and NoOp patterns
+ * - Static imports for events, llm-manager, and utils modules for improved separation of concerns
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
  *
  * Performance Optimizations:
- * - Consolidated 50+ scattered dynamic imports into single initialization
- * - Pre-initialized function pattern for all module operations
- * - Environment-based NoOp implementations for browser compatibility
+ * - Static imports for events, llm-manager, and utils modules eliminate dynamic import overhead
+ * - Environment detection delegated to storage-factory for clean separation of concerns
+ * - Pre-initialized storage function wrappers from storage factory
  * - Single moduleInitialization promise for all async operations
  * - Eliminated per-method import overhead and file system lookups
  *
@@ -48,10 +48,17 @@
  * - Reconstructs EventEmitter and agents Map for runtime World objects
  * - Automatically subscribes agents to world messages during world loading
  * - Storage layer works with plain data objects (no EventEmitter)
- * - Pre-initialized functions for all module operations (storage, utils, events, llm-manager)
+ * - Static imports for events, llm-manager, and utils modules
+ * - Environment detection handled by storage-factory module
  * - Clean separation of storage data from runtime objects
  * - Complete isolation from other internal modules
- * - Unified environment detection with browser-safe NoOp fallbacks
+ * - Environment-aware storage function wrappers from storage factory
+ *
+ * Separation of Concerns:
+ * - Static imports: events.js, llm-manager.js, utils.js (no dynamic imports)
+ * - Environment detection: Delegated to storage-factory.js
+ * - Storage operations: Wrapped functions from storage-factory with environment awareness
+ * - NoOp implementations: Provided by storage-factory for browser environments
  */
 
 // Import logger and initialize function
