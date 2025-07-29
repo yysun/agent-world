@@ -247,7 +247,7 @@ export default class AgentEdit extends Component<AgentEditState> {
               // Form view for create and edit modes
               <form className="agent-form">
                 {/* First row: Name and Temperature */}
-                <div className="form-section">
+                <div className={`form-group ${isEditMode ? 'hidden' : ''}`}>
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="agent-name">Agent Name *</label>
@@ -258,7 +258,7 @@ export default class AgentEdit extends Component<AgentEditState> {
                         placeholder="Enter agent name"
                         value={state.agent.name}
                         $bind="agent.name"
-                        disabled={state.loading || isEditMode}
+                        disabled={state.loading}
                       />
                     </div>
 

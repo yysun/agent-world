@@ -72,6 +72,10 @@ a {
   text-decoration: none;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .doodle button,
 .doodle textarea,
 .doodle input,

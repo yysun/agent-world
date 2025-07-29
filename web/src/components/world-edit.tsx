@@ -232,7 +232,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                 {/* Basic Information Section */}
                 <div className="form-section">
 
-                  <div className="form-group">
+                  <div className={`form-group ${isEditMode ? 'hidden' : ''}`}>
                     <label htmlFor="world-name">World Name *</label>
                     <input
                       id="world-name"
@@ -241,7 +241,7 @@ export default class WorldEdit extends Component<WorldEditState> {
                       placeholder="Enter world name"
                       value={state.world.name}
                       $bind="world.name"
-                      disabled={state.loading || isEditMode}
+                      disabled={state.loading}
                     />
                   </div>
 
