@@ -26,7 +26,7 @@
  * - User input pre-fill with @agent mentions when agent selected
  */
 
-import { app, Component } from 'apprun';
+import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent } from '../types';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
@@ -41,7 +41,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
     return {
       worldName: 'World',
       world: null,
-      agents: [],
       messages: [],
       userInput: '',
       loading: true,
@@ -143,7 +142,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   {state.loading ? (
                     <div className="loading-agents">Loading agents...</div>
                   ) : !(state.world?.agents?.length) ? (
-                    <div className="no-agents">No agents in this world</div>
+                      <div className="no-agents">No agents in this world:
+                        <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>') }</span>
+                      </div>
                   ) : (
                     <div className="agents-list">
                       {state.world?.agents.map((agent, index) => {
