@@ -458,11 +458,20 @@ describe('processAgentMessage', () => {
       await processAgentMessage(mockWorld, mockAgent, messageEvent);
 
       // Should have called streamAgentResponse with prepared messages
-      expect(mockStreamAgentResponse).toHaveBeenCalledWith(
-        mockWorld,
-        mockAgent,
-        expect.any(Array) // prepareMessagesForLLM result
-      );
+      const callArgs = mockStreamAgentResponse.mock.calls[0];
+      expect(callArgs[0]).toBe(mockWorld);
+      expect(callArgs[1]).toBe(mockAgent);
+      const messages = callArgs[2] as import('../../../core/types').AgentMessage[];
+      // First message should be system prompt
+      expect(messages[0]).toMatchObject({ role: 'system', content: mockAgent.systemPrompt });
+      // Next 10 messages should be the last 10 from memory
+  const last10 = longMemory.slice(6, 16);
+      // LLM context: [system prompt, last 10 memory, new user message]
+      for (let i = 0; i < 10; i++) {
+        expect(messages[i + 1]).toMatchObject({ content: last10[i].content, role: last10[i].role });
+      }
+      // The last message should be the new user message
+      expect(messages[11]).toMatchObject({ role: 'user', content: messageEvent.content });
     });
   });
 
