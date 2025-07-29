@@ -473,6 +473,7 @@ export const handleMessage = <T extends SSEComponentState>(state: T, data: Messa
   let fromAgentId: string | undefined;
   if (isWorldComponentState(state) && state.world && Array.isArray(state.world.agents)) {
     const agent = state.world.agents.find((a: any) => a.name === senderName);
+    agent.messageCount++;
     fromAgentId = agent?.id;
   }
 

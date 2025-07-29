@@ -344,23 +344,24 @@ export default class ParentComponent extends Component<ParentState> {
 
 ### State Update Rules (Critical)
 
-**✅ ALWAYS DO:**
+You can mutate state directly. Only return state when you need to re-render the component. 
+
 ```typescript
-// Immutable updates
-{ ...state, field: newValue }
-
-// Nested updates
-{ ...state, nested: { ...state.nested, field: newValue } }
-
-// Array updates
-{ ...state, items: [...state.items, newItem] }
+const stateUpdate = (state) => {
+  state.field = newValue;        // Mutation
+  state.items.push(newItem);     // Mutation
+  state.nested.field = value; 
+  return state;                   // Return updated state to trigger re-render
+}
 ```
 
-**❌ NEVER DO:**
 ```typescript
-state.field = newValue;        // Mutation
-state.items.push(newItem);     // Mutation
-state.nested.field = value;    // Mutation
+const stateUpdate = (state) => {
+  state.field = newValue;        // Mutation
+  state.items.push(newItem);     // Mutation
+  state.nested.field = value; 
+  // No return needed if no need to re-render
+}
 ```
 
 ### Required State Properties
