@@ -531,6 +531,8 @@ export const handleError = <T extends SSEComponentState>(state: T, error: ErrorD
 export const handleComplete = <T extends SSEComponentState>(state: T, payload: any): T => {
   return {
     ...state,
-    connectionStatus: 'completed'
+    connectionStatus: 'completed',
+    isSending: false,
+    isWaiting: false
   };
 };
