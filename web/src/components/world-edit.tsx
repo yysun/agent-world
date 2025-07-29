@@ -89,12 +89,13 @@ export const saveWorld = async function* (state: WorldEditState): AsyncGenerator
 
     // Auto-close after showing success message
     setTimeout(() => {
-      if (state.mode === 'create') {
-        // Redirect to new world
-        window.location.href = '/World/' + encodeURIComponent(state.world.name);
-      } else {
-        state.parentComponent.run('world-saved');
-      }
+      // if (state.mode === 'create') {
+      //   // Redirect to new world
+      //   window.location.href = '/World/' + encodeURIComponent(state.world.name);
+      // } else {
+      //   state.parentComponent.run('world-saved');
+      // }
+      location.reload();
     }, 2000);
 
   } catch (error: any) {

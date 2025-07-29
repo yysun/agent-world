@@ -374,7 +374,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
       return;
     }
 
-    const { status, config, systemPrompt, clearMemory } = validation.data;
+    const { clearMemory } = validation.data;
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
@@ -384,16 +384,28 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
       return;
     }
 
-    // Clear memory if requested
-    if (clearMemory && !(await world.clearAgentMemory(agentName))) {
-      sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
-      return;
+    // Only update agent config/metadata, never memory unless clearMemory is set
+    let updatedAgent = existingAgent;
+
+    // If clearMemory is requested, clear memory first
+    if (clearMemory) {
+      const cleared = await world.clearAgentMemory(agentName);
+      if (!cleared) {
+        sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
+        return;
+      }
+      // Re-fetch agent after memory clear
+      updatedAgent = await world.getAgent(agentName);
     }
 
-    // Prepare and apply updates
-    const updates: any = validation.data;
-    let updatedAgent = existingAgent;
-    if (Object.keys(updates).length > 0) {
+    // Prepare updates, but exclude memory field if present
+    const updates: any = { ...validation.data };
+    delete updates.clearMemory;
+    if ('memory' in updates) delete updates.memory;
+
+    // Only update if there are non-memory fields to update
+    const updateKeys = Object.keys(updates).filter(k => k !== 'memory');
+    if (updateKeys.length > 0) {
       const updateResult = await world.updateAgent(agentName, updates);
       if (!updateResult) {
         sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
