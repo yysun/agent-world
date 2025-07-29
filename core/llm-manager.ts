@@ -76,7 +76,7 @@ import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages,
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 
-// Create LLM category logger
+// Create LLM category logger - initialized when module loads
 const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config.js';
 

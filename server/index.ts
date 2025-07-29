@@ -34,12 +34,9 @@ const __dirname = path.dirname(__filename);
 // Configuration
 const PORT = Number(process.env.PORT) || 0;
 const HOST = process.env.HOST || '127.0.0.1';
-const logLevel = (process.env.LOG_LEVEL || 'error') as LogLevel;
 
-// Initialize logger with environment variable support
-initializeLogger({ globalLevel: logLevel });
+// Create server logger after logger auto-initialization
 const serverLogger = createCategoryLogger('server');
-serverLogger.debug('Server logger initialized', { logLevel });
 
 // LLM provider configuration
 function configureLLMProvidersFromEnv(): void {

@@ -4,12 +4,13 @@
  * Features:
  * - Pure console-based logging (Node.js/browser compatible)
  * - Category-specific loggers with independent levels
+ * - Auto-initialization with environment variables on module load
  * - Configuration-driven setup with level filtering
  * - Zero external dependencies
  * - Environment variable support for per-category log levels (e.g., LOG_EVENTS=debug)
  *
  * Categories: ws, cli, core, storage, llm, events, api, server
- * Usage: initializeLogger(config) → createCategoryLogger(category)
+ * Usage: Auto-initialized on import → createCategoryLogger(category)
  *
  * Environment Variable Support:
  *   - Set per-category log level with LOG_{CATEGORY} (e.g., LOG_EVENTS=debug)
@@ -18,8 +19,17 @@
  *   - These override global LOG_LEVEL and config.categoryLevels
  *   - LOG_LEVEL sets the global default if no category override is present
  *
+ * Auto-Initialization:
+ *   - Logger automatically scans environment variables when module is imported
+ *   - No manual initialization required for basic usage
+ *   - initializeLogger() can still be used to override settings
+ *
  * Implementation: Console methods with structured output formatting
  */
+
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
@@ -80,6 +90,31 @@ let globalLevel: LogLevel = 'error';
 const categoryLevels: Record<string, LogLevel> = {};
 const categoryLoggers: Record<string, Logger> = {};
 
+// Auto-initialize logger with environment variables when module loads
+function autoInitializeLogger(): void {
+  // Set global level from environment
+  const envGlobalLevel = (typeof process !== 'undefined' && process.env && process.env.LOG_LEVEL) ? process.env.LOG_LEVEL.toLowerCase() : undefined;
+  globalLevel = (envGlobalLevel && LOG_LEVELS[envGlobalLevel as LogLevel]) ? envGlobalLevel as LogLevel : 'error';
+
+  // Dynamically scan environment for LOG_{CATEGORY} variables (case-insensitive, dashes/underscores normalized)
+  if (typeof process !== 'undefined' && process.env) {
+    const env = process.env;
+    Object.keys(env).forEach(key => {
+      if (key.startsWith('LOG_') && key !== 'LOG_LEVEL') {
+        // Normalize: LOG_{CATEGORY} => category (lowercase, underscores/dashes to dashes)
+        const cat = key.slice(4).toLowerCase().replace(/[_]+/g, '-');
+        const val = env[key];
+        if (val && LOG_LEVELS[val.toLowerCase() as LogLevel]) {
+          categoryLevels[cat] = val.toLowerCase() as LogLevel;
+        }
+      }
+    });
+  }
+}
+
+// Auto-initialize when module loads
+autoInitializeLogger();
+
 export interface LoggerConfig {
   globalLevel?: LogLevel;
   categoryLevels?: Record<string, LogLevel>;
@@ -87,16 +122,17 @@ export interface LoggerConfig {
 
 // Simple synchronous logger initialization
 export function initializeLogger(config: LoggerConfig = {}): void {
-  // Set global level from config or environment
-  const envGlobalLevel = (typeof process !== 'undefined' && process.env && process.env.LOG_LEVEL) ? process.env.LOG_LEVEL.toLowerCase() : undefined;
-  globalLevel = (envGlobalLevel && LOG_LEVELS[envGlobalLevel as LogLevel]) ? envGlobalLevel as LogLevel : (config.globalLevel || 'error');
+  // Override global level if provided in config
+  if (config.globalLevel) {
+    globalLevel = config.globalLevel;
+  }
 
-  // Start with config-provided category levels
+  // Override category levels if provided in config
   if (config.categoryLevels) {
     Object.assign(categoryLevels, config.categoryLevels);
   }
 
-  // Dynamically scan environment for LOG_{CATEGORY} variables (case-insensitive, dashes/underscores normalized)
+  // Re-scan environment variables to ensure they take precedence
   if (typeof process !== 'undefined' && process.env) {
     const env = process.env;
     Object.keys(env).forEach(key => {
