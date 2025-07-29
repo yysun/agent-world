@@ -337,14 +337,6 @@ async function executeGenerateAgentResponse(
   agent.llmCallCount++;
   agent.lastLLMCall = new Date();
 
-  // Auto-save agent state after LLM call
-  try {
-    const { saveAgentToDisk } = await import('./agent-storage.js');
-    await saveAgentToDisk(world.rootPath, world.id, agent);
-  } catch (error) {
-    logger.warn('Failed to auto-save agent after LLM call', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-  }
-
   return text;
 }
 

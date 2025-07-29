@@ -75,6 +75,7 @@ import type { WorldData } from './world-storage.js';
 import { EventEmitter } from 'events';
 import * as events from './events.js';
 import * as llmManager from './llm-manager.js';
+import * as storageFactory from './storage-factory.js';
 import * as utils from './utils.js';
 
 // Storage and utility function assignments - initialized from storage factory
@@ -102,7 +103,6 @@ async function initializeModules() {
   initializeLogger();
   
   // Get storage instance and wrappers from storage factory (handles environment detection)
-  const storageFactory = await import('./storage-factory.js');
   const {
     storageInstance: storage,
     saveWorldToDisk: saveWorld,
@@ -1319,7 +1319,6 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
  * Set storage configuration for the system
  */
 export async function setStorageConfiguration(config: any): Promise<void> {
-  const storageFactory = await import('./storage-factory.js');
   storageInstance = await storageFactory.createStorage(config);
 }
 
