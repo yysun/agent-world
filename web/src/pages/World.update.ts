@@ -155,12 +155,12 @@ export const worldUpdateHandlers = {
   },
 
   // Message Handlers
-  'update-input': (state: WorldComponentState, e): WorldComponentState => ({
+  'update-input': (state: WorldComponentState, e: any): WorldComponentState => ({
     ...state,
     userInput: e.target.value
   }),
 
-  'key-press': (state: WorldComponentState, e) => {
+  'key-press': (state: WorldComponentState, e: any) => {
     if (e.key === 'Enter' && (state.userInput || '').trim()) {
       app.run('send-message');
     }
@@ -246,7 +246,7 @@ export const worldUpdateHandlers = {
         agents: updatedAgents
       } : null;
 
-      const updatedSelectedAgent = finalState.selectedAgent?.name === agentName
+      const updatedSelectedAgent = finalState.selectedAgent?.name === agentName && finalState.selectedAgent
         ? { ...finalState.selectedAgent, messageCount: finalState.selectedAgent.messageCount + 1 }
         : finalState.selectedAgent;
 
@@ -388,7 +388,7 @@ export const worldUpdateHandlers = {
 
       // Remove agent from agents array
       const updatedAgents = state.agents.filter(a => a.id !== agent.id);
-      
+
       // Remove agent messages from the message list
       const filteredMessages = (state.messages || []).filter(msg => msg.sender !== agent.name);
 
