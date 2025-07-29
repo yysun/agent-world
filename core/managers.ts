@@ -7,15 +7,15 @@
  * - High-level message broadcasting and routing
  * - EventEmitter integration for runtime world instances
  * - Agent event subscriptions handled automatically during world loading
- * - Consolidated dynamic imports with environment detection and NoOp patterns
+ * - Static imports for events, llm-manager, and utils modules for improved separation of concerns
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
  *
  * Performance Optimizations:
- * - Consolidated 50+ scattered dynamic imports into single initialization
- * - Pre-initialized function pattern for all module operations
- * - Environment-based NoOp implementations for browser compatibility
+ * - Static imports for events, llm-manager, and utils modules eliminate dynamic import overhead
+ * - Environment detection delegated to storage-factory for clean separation of concerns
+ * - Pre-initialized storage function wrappers from storage factory
  * - Single moduleInitialization promise for all async operations
  * - Eliminated per-method import overhead and file system lookups
  *
@@ -48,10 +48,17 @@
  * - Reconstructs EventEmitter and agents Map for runtime World objects
  * - Automatically subscribes agents to world messages during world loading
  * - Storage layer works with plain data objects (no EventEmitter)
- * - Pre-initialized functions for all module operations (storage, utils, events, llm-manager)
+ * - Static imports for events, llm-manager, and utils modules
+ * - Environment detection handled by storage-factory module
  * - Clean separation of storage data from runtime objects
  * - Complete isolation from other internal modules
- * - Unified environment detection with browser-safe NoOp fallbacks
+ * - Environment-aware storage function wrappers from storage factory
+ *
+ * Separation of Concerns:
+ * - Static imports: events.js, llm-manager.js, utils.js (no dynamic imports)
+ * - Environment detection: Delegated to storage-factory.js
+ * - Storage operations: Wrapped functions from storage-factory with environment awareness
+ * - NoOp implementations: Provided by storage-factory for browser environments
  */
 
 // Import logger and initialize function
@@ -63,13 +70,14 @@ const logger = createCategoryLogger('core');
 // Type-only imports
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types.js';
 import type { WorldData } from './world-storage.js';
-import { toKebabCase } from './utils.js';
 
-// Dynamic imports for browser/Node.js compatibility
+// Static imports for core modules
 import { EventEmitter } from 'events';
-import { isNodeEnvironment } from './utils.js';
+import * as events from './events.js';
+import * as llmManager from './llm-manager.js';
+import * as utils from './utils.js';
 
-// Storage and utility function assignments
+// Storage and utility function assignments - initialized from storage factory
 let storageInstance: any = null;
 let saveWorldToDisk: any;
 let loadWorldFromDisk: any;
@@ -88,92 +96,53 @@ let agentExistsOnDisk: any;
 let validateAgentIntegrity: any;
 let repairAgentData: any;
 let archiveAgentMemory: any;
-let extractMentions: any;
-let extractParagraphBeginningMentions: any;
-let determineSenderType: any;
-let shouldAutoMention: any;
-let addAutoMention: any;
-let removeSelfMentions: any;
-let publishMessage: any;
-let subscribeToMessages: any;
-let broadcastToWorld: any;
-let publishSSE: any;
-let subscribeToSSE: any;
-let subscribeAgentToMessages: any;
-let shouldAgentRespond: any;
-let processAgentMessage: any;
-let generateAgentResponse: any;
-let streamAgentResponse: any;
 
-// Initialize modules and storage from environment
+// Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
   initializeLogger();
-  if (isNodeEnvironment()) {
-    const storageFactory = await import('./storage-factory.js');
-    storageInstance = await storageFactory.createStorageFromEnv();
+  
+  // Get storage instance and wrappers from storage factory (handles environment detection)
+  const storageFactory = await import('./storage-factory.js');
+  const {
+    storageInstance: storage,
+    saveWorldToDisk: saveWorld,
+    loadWorldFromDisk: loadWorld,
+    deleteWorldFromDisk: deleteWorld,
+    loadAllWorldsFromDisk: loadAllWorlds,
+    worldExistsOnDisk: worldExists,
+    loadAllAgentsFromDisk: loadAllAgents,
+    saveAgentConfigToDisk: saveAgentConfig,
+    saveAgentToDisk: saveAgent,
+    saveAgentMemoryToDisk: saveAgentMemory,
+    loadAgentFromDisk: loadAgent,
+    loadAgentFromDiskWithRetry: loadAgentWithRetry,
+    deleteAgentFromDisk: deleteAgent,
+    loadAllAgentsFromDiskBatch: loadAllAgentsBatch,
+    agentExistsOnDisk: agentExists,
+    validateAgentIntegrity: validateIntegrity,
+    repairAgentData: repairData,
+    archiveAgentMemory: archiveMemory
+  } = await storageFactory.createStorageWithWrappers();
 
-    // Storage wrappers
-    saveWorldToDisk = async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData);
-    loadWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId);
-    deleteWorldFromDisk = async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId);
-    loadAllWorldsFromDisk = async (_rootPath: string) => storageInstance.listWorlds();
-    worldExistsOnDisk = async (_rootPath: string, worldId: string) => {
-      try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
-    };
-    loadAllAgentsFromDisk = async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId);
-    saveAgentConfigToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
-    saveAgentToDisk = async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent);
-    saveAgentMemoryToDisk = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      const agent = await storageInstance.loadAgent(worldId, agentId);
-      if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
-    };
-    loadAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId);
-    loadAgentFromDiskWithRetry = async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId);
-    deleteAgentFromDisk = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId);
-    loadAllAgentsFromDiskBatch = async (_rootPath: string, worldId: string, _options?: any) => {
-      const agents = await storageInstance.listAgents(worldId); return { successful: agents, failed: [] };
-    };
-    agentExistsOnDisk = async (_rootPath: string, worldId: string, agentId: string) => {
-      try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
-    };
-    validateAgentIntegrity = async (_rootPath: string, worldId: string, agentId: string) => {
-      const isValid = await storageInstance.validateIntegrity(worldId, agentId); return { isValid };
-    };
-    repairAgentData = async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId);
-    archiveAgentMemory = async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-      if ('archiveAgentMemory' in storageInstance) {
-        return storageInstance.archiveAgentMemory(worldId, agentId, memory);
-      } else {
-        const agentStorage = await import('./agent-storage.js');
-        return agentStorage.archiveAgentMemory(storageInstance.rootPath, worldId, agentId, memory);
-      }
-    };
-
-    // Utility and event modules
-    const utils = await import('./utils.js');
-    const events = await import('./events.js');
-    const llmManager = await import('./llm-manager.js');
-    extractMentions = utils.extractMentions;
-    extractParagraphBeginningMentions = utils.extractParagraphBeginningMentions;
-    determineSenderType = utils.determineSenderType;
-    shouldAutoMention = events.shouldAutoMention;
-    addAutoMention = events.addAutoMention;
-    removeSelfMentions = events.removeSelfMentions;
-    publishMessage = events.publishMessage;
-    subscribeToMessages = events.subscribeToMessages;
-    broadcastToWorld = events.broadcastToWorld;
-    publishSSE = events.publishSSE;
-    subscribeToSSE = events.subscribeToSSE;
-    subscribeAgentToMessages = events.subscribeAgentToMessages;
-    shouldAgentRespond = events.shouldAgentRespond;
-    processAgentMessage = events.processAgentMessage;
-    generateAgentResponse = llmManager.generateAgentResponse;
-    streamAgentResponse = llmManager.streamAgentResponse;
-  } else {
-    // ...existing code for browser NoOps...
-    logger.warn('All operations disabled in browser environment');
-    // ...existing code...
-  }
+  // Assign storage instance and wrappers
+  storageInstance = storage;
+  saveWorldToDisk = saveWorld;
+  loadWorldFromDisk = loadWorld;
+  deleteWorldFromDisk = deleteWorld;
+  loadAllWorldsFromDisk = loadAllWorlds;
+  worldExistsOnDisk = worldExists;
+  loadAllAgentsFromDisk = loadAllAgents;
+  saveAgentConfigToDisk = saveAgentConfig;
+  saveAgentToDisk = saveAgent;
+  saveAgentMemoryToDisk = saveAgentMemory;
+  loadAgentFromDisk = loadAgent;
+  loadAgentFromDiskWithRetry = loadAgentWithRetry;
+  deleteAgentFromDisk = deleteAgent;
+  loadAllAgentsFromDiskBatch = loadAllAgentsBatch;
+  agentExistsOnDisk = agentExists;
+  validateAgentIntegrity = validateIntegrity;
+  repairAgentData = repairData;
+  archiveAgentMemory = archiveMemory;
 }
 
 const moduleInitialization = initializeModules();
@@ -197,7 +166,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
   await moduleInitialization;
 
   // Convert name to kebab-case for consistent ID format
-  const worldId = toKebabCase(params.name);
+  const worldId = utils.toKebabCase(params.name);
 
   // Check if world already exists
   const exists = await worldExistsOnDisk(rootPath, worldId);
@@ -230,7 +199,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
   await moduleInitialization;
 
   // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = toKebabCase(worldId);
+  const normalizedWorldId = utils.toKebabCase(worldId);
 
   const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
@@ -261,7 +230,7 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
   await moduleInitialization;
 
   // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = toKebabCase(worldId);
+  const normalizedWorldId = utils.toKebabCase(worldId);
 
   const existingData = await loadWorldFromDisk(rootPath, normalizedWorldId);
 
@@ -288,7 +257,7 @@ export async function deleteWorld(rootPath: string, worldId: string): Promise<bo
   await moduleInitialization;
 
   // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = toKebabCase(worldId);
+  const normalizedWorldId = utils.toKebabCase(worldId);
 
   return await deleteWorldFromDisk(rootPath, normalizedWorldId);
 }
@@ -339,7 +308,7 @@ export async function getWorldConfig(rootPath: string, worldId: string): Promise
   await moduleInitialization;
 
   // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = toKebabCase(worldId);
+  const normalizedWorldId = utils.toKebabCase(worldId);
 
   logger.debug('getWorldConfig called', {
     originalWorldId: worldId,
@@ -455,39 +424,39 @@ function createStorageManager(rootPath: string): StorageManager {
 
 /**
  * Create MessageProcessor implementation (R4.1)
- * Uses pre-initialized functions for performance optimization
+ * Uses statically imported functions from utils and events modules
  */
 function createMessageProcessor(): MessageProcessor {
   return {
     extractMentions(content: string): string[] {
-      return extractMentions(content);
+      return utils.extractMentions(content);
     },
 
     extractParagraphBeginningMentions(content: string): string[] {
-      return extractParagraphBeginningMentions(content);
+      return utils.extractParagraphBeginningMentions(content);
     },
 
     determineSenderType(sender: string | undefined) {
-      return determineSenderType(sender);
+      return utils.determineSenderType(sender);
     },
 
     shouldAutoMention(response: string, sender: string, agentId: string): boolean {
-      return shouldAutoMention(response, sender, agentId);
+      return events.shouldAutoMention(response, sender, agentId);
     },
 
     addAutoMention(response: string, sender: string): string {
-      return addAutoMention(response, sender);
+      return events.addAutoMention(response, sender);
     },
 
     removeSelfMentions(response: string, agentId: string): string {
-      return removeSelfMentions(response, agentId);
+      return events.removeSelfMentions(response, agentId);
     }
   };
 }
 
 /**
  * Enhance agent data with methods to create a full Agent object
- * Uses pre-initialized functions for performance optimization
+ * Uses statically imported functions from utils, events, and llm-manager modules
  */
 function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: string): Agent {
   return {
@@ -499,7 +468,7 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
       const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await generateAgentResponse(world, agentData, messages);
+      return await llmManager.generateAgentResponse(world, agentData, messages);
     },
     streamResponse: async (prompt: string, options?: any) => {
       await moduleInitialization;
@@ -507,14 +476,14 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
       const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await streamAgentResponse(world, agentData, messages);
+      return await llmManager.streamAgentResponse(world, agentData, messages);
     },
     completeChat: async (messages: any[], options?: any) => {
       await moduleInitialization;
       const worldData = await getWorldConfig(rootPath, worldId);
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
-      return await generateAgentResponse(world, agentData, messages);
+      return await llmManager.generateAgentResponse(world, agentData, messages);
     },
 
     // Memory Management
@@ -542,14 +511,14 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       const worldData = await getWorldConfig(rootPath, worldId);
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
-      return await processAgentMessage(world, agentData, message);
+      return await events.processAgentMessage(world, agentData, message);
     },
     sendMessage: async (content: string, type?: string) => {
       await moduleInitialization;
       const worldData = await getWorldConfig(rootPath, worldId);
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
-      return publishMessage(world, content, agentData.id);
+      return events.publishMessage(world, content, agentData.id);
     }
   };
 }
@@ -577,7 +546,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       // Automatically convert agent name to kebab-case for consistent ID
       const agentParams = {
         ...params,
-        id: toKebabCase(params.name)
+        id: utils.toKebabCase(params.name)
       };
 
       const agent = await createAgent(world.rootPath, world.id, agentParams);
@@ -588,7 +557,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async getAgent(agentName) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       try {
         return await getAgent(world.rootPath, world.id, agentId);
@@ -599,7 +568,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async updateAgent(agentName, updates) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       try {
         const updatedAgent = await updateAgent(world.rootPath, world.id, agentId, updates);
@@ -616,7 +585,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async deleteAgent(agentName) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       try {
         const success = await deleteAgent(world.rootPath, world.id, agentId);
@@ -633,7 +602,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async clearAgentMemory(agentName) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       logger.debug('World.clearAgentMemory called', {
         originalAgentName: agentName,
@@ -675,7 +644,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async updateAgentMemory(agentName, messages) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       try {
         const updatedAgent = await updateAgentMemory(world.rootPath, world.id, agentId, messages);
@@ -692,7 +661,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async saveAgentConfig(agentName) {
       // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = toKebabCase(agentName);
+      const agentId = utils.toKebabCase(agentName);
 
       try {
         const agent = await getAgent(world.rootPath, world.id, agentId);
@@ -760,28 +729,28 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     // Event methods (R1.2)
     publishMessage(content: string, sender: string) {
-      publishMessage(world, content, sender);
+      events.publishMessage(world, content, sender);
     },
 
     subscribeToMessages(handler: (event: WorldMessageEvent) => void) {
-      return subscribeToMessages(world, handler);
+      return events.subscribeToMessages(world, handler);
     },
 
     broadcastMessage(message: string, sender?: string) {
-      broadcastToWorld(world, message, sender);
+      events.broadcastToWorld(world, message, sender);
     },
 
     publishSSE(data: Partial<WorldSSEEvent>) {
-      publishSSE(world, data);
+      events.publishSSE(world, data);
     },
 
     subscribeToSSE(handler: (event: WorldSSEEvent) => void) {
-      return subscribeToSSE(world, handler);
+      return events.subscribeToSSE(world, handler);
     },
 
     // Agent subscription methods (R1.3)
     subscribeAgent(agent: Agent) {
-      return subscribeAgentToMessages(world, agent);
+      return events.subscribeAgentToMessages(world, agent);
     },
 
     unsubscribeAgent(agentId: string) {
@@ -1052,7 +1021,7 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
   await moduleInitialization;
 
   // Automatically generate ID from name if not provided
-  const agentId = params.id || toKebabCase(params.name);
+  const agentId = params.id || utils.toKebabCase(params.name);
 
   // Check if agent already exists
   const exists = await agentExistsOnDisk(rootPath, worldId, agentId);
@@ -1080,13 +1049,13 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     async generateResponse(messages: AgentMessage[]): Promise<string> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return generateAgentResponse(agent.world, agent, messages);
+      return llmManager.generateAgentResponse(agent.world, agent, messages);
     },
 
     async streamResponse(messages: AgentMessage[]): Promise<string> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return streamAgentResponse(agent.world, agent, messages);
+      return llmManager.streamAgentResponse(agent.world, agent, messages);
     },
 
     // Memory management methods (R2.2)
@@ -1127,17 +1096,17 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     async shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean> {
       await moduleInitialization;
       if (!agent.world) return false;
-      return shouldAgentRespond(agent.world, agent, messageEvent);
+      return events.shouldAgentRespond(agent.world, agent, messageEvent);
     },
 
     async processMessage(messageEvent: WorldMessageEvent): Promise<void> {
       await moduleInitialization;
       if (!agent.world) throw new Error('Agent not attached to world');
-      return processAgentMessage(agent.world, agent, messageEvent);
+      return events.processAgentMessage(agent.world, agent, messageEvent);
     },
 
     extractMentions(content: string): string[] {
-      return extractMentions(content);
+      return utils.extractMentions(content);
     },
 
     isMentioned(content: string): boolean {

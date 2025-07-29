@@ -2,21 +2,26 @@
  * Storage Factory
  *
  * Provides a unified interface for file-based and SQLite-based storage backends for agent-world.
+ * Handles all environment detection logic and dynamic imports for storage modules.
  *
  * Features:
- * - Dynamically loads file or SQLite storage based on configuration or environment variables.
- * - Caches storage instances for reuse and performance.
- * - Utility functions for migration, cache management, and storage recommendations.
- * - Default storage is now SQLite (was file-based previously).
+ * - Environment detection and dynamic loading of storage backends based on Node.js vs browser
+ * - Dynamically loads file or SQLite storage based on configuration or environment variables
+ * - Caches storage instances for reuse and performance
+ * - Provides NoOp implementations for browser environments
+ * - Utility functions for migration, cache management, and storage recommendations
+ * - Default storage is SQLite in Node.js environments
  *
  * Implementation:
- * - File storage uses dynamic imports and disk-based JSON files.
- * - SQLite storage uses a schema, context, and migration helpers.
- * - Exposes migration helpers and cache utilities.
+ * - File storage uses dynamic imports and disk-based JSON files
+ * - SQLite storage uses a schema, context, and migration helpers
+ * - Browser environments get NoOp implementations that don't perform any storage operations
+ * - All environment detection logic centralized here for clean separation of concerns
  *
  * Changes:
- * - 2025-07-27: Default storage type changed to SQLite.
- * - See git history for previous changes.
+ * - 2025-01-XX: Moved all environment detection logic from managers.ts to here
+ * - 2025-07-27: Default storage type changed to SQLite
+ * - See git history for previous changes
  */
 import type { StorageManager } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
@@ -151,6 +156,108 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
 
 // Simple in-memory cache for storage instances
 const storageCache = new Map<string, StorageManager>();
+
+/**
+ * Create storage-aware function wrappers that handle environment detection
+ * Returns NoOp implementations for browser environments
+ */
+export async function createStorageWithWrappers(): Promise<{
+  storageInstance: StorageManager | null;
+  // Storage wrapper functions
+  saveWorldToDisk: (rootPath: string, worldData: any) => Promise<void>;
+  loadWorldFromDisk: (rootPath: string, worldId: string) => Promise<any>;
+  deleteWorldFromDisk: (rootPath: string, worldId: string) => Promise<boolean>;
+  loadAllWorldsFromDisk: (rootPath: string) => Promise<any[]>;
+  worldExistsOnDisk: (rootPath: string, worldId: string) => Promise<boolean>;
+  loadAllAgentsFromDisk: (rootPath: string, worldId: string) => Promise<any[]>;
+  saveAgentConfigToDisk: (rootPath: string, worldId: string, agent: any) => Promise<void>;
+  saveAgentToDisk: (rootPath: string, worldId: string, agent: any) => Promise<void>;
+  saveAgentMemoryToDisk: (rootPath: string, worldId: string, agentId: string, memory: any[]) => Promise<void>;
+  loadAgentFromDisk: (rootPath: string, worldId: string, agentId: string) => Promise<any>;
+  loadAgentFromDiskWithRetry: (rootPath: string, worldId: string, agentId: string, options?: any) => Promise<any>;
+  deleteAgentFromDisk: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
+  loadAllAgentsFromDiskBatch: (rootPath: string, worldId: string, options?: any) => Promise<{ successful: any[]; failed: any[] }>;
+  agentExistsOnDisk: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
+  validateAgentIntegrity: (rootPath: string, worldId: string, agentId: string) => Promise<{ isValid: boolean }>;
+  repairAgentData: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
+  archiveAgentMemory: (rootPath: string, worldId: string, agentId: string, memory: any[]) => Promise<any>;
+}> {
+  if (isNodeEnvironment()) {
+    // Node.js environment - create actual storage instance
+    const storageInstance = await createStorageFromEnv();
+
+    return {
+      storageInstance,
+      // Storage wrappers that use the storage instance
+      saveWorldToDisk: async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData),
+      loadWorldFromDisk: async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId),
+      deleteWorldFromDisk: async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId),
+      loadAllWorldsFromDisk: async (_rootPath: string) => storageInstance.listWorlds(),
+      worldExistsOnDisk: async (_rootPath: string, worldId: string) => {
+        try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
+      },
+      loadAllAgentsFromDisk: async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId),
+      saveAgentConfigToDisk: async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent),
+      saveAgentToDisk: async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent),
+      saveAgentMemoryToDisk: async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+        const agent = await storageInstance.loadAgent(worldId, agentId);
+        if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
+      },
+      loadAgentFromDisk: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId),
+      loadAgentFromDiskWithRetry: async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId),
+      deleteAgentFromDisk: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId),
+      loadAllAgentsFromDiskBatch: async (_rootPath: string, worldId: string, _options?: any) => {
+        const agents = await storageInstance.listAgents(worldId); 
+        return { successful: agents, failed: [] };
+      },
+      agentExistsOnDisk: async (_rootPath: string, worldId: string, agentId: string) => {
+        try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
+      },
+      validateAgentIntegrity: async (_rootPath: string, worldId: string, agentId: string) => {
+        const isValid = await storageInstance.validateIntegrity(worldId, agentId); 
+        return { isValid };
+      },
+      repairAgentData: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId),
+      archiveAgentMemory: async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
+        if ('archiveAgentMemory' in storageInstance) {
+          return (storageInstance as any).archiveAgentMemory(worldId, agentId, memory);
+        } else {
+          const agentStorage = await import('./agent-storage.js');
+          return agentStorage.archiveAgentMemory((storageInstance as any).rootPath, worldId, agentId, memory);
+        }
+      }
+    };
+  } else {
+    // Browser environment - return NoOp implementations
+    const noOpAsync = async () => {};
+    const noOpAsyncReturn = async () => null;
+    const noOpAsyncReturnFalse = async () => false;
+    const noOpAsyncReturnEmptyArray = async () => [];
+    const noOpAsyncReturnBatchResult = async () => ({ successful: [], failed: [] });
+    const noOpAsyncReturnValidation = async () => ({ isValid: false });
+
+    return {
+      storageInstance: null,
+      saveWorldToDisk: noOpAsync,
+      loadWorldFromDisk: noOpAsyncReturn,
+      deleteWorldFromDisk: noOpAsyncReturnFalse,
+      loadAllWorldsFromDisk: noOpAsyncReturnEmptyArray,
+      worldExistsOnDisk: noOpAsyncReturnFalse,
+      loadAllAgentsFromDisk: noOpAsyncReturnEmptyArray,
+      saveAgentConfigToDisk: noOpAsync,
+      saveAgentToDisk: noOpAsync,
+      saveAgentMemoryToDisk: noOpAsync,
+      loadAgentFromDisk: noOpAsyncReturn,
+      loadAgentFromDiskWithRetry: noOpAsyncReturn,
+      deleteAgentFromDisk: noOpAsyncReturnFalse,
+      loadAllAgentsFromDiskBatch: noOpAsyncReturnBatchResult,
+      agentExistsOnDisk: noOpAsyncReturnFalse,
+      validateAgentIntegrity: noOpAsyncReturnValidation,
+      repairAgentData: noOpAsyncReturnFalse,
+      archiveAgentMemory: noOpAsyncReturn
+    };
+  }
+}
 
 export async function createStorage(config: StorageConfig): Promise<StorageManager> {
   const cacheKey = `${config.type}-${config.rootPath}`;
