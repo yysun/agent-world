@@ -50,6 +50,7 @@
     "chalk": "^4.1.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
+    "enquirer": "^2.4.1",
     "events": "^3.3.0",
     "express": "^4.21.2",
     "ollama-ai-provider": "^1.2.0",
