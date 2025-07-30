@@ -561,26 +561,36 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
+      // Check for exit commands before anything else
+      const isExitCommand = trimmedInput.toLowerCase() === '/exit' || trimmedInput.toLowerCase() === '/quit';
+      if (isExitCommand) {
+        if (isExiting) return;
+        isExiting = true;
+        // Clear any existing timers immediately
+        clearPromptTimer(globalState);
+        if (streaming.stopWait) streaming.stopWait();
+        console.log(`\n${boldCyan('Goodbye!')}`);
+        if (worldState) cleanupWorldSubscription(worldState);
+        rl.close();
+        process.exit(0);
+        return;
+      }
+
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
       try {
         const result = await processCLIInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
 
-        // Handle exit commands
+        // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
           if (isExiting) return; // Prevent duplicate exit handling
           isExiting = true;
-
-          // Clear any existing timers immediately
-          if (streaming.stopWait) {
-            streaming.stopWait();
-          }
-
+          clearPromptTimer(globalState);
+          if (streaming.stopWait) streaming.stopWait();
           console.log(`\n${boldCyan('Goodbye!')}`);
-          if (worldState) {
-            cleanupWorldSubscription(worldState);
-          }
+          if (worldState) cleanupWorldSubscription(worldState);
           rl.close();
+          process.exit(0);
           return;
         }
 
@@ -670,13 +680,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       // Set timer based on input type: commands get short delay, messages get longer delay
       const isCommand = trimmedInput.startsWith('/');
-      const isExitCommand = trimmedInput.toLowerCase() === '/exit' || trimmedInput.toLowerCase() === '/quit';
       const isSelectCommand = trimmedInput.toLowerCase() === '/select';
 
-      if (isExitCommand) {
-        // For exit commands, don't set any timer - exit should be immediate
-        return;
-      } else if (isSelectCommand) {
+      if (isSelectCommand) {
         // For select command, prompt is already shown in the handler
         return;
       } else if (isCommand) {
@@ -691,29 +697,22 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('close', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-
+      clearPromptTimer(globalState);
+      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        if (streaming.stopWait) {
-          streaming.stopWait();
-        }
-        cleanupWorldSubscription(worldState);
-      }
+      if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
     });
 
     rl.on('SIGINT', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-
+      clearPromptTimer(globalState);
+      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        if (streaming.stopWait) {
-          streaming.stopWait();
-        }
-        cleanupWorldSubscription(worldState);
-      }
+      if (worldState) cleanupWorldSubscription(worldState);
       rl.close();
+      process.exit(0);
     });
 
   } catch (err) {
