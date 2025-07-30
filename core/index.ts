@@ -20,6 +20,7 @@ export {
   deleteWorld,
   listWorlds,
   getWorldConfig,
+  exportWorldToMarkdown,
   // Agent operations
   createAgent,
   getAgent,

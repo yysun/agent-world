@@ -159,6 +159,25 @@ export default function WorldSettings(props: WorldSettingsProps) {
               </span>
             </div>
             <div className="setting-item">
+              <label>Export World:</label>
+              <span>
+                <button
+                  className="action-btn"
+                  $onclick={['export-world-markdown', world.name]}
+                  title="Export world to markdown file"
+                >
+                  <span className="btn-icon">↓</span>
+                </button>
+                <button
+                  className="action-btn"
+                  $onclick={['view-world-markdown', world.name]}
+                  title="View world markdown in new tab"
+                >
+                  <span className="btn-icon">👁</span>
+                </button>
+              </span>
+            </div>
+            <div className="setting-item">
               <label>Agents Count:</label>
               <span>
                 <span className="setting-value">{world.agents.length}</span>

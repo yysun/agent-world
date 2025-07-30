@@ -1310,3 +1310,101 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
   const { memory, ...config } = agent;
   return config;
 }
+
+// ========================
+// WORLD EXPORT
+// ========================
+
+/**
+ * Export world and agents to markdown format
+ * 
+ * @param rootPath - Root path for worlds data
+ * @param worldName - World name or ID to export
+ * @returns Promise<string> - Markdown content as string
+ */
+export async function exportWorldToMarkdown(rootPath: string, worldName: string): Promise<string> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  // Load world configuration
+  const worldData = await getWorldConfig(rootPath, worldName);
+  if (!worldData) {
+    throw new Error(`World '${worldName}' not found`);
+  }
+
+  // Load all agents in the world
+  const agents = await listAgents(rootPath, worldData.id);
+
+  // Generate markdown content
+  let markdown = `# World Export: ${worldData.name}\n\n`;
+  markdown += `**Exported on:** ${new Date().toISOString()}\n\n`;
+
+  // World information
+  markdown += `## World Configuration\n\n`;
+  markdown += `- **Name:** ${worldData.name}\n`;
+  markdown += `- **ID:** ${worldData.id}\n`;
+  markdown += `- **Description:** ${worldData.description || 'No description'}\n`;
+  markdown += `- **Turn Limit:** ${worldData.turnLimit}\n`;
+  markdown += `- **Total Agents:** ${agents.length}\n\n`;
+
+  // Agents section
+  if (agents.length > 0) {
+    markdown += `## Agents (${agents.length})\n\n`;
+
+    for (const agentInfo of agents) {
+      // Load full agent data to get memory
+      const fullAgent = await getAgent(rootPath, worldData.id, agentInfo.name);
+      if (!fullAgent) continue;
+
+      markdown += `### ${fullAgent.name}\n\n`;
+      markdown += `**Configuration:**\n`;
+      markdown += `- **ID:** ${fullAgent.id}\n`;
+      markdown += `- **Type:** ${fullAgent.type}\n`;
+      markdown += `- **LLM Provider:** ${fullAgent.provider}\n`;
+      markdown += `- **Model:** ${fullAgent.model}\n`;
+      markdown += `- **Status:** ${fullAgent.status || 'active'}\n`;
+      markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
+      markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
+      markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
+      markdown += `- **Created:** ${fullAgent.createdAt ? fullAgent.createdAt.toISOString() : 'Unknown'}\n`;
+      markdown += `- **Last Active:** ${fullAgent.lastActive ? fullAgent.lastActive.toISOString() : 'Unknown'}\n\n`;
+
+      if (fullAgent.systemPrompt) {
+        markdown += `**System Prompt:**\n`;
+        markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
+      }
+
+      // Agent memory
+      if (fullAgent.memory && fullAgent.memory.length > 0) {
+        markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
+
+        fullAgent.memory.forEach((message, index) => {
+          markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
+          if (message.createdAt) {
+            markdown += `   *${message.createdAt.toISOString()}*\n`;
+          }
+          markdown += '   ```markdown\n';
+          // Pad each line of content with 4 spaces, preserving original newlines
+          let paddedContent = '';
+          if (typeof message.content === 'string') {
+            // Split by /(?<=\n)/ to preserve empty lines and trailing newlines
+            paddedContent = message.content
+              .split(/(\n)/)
+              .map(part => part === '\n' ? '\n' : '    ' + part)
+              .join('');
+          }
+          markdown += `${paddedContent}\n`;
+          markdown += '   ```\n\n';
+        });
+      } else {
+        markdown += `**Memory:** No messages\n\n`;
+      }
+
+      markdown += `---\n\n`;
+    }
+  } else {
+    markdown += `## Agents\n\nNo agents found in this world.\n\n`;
+  }
+
+  return markdown;
+}

@@ -357,5 +357,127 @@ export const worldUpdateHandlers = {
         error: error.message || 'Failed to delete agent'
       };
     }
+  },
+
+  // Export world to markdown file
+  'export-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
+    try {
+      await api.exportWorldToMarkdown(worldName);
+      return state; // No state change needed for download
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to export world'
+      };
+    }
+  },
+
+  // View world markdown in new tab
+  'view-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
+    try {
+      const markdown = await api.getWorldMarkdown(worldName);
+      
+      // Simple markdown to HTML conversion
+      const convertMarkdownToHtml = (md: string): string => {
+        let html = md;
+        
+        // Headers
+        html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+        html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+        
+        // Bold
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Italic
+        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        
+        // Code blocks
+        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+        
+        // Inline code
+        html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+        
+        // Lists
+        html = html.replace(/^\- (.*$)/gim, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+        
+        // Line breaks
+        html = html.replace(/\n/g, '<br>');
+        
+        // Horizontal rules
+        html = html.replace(/^---$/gm, '<hr>');
+        
+        return html;
+      };
+      
+      const htmlContent = convertMarkdownToHtml(markdown);
+      
+      // Create HTML document
+      const fullHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Export: ${worldName}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }
+        h1, h2, h3 { color: #2c3e50; }
+        h1 { border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        h2 { border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; }
+        code { 
+            background: #f8f9fa; 
+            padding: 2px 4px; 
+            border-radius: 3px; 
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        pre code {
+            background: none;
+            padding: 0;
+        }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 5px; }
+        hr { 
+            border: none; 
+            height: 1px; 
+            background: #bdc3c7; 
+            margin: 30px 0; 
+        }
+        strong { color: #2c3e50; }
+    </style>
+</head>
+<body>
+    ${htmlContent}
+</body>
+</html>`;
+      
+      // Open in new tab
+      const newWindow = window.open();
+      if (newWindow) {
+        newWindow.document.write(fullHtml);
+        newWindow.document.close();
+      }
+      
+      return state; // No state change needed
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to view world markdown'
+      };
+    }
   }
 };

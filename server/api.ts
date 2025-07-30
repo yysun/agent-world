@@ -26,7 +26,7 @@
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
@@ -276,6 +276,39 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
   } catch (error) {
     logger.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
+  }
+});
+
+// GET /worlds/:worldName/export - Export world to markdown
+router.get('/worlds/:worldName/export', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+
+    // Check if world exists
+    const worldExists = await getWorldConfig(ROOT_PATH, worldName);
+    if (!worldExists) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Generate markdown using core function
+    const markdown = await exportWorldToMarkdown(ROOT_PATH, worldName);
+    
+    // Generate timestamp for filename
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5); // Format: YYYY-MM-DDTHH-MM-SS
+    const filename = `${worldName}-${timestamp}.md`;
+
+    // Set headers for file download
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', Buffer.byteLength(markdown, 'utf8'));
+
+    // Send the markdown content
+    res.send(markdown);
+  } catch (error) {
+    logger.error('Error exporting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to export world', 'WORLD_EXPORT_ERROR');
   }
 });
 
