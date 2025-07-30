@@ -43,7 +43,7 @@ jest.mock('../../core/llm-manager', () => ({
   LLMConfig: jest.fn<any>()
 }));
 
-// Mock path module (usually doesn't need mocking but can be useful)
+// Mock path module with all necessary functions
 jest.mock('path', () => ({
   join: (...paths: string[]) => paths.filter(p => p).join('/'),
   dirname: (path: string) => path.split('/').slice(0, -1).join('/'),
@@ -52,7 +52,17 @@ jest.mock('path', () => ({
     const name = path.split('/').pop() || '';
     const lastDot = name.lastIndexOf('.');
     return lastDot >= 0 ? name.substring(lastDot) : '';
-  }
+  },
+  resolve: (...paths: string[]) => '/' + paths.filter(p => p).join('/').replace(/\/+/g, '/'),
+  relative: (from: string, to: string) => to,
+  isAbsolute: (path: string) => path.startsWith('/'),
+  parse: (path: string) => ({
+    root: '/',
+    dir: path.split('/').slice(0, -1).join('/'),
+    base: path.split('/').pop() || '',
+    ext: '',
+    name: path.split('/').pop() || ''
+  })
 }));
 
 // Mock AI SDK for direct LLM testing
@@ -63,6 +73,21 @@ jest.mock('ai', () => ({
   createAnthropic: jest.fn<any>().mockReturnValue({}),
   createGoogle: jest.fn<any>().mockReturnValue({})
 }));
+
+// Mock dotenv
+jest.mock('dotenv', () => ({
+  config: jest.fn<any>().mockReturnValue({ parsed: {} })
+}));
+
+// Mock process functions
+const originalCwd = process.cwd;
+beforeAll(() => {
+  process.cwd = jest.fn<any>().mockReturnValue('/test');
+});
+
+afterAll(() => {
+  process.cwd = originalCwd;
+});
 
 // Global test timeout
 jest.setTimeout(10000);

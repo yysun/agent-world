@@ -536,7 +536,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
     // Show usage tips
     console.log(`\n${gray('Tips:')}`);
-    console.log(`  ${bullet(gray('Type commands like:'))} ${cyan('/clear agent1')}, ${cyan('/clear all')}, ${cyan('/add MyAgent')}`);
+    console.log(`  ${bullet(gray('Short commands:'))} ${cyan('/list')}, ${cyan('/show agent1')}, ${cyan('/edit agent1')}, ${cyan('/del agent1')}`);
+    console.log(`  ${bullet(gray('Context-sensitive:'))} ${cyan('/list')} ${gray('shows agents if world selected, worlds otherwise')}`);
+    console.log(`  ${bullet(gray('Legacy commands:'))} ${cyan('/clear agent1')}, ${cyan('/clear all')}, ${cyan('/add MyAgent')}`);
     console.log(`  ${bullet(gray('Use'))} ${cyan('/select')} ${gray('to choose a different world')}`);
     console.log(`  ${bullet(gray('Type messages to send to agents'))}`);
     console.log(`  ${bullet(gray('Use'))} ${cyan('/quit')} ${gray('or')} ${cyan('/exit')} ${gray('to exit, or press')} ${boldYellow('Ctrl+C')}`);
