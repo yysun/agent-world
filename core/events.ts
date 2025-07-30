@@ -401,6 +401,12 @@ export async function processAgentMessage(
       response = await generateAgentResponse(world, agent, messages);
     }
 
+    if(!response) {
+      logger.error('LLM response is empty', { agentId: agent.id });
+      publishMessage(world, `[Error] LLM response is empty`, 'system');
+      return;
+    }
+
     // Process auto-mention logic with new requirements
     let finalResponse = response;
 

@@ -220,8 +220,11 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       onWorldEvent: (eventType: string, eventData: any) => {
         if (eventData.content && eventData.content.includes('Success message sent')) return;
 
-        if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-          console.log(`${boldRed('● system:')} ${eventData.message}`);
+        if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
+          // existing logic
+        } else if (eventType === 'message' && eventData.sender === 'system') {
+          const msg = eventData.content;
+          console.log(`${boldRed('● system:')} ${msg}`);
         }
 
         if (eventType === 'sse' && eventData.content) {
@@ -380,8 +383,11 @@ function handleWorldEvent(
 
   if (eventData.content && eventData.content.includes('Success message sent')) return;
 
-  if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-    console.log(`\n${boldRed('● system:')} ${eventData.message}`);
+  if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
+    // existing logic
+  } else if (eventType === 'message' && eventData.sender === 'system') {
+    const msg = eventData.content;
+    console.log(`${boldRed('● system:')} ${msg}`);
   }
 }
 
