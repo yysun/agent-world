@@ -26,6 +26,8 @@ import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publish
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
+import fs from 'fs';
+import path from 'path';
 
 // Create CLI logger
 const logger = createCategoryLogger('cli');
@@ -205,6 +207,16 @@ export const CLI_COMMAND_MAP: Record<string, {
       { name: 'name', required: true, description: 'Agent name', type: 'string' }
     ]
   },
+  'export': {
+    type: 'exportWorld',
+    requiresWorld: false,
+    description: 'Export world and agents to markdown file',
+    usage: '/export <world> [file]',
+    parameters: [
+      { name: 'world', required: true, description: 'World name to export', type: 'string' },
+      { name: 'file', required: false, description: 'Output file path (defaults to [world]-timestamp.md)', type: 'string' }
+    ]
+  },
   'help': {
     type: 'help',
     requiresWorld: false,
@@ -333,6 +345,9 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['delete-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-agent'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['clear'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['clear'].description}\n`;
   
+  help += '\nData Export:\n';
+  help += `  ${CLI_COMMAND_MAP['export'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['export'].description}\n`;
+  
   help += '\nLegacy Commands (for backward compatibility):\n';
   help += `  ${CLI_COMMAND_MAP['new'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['new'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['add'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['add'].description}\n`;
@@ -345,6 +360,119 @@ export function generateHelpMessage(command?: string): string {
   help += '\nUse /help <command> for detailed information about a specific command.';
   help += '\nNote: Interactive commands support rich prompts. For multiline input, use copy/paste.';
   return help;
+}
+
+// Export world to markdown file
+async function exportWorldToMarkdown(
+  worldName: string,
+  outputPath: string,
+  rootPath: string
+): Promise<CLIResponse> {
+  try {
+    // Load world configuration
+    const worldData = await getWorldConfig(rootPath, worldName);
+    if (!worldData) {
+      return {
+        success: false,
+        message: `World '${worldName}' not found`
+      };
+    }
+
+    // Load all agents in the world
+    const agents = await listAgents(rootPath, worldData.id);
+    
+    // Generate timestamp for default filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+    
+    // Determine output file path
+    let filePath: string;
+    if (outputPath) {
+      filePath = path.resolve(outputPath);
+    } else {
+      filePath = path.resolve(process.cwd(), `${worldName}-${timestamp}.md`);
+    }
+
+    // Generate markdown content
+    let markdown = `# World Export: ${worldData.name}\n\n`;
+    markdown += `**Exported on:** ${new Date().toISOString()}\n\n`;
+
+    // World information
+    markdown += `## World Configuration\n\n`;
+    markdown += `- **Name:** ${worldData.name}\n`;
+    markdown += `- **ID:** ${worldData.id}\n`;
+    markdown += `- **Description:** ${worldData.description || 'No description'}\n`;
+    markdown += `- **Turn Limit:** ${worldData.turnLimit}\n`;
+    markdown += `- **Total Agents:** ${agents.length}\n\n`;
+
+    // Agents section
+    if (agents.length > 0) {
+      markdown += `## Agents (${agents.length})\n\n`;
+
+      for (const agentInfo of agents) {
+        // Load full agent data to get memory
+        const fullAgent = await getAgent(rootPath, worldData.id, agentInfo.name);
+        if (!fullAgent) continue;
+
+        markdown += `### ${fullAgent.name}\n\n`;
+        markdown += `**Configuration:**\n`;
+        markdown += `- **ID:** ${fullAgent.id}\n`;
+        markdown += `- **Type:** ${fullAgent.type}\n`;
+        markdown += `- **LLM Provider:** ${fullAgent.provider}\n`;
+        markdown += `- **Model:** ${fullAgent.model}\n`;
+        markdown += `- **Status:** ${fullAgent.status || 'active'}\n`;
+        markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
+        markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
+        markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
+        markdown += `- **Created:** ${fullAgent.createdAt ? fullAgent.createdAt.toISOString() : 'Unknown'}\n`;
+        markdown += `- **Last Active:** ${fullAgent.lastActive ? fullAgent.lastActive.toISOString() : 'Unknown'}\n\n`;
+
+        if (fullAgent.systemPrompt) {
+          markdown += `**System Prompt:**\n`;
+          markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
+        }
+
+        // Agent memory
+        if (fullAgent.memory && fullAgent.memory.length > 0) {
+          markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
+          
+          fullAgent.memory.forEach((message, index) => {
+            markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
+            if (message.createdAt) {
+              markdown += `   *${message.createdAt.toISOString()}*\n`;
+            }
+            markdown += `   ${message.content}\n\n`;
+          });
+        } else {
+          markdown += `**Memory:** No messages\n\n`;
+        }
+
+        markdown += `---\n\n`;
+      }
+    } else {
+      markdown += `## Agents\n\nNo agents found in this world.\n\n`;
+    }
+
+    // Write file
+    await fs.promises.writeFile(filePath, markdown, 'utf8');
+
+    return {
+      success: true,
+      message: `World '${worldName}' exported successfully to: ${filePath}`,
+      data: {
+        worldName,
+        filePath,
+        agentCount: agents.length,
+        fileSize: markdown.length
+      }
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to export world',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 // CLI Command Processor
@@ -1102,6 +1230,21 @@ export async function processCLICommand(
           cliResponse = {
             success: false,
             message: 'Failed to delete agent',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'exportWorld':
+        try {
+          const worldNameParam = collectedParams.world;
+          const fileParam = collectedParams.file;
+          
+          cliResponse = await exportWorldToMarkdown(worldNameParam, fileParam, context.rootPath);
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to export world',
             error: error instanceof Error ? error.message : String(error)
           };
         }
