@@ -1563,15 +1563,6 @@ legend {
   position: relative;
 }
 
-.cross-agent-message::before {
-  content: "🔗";
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  font-size: 0.8rem;
-  opacity: 0.6;
-}
-
 /* Agent Edit Modal Styles */
 .modal-backdrop {
   position: fixed;

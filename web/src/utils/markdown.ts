@@ -19,18 +19,19 @@
 
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+// @ts-ignore
+const dompurify = (typeof window !== 'undefined' && DOMPurify && (DOMPurify as any).default) ? (DOMPurify as any).default : DOMPurify;
 
 // Configure marked for better table and markdown support
 marked.setOptions({
   gfm: true, // GitHub Flavored Markdown
   breaks: true, // Convert line breaks to <br>
-  tables: true, // Enable table support
-  headerIds: false, // Disable header IDs for security
-  mangle: false, // Don't mangle autolinks
+  // headerIds: false, // Disable header IDs for security (option not supported in this version)
+  // mangle: false, // Don't mangle autolinks (option not supported in this version)
 });
 
 // Configure DOMPurify to allow safe HTML elements
-const ALLOWED_TAGS = [
+const ALLOWED_TAGS: string[] = [
   'p', 'br', 'strong', 'em', 'u', 'strike', 'del', 's',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li',
@@ -42,7 +43,7 @@ const ALLOWED_TAGS = [
   'div', 'span'
 ];
 
-const ALLOWED_ATTRIBUTES = {
+const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   'a': ['href', 'title'],
   'img': ['src', 'alt', 'title', 'width', 'height'],
   'table': ['class'],
@@ -67,27 +68,26 @@ export function renderMarkdown(markdownText: string): string {
   try {
     // Convert markdown to HTML
     const rawHtml = marked(markdownText) as string;
-    
+
     // Sanitize the HTML to prevent XSS
-    const sanitizedHtml = DOMPurify.sanitize(rawHtml, {
+    // DOMPurify options: use correct option names and types
+    const sanitizedHtml = dompurify.sanitize(rawHtml, {
       ALLOWED_TAGS,
       ALLOWED_ATTR: ALLOWED_ATTRIBUTES,
       ALLOW_DATA_ATTR: false,
       ALLOW_UNKNOWN_PROTOCOLS: false,
-      FORBID_SCRIPT: true,
       FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
       FORBID_ATTR: ['onload', 'onerror', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
-    });
-
+    } as any);
     return sanitizedHtml;
   } catch (error) {
     console.error('Error rendering markdown:', error);
     // Return escaped plain text as fallback
     return markdownText.replace(/&/g, '&amp;')
-                      .replace(/</g, '&lt;')
-                      .replace(/>/g, '&gt;')
-                      .replace(/"/g, '&quot;')
-                      .replace(/'/g, '&#x27;');
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
   }
 }
 
@@ -116,14 +116,4 @@ export function hasMarkdown(text: string): boolean {
   ];
 
   return markdownPatterns.some(pattern => pattern.test(text));
-}
-
-/**
- * Utility function to render markdown for AppRun components
- * Returns an object suitable for dangerouslySetInnerHTML
- * @param markdownText - The markdown text to render
- * @returns Object with __html property for React-style innerHTML
- */
-export function renderMarkdownForComponent(markdownText: string): { __html: string } {
-  return { __html: renderMarkdown(markdownText) };
 }

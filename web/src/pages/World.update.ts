@@ -36,6 +36,7 @@ import {
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent } from '../types';
 import toKebabCase from '../utils/toKebabCase';
+import { renderMarkdown } from '../utils/markdown';
 export const worldUpdateHandlers = {
 
   '/World': async function* (state: WorldComponentState, name: string): AsyncGenerator<WorldComponentState> {
@@ -362,7 +363,8 @@ export const worldUpdateHandlers = {
   // Export world to markdown file
   'export-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
     try {
-      await api.exportWorldToMarkdown(worldName);
+      // Trigger file download by navigating to the export endpoint
+      window.location.href = `/api/worlds/${encodeURIComponent(worldName)}/export`;
       return state; // No state change needed for download
     } catch (error: any) {
       return {
@@ -376,43 +378,7 @@ export const worldUpdateHandlers = {
   'view-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
     try {
       const markdown = await api.getWorldMarkdown(worldName);
-      
-      // Simple markdown to HTML conversion
-      const convertMarkdownToHtml = (md: string): string => {
-        let html = md;
-        
-        // Headers
-        html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-        html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
-        html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-        
-        // Bold
-        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        
-        // Italic
-        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-        
-        // Code blocks
-        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
-        
-        // Inline code
-        html = html.replace(/`(.*?)`/g, '<code>$1</code>');
-        
-        // Lists
-        html = html.replace(/^\- (.*$)/gim, '<li>$1</li>');
-        html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-        
-        // Line breaks
-        html = html.replace(/\n/g, '<br>');
-        
-        // Horizontal rules
-        html = html.replace(/^---$/gm, '<hr>');
-        
-        return html;
-      };
-      
-      const htmlContent = convertMarkdownToHtml(markdown);
-      
+      const htmlContent = renderMarkdown(markdown);
       // Create HTML document
       const fullHtml = `
 <!DOCTYPE html>
@@ -464,14 +430,14 @@ export const worldUpdateHandlers = {
     ${htmlContent}
 </body>
 </html>`;
-      
+
       // Open in new tab
       const newWindow = window.open();
       if (newWindow) {
         newWindow.document.write(fullHtml);
         newWindow.document.close();
       }
-      
+
       return state; // No state change needed
     } catch (error: any) {
       return {

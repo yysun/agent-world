@@ -142,9 +142,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   {state.loading ? (
                     <div className="loading-agents">Loading agents...</div>
                   ) : !(state.world?.agents?.length) ? (
-                      <div className="no-agents">No agents in this world:
-                        <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>') }</span>
-                      </div>
+                    <div className="no-agents">No agents in this world:
+                      <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>')}</span>
+                    </div>
                   ) : (
                     <div className="agents-list">
                       {state.world?.agents.map((agent, index) => {
@@ -183,6 +183,26 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
                   <span className="world-gear-icon">⊕</span>
                 </button>
+                {state.selectedSettingsTarget === 'world' && state.world && (
+                  <>
+                    <button
+                      className="world-settings-btn"
+                      $onclick={['export-world-markdown', state.world.name]}
+                      title="Export world to markdown file"
+                      style={{ marginLeft: '8px' }}
+                    >
+                      <span className="world-gear-icon">↓</span>
+                    </button>
+                    <button
+                      className="world-settings-btn"
+                      $onclick={['view-world-markdown', state.world.name]}
+                      title="View world markdown in new tab"
+                      style={{ marginLeft: '4px' }}
+                    >
+                      <span className="world-gear-icon">&#x1F5CE;</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
