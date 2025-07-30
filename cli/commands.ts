@@ -503,8 +503,14 @@ async function exportWorldToMarkdown(
     // Load all agents in the world
     const agents = await listAgents(rootPath, worldData.id);
 
-    // Generate timestamp for default filename
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+    // Generate timestamp for default filename (YYYY-MM-DD_HH-MM-SS)
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const timePart = now
+      .toTimeString()
+      .slice(0, 8)
+      .replace(/:/g, '-'); // HH-MM-SS
+    const timestamp = `${datePart}_${timePart}`;
 
     // Determine output file path
     let filePath: string;
@@ -562,7 +568,18 @@ async function exportWorldToMarkdown(
             if (message.createdAt) {
               markdown += `   *${message.createdAt.toISOString()}*\n`;
             }
-            markdown += `   ${message.content}\n\n`;
+            markdown += '   ```markdown\n';
+            // Pad each line of content with 4 spaces, preserving original newlines
+            let paddedContent = '';
+            if (typeof message.content === 'string') {
+              // Split by /(?<=\n)/ to preserve empty lines and trailing newlines
+              paddedContent = message.content
+                .split(/(\n)/)
+                .map(part => part === '\n' ? '\n' : '    ' + part)
+                .join('');
+            }
+            markdown += `${paddedContent}\n`;
+            markdown += '   ```\n\n';
           });
         } else {
           markdown += `**Memory:** No messages\n\n`;
