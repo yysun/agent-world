@@ -1,3 +1,14 @@
+// Helper for world-required command validation
+function requireWorldOrError(world: World | null, command: string): CLIResponse | undefined {
+  if (!world) {
+    return {
+      success: false,
+      message: 'No world selected. World is required for this command.',
+      technicalDetails: `Command ${command} requires world context`
+    };
+  }
+  return undefined;
+}
 /**
  * CLI Commands Implementation - Direct Core Integration
  * 
@@ -209,11 +220,10 @@ export const CLI_COMMAND_MAP: Record<string, {
   },
   'export': {
     type: 'exportWorld',
-    requiresWorld: false,
-    description: 'Export world and agents to markdown file',
-    usage: '/export <world> [file]',
+    requiresWorld: true,
+    description: 'Export the current world and agents to a markdown file',
+    usage: '/export [file]',
     parameters: [
-      { name: 'world', required: true, description: 'World name to export', type: 'string' },
       { name: 'file', required: false, description: 'Output file path (defaults to [world]-timestamp.md)', type: 'string' }
     ]
   },
@@ -327,7 +337,7 @@ export function generateHelpMessage(command?: string): string {
   }
 
   let help = '\nAvailable Commands:\n\n';
-  
+
   // World Commands
   help += 'World Management:\n';
   help += `  ${CLI_COMMAND_MAP['list-worlds'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['list-worlds'].description}\n`;
@@ -336,7 +346,7 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['update-world'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['update-world'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['delete-world'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-world'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['select'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['select'].description}\n`;
-  
+
   help += '\nAgent Management:\n';
   help += `  ${CLI_COMMAND_MAP['list-agents'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['list-agents'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['add-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['add-agent'].description}\n`;
@@ -344,19 +354,19 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['update-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['update-agent'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['delete-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-agent'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['clear'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['clear'].description}\n`;
-  
+
   help += '\nData Export:\n';
   help += `  ${CLI_COMMAND_MAP['export'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['export'].description}\n`;
-  
+
   help += '\nLegacy Commands (for backward compatibility):\n';
   help += `  ${CLI_COMMAND_MAP['new'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['new'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['add'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['add'].description}\n`;
-  
+
   help += '\nSystem Commands:\n';
   help += `  ${CLI_COMMAND_MAP['help'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['help'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['quit'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['quit'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['exit'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['exit'].description}\n`;
-  
+
   help += '\nUse /help <command> for detailed information about a specific command.';
   help += '\nNote: Interactive commands support rich prompts. For multiline input, use copy/paste.';
   return help;
@@ -380,10 +390,10 @@ async function exportWorldToMarkdown(
 
     // Load all agents in the world
     const agents = await listAgents(rootPath, worldData.id);
-    
+
     // Generate timestamp for default filename
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-    
+
     // Determine output file path
     let filePath: string;
     if (outputPath) {
@@ -434,7 +444,7 @@ async function exportWorldToMarkdown(
         // Agent memory
         if (fullAgent.memory && fullAgent.memory.length > 0) {
           markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
-          
+
           fullAgent.memory.forEach((message, index) => {
             markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
             if (message.createdAt) {
@@ -600,13 +610,13 @@ export async function processCLICommand(
             ];
 
             const answers = await enquirer.prompt(prompts) as WorldCreateAnswers;
-            
+
             const newWorld = await createWorld(context.rootPath, {
               name: answers.name,
               description: answers.description || `A world named ${answers.name}`,
               turnLimit: answers.turnLimit
             });
-            
+
             cliResponse = {
               success: true,
               message: `World '${answers.name}' created successfully`,
@@ -644,11 +654,10 @@ export async function processCLICommand(
         break;
 
       case 'createAgent':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-        
         // Check if this is the interactive version (/add-agent) or legacy (/add)
         if (command === 'add-agent' || collectedParams.name === undefined) {
           // Interactive mode using enquirer
@@ -693,17 +702,17 @@ export async function processCLICommand(
             ];
 
             const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
-            
-            const agent = await world.createAgent({
+
+            const agent = await world!.createAgent({
               name: answers.name,
               type: 'conversational',
               provider: answers.provider,
               model: answers.model,
-              systemPrompt: answers.systemPrompt || `You are ${answers.name}, an agent in the ${world.name} world.`,
+              systemPrompt: answers.systemPrompt || `You are ${answers.name}, an agent in the ${world!.name} world.`,
               temperature: answers.temperature,
               maxTokens: answers.maxTokens
             });
-            
+
             cliResponse = {
               success: true,
               message: `Agent '${answers.name}' created successfully`,
@@ -719,12 +728,12 @@ export async function processCLICommand(
           }
         } else {
           // Legacy mode with command arguments
-          const agent = await world.createAgent({
+          const agent = await world!.createAgent({
             name: collectedParams.name,
             type: 'conversational',
             provider: LLMProvider.OPENAI,
             model: 'gpt-4',
-            systemPrompt: collectedParams.prompt || `You are ${collectedParams.name}, an agent in the ${world.name} world.`
+            systemPrompt: collectedParams.prompt || `You are ${collectedParams.name}, an agent in the ${world!.name} world.`
           });
           cliResponse = {
             success: true,
@@ -736,24 +745,23 @@ export async function processCLICommand(
         break;
 
       case 'clearAgentMemory':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-
         logger.debug('clearAgentMemory command started', {
           agentName: collectedParams.agentName,
-          worldName: world.name,
-          worldId: world.id,
-          agentsInWorld: Array.from(world.agents.keys())
+          worldName: world!.name,
+          worldId: world!.id,
+          agentsInWorld: Array.from(world!.agents.keys())
         });
 
         // Handle /clear all to clear all agents' memory
         if (collectedParams.agentName.toLowerCase() === 'all') {
           const clearedAgents: string[] = [];
-          for (const [agentName] of world.agents) {
+          for (const [agentName] of world!.agents) {
             logger.debug('Clearing memory for agent', { agentName });
-            await world.clearAgentMemory(agentName);
+            await world!.clearAgentMemory(agentName);
             clearedAgents.push(agentName);
           }
           cliResponse = {
@@ -768,11 +776,11 @@ export async function processCLICommand(
         // Handle single agent clear
         logger.debug('Looking for agent in world.agents Map', {
           searchName: collectedParams.agentName,
-          availableAgents: Array.from(world.agents.keys()),
-          agentExists: world.agents.has(collectedParams.agentName)
+          availableAgents: Array.from(world!.agents.keys()),
+          agentExists: world!.agents.has(collectedParams.agentName)
         });
 
-        const agentForClear = world.agents.get(collectedParams.agentName);
+        const agentForClear = world!.agents.get(collectedParams.agentName);
         if (!agentForClear) {
           logger.debug('Agent not found in world.agents Map');
           cliResponse = { success: false, message: `Agent '${collectedParams.agentName}' not found`, data: null };
@@ -786,7 +794,7 @@ export async function processCLICommand(
         });
 
         try {
-          const result = await world.clearAgentMemory(collectedParams.agentName);
+          const result = await world!.clearAgentMemory(collectedParams.agentName);
           logger.debug('clearAgentMemory result', {
             success: !!result,
             resultAgentId: result?.id,
@@ -861,14 +869,14 @@ export async function processCLICommand(
             output += `  Description: ${worldData.description || 'No description'}\n`;
             output += `  Turn Limit: ${worldData.turnLimit}\n`;
             output += `  Agents: ${agents.length}\n`;
-            
+
             if (agents.length > 0) {
               output += `\nAgents in this world:\n`;
               agents.forEach(agent => {
                 output += `  - ${agent.name} (${agent.id}) - ${agent.status || 'active'}\n`;
               });
             }
-            
+
             cliResponse = {
               success: true,
               message: output,
@@ -918,7 +926,7 @@ export async function processCLICommand(
           ];
 
           const answers = await enquirer.prompt(prompts) as WorldCreateAnswers;
-          
+
           const updatedWorld = await updateWorld(context.rootPath, existingWorld.id, {
             name: answers.name,
             description: answers.description,
@@ -967,7 +975,7 @@ export async function processCLICommand(
           };
 
           const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
-          
+
           if (!confirmed) {
             cliResponse = {
               success: true,
@@ -977,7 +985,7 @@ export async function processCLICommand(
           }
 
           const deleted = await deleteWorld(context.rootPath, existingWorld.id);
-          
+
           if (deleted) {
             cliResponse = {
               success: true,
@@ -1001,20 +1009,19 @@ export async function processCLICommand(
 
       // New Agent CRUD commands
       case 'listAgents':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-        
         try {
-          const agents = await listAgents(context.rootPath, world.id);
+          const agents = await listAgents(context.rootPath, world!.id);
           if (agents.length === 0) {
             cliResponse = {
               success: true,
-              message: `No agents found in world '${world.name}'.`
+              message: `No agents found in world '${world!.name}'.`
             };
           } else {
-            let output = `\nAgents in world '${world.name}':\n`;
+            let output = `\nAgents in world '${world!.name}':\n`;
             agents.forEach(agent => {
               output += `  Name: ${agent.name} (${agent.id})\n`;
               output += `  Type: ${agent.type}\n`;
@@ -1042,13 +1049,12 @@ export async function processCLICommand(
         break;
 
       case 'showAgent':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-        
         try {
-          const agent = await getAgent(context.rootPath, world.id, collectedParams.name);
+          const agent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!agent) {
             cliResponse = {
               success: false,
@@ -1068,11 +1074,11 @@ export async function processCLICommand(
             output += `  LLM Calls: ${agent.llmCallCount}\n`;
             output += `  Created: ${agent.createdAt ? agent.createdAt.toISOString() : 'Unknown'}\n`;
             output += `  Last Active: ${agent.lastActive ? agent.lastActive.toISOString() : 'Unknown'}\n`;
-            
+
             if (agent.systemPrompt) {
               output += `\nSystem Prompt:\n${agent.systemPrompt}\n`;
             }
-            
+
             cliResponse = {
               success: true,
               message: output,
@@ -1089,13 +1095,12 @@ export async function processCLICommand(
         break;
 
       case 'updateAgent':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-        
         try {
-          const existingAgent = await getAgent(context.rootPath, world.id, collectedParams.name);
+          const existingAgent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!existingAgent) {
             cliResponse = {
               success: false,
@@ -1146,8 +1151,8 @@ export async function processCLICommand(
           ];
 
           const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
-          
-          const updatedAgent = await updateAgent(context.rootPath, world.id, existingAgent.id, {
+
+          const updatedAgent = await updateAgent(context.rootPath, world!.id, existingAgent.id, {
             name: answers.name,
             provider: answers.provider,
             model: answers.model,
@@ -1179,13 +1184,12 @@ export async function processCLICommand(
         break;
 
       case 'deleteAgent':
-        if (!world) {
-          cliResponse = { success: false, message: 'No world selected', data: null };
-          break;
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
         }
-        
         try {
-          const existingAgent = await getAgent(context.rootPath, world.id, collectedParams.name);
+          const existingAgent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!existingAgent) {
             cliResponse = {
               success: false,
@@ -1203,7 +1207,7 @@ export async function processCLICommand(
           };
 
           const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
-          
+
           if (!confirmed) {
             cliResponse = {
               success: true,
@@ -1212,8 +1216,8 @@ export async function processCLICommand(
             break;
           }
 
-          const deleted = await deleteAgent(context.rootPath, world.id, existingAgent.id);
-          
+          const deleted = await deleteAgent(context.rootPath, world!.id, existingAgent.id);
+
           if (deleted) {
             cliResponse = {
               success: true,
@@ -1236,11 +1240,13 @@ export async function processCLICommand(
         break;
 
       case 'exportWorld':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
         try {
-          const worldNameParam = collectedParams.world;
           const fileParam = collectedParams.file;
-          
-          cliResponse = await exportWorldToMarkdown(worldNameParam, fileParam, context.rootPath);
+          cliResponse = await exportWorldToMarkdown(world!.name, fileParam, context.rootPath);
         } catch (error) {
           cliResponse = {
             success: false,
