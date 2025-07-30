@@ -193,6 +193,17 @@ interface CLIOptions {
   logLevel?: string;
 }
 
+// Helper to print CLI results in a user-friendly way
+function printCLIResult(result: any) {
+  if (result.success) {
+    if (result.message) console.log(success(result.message));
+    if (result.data && typeof result.data === 'string') console.log(result.data);
+  } else {
+    if (result.message) console.log(error(result.message));
+    if (result.error && result.error !== result.message) console.log(error(result.error));
+  }
+}
+
 // Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
@@ -251,7 +262,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const result = await processCLIInput(options.command, world, rootPath, 'HUMAN');
-      console.log(JSON.stringify(result, null, 2));
+      printCLIResult(result);
 
       // Only set timer if sending message to world (not for commands)
       if (!options.command.startsWith('/') && world) {
@@ -275,7 +286,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const result = await processCLIInput(messageFromArgs, world, rootPath, 'HUMAN');
-      console.log(JSON.stringify(result, null, 2));
+      printCLIResult(result);
 
       // Set timer with longer delay for message processing (always needed for messages)
       setupExitTimer(8000);
@@ -298,7 +309,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           process.exit(1);
         }
         const result = await processCLIInput(input.trim(), world, rootPath, 'HUMAN');
-        console.log(JSON.stringify(result, null, 2));
+        printCLIResult(result);
 
         // Set timer with longer delay for message processing (always needed for stdin messages)
         setupExitTimer(8000);
@@ -614,7 +625,20 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         }
 
         if (result.data && !(result.data.sender === 'HUMAN')) {
-          console.log(`${boldMagenta('Data:')} ${JSON.stringify(result.data, null, 2)}`);
+          // Print a concise summary of result.data if present and not already in message
+          if (result.data) {
+            if (typeof result.data === 'string') {
+              console.log(`${boldMagenta('Data:')} ${result.data}`);
+            } else if (result.data.name) {
+              // If it's an agent or world object
+              console.log(`${boldMagenta('Data:')} ${result.data.name}`);
+            } else if (Array.isArray(result.data)) {
+              console.log(`${boldMagenta('Data:')} ${result.data.length} items`);
+            } else {
+              // Fallback: print keys
+              console.log(`${boldMagenta('Data:')} ${Object.keys(result.data).join(', ')}`);
+            }
+          }
         }
 
         // Refresh world if needed
