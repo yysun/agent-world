@@ -722,6 +722,10 @@ async function main(): Promise<void> {
   // Configure LLM providers from environment variables at startup
   configureLLMProvidersFromEnv();
 
+  // Import help generator from commands.ts
+  // (import at top: import { generateHelpMessage } from './commands.js';)
+  const { generateHelpMessage } = await import('./commands.js');
+
   program
     .name('cli')
     .description('Agent World CLI')
@@ -733,9 +737,11 @@ async function main(): Promise<void> {
     .option('-s, --server', 'Launch the server before running CLI')
     .allowUnknownOption()
     .allowExcessArguments()
+    .helpOption('-h, --help', 'Display help for command')
+    .addHelpText('beforeAll', () => generateHelpMessage())
     .parse();
 
-  const options = program.opts<CLIOptions & { server?: boolean }>();
+  const options = program.opts();
 
   // If --server is specified, launch the server first
   if (options.server) {
