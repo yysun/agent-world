@@ -335,6 +335,8 @@ export function getDefaultRootPath(): string {
     // Default to ~/agent-world if not defined
     const homeDir = process.env.HOME || process.env.USERPROFILE || '';
     rootPath = homeDir ? path.join(homeDir, 'agent-world') : './agent-world';
+  } else {
+    rootPath = path.resolve(process.cwd(), rootPath);
   }
   return rootPath;
 }
