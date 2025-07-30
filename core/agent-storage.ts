@@ -229,9 +229,10 @@ export async function saveAgentToDisk(rootPath: string, worldId: string, agent: 
   await writeJsonFile(memoryPath, serializedMemory);
 
   // Save agent data without system prompt (stored separately) and with Date serialization
-  const { systemPrompt, ...agentWithoutPrompt } = agent;
+  // Exclude systemPrompt and memory from config.json
+  const { systemPrompt, memory, ...agentWithoutPromptAndMemory } = agent;
   const agentData = {
-    ...agentWithoutPrompt,
+    ...agentWithoutPromptAndMemory,
     createdAt: agent.createdAt?.toISOString(),
     lastActive: agent.lastActive?.toISOString(),
     lastLLMCall: agent.lastLLMCall?.toISOString()
