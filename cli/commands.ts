@@ -174,7 +174,7 @@ export const CLI_COMMAND_MAP: Record<string, {
   'add-agent': {
     type: 'createAgent',
     requiresWorld: true,
-    description: 'Create a new agent with interactive prompts (supports multiline system prompt)',
+    description: 'Create a new agent with interactive prompts (supports multiline via copy/paste)',
     usage: '/add-agent',
     parameters: []
   },
@@ -190,7 +190,7 @@ export const CLI_COMMAND_MAP: Record<string, {
   'update-agent': {
     type: 'updateAgent',
     requiresWorld: true,
-    description: 'Update agent properties interactively (supports multiline system prompt)',
+    description: 'Update agent properties interactively (supports multiline via copy/paste)',
     usage: '/update-agent <name>',
     parameters: [
       { name: 'name', required: true, description: 'Agent name', type: 'string' }
@@ -343,7 +343,7 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['exit'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['exit'].description}\n`;
   
   help += '\nUse /help <command> for detailed information about a specific command.';
-  help += '\nNote: Interactive commands (create-world, add-agent, update-world, update-agent) support rich prompts and multiline input.';
+  help += '\nNote: Interactive commands support rich prompts. For multiline input, use copy/paste.';
   return help;
 }
 
@@ -546,9 +546,9 @@ export async function processCLICommand(
                 initial: 'gpt-4'
               },
               {
-                type: 'editor',
+                type: 'input',
                 name: 'systemPrompt',
-                message: 'System prompt (opens editor):'
+                message: 'System prompt (or press Enter for default):'
               },
               {
                 type: 'numeral',
@@ -998,9 +998,9 @@ export async function processCLICommand(
               initial: existingAgent.model
             },
             {
-              type: 'editor',
+              type: 'input',
               name: 'systemPrompt',
-              message: 'System prompt (opens editor):',
+              message: 'System prompt (or press Enter for default):',
               initial: existingAgent.systemPrompt || ''
             },
             {
