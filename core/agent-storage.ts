@@ -221,7 +221,12 @@ export async function saveAgentToDisk(rootPath: string, worldId: string, agent: 
 
   // Save memory as JSON with Date serialization
   const memoryPath = path.join(agentDir, 'memory.json');
-  await writeJsonFile(memoryPath, agent.memory || []);
+  // Serialize memory, preserving new lines as \n
+  const serializedMemory = (agent.memory || []).map(msg => ({
+    ...msg,
+    content: typeof msg.content === 'string' ? msg.content.replace(/\n/g, '\\n') : msg.content
+  }));
+  await writeJsonFile(memoryPath, serializedMemory);
 
   // Save agent data without system prompt (stored separately) and with Date serialization
   const { systemPrompt, ...agentWithoutPrompt } = agent;
@@ -280,7 +285,12 @@ export async function saveAgentMemoryToDisk(
 
   // Save memory as JSON with Date serialization
   const memoryPath = path.join(agentDir, 'memory.json');
-  await writeJsonFile(memoryPath, memory || []);
+  // Serialize memory, preserving new lines as \n
+  const serializedMemory = (memory || []).map(msg => ({
+    ...msg,
+    content: typeof msg.content === 'string' ? msg.content.replace(/\n/g, '\\n') : msg.content
+  }));
+  await writeJsonFile(memoryPath, serializedMemory);
 }
 
 /**
@@ -304,7 +314,12 @@ export async function archiveAgentMemory(
   const archivePath = path.join(archiveDir, archiveFilename);
 
   // Save memory to archive file
-  await writeJsonFile(archivePath, memory || []);
+  // Serialize memory, preserving new lines as \n
+  const serializedMemory = (memory || []).map(msg => ({
+    ...msg,
+    content: typeof msg.content === 'string' ? msg.content.replace(/\n/g, '\\n') : msg.content
+  }));
+  await writeJsonFile(archivePath, serializedMemory);
 }
 
 /**
@@ -366,6 +381,7 @@ export async function loadAgentFromDiskWithRetry(
           const rawMemory = await readJsonFile<AgentMessage[]>(memoryPath);
           memory = rawMemory.map(msg => ({
             ...msg,
+            content: typeof msg.content === 'string' ? msg.content.replace(/\\n/g, '\n') : msg.content,
             createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date()
           }));
         } catch {
