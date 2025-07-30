@@ -46,7 +46,7 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent } from '../core/index.js';
+import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown } from '../core/index.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
@@ -484,24 +484,15 @@ export function generateHelpMessage(command?: string): string {
   return help;
 }
 
-// Export world to markdown file
-async function exportWorldToMarkdown(
+// Export world to markdown file (CLI wrapper)
+async function exportWorldToMarkdownFile(
   worldName: string,
   outputPath: string,
   rootPath: string
 ): Promise<CLIResponse> {
   try {
-    // Load world configuration
-    const worldData = await getWorldConfig(rootPath, worldName);
-    if (!worldData) {
-      return {
-        success: false,
-        message: `World '${worldName}' not found`
-      };
-    }
-
-    // Load all agents in the world
-    const agents = await listAgents(rootPath, worldData.id);
+    // Use the core function to generate markdown
+    const markdown = await exportWorldToMarkdown(rootPath, worldName);
 
     // Generate timestamp for default filename (YYYY-MM-DD_HH-MM-SS)
     const now = new Date();
@@ -520,79 +511,12 @@ async function exportWorldToMarkdown(
       filePath = path.resolve(process.cwd(), `${worldName}-${timestamp}.md`);
     }
 
-    // Generate markdown content
-    let markdown = `# World Export: ${worldData.name}\n\n`;
-    markdown += `**Exported on:** ${new Date().toISOString()}\n\n`;
-
-    // World information
-    markdown += `## World Configuration\n\n`;
-    markdown += `- **Name:** ${worldData.name}\n`;
-    markdown += `- **ID:** ${worldData.id}\n`;
-    markdown += `- **Description:** ${worldData.description || 'No description'}\n`;
-    markdown += `- **Turn Limit:** ${worldData.turnLimit}\n`;
-    markdown += `- **Total Agents:** ${agents.length}\n\n`;
-
-    // Agents section
-    if (agents.length > 0) {
-      markdown += `## Agents (${agents.length})\n\n`;
-
-      for (const agentInfo of agents) {
-        // Load full agent data to get memory
-        const fullAgent = await getAgent(rootPath, worldData.id, agentInfo.name);
-        if (!fullAgent) continue;
-
-        markdown += `### ${fullAgent.name}\n\n`;
-        markdown += `**Configuration:**\n`;
-        markdown += `- **ID:** ${fullAgent.id}\n`;
-        markdown += `- **Type:** ${fullAgent.type}\n`;
-        markdown += `- **LLM Provider:** ${fullAgent.provider}\n`;
-        markdown += `- **Model:** ${fullAgent.model}\n`;
-        markdown += `- **Status:** ${fullAgent.status || 'active'}\n`;
-        markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
-        markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
-        markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
-        markdown += `- **Created:** ${fullAgent.createdAt ? fullAgent.createdAt.toISOString() : 'Unknown'}\n`;
-        markdown += `- **Last Active:** ${fullAgent.lastActive ? fullAgent.lastActive.toISOString() : 'Unknown'}\n\n`;
-
-        if (fullAgent.systemPrompt) {
-          markdown += `**System Prompt:**\n`;
-          markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
-        }
-
-        // Agent memory
-        if (fullAgent.memory && fullAgent.memory.length > 0) {
-          markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
-
-          fullAgent.memory.forEach((message, index) => {
-            markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
-            if (message.createdAt) {
-              markdown += `   *${message.createdAt.toISOString()}*\n`;
-            }
-            markdown += '   ```markdown\n';
-            // Pad each line of content with 4 spaces, preserving original newlines
-            let paddedContent = '';
-            if (typeof message.content === 'string') {
-              // Split by /(?<=\n)/ to preserve empty lines and trailing newlines
-              paddedContent = message.content
-                .split(/(\n)/)
-                .map(part => part === '\n' ? '\n' : '    ' + part)
-                .join('');
-            }
-            markdown += `${paddedContent}\n`;
-            markdown += '   ```\n\n';
-          });
-        } else {
-          markdown += `**Memory:** No messages\n\n`;
-        }
-
-        markdown += `---\n\n`;
-      }
-    } else {
-      markdown += `## Agents\n\nNo agents found in this world.\n\n`;
-    }
-
     // Write file
     await fs.promises.writeFile(filePath, markdown, 'utf8');
+
+    // Get agent count for response data
+    const worldData = await getWorldConfig(rootPath, worldName);
+    const agents = await listAgents(rootPath, worldData!.id);
 
     return {
       success: true,
@@ -1375,7 +1299,7 @@ export async function processCLICommand(
         }
         try {
           const fileParam = collectedParams.file;
-          cliResponse = await exportWorldToMarkdown(world!.name, fileParam, context.rootPath);
+          cliResponse = await exportWorldToMarkdownFile(world!.name, fileParam, context.rootPath);
         } catch (error) {
           cliResponse = {
             success: false,

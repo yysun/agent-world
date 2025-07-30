@@ -252,6 +252,55 @@ export async function clearAgentMemory(worldName: string, agentName: string): Pr
   });
 }
 
+/**
+ * Export world to markdown and download it
+ */
+async function exportWorldToMarkdown(worldName: string): Promise<void> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/export`);
+  
+  // Get the filename from Content-Disposition header
+  const contentDisposition = response.headers.get('Content-Disposition');
+  let filename = `${worldName}-export.md`;
+  
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="(.+)"/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  // Get the markdown content
+  const markdown = await response.text();
+
+  // Create a blob and download it
+  const blob = new Blob([markdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export world to markdown and return the content for viewing
+ */
+async function getWorldMarkdown(worldName: string): Promise<string> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/export`);
+  return response.text();
+}
+
 // Export the API functions
 export default {
   // Core API function
@@ -263,6 +312,8 @@ export default {
   createWorld,
   updateWorld,
   deleteWorld,
+  exportWorldToMarkdown,
+  getWorldMarkdown,
 
   // Agent management
   getAgents,
