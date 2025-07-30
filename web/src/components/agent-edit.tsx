@@ -55,6 +55,7 @@ export const defaultAgentData: Partial<Agent> = {
   provider: 'ollama' as LLMProvider,
   model: 'llama3.2:3b',
   temperature: 0.7,
+  maxTokens: 2048,
   systemPrompt: 'You are a helpful assistant.',
 };
 
@@ -213,7 +214,7 @@ export default class AgentEdit extends Component<AgentEditState> {
 
     return (
       <div className="modal-backdrop" $onclick={closeModal}>
-        <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+        <div className="modal-content agent-edit-modal" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
@@ -241,7 +242,8 @@ export default class AgentEdit extends Component<AgentEditState> {
             ) : (
               // Form view for create and edit modes
               <form className="agent-form">
-                {/* First row: Name and Temperature */}
+
+                {/* First row: Name (hidden in edit mode) */}
                 <div className={`form-group ${isEditMode ? 'hidden' : ''}`}>
                   <div className="form-row">
                     <div className="form-group">
@@ -256,26 +258,10 @@ export default class AgentEdit extends Component<AgentEditState> {
                         disabled={state.loading}
                       />
                     </div>
-
-                    <div className="form-group">
-                      <label htmlFor="agent-temperature">Temperature</label>
-                      <input
-                        id="agent-temperature"
-                        type="number"
-                        className="form-input"
-                        placeholder="0.0 - 2.0"
-                        min="0"
-                        max="2"
-                        step="0.1"
-                        value={state.agent.temperature}
-                        $bind="agent.temperature"
-                        disabled={state.loading}
-                      />
-                    </div>
                   </div>
                 </div>
 
-                {/* Second row: Provider and Model */}
+                {/* Model/Provider row (now above temperature/maxTokens) */}
                 <div className="form-section">
                   <div className="form-row">
                     <div className="form-group">
@@ -311,6 +297,42 @@ export default class AgentEdit extends Component<AgentEditState> {
                   </div>
                 </div>
 
+                {/* Temperature and Max Tokens row (now below model/provider) */}
+                <div className="form-section">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="agent-temperature">Temperature</label>
+                      <input
+                        id="agent-temperature"
+                        type="number"
+                        className="form-input"
+                        placeholder="0.0 - 2.0"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={state.agent.temperature}
+                        $bind="agent.temperature"
+                        disabled={state.loading}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="agent-max-tokens">Max Tokens</label>
+                      <input
+                        id="agent-max-tokens"
+                        type="number"
+                        className="form-input"
+                        placeholder="e.g. 2048"
+                        min="1"
+                        max="32768"
+                        step="1"
+                        value={state.agent.maxTokens}
+                        $bind="agent.maxTokens"
+                        disabled={state.loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 {/* Third row: Description - Full width */}
                 {/* <div className="form-section">
                   <div className="form-group">
@@ -333,9 +355,9 @@ export default class AgentEdit extends Component<AgentEditState> {
                     <label htmlFor="agent-prompt">System Prompt</label>
                     <textarea
                       id="agent-prompt"
-                      className="form-textarea"
+                      className="form-textarea agent-system-prompt-textarea"
                       placeholder="Enter the system prompt for this agent..."
-                      rows={8}
+                      rows={12}
                       value={state.agent.systemPrompt}
                       $bind="agent.systemPrompt"
                       disabled={state.loading}
