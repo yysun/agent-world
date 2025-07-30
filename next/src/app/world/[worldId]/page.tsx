@@ -1,12 +1,16 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import MarkdownMemory from '../../../components/MarkdownMemory';
+import MarkdownEditor from '../../../components/MarkdownEditor';
+import StreamChatBox from '../../../components/StreamChatBox';
 
 interface World {
   id: string;
   name: string;
   description?: string;
+  memory?: string;
 }
 
 interface Agent {
@@ -14,6 +18,8 @@ interface Agent {
   name: string;
   type: string;
   systemPrompt?: string;
+  description?: string;
+  memory?: string;
 }
 
 interface Message {
@@ -37,7 +43,8 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   const [newAgentName, setNewAgentName] = useState('');
   const [creating, setCreating] = useState(false);
   const [worldId, setWorldId] = useState<string>('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingSaving, setEditingSaving] = useState(false);
   const router = useRouter();
 
   // --- All hooks must be before any return ---
@@ -55,6 +62,7 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
       // Reset agent selection when world changes
       setSelectedAgent(null);
       setActiveTab('main');
+      setIsEditing(false);
 
       // Inline loadWorld
       (async () => {
@@ -86,15 +94,6 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
       })();
     }
   }, [worldId, router]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
 
 
   const sendMessage = async (e: React.FormEvent) => {
@@ -194,6 +193,65 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
     }
   };
 
+  // Save world data
+  const saveWorld = async (data: Record<string, unknown>) => {
+    setEditingSaving(true);
+    try {
+      const response = await fetch(`/api/worlds/${worldId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (response.ok) {
+        const updatedWorld = await response.json();
+        setWorld(updatedWorld.world);
+        setIsEditing(false);
+      } else {
+        throw new Error('Failed to save world');
+      }
+    } catch (error) {
+      console.error('Error saving world:', error);
+      // TODO: Show error message to user
+    } finally {
+      setEditingSaving(false);
+    }
+  };
+
+  // Save agent data
+  const saveAgent = async (data: Record<string, unknown>) => {
+    if (!selectedAgent) return;
+    
+    setEditingSaving(true);
+    try {
+      const response = await fetch(`/api/worlds/${worldId}/agents/${selectedAgent.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (response.ok) {
+        const updatedAgent = await response.json();
+        setAgents(agents.map(agent => 
+          agent.id === selectedAgent.id ? updatedAgent.agent : agent
+        ));
+        setSelectedAgent(updatedAgent.agent);
+        setIsEditing(false);
+      } else {
+        throw new Error('Failed to save agent');
+      }
+    } catch (error) {
+      console.error('Error saving agent:', error);
+      // TODO: Show error message to user
+    } finally {
+      setEditingSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center font-sans">
@@ -224,6 +282,17 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   const handleAgentSelect = (agent: Agent) => {
     setSelectedAgent(agent);
     setActiveTab('main');
+    setIsEditing(false); // Reset editing state when switching agents
+  };
+
+  // --- Edit handlers ---
+  const handleEdit = () => {
+    setIsEditing(true);
+    setActiveTab('settings');
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
   };
 
 
@@ -338,110 +407,152 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
       <div className="flex-1 flex flex-col">
         {/* Header with Tabs */}
         <div className="bg-card px-6 pt-6 pb-0 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-end gap-6">
-            {tabLabels.map((label, idx) => (
-              <button
-                key={label}
-                className={`text-base pb-2 transition-colors font-sans ${((activeTab === 'main' && idx === 0) || (activeTab === 'settings' && idx === 1))
-                  ? 'text-foreground'
-                  : 'text-gray-400 hover:text-primary'
-                  }`}
-                onClick={() => handleTabClick(idx === 0 ? 'main' : 'settings')}
-                tabIndex={0}
-              >
-                {label}
-              </button>
-            ))}
-            {/* Show a close button if agent is selected */}
-            {selectedAgent && (
-              <button
-                className={
-                  `ml-4 text-base pb-2 transition-colors font-sans text-gray-400 hover:text-primary`
-                }
-                onClick={() => setSelectedAgent(null)}
-                title="Back to world view"
-                tabIndex={0}
-              >
-                ×
-              </button>
-            )}
+          <div className="flex items-end justify-between">
+            <div className="flex items-end gap-6">
+              {tabLabels.map((label, idx) => (
+                <button
+                  key={label}
+                  className={`text-base pb-2 transition-colors font-sans ${((activeTab === 'main' && idx === 0) || (activeTab === 'settings' && idx === 1))
+                    ? 'text-foreground'
+                    : 'text-gray-400 hover:text-primary'
+                    }`}
+                  onClick={() => handleTabClick(idx === 0 ? 'main' : 'settings')}
+                  tabIndex={0}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex items-center gap-3 pb-2">
+              {/* Edit button - only show in settings tab and not in editing mode */}
+              {activeTab === 'settings' && !isEditing && (
+                <button
+                  onClick={handleEdit}
+                  className="text-gray-400 hover:text-primary transition-colors"
+                  title={`Edit ${selectedAgent ? 'agent' : 'world'}`}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              )}
+              
+              {/* Show a close button if agent is selected */}
+              {selectedAgent && (
+                <button
+                  className="text-gray-400 hover:text-primary transition-colors font-sans"
+                  onClick={() => {
+                    setSelectedAgent(null);
+                    setIsEditing(false);
+                  }}
+                  title="Back to world view"
+                  tabIndex={0}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-hidden">
           {activeTab === 'main' ? (
-            // Main content: chat messages
-            <div className="space-y-4">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.sender === 'human' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-2 rounded-xl font-sans ${msg.sender === 'human'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-card shadow text-foreground'
-                      }`}
-                  >
-                    <div className="text-sm font-sans">
-                      <strong>{msg.sender === 'human' ? 'You' : msg.sender}</strong>
-                    </div>
-                    <div className="mt-1 font-sans">{msg.content}</div>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
+            // Main content: enhanced streaming chat
+            <StreamChatBox
+              messages={messages}
+              selectedAgent={selectedAgent}
+              message={message}
+              setMessage={setMessage}
+              onSendMessage={sendMessage}
+              sending={sending}
+            />
           ) : (
-            // Settings tab content
-            <div>
-              {selectedAgent ? (
-                <div>
-                  <h3 className="text-xl font-semibold mb-2 font-sans">Agent Settings</h3>
-                  <div className="mb-2 font-sans"><span className="font-medium">Name:</span> {selectedAgent.name}</div>
-                  <div className="mb-2 font-sans"><span className="font-medium">Type:</span> {selectedAgent.type}</div>
-                  {selectedAgent.systemPrompt && (
-                    <div className="mb-2 font-sans"><span className="font-medium">System Prompt:</span> {selectedAgent.systemPrompt}</div>
-                  )}
-                  {/* Add more agent settings here if needed */}
-                </div>
+            // Settings tab content with markdown display and editing
+            <div className="h-full overflow-y-auto p-6">
+              {isEditing ? (
+                // Edit mode - show MarkdownEditor
+                selectedAgent ? (
+                  <MarkdownEditor
+                    initialData={{
+                      name: selectedAgent.name,
+                      type: selectedAgent.type,
+                      systemPrompt: selectedAgent.systemPrompt || '',
+                      description: selectedAgent.description || selectedAgent.memory || ''
+                    }}
+                    onSave={saveAgent}
+                    onCancel={handleCancelEdit}
+                    saving={editingSaving}
+                    entityType="agent"
+                  />
+                ) : (
+                  <MarkdownEditor
+                    initialData={{
+                      name: world!.name,
+                      description: world!.description || world!.memory || ''
+                    }}
+                    onSave={saveWorld}
+                    onCancel={handleCancelEdit}
+                    saving={editingSaving}
+                    entityType="world"
+                  />
+                )
               ) : (
-                <div>
-                  <h3 className="text-xl font-semibold mb-2 font-sans">World Settings</h3>
-                  <div className="mb-2 font-sans"><span className="font-medium">Name:</span> {world.name}</div>
-                  {world.description && (
-                    <div className="mb-2 font-sans"><span className="font-medium">Description:</span> {world.description}</div>
+                // View mode - show markdown memory and basic info
+                <div className="space-y-6">
+                  {selectedAgent ? (
+                    <div>
+                      <h3 className="text-xl font-semibold mb-4 font-sans">Agent: {selectedAgent.name}</h3>
+                      
+                      {/* Basic agent info */}
+                      <div className="bg-muted rounded-lg p-4 mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="font-medium text-foreground">Type:</span>
+                            <span className="ml-2 text-muted-foreground">{selectedAgent.type}</span>
+                          </div>
+                          {selectedAgent.systemPrompt && (
+                            <div className="md:col-span-2">
+                              <span className="font-medium text-foreground">System Prompt:</span>
+                              <div className="ml-2 text-muted-foreground mt-1 p-2 bg-background rounded text-xs font-mono">
+                                {selectedAgent.systemPrompt}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Agent memory/description as markdown */}
+                      <MarkdownMemory 
+                        content={selectedAgent.description || selectedAgent.memory || ''} 
+                        title="Memory & Description"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <h3 className="text-xl font-semibold mb-4 font-sans">World: {world!.name}</h3>
+                      
+                      {/* Basic world info */}
+                      <div className="bg-muted rounded-lg p-4 mb-6">
+                        <div className="text-sm">
+                          <span className="font-medium text-foreground">ID:</span>
+                          <span className="ml-2 text-muted-foreground font-mono">{world!.id}</span>
+                        </div>
+                      </div>
+
+                      {/* World description/memory as markdown */}
+                      <MarkdownMemory 
+                        content={world!.description || world!.memory || ''} 
+                        title="Description & Memory"
+                      />
+                    </div>
                   )}
-                  {/* Add more world settings here if needed */}
                 </div>
               )}
             </div>
           )}
         </div>
-
-        {/* Message Input (only show in main tab) */}
-        {activeTab === 'main' && (
-          <div className="bg-card p-6">
-            <form onSubmit={sendMessage} className="flex gap-3">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                className="flex-1 px-4 py-2 rounded-xl border border-[color:var(--border)] focus:outline-none focus:ring-2 focus:ring-primary/40 bg-background text-foreground font-sans"
-                placeholder="Type your message..."
-                disabled={sending}
-              />
-              <button
-                type="submit"
-                disabled={sending || !message.trim()}
-                className="bg-primary hover:bg-primary/80 disabled:bg-muted text-primary-foreground px-6 py-2 rounded-xl font-medium transition-colors shadow-sm font-sans"
-              >
-                {sending ? 'Sending...' : 'Send'}
-              </button>
-            </form>
-          </div>
-        )}
       </div>
     </div >
   );
