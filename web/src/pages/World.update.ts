@@ -69,30 +69,27 @@ export const worldUpdateHandlers = {
         return;
       }
 
-      const messageMap = new Map();
+      // Convert all agent memories to messages (no deduplication)
+      let allMessages: any[] = [];
       const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
         if (agent.memory && Array.isArray(agent.memory)) {
-          agent.memory.forEach((memoryItem: any) => {
-            memoryItem.sender = toKebabCase(memoryItem.sender || agent.name);
-            const messageKey = `${memoryItem.createdAt || Date.now()}-${memoryItem.text || memoryItem.content || ''}`;
-            if (!messageMap.has(messageKey)) {
-              const originalSender = memoryItem.sender || agent.name;
-              let messageType = 'agent';
-              if (originalSender === 'HUMAN' || originalSender === 'USER') {
-                messageType = 'user';
-              }
-              messageMap.set(messageKey, {
-                id: memoryItem.id || messageKey,
-                sender: originalSender,
-                text: memoryItem.text || memoryItem.content || '',
-                createdAt: memoryItem.createdAt || new Date().toISOString(),
-                type: messageType,
-                fromAgentId: agent.id
-              });
+          const agentMessages = agent.memory.map((memoryItem: any) => {
+            const sender = toKebabCase(memoryItem.sender || agent.name);
+            let messageType = 'agent';
+            if (sender === 'HUMAN' || sender === 'USER') {
+              messageType = 'user';
             }
+            return {
+              id: memoryItem.id || `${memoryItem.createdAt || Date.now()}-${Math.random()}`,
+              sender,
+              text: memoryItem.text || memoryItem.content || '',
+              createdAt: memoryItem.createdAt || new Date().toISOString(),
+              type: messageType,
+              fromAgentId: agent.id
+            };
           });
+          allMessages = allMessages.concat(agentMessages);
         }
-
         return {
           ...agent,
           spriteIndex: index % 9,
@@ -100,7 +97,8 @@ export const worldUpdateHandlers = {
         } as Agent;
       }));
 
-      const sortedMessages = Array.from(messageMap.values()).sort((a, b) => {
+      // Sort all messages by createdAt
+      const sortedMessages = allMessages.sort((a, b) => {
         const timeA = new Date(a.createdAt).getTime();
         const timeB = new Date(b.createdAt).getTime();
         return timeA - timeB;

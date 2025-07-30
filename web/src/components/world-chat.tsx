@@ -59,7 +59,8 @@ export interface WorldChatProps {
   } | null;
 }
 
-const debug = false;
+const debug = true;
+
 export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
@@ -91,20 +92,20 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             messages
-              .filter(message => {
-                // Always show user messages
-                if (message.sender === 'HUMAN' || message.sender === 'USER' || message.type === 'user' || message.sender === 'system' || message.sender === 'SYSTEM') {
-                  return true;
-                }
-                if (message.isStreaming === true) {
-                  return true; // Currently streaming
-                }
-                // If an agent is selected for settings, filter to show only that agent's messages
-                if (selectedAgent?.id && message.fromAgentId !== selectedAgent.id) {
-                  return false;
-                }
-                return true;
-              })
+              // .filter(message => {
+              //   // Always show user messages
+              //   if (message.sender === 'HUMAN' || message.sender === 'human' || message.type === 'user' || message.sender === 'system' || message.sender === 'world') {
+              //     return true;
+              //   }
+              //   if (message.isStreaming === true) {
+              //     return true; // Currently streaming
+              //   }
+              //   // If an agent is selected for settings, filter to show only that agent's messages
+              //   if (selectedAgent?.id && message.fromAgentId !== selectedAgent.id) {
+              //     return false;
+              //   }
+              //   return true;
+              // })
               .map((message, index) => {
                 // Check if this is a cross-agent message
                 const isCrossAgentMessage = hasSenderAgentMismatch(message);
