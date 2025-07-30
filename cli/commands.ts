@@ -10,7 +10,7 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
   return undefined;
 }
 /**
- * CLI Commands Implementation - Direct Core Integration
+ * CLI Commands Implementation - Direct Core Integration with Short Aliases
  * 
  * Features:
  * - Direct command mapping system with interactive parameter collection
@@ -20,10 +20,23 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Help message generation with command documentation
  * - Dual input handling for commands and messages
  * - World instance isolation and proper cleanup during refresh
+ * - Short command aliases for improved usability
+ * - Context-sensitive commands that adapt based on world selection
  *
  * Available Commands:
- * - new (create-world), add (create-agent), clear, select
- * - help, quit, exit
+ * - Legacy: new (create-world), add (create-agent), clear, select
+ * - System: help, quit, exit
+ * - Short Context-Sensitive: list, show, edit, delete, create (adapt to context)
+ * - Short Explicit: lsw (list-worlds), lsa (list-agents)
+ * - Full CRUD: list-worlds, create-world, show-world, update-world, delete-world
+ * - Full CRUD: list-agents, add-agent, show-agent, update-agent, delete-agent
+ * 
+ * Short Alias System:
+ * - Context-sensitive aliases adapt behavior based on whether a world is selected
+ * - /list shows agents if world selected, worlds if no world selected
+ * - /show, /edit, /delete work on agents or worlds based on context
+ * - /create creates agents if world selected, worlds if no world selected
+ * - Explicit aliases like /lsw, /lsa provide unambiguous targeting
  * 
  * World Refresh Mechanism:
  * - Commands that modify world state signal refresh requirement via `refreshWorld: true`
@@ -82,7 +95,7 @@ interface ConfirmationAnswer {
   confirmed: boolean;
 }
 
-// CLI Command Mapping
+// CLI Command Mapping with Short Aliases
 export const CLI_COMMAND_MAP: Record<string, {
   type: string;
   requiresWorld: boolean;
@@ -95,13 +108,15 @@ export const CLI_COMMAND_MAP: Record<string, {
     type: 'string' | 'number' | 'boolean';
     options?: string[];
   }>;
+  aliases?: string[];
 }> = {
   'select': {
     type: 'selectWorld',
     requiresWorld: false,
     description: 'Show world selection menu to pick a world',
     usage: '/select',
-    parameters: []
+    parameters: [],
+    aliases: ['/sel']
   },
   'new': {
     type: 'createWorld',
@@ -249,6 +264,83 @@ export const CLI_COMMAND_MAP: Record<string, {
     description: 'Exit the CLI',
     usage: '/exit',
     parameters: []
+  },
+
+  // Short aliases for CRUD commands
+  'list': {
+    type: 'contextualList',
+    requiresWorld: false,
+    description: 'List agents (if world selected) or worlds (if no world)',
+    usage: '/list',
+    parameters: [],
+    aliases: ['/ls']
+  },
+  'ls': {
+    type: 'contextualList',
+    requiresWorld: false,
+    description: 'List agents (if world selected) or worlds (if no world)',
+    usage: '/ls',
+    parameters: []
+  },
+  'show': {
+    type: 'contextualShow',
+    requiresWorld: false,
+    description: 'Show agent details (if world selected) or world details (if no world)',
+    usage: '/show <name>',
+    parameters: [
+      { name: 'name', required: true, description: 'Agent or world name', type: 'string' }
+    ]
+  },
+  'edit': {
+    type: 'contextualEdit',
+    requiresWorld: false,
+    description: 'Edit agent (if world selected) or world (if no world)',
+    usage: '/edit <name>',
+    parameters: [
+      { name: 'name', required: true, description: 'Agent or world name', type: 'string' }
+    ]
+  },
+  'delete': {
+    type: 'contextualDelete',
+    requiresWorld: false,
+    description: 'Delete agent (if world selected) or world (if no world)',
+    usage: '/delete <name>',
+    parameters: [
+      { name: 'name', required: true, description: 'Agent or world name', type: 'string' }
+    ],
+    aliases: ['/del']
+  },
+  'del': {
+    type: 'contextualDelete',
+    requiresWorld: false,
+    description: 'Delete agent (if world selected) or world (if no world)',
+    usage: '/del <name>',
+    parameters: [
+      { name: 'name', required: true, description: 'Agent or world name', type: 'string' }
+    ]
+  },
+  'create': {
+    type: 'contextualCreate',
+    requiresWorld: false,
+    description: 'Create agent (if world selected) or world (if no world)',
+    usage: '/create',
+    parameters: []
+  },
+
+  // Explicit world aliases
+  'lsw': {
+    type: 'listWorlds',
+    requiresWorld: false,
+    description: 'List all worlds',
+    usage: '/lsw',
+    parameters: []
+  },
+  'lsa': {
+    type: 'listAgents',
+    requiresWorld: true,
+    description: 'List all agents in current world',
+    usage: '/lsa',
+    parameters: []
   }
 };
 
@@ -325,6 +417,12 @@ export function generateHelpMessage(command?: string): string {
     const cmd = CLI_COMMAND_MAP[command];
     let help = `\n${cmd.usage}\n`;
     help += `Description: ${cmd.description}\n`;
+    
+    // Show aliases if they exist
+    if (cmd.aliases && cmd.aliases.length > 0) {
+      help += `Aliases: ${cmd.aliases.join(', ')}\n`;
+    }
+    
     if (cmd.parameters.length > 0) {
       help += `\nParameters:\n`;
       cmd.parameters.forEach(param => {
@@ -338,8 +436,21 @@ export function generateHelpMessage(command?: string): string {
 
   let help = '\nAvailable Commands:\n\n';
 
-  // World Commands
-  help += 'World Management:\n';
+  // Short Context-Sensitive Aliases (NEW)
+  help += 'Short Context-Sensitive Aliases:\n';
+  help += `  ${CLI_COMMAND_MAP['list'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['list'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['show'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['show'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['edit'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['edit'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['delete'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['create'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['create'].description}\n`;
+
+  help += '\nShort Explicit Aliases:\n';
+  help += `  ${CLI_COMMAND_MAP['lsw'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['lsw'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['lsa'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['lsa'].description}\n`;
+  help += `  /ls                           - Alias for /list\n`;
+  help += `  /del                          - Alias for /delete\n`;
+
+  help += '\nWorld Management:\n';
   help += `  ${CLI_COMMAND_MAP['list-worlds'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['list-worlds'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['create-world'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['create-world'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['show-world'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['show-world'].description}\n`;
@@ -369,6 +480,7 @@ export function generateHelpMessage(command?: string): string {
 
   help += '\nUse /help <command> for detailed information about a specific command.';
   help += '\nNote: Interactive commands support rich prompts. For multiline input, use copy/paste.';
+  help += '\nContext-sensitive aliases (like /list, /show) behave differently based on whether a world is selected.';
   return help;
 }
 
@@ -1263,6 +1375,534 @@ export async function processCLICommand(
           message: 'Exiting CLI...',
           data: { exit: true }
         };
+        break;
+
+      // Contextual short alias handlers
+      case 'contextualList':
+        if (context.currentWorld) {
+          // If world is selected, list agents
+          try {
+            const agents = await listAgents(context.rootPath, context.currentWorld.id);
+            if (agents.length === 0) {
+              cliResponse = {
+                success: true,
+                message: `No agents found in world '${context.currentWorld.name}'.`
+              };
+            } else {
+              let output = `\nAgents in world '${context.currentWorld.name}':\n`;
+              agents.forEach(agent => {
+                output += `  Name: ${agent.name} (${agent.id})\n`;
+                output += `  Type: ${agent.type}\n`;
+                output += `  Model: ${agent.model}\n`;
+                output += `  Status: ${agent.status || 'active'}\n`;
+                output += `  Memory Size: ${agent.memorySize} messages\n`;
+                output += `  LLM Calls: ${agent.llmCallCount}\n`;
+                output += `  Created: ${agent.createdAt ? agent.createdAt.toISOString().split('T')[0] : 'Unknown'}\n`;
+                output += `  Last Active: ${agent.lastActive ? agent.lastActive.toISOString().split('T')[0] : 'Unknown'}\n`;
+                output += `  ---\n`;
+              });
+              cliResponse = {
+                success: true,
+                message: output,
+                data: { agents }
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to list agents',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        } else {
+          // If no world selected, list worlds
+          try {
+            const worlds = await listWorlds(context.rootPath);
+            if (worlds.length === 0) {
+              cliResponse = {
+                success: true,
+                message: 'No worlds found.',
+                data: { worlds: [] }
+              };
+            } else {
+              let output = '\nAvailable Worlds:\n';
+              worlds.forEach((worldInfo: WorldInfo) => {
+                output += `  ID: ${worldInfo.id}\n`;
+                output += `  Name: ${worldInfo.name}\n`;
+                output += `  Description: ${worldInfo.description || 'No description'}\n`;
+                output += `  Turn Limit: ${worldInfo.turnLimit}\n`;
+                output += `  Agents: ${worldInfo.agentCount}\n`;
+                output += `  ---\n`;
+              });
+              cliResponse = {
+                success: true,
+                message: output,
+                data: { worlds }
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to list worlds',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+        break;
+
+      case 'contextualShow':
+        if (context.currentWorld) {
+          // If world is selected, show agent
+          try {
+            const agent = await getAgent(context.rootPath, context.currentWorld.id, collectedParams.name);
+            if (!agent) {
+              cliResponse = {
+                success: false,
+                message: `Agent '${collectedParams.name}' not found`
+              };
+            } else {
+              let output = `\nAgent Details:\n`;
+              output += `  Name: ${agent.name}\n`;
+              output += `  ID: ${agent.id}\n`;
+              output += `  Type: ${agent.type}\n`;
+              output += `  Provider: ${agent.provider}\n`;
+              output += `  Model: ${agent.model}\n`;
+              output += `  Status: ${agent.status || 'active'}\n`;
+              output += `  Temperature: ${agent.temperature || 'default'}\n`;
+              output += `  Max Tokens: ${agent.maxTokens || 'default'}\n`;
+              output += `  Memory Size: ${agent.memory.length} messages\n`;
+              output += `  LLM Calls: ${agent.llmCallCount}\n`;
+              output += `  Created: ${agent.createdAt ? agent.createdAt.toISOString() : 'Unknown'}\n`;
+              output += `  Last Active: ${agent.lastActive ? agent.lastActive.toISOString() : 'Unknown'}\n`;
+
+              if (agent.systemPrompt) {
+                output += `\nSystem Prompt:\n${agent.systemPrompt}\n`;
+              }
+
+              cliResponse = {
+                success: true,
+                message: output,
+                data: { agent }
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to get agent details',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        } else {
+          // If no world selected, show world
+          try {
+            const worldData = await getWorldConfig(context.rootPath, collectedParams.name);
+            if (!worldData) {
+              cliResponse = {
+                success: false,
+                message: `World '${collectedParams.name}' not found`
+              };
+            } else {
+              // Get agent count
+              const agents = await listAgents(context.rootPath, worldData.id);
+              let output = `\nWorld Details:\n`;
+              output += `  ID: ${worldData.id}\n`;
+              output += `  Name: ${worldData.name}\n`;
+              output += `  Description: ${worldData.description || 'No description'}\n`;
+              output += `  Turn Limit: ${worldData.turnLimit}\n`;
+              output += `  Agents: ${agents.length}\n`;
+
+              if (agents.length > 0) {
+                output += `\nAgents in this world:\n`;
+                agents.forEach(agent => {
+                  output += `  - ${agent.name} (${agent.id}) - ${agent.status || 'active'}\n`;
+                });
+              }
+
+              cliResponse = {
+                success: true,
+                message: output,
+                data: { world: worldData, agents }
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to get world details',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+        break;
+
+      case 'contextualEdit':
+        if (context.currentWorld) {
+          // If world is selected, edit agent (redirect to updateAgent)
+          try {
+            const existingAgent = await getAgent(context.rootPath, context.currentWorld.id, collectedParams.name);
+            if (!existingAgent) {
+              cliResponse = {
+                success: false,
+                message: `Agent '${collectedParams.name}' not found`
+              };
+              break;
+            }
+
+            // Use enquirer for interactive prompts with multiline support
+            const prompts = [
+              {
+                type: 'input',
+                name: 'name',
+                message: 'Agent name:',
+                initial: existingAgent.name
+              },
+              {
+                type: 'select',
+                name: 'provider',
+                message: 'LLM Provider:',
+                choices: Object.values(LLMProvider),
+                initial: existingAgent.provider
+              },
+              {
+                type: 'input',
+                name: 'model',
+                message: 'Model:',
+                initial: existingAgent.model
+              },
+              {
+                type: 'input',
+                name: 'systemPrompt',
+                message: 'System prompt (or press Enter for default):',
+                initial: existingAgent.systemPrompt || ''
+              },
+              {
+                type: 'numeral',
+                name: 'temperature',
+                message: 'Temperature (0.0-2.0):',
+                initial: existingAgent.temperature || 0.7
+              },
+              {
+                type: 'numeral',
+                name: 'maxTokens',
+                message: 'Max tokens:',
+                initial: existingAgent.maxTokens || 4096
+              }
+            ];
+
+            const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
+
+            const updatedAgent = await updateAgent(context.rootPath, context.currentWorld.id, existingAgent.id, {
+              name: answers.name,
+              provider: answers.provider,
+              model: answers.model,
+              systemPrompt: answers.systemPrompt,
+              temperature: answers.temperature,
+              maxTokens: answers.maxTokens
+            });
+
+            if (updatedAgent) {
+              cliResponse = {
+                success: true,
+                message: `Agent '${answers.name}' updated successfully`,
+                data: updatedAgent,
+                needsWorldRefresh: true
+              };
+            } else {
+              cliResponse = {
+                success: false,
+                message: 'Failed to update agent'
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to update agent',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        } else {
+          // If no world selected, edit world (redirect to updateWorld)
+          try {
+            const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+            if (!existingWorld) {
+              cliResponse = {
+                success: false,
+                message: `World '${collectedParams.name}' not found`
+              };
+              break;
+            }
+
+            // Use enquirer for interactive prompts
+            const prompts = [
+              {
+                type: 'input',
+                name: 'name',
+                message: 'World name:',
+                initial: existingWorld.name
+              },
+              {
+                type: 'input',
+                name: 'description',
+                message: 'World description:',
+                initial: existingWorld.description || ''
+              },
+              {
+                type: 'numeral',
+                name: 'turnLimit',
+                message: 'Turn limit:',
+                initial: existingWorld.turnLimit
+              }
+            ];
+
+            const answers = await enquirer.prompt(prompts) as WorldCreateAnswers;
+
+            const updatedWorld = await updateWorld(context.rootPath, existingWorld.id, {
+              name: answers.name,
+              description: answers.description,
+              turnLimit: answers.turnLimit
+            });
+
+            if (updatedWorld) {
+              cliResponse = {
+                success: true,
+                message: `World '${answers.name}' updated successfully`,
+                data: updatedWorld,
+                needsWorldRefresh: true
+              };
+            } else {
+              cliResponse = {
+                success: false,
+                message: 'Failed to update world'
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to update world',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+        break;
+
+      case 'contextualDelete':
+        if (context.currentWorld) {
+          // If world is selected, delete agent
+          try {
+            const existingAgent = await getAgent(context.rootPath, context.currentWorld.id, collectedParams.name);
+            if (!existingAgent) {
+              cliResponse = {
+                success: false,
+                message: `Agent '${collectedParams.name}' not found`
+              };
+              break;
+            }
+
+            // Confirmation prompt
+            const confirmPrompt = {
+              type: 'confirm',
+              name: 'confirmed',
+              message: `Are you sure you want to delete agent '${existingAgent.name}'? This action cannot be undone.`,
+              initial: false
+            };
+
+            const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
+
+            if (!confirmed) {
+              cliResponse = {
+                success: true,
+                message: 'Agent deletion cancelled'
+              };
+              break;
+            }
+
+            const deleted = await deleteAgent(context.rootPath, context.currentWorld.id, existingAgent.id);
+
+            if (deleted) {
+              cliResponse = {
+                success: true,
+                message: `Agent '${existingAgent.name}' deleted successfully`,
+                needsWorldRefresh: true
+              };
+            } else {
+              cliResponse = {
+                success: false,
+                message: 'Failed to delete agent'
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to delete agent',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        } else {
+          // If no world selected, delete world
+          try {
+            const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+            if (!existingWorld) {
+              cliResponse = {
+                success: false,
+                message: `World '${collectedParams.name}' not found`
+              };
+              break;
+            }
+
+            // Confirmation prompt
+            const confirmPrompt = {
+              type: 'confirm',
+              name: 'confirmed',
+              message: `Are you sure you want to delete world '${existingWorld.name}'? This action cannot be undone.`,
+              initial: false
+            };
+
+            const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
+
+            if (!confirmed) {
+              cliResponse = {
+                success: true,
+                message: 'World deletion cancelled'
+              };
+              break;
+            }
+
+            const deleted = await deleteWorld(context.rootPath, existingWorld.id);
+
+            if (deleted) {
+              cliResponse = {
+                success: true,
+                message: `World '${existingWorld.name}' deleted successfully`,
+                needsWorldRefresh: true
+              };
+            } else {
+              cliResponse = {
+                success: false,
+                message: 'Failed to delete world'
+              };
+            }
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to delete world',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
+        break;
+
+      case 'contextualCreate':
+        if (context.currentWorld) {
+          // If world is selected, create agent (redirect to add-agent)
+          try {
+            const prompts = [
+              {
+                type: 'input',
+                name: 'name',
+                message: 'Agent name:',
+                required: true
+              },
+              {
+                type: 'select',
+                name: 'provider',
+                message: 'LLM Provider:',
+                choices: Object.values(LLMProvider),
+                initial: 'openai'
+              },
+              {
+                type: 'input',
+                name: 'model',
+                message: 'Model:',
+                initial: 'gpt-4'
+              },
+              {
+                type: 'input',
+                name: 'systemPrompt',
+                message: 'System prompt (or press Enter for default):'
+              },
+              {
+                type: 'numeral',
+                name: 'temperature',
+                message: 'Temperature (0.0-2.0):',
+                initial: 0.7
+              },
+              {
+                type: 'numeral',
+                name: 'maxTokens',
+                message: 'Max tokens:',
+                initial: 4096
+              }
+            ];
+
+            const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
+
+            const agent = await context.currentWorld.createAgent({
+              name: answers.name,
+              type: 'conversational',
+              provider: answers.provider,
+              model: answers.model,
+              systemPrompt: answers.systemPrompt || `You are ${answers.name}, an agent in the ${context.currentWorld.name} world.`,
+              temperature: answers.temperature,
+              maxTokens: answers.maxTokens
+            });
+
+            cliResponse = {
+              success: true,
+              message: `Agent '${answers.name}' created successfully`,
+              data: agent,
+              needsWorldRefresh: true
+            };
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to create agent',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        } else {
+          // If no world selected, create world (redirect to create-world)
+          try {
+            const prompts = [
+              {
+                type: 'input',
+                name: 'name',
+                message: 'World name:',
+                required: true
+              },
+              {
+                type: 'input',
+                name: 'description',
+                message: 'World description:'
+              },
+              {
+                type: 'numeral',
+                name: 'turnLimit',
+                message: 'Turn limit:',
+                initial: 5
+              }
+            ];
+
+            const answers = await enquirer.prompt(prompts) as WorldCreateAnswers;
+
+            const newWorld = await createWorld(context.rootPath, {
+              name: answers.name,
+              description: answers.description || `A world named ${answers.name}`,
+              turnLimit: answers.turnLimit
+            });
+
+            cliResponse = {
+              success: true,
+              message: `World '${answers.name}' created successfully`,
+              data: newWorld,
+              needsWorldRefresh: true
+            };
+          } catch (error) {
+            cliResponse = {
+              success: false,
+              message: 'Failed to create world',
+              error: error instanceof Error ? error.message : String(error)
+            };
+          }
+        }
         break;
 
       default:
