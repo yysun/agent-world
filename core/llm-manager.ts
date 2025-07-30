@@ -104,6 +104,7 @@ class LLMQueue {
       throw new Error(`LLM queue is full (${this.maxQueueSize} items). Please try again later.`);
     }
 
+    logger.debug(`LLMQueue: Adding task for agent=${agentId}, world=${worldId}. Queue length before add: ${this.queue.length}`);
     return new Promise<T>((resolve, reject) => {
       const queueItem: QueuedLLMCall = {
         id: generateId(),
@@ -126,10 +127,12 @@ class LLMQueue {
 
     this.processing = true;
 
+    logger.debug(`LLMQueue: Starting queue processing. Queue length: ${this.queue.length}`);
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
 
       try {
+        logger.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
         // Add processing timeout to prevent stuck queue
         const processPromise = item.execute();
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -140,6 +143,7 @@ class LLMQueue {
 
         const result = await Promise.race([processPromise, timeoutPromise]);
         item.resolve(result);
+        logger.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
       } catch (error) {
         logger.error('LLM queue error', { agentId: item.agentId, error: error instanceof Error ? error.message : error });
         item.reject(error);
@@ -147,6 +151,7 @@ class LLMQueue {
     }
 
     this.processing = false;
+    logger.debug('LLMQueue: Queue processing complete.');
   }
 
   getQueueStatus(): {
@@ -236,6 +241,8 @@ async function executeStreamAgentResponse(
       messageId
     });
 
+    logger.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
+
     // Load LLM provider
     const model = loadLLMProvider(agent);
 
@@ -271,6 +278,7 @@ async function executeStreamAgentResponse(
         content: chunk,
         messageId
       });
+      logger.debug(`LLM: Streaming chunk for agent=${agent.id}, world=${world.id}, messageId=${messageId}, chunkLength=${chunk.length}`);
     }
 
     // Publish SSE end event via world's eventEmitter
@@ -280,6 +288,8 @@ async function executeStreamAgentResponse(
       messageId,
       // Add usage information if available
     });
+
+    logger.debug(`LLM: Finished streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
     // Update agent activity
     agent.lastActive = new Date();
@@ -294,6 +304,8 @@ async function executeStreamAgentResponse(
       error: (error as Error).message,
       messageId
     });
+
+    logger.error(`LLM: Error during streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, error=${(error as Error).message}`);
 
     throw error;
   }
@@ -325,19 +337,26 @@ async function executeGenerateAgentResponse(
   const model = loadLLMProvider(agent);
   const llmMessages = stripCustomFieldsFromMessages(messages);
 
-  const { text } = await generateText({
-    model,
-    messages: llmMessages,
-    temperature: agent.temperature,
-    maxTokens: agent.maxTokens
-  });
+  logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
+  try {
+    const { text } = await generateText({
+      model,
+      messages: llmMessages,
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens
+    });
 
-  // Update agent activity and LLM call count
-  agent.lastActive = new Date();
-  agent.llmCallCount++;
-  agent.lastLLMCall = new Date();
+    // Update agent activity and LLM call count
+    agent.lastActive = new Date();
+    agent.llmCallCount++;
+    agent.lastLLMCall = new Date();
 
-  return text;
+    logger.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+    return text;
+  } catch (error) {
+    logger.error(`LLM: Error during non-streaming response for agent=${agent.id}, world=${world.id}, error=${(error as Error).message}`);
+    throw error;
+  }
 }
 
 /**
@@ -420,6 +439,7 @@ function loadLLMProvider(agent: Agent): any {
     }
 
     default:
+      logger.error(`Unsupported LLM provider: ${agent.provider}`);
       throw new Error(`Unsupported LLM provider: ${agent.provider}`);
   }
 }
