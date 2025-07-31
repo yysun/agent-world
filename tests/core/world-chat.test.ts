@@ -18,56 +18,47 @@ const chatParams: CreateChatParams = {
   captureSnapshot: false
 };
 
-// Utility for full mock (chat/snapshot methods both top-level and in storageInstance for type compatibility)
+// Utility for full mock - returns proper StorageAPI interface
 const fullMockWrappers = (overrides = {}) => ({
-  storageInstance: {
-    saveWorld: jest.fn(),
-    loadWorld: jest.fn(),
-    deleteWorld: jest.fn(),
-    listWorlds: jest.fn(),
-    saveAgent: jest.fn(),
-    loadAgent: jest.fn(),
-    deleteAgent: jest.fn(),
-    listAgents: jest.fn(),
-    saveAgentsBatch: jest.fn(),
-    loadAgentsBatch: jest.fn(),
-    restoreFromSnapshot: jest.fn(),
-    validateIntegrity: jest.fn(),
-    repairData: jest.fn(),
-    // Chat and snapshot methods for type compatibility
-    saveChat: jest.fn(),
-    loadChat: jest.fn(),
-    deleteChat: jest.fn(),
-    listChats: jest.fn(),
-    updateChat: jest.fn(),
-    saveSnapshot: jest.fn(),
-    loadSnapshot: jest.fn(),
-  },
-  saveWorldToDisk: jest.fn(),
-  loadWorldFromDisk: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
-  deleteWorldFromDisk: jest.fn(),
-  loadAllWorldsFromDisk: jest.fn().mockResolvedValue([{ id: 'test-world', ...worldParams }]),
-  worldExistsOnDisk: jest.fn().mockResolvedValue(false),
-  loadAllAgentsFromDisk: jest.fn().mockResolvedValue([]),
-  saveAgentConfigToDisk: jest.fn(),
-  saveAgentToDisk: jest.fn(),
-  saveAgentMemoryToDisk: jest.fn(),
-  loadAgentFromDisk: jest.fn(),
-  loadAgentFromDiskWithRetry: jest.fn(),
-  deleteAgentFromDisk: jest.fn(),
-  loadAllAgentsFromDiskBatch: jest.fn(),
-  agentExistsOnDisk: jest.fn().mockResolvedValue(false),
-  validateAgentIntegrity: jest.fn(),
-  repairAgentData: jest.fn(),
-  archiveAgentMemory: jest.fn(),
-  // Top-level chat and snapshot methods
+  // World operations - standardized naming (required by StorageAPI)
+  saveWorld: jest.fn(),
+  loadWorld: jest.fn(),
+  deleteWorld: jest.fn(),
+  listWorlds: jest.fn(),
+  worldExists: jest.fn().mockResolvedValue(false),
+
+  // Agent operations - standardized naming (required by StorageAPI)
+  saveAgent: jest.fn(),
+  saveAgentConfig: jest.fn(),
+  saveAgentMemory: jest.fn(),
+  loadAgent: jest.fn(),
+  loadAgentWithRetry: jest.fn(),
+  deleteAgent: jest.fn(),
+  listAgents: jest.fn().mockResolvedValue([]),
+  agentExists: jest.fn().mockResolvedValue(false),
+
+  // Batch operations (required by StorageAPI)
+  saveAgentsBatch: jest.fn(),
+  loadAgentsBatch: jest.fn(),
+
+  // Chat history operations (required by StorageAPI)
   saveChat: jest.fn(),
   loadChat: jest.fn(),
   deleteChat: jest.fn(),
   listChats: jest.fn().mockResolvedValue([]),
   updateChat: jest.fn(),
+
+  // Snapshot operations (required by StorageAPI)
   saveSnapshot: jest.fn(),
   loadSnapshot: jest.fn(),
+  restoreFromSnapshot: jest.fn(),
+
+  // Integrity operations (required by StorageAPI)
+  validateIntegrity: jest.fn().mockResolvedValue({ isValid: true }),
+  repairData: jest.fn(),
+  archiveMemory: jest.fn(),
+
+  // Apply any overrides
   ...overrides,
 });
 
@@ -140,8 +131,8 @@ it('should create world snapshot', async () => {
   jest.resetModules();
   const storageFactory = await import('../../core/storage-factory');
   jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
-    loadWorldFromDisk: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
-    loadAllAgentsFromDisk: jest.fn().mockResolvedValue([]),
+    loadWorld: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
+    listAgents: jest.fn().mockResolvedValue([]),
   }));
   const managers = await import('../../core/managers');
   const snapshot = await managers.createWorldSnapshot(rootPath, 'test-world');
@@ -155,9 +146,11 @@ it('should restore world snapshot', async () => {
   jest.resetModules();
   const storageFactory = await import('../../core/storage-factory');
   jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
-    saveWorldToDisk: jest.fn(),
-    saveAgentToDisk: jest.fn(),
-    saveAgentMemoryToDisk: jest.fn(),
+    saveWorld: jest.fn(),
+    saveAgent: jest.fn(),
+    saveAgentMemory: jest.fn(),
+    listAgents: jest.fn().mockResolvedValue([]), // Ensure empty array for existing agents
+    deleteAgent: jest.fn(),
   }));
   const managers = await import('../../core/managers');
   // Use a minimal valid snapshot
@@ -183,7 +176,7 @@ it('should summarize chat', async () => {
       snapshot: { messages: [{ sender: 'A' }, { sender: 'B' }] },
       createdAt: new Date(),
     }),
-    loadWorldFromDisk: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
+    loadWorld: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
   }));
   const managers = await import('../../core/managers');
   const summary = await managers.summarizeChat(rootPath, 'test-world', chatId);
@@ -195,8 +188,8 @@ it('should export world to markdown', async () => {
   jest.resetModules();
   const storageFactory = await import('../../core/storage-factory');
   jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
-    loadWorldFromDisk: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
-    loadAllAgentsFromDisk: jest.fn().mockResolvedValue([]),
+    loadWorld: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
+    listAgents: jest.fn().mockResolvedValue([]),
     listChats: jest.fn().mockResolvedValue([]),
   }));
   const managers = await import('../../core/managers');
