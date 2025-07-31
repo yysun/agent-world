@@ -127,19 +127,18 @@ export function extractMentions(content: string): string[] {
 export function extractParagraphBeginningMentions(content: string): string[] {
   if (!content) return [];
 
-  // Pattern to match @mentions at paragraph beginning:
-  // (?:^|\n\s*) - Start of string OR newline followed by optional whitespace
-  // @ - Literal @ symbol
-  // (\w+(?:[-_]\w+)*) - Capture group for mention name (word chars, hyphens, underscores)
-  const paragraphMentionRegex = /(?:^|\n\s*)@(\w+(?:[-_]\w+)*)/g;
   const validMentions: string[] = [];
-  let match;
+  const mentionPattern = /^@(\w+(?:[-_]\w+)*)/;
+  const lines = content.split(/\n/);
 
-  while ((match = paragraphMentionRegex.exec(content)) !== null) {
-    const mention = match[1];
-    if (mention && mention.length > 0) {
-      const lowerMention = mention.toLowerCase();
-      validMentions.push(lowerMention);
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    // Only match if @ is the very first character after trimming
+    if (trimmed.startsWith('@')) {
+      const match = mentionPattern.exec(trimmed);
+      if (match && match[1]) {
+        validMentions.push(match[1].toLowerCase());
+      }
     }
   }
 

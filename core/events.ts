@@ -102,10 +102,10 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
   try {
     // Get current chats
     const chats = await world.listChats();
-    
+
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
-      const activeChat = chats.reduce((latest, chat) => 
+      const activeChat = chats.reduce((latest, chat) =>
         new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
       );
 
@@ -120,7 +120,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
         await world.storage.updateChat(world.id, activeChat.id, {
           messageCount: totalMessages
         });
-        
+
         logger.debug('Auto-updated chat message count', {
           chatId: activeChat.id,
           oldCount: activeChat.messageCount,
@@ -391,7 +391,7 @@ export async function saveIncomingMessageToMemory(
     // Auto-save memory using storage factory (database or disk)
     try {
       await world.storage.saveAgent(world.id, agent);
-      
+
       // Auto-update chat history message counts
       await updateActiveChatMessageCounts(world);
     } catch (error) {
@@ -458,7 +458,7 @@ export async function processAgentMessage(
       response = await generateAgentResponse(world, agent, messages);
     }
 
-    if(!response) {
+    if (!response) {
       logger.error('LLM response is empty', { agentId: agent.id });
       publishMessage(world, `[Error] LLM response is empty`, 'system');
       return;
@@ -489,7 +489,7 @@ export async function processAgentMessage(
     // Auto-save memory after adding final response
     try {
       await world.storage.saveAgent(world.id, agent);
-      
+
       // Auto-update chat history message counts
       await updateActiveChatMessageCounts(world);
     } catch (error) {
@@ -604,13 +604,19 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   // For HUMAN/user messages
   if (senderType === SenderType.HUMAN) {
     logger.debug('Processing HUMAN message logic', { agentId: agent.id });
-    // If no paragraph-beginning mentions, check for any mentions at all
+    // If no paragraph-beginning mentions, check if there are any mentions at all
     if (mentions.length === 0) {
-      logger.debug('No agent mentions - responding as public message', { agentId: agent.id });
-      return true;
+      // If there are ANY mentions anywhere but none at paragraph beginnings, don't respond
+      if (anyMentions.length > 0) {
+        logger.debug('Has mentions but not at paragraph beginning - not responding', { agentId: agent.id, anyMentions });
+        return false;
+      } else {
+        logger.debug('No agent mentions anywhere - responding as public message', { agentId: agent.id });
+        return true;
+      }
     } else {
       const shouldRespond = mentions.includes(agent.id.toLowerCase());
-      logger.debug('Agent mentioned - responding tomessage', { agentId: agent.id, mentions, shouldRespond });
+      logger.debug('Agent mentioned at paragraph beginning - responding to message', { agentId: agent.id, mentions, shouldRespond });
       return shouldRespond;
     }
   }

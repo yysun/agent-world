@@ -462,10 +462,18 @@ export function getDefaultRootPath(): string {
     // Default to ~/agent-world if not defined
     const homeDir = process.env.HOME || process.env.USERPROFILE || '';
     rootPath = homeDir ? path.join(homeDir, 'agent-world') : './agent-world';
-  } else {
-    rootPath = path.resolve(process.cwd(), rootPath);
   }
-  return rootPath;
+  // If AGENT_WORLD_DATA_PATH is absolute, use it as-is
+  // If relative, resolve relative to current working directory
+  if (path.isAbsolute(rootPath)) {
+    return rootPath;
+  } else {
+    // For relative paths, don't use resolve if it's already in the correct format
+    if (rootPath === './agent-world') {
+      return './agent-world';
+    }
+    return path.resolve(process.cwd(), rootPath);
+  }
 }
 
 export async function createStorageFromEnv(): Promise<StorageManager> {
