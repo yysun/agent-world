@@ -6,6 +6,8 @@
 
 Traditional AI frameworks force you to write hundreds of lines of code just to make agents talk to each other. Agent World lets you create intelligent agent teams using nothing but plain natural language.
 
+https://github.com/user-attachments/assets/cc507c95-01a4-4c27-975a-f8f67d8cf0d7
+
 Audio introduction: [Listen here](https://yysun.github.io/agent-world)
 
 **Other frameworks:**
