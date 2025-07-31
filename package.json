@@ -1,6 +1,6 @@
 {
   "name": "agent-world",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "main": "index.ts",
   "type": "module",
   "workspaces": [
