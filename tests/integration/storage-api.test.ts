@@ -2,21 +2,21 @@
  * Integration Test for StorageAPI Refactoring
  *
  * Validates that the new StorageAPI interface works correctly and that
- * StorageWrappers class properly delegates to storage instances.
+ * createStorageWrappers function properly delegates to storage instances.
  *
  * Features:
- * - Tests StorageWrappers class instantiation
+ * - Tests createStorageWrappers function
  * - Tests StorageAPI interface compliance
  * - Tests backward compatibility with old function names
  * - Tests that storage methods are properly delegated
  */
 
 import { describe, test, expect } from '@jest/globals';
-import { StorageWrappers, createStorageWithWrappers } from '../../core/storage-factory.js';
+import { createStorageWrappers, createStorageWithWrappers } from '../../core/storage-factory.js';
 import { StorageAPI } from '../../core/types.js';
 
 describe('StorageAPI Refactoring Integration', () => {
-  test('StorageWrappers implements StorageAPI interface', () => {
+  test('createStorageWrappers implements StorageAPI interface', () => {
     // Create a mock storage instance
     const mockStorage = {
       saveWorld: jest.fn(),
@@ -41,8 +41,8 @@ describe('StorageAPI Refactoring Integration', () => {
       repairData: jest.fn(),
     };
 
-    // Create StorageWrappers instance
-    const wrappers = new StorageWrappers(mockStorage);
+    // Create storage wrappers using function
+    const wrappers = createStorageWrappers(mockStorage);
 
     // Verify it implements StorageAPI interface
     const storageAPI: StorageAPI = wrappers;
@@ -71,7 +71,7 @@ describe('StorageAPI Refactoring Integration', () => {
     expect(typeof storageAPI.archiveMemory).toBe('function');
   });
 
-  test('StorageWrappers delegates to storage instance', async () => {
+  test('createStorageWrappers delegates to storage instance', async () => {
     // Create a mock storage instance with spies
     const mockStorage = {
       saveWorld: jest.fn().mockResolvedValue(undefined),
@@ -96,8 +96,8 @@ describe('StorageAPI Refactoring Integration', () => {
       repairData: jest.fn().mockResolvedValue(true),
     };
 
-    // Create StorageWrappers instance
-    const wrappers = new StorageWrappers(mockStorage);
+    // Create storage wrappers using function
+    const wrappers = createStorageWrappers(mockStorage);
 
     // Test world operations
     await wrappers.saveWorld({ id: 'test-world', name: 'Test World', turnLimit: 5 });
@@ -121,9 +121,9 @@ describe('StorageAPI Refactoring Integration', () => {
     expect(agent).toEqual({ id: 'test-agent' });
   });
 
-  test('StorageWrappers handles null storage instance gracefully', async () => {
-    // Create StorageWrappers with null storage (browser environment simulation)
-    const wrappers = new StorageWrappers(null);
+  test('createStorageWrappers handles null storage instance gracefully', async () => {
+    // Create storage wrappers with null storage (browser environment simulation)
+    const wrappers = createStorageWrappers(null);
 
     // All operations should return sensible defaults without throwing
     expect(await wrappers.saveWorld({ id: 'test' })).toBeUndefined();
@@ -175,12 +175,13 @@ describe('StorageAPI Refactoring Integration', () => {
     expect(typeof worldStorage.worldExists).toBe('function');
   });
 
-  test('createStorageWithWrappers returns StorageWrappers instance', async () => {
+  test('createStorageWithWrappers returns StorageAPI object', async () => {
     // This will test the factory function
     const wrappers = await createStorageWithWrappers();
     
-    // Should return a StorageWrappers instance
-    expect(wrappers).toBeInstanceOf(StorageWrappers);
+    // Should return an object implementing StorageAPI
+    expect(typeof wrappers).toBe('object');
+    expect(wrappers).not.toBeNull();
     
     // Should implement StorageAPI interface
     const storageAPI: StorageAPI = wrappers;

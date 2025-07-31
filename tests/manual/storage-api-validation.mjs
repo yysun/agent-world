@@ -37,14 +37,14 @@ async function runTests() {
       getAgent,
       deleteAgent,
       listAgents,
-      StorageWrappers,
+      createStorageWrappers,
       createStorageWithWrappers
     } = await import('../../core/index.js');
 
-    // Test 1: Verify StorageWrappers can be instantiated
-    console.log('\n✅ Test 1: StorageWrappers instantiation');
+    // Test 1: Verify createStorageWrappers works correctly
+    console.log('\n✅ Test 1: createStorageWrappers function');
     const wrappers = await createStorageWithWrappers();
-    console.log(`   StorageWrappers instance: ${wrappers.constructor.name}`);
+    console.log(`   Storage wrapper type: ${typeof wrappers}`);
     console.log(`   Has saveWorld method: ${typeof wrappers.saveWorld === 'function'}`);
     console.log(`   Has loadWorld method: ${typeof wrappers.loadWorld === 'function'}`);
     console.log(`   Has saveAgent method: ${typeof wrappers.saveAgent === 'function'}`);
@@ -171,7 +171,7 @@ async function runTests() {
 
     console.log('\n🎉 All tests completed successfully!');
     console.log('\n📋 Summary:');
-    console.log('   ✅ StorageWrappers class works correctly');
+    console.log('   ✅ createStorageWrappers function works correctly');
     console.log('   ✅ StorageAPI interface is properly implemented');
     console.log('   ✅ World management through managers works');
     console.log('   ✅ Agent management through managers works');

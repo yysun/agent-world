@@ -103,7 +103,7 @@ export { generateId, toKebabCase } from './utils.js';
 export { enableStreaming, disableStreaming } from './events.js';
 
 // Storage factory and wrappers
-export { StorageWrappers, createStorageWithWrappers, createStorageFromEnv } from './storage-factory.js';
+export { createStorageWrappers, createStorageWithWrappers, createStorageFromEnv } from './storage-factory.js';
 
 // Subscription system
 export * from './subscription.js';

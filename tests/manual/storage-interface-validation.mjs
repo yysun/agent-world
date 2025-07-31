@@ -14,12 +14,12 @@ async function runTests() {
     // Test 1: Import and verify StorageAPI interface exists
     console.log('\n✅ Test 1: Import StorageAPI and related modules');
     
-    const { StorageWrappers, createStorageWithWrappers } = await import('../../core/storage-factory.js');
-    console.log(`   ✓ StorageWrappers imported: ${StorageWrappers.name}`);
+    const { createStorageWrappers, createStorageWithWrappers } = await import('../../core/storage-factory.js');
+    console.log(`   ✓ createStorageWrappers imported: ${typeof createStorageWrappers === 'function'}`);
     console.log(`   ✓ createStorageWithWrappers imported: ${typeof createStorageWithWrappers === 'function'}`);
     
-    // Test 2: Test StorageWrappers class instantiation
-    console.log('\n✅ Test 2: StorageWrappers class structure');
+    // Test 2: Test createStorageWrappers function
+    console.log('\n✅ Test 2: createStorageWrappers function structure');
     
     // Create a mock storage instance for testing
     const mockStorage = {
@@ -45,9 +45,9 @@ async function runTests() {
       repairData: () => Promise.resolve(true),
     };
 
-    // Test instantiation
-    const wrappers = new StorageWrappers(mockStorage);
-    console.log(`   ✓ StorageWrappers instance created: ${wrappers.constructor.name}`);
+    // Test function usage
+    const wrappers = createStorageWrappers(mockStorage);
+    console.log(`   ✓ createStorageWrappers returned: ${typeof wrappers}`);
     
     // Test StorageAPI interface compliance
     const requiredMethods = [
@@ -91,8 +91,8 @@ async function runTests() {
     // Test 4: Test null storage instance (browser environment simulation)
     console.log('\n✅ Test 4: Null storage handling');
     
-    const nullWrappers = new StorageWrappers(null);
-    console.log('   ✓ StorageWrappers with null storage created');
+    const nullWrappers = createStorageWrappers(null);
+    console.log('   ✓ createStorageWrappers with null storage created');
     
     // These should return sensible defaults
     const result1 = await nullWrappers.saveWorld(testWorld);
@@ -133,16 +133,16 @@ async function runTests() {
     
     const core = await import('../../core/index.js');
     const hasStorageAPI = 'StorageAPI' in core || core.StorageAPI !== undefined;
-    const hasStorageWrappers = 'StorageWrappers' in core || core.StorageWrappers !== undefined;
+    const hasCreateStorageWrappers = typeof core.createStorageWrappers === 'function';
     const hasCreateStorageWithWrappers = typeof core.createStorageWithWrappers === 'function';
     
     console.log(`   ✓ StorageAPI exported: ${hasStorageAPI ? 'yes' : 'no'}`);
-    console.log(`   ✓ StorageWrappers exported: ${hasStorageWrappers ? 'yes' : 'no'}`);
+    console.log(`   ✓ createStorageWrappers exported: ${hasCreateStorageWrappers ? 'yes' : 'no'}`);
     console.log(`   ✓ createStorageWithWrappers exported: ${hasCreateStorageWithWrappers ? 'yes' : 'no'}`);
 
     console.log('\n🎉 All interface validation tests completed successfully!');
     console.log('\n📋 Summary:');
-    console.log('   ✅ StorageWrappers class structure is correct');
+    console.log('   ✅ createStorageWrappers function structure is correct');
     console.log('   ✅ StorageAPI interface compliance verified');
     console.log('   ✅ Method delegation works with mock storage');
     console.log('   ✅ Null storage handling works correctly');

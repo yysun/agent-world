@@ -79,7 +79,7 @@ import * as storageFactory from './storage-factory.js';
 import * as utils from './utils.js';
 
 // Storage wrapper instance - initialized from storage factory
-let storageWrappers: storageFactory.StorageWrappers | null = null;
+let storageWrappers: storageFactory.StorageAPI | null = null;
 
 // Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
@@ -92,7 +92,7 @@ async function initializeModules() {
 const moduleInitialization = initializeModules();
 
 // Wrapper functions to maintain backward compatibility during transition
-// These will delegate to the new StorageWrappers class
+// These will delegate to the new createStorageWrappers function
 async function saveWorldToDisk(rootPath: string, worldData: any): Promise<void> {
   await moduleInitialization;
   return storageWrappers!.saveWorld(worldData);
