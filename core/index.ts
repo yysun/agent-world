@@ -34,6 +34,15 @@ export {
   createAgentsBatch,
   registerAgentRuntime,
   getAgentConfig,
+  // Chat history operations
+  createChat,
+  getChatHistory,
+  updateChatHistory,
+  deleteChatHistory,
+  listChatHistory,
+  createWorldSnapshot,
+  restoreFromSnapshot,
+  summarizeChat,
   // Message operations
   // Note: Message operations moved to events.js (publishMessage, etc.)
 } from './managers.js';
@@ -60,6 +69,12 @@ export type {
   UpdateAgentParams,
   CreateWorldParams,
   UpdateWorldParams,
+  // Chat history types
+  WorldChat,
+  CreateChatParams,
+  UpdateChatParams,
+  ChatInfo,
+  WorldSnapshot,
   // Derived types using utility types
   AgentInfo,
   AgentData,
