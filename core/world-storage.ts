@@ -62,7 +62,7 @@ export async function ensureWorldDirectory(root: string, worldId: string): Promi
 /**
  * Check if world directory exists on disk
  */
-export async function worldExistsOnDisk(root: string, worldId: string): Promise<boolean> {
+export async function worldExists(root: string, worldId: string): Promise<boolean> {
   try {
     const worldDir = getWorldDir(root, worldId);
     const configPath = path.join(worldDir, 'config.json');
@@ -76,7 +76,7 @@ export async function worldExistsOnDisk(root: string, worldId: string): Promise<
 /**
  * Save world configuration to disk (excludes eventEmitter and agents)
  */
-export async function saveWorldToDisk(root: string, worldData: WorldData): Promise<void> {
+export async function saveWorld(root: string, worldData: WorldData): Promise<void> {
   const worldId = toKebabCase(worldData.id);
   await ensureWorldDirectory(root, worldId);
 
@@ -97,7 +97,7 @@ export async function saveWorldToDisk(root: string, worldData: WorldData): Promi
 /**
  * Load world configuration from disk
  */
-export async function loadWorldFromDisk(root: string, worldId: string): Promise<WorldData | null> {
+export async function loadWorld(root: string, worldId: string): Promise<WorldData | null> {
   try {
     const worldDir = getWorldDir(root, worldId);
     const configPath = path.join(worldDir, 'config.json');
@@ -121,7 +121,7 @@ export async function loadWorldFromDisk(root: string, worldId: string): Promise<
 /**
  * Delete world directory and all contents
  */
-export async function deleteWorldFromDisk(root: string, worldId: string): Promise<boolean> {
+export async function deleteWorld(root: string, worldId: string): Promise<boolean> {
   try {
     const worldDir = getWorldDir(root, worldId);
 
@@ -139,14 +139,14 @@ export async function deleteWorldFromDisk(root: string, worldId: string): Promis
 /**
  * Load all worlds from root directory
  */
-export async function loadAllWorldsFromDisk(root: string): Promise<WorldData[]> {
+export async function listWorlds(root: string): Promise<WorldData[]> {
   try {
     const entries = await fs.readdir(root, { withFileTypes: true });
     const worlds: WorldData[] = [];
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const worldData = await loadWorldFromDisk(root, entry.name);
+        const worldData = await loadWorld(root, entry.name);
         if (worldData) {
           worlds.push(worldData);
         }
@@ -176,3 +176,10 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
   const data = await fs.readFile(filePath, 'utf8');
   return JSON.parse(data) as T;
 }
+
+// Backward compatibility exports (old function names)
+export const saveWorldToDisk = saveWorld;
+export const loadWorldFromDisk = loadWorld;
+export const deleteWorldFromDisk = deleteWorld;
+export const loadAllWorldsFromDisk = listWorlds;
+export const worldExistsOnDisk = worldExists;

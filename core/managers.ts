@@ -125,7 +125,7 @@ async function loadAllAgentsFromDisk(rootPath: string, worldId: string): Promise
 
 async function saveAgentConfigToDisk(rootPath: string, worldId: string, agent: any): Promise<void> {
   await moduleInitialization;
-  return storageWrappers!.saveAgentConfig(worldId, agent);
+  return storageWrappers!.saveAgent(worldId, agent);
 }
 
 async function saveAgentToDisk(rootPath: string, worldId: string, agent: any): Promise<void> {

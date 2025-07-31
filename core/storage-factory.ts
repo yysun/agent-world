@@ -226,72 +226,72 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
   return {
     async saveWorld(worldData: any): Promise<void> {
       await ensureModulesLoaded();
-      if (worldStorage?.saveWorldToDisk) {
-        return worldStorage.saveWorldToDisk(rootPath, worldData);
+      if (worldStorage?.saveWorld) {
+        return worldStorage.saveWorld(rootPath, worldData);
       }
     },
     async loadWorld(worldId: string): Promise<any> {
       await ensureModulesLoaded();
-      if (worldStorage?.loadWorldFromDisk) {
-        return worldStorage.loadWorldFromDisk(rootPath, worldId);
+      if (worldStorage?.loadWorld) {
+        return worldStorage.loadWorld(rootPath, worldId);
       }
       return null;
     },
     async deleteWorld(worldId: string): Promise<boolean> {
       await ensureModulesLoaded();
-      if (worldStorage?.deleteWorldFromDisk) {
-        return worldStorage.deleteWorldFromDisk(rootPath, worldId);
+      if (worldStorage?.deleteWorld) {
+        return worldStorage.deleteWorld(rootPath, worldId);
       }
       return false;
     },
     async listWorlds(): Promise<any[]> {
       await ensureModulesLoaded();
-      if (worldStorage?.loadAllWorldsFromDisk) {
-        return worldStorage.loadAllWorldsFromDisk(rootPath);
+      if (worldStorage?.listWorlds) {
+        return worldStorage.listWorlds(rootPath);
       }
       return [];
     },
     async saveAgent(worldId: string, agent: any): Promise<void> {
       await ensureModulesLoaded();
-      if (agentStorage?.saveAgentToDisk) {
-        return agentStorage.saveAgentToDisk(rootPath, worldId, agent);
+      if (agentStorage?.saveAgent) {
+        return agentStorage.saveAgent(rootPath, worldId, agent);
       }
     },
     async loadAgent(worldId: string, agentId: string): Promise<any> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAgentFromDisk) {
-        return agentStorage.loadAgentFromDisk(rootPath, worldId, agentId);
+      if (agentStorage?.loadAgent) {
+        return agentStorage.loadAgent(rootPath, worldId, agentId);
       }
       return null;
     },
     async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
       await ensureModulesLoaded();
-      if (agentStorage?.deleteAgentFromDisk) {
-        return agentStorage.deleteAgentFromDisk(rootPath, worldId, agentId);
+      if (agentStorage?.deleteAgent) {
+        return agentStorage.deleteAgent(rootPath, worldId, agentId);
       }
       return false;
     },
     async listAgents(worldId: string): Promise<any[]> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAllAgentsFromDisk) {
-        return agentStorage.loadAllAgentsFromDisk(rootPath, worldId);
+      if (agentStorage?.listAgents) {
+        return agentStorage.listAgents(rootPath, worldId);
       }
       return [];
     },
     async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
       await ensureModulesLoaded();
-      if (agentStorage?.saveAgentToDisk) {
+      if (agentStorage?.saveAgent) {
         for (const agent of agents) {
-          await agentStorage.saveAgentToDisk(rootPath, worldId, agent);
+          await agentStorage.saveAgent(rootPath, worldId, agent);
         }
       }
     },
     async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<any[]> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAgentFromDisk) {
+      if (agentStorage?.loadAgent) {
         const agents: any[] = [];
         for (const agentId of agentIds) {
-          const agent = await agentStorage.loadAgentFromDisk(rootPath, worldId, agentId);
+          const agent = await agentStorage.loadAgent(rootPath, worldId, agentId);
           if (agent) agents.push(agent);
         }
         return agents;
@@ -306,8 +306,8 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
           return result.isValid;
         }
       } else {
-        if (worldStorage?.worldExistsOnDisk) {
-          return worldStorage.worldExistsOnDisk(rootPath, worldId);
+        if (worldStorage?.worldExists) {
+          return worldStorage.worldExists(rootPath, worldId);
         }
       }
       return false;
