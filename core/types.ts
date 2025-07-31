@@ -308,6 +308,7 @@ export interface CreateChatParams {
 export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureSnapshot'>> {
   summary?: string;
   tags?: string[];
+  messageCount?: number; // For autosave updates
 }
 
 /**

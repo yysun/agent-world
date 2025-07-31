@@ -81,6 +81,60 @@ import { createCategoryLogger } from './logger.js';
 const logger = createCategoryLogger('events');
 
 /**
+ * Auto-save chat history message counts when enabled
+ */
+let chatHistoryAutosaveEnabled = true;
+
+export function enableChatHistoryAutosave(): void {
+  chatHistoryAutosaveEnabled = true;
+}
+
+export function disableChatHistoryAutosave(): void {
+  chatHistoryAutosaveEnabled = false;
+}
+
+/**
+ * Update active chat message counts for autosave
+ */
+async function updateActiveChatMessageCounts(world: World): Promise<void> {
+  if (!chatHistoryAutosaveEnabled) return;
+
+  try {
+    // Get current chats
+    const chats = await world.listChats();
+    
+    // Find the most recently updated chat (likely the active one)
+    if (chats.length > 0) {
+      const activeChat = chats.reduce((latest, chat) => 
+        new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
+      );
+
+      // Calculate total message count across all agents
+      let totalMessages = 0;
+      for (const [, agent] of world.agents) {
+        totalMessages += agent.memory?.length || 0;
+      }
+
+      // Update the active chat's message count if it has changed
+      if (activeChat.messageCount !== totalMessages) {
+        await world.storage.updateChat(world.id, activeChat.id, {
+          messageCount: totalMessages
+        });
+        
+        logger.debug('Auto-updated chat message count', {
+          chatId: activeChat.id,
+          oldCount: activeChat.messageCount,
+          newCount: totalMessages
+        });
+      }
+    }
+  } catch (error) {
+    logger.debug('Chat autosave failed', { error: error instanceof Error ? error.message : error });
+    // Don't throw - autosave failures shouldn't break the main flow
+  }
+}
+
+/**
  * Message publishing using World.eventEmitter
  */
 export function publishMessage(world: World, content: string, sender: string): void {
@@ -337,6 +391,9 @@ export async function saveIncomingMessageToMemory(
     // Auto-save memory using storage factory (database or disk)
     try {
       await world.storage.saveAgent(world.id, agent);
+      
+      // Auto-update chat history message counts
+      await updateActiveChatMessageCounts(world);
     } catch (error) {
       logger.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -432,6 +489,9 @@ export async function processAgentMessage(
     // Auto-save memory after adding final response
     try {
       await world.storage.saveAgent(world.id, agent);
+      
+      // Auto-update chat history message counts
+      await updateActiveChatMessageCounts(world);
     } catch (error) {
       logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }

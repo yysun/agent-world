@@ -469,6 +469,10 @@ export async function updateChat(ctx: SQLiteStorageContext, worldId: string, cha
     setClauses.push('tags = ?');
     params.push(JSON.stringify(updates.tags));
   }
+  if (updates.messageCount !== undefined) {
+    setClauses.push('message_count = ?');
+    params.push(updates.messageCount);
+  }
   
   if (setClauses.length === 0) {
     return await loadChat(ctx, worldId, chatId);

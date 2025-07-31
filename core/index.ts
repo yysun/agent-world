@@ -55,7 +55,9 @@ export {
   publishSSE,
   subscribeAgentToMessages,
   processAgentMessage,
-  shouldAgentRespond
+  shouldAgentRespond,
+  enableChatHistoryAutosave,
+  disableChatHistoryAutosave
 } from './events.js';
 
 // Core types and utilities - Enhanced with TypeScript Utility Types
