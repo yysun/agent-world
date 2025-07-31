@@ -78,98 +78,141 @@ import * as llmManager from './llm-manager.js';
 import * as storageFactory from './storage-factory.js';
 import * as utils from './utils.js';
 
-// Storage and utility function assignments - initialized from storage factory
-let storageInstance: any = null;
-let saveWorldToDisk: any;
-let loadWorldFromDisk: any;
-let deleteWorldFromDisk: any;
-let loadAllWorldsFromDisk: any;
-let worldExistsOnDisk: any;
-let loadAllAgentsFromDisk: any;
-let saveAgentConfigToDisk: any;
-let saveAgentToDisk: any;
-let saveAgentMemoryToDisk: any;
-let loadAgentFromDisk: any;
-let loadAgentFromDiskWithRetry: any;
-let deleteAgentFromDisk: any;
-let loadAllAgentsFromDiskBatch: any;
-let agentExistsOnDisk: any;
-let validateAgentIntegrity: any;
-let repairAgentData: any;
-let archiveAgentMemory: any;
-// Chat operations
-let saveChat: any;
-let loadChat: any;
-let deleteChat: any;
-let listChats: any;
-let updateChat: any;
-let saveSnapshot: any;
-let loadSnapshot: any;
+// Storage wrapper instance - initialized from storage factory
+let storageWrappers: storageFactory.StorageWrappers | null = null;
 
 // Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
   initializeLogger();
 
-  // Get storage instance and wrappers from storage factory (handles environment detection)
-  const {
-    storageInstance: storage,
-    saveWorldToDisk: saveWorld,
-    loadWorldFromDisk: loadWorld,
-    deleteWorldFromDisk: deleteWorld,
-    loadAllWorldsFromDisk: loadAllWorlds,
-    worldExistsOnDisk: worldExists,
-    loadAllAgentsFromDisk: loadAllAgents,
-    saveAgentConfigToDisk: saveAgentConfig,
-    saveAgentToDisk: saveAgent,
-    saveAgentMemoryToDisk: saveAgentMemory,
-    loadAgentFromDisk: loadAgent,
-    loadAgentFromDiskWithRetry: loadAgentWithRetry,
-    deleteAgentFromDisk: deleteAgent,
-    loadAllAgentsFromDiskBatch: loadAllAgentsBatch,
-    agentExistsOnDisk: agentExists,
-    validateAgentIntegrity: validateIntegrity,
-    repairAgentData: repairData,
-    archiveAgentMemory: archiveMemory,
-    // Chat operations
-    saveChat: saveChat_,
-    loadChat: loadChat_,
-    deleteChat: deleteChat_,
-    listChats: listChats_,
-    updateChat: updateChat_,
-    saveSnapshot: saveSnapshot_,
-    loadSnapshot: loadSnapshot_
-  } = await storageFactory.createStorageWithWrappers();
-
-  // Assign storage instance and wrappers
-  storageInstance = storage;
-  saveWorldToDisk = saveWorld;
-  loadWorldFromDisk = loadWorld;
-  deleteWorldFromDisk = deleteWorld;
-  loadAllWorldsFromDisk = loadAllWorlds;
-  worldExistsOnDisk = worldExists;
-  loadAllAgentsFromDisk = loadAllAgents;
-  saveAgentConfigToDisk = saveAgentConfig;
-  saveAgentToDisk = saveAgent;
-  saveAgentMemoryToDisk = saveAgentMemory;
-  loadAgentFromDisk = loadAgent;
-  loadAgentFromDiskWithRetry = loadAgentWithRetry;
-  deleteAgentFromDisk = deleteAgent;
-  loadAllAgentsFromDiskBatch = loadAllAgentsBatch;
-  agentExistsOnDisk = agentExists;
-  validateAgentIntegrity = validateIntegrity;
-  repairAgentData = repairData;
-  archiveAgentMemory = archiveMemory;
-  // Chat operations
-  saveChat = saveChat_;
-  loadChat = loadChat_;
-  deleteChat = deleteChat_;
-  listChats = listChats_;
-  updateChat = updateChat_;
-  saveSnapshot = saveSnapshot_;
-  loadSnapshot = loadSnapshot_;
+  // Get storage wrapper instance from storage factory (handles environment detection)
+  storageWrappers = await storageFactory.createStorageWithWrappers();
 }
 
 const moduleInitialization = initializeModules();
+
+// Wrapper functions to maintain backward compatibility during transition
+// These will delegate to the new StorageWrappers class
+async function saveWorldToDisk(rootPath: string, worldData: any): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveWorld(worldData);
+}
+
+async function loadWorldFromDisk(rootPath: string, worldId: string): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.loadWorld(worldId);
+}
+
+async function deleteWorldFromDisk(rootPath: string, worldId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.deleteWorld(worldId);
+}
+
+async function loadAllWorldsFromDisk(rootPath: string): Promise<any[]> {
+  await moduleInitialization;
+  return storageWrappers!.listWorlds();
+}
+
+async function worldExistsOnDisk(rootPath: string, worldId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.worldExists(worldId);
+}
+
+async function loadAllAgentsFromDisk(rootPath: string, worldId: string): Promise<any[]> {
+  await moduleInitialization;
+  return storageWrappers!.listAgents(worldId);
+}
+
+async function saveAgentConfigToDisk(rootPath: string, worldId: string, agent: any): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveAgentConfig(worldId, agent);
+}
+
+async function saveAgentToDisk(rootPath: string, worldId: string, agent: any): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveAgent(worldId, agent);
+}
+
+async function saveAgentMemoryToDisk(rootPath: string, worldId: string, agentId: string, memory: any[]): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveAgentMemory(worldId, agentId, memory);
+}
+
+async function loadAgentFromDisk(rootPath: string, worldId: string, agentId: string): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.loadAgent(worldId, agentId);
+}
+
+async function loadAgentFromDiskWithRetry(rootPath: string, worldId: string, agentId: string, options?: any): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.loadAgentWithRetry(worldId, agentId, options);
+}
+
+async function deleteAgentFromDisk(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.deleteAgent(worldId, agentId);
+}
+
+async function loadAllAgentsFromDiskBatch(rootPath: string, worldId: string, options?: any): Promise<{ successful: any[]; failed: any[] }> {
+  await moduleInitialization;
+  return storageWrappers!.loadAgentsBatch(worldId, [], options);
+}
+
+async function agentExistsOnDisk(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.agentExists(worldId, agentId);
+}
+
+async function validateAgentIntegrity(rootPath: string, worldId: string, agentId: string): Promise<{ isValid: boolean }> {
+  await moduleInitialization;
+  return storageWrappers!.validateIntegrity(worldId, agentId);
+}
+
+async function repairAgentData(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.repairData(worldId, agentId);
+}
+
+async function archiveAgentMemory(rootPath: string, worldId: string, agentId: string, memory: any[]): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.archiveMemory(worldId, agentId, memory);
+}
+
+// Chat operations
+async function saveChat(rootPath: string, worldId: string, chat: any): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveChat(worldId, chat);
+}
+
+async function loadChat(rootPath: string, worldId: string, chatId: string): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.loadChat(worldId, chatId);
+}
+
+async function deleteChat(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
+  await moduleInitialization;
+  return storageWrappers!.deleteChat(worldId, chatId);
+}
+
+async function listChats(rootPath: string, worldId: string): Promise<any[]> {
+  await moduleInitialization;
+  return storageWrappers!.listChats(worldId);
+}
+
+async function updateChat(rootPath: string, worldId: string, chatId: string, updates: any): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.updateChat(worldId, chatId, updates);
+}
+
+async function saveSnapshot(rootPath: string, worldId: string, chatId: string, snapshot: any): Promise<void> {
+  await moduleInitialization;
+  return storageWrappers!.saveSnapshot(worldId, chatId, snapshot);
+}
+
+async function loadSnapshot(rootPath: string, worldId: string, chatId: string): Promise<any> {
+  await moduleInitialization;
+  return storageWrappers!.loadSnapshot(worldId, chatId);
+}
 
 // ========================
 // WORLD MANAGEMENT
@@ -193,7 +236,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
   const worldId = utils.toKebabCase(params.name);
 
   // Check if world already exists
-  const exists = await worldExistsOnDisk(rootPath, worldId);
+  const exists = await storageWrappers!.worldExists(worldId);
   if (exists) {
     throw new Error(`World with name '${params.name}' already exists`);
   }
@@ -205,7 +248,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     turnLimit: params.turnLimit || 5
   };
 
-  await saveWorldToDisk(rootPath, worldData);
+  await storageWrappers!.saveWorld(worldData);
 
   // Return runtime World object with EventEmitter and agents Map
   return worldDataToWorld(worldData, rootPath);
@@ -225,7 +268,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
   // Automatically convert worldId to kebab-case for consistent lookup
   const normalizedWorldId = utils.toKebabCase(worldId);
 
-  const worldData = await loadWorldFromDisk(rootPath, normalizedWorldId);
+  const worldData = await storageWrappers!.loadWorld(normalizedWorldId);
 
   if (!worldData) {
     return null;
@@ -235,7 +278,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
   const world = worldDataToWorld(worldData, rootPath);
 
   // Load agents into world runtime - use normalizedWorldId consistently
-  const agents = await loadAllAgentsFromDisk(rootPath, normalizedWorldId);
+  const agents = await storageWrappers!.listAgents(normalizedWorldId);
   for (const agentData of agents) {
     // Enhance agent data with methods before adding to world
     const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
@@ -256,7 +299,7 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
   // Automatically convert worldId to kebab-case for consistent lookup
   const normalizedWorldId = utils.toKebabCase(worldId);
 
-  const existingData = await loadWorldFromDisk(rootPath, normalizedWorldId);
+  const existingData = await storageWrappers!.loadWorld(normalizedWorldId);
 
   if (!existingData) {
     return null;
@@ -268,7 +311,7 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
     ...updates
   };
 
-  await saveWorldToDisk(rootPath, updatedData);
+  await storageWrappers!.saveWorld(updatedData);
   return worldDataToWorld(updatedData, rootPath);
 }
 
@@ -283,7 +326,7 @@ export async function deleteWorld(rootPath: string, worldId: string): Promise<bo
   // Automatically convert worldId to kebab-case for consistent lookup
   const normalizedWorldId = utils.toKebabCase(worldId);
 
-  return await deleteWorldFromDisk(rootPath, normalizedWorldId);
+  return await storageWrappers!.deleteWorld(normalizedWorldId);
 }
 
 /**
@@ -293,7 +336,7 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  const allWorldData = await loadAllWorldsFromDisk(rootPath);
+  const allWorldData = await storageWrappers!.listWorlds();
 
   // Count agents for each world
   const worldsWithAgentCount = await Promise.all(

@@ -452,6 +452,47 @@ export interface StorageManager {
   repairData(worldId: string, agentId?: string): Promise<boolean>;
 }
 
+// Standardized Storage API Interface (R3.2) - Unified interface for all storage implementations
+export interface StorageAPI {
+  // World operations - standardized naming
+  saveWorld(worldData: WorldData): Promise<void>;
+  loadWorld(worldId: string): Promise<WorldData | null>;
+  deleteWorld(worldId: string): Promise<boolean>;
+  listWorlds(): Promise<WorldData[]>;
+  worldExists(worldId: string): Promise<boolean>;
+
+  // Agent operations - standardized naming
+  saveAgent(worldId: string, agent: Agent): Promise<void>;
+  saveAgentConfig(worldId: string, agent: Agent): Promise<void>;
+  saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
+  loadAgent(worldId: string, agentId: string): Promise<Agent | null>;
+  loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null>;
+  deleteAgent(worldId: string, agentId: string): Promise<boolean>;
+  listAgents(worldId: string): Promise<Agent[]>;
+  agentExists(worldId: string, agentId: string): Promise<boolean>;
+
+  // Batch operations
+  saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;
+  loadAgentsBatch(worldId: string, agentIds: string[], options?: any): Promise<{ successful: Agent[]; failed: any[] }>;
+
+  // Chat history operations
+  saveChat(worldId: string, chat: WorldChat): Promise<void>;
+  loadChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  deleteChat(worldId: string, chatId: string): Promise<boolean>;
+  listChats(worldId: string): Promise<ChatInfo[]>;
+  updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
+
+  // Snapshot operations
+  saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void>;
+  loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null>;
+  restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean>;
+
+  // Integrity operations
+  validateIntegrity(worldId: string, agentId?: string): Promise<{ isValid: boolean }>;
+  repairData(worldId: string, agentId?: string): Promise<boolean>;
+  archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
+}
+
 // Message Processing Interface (R4.1)
 export interface MessageProcessor {
   extractMentions(content: string): string[];
