@@ -57,6 +57,12 @@ export interface WorldChatProps {
     id?: string;
     name: string;
   } | null;
+  currentChat?: {
+    id: string | null;
+    name: string;
+    isSaved: boolean;
+    messageCount: number;
+  };
 }
 
 const debug = true;
@@ -70,8 +76,28 @@ export default function WorldChat(props: WorldChatProps) {
     isSending,
     isWaiting,
     activeAgent,
-    selectedAgent
+    selectedAgent,
+    currentChat
   } = props;
+
+  // Check if we need to auto-save (this will be called on every render)
+  if (currentChat && !currentChat.isSaved && messages.length > 0) {
+    // Count agent messages (non-human, non-system)
+    const agentMessages = messages.filter(msg => 
+      msg.sender !== 'HUMAN' && 
+      msg.sender !== 'human' && 
+      msg.sender !== 'system' &&
+      msg.type !== 'user'
+    );
+    
+    // If this is the first agent message, trigger auto-save
+    if (agentMessages.length === 1) {
+      // Use setTimeout to avoid calling during render
+      setTimeout(() => {
+        app.run('auto-save-chat');
+      }, 100);
+    }
+  }
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -82,7 +108,12 @@ export default function WorldChat(props: WorldChatProps) {
 
   return (
     <fieldset className="chat-fieldset">
-      <legend>{worldName}</legend>
+      <legend>
+        {currentChat ? currentChat.name : worldName}
+        {currentChat && !currentChat.isSaved && (
+          <span className="unsaved-indicator" title="Unsaved chat"> ●</span>
+        )}
+      </legend>
       <div className="chat-container">
         {/* Conversation Area */}
         <div className="conversation-area" ref={e => e.scrollTop = e.scrollHeight}>

@@ -131,13 +131,17 @@ export interface ChatHistoryState {
   loading: boolean;
   error: string | null;
   selectedChat: ChatInfo | null;
-  showCreateForm: boolean;
   showDeleteConfirm: boolean;
   showLoadConfirm: boolean;
-  formData: {
-    name: string;
-    description: string;
-  };
+}
+
+// Current Chat Session State
+export interface CurrentChatState {
+  id: string | null; // null for unsaved chats, chatId for saved chats
+  name: string;
+  isSaved: boolean;
+  messageCount: number;
+  lastUpdated: Date;
 }
 
 // Agent Edit State Management
@@ -204,8 +208,9 @@ export interface WorldComponentState extends SSEComponentState {
   worldEditMode: 'create' | 'edit' | 'delete';
   selectedWorldForEdit: World | null;
 
-  // Chat history state
+  // Chat history and current chat state
   chatHistory: ChatHistoryState;
+  currentChat: CurrentChatState;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
@@ -363,13 +368,16 @@ export const DEFAULT_CHAT_HISTORY_STATE: ChatHistoryState = {
   loading: false,
   error: null,
   selectedChat: null,
-  showCreateForm: false,
   showDeleteConfirm: false,
-  showLoadConfirm: false,
-  formData: {
-    name: '',
-    description: ''
-  }
+  showLoadConfirm: false
+};
+
+export const DEFAULT_CURRENT_CHAT_STATE: CurrentChatState = {
+  id: null,
+  name: 'New Chat',
+  isSaved: false,
+  messageCount: 0,
+  lastUpdated: new Date()
 };
 
 // Export commonly used type aliases for backward compatibility

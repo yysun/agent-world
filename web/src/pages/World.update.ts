@@ -407,81 +407,6 @@ export const worldUpdateHandlers = {
     }
   },
 
-  'chat-history-show-create-form': (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      showCreateForm: true,
-      formData: {
-        name: '',
-        description: ''
-      }
-    }
-  }),
-
-  'chat-history-hide-create-form': (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      showCreateForm: false
-    }
-  }),
-
-  'chat-history-update-form': (state: WorldComponentState, updates: any): WorldComponentState => ({
-    ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      formData: {
-        ...state.chatHistory.formData,
-        ...updates
-      }
-    }
-  }),
-
-  'chat-history-create-submit': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    const newState = {
-      ...state,
-      chatHistory: {
-        ...state.chatHistory,
-        loading: true,
-        error: null
-      }
-    };
-
-    try {
-      const chat = await api.createChat(state.worldName, {
-        name: state.chatHistory.formData.name,
-        description: state.chatHistory.formData.description || undefined,
-        captureSnapshot: true
-      });
-
-      const chats = await api.listChats(state.worldName);
-
-      return {
-        ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          chats,
-          loading: false,
-          showCreateForm: false,
-          formData: {
-            name: '',
-            description: ''
-          }
-        }
-      };
-    } catch (error: any) {
-      return {
-        ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          loading: false,
-          error: error.message || 'Failed to create chat'
-        }
-      };
-    }
-  },
-
   'chat-history-show-load-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
     ...state,
     chatHistory: {
@@ -555,7 +480,8 @@ export const worldUpdateHandlers = {
       await api.deleteChat(state.worldName, state.chatHistory.selectedChat.id);
       const chats = await api.listChats(state.worldName);
 
-      return {
+      // If the deleted chat was the current chat, create a new one
+      const updatedState = {
         ...newState,
         chatHistory: {
           ...newState.chatHistory,
@@ -565,6 +491,20 @@ export const worldUpdateHandlers = {
           selectedChat: null
         }
       };
+
+      if (state.currentChat.id === state.chatHistory.selectedChat.id) {
+        updatedState.messages = [];
+        updatedState.currentChat = {
+          id: null,
+          name: 'New Chat',
+          isSaved: false,
+          messageCount: 0,
+          lastUpdated: new Date()
+        };
+        updatedState.userInput = '';
+      }
+
+      return updatedState;
     } catch (error: any) {
       return {
         ...newState,

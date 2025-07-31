@@ -2085,3 +2085,59 @@ legend {
     flex-direction: column;
   }
 }
+
+/* Chat header and new chat button styles */
+.current-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  margin-bottom: 0;
+}
+
+.chat-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.unsaved-indicator {
+  color: var(--accent-primary);
+  font-weight: bold;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.new-chat-btn {
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.new-chat-btn:hover {
+  background: var(--accent-primary-dark);
+}
+
+.new-chat-btn:active {
+  transform: translateY(1px);
+}
+
+/* Update chat fieldset legend to include unsaved indicator */
+.chat-fieldset legend .unsaved-indicator {
+  margin-left: 0.25rem;
+  font-size: 0.8em;
+}
