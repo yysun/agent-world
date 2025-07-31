@@ -61,7 +61,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
       // Chat history state
-      chatHistory: DEFAULT_CHAT_HISTORY_STATE,
+      chatHistory: null,
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -183,32 +183,29 @@ export default class WorldComponent extends Component<WorldComponentState> {
           <div className="settings-column">
             <div className="settings-section">
               <div className="settings-row">
-                <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
+                <button
+                  className="world-settings-btn"
+                  title="Toggle Settings/Chat History"
+                  $onclick="toggle-settings-chat-history"
+                >
                   <span className="world-gear-icon">⊕</span>
                 </button>
-                <button className="world-settings-btn" title="Chat History" $onclick="select-chat-history">
-                  <span className="world-gear-icon">📁</span>
+                <button
+                  className="world-settings-btn"
+                  $onclick={['export-world-markdown', state.world.name]}
+                  title="Export world to markdown file"
+                  style={{ marginLeft: '8px' }}
+                >
+                  <span className="world-gear-icon">↓</span>
                 </button>
-                {state.selectedSettingsTarget === 'world' && state.world && (
-                  <>
-                    <button
-                      className="world-settings-btn"
-                      $onclick={['export-world-markdown', state.world.name]}
-                      title="Export world to markdown file"
-                      style={{ marginLeft: '8px' }}
-                    >
-                      <span className="world-gear-icon">↓</span>
-                    </button>
-                    <button
-                      className="world-settings-btn"
-                      $onclick={['view-world-markdown', state.world.name]}
-                      title="View world markdown in new tab"
-                      style={{ marginLeft: '4px' }}
-                    >
-                      <span className="world-gear-icon">&#x1F5CE;</span>
-                    </button>
-                  </>
-                )}
+                <button
+                  className="world-settings-btn"
+                  $onclick={['view-world-markdown', state.world.name]}
+                  title="View world markdown in new tab"
+                  style={{ marginLeft: '4px' }}
+                >
+                  <span className="world-gear-icon">&#x1F5CE;</span>
+                </button>
               </div>
             </div>
 

@@ -360,6 +360,20 @@ export const worldUpdateHandlers = {
     }
   },
 
+  // Toggle between settings and chat history sidebar
+  'toggle-settings-chat-history': (state: WorldComponentState): WorldComponentState => {
+    let nextTarget: 'world' | 'chat';
+    if (state.selectedSettingsTarget !== 'world') {
+      nextTarget = 'world';
+      return {
+        ...state,
+        selectedSettingsTarget: nextTarget
+      };
+    } else {
+      app.run('select-chat-history')
+    }
+  },
+
   // Chat history event handlers
   'chat-history-refresh': async (state: WorldComponentState): Promise<WorldComponentState> => {
     const newState = {
@@ -491,10 +505,10 @@ export const worldUpdateHandlers = {
 
     try {
       await api.restoreFromChat(state.worldName, state.chatHistory.selectedChat.id);
-      
+
       // Refresh the world data after restore
       app.run('/World', state.worldName);
-      
+
       return {
         ...newState,
         chatHistory: {

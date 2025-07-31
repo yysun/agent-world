@@ -82,7 +82,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>Chat History - {worldName}</legend>
+      <legend>Chat History</legend>
       
       <div className="chat-history-container">
         {chatHistory.loading ? (
