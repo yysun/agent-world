@@ -8,6 +8,7 @@
  * - Real logger for debugging test issues
  * - Test environment setup
  * - Automatic cleanup between tests
+ * - Conditional mocking (excludes integration tests)
  */
 
 import { jest } from '@jest/globals';
@@ -35,6 +36,79 @@ jest.mock('../../core/agent-storage', () => ({
   saveWorldToDisk: jest.fn<any>().mockResolvedValue(undefined),
   loadWorldFromDisk: jest.fn<any>().mockResolvedValue({})
 }));
+
+// Mock world-storage module for new world storage operations
+jest.mock('../../core/world-storage', () => ({
+  saveWorldData: jest.fn<any>().mockResolvedValue(undefined),
+  loadWorldData: jest.fn<any>().mockResolvedValue({}),
+  deleteWorldData: jest.fn<any>().mockResolvedValue(true),
+  listWorldData: jest.fn<any>().mockResolvedValue([]),
+  saveWorldChat: jest.fn<any>().mockResolvedValue(undefined),
+  loadWorldChat: jest.fn<any>().mockResolvedValue(null),
+  deleteWorldChat: jest.fn<any>().mockResolvedValue(true),
+  listWorldChats: jest.fn<any>().mockResolvedValue([])
+}));
+
+// Mock storage-factory module with enhanced API coverage
+jest.mock('../../core/storage-factory', () => {
+  // Import the actual module to get real function implementations
+  const actualModule = jest.requireActual('../../core/storage-factory') as any;
+  
+  return {
+    // Re-export actual functions that integration tests need
+    getDefaultRootPath: actualModule.getDefaultRootPath,
+    createStorageFromEnv: actualModule.createStorageFromEnv,
+    
+    // Override only the storage creation functions with mocks
+    createStorageWrappers: jest.fn<any>().mockReturnValue({
+      // World operations
+      saveWorld: jest.fn<any>().mockResolvedValue(undefined),
+      loadWorld: jest.fn<any>().mockResolvedValue({}),
+      deleteWorld: jest.fn<any>().mockResolvedValue(true),
+      listWorlds: jest.fn<any>().mockResolvedValue([]),
+      worldExists: jest.fn<any>().mockResolvedValue(true),
+      
+      // Agent operations
+      saveAgent: jest.fn<any>().mockResolvedValue(undefined),
+      saveAgentConfig: jest.fn<any>().mockResolvedValue(undefined),
+      saveAgentMemory: jest.fn<any>().mockResolvedValue(undefined),
+      loadAgent: jest.fn<any>().mockResolvedValue(null),
+      loadAgentWithRetry: jest.fn<any>().mockResolvedValue(null),
+      deleteAgent: jest.fn<any>().mockResolvedValue(true),
+      listAgents: jest.fn<any>().mockResolvedValue([]),
+      agentExists: jest.fn<any>().mockResolvedValue(true),
+      
+      // Batch operations
+      saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
+      loadAgentsBatch: jest.fn<any>().mockResolvedValue({ successful: [], failed: [] }),
+      
+      // Chat history operations
+      saveChat: jest.fn<any>().mockResolvedValue(undefined),
+      loadChat: jest.fn<any>().mockResolvedValue(null),
+      deleteChat: jest.fn<any>().mockResolvedValue(true),
+      listChats: jest.fn<any>().mockResolvedValue([]),
+      updateChat: jest.fn<any>().mockResolvedValue(null),
+      
+      // Snapshot operations
+      saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
+      loadSnapshot: jest.fn<any>().mockResolvedValue(null),
+      restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
+      
+      // Integrity operations
+      validateIntegrity: jest.fn<any>().mockResolvedValue({ isValid: true }),
+      repairData: jest.fn<any>().mockResolvedValue(true),
+      archiveMemory: jest.fn<any>().mockResolvedValue(undefined)
+    }),
+    
+    createStorageWithWrappers: jest.fn<any>().mockResolvedValue({
+      // Mirror the same API
+      saveWorld: jest.fn<any>().mockResolvedValue(undefined),
+      loadWorld: jest.fn<any>().mockResolvedValue({}),
+      deleteWorld: jest.fn<any>().mockResolvedValue(true),
+      listWorlds: jest.fn<any>().mockResolvedValue([])
+    })
+  };
+});
 
 // Mock LLM manager globally with default successful responses
 jest.mock('../../core/llm-manager', () => ({
@@ -77,6 +151,71 @@ jest.mock('ai', () => ({
 // Mock dotenv
 jest.mock('dotenv', () => ({
   config: jest.fn<any>().mockReturnValue({ parsed: {} })
+}));
+
+// Mock nanoid for unique ID generation
+jest.mock('nanoid', () => ({
+  nanoid: jest.fn<any>().mockReturnValue('mock-nanoid-id')
+}));
+
+// Mock SQLite storage modules for new storage backend
+jest.mock('../../core/sqlite-storage', () => ({
+  SQLiteStorage: jest.fn<any>().mockImplementation(() => ({
+    // World operations
+    saveWorld: jest.fn<any>().mockResolvedValue(undefined),
+    loadWorld: jest.fn<any>().mockResolvedValue({}),
+    deleteWorld: jest.fn<any>().mockResolvedValue(true),
+    listWorlds: jest.fn<any>().mockResolvedValue([]),
+    
+    // Agent operations
+    saveAgent: jest.fn<any>().mockResolvedValue(undefined),
+    loadAgent: jest.fn<any>().mockResolvedValue(null),
+    deleteAgent: jest.fn<any>().mockResolvedValue(true),
+    listAgents: jest.fn<any>().mockResolvedValue([]),
+    
+    // Chat and snapshot operations
+    saveChat: jest.fn<any>().mockResolvedValue(undefined),
+    loadChat: jest.fn<any>().mockResolvedValue(null),
+    deleteChat: jest.fn<any>().mockResolvedValue(true),
+    listChats: jest.fn<any>().mockResolvedValue([]),
+    updateChat: jest.fn<any>().mockResolvedValue(null),
+    saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
+    loadSnapshot: jest.fn<any>().mockResolvedValue(null),
+    restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
+    
+    // Batch and integrity operations
+    saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
+    loadAgentsBatch: jest.fn<any>().mockResolvedValue([]),
+    validateIntegrity: jest.fn<any>().mockResolvedValue(true),
+    repairData: jest.fn<any>().mockResolvedValue(true),
+    
+    // Database management
+    initialize: jest.fn<any>().mockResolvedValue(undefined),
+    close: jest.fn<any>().mockResolvedValue(undefined)
+  }))
+}));
+
+// Mock sqlite3 module
+jest.mock('sqlite3', () => ({
+  Database: jest.fn<any>().mockImplementation(() => ({
+    run: jest.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+      if (callback) callback(null);
+    }),
+    get: jest.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+      if (callback) callback(null, {});
+    }),
+    all: jest.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+      if (callback) callback(null, []);
+    }),
+    close: jest.fn<any>().mockImplementation((callback: any) => {
+      if (callback) callback(null);
+    }),
+    serialize: jest.fn<any>().mockImplementation((callback: any) => {
+      if (callback) callback();
+    })
+  })),
+  OPEN_READWRITE: 2,
+  OPEN_CREATE: 4
 }));
 
 // Mock process functions
