@@ -95,6 +95,51 @@ export interface World {
   turnLimit?: number;
 }
 
+// Chat History Interfaces (from core types)
+export interface ChatInfo {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
+  summary?: string;
+  tags?: string[];
+}
+
+export interface WorldChat extends ChatInfo {
+  worldId: string;
+  snapshot?: WorldSnapshot;
+}
+
+export interface WorldSnapshot {
+  world: any; // WorldData
+  agents: any[]; // AgentData[]
+  messages: any[]; // AgentMessage[]
+  metadata: {
+    capturedAt: Date;
+    version: string;
+    totalMessages: number;
+    activeAgents: number;
+  };
+}
+
+// Chat History State Management
+export interface ChatHistoryState {
+  isOpen: boolean;
+  chats: ChatInfo[];
+  loading: boolean;
+  error: string | null;
+  selectedChat: ChatInfo | null;
+  showCreateForm: boolean;
+  showDeleteConfirm: boolean;
+  showLoadConfirm: boolean;
+  formData: {
+    name: string;
+    description: string;
+  };
+}
+
 // Agent Edit State Management
 export interface AgentEditState {
   isOpen: boolean;
@@ -145,7 +190,7 @@ export interface WorldComponentState extends SSEComponentState {
   messagesLoading: boolean;
   isSending: boolean;
   isWaiting: boolean;
-  selectedSettingsTarget: 'world' | 'agent' | null;
+  selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;
 
@@ -158,6 +203,9 @@ export interface WorldComponentState extends SSEComponentState {
   showWorldEdit: boolean;
   worldEditMode: 'create' | 'edit' | 'delete';
   selectedWorldForEdit: World | null;
+
+  // Chat history state
+  chatHistory: ChatHistoryState;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
@@ -307,6 +355,21 @@ export const DEFAULT_WORLD_FORM_DATA: WorldFormData = {
   name: '',
   description: '',
   turnLimit: UI_CONSTANTS.DEFAULT_TURN_LIMIT
+};
+
+export const DEFAULT_CHAT_HISTORY_STATE: ChatHistoryState = {
+  isOpen: false,
+  chats: [],
+  loading: false,
+  error: null,
+  selectedChat: null,
+  showCreateForm: false,
+  showDeleteConfirm: false,
+  showLoadConfirm: false,
+  formData: {
+    name: '',
+    description: ''
+  }
 };
 
 // Export commonly used type aliases for backward compatibility

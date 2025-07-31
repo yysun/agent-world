@@ -33,7 +33,9 @@ import type {
   AgentFormData,
   WorldFormData,
   ApiResponse,
-  ApiRequestOptions
+  ApiRequestOptions,
+  ChatInfo,
+  WorldChat
 } from './types';
 
 interface ErrorResponse {
@@ -325,4 +327,123 @@ export default {
   // Agent memory management
   // getAgentMemory,
   clearAgentMemory,
+
+  // Chat history management
+  listChats,
+  createChat,
+  getChat,
+  updateChat,
+  deleteChat,
+  restoreFromChat,
+  summarizeChat,
 };
+
+// ========================
+// CHAT HISTORY API
+// ========================
+
+/**
+ * List all chat history entries for a world
+ */
+export async function listChats(worldName: string): Promise<ChatInfo[]> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`);
+  const data = await response.json();
+  
+  return data.chats || [];
+}
+
+/**
+ * Create a new chat history entry
+ */
+export async function createChat(worldName: string, chatData: { name: string; description?: string; captureSnapshot?: boolean }): Promise<WorldChat> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(chatData),
+  });
+
+  const data = await response.json();
+  return data.chat;
+}
+
+/**
+ * Get a specific chat history entry
+ */
+export async function getChat(worldName: string, chatId: string): Promise<WorldChat> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`);
+  const data = await response.json();
+  
+  return data.chat;
+}
+
+/**
+ * Update a chat history entry
+ */
+export async function updateChat(worldName: string, chatId: string, updates: { name?: string; description?: string; summary?: string; tags?: string[] }): Promise<WorldChat> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+
+  const data = await response.json();
+  return data.chat;
+}
+
+/**
+ * Delete a chat history entry
+ */
+export async function deleteChat(worldName: string, chatId: string): Promise<void> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Restore world state from a chat history entry
+ */
+export async function restoreFromChat(worldName: string, chatId: string): Promise<void> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/restore`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Generate a summary for a chat history entry
+ */
+export async function summarizeChat(worldName: string, chatId: string): Promise<string> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/summarize`, {
+    method: 'POST',
+  });
+
+  const data = await response.json();
+  return data.summary;
+}
