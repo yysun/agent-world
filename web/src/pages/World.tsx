@@ -27,9 +27,10 @@
  */
 
 import { app, Component, safeHTML } from 'apprun';
-import type { WorldComponentState, Agent } from '../types';
+import type { WorldComponentState, Agent, DEFAULT_CHAT_HISTORY_STATE } from '../types';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
+import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
@@ -59,6 +60,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false,
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
+      // Chat history state
+      chatHistory: DEFAULT_CHAT_HISTORY_STATE,
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -183,6 +186,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 <button className="world-settings-btn" title="World Settings" $onclick="select-world-settings">
                   <span className="world-gear-icon">⊕</span>
                 </button>
+                <button className="world-settings-btn" title="Chat History" $onclick="select-chat-history">
+                  <span className="world-gear-icon">📁</span>
+                </button>
                 {state.selectedSettingsTarget === 'world' && state.world && (
                   <>
                     <button
@@ -206,12 +212,19 @@ export default class WorldComponent extends Component<WorldComponentState> {
               </div>
             </div>
 
-            <WorldSettings
-              world={state.world}
-              selectedSettingsTarget={state.selectedSettingsTarget}
-              selectedAgent={state.selectedAgent}
-              totalMessages={(state.messages || []).length}
-            />
+            {state.selectedSettingsTarget === 'chat' ? (
+              <WorldChatHistory
+                worldName={state.worldName}
+                chatHistory={state.chatHistory}
+              />
+            ) : (
+              <WorldSettings
+                world={state.world}
+                selectedSettingsTarget={state.selectedSettingsTarget}
+                selectedAgent={state.selectedAgent}
+                totalMessages={(state.messages || []).length}
+              />
+            )}
           </div>
         </div>
 

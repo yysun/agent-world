@@ -324,6 +324,290 @@ export const worldUpdateHandlers = {
     };
   },
 
+  // Chat history settings handler
+  'select-chat-history': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    const newState = {
+      ...state,
+      selectedSettingsTarget: 'chat' as const,
+      selectedAgent: null,
+      messages: (state.messages || []).filter(message => !message.userEntered),
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      const chats = await api.listChats(state.worldName);
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          chats,
+          loading: false
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to load chat history'
+        }
+      };
+    }
+  },
+
+  // Chat history event handlers
+  'chat-history-refresh': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    const newState = {
+      ...state,
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      const chats = await api.listChats(state.worldName);
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          chats,
+          loading: false
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to refresh chat history'
+        }
+      };
+    }
+  },
+
+  'chat-history-show-create-form': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      showCreateForm: true,
+      formData: {
+        name: '',
+        description: ''
+      }
+    }
+  }),
+
+  'chat-history-hide-create-form': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      showCreateForm: false
+    }
+  }),
+
+  'chat-history-update-form': (state: WorldComponentState, updates: any): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      formData: {
+        ...state.chatHistory.formData,
+        ...updates
+      }
+    }
+  }),
+
+  'chat-history-create-submit': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    const newState = {
+      ...state,
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      const chat = await api.createChat(state.worldName, {
+        name: state.chatHistory.formData.name,
+        description: state.chatHistory.formData.description || undefined,
+        captureSnapshot: true
+      });
+
+      const chats = await api.listChats(state.worldName);
+
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          chats,
+          loading: false,
+          showCreateForm: false,
+          formData: {
+            name: '',
+            description: ''
+          }
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to create chat'
+        }
+      };
+    }
+  },
+
+  'chat-history-show-load-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      showLoadConfirm: true,
+      selectedChat: chat
+    }
+  }),
+
+  'chat-history-load-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.chatHistory.selectedChat) return state;
+
+    const newState = {
+      ...state,
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      await api.restoreFromChat(state.worldName, state.chatHistory.selectedChat.id);
+      
+      // Refresh the world data after restore
+      app.run('/World', state.worldName);
+      
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          showLoadConfirm: false,
+          selectedChat: null
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to restore from chat'
+        }
+      };
+    }
+  },
+
+  'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      showDeleteConfirm: true,
+      selectedChat: chat
+    }
+  }),
+
+  'chat-history-delete-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.chatHistory.selectedChat) return state;
+
+    const newState = {
+      ...state,
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      await api.deleteChat(state.worldName, state.chatHistory.selectedChat.id);
+      const chats = await api.listChats(state.worldName);
+
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          chats,
+          loading: false,
+          showDeleteConfirm: false,
+          selectedChat: null
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to delete chat'
+        }
+      };
+    }
+  },
+
+  'chat-history-summarize': async (state: WorldComponentState, chat: any): Promise<WorldComponentState> => {
+    const newState = {
+      ...state,
+      chatHistory: {
+        ...state.chatHistory,
+        loading: true,
+        error: null
+      }
+    };
+
+    try {
+      const summary = await api.summarizeChat(state.worldName, chat.id);
+      const chats = await api.listChats(state.worldName);
+
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          chats,
+          loading: false
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...newState,
+        chatHistory: {
+          ...newState.chatHistory,
+          loading: false,
+          error: error.message || 'Failed to summarize chat'
+        }
+      };
+    }
+  },
+
+  'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    chatHistory: {
+      ...state.chatHistory,
+      showCreateForm: false,
+      showLoadConfirm: false,
+      showDeleteConfirm: false,
+      selectedChat: null
+    }
+  }),
+
   // Agent deletion handler
   'delete-agent': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
     try {
