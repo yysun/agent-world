@@ -130,6 +130,8 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       name TEXT NOT NULL,
       description TEXT,
       turn_limit INTEGER NOT NULL DEFAULT 5,
+      chat_llm_provider TEXT,
+      chat_llm_model TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -164,6 +166,32 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       sender TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (agent_id, world_id) REFERENCES agents(id, world_id) ON DELETE CASCADE
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS world_chats (
+      id TEXT PRIMARY KEY,
+      world_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      message_count INTEGER DEFAULT 0,
+      summary TEXT,
+      tags TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS chat_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
+      world_id TEXT NOT NULL,
+      snapshot_data TEXT NOT NULL,
+      captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      version TEXT DEFAULT '1.0',
+      FOREIGN KEY (chat_id) REFERENCES world_chats(id) ON DELETE CASCADE,
+      FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE
     )
   `);
   await run(`
@@ -225,6 +253,11 @@ export async function createIndexes(ctx: SQLiteSchemaContext): Promise<void> {
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_world ON agent_memory(agent_id, world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_created_at ON agent_memory(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_sender ON agent_memory(sender)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_world_id ON world_chats(world_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_created_at ON world_chats(created_at)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_updated_at ON world_chats(updated_at)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_chat_snapshots_chat_id ON chat_snapshots(chat_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_chat_snapshots_world_id ON chat_snapshots(world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_memory_archives_agent_world ON memory_archives(agent_id, world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_memory_archives_created_at ON memory_archives(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_memory_archives_session_name ON memory_archives(session_name)`);
@@ -249,6 +282,13 @@ export async function createTriggers(ctx: SQLiteSchemaContext): Promise<void> {
     AFTER UPDATE ON agents
     BEGIN
       UPDATE agents SET last_active = CURRENT_TIMESTAMP WHERE id = NEW.id AND world_id = NEW.world_id;
+    END
+  `);
+  await run(`
+    CREATE TRIGGER IF NOT EXISTS world_chats_updated_at 
+    AFTER UPDATE ON world_chats
+    BEGIN
+      UPDATE world_chats SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END
   `);
   await run(`

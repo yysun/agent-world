@@ -44,6 +44,14 @@ export interface StorageWrappers {
   validateAgentIntegrity: (rootPath: string, worldId: string, agentId: string) => Promise<{ isValid: boolean }>;
   repairAgentData: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
   archiveAgentMemory: (rootPath: string, worldId: string, agentId: string, memory: any[]) => Promise<any>;
+  // Chat operations
+  saveChat: (rootPath: string, worldId: string, chat: any) => Promise<void>;
+  loadChat: (rootPath: string, worldId: string, chatId: string) => Promise<any>;
+  deleteChat: (rootPath: string, worldId: string, chatId: string) => Promise<boolean>;
+  listChats: (rootPath: string, worldId: string) => Promise<any[]>;
+  updateChat: (rootPath: string, worldId: string, chatId: string, updates: any) => Promise<any>;
+  saveSnapshot: (rootPath: string, worldId: string, chatId: string, snapshot: any) => Promise<void>;
+  loadSnapshot: (rootPath: string, worldId: string, chatId: string) => Promise<any>;
 }
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
@@ -171,6 +179,33 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
         }
       }
       return false;
+    },
+
+    // Chat operations (file storage doesn't support chats yet)
+    async saveChat(worldId: string, chat: any): Promise<void> {
+      // TODO: Implement file-based chat storage if needed
+      throw new Error('Chat operations not supported in file storage backend');
+    },
+    async loadChat(worldId: string, chatId: string): Promise<any> {
+      return null;
+    },
+    async deleteChat(worldId: string, chatId: string): Promise<boolean> {
+      return false;
+    },
+    async listChats(worldId: string): Promise<any[]> {
+      return [];
+    },
+    async updateChat(worldId: string, chatId: string, updates: any): Promise<any> {
+      return null;
+    },
+    async saveSnapshot(worldId: string, chatId: string, snapshot: any): Promise<void> {
+      // No-op for file storage
+    },
+    async loadSnapshot(worldId: string, chatId: string): Promise<any> {
+      return null;
+    },
+    async restoreFromSnapshot(worldId: string, snapshot: any): Promise<boolean> {
+      return false;
     }
   };
 }
@@ -226,6 +261,48 @@ export async function createStorageWithWrappers(): Promise<StorageWrappers> {
           const agentStorage = await import('./agent-storage.js');
           return agentStorage.archiveAgentMemory((storageInstance as any).rootPath, worldId, agentId, memory);
         }
+      },
+      // Chat operations
+      saveChat: async (_rootPath: string, worldId: string, chat: any) => {
+        if ('saveChat' in storageInstance) {
+          return (storageInstance as any).saveChat(worldId, chat);
+        }
+        throw new Error('Chat operations not supported in this storage backend');
+      },
+      loadChat: async (_rootPath: string, worldId: string, chatId: string) => {
+        if ('loadChat' in storageInstance) {
+          return (storageInstance as any).loadChat(worldId, chatId);
+        }
+        return null;
+      },
+      deleteChat: async (_rootPath: string, worldId: string, chatId: string) => {
+        if ('deleteChat' in storageInstance) {
+          return (storageInstance as any).deleteChat(worldId, chatId);
+        }
+        return false;
+      },
+      listChats: async (_rootPath: string, worldId: string) => {
+        if ('listChats' in storageInstance) {
+          return (storageInstance as any).listChats(worldId);
+        }
+        return [];
+      },
+      updateChat: async (_rootPath: string, worldId: string, chatId: string, updates: any) => {
+        if ('updateChat' in storageInstance) {
+          return (storageInstance as any).updateChat(worldId, chatId, updates);
+        }
+        return null;
+      },
+      saveSnapshot: async (_rootPath: string, worldId: string, chatId: string, snapshot: any) => {
+        if ('saveSnapshot' in storageInstance) {
+          return (storageInstance as any).saveSnapshot(worldId, chatId, snapshot);
+        }
+      },
+      loadSnapshot: async (_rootPath: string, worldId: string, chatId: string) => {
+        if ('loadSnapshot' in storageInstance) {
+          return (storageInstance as any).loadSnapshot(worldId, chatId);
+        }
+        return null;
       }
     };
   } else {
@@ -255,7 +332,15 @@ export async function createStorageWithWrappers(): Promise<StorageWrappers> {
       agentExistsOnDisk: noOpAsyncReturnFalse,
       validateAgentIntegrity: noOpAsyncReturnValidation,
       repairAgentData: noOpAsyncReturnFalse,
-      archiveAgentMemory: noOpAsyncReturn
+      archiveAgentMemory: noOpAsyncReturn,
+      // Chat operations (NoOp)
+      saveChat: noOpAsync,
+      loadChat: noOpAsyncReturn,
+      deleteChat: noOpAsyncReturnFalse,
+      listChats: noOpAsyncReturnEmptyArray,
+      updateChat: noOpAsyncReturn,
+      saveSnapshot: noOpAsync,
+      loadSnapshot: noOpAsyncReturn
     };
   }
 }
@@ -296,7 +381,15 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       repairData,
       close,
       getDatabaseStats,
-      initializeWithDefaults
+      initializeWithDefaults,
+      // Chat operations
+      saveChat,
+      loadChat,
+      deleteChat,
+      listChats,
+      updateChat,
+      saveSnapshot,
+      loadSnapshot
     } = await import('./sqlite-storage.js');
     const { initializeSchema } = await import('./sqlite-schema.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
@@ -316,6 +409,18 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       loadAgentsBatch: (worldId: string, agentIds: string[]) => loadAgentsBatch(ctx, worldId, agentIds),
       validateIntegrity: (worldId: string, agentId?: string) => validateIntegrity(ctx, worldId, agentId),
       repairData: (worldId: string, agentId?: string) => repairData(ctx, worldId, agentId),
+      // Chat operations
+      saveChat: (worldId: string, chat: any) => saveChat(ctx, worldId, chat),
+      loadChat: (worldId: string, chatId: string) => loadChat(ctx, worldId, chatId),
+      deleteChat: (worldId: string, chatId: string) => deleteChat(ctx, worldId, chatId),
+      listChats: (worldId: string) => listChats(ctx, worldId),
+      updateChat: (worldId: string, chatId: string, updates: any) => updateChat(ctx, worldId, chatId, updates),
+      saveSnapshot: (worldId: string, chatId: string, snapshot: any) => saveSnapshot(ctx, worldId, chatId, snapshot),
+      loadSnapshot: (worldId: string, chatId: string) => loadSnapshot(ctx, worldId, chatId),
+      restoreFromSnapshot: async (worldId: string, snapshot: any) => {
+        // TODO: Implement snapshot restore logic
+        return false;
+      },
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)
     } as any;

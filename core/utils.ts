@@ -3,6 +3,7 @@
  *
  * Features:
  * - Unique ID generation for events and messages using crypto.randomUUID()
+ * - Chat ID generation using nanoid for human-readable IDs
  * - Manager-specific utility functions for string manipulation and processing
  * - String manipulation utilities (kebab-case conversion for IDs and names)
  * - Agent and message processing utilities with world-aware operations
@@ -12,6 +13,7 @@
  *
  * Core Utilities:
  * - generateId: Crypto-based unique ID generation for messages and events
+ * - generateChatId: Nanoid-based short ID generation for chat history
  * - toKebabCase: String conversion for consistent naming conventions
  * - getWorldTurnLimit: World-specific turn limit retrieval with fallback defaults
  * - extractMentions: Case-insensitive mention extraction with first-mention-only logic
@@ -20,6 +22,7 @@
  *
  * Implementation Details:
  * - Uses native crypto.randomUUID() for ID generation ensuring uniqueness
+ * - Uses nanoid for human-readable chat IDs (8 characters, URL-safe)
  * - Self-contained utility functions with no external dependencies
  * - Ready for manager module integration with consistent interfaces
  * - All types imported from types.ts for better organization and reusability
@@ -30,12 +33,23 @@
  * - Enhanced comment documentation with detailed feature descriptions
  * - Improved function descriptions with implementation details
  * - Added details about world-aware operations and LLM integration
+ * - Added nanoid support for chat ID generation
  */
+
+import { nanoid } from 'nanoid';
+
 /**
  * Generate unique ID for messages and events
  */
 export function generateId(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * Generate short, human-readable ID for chat history
+ */
+export function generateChatId(): string {
+  return nanoid(8); // 8 characters, URL-safe
 }
 
 /**

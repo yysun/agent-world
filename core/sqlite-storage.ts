@@ -177,20 +177,24 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: WorldData)
   await ensureInitialized(ctx);
   // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
-    INSERT INTO worlds (id, name, description, turn_limit, updated_at)
-    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO worlds (id, name, description, turn_limit, chat_llm_provider, chat_llm_model, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
       turn_limit = excluded.turn_limit,
+      chat_llm_provider = excluded.chat_llm_provider,
+      chat_llm_model = excluded.chat_llm_model,
       updated_at = CURRENT_TIMESTAMP
-  `, worldData.id, worldData.name, worldData.description, worldData.turnLimit);
+  `, worldData.id, worldData.name, worldData.description, worldData.turnLimit, 
+     worldData.chatLLMProvider, worldData.chatLLMModel);
 }
 
 export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<WorldData | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
-    SELECT id, name, description, turn_limit as turnLimit
+    SELECT id, name, description, turn_limit as turnLimit,
+           chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel
     FROM worlds WHERE id = ?
   `, worldId) as WorldData | undefined;
   return result || null;
@@ -209,7 +213,8 @@ export async function deleteWorld(ctx: SQLiteStorageContext, worldId: string): P
 export async function listWorlds(ctx: SQLiteStorageContext): Promise<WorldData[]> {
   await ensureInitialized(ctx);
   const results = await all(ctx, `
-    SELECT id, name, description, turn_limit as turnLimit
+    SELECT id, name, description, turn_limit as turnLimit,
+           chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel
     FROM worlds
     ORDER BY name
   `) as WorldData[];
@@ -361,6 +366,156 @@ export async function validateIntegrity(ctx: SQLiteStorageContext, worldId: stri
 export async function repairData(ctx: SQLiteStorageContext, worldId: string, agentId?: string): Promise<boolean> {
   await ensureInitialized(ctx);
   return false;
+}
+
+// CHAT HISTORY OPERATIONS
+export async function saveChat(ctx: SQLiteStorageContext, worldId: string, chat: any): Promise<void> {
+  await ensureInitialized(ctx);
+  await run(ctx, `
+    INSERT INTO world_chats (id, world_id, name, description, message_count, summary, tags, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      description = excluded.description,
+      message_count = excluded.message_count,
+      summary = excluded.summary,
+      tags = excluded.tags,
+      updated_at = CURRENT_TIMESTAMP
+  `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0, 
+     chat.summary, JSON.stringify(chat.tags || []));
+}
+
+export async function loadChat(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<any | null> {
+  await ensureInitialized(ctx);
+  const result = await get(ctx, `
+    SELECT id, world_id as worldId, name, description, message_count as messageCount,
+           summary, tags, created_at as createdAt, updated_at as updatedAt
+    FROM world_chats
+    WHERE id = ? AND world_id = ?
+  `, chatId, worldId);
+  
+  if (!result) return null;
+  
+  // Load snapshot if exists
+  const snapshot = await get(ctx, `
+    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
+    FROM chat_snapshots
+    WHERE chat_id = ? AND world_id = ?
+    ORDER BY captured_at DESC
+    LIMIT 1
+  `, chatId, worldId);
+  
+  return {
+    ...result,
+    createdAt: new Date(result.createdAt),
+    updatedAt: new Date(result.updatedAt),
+    tags: JSON.parse(result.tags || '[]'),
+    snapshot: snapshot ? {
+      ...JSON.parse(snapshot.snapshotData),
+      metadata: {
+        ...JSON.parse(snapshot.snapshotData).metadata,
+        capturedAt: new Date(snapshot.capturedAt),
+        version: snapshot.version
+      }
+    } : undefined
+  };
+}
+
+export async function deleteChat(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<boolean> {
+  await ensureInitialized(ctx);
+  const result = await run(ctx, `
+    DELETE FROM world_chats WHERE id = ? AND world_id = ?
+  `, chatId, worldId);
+  return result.changes > 0;
+}
+
+export async function listChats(ctx: SQLiteStorageContext, worldId: string): Promise<any[]> {
+  await ensureInitialized(ctx);
+  const results = await all(ctx, `
+    SELECT id, name, description, message_count as messageCount,
+           summary, tags, created_at as createdAt, updated_at as updatedAt
+    FROM world_chats
+    WHERE world_id = ?
+    ORDER BY updated_at DESC
+  `, worldId);
+  
+  return results.map(chat => ({
+    ...chat,
+    createdAt: new Date(chat.createdAt),
+    updatedAt: new Date(chat.updatedAt),
+    tags: JSON.parse(chat.tags || '[]')
+  }));
+}
+
+export async function updateChat(ctx: SQLiteStorageContext, worldId: string, chatId: string, updates: any): Promise<any | null> {
+  await ensureInitialized(ctx);
+  
+  const setClauses: string[] = [];
+  const params: any[] = [];
+  
+  if (updates.name !== undefined) {
+    setClauses.push('name = ?');
+    params.push(updates.name);
+  }
+  if (updates.description !== undefined) {
+    setClauses.push('description = ?');
+    params.push(updates.description);
+  }
+  if (updates.summary !== undefined) {
+    setClauses.push('summary = ?');
+    params.push(updates.summary);
+  }
+  if (updates.tags !== undefined) {
+    setClauses.push('tags = ?');
+    params.push(JSON.stringify(updates.tags));
+  }
+  
+  if (setClauses.length === 0) {
+    return await loadChat(ctx, worldId, chatId);
+  }
+  
+  setClauses.push('updated_at = CURRENT_TIMESTAMP');
+  params.push(chatId, worldId);
+  
+  await run(ctx, `
+    UPDATE world_chats 
+    SET ${setClauses.join(', ')}
+    WHERE id = ? AND world_id = ?
+  `, ...params);
+  
+  return await loadChat(ctx, worldId, chatId);
+}
+
+// SNAPSHOT OPERATIONS
+export async function saveSnapshot(ctx: SQLiteStorageContext, worldId: string, chatId: string, snapshot: any): Promise<void> {
+  await ensureInitialized(ctx);
+  await run(ctx, `
+    INSERT INTO chat_snapshots (chat_id, world_id, snapshot_data, version)
+    VALUES (?, ?, ?, ?)
+  `, chatId, worldId, JSON.stringify(snapshot), snapshot.metadata?.version || '1.0');
+}
+
+export async function loadSnapshot(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<any | null> {
+  await ensureInitialized(ctx);
+  const result = await get(ctx, `
+    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
+    FROM chat_snapshots
+    WHERE chat_id = ? AND world_id = ?
+    ORDER BY captured_at DESC
+    LIMIT 1
+  `, chatId, worldId);
+  
+  if (!result) return null;
+  
+  const snapshot = JSON.parse(result.snapshotData);
+  return {
+    ...snapshot,
+    metadata: {
+      ...snapshot.metadata,
+      capturedAt: new Date(result.capturedAt),
+      version: result.version
+    }
+  };
 }
 
 // ARCHIVE OPERATIONS
