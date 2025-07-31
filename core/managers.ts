@@ -68,7 +68,7 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent } from './types.js';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, WorldChat, CreateChatParams, UpdateChatParams, ChatInfo, WorldSnapshot, LLMProvider } from './types.js';
 import type { WorldData } from './world-storage.js';
 
 // Static imports for core modules
@@ -97,6 +97,14 @@ let agentExistsOnDisk: any;
 let validateAgentIntegrity: any;
 let repairAgentData: any;
 let archiveAgentMemory: any;
+// Chat operations
+let saveChat: any;
+let loadChat: any;
+let deleteChat: any;
+let listChats: any;
+let updateChat: any;
+let saveSnapshot: any;
+let loadSnapshot: any;
 
 // Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
@@ -121,7 +129,15 @@ async function initializeModules() {
     agentExistsOnDisk: agentExists,
     validateAgentIntegrity: validateIntegrity,
     repairAgentData: repairData,
-    archiveAgentMemory: archiveMemory
+    archiveAgentMemory: archiveMemory,
+    // Chat operations
+    saveChat: saveChat_,
+    loadChat: loadChat_,
+    deleteChat: deleteChat_,
+    listChats: listChats_,
+    updateChat: updateChat_,
+    saveSnapshot: saveSnapshot_,
+    loadSnapshot: loadSnapshot_
   } = await storageFactory.createStorageWithWrappers();
 
   // Assign storage instance and wrappers
@@ -143,6 +159,14 @@ async function initializeModules() {
   validateAgentIntegrity = validateIntegrity;
   repairAgentData = repairData;
   archiveAgentMemory = archiveMemory;
+  // Chat operations
+  saveChat = saveChat_;
+  loadChat = loadChat_;
+  deleteChat = deleteChat_;
+  listChats = listChats_;
+  updateChat = updateChat_;
+  saveSnapshot = saveSnapshot_;
+  loadSnapshot = loadSnapshot_;
 }
 
 const moduleInitialization = initializeModules();
@@ -401,6 +425,48 @@ function createStorageManager(rootPath: string): StorageManager {
       return agents;
     },
 
+    // Chat history operations
+    async saveChat(worldId: string, chat: WorldChat): Promise<void> {
+      await moduleInitialization;
+      return saveChat(rootPath, worldId, chat);
+    },
+
+    async loadChat(worldId: string, chatId: string): Promise<WorldChat | null> {
+      await moduleInitialization;
+      return loadChat(rootPath, worldId, chatId);
+    },
+
+    async deleteChat(worldId: string, chatId: string): Promise<boolean> {
+      await moduleInitialization;
+      return deleteChat(rootPath, worldId, chatId);
+    },
+
+    async listChats(worldId: string): Promise<ChatInfo[]> {
+      await moduleInitialization;
+      return listChats(rootPath, worldId);
+    },
+
+    async updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null> {
+      await moduleInitialization;
+      return updateChat(rootPath, worldId, chatId, updates);
+    },
+
+    // Snapshot operations
+    async saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void> {
+      await moduleInitialization;
+      return saveSnapshot(rootPath, worldId, chatId, snapshot);
+    },
+
+    async loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null> {
+      await moduleInitialization;
+      return loadSnapshot(rootPath, worldId, chatId);
+    },
+
+    async restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean> {
+      await moduleInitialization;
+      return restoreFromSnapshot(rootPath, worldId, snapshot);
+    },
+
     // Integrity operations
     async validateIntegrity(worldId: string, agentId?: string): Promise<boolean> {
       await moduleInitialization;
@@ -534,6 +600,8 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     name: data.name,
     description: data.description,
     turnLimit: data.turnLimit,
+    chatLLMProvider: data.chatLLMProvider as LLMProvider,
+    chatLLMModel: data.chatLLMModel,
     eventEmitter: new EventEmitter(),
     agents: new Map(), // Empty agents map - to be populated by agent manager
 
@@ -677,13 +745,52 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       }
     },
 
+    // Chat history methods
+    async createChat(params) {
+      return await createChat(world.rootPath, world.id, params);
+    },
+
+    async loadChat(chatId) {
+      return await getChatHistory(world.rootPath, world.id, chatId);
+    },
+
+    async updateChat(chatId, updates) {
+      return await updateChatHistory(world.rootPath, world.id, chatId, updates);
+    },
+
+    async deleteChat(chatId) {
+      return await deleteChatHistory(world.rootPath, world.id, chatId);
+    },
+
+    async listChats() {
+      return await listChatHistory(world.rootPath, world.id);
+    },
+
+    async createSnapshot() {
+      return await createWorldSnapshot(world.rootPath, world.id);
+    },
+
+    async restoreFromChat(chatId) {
+      const chat = await getChatHistory(world.rootPath, world.id, chatId);
+      if (!chat || !chat.snapshot) {
+        return false;
+      }
+      return await restoreFromSnapshot(world.rootPath, world.id, chat.snapshot);
+    },
+
+    async summarizeChat(chatId) {
+      return await summarizeChat(world.rootPath, world.id, chatId);
+    },
+
     // World operation methods
     async save() {
       const worldData: WorldData = {
         id: world.id,
         name: world.name,
         description: world.description,
-        turnLimit: world.turnLimit
+        turnLimit: world.turnLimit,
+        chatLLMProvider: world.chatLLMProvider,
+        chatLLMModel: world.chatLLMModel
       };
       await saveWorldToDisk(world.rootPath, worldData);
     },
@@ -698,6 +805,8 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         world.name = worldData.name;
         world.description = worldData.description;
         world.turnLimit = worldData.turnLimit;
+        world.chatLLMProvider = worldData.chatLLMProvider;
+        world.chatLLMModel = worldData.chatLLMModel;
       }
     },
 
@@ -1309,6 +1418,229 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
   const agent = enhanceAgentWithMethods(agentData, rootPath, worldId);
   const { memory, ...config } = agent;
   return config;
+}
+
+// ========================
+// CHAT HISTORY MANAGEMENT
+// ========================
+
+/**
+ * Create new chat history entry with optional snapshot
+ */
+export async function createChat(rootPath: string, worldId: string, params: CreateChatParams): Promise<WorldChat> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  const chatId = utils.generateChatId();
+  const now = new Date();
+
+  let snapshot: WorldSnapshot | undefined;
+  if (params.captureSnapshot) {
+    snapshot = await createWorldSnapshot(rootPath, worldId);
+  }
+
+  const chat: WorldChat = {
+    id: chatId,
+    worldId,
+    name: params.name,
+    description: params.description,
+    createdAt: now,
+    updatedAt: now,
+    messageCount: 0,
+    snapshot
+  };
+
+  await saveChat(rootPath, worldId, chat);
+
+  if (snapshot) {
+    await saveSnapshot(rootPath, worldId, chatId, snapshot);
+  }
+
+  return chat;
+}
+
+/**
+ * Load chat history entry with snapshot
+ */
+export async function getChatHistory(rootPath: string, worldId: string, chatId: string): Promise<WorldChat | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  return await loadChat(rootPath, worldId, chatId);
+}
+
+/**
+ * Update chat history entry
+ */
+export async function updateChatHistory(rootPath: string, worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  return await updateChat(rootPath, worldId, chatId, updates);
+}
+
+/**
+ * Delete chat history entry
+ */
+export async function deleteChatHistory(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  return await deleteChat(rootPath, worldId, chatId);
+}
+
+/**
+ * List all chat history entries for a world
+ */
+export async function listChatHistory(rootPath: string, worldId: string): Promise<ChatInfo[]> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  return await listChats(rootPath, worldId);
+}
+
+/**
+ * Create snapshot of current world state
+ */
+export async function createWorldSnapshot(rootPath: string, worldId: string): Promise<WorldSnapshot> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  const worldData = await loadWorldFromDisk(rootPath, worldId);
+  if (!worldData) {
+    throw new Error(`World ${worldId} not found`);
+  }
+
+  const agents = await loadAllAgentsFromDisk(rootPath, worldId);
+  const allMessages: AgentMessage[] = [];
+  let totalMessages = 0;
+
+  // Collect all agent messages
+  for (const agent of agents) {
+    if (agent.memory && agent.memory.length > 0) {
+      allMessages.push(...agent.memory);
+      totalMessages += agent.memory.length;
+    }
+  }
+
+  const snapshot: WorldSnapshot = {
+    world: worldData,
+    agents,
+    messages: allMessages,
+    metadata: {
+      capturedAt: new Date(),
+      version: '1.0',
+      totalMessages,
+      activeAgents: agents.filter((a: any) => a.status === 'active').length
+    }
+  };
+
+  return snapshot;
+}
+
+/**
+ * Restore world state from snapshot
+ */
+export async function restoreFromSnapshot(rootPath: string, worldId: string, snapshot: WorldSnapshot): Promise<boolean> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  try {
+    // Save world configuration
+    await saveWorldToDisk(rootPath, snapshot.world);
+
+    // Clear existing agents and restore from snapshot
+    const existingAgents = await loadAllAgentsFromDisk(rootPath, worldId);
+    for (const agent of existingAgents) {
+      await deleteAgentFromDisk(rootPath, worldId, agent.id);
+    }
+
+    // Restore agents with their memory
+    for (const agentData of snapshot.agents) {
+      await saveAgentToDisk(rootPath, worldId, agentData);
+      if (agentData.memory && agentData.memory.length > 0) {
+        await saveAgentMemoryToDisk(rootPath, worldId, agentData.id, agentData.memory);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    logger.error('Failed to restore from snapshot', { worldId, error: error instanceof Error ? error.message : error });
+    return false;
+  }
+}
+
+/**
+ * Summarize chat using LLM
+ */
+export async function summarizeChat(rootPath: string, worldId: string, chatId: string): Promise<string> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  const chat = await loadChat(rootPath, worldId, chatId);
+  if (!chat || !chat.snapshot) {
+    throw new Error('Chat or snapshot not found');
+  }
+
+  const worldData = await loadWorldFromDisk(rootPath, worldId);
+  if (!worldData) {
+    throw new Error(`World ${worldId} not found`);
+  }
+
+  // Try to use world's configured LLM provider for summarization
+  if (worldData.chatLLMProvider && worldData.chatLLMModel) {
+    try {
+      // Create a temporary world object for LLM operations
+      const tempWorld = worldDataToWorld(worldData, rootPath);
+      
+      // Prepare messages for summarization
+      const messages = chat.snapshot.messages || [];
+      if (messages.length === 0) {
+        return 'No messages to summarize.';
+      }
+
+      const summaryPrompt = `Please provide a concise summary of this conversation between agents and users. Focus on key decisions, outcomes, and important information exchanged.
+
+Conversation (${messages.length} messages):
+${messages.map((m: any) => `${m.sender || m.role}: ${m.content}`).join('\n\n')}
+
+Summary:`;
+
+      const summaryMessages: AgentMessage[] = [
+        { role: 'user', content: summaryPrompt, createdAt: new Date() }
+      ];
+
+      // Create a temporary agent configuration for summarization
+      const tempAgent: any = {
+        id: 'chat-summarizer',
+        name: 'Chat Summarizer',
+        type: 'summarizer',
+        provider: worldData.chatLLMProvider,
+        model: worldData.chatLLMModel,
+        systemPrompt: 'You are a helpful assistant that creates concise, informative summaries of conversations.',
+        temperature: 0.3,
+        maxTokens: 500,
+        memory: [],
+        llmCallCount: 0
+      };
+
+      const summary = await llmManager.generateAgentResponse(tempWorld, tempAgent, summaryMessages);
+      
+      // Update chat with summary
+      await updateChat(rootPath, worldId, chatId, { summary });
+      
+      return summary;
+    } catch (error) {
+      logger.warn('Failed to generate LLM summary, using fallback', { error: error instanceof Error ? error.message : error });
+    }
+  }
+
+  // Fallback to simple summary
+  const messages = chat.snapshot.messages || [];
+  const messageCount = messages.length;
+  const participants = [...new Set(messages.map((m: any) => m.sender || m.role).filter(Boolean))];
+  
+  return `Chat with ${messageCount} messages from ${participants.length} participants: ${participants.join(', ')}. Created on ${chat.createdAt.toLocaleDateString()}.`;
 }
 
 // ========================

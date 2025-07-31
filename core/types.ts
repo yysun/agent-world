@@ -260,6 +260,71 @@ export type AgentStorage = Omit<Agent,
   | 'world' // Exclude circular reference for storage
 >
 
+// World Chat History Types
+
+/**
+ * World chat history entry
+ */
+export interface WorldChat {
+  id: string; // nanoid
+  worldId: string;
+  name: string;
+  description?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
+  summary?: string; // LLM-generated summary
+  tags?: string[];
+  snapshot?: WorldSnapshot; // Full world state when chat was created/saved
+}
+
+/**
+ * World snapshot for full state capture
+ */
+export interface WorldSnapshot {
+  world: WorldData;
+  agents: AgentData[];
+  messages: AgentMessage[];
+  metadata: {
+    capturedAt: Date;
+    version: string;
+    totalMessages: number;
+    activeAgents: number;
+  };
+}
+
+/**
+ * Chat creation parameters
+ */
+export interface CreateChatParams {
+  name: string;
+  description?: string;
+  captureSnapshot?: boolean;
+}
+
+/**
+ * Chat update parameters
+ */
+export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureSnapshot'>> {
+  summary?: string;
+  tags?: string[];
+  messageCount?: number; // For autosave updates
+}
+
+/**
+ * Chat list info for efficient display
+ */
+export interface ChatInfo {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  messageCount: number;
+  summary?: string;
+  tags?: string[];
+}
+
 // World Management Types - Simplified Parameter Interfaces
 
 /**
@@ -269,6 +334,8 @@ export interface CreateWorldParams {
   name: string;
   description?: string;
   turnLimit?: number;
+  chatLLMProvider?: LLMProvider; // For chat summarization
+  chatLLMModel?: string; // For chat summarization
 }
 
 /**
@@ -288,6 +355,8 @@ export interface World {
   name: string;
   description?: string;
   turnLimit: number;
+  chatLLMProvider?: LLMProvider; // For chat summarization
+  chatLLMModel?: string; // For chat summarization
 
   // Runtime Objects
   eventEmitter: EventEmitter;
@@ -306,6 +375,16 @@ export interface World {
   listAgents(): Promise<AgentInfo[]>;
   updateAgentMemory(agentName: string, messages: AgentMessage[]): Promise<Agent | null>;
   saveAgentConfig(agentName: string): Promise<void>;
+
+  // Chat history methods
+  createChat(params: CreateChatParams): Promise<WorldChat>;
+  loadChat(chatId: string): Promise<WorldChat | null>;
+  updateChat(chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
+  deleteChat(chatId: string): Promise<boolean>;
+  listChats(): Promise<ChatInfo[]>;
+  createSnapshot(): Promise<WorldSnapshot>;
+  restoreFromChat(chatId: string): Promise<boolean>;
+  summarizeChat(chatId: string): Promise<string>;
 
   // World operations
   save(): Promise<void>;
@@ -355,6 +434,18 @@ export interface StorageManager {
   // Batch operations
   saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;
   loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]>;
+
+  // Chat history operations
+  saveChat(worldId: string, chat: WorldChat): Promise<void>;
+  loadChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  deleteChat(worldId: string, chatId: string): Promise<boolean>;
+  listChats(worldId: string): Promise<ChatInfo[]>;
+  updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
+
+  // Snapshot operations
+  saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void>;
+  loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null>;
+  restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;

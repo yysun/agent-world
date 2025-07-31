@@ -39,6 +39,8 @@ export interface WorldData {
   name: string;
   description?: string;
   turnLimit: number;
+  chatLLMProvider?: string; // For chat summarization
+  chatLLMModel?: string; // For chat summarization
 }
 
 /**

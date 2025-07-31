@@ -1027,4 +1027,180 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
   }
 });
 
+// Chat History Endpoints
+
+// Validation schemas for chat history
+const ChatCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().optional(),
+  captureSnapshot: z.boolean().optional().default(true)
+});
+
+const ChatUpdateSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().optional(),
+  summary: z.string().optional(),
+  tags: z.array(z.string()).optional()
+});
+
+// GET /worlds/:worldName/chats - List chat history
+router.get('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worldName = req.params.worldName;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const chats = await world.listChats();
+    res.json({ chats });
+
+  } catch (error) {
+    logger.error('Error listing chats', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to list chats', 'LIST_CHATS_ERROR');
+    }
+  }
+});
+
+// POST /worlds/:worldName/chats - Create new chat
+router.post('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worldName = req.params.worldName;
+    const validation = ChatCreateSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request data', 'VALIDATION_ERROR', validation.error.format());
+      return;
+    }
+
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const chat = await world.createChat(validation.data);
+    res.status(201).json({ chat });
+
+  } catch (error) {
+    logger.error('Error creating chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to create chat', 'CREATE_CHAT_ERROR');
+    }
+  }
+});
+
+// GET /worlds/:worldName/chats/:chatId - Get specific chat
+router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const chat = await world.loadChat(chatId);
+    if (!chat) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+
+    res.json({ chat });
+
+  } catch (error) {
+    logger.error('Error getting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to get chat', 'GET_CHAT_ERROR');
+    }
+  }
+});
+
+// PATCH /worlds/:worldName/chats/:chatId - Update chat
+router.patch('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const validation = ChatUpdateSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request data', 'VALIDATION_ERROR', validation.error.format());
+      return;
+    }
+
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const chat = await world.updateChat(chatId, validation.data);
+    if (!chat) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+
+    res.json({ chat });
+
+  } catch (error) {
+    logger.error('Error updating chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to update chat', 'UPDATE_CHAT_ERROR');
+    }
+  }
+});
+
+// DELETE /worlds/:worldName/chats/:chatId - Delete chat
+router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const deleted = await world.deleteChat(chatId);
+    if (!deleted) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+
+    res.json({ message: 'Chat deleted successfully' });
+
+  } catch (error) {
+    logger.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to delete chat', 'DELETE_CHAT_ERROR');
+    }
+  }
+});
+
+// POST /worlds/:worldName/chats/:chatId/restore - Restore from chat
+router.post('/worlds/:worldName/chats/:chatId/restore', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const restored = await world.restoreFromChat(chatId);
+    if (!restored) {
+      sendError(res, 400, 'Failed to restore from chat', 'RESTORE_ERROR');
+      return;
+    }
+
+    res.json({ message: 'World state restored successfully' });
+
+  } catch (error) {
+    logger.error('Error restoring from chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to restore from chat', 'RESTORE_CHAT_ERROR');
+    }
+  }
+});
+
+// POST /worlds/:worldName/chats/:chatId/summarize - Summarize chat
+router.post('/worlds/:worldName/chats/:chatId/summarize', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const summary = await world.summarizeChat(chatId);
+    res.json({ summary });
+
+  } catch (error) {
+    logger.error('Error summarizing chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to summarize chat', 'SUMMARIZE_CHAT_ERROR');
+    }
+  }
+});
+
 export default router;

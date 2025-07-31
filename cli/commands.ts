@@ -46,7 +46,7 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown } from '../core/index.js';
+import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChat, getChatHistory, updateChatHistory, deleteChatHistory, listChatHistory, summarizeChat, restoreFromSnapshot } from '../core/index.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
@@ -341,6 +341,52 @@ export const CLI_COMMAND_MAP: Record<string, {
     description: 'List all agents in current world',
     usage: '/lsa',
     parameters: []
+  },
+
+  // Chat history commands
+  'list-chats': {
+    type: 'listChats',
+    requiresWorld: true,
+    description: 'List all chat history entries for the current world',
+    usage: '/list-chats',
+    parameters: []
+  },
+  'new-chat': {
+    type: 'createChat',
+    requiresWorld: true,
+    description: 'Create a new chat history entry with optional snapshot',
+    usage: '/new-chat <name> [description]',
+    parameters: [
+      { name: 'name', required: true, description: 'Chat name', type: 'string' },
+      { name: 'description', required: false, description: 'Chat description', type: 'string' }
+    ]
+  },
+  'load-chat': {
+    type: 'loadChat',
+    requiresWorld: true,
+    description: 'Load and restore state from a chat history entry',
+    usage: '/load-chat <chatId>',
+    parameters: [
+      { name: 'chatId', required: true, description: 'Chat ID to load', type: 'string' }
+    ]
+  },
+  'delete-chat': {
+    type: 'deleteChat',
+    requiresWorld: true,
+    description: 'Delete a chat history entry after confirmation',
+    usage: '/delete-chat <chatId>',
+    parameters: [
+      { name: 'chatId', required: true, description: 'Chat ID to delete', type: 'string' }
+    ]
+  },
+  'summarize-chat': {
+    type: 'summarizeChat',
+    requiresWorld: true,
+    description: 'Generate a summary for a chat history entry using LLM',
+    usage: '/summarize-chat <chatId>',
+    parameters: [
+      { name: 'chatId', required: true, description: 'Chat ID to summarize', type: 'string' }
+    ]
   }
 };
 
@@ -465,6 +511,13 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['update-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['update-agent'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['delete-agent'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-agent'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['clear'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['clear'].description}\n`;
+
+  help += '\nChat History Management:\n';
+  help += `  ${CLI_COMMAND_MAP['list-chats'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['list-chats'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['new-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['new-chat'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['load-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['load-chat'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['delete-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-chat'].description}\n`;
+  help += `  ${CLI_COMMAND_MAP['summarize-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['summarize-chat'].description}\n`;
 
   help += '\nData Export:\n';
   help += `  ${CLI_COMMAND_MAP['export'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['export'].description}\n`;
@@ -1304,6 +1357,227 @@ export async function processCLICommand(
           cliResponse = {
             success: false,
             message: 'Failed to export world',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      // Chat history commands
+      case 'listChats':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          const chats = await listChatHistory(context.rootPath, world!.id);
+          if (chats.length === 0) {
+            cliResponse = {
+              success: true,
+              message: `No chat history found in world '${world!.name}'.`
+            };
+          } else {
+            let output = `\nChat history in world '${world!.name}':\n`;
+            chats.forEach(chat => {
+              output += `  ID: ${chat.id}\n`;
+              output += `  Name: ${chat.name}\n`;
+              if (chat.description) output += `  Description: ${chat.description}\n`;
+              output += `  Messages: ${chat.messageCount}\n`;
+              if (chat.summary) output += `  Summary: ${chat.summary}\n`;
+              if (chat.tags && chat.tags.length > 0) output += `  Tags: ${chat.tags.join(', ')}\n`;
+              output += `  Created: ${chat.createdAt.toISOString().split('T')[0]}\n`;
+              output += `  Updated: ${chat.updatedAt.toISOString().split('T')[0]}\n`;
+              output += `  ---\n`;
+            });
+            cliResponse = {
+              success: true,
+              message: output,
+              data: { chats }
+            };
+          }
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to list chat history',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'createChat':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          // Join remaining args as description if provided
+          const description = args.length > 1 ? args.slice(1).join(' ') : undefined;
+          
+          const chat = await createChat(context.rootPath, world!.id, {
+            name: collectedParams.name,
+            description: description || `Chat created on ${new Date().toLocaleDateString()}`,
+            captureSnapshot: true
+          });
+
+          cliResponse = {
+            success: true,
+            message: `Chat '${chat.name}' created successfully with ID: ${chat.id}`,
+            data: chat
+          };
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to create chat',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'loadChat':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chat) {
+            cliResponse = {
+              success: false,
+              message: `Chat '${collectedParams.chatId}' not found`
+            };
+            break;
+          }
+
+          if (!chat.snapshot) {
+            cliResponse = {
+              success: false,
+              message: `Chat '${chat.name}' has no snapshot to restore`
+            };
+            break;
+          }
+
+          // Confirmation prompt
+          const confirmPrompt = {
+            type: 'confirm',
+            name: 'confirmed',
+            message: `Are you sure you want to restore from chat '${chat.name}'? This will replace the current world state.`,
+            initial: false
+          };
+
+          const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
+
+          if (!confirmed) {
+            cliResponse = {
+              success: true,
+              message: 'Chat restore cancelled'
+            };
+            break;
+          }
+
+          const restored = await restoreFromSnapshot(context.rootPath, world!.id, chat.snapshot);
+
+          if (restored) {
+            cliResponse = {
+              success: true,
+              message: `Successfully restored world state from chat '${chat.name}'`,
+              data: chat,
+              needsWorldRefresh: true
+            };
+          } else {
+            cliResponse = {
+              success: false,
+              message: 'Failed to restore from chat snapshot'
+            };
+          }
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to load chat',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'deleteChat':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chat) {
+            cliResponse = {
+              success: false,
+              message: `Chat '${collectedParams.chatId}' not found`
+            };
+            break;
+          }
+
+          // Confirmation prompt
+          const confirmPrompt = {
+            type: 'confirm',
+            name: 'confirmed',
+            message: `Are you sure you want to delete chat '${chat.name}'? This action cannot be undone.`,
+            initial: false
+          };
+
+          const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
+
+          if (!confirmed) {
+            cliResponse = {
+              success: true,
+              message: 'Chat deletion cancelled'
+            };
+            break;
+          }
+
+          const deleted = await deleteChatHistory(context.rootPath, world!.id, chat.id);
+
+          if (deleted) {
+            cliResponse = {
+              success: true,
+              message: `Chat '${chat.name}' deleted successfully`
+            };
+          } else {
+            cliResponse = {
+              success: false,
+              message: 'Failed to delete chat'
+            };
+          }
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to delete chat',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'summarizeChat':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chat) {
+            cliResponse = {
+              success: false,
+              message: `Chat '${collectedParams.chatId}' not found`
+            };
+            break;
+          }
+
+          const summary = await summarizeChat(context.rootPath, world!.id, chat.id);
+
+          cliResponse = {
+            success: true,
+            message: `Summary for chat '${chat.name}':\n\n${summary}`,
+            data: { summary, chat }
+          };
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to summarize chat',
             error: error instanceof Error ? error.message : String(error)
           };
         }
