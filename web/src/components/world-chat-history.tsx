@@ -69,95 +69,84 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
   return (
     <fieldset className="settings-fieldset">
       <legend>Chat History</legend>
-      
+
+      <div className="chat-history-header centered">
+        <button
+          className="new-chat-btn"
+          onClick={() => app.run('create-new-chat')}
+          title="Create new chat session"
+        >
+          ✚ New Chat
+        </button>
+      </div>
+
       <div className="chat-history-container">
         {chatHistory.loading ? (
           <div className="loading-indicator">Loading chat history...</div>
-        ) : chatHistory.error ? (
-          <div className="error-message">
-            Error: {chatHistory.error}
-            <button className="btn-retry" onclick={() => app.run('chat-history-refresh')}>
-              Retry
-            </button>
+        ) : chatHistory.chats.length === 0 ? (
+          <div className="no-chats">
+            <p>No chat history entries found.</p>
+            <p>Start a conversation with agents to auto-save chats.</p>
           </div>
         ) : (
-          <>
-            <div className="chat-history-header">
-              <button 
-                className="btn-secondary" 
-                onclick={() => app.run('chat-history-refresh')}
-                disabled={chatHistory.loading}
-              >
-                🔄 Refresh
-              </button>
-            </div>
-
-            {chatHistory.chats.length === 0 ? (
-              <div className="no-chats">
-                <p>No chat history entries found.</p>
-                <p>Start a conversation with agents to auto-save chats.</p>
-              </div>
-            ) : (
-              <div className="chat-list">
-                {chatHistory.chats.map(chat => (
-                  <div key={chat.id} className="chat-item">
-                    <div className="chat-header">
-                      <h4 className="chat-name">{chat.name}</h4>
-                      <div className="chat-actions">
-                        <button 
-                          className="action-btn" 
-                          onclick={() => handleLoadChat(chat)}
-                          title="Load chat"
-                        >
-                          📂
-                        </button>
-                        <button 
-                          className="action-btn" 
-                          onclick={() => handleSummarizeChat(chat)}
-                          title="Generate summary"
-                        >
-                          📝
-                        </button>
-                        <button 
-                          className="action-btn" 
-                          onclick={() => handleDeleteChat(chat)}
-                          title="Delete chat"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </div>
-                    
-                    {chat.description && (
-                      <div className="chat-description">{chat.description}</div>
-                    )}
-                    
-                    <div className="chat-metadata">
-                      <span className="chat-messages">💬 {chat.messageCount} messages</span>
-                      <span className="chat-created">📅 {formatDate(chat.createdAt)}</span>
-                      {chat.updatedAt !== chat.createdAt && (
-                        <span className="chat-updated">🔄 {formatDate(chat.updatedAt)}</span>
-                      )}
-                    </div>
-                    
-                    {chat.summary && (
-                      <div className="chat-summary">
-                        <strong>Summary:</strong> {chat.summary}
-                      </div>
-                    )}
-                    
-                    {chat.tags && chat.tags.length > 0 && (
-                      <div className="chat-tags">
-                        {chat.tags.map(tag => (
-                          <span key={tag} className="tag">{tag}</span>
-                        ))}
-                      </div>
-                    )}
+          <div className="chat-list">
+            {chatHistory.chats.map(chat => (
+              <div key={chat.id} className="chat-item">
+                <div className="chat-header">
+                  <h4 className="chat-name">{chat.name}</h4>
+                  <div className="chat-actions">
+                    <button
+                      className="action-btn"
+                      onclick={() => handleLoadChat(chat)}
+                      title="Load chat"
+                    >
+                      📂
+                    </button>
+                    <button
+                      className="action-btn"
+                      onclick={() => handleSummarizeChat(chat)}
+                      title="Generate summary"
+                    >
+                      📝
+                    </button>
+                    <button
+                      className="action-btn"
+                      onclick={() => handleDeleteChat(chat)}
+                      title="Delete chat"
+                    >
+                      🗑️
+                    </button>
                   </div>
-                ))}
+                </div>
+
+                {chat.description && (
+                  <div className="chat-description">{chat.description}</div>
+                )}
+
+                <div className="chat-metadata">
+                  <span className="chat-messages">💬 {chat.messageCount} messages</span>
+                  <span className="chat-created">📅 {formatDate(chat.createdAt)}</span>
+                  {chat.updatedAt !== chat.createdAt && (
+                    <span className="chat-updated">🔄 {formatDate(chat.updatedAt)}</span>
+                  )}
+                </div>
+
+                {chat.summary && (
+                  <div className="chat-summary">
+                    <strong>Summary:</strong> {chat.summary}
+                  </div>
+                )}
+
+                {chat.tags && chat.tags.length > 0 && (
+                  <div className="chat-tags">
+                    {chat.tags.map(tag => (
+                      <span key={tag} className="tag">{tag}</span>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </>
+            ))}
+          </div>
         )}
       </div>
 

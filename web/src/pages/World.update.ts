@@ -54,8 +54,9 @@ export const worldUpdateHandlers = {
         isWaiting: false,
         activeAgent: null
       };
-      const world = await api.getWorld(worldName);
 
+      // Fetch world data
+      const world = await api.getWorld(worldName);
       if (!world) {
         yield {
           ...state,
@@ -68,6 +69,45 @@ export const worldUpdateHandlers = {
           activeAgent: null
         };
         return;
+      }
+
+      // Fetch chat history
+      let chatHistory: import('../types').ChatHistoryState = {
+        isOpen: false,
+        chats: [],
+        loading: false,
+        error: null,
+        selectedChat: null,
+        showDeleteConfirm: false,
+        showLoadConfirm: false
+      };
+      let currentChat: import('../types').CurrentChatState = {
+        id: null,
+        name: 'New Chat',
+        isSaved: false,
+        messageCount: 0,
+        lastUpdated: new Date()
+      };
+      let messages: any[] = [];
+      try {
+        const chats = await api.listChats(worldName);
+        chatHistory.chats = chats || [];
+        if (chats && chats.length > 0) {
+          const lastChat = chats[chats.length - 1];
+          const chatData = await api.getChat(worldName, lastChat.id);
+          if (chatData && chatData.snapshot) {
+            messages = chatData.snapshot.messages || [];
+            currentChat = {
+              id: chatData.id,
+              name: chatData.name,
+              isSaved: true,
+              messageCount: chatData.messageCount,
+              lastUpdated: new Date(chatData.updatedAt)
+            };
+          }
+        }
+      } catch (err) {
+        // leave defaults
       }
 
       // Convert all agent memories to messages (no deduplication)
@@ -105,6 +145,9 @@ export const worldUpdateHandlers = {
         return timeA - timeB;
       });
 
+      // If chat history messages exist, use them; else use agent memory messages
+      const finalMessages = messages.length > 0 ? messages : sortedMessages;
+
       yield {
         ...state,
         worldName,
@@ -113,11 +156,13 @@ export const worldUpdateHandlers = {
           agents: worldAgents,
           llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
         },
-        messages: sortedMessages,
+        messages: finalMessages,
+        chatHistory,
+        currentChat,
         loading: false,
         error: null,
         isWaiting: false,
-        selectedSettingsTarget: 'world',
+        selectedSettingsTarget: 'chat',
         selectedAgent: null,
         activeAgent: null
       };
@@ -555,7 +600,6 @@ export const worldUpdateHandlers = {
     ...state,
     chatHistory: {
       ...state.chatHistory,
-      showCreateForm: false,
       showLoadConfirm: false,
       showDeleteConfirm: false,
       selectedChat: null

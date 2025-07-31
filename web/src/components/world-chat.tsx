@@ -109,7 +109,7 @@ export default function WorldChat(props: WorldChatProps) {
   return (
     <fieldset className="chat-fieldset">
       <legend>
-        {currentChat ? currentChat.name : worldName}
+        {worldName} - {currentChat ? currentChat.name : ''}
         {currentChat && !currentChat.isSaved && (
           <span className="unsaved-indicator" title="Unsaved chat"> ●</span>
         )}
