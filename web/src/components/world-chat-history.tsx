@@ -38,12 +38,8 @@ export interface WorldChatHistoryProps {
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const { worldName, chatHistory } = props;
 
-  const handleCreateChat = () => {
-    app.run('chat-history-show-create-form');
-  };
-
   const handleLoadChat = (chat: ChatInfo) => {
-    app.run('chat-history-show-load-confirm', chat);
+    app.run('load-chat-from-history', chat.id);
   };
 
   const handleDeleteChat = (chat: ChatInfo) => {
@@ -54,21 +50,11 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
     app.run('chat-history-summarize', chat);
   };
 
-  const handleCreateSubmit = (e: Event) => {
-    e.preventDefault();
-    app.run('chat-history-create-submit');
-  };
-
-  const handleCreateCancel = () => {
-    app.run('chat-history-hide-create-form');
-  };
-
-  const handleLoadConfirm = () => {
-    app.run('chat-history-load-confirm');
-  };
-
   const handleDeleteConfirm = () => {
-    app.run('chat-history-delete-confirm');
+    if (chatHistory.selectedChat) {
+      app.run('delete-chat-from-history', chatHistory.selectedChat.id);
+    }
+    app.run('chat-history-hide-modals');
   };
 
   const handleModalCancel = () => {
@@ -98,13 +84,6 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           <>
             <div className="chat-history-header">
               <button 
-                className="btn-primary" 
-                onclick={handleCreateChat}
-                disabled={chatHistory.loading}
-              >
-                📁 New Chat
-              </button>
-              <button 
                 className="btn-secondary" 
                 onclick={() => app.run('chat-history-refresh')}
                 disabled={chatHistory.loading}
@@ -116,7 +95,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
             {chatHistory.chats.length === 0 ? (
               <div className="no-chats">
                 <p>No chat history entries found.</p>
-                <p>Create a new chat to save the current world state.</p>
+                <p>Start a conversation with agents to auto-save chats.</p>
               </div>
             ) : (
               <div className="chat-list">
@@ -128,7 +107,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
                         <button 
                           className="action-btn" 
                           onclick={() => handleLoadChat(chat)}
-                          title="Load and restore world state"
+                          title="Load chat"
                         >
                           📂
                         </button>
@@ -181,68 +160,6 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           </>
         )}
       </div>
-
-      {/* Create Chat Modal */}
-      {chatHistory.showCreateForm && (
-        <div className="modal-overlay" onclick={handleModalCancel}>
-          <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
-            <h3>Create New Chat</h3>
-            <form onsubmit={handleCreateSubmit}>
-              <div className="form-group">
-                <label htmlFor="chat-name">Name:</label>
-                <input
-                  id="chat-name"
-                  type="text"
-                  value={chatHistory.formData.name}
-                  oninput={(e: any) => app.run('chat-history-update-form', { name: e.target.value })}
-                  placeholder="Enter chat name"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="chat-description">Description:</label>
-                <textarea
-                  id="chat-description"
-                  value={chatHistory.formData.description}
-                  oninput={(e: any) => app.run('chat-history-update-form', { description: e.target.value })}
-                  placeholder="Optional description"
-                />
-              </div>
-              <div className="form-actions">
-                <button type="submit" className="btn-primary" disabled={chatHistory.loading}>
-                  {chatHistory.loading ? 'Creating...' : 'Create Chat'}
-                </button>
-                <button type="button" className="btn-secondary" onclick={handleCreateCancel}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Load Confirmation Modal */}
-      {chatHistory.showLoadConfirm && chatHistory.selectedChat && (
-        <div className="modal-overlay" onclick={handleModalCancel}>
-          <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
-            <h3>Load Chat</h3>
-            <p>
-              Are you sure you want to restore world state from chat "{chatHistory.selectedChat.name}"?
-            </p>
-            <p className="warning">
-              ⚠️ This will replace the current world state with the saved snapshot.
-            </p>
-            <div className="form-actions">
-              <button className="btn-primary" onclick={handleLoadConfirm} disabled={chatHistory.loading}>
-                {chatHistory.loading ? 'Loading...' : 'Load Chat'}
-              </button>
-              <button className="btn-secondary" onclick={handleModalCancel}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delete Confirmation Modal */}
       {chatHistory.showDeleteConfirm && chatHistory.selectedChat && (
