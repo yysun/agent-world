@@ -53,6 +53,44 @@ export const mockFs = {
 };
 
 /**
+ * Enhanced storage mocking for new API surfaces
+ * Includes chat history, snapshot operations, and integrity checks
+ */
+export const mockStorage = {
+  // World operations
+  saveWorld: jest.fn<any>().mockResolvedValue(undefined),
+  loadWorld: jest.fn<any>().mockResolvedValue({}),
+  deleteWorld: jest.fn<any>().mockResolvedValue(true),
+  listWorlds: jest.fn<any>().mockResolvedValue([]),
+  
+  // Agent operations  
+  saveAgent: jest.fn<any>().mockResolvedValue(undefined),
+  loadAgent: jest.fn<any>().mockResolvedValue(null),
+  deleteAgent: jest.fn<any>().mockResolvedValue(true),
+  listAgents: jest.fn<any>().mockResolvedValue([]),
+  
+  // Batch operations
+  saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
+  loadAgentsBatch: jest.fn<any>().mockResolvedValue([]),
+  
+  // Chat history operations - new mock surfaces
+  saveChat: jest.fn<any>().mockResolvedValue(undefined),
+  loadChat: jest.fn<any>().mockResolvedValue(null),
+  deleteChat: jest.fn<any>().mockResolvedValue(true),
+  listChats: jest.fn<any>().mockResolvedValue([]),
+  updateChat: jest.fn<any>().mockResolvedValue(null),
+  
+  // Snapshot operations - new mock surfaces
+  saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
+  loadSnapshot: jest.fn<any>().mockResolvedValue(null),
+  restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
+  
+  // Integrity operations - new mock surfaces
+  validateIntegrity: jest.fn<any>().mockResolvedValue(true),
+  repairData: jest.fn<any>().mockResolvedValue(true),
+};
+
+/**
  * Setup file system mocking
  */
 export function setupFileSystemMocks(): void {

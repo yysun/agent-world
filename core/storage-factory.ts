@@ -28,6 +28,9 @@ import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
 
+// Re-export StorageAPI type for external use
+export type { StorageAPI } from './types.js';
+
 export interface StorageConfig {
   type: 'file' | 'sqlite';
   rootPath: string;

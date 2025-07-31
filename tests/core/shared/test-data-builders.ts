@@ -134,16 +134,35 @@ export class WorldTestBuilder {
 
     // Create mock storage manager
     const mockStorage: StorageManager = {
+      // World operations
       saveWorld: jest.fn(),
       loadWorld: jest.fn(),
       deleteWorld: jest.fn(),
       listWorlds: jest.fn(),
+      
+      // Agent operations
       saveAgent: jest.fn(),
       loadAgent: jest.fn(),
       deleteAgent: jest.fn(),
       listAgents: jest.fn(),
+      
+      // Batch operations
       saveAgentsBatch: jest.fn(),
       loadAgentsBatch: jest.fn(),
+      
+      // Chat history operations
+      saveChat: jest.fn(),
+      loadChat: jest.fn(),
+      deleteChat: jest.fn(),
+      listChats: jest.fn(),
+      updateChat: jest.fn(),
+      
+      // Snapshot operations
+      saveSnapshot: jest.fn(),
+      loadSnapshot: jest.fn(),
+      restoreFromSnapshot: jest.fn(),
+      
+      // Integrity operations
       validateIntegrity: jest.fn(),
       repairData: jest.fn(),
     };
