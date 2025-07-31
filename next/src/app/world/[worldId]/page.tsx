@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import MarkdownMemory from '../../../components/MarkdownMemory';
+// import MarkdownMemory from '../../../components/MarkdownMemory';
 import MarkdownEditor from '../../../components/MarkdownEditor';
 import StreamChatBox from '../../../components/StreamChatBox';
 
@@ -43,7 +43,7 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   const [newAgentName, setNewAgentName] = useState('');
   const [creating, setCreating] = useState(false);
   const [worldId, setWorldId] = useState<string>('');
-  const [isEditing, setIsEditing] = useState(false);
+  // const [isEditing, setIsEditing] = useState(false);
   const [editingSaving, setEditingSaving] = useState(false);
   const router = useRouter();
 
@@ -62,7 +62,6 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
       // Reset agent selection when world changes
       setSelectedAgent(null);
       setActiveTab('main');
-      setIsEditing(false);
 
       // Inline loadWorld
       (async () => {
@@ -208,7 +207,6 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
       if (response.ok) {
         const updatedWorld = await response.json();
         setWorld(updatedWorld.world);
-        setIsEditing(false);
       } else {
         throw new Error('Failed to save world');
       }
@@ -223,7 +221,7 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   // Save agent data
   const saveAgent = async (data: Record<string, unknown>) => {
     if (!selectedAgent) return;
-    
+
     setEditingSaving(true);
     try {
       const response = await fetch(`/api/worlds/${worldId}/agents/${selectedAgent.id}`, {
@@ -236,11 +234,10 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
 
       if (response.ok) {
         const updatedAgent = await response.json();
-        setAgents(agents.map(agent => 
+        setAgents(agents.map(agent =>
           agent.id === selectedAgent.id ? updatedAgent.agent : agent
         ));
         setSelectedAgent(updatedAgent.agent);
-        setIsEditing(false);
       } else {
         throw new Error('Failed to save agent');
       }
@@ -282,17 +279,12 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
   const handleAgentSelect = (agent: Agent) => {
     setSelectedAgent(agent);
     setActiveTab('main');
-    setIsEditing(false); // Reset editing state when switching agents
   };
 
   // --- Edit handlers ---
-  const handleEdit = () => {
-    setIsEditing(true);
-    setActiveTab('settings');
-  };
-
+  // No longer needed: handleEdit, handleCancelEdit
   const handleCancelEdit = () => {
-    setIsEditing(false);
+    setActiveTab('main');
   };
 
 
@@ -423,28 +415,14 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
                 </button>
               ))}
             </div>
-            
+
             <div className="flex items-center gap-3 pb-2">
-              {/* Edit button - only show in settings tab and not in editing mode */}
-              {activeTab === 'settings' && !isEditing && (
-                <button
-                  onClick={handleEdit}
-                  className="text-gray-400 hover:text-primary transition-colors"
-                  title={`Edit ${selectedAgent ? 'agent' : 'world'}`}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-              )}
-              
               {/* Show a close button if agent is selected */}
               {selectedAgent && (
                 <button
                   className="text-gray-400 hover:text-primary transition-colors font-sans"
                   onClick={() => {
                     setSelectedAgent(null);
-                    setIsEditing(false);
                   }}
                   title="Back to world view"
                   tabIndex={0}
@@ -469,86 +447,32 @@ export default function WorldPage({ params }: { params: Promise<{ worldId: strin
               sending={sending}
             />
           ) : (
-            // Settings tab content with markdown display and editing
+            // Settings tab content: always show MarkdownEditor (edit mode)
             <div className="h-full overflow-y-auto p-6">
-              {isEditing ? (
-                // Edit mode - show MarkdownEditor
-                selectedAgent ? (
-                  <MarkdownEditor
-                    initialData={{
-                      name: selectedAgent.name,
-                      type: selectedAgent.type,
-                      systemPrompt: selectedAgent.systemPrompt || '',
-                      description: selectedAgent.description || selectedAgent.memory || ''
-                    }}
-                    onSave={saveAgent}
-                    onCancel={handleCancelEdit}
-                    saving={editingSaving}
-                    entityType="agent"
-                  />
-                ) : (
-                  <MarkdownEditor
-                    initialData={{
-                      name: world!.name,
-                      description: world!.description || world!.memory || ''
-                    }}
-                    onSave={saveWorld}
-                    onCancel={handleCancelEdit}
-                    saving={editingSaving}
-                    entityType="world"
-                  />
-                )
+              {selectedAgent ? (
+                <MarkdownEditor
+                  initialData={{
+                    name: selectedAgent.name,
+                    type: selectedAgent.type,
+                    systemPrompt: selectedAgent.systemPrompt || '',
+                    description: selectedAgent.description || selectedAgent.memory || ''
+                  }}
+                  onSave={saveAgent}
+                  onCancel={handleCancelEdit}
+                  saving={editingSaving}
+                  entityType="agent"
+                />
               ) : (
-                // View mode - show markdown memory and basic info
-                <div className="space-y-6">
-                  {selectedAgent ? (
-                    <div>
-                      <h3 className="text-xl font-semibold mb-4 font-sans">Agent: {selectedAgent.name}</h3>
-                      
-                      {/* Basic agent info */}
-                      <div className="bg-muted rounded-lg p-4 mb-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <span className="font-medium text-foreground">Type:</span>
-                            <span className="ml-2 text-muted-foreground">{selectedAgent.type}</span>
-                          </div>
-                          {selectedAgent.systemPrompt && (
-                            <div className="md:col-span-2">
-                              <span className="font-medium text-foreground">System Prompt:</span>
-                              <div className="ml-2 text-muted-foreground mt-1 p-2 bg-background rounded text-xs font-mono">
-                                {selectedAgent.systemPrompt}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Agent memory/description as markdown */}
-                      <MarkdownMemory 
-                        content={selectedAgent.description || selectedAgent.memory || ''} 
-                        title="Memory & Description"
-                      />
-                    </div>
-                  ) : (
-                    <div>
-                      <h3 className="text-xl font-semibold mb-4 font-sans">World: {world!.name}</h3>
-                      
-                      {/* Basic world info */}
-                      <div className="bg-muted rounded-lg p-4 mb-6">
-                        <div className="text-sm">
-                          <span className="font-medium text-foreground">ID:</span>
-                          <span className="ml-2 text-muted-foreground font-mono">{world!.id}</span>
-                        </div>
-                      </div>
-
-                      {/* World description/memory as markdown */}
-                      <MarkdownMemory 
-                        content={world!.description || world!.memory || ''} 
-                        title="Description & Memory"
-                      />
-                    </div>
-                  )}
-                </div>
+                <MarkdownEditor
+                  initialData={{
+                    name: world!.name,
+                    description: world!.description || world!.memory || ''
+                  }}
+                  onSave={saveWorld}
+                  onCancel={handleCancelEdit}
+                  saving={editingSaving}
+                  entityType="world"
+                />
               )}
             </div>
           )}
