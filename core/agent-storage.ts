@@ -92,7 +92,7 @@ export async function ensureAgentDirectory(rootPath: string, worldId: string, ag
 /**
  * Check if agent directory exists on disk
  */
-export async function agentExistsOnDisk(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+export async function agentExists(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
   try {
     const agentDir = getAgentDir(rootPath, worldId, agentId);
     const configPath = path.join(agentDir, 'config.json');
@@ -208,7 +208,7 @@ export async function repairAgentData(rootPath: string, worldId: string, agentId
 /**
  * Save agent to disk with three-file structure
  */
-export async function saveAgentToDisk(rootPath: string, worldId: string, agent: Agent): Promise<void> {
+export async function saveAgent(rootPath: string, worldId: string, agent: Agent): Promise<void> {
   const agentId = toKebabCase(agent.id);
   await ensureAgentDirectory(rootPath, worldId, agentId);
 
@@ -246,7 +246,7 @@ export async function saveAgentToDisk(rootPath: string, worldId: string, agent: 
  * Save agent configuration and system prompt to disk without memory
  * This is useful for saving agent metadata changes without including chat history
  */
-export async function saveAgentConfigToDisk(rootPath: string, worldId: string, agent: Agent): Promise<void> {
+export async function saveAgentConfig(rootPath: string, worldId: string, agent: Agent): Promise<void> {
   const agentId = toKebabCase(agent.id);
   await ensureAgentDirectory(rootPath, worldId, agentId);
 
@@ -273,7 +273,7 @@ export async function saveAgentConfigToDisk(rootPath: string, worldId: string, a
 /**
  * Save only agent memory to disk (performance optimized)
  */
-export async function saveAgentMemoryToDisk(
+export async function saveAgentMemory(
   rootPath: string,
   worldId: string,
   agentId: string,
@@ -326,7 +326,7 @@ export async function archiveAgentMemory(
 /**
  * Enhanced agent loading with retry mechanism and partial recovery
  */
-export async function loadAgentFromDiskWithRetry(
+export async function loadAgentWithRetry(
   rootPath: string,
   worldId: string,
   agentId: string,
@@ -425,8 +425,8 @@ export async function loadAgentFromDiskWithRetry(
 /**
  * Load agent from disk with complete data reconstruction (original method)
  */
-export async function loadAgentFromDisk(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
-  return loadAgentFromDiskWithRetry(rootPath, worldId, agentId, {
+export async function loadAgent(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
+  return loadAgentWithRetry(rootPath, worldId, agentId, {
     includeMemory: true,
     retryCount: 1,
     allowPartialLoad: true,
@@ -437,7 +437,7 @@ export async function loadAgentFromDisk(rootPath: string, worldId: string, agent
 /**
  * Optimized batch loading with parallel processing
  */
-export async function loadAllAgentsFromDiskBatch(
+export async function loadAgentsBatch(
   rootPath: string,
   worldId: string,
   options: AgentLoadOptions = {}
@@ -469,7 +469,7 @@ export async function loadAllAgentsFromDiskBatch(
     for (const batch of batches) {
       const batchPromises = batch.map(async (agentId) => {
         try {
-          const agent = await loadAgentFromDiskWithRetry(rootPath, worldId, agentId, options);
+          const agent = await loadAgentWithRetry(rootPath, worldId, agentId, options);
           if (agent) {
             result.successful.push(agent);
             result.successCount++;
@@ -503,8 +503,8 @@ export async function loadAllAgentsFromDiskBatch(
 /**
  * Load all agents from world directory (original method)
  */
-export async function loadAllAgentsFromDisk(rootPath: string, worldId: string): Promise<Agent[]> {
-  const result = await loadAllAgentsFromDiskBatch(rootPath, worldId, {
+export async function listAgents(rootPath: string, worldId: string): Promise<Agent[]> {
+  const result = await loadAgentsBatch(rootPath, worldId, {
     includeMemory: true,
     allowPartialLoad: true,
     validateIntegrity: false
@@ -516,7 +516,7 @@ export async function loadAllAgentsFromDisk(rootPath: string, worldId: string): 
 /**
  * Delete agent directory and all files
  */
-export async function deleteAgentFromDisk(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
+export async function deleteAgent(rootPath: string, worldId: string, agentId: string): Promise<boolean> {
   try {
     const agentDir = getAgentDir(rootPath, worldId, agentId);
 
@@ -568,3 +568,14 @@ async function readTextFile(filePath: string): Promise<string> {
     return `You are an AI agent.`; // Default fallback
   }
 }
+
+// Backward compatibility exports (old function names)
+export const saveAgentToDisk = saveAgent;
+export const saveAgentConfigToDisk = saveAgentConfig;
+export const saveAgentMemoryToDisk = saveAgentMemory;
+export const loadAgentFromDisk = loadAgent;
+export const loadAgentFromDiskWithRetry = loadAgentWithRetry;
+export const loadAllAgentsFromDiskBatch = loadAgentsBatch;
+export const loadAllAgentsFromDisk = listAgents;
+export const deleteAgentFromDisk = deleteAgent;
+export const agentExistsOnDisk = agentExists;

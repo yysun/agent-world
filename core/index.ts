@@ -81,6 +81,9 @@ export type {
   AgentInfo,
   AgentData,
   AgentStorage,
+  // Storage interfaces - new unified API
+  StorageManager,
+  StorageAPI,
   // Enhanced event types
   EventPayloadMap,
   TypedEvent,
@@ -98,6 +101,9 @@ export { generateId, toKebabCase } from './utils.js';
 
 // Streaming control
 export { enableStreaming, disableStreaming } from './events.js';
+
+// Storage factory and wrappers
+export { createStorageWrappers, createStorageWithWrappers, createStorageFromEnv } from './storage-factory.js';
 
 // Subscription system
 export * from './subscription.js';

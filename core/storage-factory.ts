@@ -23,36 +23,7 @@
  * - 2025-07-27: Default storage type changed to SQLite
  * - See git history for previous changes
  */
-import type { StorageManager } from './types.js';
-// Interface for storage wrapper functions and instance
-export interface StorageWrappers {
-  storageInstance: StorageManager | null;
-  saveWorldToDisk: (rootPath: string, worldData: any) => Promise<void>;
-  loadWorldFromDisk: (rootPath: string, worldId: string) => Promise<any>;
-  deleteWorldFromDisk: (rootPath: string, worldId: string) => Promise<boolean>;
-  loadAllWorldsFromDisk: (rootPath: string) => Promise<any[]>;
-  worldExistsOnDisk: (rootPath: string, worldId: string) => Promise<boolean>;
-  loadAllAgentsFromDisk: (rootPath: string, worldId: string) => Promise<any[]>;
-  saveAgentConfigToDisk: (rootPath: string, worldId: string, agent: any) => Promise<void>;
-  saveAgentToDisk: (rootPath: string, worldId: string, agent: any) => Promise<void>;
-  saveAgentMemoryToDisk: (rootPath: string, worldId: string, agentId: string, memory: any[]) => Promise<void>;
-  loadAgentFromDisk: (rootPath: string, worldId: string, agentId: string) => Promise<any>;
-  loadAgentFromDiskWithRetry: (rootPath: string, worldId: string, agentId: string, options?: any) => Promise<any>;
-  deleteAgentFromDisk: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
-  loadAllAgentsFromDiskBatch: (rootPath: string, worldId: string, options?: any) => Promise<{ successful: any[]; failed: any[] }>;
-  agentExistsOnDisk: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
-  validateAgentIntegrity: (rootPath: string, worldId: string, agentId: string) => Promise<{ isValid: boolean }>;
-  repairAgentData: (rootPath: string, worldId: string, agentId: string) => Promise<boolean>;
-  archiveAgentMemory: (rootPath: string, worldId: string, agentId: string, memory: any[]) => Promise<any>;
-  // Chat operations
-  saveChat: (rootPath: string, worldId: string, chat: any) => Promise<void>;
-  loadChat: (rootPath: string, worldId: string, chatId: string) => Promise<any>;
-  deleteChat: (rootPath: string, worldId: string, chatId: string) => Promise<boolean>;
-  listChats: (rootPath: string, worldId: string) => Promise<any[]>;
-  updateChat: (rootPath: string, worldId: string, chatId: string, updates: any) => Promise<any>;
-  saveSnapshot: (rootPath: string, worldId: string, chatId: string, snapshot: any) => Promise<void>;
-  loadSnapshot: (rootPath: string, worldId: string, chatId: string) => Promise<any>;
-}
+import type { StorageManager, StorageAPI } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
@@ -63,7 +34,173 @@ export interface StorageConfig {
   sqlite?: SQLiteConfig;
 }
 
-// File storage implementation wrapper (function-based)
+/**
+ * StorageWrappers factory function - creates an object that implements StorageAPI and delegates to storage instance
+ * This provides a unified interface that works across all storage backends
+ */
+export function createStorageWrappers(storageInstance: StorageManager | null): StorageAPI {
+  return {
+    // World operations - standardized naming
+    async saveWorld(worldData: any): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveWorld(worldData);
+    },
+
+    async loadWorld(worldId: string): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.loadWorld(worldId);
+    },
+
+    async deleteWorld(worldId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      return storageInstance.deleteWorld(worldId);
+    },
+
+    async listWorlds(): Promise<any[]> {
+      if (!storageInstance) return [];
+      return storageInstance.listWorlds();
+    },
+
+    async worldExists(worldId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      try {
+        const world = await storageInstance.loadWorld(worldId);
+        return !!world;
+      } catch {
+        return false;
+      }
+    },
+
+    // Agent operations - standardized naming
+    async saveAgent(worldId: string, agent: any): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveAgent(worldId, agent);
+    },
+
+    async saveAgentConfig(worldId: string, agent: any): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveAgent(worldId, agent);
+    },
+
+    async saveAgentMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
+      if (!storageInstance) return;
+      const agent = await storageInstance.loadAgent(worldId, agentId);
+      if (agent) {
+        agent.memory = memory;
+        return storageInstance.saveAgent(worldId, agent);
+      }
+    },
+
+    async loadAgent(worldId: string, agentId: string): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.loadAgent(worldId, agentId);
+    },
+
+    async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.loadAgent(worldId, agentId);
+    },
+
+    async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      return storageInstance.deleteAgent(worldId, agentId);
+    },
+
+    async listAgents(worldId: string): Promise<any[]> {
+      if (!storageInstance) return [];
+      return storageInstance.listAgents(worldId);
+    },
+
+    async agentExists(worldId: string, agentId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      try {
+        const agent = await storageInstance.loadAgent(worldId, agentId);
+        return !!agent;
+      } catch {
+        return false;
+      }
+    },
+
+    // Batch operations
+    async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveAgentsBatch(worldId, agents);
+    },
+
+    async loadAgentsBatch(worldId: string, agentIds: string[], options?: any): Promise<{ successful: any[]; failed: any[] }> {
+      if (!storageInstance) return { successful: [], failed: [] };
+      const agents = await storageInstance.loadAgentsBatch(worldId, agentIds);
+      return { successful: agents, failed: [] };
+    },
+
+    // Chat operations
+    async saveChat(worldId: string, chat: any): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveChat(worldId, chat);
+    },
+
+    async loadChat(worldId: string, chatId: string): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.loadChat(worldId, chatId);
+    },
+
+    async deleteChat(worldId: string, chatId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      return storageInstance.deleteChat(worldId, chatId);
+    },
+
+    async listChats(worldId: string): Promise<any[]> {
+      if (!storageInstance) return [];
+      return storageInstance.listChats(worldId);
+    },
+
+    async updateChat(worldId: string, chatId: string, updates: any): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.updateChat(worldId, chatId, updates);
+    },
+
+    // Snapshot operations
+    async saveSnapshot(worldId: string, chatId: string, snapshot: any): Promise<void> {
+      if (!storageInstance) return;
+      return storageInstance.saveSnapshot(worldId, chatId, snapshot);
+    },
+
+    async loadSnapshot(worldId: string, chatId: string): Promise<any> {
+      if (!storageInstance) return null;
+      return storageInstance.loadSnapshot(worldId, chatId);
+    },
+
+    async restoreFromSnapshot(worldId: string, snapshot: any): Promise<boolean> {
+      if (!storageInstance) return false;
+      return storageInstance.restoreFromSnapshot(worldId, snapshot);
+    },
+
+    // Integrity operations
+    async validateIntegrity(worldId: string, agentId?: string): Promise<{ isValid: boolean }> {
+      if (!storageInstance) return { isValid: false };
+      const isValid = await storageInstance.validateIntegrity(worldId, agentId);
+      return { isValid };
+    },
+
+    async repairData(worldId: string, agentId?: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      return storageInstance.repairData(worldId, agentId);
+    },
+
+    async archiveMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
+      if (!storageInstance) return;
+      // Try to use the storage instance's archiveAgentMemory if available
+      if ('archiveAgentMemory' in storageInstance) {
+        return (storageInstance as any).archiveAgentMemory(worldId, agentId, memory);
+      } else {
+        // Fallback to file storage implementation
+        const agentStorage = await import('./agent-storage.js');
+      }
+    }
+  };
+}
+
+// File storage implementation adapter (function-based)
 function createFileStorageAdapter(rootPath: string): StorageManager {
   let worldStorage: any;
   let agentStorage: any;
@@ -85,72 +222,72 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
   return {
     async saveWorld(worldData: any): Promise<void> {
       await ensureModulesLoaded();
-      if (worldStorage?.saveWorldToDisk) {
-        return worldStorage.saveWorldToDisk(rootPath, worldData);
+      if (worldStorage?.saveWorld) {
+        return worldStorage.saveWorld(rootPath, worldData);
       }
     },
     async loadWorld(worldId: string): Promise<any> {
       await ensureModulesLoaded();
-      if (worldStorage?.loadWorldFromDisk) {
-        return worldStorage.loadWorldFromDisk(rootPath, worldId);
+      if (worldStorage?.loadWorld) {
+        return worldStorage.loadWorld(rootPath, worldId);
       }
       return null;
     },
     async deleteWorld(worldId: string): Promise<boolean> {
       await ensureModulesLoaded();
-      if (worldStorage?.deleteWorldFromDisk) {
-        return worldStorage.deleteWorldFromDisk(rootPath, worldId);
+      if (worldStorage?.deleteWorld) {
+        return worldStorage.deleteWorld(rootPath, worldId);
       }
       return false;
     },
     async listWorlds(): Promise<any[]> {
       await ensureModulesLoaded();
-      if (worldStorage?.loadAllWorldsFromDisk) {
-        return worldStorage.loadAllWorldsFromDisk(rootPath);
+      if (worldStorage?.listWorlds) {
+        return worldStorage.listWorlds(rootPath);
       }
       return [];
     },
     async saveAgent(worldId: string, agent: any): Promise<void> {
       await ensureModulesLoaded();
-      if (agentStorage?.saveAgentToDisk) {
-        return agentStorage.saveAgentToDisk(rootPath, worldId, agent);
+      if (agentStorage?.saveAgent) {
+        return agentStorage.saveAgent(rootPath, worldId, agent);
       }
     },
     async loadAgent(worldId: string, agentId: string): Promise<any> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAgentFromDisk) {
-        return agentStorage.loadAgentFromDisk(rootPath, worldId, agentId);
+      if (agentStorage?.loadAgent) {
+        return agentStorage.loadAgent(rootPath, worldId, agentId);
       }
       return null;
     },
     async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
       await ensureModulesLoaded();
-      if (agentStorage?.deleteAgentFromDisk) {
-        return agentStorage.deleteAgentFromDisk(rootPath, worldId, agentId);
+      if (agentStorage?.deleteAgent) {
+        return agentStorage.deleteAgent(rootPath, worldId, agentId);
       }
       return false;
     },
     async listAgents(worldId: string): Promise<any[]> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAllAgentsFromDisk) {
-        return agentStorage.loadAllAgentsFromDisk(rootPath, worldId);
+      if (agentStorage?.listAgents) {
+        return agentStorage.listAgents(rootPath, worldId);
       }
       return [];
     },
     async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
       await ensureModulesLoaded();
-      if (agentStorage?.saveAgentToDisk) {
+      if (agentStorage?.saveAgent) {
         for (const agent of agents) {
-          await agentStorage.saveAgentToDisk(rootPath, worldId, agent);
+          await agentStorage.saveAgent(rootPath, worldId, agent);
         }
       }
     },
     async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<any[]> {
       await ensureModulesLoaded();
-      if (agentStorage?.loadAgentFromDisk) {
+      if (agentStorage?.loadAgent) {
         const agents: any[] = [];
         for (const agentId of agentIds) {
-          const agent = await agentStorage.loadAgentFromDisk(rootPath, worldId, agentId);
+          const agent = await agentStorage.loadAgent(rootPath, worldId, agentId);
           if (agent) agents.push(agent);
         }
         return agents;
@@ -165,8 +302,8 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
           return result.isValid;
         }
       } else {
-        if (worldStorage?.worldExistsOnDisk) {
-          return worldStorage.worldExistsOnDisk(rootPath, worldId);
+        if (worldStorage?.worldExists) {
+          return worldStorage.worldExists(rootPath, worldId);
         }
       }
       return false;
@@ -183,7 +320,6 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
 
     // Chat operations (file storage doesn't support chats yet)
     async saveChat(worldId: string, chat: any): Promise<void> {
-      // TODO: Implement file-based chat storage if needed
       throw new Error('Chat operations not supported in file storage backend');
     },
     async loadChat(worldId: string, chatId: string): Promise<any> {
@@ -214,134 +350,17 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
 const storageCache = new Map<string, StorageManager>();
 
 /**
- * Create storage-aware function wrappers that handle environment detection
- * Returns NoOp implementations for browser environments
+ * Create storage-aware wrapper that handles environment detection
+ * Returns StorageAPI object that delegates to appropriate storage instance
  */
-export async function createStorageWithWrappers(): Promise<StorageWrappers> {
+export async function createStorageWithWrappers(): Promise<StorageAPI> {
   if (isNodeEnvironment()) {
     // Node.js environment - create actual storage instance
     const storageInstance = await createStorageFromEnv();
-
-    return {
-      storageInstance,
-      // Storage wrappers that use the storage instance
-      saveWorldToDisk: async (_rootPath: string, worldData: any) => storageInstance.saveWorld(worldData),
-      loadWorldFromDisk: async (_rootPath: string, worldId: string) => storageInstance.loadWorld(worldId),
-      deleteWorldFromDisk: async (_rootPath: string, worldId: string) => storageInstance.deleteWorld(worldId),
-      loadAllWorldsFromDisk: async (_rootPath: string) => storageInstance.listWorlds(),
-      worldExistsOnDisk: async (_rootPath: string, worldId: string) => {
-        try { return !!(await storageInstance.loadWorld(worldId)); } catch { return false; }
-      },
-      loadAllAgentsFromDisk: async (_rootPath: string, worldId: string) => storageInstance.listAgents(worldId),
-      saveAgentConfigToDisk: async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent),
-      saveAgentToDisk: async (_rootPath: string, worldId: string, agent: any) => storageInstance.saveAgent(worldId, agent),
-      saveAgentMemoryToDisk: async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-        const agent = await storageInstance.loadAgent(worldId, agentId);
-        if (agent) { agent.memory = memory; return storageInstance.saveAgent(worldId, agent); }
-      },
-      loadAgentFromDisk: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.loadAgent(worldId, agentId),
-      loadAgentFromDiskWithRetry: async (_rootPath: string, worldId: string, agentId: string, _options?: any) => storageInstance.loadAgent(worldId, agentId),
-      deleteAgentFromDisk: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.deleteAgent(worldId, agentId),
-      loadAllAgentsFromDiskBatch: async (_rootPath: string, worldId: string, _options?: any) => {
-        const agents = await storageInstance.listAgents(worldId);
-        return { successful: agents, failed: [] };
-      },
-      agentExistsOnDisk: async (_rootPath: string, worldId: string, agentId: string) => {
-        try { return !!(await storageInstance.loadAgent(worldId, agentId)); } catch { return false; }
-      },
-      validateAgentIntegrity: async (_rootPath: string, worldId: string, agentId: string) => {
-        const isValid = await storageInstance.validateIntegrity(worldId, agentId);
-        return { isValid };
-      },
-      repairAgentData: async (_rootPath: string, worldId: string, agentId: string) => storageInstance.repairData(worldId, agentId),
-      archiveAgentMemory: async (_rootPath: string, worldId: string, agentId: string, memory: any[]) => {
-        if ('archiveAgentMemory' in storageInstance) {
-          return (storageInstance as any).archiveAgentMemory(worldId, agentId, memory);
-        } else {
-          const agentStorage = await import('./agent-storage.js');
-          return agentStorage.archiveAgentMemory((storageInstance as any).rootPath, worldId, agentId, memory);
-        }
-      },
-      // Chat operations
-      saveChat: async (_rootPath: string, worldId: string, chat: any) => {
-        if ('saveChat' in storageInstance) {
-          return (storageInstance as any).saveChat(worldId, chat);
-        }
-        throw new Error('Chat operations not supported in this storage backend');
-      },
-      loadChat: async (_rootPath: string, worldId: string, chatId: string) => {
-        if ('loadChat' in storageInstance) {
-          return (storageInstance as any).loadChat(worldId, chatId);
-        }
-        return null;
-      },
-      deleteChat: async (_rootPath: string, worldId: string, chatId: string) => {
-        if ('deleteChat' in storageInstance) {
-          return (storageInstance as any).deleteChat(worldId, chatId);
-        }
-        return false;
-      },
-      listChats: async (_rootPath: string, worldId: string) => {
-        if ('listChats' in storageInstance) {
-          return (storageInstance as any).listChats(worldId);
-        }
-        return [];
-      },
-      updateChat: async (_rootPath: string, worldId: string, chatId: string, updates: any) => {
-        if ('updateChat' in storageInstance) {
-          return (storageInstance as any).updateChat(worldId, chatId, updates);
-        }
-        return null;
-      },
-      saveSnapshot: async (_rootPath: string, worldId: string, chatId: string, snapshot: any) => {
-        if ('saveSnapshot' in storageInstance) {
-          return (storageInstance as any).saveSnapshot(worldId, chatId, snapshot);
-        }
-      },
-      loadSnapshot: async (_rootPath: string, worldId: string, chatId: string) => {
-        if ('loadSnapshot' in storageInstance) {
-          return (storageInstance as any).loadSnapshot(worldId, chatId);
-        }
-        return null;
-      }
-    };
+    return createStorageWrappers(storageInstance);
   } else {
-    // Browser environment - return NoOp implementations
-    const noOpAsync = async () => { };
-    const noOpAsyncReturn = async () => null;
-    const noOpAsyncReturnFalse = async () => false;
-    const noOpAsyncReturnEmptyArray = async () => [];
-    const noOpAsyncReturnBatchResult = async () => ({ successful: [], failed: [] });
-    const noOpAsyncReturnValidation = async () => ({ isValid: false });
-
-    return {
-      storageInstance: null,
-      saveWorldToDisk: noOpAsync,
-      loadWorldFromDisk: noOpAsyncReturn,
-      deleteWorldFromDisk: noOpAsyncReturnFalse,
-      loadAllWorldsFromDisk: noOpAsyncReturnEmptyArray,
-      worldExistsOnDisk: noOpAsyncReturnFalse,
-      loadAllAgentsFromDisk: noOpAsyncReturnEmptyArray,
-      saveAgentConfigToDisk: noOpAsync,
-      saveAgentToDisk: noOpAsync,
-      saveAgentMemoryToDisk: noOpAsync,
-      loadAgentFromDisk: noOpAsyncReturn,
-      loadAgentFromDiskWithRetry: noOpAsyncReturn,
-      deleteAgentFromDisk: noOpAsyncReturnFalse,
-      loadAllAgentsFromDiskBatch: noOpAsyncReturnBatchResult,
-      agentExistsOnDisk: noOpAsyncReturnFalse,
-      validateAgentIntegrity: noOpAsyncReturnValidation,
-      repairAgentData: noOpAsyncReturnFalse,
-      archiveAgentMemory: noOpAsyncReturn,
-      // Chat operations (NoOp)
-      saveChat: noOpAsync,
-      loadChat: noOpAsyncReturn,
-      deleteChat: noOpAsyncReturnFalse,
-      listChats: noOpAsyncReturnEmptyArray,
-      updateChat: noOpAsyncReturn,
-      saveSnapshot: noOpAsync,
-      loadSnapshot: noOpAsyncReturn
-    };
+    // Browser environment - return wrapper with null storage instance (NoOp)
+    return createStorageWrappers(null);
   }
 }
 
