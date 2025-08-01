@@ -46,7 +46,7 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChat, createChatData, getChat, getChatData, summarizeChat, restoreWorldChat } from '../core/index.js';
+import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
 import type { ChatData } from '../core/index.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
@@ -379,15 +379,6 @@ export const CLI_COMMAND_MAP: Record<string, {
     parameters: [
       { name: 'chatId', required: true, description: 'Chat ID to delete', type: 'string' }
     ]
-  },
-  'summarize-chat': {
-    type: 'summarizeChat',
-    requiresWorld: true,
-    description: 'Generate a summary for a chat history entry using LLM',
-    usage: '/summarize-chat <chatId>',
-    parameters: [
-      { name: 'chatId', required: true, description: 'Chat ID to summarize', type: 'string' }
-    ]
   }
 };
 
@@ -518,7 +509,6 @@ export function generateHelpMessage(command?: string): string {
   help += `  ${CLI_COMMAND_MAP['new-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['new-chat'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['load-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['load-chat'].description}\n`;
   help += `  ${CLI_COMMAND_MAP['delete-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['delete-chat'].description}\n`;
-  help += `  ${CLI_COMMAND_MAP['summarize-chat'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['summarize-chat'].description}\n`;
 
   help += '\nData Export:\n';
   help += `  ${CLI_COMMAND_MAP['export'].usage.padEnd(30)} - ${CLI_COMMAND_MAP['export'].description}\n`;
@@ -1548,37 +1538,6 @@ export async function processCLICommand(
           cliResponse = {
             success: false,
             message: 'Failed to delete chat',
-            error: error instanceof Error ? error.message : String(error)
-          };
-        }
-        break;
-
-      case 'summarizeChat':
-        {
-          const worldError = requireWorldOrError(world, command);
-          if (worldError) return worldError;
-        }
-        try {
-          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chatData) {
-            cliResponse = {
-              success: false,
-              message: `Chat '${collectedParams.chatId}' not found`
-            };
-            break;
-          }
-
-          const summary = await summarizeChat(context.rootPath, world!.id, chatData.id);
-
-          cliResponse = {
-            success: true,
-            message: `Summary for chat '${chatData.name}':\n\n${summary}`,
-            data: { summary, chatData }
-          };
-        } catch (error) {
-          cliResponse = {
-            success: false,
-            message: 'Failed to summarize chat',
             error: error instanceof Error ? error.message : String(error)
           };
         }

@@ -312,15 +312,10 @@ export default {
 
   // Chat history management
   listChats,
-  createChat,
-  getChat,
-  updateChat,
   deleteChat,
-  summarizeChat,
 
   // Consolidated chat operations
   setCurrentChat,
-  restoreWorldState,
 };
 
 // ========================
@@ -341,55 +336,6 @@ export async function listChats(worldName: string): Promise<ChatInfo[]> {
   return data.chats || [];
 }
 
-/**
- * Create a new chat history entry
- */
-export async function createChat(worldName: string, chatData: { name: string; description?: string; captureSnapshot?: boolean }): Promise<WorldChat> {
-  if (!worldName) {
-    throw new Error('World name is required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(chatData),
-  });
-
-  const data = await response.json();
-  return data.chat;
-}
-
-/**
- * Get a specific chat history entry
- */
-export async function getChat(worldName: string, chatId: string): Promise<WorldChat> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`);
-  const data = await response.json();
-
-  return data.chat;
-}
-
-/**
- * Update a chat history entry
- */
-export async function updateChat(worldName: string, chatId: string, updates: { name?: string; description?: string; summary?: string; tags?: string[] }): Promise<WorldChat> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(updates),
-  });
-
-  const data = await response.json();
-  return data.chat;
-}
 
 /**
  * Delete a chat history entry
@@ -405,44 +351,12 @@ export async function deleteChat(worldName: string, chatId: string): Promise<voi
 }
 
 /**
- * Generate a summary for a chat history entry
- */
-export async function summarizeChat(worldName: string, chatId: string): Promise<string> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/summarize`, {
-    method: 'POST',
-  });
-
-  const data = await response.json();
-  return data.summary;
-}
-
-/**
  * Get the last active chat for auto-restoration
  */
 export async function getLastActiveChat(worldName: string): Promise<WorldChat | null> {
-  try {
-    // Get all chats for the world
-    const chats = await listChats(worldName);
-
-    if (chats.length === 0) {
-      return null;
-    }
-
-    // Find the most recently updated chat
-    const lastChatInfo = chats.reduce((latest, current) =>
-      new Date(current.updatedAt) > new Date(latest.updatedAt) ? current : latest
-    );
-
-    // Get the full chat data
-    return await getChat(worldName, lastChatInfo.id);
-  } catch (error) {
-    console.warn('Failed to get last active chat:', error);
-    return null;
-  }
+  // This function is deprecated because getChat is no longer available.
+  // It will always return null.
+  return null;
 }
 
 /**
@@ -459,18 +373,6 @@ export async function setCurrentChat(worldName: string, chatId: string): Promise
   return await response.json();
 }
 
-/**
- * Restore world state from chat snapshot
- */
-export async function restoreWorldState(worldName: string, chatId: string): Promise<void> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/restore`, {
-    method: 'POST',
-  });
-}
 
 // ========================
 // CONSOLIDATED CHAT OPERATIONS

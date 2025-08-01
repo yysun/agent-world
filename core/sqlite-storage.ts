@@ -5,7 +5,7 @@
  *
  * Features:
  * - Full implementation of StorageManager interface for SQLite backend
- * - Complete chat operations with proper TypeScript types (WorldChat, ChatInfo, etc.)
+ * - Complete chat operations with proper TypeScript types (WorldChat, ChatData, etc.)
  * - Enhanced snapshot operations for world state preservation and restoration
  * - Enhanced archive management with rich metadata and search capabilities
  * - Optimized queries with prepared statements and transactions
@@ -54,7 +54,7 @@ import {
   ArchiveMetadata,
   ArchiveStatistics
 } from './sqlite-schema.js';
-import type { StorageManager, WorldData, Agent, AgentMessage, ChatData, ChatInfo, CreateChatParams, UpdateChatParams, WorldChat } from './types.js';
+import type { StorageManager, WorldData, Agent, AgentMessage, ChatData, CreateChatParams, UpdateChatParams, WorldChat } from './types.js';
 import { toKebabCase } from './utils.js';
 
 /**
@@ -443,7 +443,7 @@ export async function deleteChatData(ctx: SQLiteStorageContext, worldId: string,
   return result.changes > 0;
 }
 
-export async function listChatHistories(ctx: SQLiteStorageContext, worldId: string): Promise<ChatInfo[]> {
+export async function listChatHistories(ctx: SQLiteStorageContext, worldId: string): Promise<ChatData[]> {
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, message_count as messageCount,

@@ -112,14 +112,6 @@ const AgentUpdateSchema = z.object({
   clearMemory: z.boolean().optional()
 });
 
-const MemoryAppendSchema = z.object({
-  messages: z.array(z.object({
-    role: z.enum(['user', 'assistant', 'system']),
-    content: z.string().min(1),
-    sender: z.string().optional()
-  })).min(1)
-});
-
 const router = express.Router();
 
 // GET /worlds/:worldName - Get specific world with agents
@@ -312,90 +304,6 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
   }
 });
 
-// GET /worlds/:worldName/agents - List agents in world
-router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worldName = req.params.worldName;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const agents = await world.listAgents();
-    res.json(agents);
-  } catch (error) {
-    logger.error('Error listing agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    sendError(res, 500, 'Failed to list agents', 'AGENT_LIST_ERROR');
-  }
-});
-
-// GET /worlds/:worldName/agents/:agentName - Get agent details
-router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, agentName } = req.params;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const agent = await world.getAgent(agentName);
-    if (!agent) {
-      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
-      return;
-    }
-
-    res.json(agent);
-  } catch (error) {
-    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
-    sendError(res, 500, 'Failed to get agent details', 'AGENT_GET_ERROR');
-  }
-});
-
-// POST /worlds/:worldName/agents - Create agent
-router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName } = req.params;
-    console.log('🔧 Creating agent in world:', worldName, 'with body:', req.body);
-    const validation = AgentCreateSchema.safeParse(req.body);
-
-    if (!validation.success) {
-      console.log('❌ Validation failed:', validation.error.issues);
-      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
-      return;
-    }
-
-    const { name, type, provider, model, systemPrompt, apiKey, baseUrl, temperature, maxTokens } = validation.data;
-    const agentId = toKebabCase(name);
-
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    // Check if agent name is unique
-    const isUnique = await isAgentNameUnique(world, agentId);
-    if (!isUnique) {
-      sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
-      return;
-    }
-
-    // Create the agent
-    const agentData = {
-      name,
-      type,
-      provider: provider as LLMProvider,
-      model,
-      systemPrompt,
-      apiKey,
-      baseUrl,
-      temperature,
-      maxTokens
-    };
-
-    const agent = await world.createAgent(agentData);
-    console.log('✅ Agent created successfully:', agent.name);
-    res.status(201).json({ name: agent.name, id: agentId, type: agent.type });
-  } catch (error) {
-    console.log('❌ Error creating agent:', error);
-    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
-  }
-});
-
 // PATCH /worlds/:worldName/agents/:agentName - Update agent
 router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -503,59 +411,6 @@ router.get('/worlds/:worldName/agents/:agentName/memory', async (req: Request, r
   } catch (error) {
     logger.error('Error getting agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to get agent memory', 'MEMORY_GET_ERROR');
-  }
-});
-
-// POST /worlds/:worldName/agents/:agentName/memory - Append to agent memory
-router.post('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, agentName } = req.params;
-    const validation = MemoryAppendSchema.safeParse(req.body);
-
-    if (!validation.success) {
-      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
-      return;
-    }
-
-    const { messages } = validation.data;
-
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const agent = await world.getAgent(agentName);
-    if (!agent) {
-      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
-      return;
-    }
-
-    // Ensure existing memory is in array format
-    let currentMemory = validateMemoryFormat(agent.memory) ? agent.memory : [];
-
-    // Convert non-array memory to array format if needed
-    if (!Array.isArray(currentMemory)) {
-      currentMemory = [];
-    }
-
-    // Convert messages to AgentMessage format with timestamps
-    const newMessages = messages.map(msg => ({
-      ...msg,
-      createdAt: new Date()
-    }));
-
-    // Append new messages
-    const newMemory = [...currentMemory, ...newMessages];
-
-    // Update agent memory
-    const updatedAgent = await world.updateAgentMemory(agentName, newMemory);
-    if (!updatedAgent) {
-      sendError(res, 500, 'Failed to append to agent memory', 'MEMORY_APPEND_ERROR');
-      return;
-    }
-
-    res.json({ memory: newMemory, appended: messages.length });
-  } catch (error) {
-    logger.error('Error appending to agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
-    sendError(res, 500, 'Failed to append to agent memory', 'MEMORY_APPEND_ERROR');
   }
 });
 
@@ -1075,7 +930,8 @@ router.post('/worlds/:worldName/chats', async (req: Request, res: Response): Pro
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    const chat = await world.createChat(validation.data);
+    const chatData = await world.createChatData(validation.data);
+    const chat = chatData.chat;
     res.status(201).json({ chat });
 
   } catch (error) {
@@ -1180,24 +1036,6 @@ router.post('/worlds/:worldName/chats/:chatId/restore', async (req: Request, res
     logger.error('Error restoring from chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to restore from chat', 'RESTORE_CHAT_ERROR');
-    }
-  }
-});
-
-// POST /worlds/:worldName/chats/:chatId/summarize - Summarize chat
-router.post('/worlds/:worldName/chats/:chatId/summarize', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, chatId } = req.params;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const summary = await world.summarizeChat(chatId);
-    res.json({ summary });
-
-  } catch (error) {
-    logger.error('Error summarizing chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to summarize chat', 'SUMMARIZE_CHAT_ERROR');
     }
   }
 });

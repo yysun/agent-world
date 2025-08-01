@@ -34,7 +34,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { toKebabCase } from './utils.js';
 import { logger } from './logger.js';
-import type { WorldChat, ChatInfo, ChatData, CreateChatParams, UpdateChatParams } from './types.js';
+import type { WorldChat, ChatData, CreateChatParams, UpdateChatParams } from './types.js';
 
 // Extract readdir and exists from fs for convenience
 const { readdir, access } = fs;
@@ -257,7 +257,7 @@ export async function deleteChatData(rootPath: string, worldId: string, chatId: 
 /**
  * List chat histories (metadata only)
  */
-export async function listChatHistories(rootPath: string, worldId: string): Promise<ChatInfo[]> {
+export async function listChatHistories(rootPath: string, worldId: string): Promise<ChatData[]> {
   try {
     const chatDir = getChatDir(rootPath, worldId);
 
@@ -268,7 +268,7 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
     const files = await readdir(chatDir);
     const chatFiles = files.filter((file: string) => file.endsWith('.json'));
 
-    const chats: ChatInfo[] = [];
+    const chats: ChatData[] = [];
 
     for (const file of chatFiles) {
       const chatId = file.replace('.json', '');
@@ -276,8 +276,9 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
 
       if (chatData) {
         // Extract just the metadata
-        const chatInfo: ChatInfo = {
+        const chatInfo: ChatData = {
           id: chatData.id,
+          worldId: worldId,
           name: chatData.name,
           description: chatData.description,
           createdAt: chatData.createdAt,

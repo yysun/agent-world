@@ -81,7 +81,7 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, ChatData, CreateChatParams, UpdateChatParams, ChatInfo, WorldChat, LLMProvider } from './types.js';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, ChatData, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider } from './types.js';
 import type { WorldData } from './world-storage.js';
 
 // Static imports for core modules
@@ -211,7 +211,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
 
         if (chats.length > 0) {
           // Find the most recently updated chat
-          const lastChatInfo = chats.reduce((latest: ChatInfo, current: ChatInfo) =>
+          const lastChatInfo = chats.reduce((latest: ChatData, current: ChatData) =>
             new Date(current.updatedAt) > new Date(latest.updatedAt) ? current : latest
           );
 
@@ -497,7 +497,7 @@ function createStorageManager(rootPath: string): StorageManager {
       return storageWrappers!.deleteChatData(worldId, chatId);
     },
 
-    async listChatHistories(worldId: string): Promise<ChatInfo[]> {
+    async listChatHistories(worldId: string): Promise<ChatData[]> {
       await moduleInitialization;
       return storageWrappers!.listChatHistories(worldId);
     },
@@ -804,19 +804,8 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     // Chat history methods - implemented using new ChatData model
     async createChatData(params: CreateChatParams): Promise<ChatData> {
-      // For now, delegate to the createChat function and transform the result
-      const chat = await createChat(world.rootPath, world.id, params);
-      // Transform WorldChat to ChatData (this is a temporary bridge)
-      return {
-        id: 'temp-id', // Will be fixed when createChat is updated
-        worldId: world.id,
-        name: params.name,
-        description: params.description,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messageCount: 0,
-        chat: chat
-      };
+      // Delegate to the createChatData function
+      return await createChatData(world.rootPath, world.id, params);
     },
 
     async loadChatData(chatId: string): Promise<ChatData | null> {
@@ -831,7 +820,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       return await storageWrappers!.deleteChatData(world.id, chatId);
     },
 
-    async listChatHistories(): Promise<ChatInfo[]> {
+    async listChatHistories(): Promise<ChatData[]> {
       return await storageWrappers!.listChatHistories(world.id);
     },
 
@@ -1020,14 +1009,14 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         }
 
         // 2. Validate chatId exists
-        const chatData = await getChat('', world.id, chatId);
+        const chatData = await getChatData('', world.id, chatId);
         if (!chatData) {
           throw new Error(`Chat ${chatId} not found`);
         }
 
         // 3. Restore agent memory from chat data
-        if (chatData.agents) {
-          for (const snapshotAgent of chatData.agents) {
+        if (chatData.chat && chatData.chat.agents) {
+          for (const snapshotAgent of chatData.chat.agents) {
             const worldAgent = world.agents.get(snapshotAgent.id);
             if (worldAgent && snapshotAgent.memory) {
               worldAgent.memory = [...snapshotAgent.memory];
@@ -1059,7 +1048,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         logger.debug('Loaded chat', {
           worldId: world.id,
           chatId: world.currentChatId,
-          messageCount: chatData.messages.length
+          messageCount: chatData.chat?.messages?.length || 0
         });
       } catch (error) {
         logger.error('Failed to load chat', {
@@ -1686,43 +1675,35 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   const chatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const now = new Date();
 
+  // Optionally capture WorldChat (full world state)
+  let worldChat: WorldChat | undefined;
+  if (params.captureChat) {
+    worldChat = await createWorldChat(rootPath, worldId);
+  }
+
+  // Generate chat title from messages if possible
+  let generatedTitle = params.name;
+  if (worldChat && worldChat.messages && worldChat.messages.length > 0) {
+    generatedTitle = generateChatTitleFromMessages(worldChat.messages);
+  }
+
   // Create ChatData entry (metadata)
   const chatData: ChatData = {
     id: chatId,
     worldId,
-    name: params.name,
+    name: generatedTitle,
     description: params.description,
     createdAt: now,
     updatedAt: now,
-    messageCount: 0
+    messageCount: worldChat?.messages?.length || 0,
+    chat: worldChat
   };
-
-  // Optionally capture WorldChat (full world state)
-  if (params.captureChat) {
-    const worldChat = await createWorldChat(rootPath, worldId);
-    chatData.chat = worldChat;
-  }
 
   await storageWrappers!.saveChatData(worldId, chatData);
   return chatData;
 }
 
-/**
- * DEPRECATED: Use createChatData instead
- * Legacy function for backward compatibility - mixes ChatData and WorldChat
- */
-export async function createChat(rootPath: string, worldId: string, params: CreateChatParams): Promise<WorldChat> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  const chatId = utils.generateChatId();
-  const now = new Date();
-
-  // For legacy compatibility, just create a WorldChat
-  const worldChat = await createWorldChat(rootPath, worldId);
-
-  return worldChat;
-}
+// ...existing code...
 
 /**
  * Load chat history entry with snapshot
@@ -1739,19 +1720,7 @@ export async function getChatData(rootPath: string, worldId: string, chatId: str
   return chatData;
 }
 
-/**
- * Get chat content only (legacy function)
- */
-export async function getChat(rootPath: string, worldId: string, chatId: string): Promise<WorldChat | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  // Load ChatData and return the chat content if available
-  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
-  return chatData?.chat || null;
-}
-
-
+// (legacy getChat removed)
 
 /**
  * Generate chat title from message content (extracted from frontend utils)

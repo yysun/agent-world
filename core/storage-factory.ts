@@ -19,7 +19,7 @@
  * - SQLite storage uses a schema, context, and migration helpers
  * - Browser environments get NoOp implementations that don't perform any storage operations
  * - All environment detection logic centralized here for clean separation of concerns
- * - All chat operations use WorldChat, ChatInfo, UpdateChatParams, and WorldChat types
+ * - All chat operations use WorldChat, ChatData, UpdateChatParams, and WorldChat types
  *
  * Changes:
  * - 2025-01-XX: Moved all environment detection logic from managers.ts to here
@@ -27,7 +27,7 @@
  * - 2025-08-01: Full chat CRUD and snapshot support, strict type safety for chat operations
  * - See git history for previous changes
  */
-import type { StorageManager, StorageAPI, ChatData, ChatInfo, UpdateChatParams, WorldChat, Agent, AgentMessage } from './types.js';
+import type { StorageManager, StorageAPI, ChatData, UpdateChatParams, WorldChat, Agent, AgentMessage } from './types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from './utils.js';
 import * as path from 'path';
@@ -169,7 +169,7 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    async listChatHistories(worldId: string): Promise<ChatInfo[]> {
+    async listChatHistories(worldId: string): Promise<ChatData[]> {
       if (!storageInstance) return [];
       try {
         return await storageInstance.listChatHistories(worldId);
@@ -379,7 +379,7 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       }
       return false;
     },
-    async listChatHistories(worldId: string): Promise<ChatInfo[]> {
+    async listChatHistories(worldId: string): Promise<ChatData[]> {
       await ensureModulesLoaded();
       if (worldStorage?.listChatHistories) {
         return worldStorage.listChatHistories(rootPath, worldId);

@@ -64,7 +64,7 @@
  * - LLM call count is saved to disk after every LLM call and memory save operation
  */
 
-import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType, ChatInfo } from './types.js';
+import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType, ChatData } from './types.js';
 import { generateId } from './utils.js';
 
 let globalStreamingEnabled = true;
@@ -105,7 +105,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
-      const activeChat = chats.reduce((latest: ChatInfo, chat: ChatInfo) =>
+      const activeChat = chats.reduce((latest: ChatData, chat: ChatData) =>
         new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
       );
 

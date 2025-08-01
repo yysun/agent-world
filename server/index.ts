@@ -18,7 +18,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import open from 'open';
-import { initializeLogger, createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
+import { createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';

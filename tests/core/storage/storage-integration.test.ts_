@@ -1,0 +1,343 @@
+/**
+ * Integration Tests for Storage Consistency
+ *
+ * Features:
+ * - Tests consistency between SQLite and file storage implementations
+ * - Tests StorageAPI interface compliance for both backends
+ * - Tests storage factory delegation and wrapper behavior
+ * - Tests error handling consistency across storage types
+ * - Tests data format compatibility between storage backends
+ *
+ * Implementation:
+ * - Tests both storage backends with identical test scenarios
+ * - Validates that StorageAPI returns consistent results
+ * - Ensures migration scenarios work properly
+ * - Verifies error propagation is consistent
+ */
+
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+
+// We need to unmock storage modules for this integration test
+jest.unmock('../../../core/storage-factory');
+jest.unmock('../../../core/sqlite-storage');
+jest.unmock('../../../core/world-storage');
+
+import { createStorageWithWrappers, createStorage } from '../../../core/storage-factory';
+import type { StorageAPI, WorldChat, ChatData, UpdateChatParams } from '../../../core/types';
+import { LLMProvider } from '../../../core/types';
+
+describe('Storage Integration - Chat Operations Consistency', () => {
+  let fileStorage: StorageAPI;
+  let sqliteStorage: StorageAPI;
+  const testWorldId = 'integration-test-world';
+
+  beforeEach(async () => {
+    // Mock the Node.js environment check to return true
+    jest.doMock('../../../core/utils', () => {
+      const actualUtils = jest.requireActual('../../../core/utils') as any;
+      return {
+        ...actualUtils,
+        isNodeEnvironment: () => true
+      };
+    });
+
+    // Create file storage
+    fileStorage = await createStorageWithWrappers();
+
+    // Create SQLite storage with in-memory database
+    const sqliteStorageManager = await createStorage({
+      type: 'sqlite',
+      rootPath: 'test-data',
+      sqlite: {
+        database: ':memory:',
+        enableWAL: false,
+        busyTimeout: 1000,
+        cacheSize: -2000,
+        enableForeignKeys: true
+      }
+    });
+
+    // Wrap SQLite storage
+    const { createStorageWrappers } = await import('../../../core/storage-factory');
+    sqliteStorage = createStorageWrappers(sqliteStorageManager);
+
+    // Create test world in SQLite (file storage doesn't enforce foreign keys)
+    if ('saveWorld' in sqliteStorageManager) {
+      await (sqliteStorageManager as any).saveWorld({
+        id: testWorldId,
+        name: 'Integration Test World',
+        description: 'Test world for integration tests',
+        turnLimit: 10
+      });
+    }
+  });
+
+  afterEach(async () => {
+    jest.clearAllMocks();
+  });
+
+  const testChatData: ChatData = {
+    id: 'integration-chat-1',
+    worldId: testWorldId,
+    name: 'Integration Test Chat',
+    description: 'A chat for testing integration',
+    createdAt: new Date('2025-08-01T10:00:00Z'),
+    updatedAt: new Date('2025-08-01T10:30:00Z'),
+    messageCount: 5,
+    summary: 'Test summary',
+    tags: ['integration', 'test']
+  };
+
+  const testSnapshot: WorldChat = {
+    world: {
+      id: testWorldId,
+      name: 'Test World',
+      description: 'Test world description',
+      turnLimit: 10
+    } as any,
+    agents: [{
+      id: 'test-agent',
+      name: 'Test Agent',
+      type: 'assistant',
+      provider: LLMProvider.OPENAI,
+      model: 'gpt-4',
+      llmCallCount: 0,
+      memory: []
+    } as any],
+    messages: [],
+    metadata: {
+      capturedAt: new Date('2025-08-01T12:00:00Z'),
+      version: '1.0',
+      totalMessages: 0,
+      activeAgents: 1
+    }
+  };
+
+  describe('Chat Operations Consistency', () => {
+    test.each([
+      ['File Storage', () => fileStorage],
+      ['SQLite Storage', () => sqliteStorage]
+    ])('%s - should perform complete chat lifecycle', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Save chat
+      await storage.saveChatData(testWorldId, testChatData);
+
+      // Load chat
+      const loadedChat = await storage.loadChatData(testWorldId, testChatData.id);
+      expect(loadedChat).toBeTruthy();
+      expect(loadedChat!.id).toBe(testChatData.id);
+      expect(loadedChat!.name).toBe(testChatData.name);
+      expect(loadedChat!.description).toBe(testChatData.description);
+      expect(loadedChat!.messageCount).toBe(testChatData.messageCount);
+      expect(loadedChat!.summary).toBe(testChatData.summary);
+      expect(loadedChat!.tags).toEqual(testChatData.tags);
+      expect(loadedChat!.createdAt).toBeInstanceOf(Date);
+      expect(loadedChat!.updatedAt).toBeInstanceOf(Date);
+
+      // List chats
+      const chats = await storage.listChatHistories(testWorldId);
+      expect(chats).toHaveLength(1);
+      expect(chats[0].id).toBe(testChatData.id);
+      expect(chats[0].name).toBe(testChatData.name);
+
+      // Update chat
+      const updates: UpdateChatParams = {
+        name: 'Updated Integration Chat',
+        description: 'Updated description',
+        summary: 'Updated summary',
+        tags: ['updated', 'integration'],
+        messageCount: 10
+      };
+
+      const updatedChat = await storage.updateChatData(testWorldId, testChatData.id, updates);
+      expect(updatedChat).toBeTruthy();
+      expect(updatedChat!.name).toBe('Updated Integration Chat');
+      expect(updatedChat!.description).toBe('Updated description');
+      expect(updatedChat!.summary).toBe('Updated summary');
+      expect(updatedChat!.tags).toEqual(['updated', 'integration']);
+      expect(updatedChat!.messageCount).toBe(10);
+
+      // Delete chat
+      const deleteResult = await storage.deleteChatData(testWorldId, testChatData.id);
+      expect(deleteResult).toBe(true);
+
+      // Verify deletion
+      const deletedChat = await storage.loadChatData(testWorldId, testChatData.id);
+      expect(deletedChat).toBeNull();
+    });
+
+    test.each([
+      ['File Storage', () => fileStorage],
+      ['SQLite Storage', () => sqliteStorage]
+    ])('%s - should handle non-existent chat operations consistently', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Load non-existent chat
+      const nonExistentChat = await storage.loadChatData(testWorldId, 'non-existent-chat');
+      expect(nonExistentChat).toBeNull();
+
+      // Update non-existent chat
+      const updateResult = await storage.updateChatData(testWorldId, 'non-existent-chat', { name: 'New Name' });
+      expect(updateResult).toBeNull();
+
+      // Delete non-existent chat
+      const deleteResult = await storage.deleteChatData(testWorldId, 'non-existent-chat');
+      expect(deleteResult).toBe(false);
+
+      // List chats for world with no chats
+      const chats = await storage.listChatHistories('non-existent-world');
+      expect(chats).toEqual([]);
+    });
+  });
+
+  describe('Snapshot Operations Consistency', () => {
+    test.each([
+      ['File Storage', () => fileStorage],
+      ['SQLite Storage', () => sqliteStorage]
+    ])('%s - should perform snapshot operations consistently', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Save snapshot
+      await storage.saveWorldChat(testWorldId, 'test-chat', testSnapshot);
+
+      // Load snapshot
+      const loadedSnapshot = await storage.loadWorldChat(testWorldId, 'test-chat');
+      expect(loadedSnapshot).toBeTruthy();
+      expect(loadedSnapshot!.world.id).toBe(testWorldId);
+      expect(loadedSnapshot!.agents).toHaveLength(1);
+      expect(loadedSnapshot!.agents[0].id).toBe('test-agent');
+      expect(loadedSnapshot!.metadata.capturedAt).toBeInstanceOf(Date);
+      expect(loadedSnapshot!.metadata.version).toBe('1.0');
+
+      // Load non-existent snapshot
+      const nonExistentSnapshot = await storage.loadWorldChat(testWorldId, 'non-existent-chat');
+      expect(nonExistentSnapshot).toBeNull();
+    });
+  });
+
+  describe('Chat and Snapshot Integration', () => {
+    test.each([
+      ['SQLite Storage', () => sqliteStorage] // File storage loads snapshots separately
+    ])('%s - should load chat with associated snapshot', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Save chat and snapshot
+      await storage.saveChatData(testWorldId, testChatData);
+      await storage.saveWorldChat(testWorldId, testChatData.id, testSnapshot);
+
+      // Load chat (SQLite should include snapshot automatically)
+      const loadedChat = await storage.loadChatData(testWorldId, testChatData.id);
+      expect(loadedChat).toBeTruthy();
+
+      if (storageName.includes('SQLite')) {
+        expect(loadedChat!.chat).toBeTruthy();
+        expect(loadedChat!.chat!.metadata.capturedAt).toBeInstanceOf(Date);
+        expect(loadedChat!.chat!.metadata.version).toBe('1.0');
+      }
+    });
+  });
+
+  describe('Data Format Compatibility', () => {
+    test('should produce compatible data formats across storage types', async () => {
+      // Save the same chat to both storages
+      await fileStorage.saveChatData(testWorldId, testChatData);
+      await sqliteStorage.saveChatData(testWorldId, testChatData);
+
+      // Load from both storages
+      const fileChat = await fileStorage.loadChatData(testWorldId, testChatData.id);
+      const sqliteChat = await sqliteStorage.loadChatData(testWorldId, testChatData.id);
+
+      // Both should exist and have the same core data
+      expect(fileChat).toBeTruthy();
+      expect(sqliteChat).toBeTruthy();
+
+      // Compare core fields (excluding chat which may differ)
+      const { chat: fileChatSnapshot, ...fileChatCore } = fileChat!;
+      const { chat: sqliteChatSnapshot, ...sqliteChatCore } = sqliteChat!;
+
+      expect(fileChatCore.id).toBe(sqliteChatCore.id);
+      expect(fileChatCore.name).toBe(sqliteChatCore.name);
+      expect(fileChatCore.description).toBe(sqliteChatCore.description);
+      expect(fileChatCore.messageCount).toBe(sqliteChatCore.messageCount);
+      expect(fileChatCore.summary).toBe(sqliteChatCore.summary);
+      expect(fileChatCore.tags).toEqual(sqliteChatCore.tags);
+    });
+
+    test('should produce compatible snapshot formats across storage types', async () => {
+      // Save the same snapshot to both storages
+      await fileStorage.saveWorldChat(testWorldId, 'test-chat', testSnapshot);
+      await sqliteStorage.saveWorldChat(testWorldId, 'test-chat', testSnapshot);
+
+      // Load from both storages
+      const fileSnap = await fileStorage.loadWorldChat(testWorldId, 'test-chat');
+      const sqliteSnap = await sqliteStorage.loadWorldChat(testWorldId, 'test-chat');
+
+      // Both should exist and have the same core data
+      expect(fileSnap).toBeTruthy();
+      expect(sqliteSnap).toBeTruthy();
+
+      expect(fileSnap!.world.id).toBe(sqliteSnap!.world.id);
+      expect(fileSnap!.agents).toHaveLength(sqliteSnap!.agents.length);
+      expect(fileSnap!.metadata.version).toBe(sqliteSnap!.metadata.version);
+      expect(fileSnap!.metadata.totalMessages).toBe(sqliteSnap!.metadata.totalMessages);
+    });
+  });
+
+  describe('StorageAPI Interface Compliance', () => {
+    test.each([
+      ['File Storage', () => fileStorage],
+      ['SQLite Storage', () => sqliteStorage]
+    ])('%s - should implement all required StorageAPI methods', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Verify all chat-related methods exist and are functions
+      expect(typeof storage.saveChatData).toBe('function');
+      expect(typeof storage.loadChatData).toBe('function');
+      expect(typeof storage.deleteChatData).toBe('function');
+      expect(typeof storage.listChatHistories).toBe('function');
+      expect(typeof storage.updateChatData).toBe('function');
+      expect(typeof storage.saveWorldChat).toBe('function');
+      expect(typeof storage.loadWorldChat).toBe('function');
+
+      // Test that methods return appropriate types
+      const chats = await storage.listChatHistories(testWorldId);
+      expect(Array.isArray(chats)).toBe(true);
+
+      const nonExistentChat = await storage.loadChatData(testWorldId, 'does-not-exist');
+      expect(nonExistentChat).toBeNull();
+
+      const deleteResult = await storage.deleteChatData(testWorldId, 'does-not-exist');
+      expect(typeof deleteResult).toBe('boolean');
+    });
+  });
+
+  describe('Error Handling Consistency', () => {
+    test.each([
+      ['File Storage', () => fileStorage],
+      ['SQLite Storage', () => sqliteStorage]
+    ])('%s - should handle errors consistently', async (storageName, getStorage) => {
+      const storage = getStorage();
+
+      // Test graceful handling of malformed update parameters
+      await storage.saveChatData(testWorldId, testChatData);
+
+      const result = await storage.updateChatData(testWorldId, testChatData.id, {});
+      expect(result).toBeTruthy(); // Should return the existing chat unchanged
+
+      // Test operations on non-existent resources
+      const operations = [
+        () => storage.loadChatData('non-existent-world', 'non-existent-chat'),
+        () => storage.deleteChatData('non-existent-world', 'non-existent-chat'),
+        () => storage.listChatHistories('non-existent-world'),
+        () => storage.updateChatData('non-existent-world', 'non-existent-chat', { name: 'test' }),
+        () => storage.loadWorldChat('non-existent-world', 'non-existent-chat')
+      ];
+
+      for (const operation of operations) {
+        // Should not throw, should handle gracefully
+        await expect(operation()).resolves.toBeDefined();
+      }
+    });
+  });
+});

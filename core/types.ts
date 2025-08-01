@@ -314,16 +314,7 @@ export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captur
 /**
  * Chat list info for efficient display
  */
-export interface ChatInfo {
-  id: string;
-  name: string;
-  description?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  messageCount: number;
-  summary?: string;
-  tags?: string[];
-}
+// ...existing code...
 
 // World Management Types - Simplified Parameter Interfaces
 
@@ -384,7 +375,7 @@ export interface World {
   loadChatData(chatId: string): Promise<ChatData | null>;
   updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
   deleteChatData(chatId: string): Promise<boolean>;
-  listChatHistories(): Promise<ChatInfo[]>;
+  listChatHistories(): Promise<ChatData[]>;
   createWorldChat(): Promise<WorldChat>;
   restoreFromWorldChat(chatId: string): Promise<boolean>;
   summarizeChat(chatId: string): Promise<string>;
@@ -448,7 +439,7 @@ export interface StorageManager {
   saveChatData(worldId: string, chat: ChatData): Promise<void>;
   loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChatHistories(worldId: string): Promise<ChatInfo[]>;
+  listChatHistories(worldId: string): Promise<ChatData[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
   // Chat operations
@@ -488,7 +479,7 @@ export interface StorageAPI {
   saveChatData(worldId: string, chat: ChatData): Promise<void>;
   loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChatHistories(worldId: string): Promise<ChatInfo[]>;
+  listChatHistories(worldId: string): Promise<ChatData[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
   // Chat operations

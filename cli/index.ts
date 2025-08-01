@@ -47,7 +47,6 @@ import {
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
-  initializeLogger,
   enableStreaming,
   disableStreaming
 } from '../core/index.js';
