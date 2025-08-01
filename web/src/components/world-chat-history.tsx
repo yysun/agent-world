@@ -38,29 +38,9 @@ export interface WorldChatHistoryProps {
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const { worldName, chatHistory } = props;
 
-  const handleLoadChat = (chat: ChatInfo) => {
-    app.run('load-chat-from-history', chat.id);
-  };
-
-  const handleDeleteChat = (chat: ChatInfo) => {
-    app.run('chat-history-show-delete-confirm', chat);
-  };
-
-  const handleSummarizeChat = (chat: ChatInfo) => {
-    app.run('chat-history-summarize', chat);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (chatHistory.selectedChat) {
-      app.run('delete-chat-from-history', chatHistory.selectedChat.id);
-    }
-    app.run('chat-history-hide-modals');
-  };
-
-  const handleModalCancel = () => {
-    app.run('chat-history-hide-modals');
-  };
-
+  // AppRun pattern compliance: Using $onclick directives for event handling
+  // Following apprun-prompt.md guidelines for functional components
+  
   const formatDate = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date;
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -73,7 +53,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
       <div className="chat-history-header centered">
         <button
           className="new-chat-btn"
-          onClick={() => app.run('create-new-chat')}
+          $onclick="create-new-chat"
           title="Create new chat session"
         >
           ✚ New Chat
@@ -97,21 +77,21 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
                   <div className="chat-actions">
                     <button
                       className="action-btn"
-                      onclick={() => handleLoadChat(chat)}
+                      $onclick={['load-chat-from-history', chat.id]}
                       title="Load chat"
                     >
                       📂
                     </button>
                     <button
                       className="action-btn"
-                      onclick={() => handleSummarizeChat(chat)}
+                      $onclick={['chat-history-summarize', chat]}
                       title="Generate summary"
                     >
                       📝
                     </button>
                     <button
                       className="action-btn"
-                      onclick={() => handleDeleteChat(chat)}
+                      $onclick={['chat-history-show-delete-confirm', chat]}
                       title="Delete chat"
                     >
                       🗑️
@@ -152,7 +132,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
 
       {/* Delete Confirmation Modal */}
       {chatHistory.showDeleteConfirm && chatHistory.selectedChat && (
-        <div className="modal-overlay" onclick={handleModalCancel}>
+        <div className="modal-overlay" $onclick="chat-history-hide-modals">
           <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
             <h3>Delete Chat</h3>
             <p>
@@ -162,10 +142,14 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
               ⚠️ This action cannot be undone.
             </p>
             <div className="form-actions">
-              <button className="btn-danger" onclick={handleDeleteConfirm} disabled={chatHistory.loading}>
+              <button 
+                className="btn-danger" 
+                $onclick={['delete-chat-from-history', chatHistory.selectedChat.id]}
+                disabled={chatHistory.loading}
+              >
                 {chatHistory.loading ? 'Deleting...' : 'Delete Chat'}
               </button>
-              <button className="btn-secondary" onclick={handleModalCancel}>
+              <button className="btn-secondary" $onclick="chat-history-hide-modals">
                 Cancel
               </button>
             </div>
