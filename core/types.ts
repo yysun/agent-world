@@ -376,6 +376,7 @@ export interface World {
   updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
   deleteChatData(chatId: string): Promise<boolean>;
   listChatHistories(): Promise<ChatData[]>;
+  listChats(): Promise<ChatData[]>; // Alias for listChatHistories for API compatibility
   createWorldChat(): Promise<WorldChat>;
   restoreFromWorldChat(chatId: string): Promise<boolean>;
   summarizeChat(chatId: string): Promise<string>;

@@ -1116,6 +1116,18 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         });
         throw error;
       }
+    },
+
+    async listChats(): Promise<ChatData[]> {
+      try {
+        return await storageWrappers!.listChatHistories(world.id);
+      } catch (error) {
+        logger.error('Failed to list chats', {
+          worldId: world.id,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
     }
   };
 

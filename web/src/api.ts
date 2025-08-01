@@ -312,6 +312,7 @@ export default {
 
   // Chat history management
   listChats,
+  getChat,
   deleteChat,
 
   // Consolidated chat operations
@@ -348,6 +349,27 @@ export async function deleteChat(worldName: string, chatId: string): Promise<voi
   await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * Get a specific chat by ID
+ */
+export async function getChat(worldName: string, chatId: string): Promise<WorldChat | null> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  try {
+    const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`);
+    const data = await response.json();
+    return data.chat || null;
+  } catch (error) {
+    // If chat not found, return null instead of throwing
+    if (error instanceof Error && error.message.includes('404')) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
