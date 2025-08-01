@@ -26,7 +26,7 @@
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, restoreWorldChat } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
@@ -293,7 +293,7 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
 
     // Generate markdown using core function
     const markdown = await exportWorldToMarkdown(ROOT_PATH, worldName);
-    
+
     // Generate timestamp for filename
     const now = new Date();
     const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5); // Format: YYYY-MM-DDTHH-MM-SS
@@ -1166,12 +1166,11 @@ router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Resp
 router.post('/worlds/:worldName/chats/:chatId/restore', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, chatId } = req.params;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
 
-    const restored = await world.restoreFromChat(chatId);
+    // Use consolidated function that accepts chat ID directly
+    const restored = await restoreWorldChat(ROOT_PATH, worldName, chatId);
     if (!restored) {
-      sendError(res, 400, 'Failed to restore from chat', 'RESTORE_ERROR');
+      sendError(res, 400, 'Failed to restore world state from chat', 'RESTORE_ERROR');
       return;
     }
 
@@ -1199,6 +1198,120 @@ router.post('/worlds/:worldName/chats/:chatId/summarize', async (req: Request, r
     logger.error('Error summarizing chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to summarize chat', 'SUMMARIZE_CHAT_ERROR');
+    }
+  }
+});
+
+// POST /worlds/:worldName/new-chat - Create new chat and set as current
+router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worldName = req.params.worldName;
+
+    // Get world instance
+    const world = await getWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Create new chat via world method
+    const newChatId = await world.newChat();
+
+    // Convert agents Map to Array for response
+    const agentsArray = Array.from(world.agents.values()).map(agent => ({
+      id: agent.id,
+      name: agent.name,
+      type: agent.type,
+      status: agent.status,
+      provider: agent.provider,
+      model: agent.model,
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens,
+      systemPrompt: agent.systemPrompt,
+      llmCallCount: agent.llmCallCount,
+      lastLLMCall: agent.lastLLMCall,
+      memory: agent.memory,
+      createdAt: agent.createdAt,
+      lastActive: agent.lastActive
+    }));
+
+    // Return updated world with new currentChatId
+    res.json({
+      world: {
+        id: world.id,
+        name: world.name,
+        description: world.description,
+        turnLimit: world.turnLimit,
+        chatLLMProvider: world.chatLLMProvider,
+        chatLLMModel: world.chatLLMModel,
+        currentChatId: world.currentChatId,
+        agents: agentsArray
+      },
+      chatId: newChatId,
+      success: true
+    });
+
+  } catch (error) {
+    logger.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
+    }
+  }
+});
+
+// POST /worlds/:worldName/load-chat/:chatId - Load specific chat and set as current
+router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+
+    // Get world instance
+    const world = await getWorld(ROOT_PATH, worldName);
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    // Load chat via world method
+    await world.loadChatById(chatId);
+
+    // Convert agents Map to Array for response
+    const agentsArray = Array.from(world.agents.values()).map(agent => ({
+      id: agent.id,
+      name: agent.name,
+      type: agent.type,
+      status: agent.status,
+      provider: agent.provider,
+      model: agent.model,
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens,
+      systemPrompt: agent.systemPrompt,
+      llmCallCount: agent.llmCallCount,
+      lastLLMCall: agent.lastLLMCall,
+      memory: agent.memory,
+      createdAt: agent.createdAt,
+      lastActive: agent.lastActive
+    }));
+
+    // Return updated world with loaded chat
+    res.json({
+      world: {
+        id: world.id,
+        name: world.name,
+        description: world.description,
+        turnLimit: world.turnLimit,
+        chatLLMProvider: world.chatLLMProvider,
+        chatLLMModel: world.chatLLMModel,
+        currentChatId: world.currentChatId,
+        agents: agentsArray
+      },
+      chatId: world.currentChatId,
+      success: true
+    });
+
+  } catch (error) {
+    logger.error('Error loading chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to load chat', 'LOAD_CHAT_ERROR');
     }
   }
 });

@@ -9,7 +9,7 @@
    - NO → Go to question 2
 
 2. **Is it a popup/modal/overlay that appears on demand?**
-   - YES → Use **Popup Component** (Pattern B) 
+   - YES → Use **Popup Component** (Pattern B)
    - NO → Go to question 3
 
 3. **Does it only display data passed from parent?**
@@ -41,7 +41,7 @@ export interface ComponentState {
   loading: boolean;
   error: string | null;
   successMessage?: string | null;
-  
+
   // Your specific state
   formData: Partial<YourDataType>;
   mode: 'create' | 'edit' | 'delete';
@@ -73,7 +73,7 @@ export const saveData = async function* (state: ComponentState): AsyncGenerator<
     }
 
     yield { ...state, loading: false, successMessage: 'Saved successfully!' };
-    
+
     // Notify parent after 2 seconds
     setTimeout(() => {
       state.parentComponent?.run('data-saved');
@@ -134,19 +134,19 @@ export default class YourComponent extends Component<ComponentState> {
         <form className="component-form">
           <div className="form-group">
             <label>Name *</label>
-            <input 
+            <input
               type="text"
               value={state.formData.name || ''}
               $bind="formData.name"
               disabled={state.loading}
             />
           </div>
-          
+
           <div className="form-actions">
             <button type="button" $onclick={[closeComponent]}>Cancel</button>
-            <button 
-              type="button" 
-              $onclick={[saveData]} 
+            <button
+              type="button"
+              $onclick={[saveData]}
               disabled={state.loading || !state.formData.name?.trim()}
             >
               {state.loading ? 'Saving...' : state.mode === 'create' ? 'Create' : 'Update'}
@@ -199,7 +199,7 @@ export default class ModalComponent extends Component<ModalState> {
 
           <div className="modal-body">
             {state.error && <div className="error-message">{state.error}</div>}
-            
+
             <form>
               <input $bind="formData.name" />
               {/* Form fields */}
@@ -233,11 +233,11 @@ export interface ComponentProps {
 
 export default function DisplayComponent(props: ComponentProps) {
   // Destructure with defaults
-  const { 
-    data = [], 
-    selectedItem = null, 
+  const {
+    data = [],
+    selectedItem = null,
     loading = false,
-    onItemClick 
+    onItemClick
   } = props;
 
   // Guard clauses
@@ -254,9 +254,9 @@ export default function DisplayComponent(props: ComponentProps) {
     <div className="display-component">
       {data.map((item, index) => {
         const isSelected = selectedItem?.id === item.id;
-        
+
         return (
-          <div 
+          <div
             key={item.id || index}
             className={`item ${isSelected ? 'selected' : ''}`}
             onclick={() => onItemClick?.(item)}
@@ -281,17 +281,17 @@ export default class ParentComponent extends Component<ParentState> {
   view = (state: ParentState) => (
     <div className="parent-container">
       {/* Main content */}
-      <DisplayComponent 
+      <DisplayComponent
         data={state.items}
         selectedItem={state.selectedItem}
         onItemClick={(item) => this.run('select-item', item)}
       />
-      
+
       <button $onclick="open-create-modal">Create New</button>
-      
+
       {/* Conditional popup rendering */}
-      {state.showModal && 
-        <ModalComponent 
+      {state.showModal &&
+        <ModalComponent
           data={state.selectedItemForEdit}
           mode={state.modalMode}
           parentComponent={this}
@@ -332,25 +332,25 @@ export default class ParentComponent extends Component<ParentState> {
 
 ### Event Handling Rules (Critical)
 
-| Pattern | Use Case | Example |
-|---------|----------|---------|
-| `$bind="field"` | Form fields (preferred) | `<input $bind="formData.name" />` |
-| `$onclick={[func]}` | Direct function call | `<button $onclick={[saveData]} />` |
-| `$onclick="action"` | String action in update | `<button $onclick="save-data" />` |
-| `$onclick={['action', data]}` | Action with data | `<button $onclick={['select-item', item]} />` |
-| `onclick={(e) => ...}` | DOM manipulation only | `onclick={(e) => e.stopPropagation()}` |
+| Pattern                       | Use Case                | Example                                       |
+| ----------------------------- | ----------------------- | --------------------------------------------- |
+| `$bind="field"`               | Form fields (preferred) | `<input $bind="formData.name" />`             |
+| `$onclick={[func]}`           | Direct function call    | `<button $onclick={[saveData]} />`            |
+| `$onclick="action"`           | String action in update | `<button $onclick="save-data" />`             |
+| `$onclick={['action', data]}` | Action with data        | `<button $onclick={['select-item', item]} />` |
+| `onclick={(e) => ...}`        | DOM manipulation only   | `onclick={(e) => e.stopPropagation()}`        |
 
 **❌ NEVER DO:** `$onclick={() => app.run('action')}` - This breaks AppRun patterns
 
 ### State Update Rules (Critical)
 
-You can mutate state directly. Only return state when you need to re-render the component. 
+You can mutate state directly. Only return state when you need to re-render the component.
 
 ```typescript
 const stateUpdate = (state) => {
   state.field = newValue;        // Mutation
   state.items.push(newItem);     // Mutation
-  state.nested.field = value; 
+  state.nested.field = value;
   return state;                   // Return updated state to trigger re-render
 }
 ```
@@ -359,7 +359,7 @@ const stateUpdate = (state) => {
 const stateUpdate = (state) => {
   state.field = newValue;        // Mutation
   state.items.push(newItem);     // Mutation
-  state.nested.field = value; 
+  state.nested.field = value;
   // No return needed if no need to re-render
 }
 ```
@@ -453,10 +453,7 @@ interface ComponentState {
 
 **❌ DON'T: Use these patterns**
 ```typescript
-// ❌ Don't mutate state
-state.field = value;
-
-// ❌ Don't use $on with side effects
+// ❌ Don't use $on and run to trigger events
 $onclick={() => app.run('action')}
 
 // ❌ Don't forget error handling

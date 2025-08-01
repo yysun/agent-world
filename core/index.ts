@@ -36,12 +36,11 @@ export {
   getAgentConfig,
   // Chat history operations
   createChat,
-  getChatHistory,
-  updateChatHistory,
-  deleteChatHistory,
-  listChatHistory,
-  createWorldSnapshot,
-  restoreFromSnapshot,
+  createChatData,
+  getChat,
+  getChatData,
+  createWorldChat,
+  restoreWorldChat,
   summarizeChat,
   // Message operations
   // Note: Message operations moved to events.js (publishMessage, etc.)
@@ -56,8 +55,8 @@ export {
   subscribeAgentToMessages,
   processAgentMessage,
   shouldAgentRespond,
-  enableChatHistoryAutosave,
-  disableChatHistoryAutosave
+  enableChatDataAutosave,
+  disableChatDataAutosave
 } from './events.js';
 
 // Core types and utilities - Enhanced with TypeScript Utility Types
@@ -73,10 +72,10 @@ export type {
   UpdateWorldParams,
   // Chat history types
   WorldChat,
+  ChatData,
   CreateChatParams,
   UpdateChatParams,
   ChatInfo,
-  WorldSnapshot,
   // Derived types using utility types
   AgentInfo,
   AgentData,

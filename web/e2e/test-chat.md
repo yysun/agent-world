@@ -1,0 +1,10 @@
+- [x] Navigate to http://localhost:8080 using Playwright.
+- [x] Locate "test world" in the world selection list.
+- [x] Click the delete (×) button for "test world."
+- [x] Confirm deletion in the dialog by clicking "Delete."
+- [x] Verify that "test world" was removed from the list.
+- [x] Click the "+" button to create a new world.
+- [x] Enter "test world" as the new world name and create it.
+- [x] Click "Create Agent" in "test world."
+- [x] Enter "a1" as the agent name and create the agent.
+- [x] Type "hi" in the chat message box and click "Send."

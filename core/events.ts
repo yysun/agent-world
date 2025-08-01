@@ -64,7 +64,7 @@
  * - LLM call count is saved to disk after every LLM call and memory save operation
  */
 
-import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType } from './types.js';
+import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType, ChatInfo } from './types.js';
 import { generateId } from './utils.js';
 
 let globalStreamingEnabled = true;
@@ -83,29 +83,29 @@ const logger = createCategoryLogger('events');
 /**
  * Auto-save chat history message counts when enabled
  */
-let chatHistoryAutosaveEnabled = true;
+let chatDataAutosaveEnabled = true;
 
-export function enableChatHistoryAutosave(): void {
-  chatHistoryAutosaveEnabled = true;
+export function enableChatDataAutosave(): void {
+  chatDataAutosaveEnabled = true;
 }
 
-export function disableChatHistoryAutosave(): void {
-  chatHistoryAutosaveEnabled = false;
+export function disableChatDataAutosave(): void {
+  chatDataAutosaveEnabled = false;
 }
 
 /**
  * Update active chat message counts for autosave
  */
 async function updateActiveChatMessageCounts(world: World): Promise<void> {
-  if (!chatHistoryAutosaveEnabled) return;
+  if (!chatDataAutosaveEnabled) return;
 
   try {
-    // Get current chats
-    const chats = await world.listChats();
+    // Get current chats using storage API
+    const chats = await world.storage.listChatHistories(world.id);
 
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
-      const activeChat = chats.reduce((latest, chat) =>
+      const activeChat = chats.reduce((latest: ChatInfo, chat: ChatInfo) =>
         new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
       );
 
@@ -117,7 +117,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 
       // Update the active chat's message count if it has changed
       if (activeChat.messageCount !== totalMessages) {
-        await world.storage.updateChat(world.id, activeChat.id, {
+        await world.storage.updateChatData(world.id, activeChat.id, {
           messageCount: totalMessages
         });
 

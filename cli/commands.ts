@@ -46,7 +46,8 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChat, getChatHistory, updateChatHistory, deleteChatHistory, listChatHistory, summarizeChat, restoreFromSnapshot } from '../core/index.js';
+import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChat, createChatData, getChat, getChatData, summarizeChat, restoreWorldChat } from '../core/index.js';
+import type { ChatData } from '../core/index.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
@@ -463,12 +464,12 @@ export function generateHelpMessage(command?: string): string {
     const cmd = CLI_COMMAND_MAP[command];
     let help = `\n${cmd.usage}\n`;
     help += `Description: ${cmd.description}\n`;
-    
+
     // Show aliases if they exist
     if (cmd.aliases && cmd.aliases.length > 0) {
       help += `Aliases: ${cmd.aliases.join(', ')}\n`;
     }
-    
+
     if (cmd.parameters.length > 0) {
       help += `\nParameters:\n`;
       cmd.parameters.forEach(param => {
@@ -1369,7 +1370,7 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chats = await listChatHistory(context.rootPath, world!.id);
+          const chats = await world!.listChatHistories();
           if (chats.length === 0) {
             cliResponse = {
               success: true,
@@ -1411,11 +1412,11 @@ export async function processCLICommand(
         try {
           // Join remaining args as description if provided
           const description = args.length > 1 ? args.slice(1).join(' ') : undefined;
-          
-          const chat = await createChat(context.rootPath, world!.id, {
+
+          const chat = await createChatData(context.rootPath, world!.id, {
             name: collectedParams.name,
             description: description || `Chat created on ${new Date().toLocaleDateString()}`,
-            captureSnapshot: true
+            captureChat: true
           });
 
           cliResponse = {
@@ -1438,8 +1439,8 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chat) {
+          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chatData) {
             cliResponse = {
               success: false,
               message: `Chat '${collectedParams.chatId}' not found`
@@ -1447,10 +1448,10 @@ export async function processCLICommand(
             break;
           }
 
-          if (!chat.snapshot) {
+          if (!chatData.chat) {
             cliResponse = {
               success: false,
-              message: `Chat '${chat.name}' has no snapshot to restore`
+              message: `Chat '${chatData.name}' has no content to restore`
             };
             break;
           }
@@ -1459,7 +1460,7 @@ export async function processCLICommand(
           const confirmPrompt = {
             type: 'confirm',
             name: 'confirmed',
-            message: `Are you sure you want to restore from chat '${chat.name}'? This will replace the current world state.`,
+            message: `Are you sure you want to restore from chat '${chatData.name}'? This will replace the current world state.`,
             initial: false
           };
 
@@ -1473,13 +1474,13 @@ export async function processCLICommand(
             break;
           }
 
-          const restored = await restoreFromSnapshot(context.rootPath, world!.id, chat.snapshot);
+          const restored = await restoreWorldChat(context.rootPath, world!.id, chatData.chat);
 
           if (restored) {
             cliResponse = {
               success: true,
-              message: `Successfully restored world state from chat '${chat.name}'`,
-              data: chat,
+              message: `Successfully restored world state from chat '${chatData.name}'`,
+              data: chatData,
               needsWorldRefresh: true
             };
           } else {
@@ -1503,8 +1504,8 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chat) {
+          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chatData) {
             cliResponse = {
               success: false,
               message: `Chat '${collectedParams.chatId}' not found`
@@ -1516,7 +1517,7 @@ export async function processCLICommand(
           const confirmPrompt = {
             type: 'confirm',
             name: 'confirmed',
-            message: `Are you sure you want to delete chat '${chat.name}'? This action cannot be undone.`,
+            message: `Are you sure you want to delete chat '${chatData.name}'? This action cannot be undone.`,
             initial: false
           };
 
@@ -1530,12 +1531,12 @@ export async function processCLICommand(
             break;
           }
 
-          const deleted = await deleteChatHistory(context.rootPath, world!.id, chat.id);
+          const deleted = await world!.deleteChatData(chatData.id);
 
           if (deleted) {
             cliResponse = {
               success: true,
-              message: `Chat '${chat.name}' deleted successfully`
+              message: `Chat '${chatData.name}' deleted successfully`
             };
           } else {
             cliResponse = {
@@ -1558,8 +1559,8 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chat = await getChatHistory(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chat) {
+          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
+          if (!chatData) {
             cliResponse = {
               success: false,
               message: `Chat '${collectedParams.chatId}' not found`
@@ -1567,12 +1568,12 @@ export async function processCLICommand(
             break;
           }
 
-          const summary = await summarizeChat(context.rootPath, world!.id, chat.id);
+          const summary = await summarizeChat(context.rootPath, world!.id, chatData.id);
 
           cliResponse = {
             success: true,
-            message: `Summary for chat '${chat.name}':\n\n${summary}`,
-            data: { summary, chat }
+            message: `Summary for chat '${chatData.name}':\n\n${summary}`,
+            data: { summary, chatData }
           };
         } catch (error) {
           cliResponse = {

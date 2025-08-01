@@ -150,17 +150,17 @@ export class WorldTestBuilder {
       saveAgentsBatch: jest.fn(),
       loadAgentsBatch: jest.fn(),
       
-      // Chat history operations
-      saveChat: jest.fn(),
-      loadChat: jest.fn(),
-      deleteChat: jest.fn(),
-      listChats: jest.fn(),
-      updateChat: jest.fn(),
+      // Chat data operations
+      saveChatData: jest.fn(),
+      loadChatData: jest.fn(),
+      deleteChatData: jest.fn(),
+      listChatHistories: jest.fn(),
+      updateChatData: jest.fn(),
       
-      // Snapshot operations
-      saveSnapshot: jest.fn(),
-      loadSnapshot: jest.fn(),
-      restoreFromSnapshot: jest.fn(),
+      // World chat operations
+      saveWorldChat: jest.fn(),
+      loadWorldChat: jest.fn(),
+      restoreFromWorldChat: jest.fn(),
       
       // Integrity operations
       validateIntegrity: jest.fn(),
@@ -460,7 +460,11 @@ export class TestDataPresets {
       id: DEFAULT_WORLD_ID,
       name: 'Test World',
       description: 'A test world',
-      turnLimit: 10
+      turnLimit: 10,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      totalAgents: 0,
+      totalMessages: 0
     };
   }
 }

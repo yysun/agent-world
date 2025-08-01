@@ -265,7 +265,7 @@ export type AgentStorage = Omit<Agent,
 /**
  * World chat history entry
  */
-export interface WorldChat {
+export interface ChatData {
   id: string; // nanoid
   worldId: string;
   name: string;
@@ -275,13 +275,13 @@ export interface WorldChat {
   messageCount: number;
   summary?: string; // LLM-generated summary
   tags?: string[];
-  snapshot?: WorldSnapshot; // Full world state when chat was created/saved
+  chat?: WorldChat; // Full world state when chat was created/saved
 }
 
 /**
- * World snapshot for full state capture
+ * World chat for full state capture
  */
-export interface WorldSnapshot {
+export interface WorldChat {
   world: WorldData;
   agents: AgentData[];
   messages: AgentMessage[];
@@ -299,13 +299,13 @@ export interface WorldSnapshot {
 export interface CreateChatParams {
   name: string;
   description?: string;
-  captureSnapshot?: boolean;
+  captureChat?: boolean;
 }
 
 /**
  * Chat update parameters
  */
-export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureSnapshot'>> {
+export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureChat'>> {
   summary?: string;
   tags?: string[];
   messageCount?: number; // For autosave updates
@@ -358,6 +358,9 @@ export interface World {
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
 
+  // Chat State Management (NEW)
+  currentChatId: string | null; // Track active chat session
+
   // Runtime Objects
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
@@ -377,14 +380,20 @@ export interface World {
   saveAgentConfig(agentName: string): Promise<void>;
 
   // Chat history methods
-  createChat(params: CreateChatParams): Promise<WorldChat>;
-  loadChat(chatId: string): Promise<WorldChat | null>;
-  updateChat(chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
-  deleteChat(chatId: string): Promise<boolean>;
-  listChats(): Promise<ChatInfo[]>;
-  createSnapshot(): Promise<WorldSnapshot>;
-  restoreFromChat(chatId: string): Promise<boolean>;
+  createChatData(params: CreateChatParams): Promise<ChatData>;
+  loadChatData(chatId: string): Promise<ChatData | null>;
+  updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
+  deleteChatData(chatId: string): Promise<boolean>;
+  listChatHistories(): Promise<ChatInfo[]>;
+  createWorldChat(): Promise<WorldChat>;
+  restoreFromWorldChat(chatId: string): Promise<boolean>;
   summarizeChat(chatId: string): Promise<string>;
+
+  // NEW: Enhanced Chat Management Methods
+  newChat(): Promise<string>; // Create new chat and set as current
+  loadChatById(chatId: string): Promise<void>; // Switch to existing chat
+  getCurrentChat(): Promise<ChatData | null>; // Get current active chat
+  saveCurrentState(): Promise<void>; // Auto-save world state to current chat
 
   // World operations
   save(): Promise<void>;
@@ -436,16 +445,16 @@ export interface StorageManager {
   loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]>;
 
   // Chat history operations
-  saveChat(worldId: string, chat: WorldChat): Promise<void>;
-  loadChat(worldId: string, chatId: string): Promise<WorldChat | null>;
-  deleteChat(worldId: string, chatId: string): Promise<boolean>;
-  listChats(worldId: string): Promise<ChatInfo[]>;
-  updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
+  saveChatData(worldId: string, chat: ChatData): Promise<void>;
+  loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
+  deleteChatData(worldId: string, chatId: string): Promise<boolean>;
+  listChatHistories(worldId: string): Promise<ChatInfo[]>;
+  updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
-  // Snapshot operations
-  saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void>;
-  loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null>;
-  restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean>;
+  // Chat operations
+  saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
+  loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;
@@ -476,16 +485,16 @@ export interface StorageAPI {
   loadAgentsBatch(worldId: string, agentIds: string[], options?: any): Promise<{ successful: Agent[]; failed: any[] }>;
 
   // Chat history operations
-  saveChat(worldId: string, chat: WorldChat): Promise<void>;
-  loadChat(worldId: string, chatId: string): Promise<WorldChat | null>;
-  deleteChat(worldId: string, chatId: string): Promise<boolean>;
-  listChats(worldId: string): Promise<ChatInfo[]>;
-  updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null>;
+  saveChatData(worldId: string, chat: ChatData): Promise<void>;
+  loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
+  deleteChatData(worldId: string, chatId: string): Promise<boolean>;
+  listChatHistories(worldId: string): Promise<ChatInfo[]>;
+  updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
-  // Snapshot operations
-  saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void>;
-  loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null>;
-  restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean>;
+  // Chat operations
+  saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
+  loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<{ isValid: boolean }>;

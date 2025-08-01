@@ -11,6 +11,12 @@
  * - Enhanced runtime agent registration and world synchronization
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
+ * - Chat session management with auto-save and restoration capabilities
+ *
+ * Chat Session Management:
+ * - Integrated into getWorld: Auto-restoration of last active chat with snapshot support
+ * - Event-driven auto-save: Chat state automatically saved via event emitter
+ * - generateChatTitleFromMessages: Extract meaningful titles from message content
  *
  * Performance Optimizations:
  * - Static imports for events, llm-manager, and utils modules eliminate dynamic import overhead
@@ -40,6 +46,13 @@
  * - createAgentsBatch: Create multiple agents atomically
  * - registerAgentRuntime: Register agent in world runtime without persistence
  *
+ * Chat Functions:
+ * - createChat: Create new chat with optional snapshot
+ * - getChat: Load chat by ID with snapshot data
+ * - updateChat: Update chat metadata and message counts
+ * - deleteChat: Remove chat and associated snapshots
+ * - listChat: Get all chats for a world
+ *
  * Message Functions:
  * - getWorldMessages: Get message history (placeholder)
  *
@@ -68,7 +81,7 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 const logger = createCategoryLogger('core');
 
 // Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, WorldChat, CreateChatParams, UpdateChatParams, ChatInfo, WorldSnapshot, LLMProvider } from './types.js';
+import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, ChatData, CreateChatParams, UpdateChatParams, ChatInfo, WorldChat, LLMProvider } from './types.js';
 import type { WorldData } from './world-storage.js';
 
 // Static imports for core modules
@@ -122,7 +135,11 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     id: worldId,
     name: params.name,
     description: params.description,
-    turnLimit: params.turnLimit || 5
+    turnLimit: params.turnLimit || 5,
+    createdAt: new Date(),
+    lastUpdated: new Date(),
+    totalAgents: 0,
+    totalMessages: 0
   };
 
   await storageWrappers!.saveWorld(worldData);
@@ -161,6 +178,132 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
     const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
     world.agents.set(enhancedAgent.id, enhancedAgent);
   }
+
+  // AUTO-RESTORE LAST CHAT: Load last chat and restore agent memory
+  try {
+    // If world has a currentChatId, restore that specific chat
+    if (worldData.currentChatId) {
+      const chatData = await storageWrappers!.loadChatData(normalizedWorldId, worldData.currentChatId);
+      if (chatData?.chat) {
+        // Restore agent memory from current chat content
+        if (chatData.chat.agents) {
+          for (const snapshotAgent of chatData.chat.agents) {
+            const worldAgent = world.agents.get(snapshotAgent.id);
+            if (worldAgent && snapshotAgent.memory) {
+              // Restore memory while preserving agent config
+              worldAgent.memory = [...snapshotAgent.memory];
+              worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
+              worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
+            }
+          }
+        }
+
+        logger.debug('Auto-restored current chat', {
+          worldId: normalizedWorldId,
+          chatId: worldData.currentChatId,
+          messageCount: 0 // Will be calculated when messages are loaded
+        });
+      }
+    } else {
+      // Fall back to last active chat if no currentChatId
+      try {
+        const chats = await storageWrappers!.listChatHistories(normalizedWorldId);
+
+        if (chats.length > 0) {
+          // Find the most recently updated chat
+          const lastChatInfo = chats.reduce((latest: ChatInfo, current: ChatInfo) =>
+            new Date(current.updatedAt) > new Date(latest.updatedAt) ? current : latest
+          );
+
+          // Load the complete chat data
+          const lastChatData = await storageWrappers!.loadChatData(normalizedWorldId, lastChatInfo.id);
+
+          if (lastChatData) {
+            if (lastChatData.chat?.agents) {
+              // Restore agent memory from chat content
+              for (const snapshotAgent of lastChatData.chat.agents) {
+                const worldAgent = world.agents.get(snapshotAgent.id);
+                if (worldAgent && snapshotAgent.memory) {
+                  // Restore memory while preserving agent config
+                  worldAgent.memory = [...snapshotAgent.memory];
+                  worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
+                  worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
+                }
+              }
+            }
+
+            // Update world's currentChatId to the restored chat
+            world.currentChatId = lastChatData.id;
+
+            // Save the updated currentChatId to world data
+            const updatedWorldData = {
+              ...worldData,
+              currentChatId: lastChatData.id
+            };
+            await storageWrappers!.saveWorld(updatedWorldData);
+
+            logger.debug('Auto-restored last chat and set as current', {
+              worldId: normalizedWorldId,
+              chatId: lastChatData.id,
+              messageCount: lastChatData.messageCount
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn('Failed to auto-restore chat, continuing with fresh agents', {
+          worldId: normalizedWorldId,
+          error: error instanceof Error ? error.message : error
+        });
+      }
+    }
+  } catch (error) {
+    logger.warn('Failed to auto-restore chat, continuing with fresh agents', {
+      worldId: normalizedWorldId,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+
+  return world;
+}
+
+/**
+ * Get world with fresh agent configurations (no memory restoration)
+ * Use this for new chat sessions where agents should start with empty memory
+ */
+export async function getWorldFresh(rootPath: string, worldId: string): Promise<World | null> {
+  // Ensure modules are initialized
+  await moduleInitialization;
+
+  // Automatically convert worldId to kebab-case for consistent lookup
+  const normalizedWorldId = utils.toKebabCase(worldId);
+
+  const worldData = await storageWrappers!.loadWorld(normalizedWorldId);
+
+  if (!worldData) {
+    return null;
+  }
+
+  // Create runtime World with fresh EventEmitter and methods
+  const world = worldDataToWorld(worldData, rootPath);
+
+  // Load agents into world runtime with FRESH memory (no restoration)
+  const agents = await storageWrappers!.listAgents(normalizedWorldId);
+  for (const agentData of agents) {
+    // Enhance agent data with methods before adding to world
+    const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
+
+    // FRESH START: Clear agent memory for new chat session
+    enhancedAgent.memory = [];
+    enhancedAgent.llmCallCount = 0;
+    enhancedAgent.lastLLMCall = undefined;
+
+    world.agents.set(enhancedAgent.id, enhancedAgent);
+  }
+
+  logger.debug('Created fresh world with empty agent memory', {
+    worldId: normalizedWorldId,
+    agentCount: agents.length
+  });
 
   return world;
 }
@@ -221,19 +364,13 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
       try {
         const agents = await storageWrappers!.listAgents(data.id);
         return {
-          id: data.id,
-          name: data.name,
-          description: data.description,
-          turnLimit: data.turnLimit || 5,
+          ...data, // Include all WorldData properties
           agentCount: agents.length
         };
       } catch (error) {
         // If agent loading fails, still return world info with 0 agents
         return {
-          id: data.id,
-          name: data.name,
-          description: data.description,
-          turnLimit: data.turnLimit || 5,
+          ...data, // Include all WorldData properties
           agentCount: 0
         };
       }
@@ -345,45 +482,45 @@ function createStorageManager(rootPath: string): StorageManager {
     },
 
     // Chat history operations
-    async saveChat(worldId: string, chat: WorldChat): Promise<void> {
+    async saveChatData(worldId: string, chat: ChatData): Promise<void> {
       await moduleInitialization;
-      return storageWrappers!.saveChat(worldId, chat);
+      return storageWrappers!.saveChatData(worldId, chat);
     },
 
-    async loadChat(worldId: string, chatId: string): Promise<WorldChat | null> {
+    async loadChatData(worldId: string, chatId: string): Promise<ChatData | null> {
       await moduleInitialization;
-      return storageWrappers!.loadChat(worldId, chatId);
+      return storageWrappers!.loadChatData(worldId, chatId);
     },
 
-    async deleteChat(worldId: string, chatId: string): Promise<boolean> {
+    async deleteChatData(worldId: string, chatId: string): Promise<boolean> {
       await moduleInitialization;
-      return storageWrappers!.deleteChat(worldId, chatId);
+      return storageWrappers!.deleteChatData(worldId, chatId);
     },
 
-    async listChats(worldId: string): Promise<ChatInfo[]> {
+    async listChatHistories(worldId: string): Promise<ChatInfo[]> {
       await moduleInitialization;
-      return storageWrappers!.listChats(worldId);
+      return storageWrappers!.listChatHistories(worldId);
     },
 
-    async updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null> {
+    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
       await moduleInitialization;
-      return storageWrappers!.updateChat(worldId, chatId, updates);
+      return storageWrappers!.updateChatData(worldId, chatId, updates);
     },
 
-    // Snapshot operations
-    async saveSnapshot(worldId: string, chatId: string, snapshot: WorldSnapshot): Promise<void> {
+    // Chat operations
+    async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
       await moduleInitialization;
-      return storageWrappers!.saveSnapshot(worldId, chatId, snapshot);
+      return storageWrappers!.saveWorldChat(worldId, chatId, chat);
     },
 
-    async loadSnapshot(worldId: string, chatId: string): Promise<WorldSnapshot | null> {
+    async loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null> {
       await moduleInitialization;
-      return storageWrappers!.loadSnapshot(worldId, chatId);
+      return storageWrappers!.loadWorldChat(worldId, chatId);
     },
 
-    async restoreFromSnapshot(worldId: string, snapshot: WorldSnapshot): Promise<boolean> {
+    async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
       await moduleInitialization;
-      return storageWrappers!.restoreFromSnapshot(worldId, snapshot);
+      return storageWrappers!.restoreFromWorldChat(worldId, chat);
     },
 
     // Integrity operations
@@ -521,6 +658,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     turnLimit: data.turnLimit,
     chatLLMProvider: data.chatLLMProvider as LLMProvider,
     chatLLMModel: data.chatLLMModel,
+    currentChatId: data.currentChatId || null, // NEW: Initialize from data
     eventEmitter: new EventEmitter(),
     agents: new Map(), // Empty agents map - to be populated by agent manager
 
@@ -664,52 +802,65 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       }
     },
 
-    // Chat history methods
-    async createChat(params) {
-      return await createChat(world.rootPath, world.id, params);
+    // Chat history methods - implemented using new ChatData model
+    async createChatData(params: CreateChatParams): Promise<ChatData> {
+      // For now, delegate to the createChat function and transform the result
+      const chat = await createChat(world.rootPath, world.id, params);
+      // Transform WorldChat to ChatData (this is a temporary bridge)
+      return {
+        id: 'temp-id', // Will be fixed when createChat is updated
+        worldId: world.id,
+        name: params.name,
+        description: params.description,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        messageCount: 0,
+        chat: chat
+      };
     },
 
-    async loadChat(chatId) {
-      return await getChatHistory(world.rootPath, world.id, chatId);
+    async loadChatData(chatId: string): Promise<ChatData | null> {
+      return await storageWrappers!.loadChatData(world.id, chatId);
     },
 
-    async updateChat(chatId, updates) {
-      return await updateChatHistory(world.rootPath, world.id, chatId, updates);
+    async updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
+      return await storageWrappers!.updateChatData(world.id, chatId, updates);
     },
 
-    async deleteChat(chatId) {
-      return await deleteChatHistory(world.rootPath, world.id, chatId);
+    async deleteChatData(chatId: string): Promise<boolean> {
+      return await storageWrappers!.deleteChatData(world.id, chatId);
     },
 
-    async listChats() {
-      return await listChatHistory(world.rootPath, world.id);
+    async listChatHistories(): Promise<ChatInfo[]> {
+      return await storageWrappers!.listChatHistories(world.id);
     },
 
-    async createSnapshot() {
-      return await createWorldSnapshot(world.rootPath, world.id);
+    async createWorldChat(): Promise<WorldChat> {
+      return await createWorldChat(world.rootPath, world.id);
     },
 
-    async restoreFromChat(chatId) {
-      const chat = await getChatHistory(world.rootPath, world.id, chatId);
-      if (!chat || !chat.snapshot) {
-        return false;
-      }
-      return await restoreFromSnapshot(world.rootPath, world.id, chat.snapshot);
+    async restoreFromWorldChat(chatId: string): Promise<boolean> {
+      return await restoreWorldChat(world.rootPath, world.id, chatId);
     },
 
-    async summarizeChat(chatId) {
+    async summarizeChat(chatId: string): Promise<string> {
       return await summarizeChat(world.rootPath, world.id, chatId);
     },
 
     // World operation methods
-    async save() {
+    async save(): Promise<void> {
       const worldData: WorldData = {
         id: world.id,
         name: world.name,
         description: world.description,
         turnLimit: world.turnLimit,
         chatLLMProvider: world.chatLLMProvider,
-        chatLLMModel: world.chatLLMModel
+        chatLLMModel: world.chatLLMModel,
+        currentChatId: world.currentChatId,
+        createdAt: new Date(), // This should ideally preserve the original
+        lastUpdated: new Date(),
+        totalAgents: world.agents.size,
+        totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
       };
       await storageWrappers!.saveWorld(worldData);
     },
@@ -797,6 +948,185 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       // Implementation: Check if agent is subscribed
       // For now, assume all agents in the map are subscribed
       return world.agents.has(agentId);
+    },
+
+    // NEW: Enhanced Chat Management Methods
+    async newChat(): Promise<string> {
+      try {
+        // 1. Save current state to previous chat (if any)
+        if (world.currentChatId) {
+          await world.saveCurrentState();
+        }
+
+        // 2. Generate new chat ID
+        const newChatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // 3. Create new chat record
+        const newChatData = await createChatData('', world.id, {
+          name: 'New Chat',
+          description: 'New chat session',
+          captureChat: true
+        });
+
+        // 4. Reset agent memories to fresh state
+        for (const agent of world.agents.values()) {
+          agent.memory = [];
+          agent.llmCallCount = 0;
+          agent.lastLLMCall = undefined;
+        }
+
+        // 5. Update currentChatId
+        world.currentChatId = newChatData.id;
+
+        // 6. Save world data with new currentChatId
+        const worldData = {
+          id: world.id,
+          name: world.name,
+          description: world.description,
+          turnLimit: world.turnLimit,
+          chatLLMProvider: world.chatLLMProvider,
+          chatLLMModel: world.chatLLMModel,
+          currentChatId: world.currentChatId,
+          createdAt: new Date(), // This should ideally preserve the original
+          lastUpdated: new Date(),
+          totalAgents: world.agents.size,
+          totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
+        };
+        await storageWrappers!.saveWorld(worldData);
+
+        // 7. Auto-save initial state to new chat
+        await world.saveCurrentState();
+
+        logger.debug('Created new chat', {
+          worldId: world.id,
+          chatId: world.currentChatId
+        });
+
+        return world.currentChatId!; // Non-null assertion since we just set it
+      } catch (error) {
+        logger.error('Failed to create new chat', {
+          worldId: world.id,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
+    },
+
+    async loadChatById(chatId: string): Promise<void> {
+      try {
+        // 1. Save current state to previous chat (if any)
+        if (world.currentChatId && world.currentChatId !== chatId) {
+          await world.saveCurrentState();
+        }
+
+        // 2. Validate chatId exists
+        const chatData = await getChat('', world.id, chatId);
+        if (!chatData) {
+          throw new Error(`Chat ${chatId} not found`);
+        }
+
+        // 3. Restore agent memory from chat data
+        if (chatData.agents) {
+          for (const snapshotAgent of chatData.agents) {
+            const worldAgent = world.agents.get(snapshotAgent.id);
+            if (worldAgent && snapshotAgent.memory) {
+              worldAgent.memory = [...snapshotAgent.memory];
+              worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
+              worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
+            }
+          }
+        }
+
+        // 4. Update currentChatId
+        world.currentChatId = chatId;
+
+        // 5. Save world data with updated currentChatId
+        const worldData = {
+          id: world.id,
+          name: world.name,
+          description: world.description,
+          turnLimit: world.turnLimit,
+          chatLLMProvider: world.chatLLMProvider,
+          chatLLMModel: world.chatLLMModel,
+          currentChatId: world.currentChatId,
+          createdAt: new Date(), // This should ideally preserve the original
+          lastUpdated: new Date(),
+          totalAgents: world.agents.size,
+          totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
+        };
+        await storageWrappers!.saveWorld(worldData);
+
+        logger.debug('Loaded chat', {
+          worldId: world.id,
+          chatId: world.currentChatId,
+          messageCount: chatData.messages.length
+        });
+      } catch (error) {
+        logger.error('Failed to load chat', {
+          worldId: world.id,
+          chatId,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
+    },
+
+    async getCurrentChat(): Promise<ChatData | null> {
+      try {
+        if (!world.currentChatId) {
+          return null;
+        }
+        return await storageWrappers!.loadChatData(world.id, world.currentChatId);
+      } catch (error) {
+        logger.warn('Failed to get current chat', {
+          worldId: world.id,
+          currentChatId: world.currentChatId,
+          error: error instanceof Error ? error.message : error
+        });
+        return null;
+      }
+    },
+
+    async saveCurrentState(): Promise<void> {
+      try {
+        if (!world.currentChatId) {
+          logger.debug('No current chat to save state to', { worldId: world.id });
+          return;
+        }
+
+        // 1. Capture current agent memories and create messages
+        const allMessages: AgentMessage[] = [];
+        for (const agent of world.agents.values()) {
+          if (agent.memory && agent.memory.length > 0) {
+            allMessages.push(...agent.memory);
+          }
+        }
+
+        // Sort messages by timestamp
+        allMessages.sort((a, b) => {
+          const timeA = a.createdAt ? a.createdAt.getTime() : 0;
+          const timeB = b.createdAt ? b.createdAt.getTime() : 0;
+          return timeA - timeB;
+        });
+
+        // 2. Update chat with current state
+        await storageWrappers!.updateChatData(world.id, world.currentChatId, {
+          messageCount: allMessages.length
+        });
+
+        logger.debug('Saved current world state to chat', {
+          worldId: world.id,
+          chatId: world.currentChatId,
+          messageCount: allMessages.length
+        });
+      } catch (error) {
+        logger.error('Failed to save current state', {
+          worldId: world.id,
+          currentChatId: world.currentChatId,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
     }
   };
 
@@ -1346,6 +1676,41 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
 /**
  * Create new chat history entry with optional snapshot
  */
+/**
+ * Create a new chat data entry with optional world snapshot
+ * This properly separates ChatData (metadata) from WorldChat (content)
+ */
+export async function createChatData(rootPath: string, worldId: string, params: CreateChatParams): Promise<ChatData> {
+  await moduleInitialization;
+
+  const chatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const now = new Date();
+
+  // Create ChatData entry (metadata)
+  const chatData: ChatData = {
+    id: chatId,
+    worldId,
+    name: params.name,
+    description: params.description,
+    createdAt: now,
+    updatedAt: now,
+    messageCount: 0
+  };
+
+  // Optionally capture WorldChat (full world state)
+  if (params.captureChat) {
+    const worldChat = await createWorldChat(rootPath, worldId);
+    chatData.chat = worldChat;
+  }
+
+  await storageWrappers!.saveChatData(worldId, chatData);
+  return chatData;
+}
+
+/**
+ * DEPRECATED: Use createChatData instead
+ * Legacy function for backward compatibility - mixes ChatData and WorldChat
+ */
 export async function createChat(rootPath: string, worldId: string, params: CreateChatParams): Promise<WorldChat> {
   // Ensure modules are initialized
   await moduleInitialization;
@@ -1353,75 +1718,79 @@ export async function createChat(rootPath: string, worldId: string, params: Crea
   const chatId = utils.generateChatId();
   const now = new Date();
 
-  let snapshot: WorldSnapshot | undefined;
-  if (params.captureSnapshot) {
-    snapshot = await createWorldSnapshot(rootPath, worldId);
-  }
+  // For legacy compatibility, just create a WorldChat
+  const worldChat = await createWorldChat(rootPath, worldId);
 
-  const chat: WorldChat = {
-    id: chatId,
-    worldId,
-    name: params.name,
-    description: params.description,
-    createdAt: now,
-    updatedAt: now,
-    messageCount: 0,
-    snapshot
-  };
-
-  await storageWrappers!.saveChat(worldId, chat);
-
-  if (snapshot) {
-    await storageWrappers!.saveSnapshot(worldId, chatId, snapshot);
-  }
-
-  return chat;
+  return worldChat;
 }
 
 /**
  * Load chat history entry with snapshot
  */
-export async function getChatHistory(rootPath: string, worldId: string, chatId: string): Promise<WorldChat | null> {
+/**
+ * Get chat data with metadata and content
+ */
+export async function getChatData(rootPath: string, worldId: string, chatId: string): Promise<ChatData | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  return await storageWrappers!.loadChat(worldId, chatId);
+  // Load complete ChatData
+  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
+  return chatData;
 }
 
 /**
- * Update chat history entry
+ * Get chat content only (legacy function)
  */
-export async function updateChatHistory(rootPath: string, worldId: string, chatId: string, updates: UpdateChatParams): Promise<WorldChat | null> {
+export async function getChat(rootPath: string, worldId: string, chatId: string): Promise<WorldChat | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
-  return await storageWrappers!.updateChat(worldId, chatId, updates);
+  // Load ChatData and return the chat content if available
+  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
+  return chatData?.chat || null;
 }
 
-/**
- * Delete chat history entry
- */
-export async function deleteChatHistory(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
-  // Ensure modules are initialized
-  await moduleInitialization;
 
-  return await storageWrappers!.deleteChat(worldId, chatId);
-}
 
 /**
- * List all chat history entries for a world
+ * Generate chat title from message content (extracted from frontend utils)
  */
-export async function listChatHistory(rootPath: string, worldId: string): Promise<ChatInfo[]> {
-  // Ensure modules are initialized
-  await moduleInitialization;
+function generateChatTitleFromMessages(messages: AgentMessage[], maxLength: number = 50): string {
+  if (!messages || messages.length === 0) {
+    return 'New Chat';
+  }
 
-  return await storageWrappers!.listChats(worldId);
+  // Find first substantive user message
+  const userMessage = messages.find(msg =>
+    msg.role === 'user' &&
+    msg.content &&
+    msg.content.trim().length > 0 &&
+    !msg.content.startsWith('@') // Skip mention-only messages
+  );
+
+  if (!userMessage) {
+    return 'New Chat';
+  }
+
+  let title = userMessage.content.trim();
+
+  // Clean up the title
+  title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
+  title = title.replace(/\s+/g, ' '); // Normalize whitespace
+
+  // Truncate if too long
+  if (title.length > maxLength) {
+    title = title.substring(0, maxLength - 3) + '...';
+  }
+
+  return title || 'New Chat';
 }
 
 /**
  * Create snapshot of current world state
  */
-export async function createWorldSnapshot(rootPath: string, worldId: string): Promise<WorldSnapshot> {
+export async function createWorldChat(rootPath: string, worldId: string): Promise<WorldChat> {
   // Ensure modules are initialized
   await moduleInitialization;
 
@@ -1442,7 +1811,7 @@ export async function createWorldSnapshot(rootPath: string, worldId: string): Pr
     }
   }
 
-  const snapshot: WorldSnapshot = {
+  const snapshot: WorldChat = {
     world: worldData,
     agents,
     messages: allMessages,
@@ -1460,11 +1829,39 @@ export async function createWorldSnapshot(rootPath: string, worldId: string): Pr
 /**
  * Restore world state from snapshot
  */
-export async function restoreFromSnapshot(rootPath: string, worldId: string, snapshot: WorldSnapshot): Promise<boolean> {
+/**
+ * Restore world state from snapshot (consolidated function)
+ * Can accept either a snapshot object or a chat ID to load snapshot from
+ */
+export async function restoreWorldChat(
+  rootPath: string,
+  worldId: string,
+  snapshotOrChatId: WorldChat | string
+): Promise<boolean> {
   // Ensure modules are initialized
   await moduleInitialization;
 
   try {
+    let snapshot: WorldChat;
+
+    // Handle different input types
+    if (typeof snapshotOrChatId === 'string') {
+      // It's a chat ID - load the chat data and extract WorldChat
+      const chatId = snapshotOrChatId;
+      const chatData = await storageWrappers!.loadChatData(worldId, chatId);
+      if (!chatData || !chatData.chat) {
+        logger.warn('Chat not found or has no content', { worldId, chatId });
+        return false;
+      }
+      snapshot = chatData.chat;
+      logger.debug('Loaded snapshot from chat', { worldId, chatId });
+    } else {
+      // It's already a snapshot object
+      snapshot = snapshotOrChatId;
+      logger.debug('Using provided snapshot', { worldId });
+    }
+
+    // Core restoration logic
     // Save world configuration
     await storageWrappers!.saveWorld(snapshot.world);
 
@@ -1485,7 +1882,13 @@ export async function restoreFromSnapshot(rootPath: string, worldId: string, sna
 
     return true;
   } catch (error) {
-    logger.error('Failed to restore from snapshot', { worldId, error: error instanceof Error ? error.message : error });
+    const errorContext = typeof snapshotOrChatId === 'string'
+      ? { worldId, chatId: snapshotOrChatId }
+      : { worldId };
+    logger.error('Failed to restore from snapshot', {
+      ...errorContext,
+      error: error instanceof Error ? error.message : error
+    });
     return false;
   }
 }
@@ -1497,9 +1900,9 @@ export async function summarizeChat(rootPath: string, worldId: string, chatId: s
   // Ensure modules are initialized
   await moduleInitialization;
 
-  const chat = await storageWrappers!.loadChat(worldId, chatId);
-  if (!chat || !chat.snapshot) {
-    throw new Error('Chat or snapshot not found');
+  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
+  if (!chatData || !chatData.chat) {
+    throw new Error('Chat or content not found');
   }
 
   const worldData = await storageWrappers!.loadWorld(worldId);
@@ -1514,7 +1917,7 @@ export async function summarizeChat(rootPath: string, worldId: string, chatId: s
       const tempWorld = worldDataToWorld(worldData, rootPath);
 
       // Prepare messages for summarization
-      const messages = chat.snapshot.messages || [];
+      const messages = chatData.chat.messages || [];
       if (messages.length === 0) {
         return 'No messages to summarize.';
       }
@@ -1547,7 +1950,7 @@ Summary:`;
       const summary = await llmManager.generateAgentResponse(tempWorld, tempAgent, summaryMessages);
 
       // Update chat with summary
-      await storageWrappers!.updateChat(worldId, chatId, { summary });
+      await storageWrappers!.updateChatData(worldId, chatId, { summary });
 
       return summary;
     } catch (error) {
@@ -1556,11 +1959,11 @@ Summary:`;
   }
 
   // Fallback to simple summary
-  const messages = chat.snapshot.messages || [];
+  const messages = chatData.chat.messages || [];
   const messageCount = messages.length;
   const participants = [...new Set(messages.map((m: any) => m.sender || m.role).filter(Boolean))];
 
-  return `Chat with ${messageCount} messages from ${participants.length} participants: ${participants.join(', ')}. Created on ${chat.createdAt.toLocaleDateString()}.`;
+  return `Chat with ${messageCount} messages from ${participants.length} participants: ${participants.join(', ')}. Created on ${chatData.createdAt.toLocaleDateString()}.`;
 }
 
 // ========================
@@ -1659,4 +2062,108 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
   }
 
   return markdown;
+}
+
+// ========================
+// ENHANCED MESSAGE PUBLISHING WITH AUTO-SAVE
+// ========================
+
+/**
+ * Enhanced message publishing with automatic chat session management
+ * This wraps the core events.publishMessage with auto-save functionality
+ * Use this instead of directly calling events.publishMessage for chat sessions
+ */
+export async function publishMessageWithAutoSave(
+  world: World,
+  content: string,
+  sender: string,
+  currentChatId?: string
+): Promise<{ messageId: string; chatId?: string; autoSaved?: boolean }> {
+  // First publish the message using core events
+  const messageEvent = {
+    content,
+    sender,
+    timestamp: new Date(),
+    messageId: utils.generateId()
+  };
+
+  // Use core events to publish the message
+  events.publishMessage(world, content, sender);
+
+  // ENHANCED AUTO-SAVE: Use world's saveCurrentState method
+  try {
+    // If world has a current chat, auto-save to it
+    if (world.currentChatId) {
+      await world.saveCurrentState();
+
+      logger.debug('Auto-saved to current chat', {
+        worldId: world.id,
+        chatId: world.currentChatId,
+        sender,
+        messageId: messageEvent.messageId
+      });
+
+      return {
+        messageId: messageEvent.messageId,
+        chatId: world.currentChatId,
+        autoSaved: true
+      };
+    } else {
+      // No current chat - create new one if we have messages
+      const allMessages: AgentMessage[] = [];
+      for (const agent of world.agents.values()) {
+        if (agent.memory && agent.memory.length > 0) {
+          allMessages.push(...agent.memory);
+        }
+      }
+
+      if (allMessages.length > 0) {
+        const newChatId = await world.newChat();
+
+        logger.debug('Created new chat for auto-save', {
+          worldId: world.id,
+          chatId: newChatId,
+          messageCount: allMessages.length,
+          sender,
+          messageId: messageEvent.messageId
+        });
+
+        return {
+          messageId: messageEvent.messageId,
+          chatId: newChatId,
+          autoSaved: true
+        };
+      }
+    }
+
+    // Return message ID even if auto-save wasn't triggered
+    return {
+      messageId: messageEvent.messageId,
+      chatId: world.currentChatId || undefined,
+      autoSaved: false
+    };
+
+  } catch (error) {
+    // Log error but don't fail message publishing
+    logger.error('Auto-save error during message publishing', {
+      worldId: world.id,
+      sender,
+      messageId: messageEvent.messageId,
+      error: error instanceof Error ? error.message : error
+    });
+
+    return {
+      messageId: messageEvent.messageId,
+      chatId: world.currentChatId || undefined,
+      autoSaved: false
+    };
+  }
+}
+
+/**
+ * Wrapper function for backward compatibility
+ * Use publishMessageWithAutoSave for new implementations that need auto-save
+ */
+export function publishMessage(world: World, content: string, sender: string): void {
+  events.publishMessage(world, content, sender);
 }

@@ -55,6 +55,7 @@ export default {
   resetModules: true,
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^sqlite3$': '<rootDir>/tests/__mocks__/sqlite3.js',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(nanoid)/)',

@@ -1,28 +1,12 @@
 /**
  * API Service Module - Complete REST API Client
  * 
- * Provides functions for interacting with the agent-world REST API endpoints:
- * - World management (create, update, delete, list)
- * - Agent operations (create, read, update, delete, list)
- * - Agent memory management (get, append, clear)
- * 
- * Features:
- * - RESTful API client using fetch
- * - Comprehensive error handling with structured error format
- * - Base URL configuration
- * - Full CRUD operations for worlds and agents
- * - Memory management for agents
- * - Clean separation: Chat functionality moved to sse-client.js
- * - Full TypeScript support with proper interfaces
- * - Consolidated types using centralized types/index.ts
- * 
- * Changes:
- * - Added TypeScript interfaces for all data types
- * - Fixed type errors with proper typing
- * - Maintained all existing CRUD functionality
- * - Enhanced type safety for better development experience
- * - Eliminated duplicate interface definitions
- * - Reused consolidated types for consistency
+ * Provides comprehensive REST API client for agent-world:
+ * - World management (CRUD operations, export)
+ * - Agent operations (CRUD, memory management)
+ * - Chat history management (create, load, restore state)
+ * - Error handling with structured responses
+ * - TypeScript support with consolidated types
  */
 
 import type {
@@ -109,7 +93,6 @@ async function getWorld(worldName: string): Promise<World & { agents: Agent[] }>
 
 /**
  * Create a new world
- * Accepts Partial<World> and fills in required fields (like agents) with defaults if missing.
  */
 async function createWorld(worldData: Partial<World>): Promise<World> {
   if (!worldData || !worldData.name) {
@@ -263,11 +246,11 @@ async function exportWorldToMarkdown(worldName: string): Promise<void> {
   }
 
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/export`);
-  
+
   // Get the filename from Content-Disposition header
   const contentDisposition = response.headers.get('Content-Disposition');
   let filename = `${worldName}-export.md`;
-  
+
   if (contentDisposition) {
     const match = contentDisposition.match(/filename="(.+)"/);
     if (match) {
@@ -281,7 +264,7 @@ async function exportWorldToMarkdown(worldName: string): Promise<void> {
   // Create a blob and download it
   const blob = new Blob([markdown], { type: 'text/markdown' });
   const url = URL.createObjectURL(blob);
-  
+
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
@@ -292,7 +275,7 @@ async function exportWorldToMarkdown(worldName: string): Promise<void> {
 }
 
 /**
- * Export world to markdown and return the content for viewing
+ * Export world to markdown and return content for viewing
  */
 async function getWorldMarkdown(worldName: string): Promise<string> {
   if (!worldName) {
@@ -325,7 +308,6 @@ export default {
   deleteAgent,
 
   // Agent memory management
-  // getAgentMemory,
   clearAgentMemory,
 
   // Chat history management
@@ -334,8 +316,11 @@ export default {
   getChat,
   updateChat,
   deleteChat,
-  restoreFromChat,
   summarizeChat,
+
+  // Consolidated chat operations
+  setCurrentChat,
+  restoreWorldState,
 };
 
 // ========================
@@ -352,7 +337,7 @@ export async function listChats(worldName: string): Promise<ChatInfo[]> {
 
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`);
   const data = await response.json();
-  
+
   return data.chats || [];
 }
 
@@ -384,7 +369,7 @@ export async function getChat(worldName: string, chatId: string): Promise<WorldC
 
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`);
   const data = await response.json();
-  
+
   return data.chat;
 }
 
@@ -420,19 +405,6 @@ export async function deleteChat(worldName: string, chatId: string): Promise<voi
 }
 
 /**
- * Restore world state from a chat history entry
- */
-export async function restoreFromChat(worldName: string, chatId: string): Promise<void> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/restore`, {
-    method: 'POST',
-  });
-}
-
-/**
  * Generate a summary for a chat history entry
  */
 export async function summarizeChat(worldName: string, chatId: string): Promise<string> {
@@ -446,4 +418,91 @@ export async function summarizeChat(worldName: string, chatId: string): Promise<
 
   const data = await response.json();
   return data.summary;
+}
+
+/**
+ * Get the last active chat for auto-restoration
+ */
+export async function getLastActiveChat(worldName: string): Promise<WorldChat | null> {
+  try {
+    // Get all chats for the world
+    const chats = await listChats(worldName);
+
+    if (chats.length === 0) {
+      return null;
+    }
+
+    // Find the most recently updated chat
+    const lastChatInfo = chats.reduce((latest, current) =>
+      new Date(current.updatedAt) > new Date(latest.updatedAt) ? current : latest
+    );
+
+    // Get the full chat data
+    return await getChat(worldName, lastChatInfo.id);
+  } catch (error) {
+    console.warn('Failed to get last active chat:', error);
+    return null;
+  }
+}
+
+/**
+ * Set chat as current in world
+ */
+export async function setCurrentChat(worldName: string, chatId: string): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
+    method: 'POST'
+  });
+  return await response.json();
+}
+
+/**
+ * Restore world state from chat snapshot
+ */
+export async function restoreWorldState(worldName: string, chatId: string): Promise<void> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}/restore`, {
+    method: 'POST',
+  });
+}
+
+// ========================
+// CONSOLIDATED CHAT OPERATIONS
+// ========================
+
+/**
+ * Create new chat and set as current
+ */
+export async function createNewChat(worldName: string, options?: {
+  name?: string;
+  description?: string;
+  captureSnapshot?: boolean
+}): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/new-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options || {})
+  });
+  return await response.json();
+}
+
+/**
+ * Load existing chat and set as current
+ */
+export async function loadChatById(worldName: string, chatId: string): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  return await setCurrentChat(worldName, chatId);
 }
