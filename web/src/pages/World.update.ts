@@ -132,8 +132,7 @@ export const worldUpdateHandlers = {
 
       // Fetch chat history for sidebar
       try {
-        const chats = await api.listChats(worldName);
-        chatHistory.chats = chats || [];
+        chatHistory.chats = world.chats || [];
       } catch (err) {
         console.warn('Failed to load chat history:', err);
       }
@@ -179,11 +178,7 @@ export const worldUpdateHandlers = {
       yield {
         ...state,
         worldName,
-        world: {
-          name: worldName,
-          agents: worldAgents,
-          llmCallLimit: (world as any).llmCallLimit || (world as any).turnLimit
-        },
+        world,
         messages: finalMessages,
         chatHistory,
         currentChat,
@@ -199,7 +194,7 @@ export const worldUpdateHandlers = {
       yield {
         ...state,
         worldName,
-        world: { name: worldName, agents: [], llmCallLimit: undefined },
+        world: null,
         loading: false,
         error: error.message || 'Failed to load world data',
         isWaiting: false,
@@ -427,7 +422,7 @@ export const worldUpdateHandlers = {
     };
 
     try {
-      const chats = await api.listChats(state.worldName);
+      const chats = state.world.chats || [];
       return {
         ...newState,
         chatHistory: {
@@ -475,7 +470,8 @@ export const worldUpdateHandlers = {
     };
 
     try {
-      const chats = await api.listChats(state.worldName);
+      const world = await api.getWorld(state.worldName);
+      const chats = world.chats || [];
       return {
         ...newState,
         chatHistory: {
@@ -550,8 +546,9 @@ export const worldUpdateHandlers = {
     };
 
     try {
-      const summary = await api.summarizeChat(state.worldName, chat.id);
-      const chats = await api.listChats(state.worldName);
+      // Note: Chat summarization is now handled by core, no separate API call needed
+      const world = await api.getWorld(state.worldName);
+      const chats = world.chats || [];
 
       return {
         ...newState,
@@ -852,7 +849,8 @@ export const worldUpdateHandlers = {
       await api.deleteChat(state.worldName, chatId);
 
       // Refresh chat history
-      const updatedChats = await api.listChats(state.worldName);
+      const world = await api.getWorld(state.worldName);
+      const updatedChats = world.chats || [];
 
       // If we deleted the current chat, reset to new chat
       let updatedCurrentChat = state.currentChat;

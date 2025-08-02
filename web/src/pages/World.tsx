@@ -39,7 +39,7 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
-import api, { listChats, getChat } from '../api';
+import api from '../api';
 import { generateChatTitle, shouldAutoSaveChat } from '../utils/chatUtils';
 
 export default class WorldComponent extends Component<WorldComponentState> {
@@ -335,24 +335,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // Handler for loading a chat from history
     'load-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
       try {
-        const chatData = await getChat(state.worldName, chatId);
-
-        if (chatData && chatData.messages) {
-          return {
-            ...state,
-            messages: chatData.messages || [],
-            currentChat: {
-              id: chatData.id,
-              name: chatData.name,
-              isSaved: true,
-              messageCount: chatData.messageCount,
-              lastUpdated: new Date(chatData.updatedAt)
-            },
-            selectedSettingsTarget: 'world' // Switch to world settings
-          };
-        }
-
-        return state;
+        
+        await api.setCurrentChat(state.worldName, chatId);
+        const world = await api.getWorld(state.worldName);
+        return { ...state, world }
       } catch (error) {
         console.error('Failed to load chat:', error);
         return {
@@ -366,32 +352,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
     'delete-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
       try {
         await api.deleteChat(state.worldName, chatId);
-
-        // Refresh chat history
-        const chats = await listChats(state.worldName);
-
-        // If the deleted chat was the current chat, create a new one
-        const updatedState = {
-          ...state,
-          chatHistory: {
-            ...state.chatHistory,
-            chats: chats || []
-          }
-        };
-
-        if (state.currentChat.id === chatId) {
-          updatedState.messages = [];
-          updatedState.currentChat = {
-            id: null,
-            name: 'New Chat',
-            isSaved: false,
-            messageCount: 0,
-            lastUpdated: new Date()
-          };
-          updatedState.userInput = '';
-        }
-
-        return updatedState;
+        const world = await api.getWorld(state.worldName);
+        return { ...state, world }
       } catch (error) {
         console.error('Failed to delete chat:', error);
         return {
@@ -400,7 +362,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
         };
       }
     }
-
   };
 }
 

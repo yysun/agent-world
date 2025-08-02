@@ -26,9 +26,12 @@
  *   - serializeWorld(): Converts World objects to JSON with chats array and agent serialization
  *   - serializeAgent(): Converts Agent objects to JSON with UI-specific properties (spriteIndex, messageCount)
  *   - Updated all endpoints to use consistent serialization format
- * - Added missing agent endpoints:
- *   - GET /worlds/:worldName/agents - List all agents in world
- *   - GET /worlds/:worldName/agents/:agentName - Get specific agent
+ * - Simplified API by removing redundant endpoints since serialized World contains agents[] and chats[]:
+ *   - Removed: GET /worlds/:worldName/agents (use world.agents instead)
+ *   - Removed: GET /worlds/:worldName/agents/:agentName (use world.agents instead)
+ *   - Removed: GET /worlds/:worldName/agents/:agentName/memory (use world.agents[].memory instead)
+ *   - Kept: Action endpoints (POST, PATCH, DELETE) for agent management
+ *   - Kept: DELETE /worlds/:worldName/agents/:agentName/memory for clearing agent memory
  */
 import path from 'path';
 import express, { Request, Response } from 'express';
@@ -376,45 +379,7 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
   }
 });
 
-// DEPRECATED, use world.agents
-// GET /worlds/:worldName/agents - Get all agents in world
-router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName } = req.params;
 
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    // Convert agents Map to Array for response using serializeAgent
-    const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
-    res.json(agentsArray);
-  } catch (error) {
-    logger.error('Error getting agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    sendError(res, 500, 'Failed to get agents', 'AGENTS_GET_ERROR');
-  }
-});
-
-// DEPRECATED, use world.agents
-// GET /worlds/:worldName/agents/:agentName - Get specific agent
-router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, agentName } = req.params;
-
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const agent = await world.getAgent(agentName);
-    if (!agent) {
-      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
-      return;
-    }
-
-    res.json(serializeAgent(agent));
-  } catch (error) {
-    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
-    sendError(res, 500, 'Failed to get agent', 'AGENT_GET_ERROR');
-  }
-});
 
 // GET /worlds/:worldName/export - Export world to markdown
 router.get('/worlds/:worldName/export', async (req: Request, res: Response): Promise<void> => {
@@ -536,29 +501,7 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   }
 });
 
-// DEPRECATED, use world.agent[].memory
-// GET /worlds/:worldName/agents/:agentName/memory - Get agent memory
-router.get('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, agentName } = req.params;
 
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const agent = await world.getAgent(agentName);
-    if (!agent) {
-      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
-      return;
-    }
-
-    // Ensure memory is in array format
-    const memory = validateMemoryFormat(agent.memory) ? agent.memory : [];
-    res.json({ memory });
-  } catch (error) {
-    logger.error('Error getting agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
-    sendError(res, 500, 'Failed to get agent memory', 'MEMORY_GET_ERROR');
-  }
-});
 
 // DELETE /worlds/:worldName/agents/:agentName/memory - Clear agent memory
 router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {

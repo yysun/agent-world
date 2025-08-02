@@ -7,6 +7,14 @@
  * - Chat history management (create, load, restore state)
  * - Error handling with structured responses
  * - TypeScript support with consolidated types
+ * 
+ * Simplified API Usage:
+ * - Use getWorld() to get complete world data including agents[] and chats[]
+ * - Removed redundant getAgents() and getAgent() - use world.agents instead
+ * - Removed redundant listChats() - use world.chats instead
+ * - Agent memory available via world.agents[].memory instead of separate endpoint
+ * - Clear agent memory uses existing DELETE endpoint with clearMemory flag
+ * - Chat summarization handled by core, no separate API needed
  */
 
 import type {
@@ -141,30 +149,6 @@ async function deleteWorld(worldName: string): Promise<void> {
 }
 
 /**
- * Get all agents in a specific world
- */
-async function getAgents(worldName: string): Promise<Agent[]> {
-  if (!worldName) {
-    throw new Error('World name is required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents`);
-  return response.json();
-}
-
-/**
- * Get a specific agent from a world
- */
-async function getAgent(worldName: string, agentName: string): Promise<Agent> {
-  if (!worldName || !agentName) {
-    throw new Error('Both world name and agent name are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}`);
-  return response.json();
-}
-
-/**
  * Create a new agent in a world
  */
 async function createAgent(worldName: string, agentData: Partial<Agent>): Promise<Agent> {
@@ -209,6 +193,9 @@ async function deleteAgent(worldName: string, agentName: string): Promise<void> 
   });
 }
 
+/**
+ * Clear agent memory using the DELETE memory endpoint
+ */
 export async function clearAgentMemory(worldName: string, agentName: string): Promise<void> {
   if (!worldName || !agentName) {
     throw new Error('World name and agent name are required');
@@ -289,6 +276,57 @@ async function deleteChat(worldName: string, chatId: string): Promise<void> {
   });
 }
 
+/**
+ * Create a new chat and set it as current
+ */
+async function createNewChat(worldName: string): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  if (!worldName) {
+    throw new Error('World name is required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/new-chat`, {
+    method: 'POST'
+  });
+  return await response.json();
+}
+
+/**
+ * Load a specific chat by ID and set it as current
+ */
+async function loadChatById(worldName: string, chatId: string): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
+    method: 'POST'
+  });
+  return await response.json();
+}
+
+/**
+ * Get a specific chat data (using setCurrentChat for now)
+ */
+async function getChat(worldName: string, chatId: string): Promise<any> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  // Use setCurrentChat as it loads the chat and returns data
+  const result = await setCurrentChat(worldName, chatId);
+  return result.world;
+}
+
+
+
 // Export the API functions
 export default {
   // Core API function
@@ -303,9 +341,8 @@ export default {
   exportWorldToMarkdown,
   getWorldMarkdown,
 
-  // Agent management
-  getAgents,
-  getAgent,
+  // Agent management - simplified to use world.agents
+  // Note: getAgents and getAgent removed - use getWorld().agents instead
   createAgent,
   updateAgent,
   deleteAgent,
@@ -313,8 +350,12 @@ export default {
   // Agent memory management
   clearAgentMemory,
 
+  // Chat management
   setCurrentChat,
   deleteChat,
+  createNewChat,
+  loadChatById,
+  getChat,
 };
 
 
