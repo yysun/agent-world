@@ -232,7 +232,6 @@ export async function updateChatData(rootPath: string, worldId: string, chatId: 
   // Apply updates to metadata
   if (updates.name !== undefined) chatData.name = updates.name;
   if (updates.description !== undefined) chatData.description = updates.description;
-  if (updates.summary !== undefined) chatData.summary = updates.summary;
 
   // Update timestamps
   chatData.updatedAt = new Date();
@@ -284,7 +283,6 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
           createdAt: chatData.createdAt,
           updatedAt: chatData.updatedAt,
           messageCount: chatData.messageCount,
-          summary: chatData.summary,
           tags: chatData.tags
         };
         chats.push(chatInfo);

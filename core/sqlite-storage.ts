@@ -98,7 +98,6 @@ export interface ArchiveInfo {
   endTime?: Date;
   participants: string[];
   tags: string[];
-  summary?: string;
   createdAt: Date;
 }
 
@@ -386,24 +385,23 @@ export async function repairData(ctx: SQLiteStorageContext, worldId: string, age
 export async function saveChatData(ctx: SQLiteStorageContext, worldId: string, chat: ChatData): Promise<void> {
   await ensureInitialized(ctx);
   await run(ctx, `
-    INSERT INTO world_chats (id, world_id, name, description, message_count, summary, tags, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO world_chats (id, world_id, name, description, message_count, tags, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
       message_count = excluded.message_count,
-      summary = excluded.summary,
       tags = excluded.tags,
       updated_at = CURRENT_TIMESTAMP
   `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0,
-    chat.summary, JSON.stringify(chat.tags || []));
+    JSON.stringify(chat.tags || []));
 }
 
 export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<ChatData | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
     SELECT id, world_id as worldId, name, description, message_count as messageCount,
-           summary, tags, created_at as createdAt, updated_at as updatedAt
+           tags, created_at as createdAt, updated_at as updatedAt
     FROM world_chats
     WHERE id = ? AND world_id = ?
   `, chatId, worldId);
@@ -447,7 +445,7 @@ export async function listChatHistories(ctx: SQLiteStorageContext, worldId: stri
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, message_count as messageCount,
-           summary, tags, created_at as createdAt, updated_at as updatedAt
+           tags, created_at as createdAt, updated_at as updatedAt
     FROM world_chats
     WHERE world_id = ?
     ORDER BY updated_at DESC
@@ -474,10 +472,6 @@ export async function updateChatData(ctx: SQLiteStorageContext, worldId: string,
   if (updates.description !== undefined) {
     setClauses.push('description = ?');
     params.push(updates.description);
-  }
-  if (updates.summary !== undefined) {
-    setClauses.push('summary = ?');
-    params.push(updates.summary);
   }
   if (updates.tags !== undefined) {
     setClauses.push('tags = ?');
@@ -519,7 +513,7 @@ export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: stri
   // Get the chat metadata
   const result = await get(ctx, `
     SELECT id, name, description, message_count as messageCount,
-           summary, tags, created_at as createdAt, updated_at as updatedAt
+           tags, created_at as createdAt, updated_at as updatedAt
     FROM world_chats
     WHERE id = ? AND world_id = ?
   `, chatId, worldId);
@@ -550,7 +544,6 @@ export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: stri
     createdAt: new Date(result.createdAt),
     updatedAt: new Date(result.updatedAt),
     messageCount: result.messageCount,
-    summary: result.summary,
     tags: JSON.parse(result.tags || '[]'),
     
     // Snapshot data (core WorldChat fields)
@@ -660,13 +653,12 @@ export async function archiveAgentMemory(
   const archiveResult = await run(ctx, `
     INSERT INTO memory_archives (
       agent_id, world_id, session_name, archive_reason, message_count,
-      start_time, end_time, participants, tags, summary
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      start_time, end_time, participants, tags
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
     agentId, worldId, metadata?.sessionName, metadata?.archiveReason,
     memory.length, startTime, endTime,
-    JSON.stringify(participants), JSON.stringify(metadata?.tags || []),
-    metadata?.summary
+    JSON.stringify(participants), JSON.stringify(metadata?.tags || [])
   );
   const archiveId = (archiveResult as any).lastID;
   for (const message of memory) {
@@ -689,7 +681,7 @@ export async function searchArchives(ctx: SQLiteStorageContext, options: Archive
     SELECT id, agent_id as agentId, world_id as worldId,
            session_name as sessionName, archive_reason as archiveReason,
            message_count as messageCount, start_time as startTime,
-           end_time as endTime, participants, tags, summary,
+           end_time as endTime, participants, tags,
            created_at as createdAt
     FROM memory_archives
     WHERE world_id = ?

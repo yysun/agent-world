@@ -139,33 +139,6 @@ it('should restore world snapshot', async () => {
   expect(restored).toBe(true);
 });
 
-it('should summarize chat', async () => {
-  jest.resetModules();
-  const chatId = 'chat-1';
-  const storageFactory = await import('../../core/storage-factory');
-  jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
-    loadChatData: jest.fn().mockResolvedValue({
-      id: chatId,
-      ...chatParams,
-      worldId: 'test-world',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      messageCount: 2,
-      chat: {
-        world: { id: 'test-world', ...worldParams },
-        agents: [],
-        messages: [{ sender: 'A' }, { sender: 'B' }],
-        metadata: { capturedAt: new Date(), version: '1.0', totalMessages: 2, activeAgents: 0 }
-      },
-    }),
-    loadWorld: jest.fn().mockResolvedValue({ id: 'test-world', ...worldParams }),
-  }));
-  const managers = await import('../../core/managers');
-  const summary = await managers.summarizeChat(rootPath, 'test-world', chatId);
-  expect(typeof summary).toBe('string');
-  expect(summary).toMatch(/Chat with/);
-});
-
 it('should export world to markdown', async () => {
   jest.resetModules();
   const storageFactory = await import('../../core/storage-factory');

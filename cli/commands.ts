@@ -1373,7 +1373,6 @@ export async function processCLICommand(
               output += `  Name: ${chat.name}\n`;
               if (chat.description) output += `  Description: ${chat.description}\n`;
               output += `  Messages: ${chat.messageCount}\n`;
-              if (chat.summary) output += `  Summary: ${chat.summary}\n`;
               if (chat.tags && chat.tags.length > 0) output += `  Tags: ${chat.tags.join(', ')}\n`;
               output += `  Created: ${chat.createdAt.toISOString().split('T')[0]}\n`;
               output += `  Updated: ${chat.updatedAt.toISOString().split('T')[0]}\n`;
