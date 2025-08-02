@@ -1360,7 +1360,7 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chats = await world!.listChatHistories();
+          const chats = await world!.listChats();
           if (chats.length === 0) {
             cliResponse = {
               success: true,

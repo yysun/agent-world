@@ -24,6 +24,10 @@
  * - Keyboard support: Escape key closes agent edit popup
  * - Agent memory consolidation with fromAgentId tracking
  * - User input pre-fill with @agent mentions when agent selected
+ * 
+ * Changes:
+ * - Fixed create-new-chat handler to preserve current settings target instead of forcing world settings
+ * - New chat creation now keeps current side panel state (chat history, agent settings, etc.)
  */
 
 import { app, Component, safeHTML } from 'apprun';
@@ -325,8 +329,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
         messageCount: 0,
         lastUpdated: new Date()
       },
-      userInput: '', // Clear input
-      selectedSettingsTarget: 'world' // Switch to world settings
+      userInput: '' // Clear input - keep current settings target unchanged
     }),
 
     // Handler for loading a chat from history

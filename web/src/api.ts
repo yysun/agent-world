@@ -12,14 +12,8 @@
 import type {
   World,
   Agent,
-  Message,
-  AgentMemoryResponse,
-  AgentFormData,
-  WorldFormData,
-  ApiResponse,
   ApiRequestOptions,
-  ChatInfo,
-  WorldChat
+  Chat
 } from './types';
 
 interface ErrorResponse {
@@ -100,10 +94,13 @@ async function createWorld(worldData: Partial<World>): Promise<World> {
   }
   // Ensure required fields are present
   const completeWorld: World = {
+    id: worldData.id ?? '', // Provide default or generate as needed
     name: worldData.name,
     description: worldData.description || '',
     turnLimit: worldData.turnLimit ?? 5,
     agents: worldData.agents ?? [],
+    currentChatId: worldData.currentChatId ?? '',
+    chats: worldData.chats ?? [],
   };
 
   const response = await apiRequest('/worlds', {
@@ -212,21 +209,6 @@ async function deleteAgent(worldName: string, agentName: string): Promise<void> 
   });
 }
 
-/**
- * Get agent memory
- */
-// async function getAgentMemory(worldName: string, agentName: string): Promise<AgentMemoryResponse> {
-//   if (!worldName || !agentName) {
-//     throw new Error('World name and agent name are required');
-//   }
-
-//   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/agents/${encodeURIComponent(agentName)}/memory`);
-//   return response.json();
-// }
-
-/**
- * Clear agent memory
- */
 export async function clearAgentMemory(worldName: string, agentName: string): Promise<void> {
   if (!worldName || !agentName) {
     throw new Error('World name and agent name are required');
@@ -286,6 +268,27 @@ async function getWorldMarkdown(worldName: string): Promise<string> {
   return response.text();
 }
 
+export async function setCurrentChat(worldName: string, chatId: string): Promise<{
+  world: any;
+  chatId: string;
+  success: boolean;
+}> {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
+    method: 'POST'
+  });
+  return await response.json();
+}
+
+async function deleteChat(worldName: string, chatId: string): Promise<void> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
+    method: 'DELETE',
+  });
+}
+
 // Export the API functions
 export default {
   // Core API function
@@ -310,123 +313,12 @@ export default {
   // Agent memory management
   clearAgentMemory,
 
-  // Chat history management
-  listChats,
-  getChat,
-  deleteChat,
-
-  // Consolidated chat operations
   setCurrentChat,
+  deleteChat,
 };
 
-// ========================
-// CHAT HISTORY API
-// ========================
-
-/**
- * List all chat history entries for a world
- */
-export async function listChats(worldName: string): Promise<ChatInfo[]> {
-  if (!worldName) {
-    throw new Error('World name is required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`);
-  const data = await response.json();
-
-  return data.chats || [];
-}
 
 
-/**
- * Delete a chat history entry
- */
-export async function deleteChat(worldName: string, chatId: string): Promise<void> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`, {
-    method: 'DELETE',
-  });
-}
-
-/**
- * Get a specific chat by ID
- */
-export async function getChat(worldName: string, chatId: string): Promise<WorldChat | null> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  try {
-    const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats/${encodeURIComponent(chatId)}`);
-    const data = await response.json();
-    return data.chat || null;
-  } catch (error) {
-    // If chat not found, return null instead of throwing
-    if (error instanceof Error && error.message.includes('404')) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-/**
- * Get the last active chat for auto-restoration
- */
-export async function getLastActiveChat(worldName: string): Promise<WorldChat | null> {
-  // This function is deprecated because getChat is no longer available.
-  // It will always return null.
-  return null;
-}
-
-/**
- * Set chat as current in world
- */
-export async function setCurrentChat(worldName: string, chatId: string): Promise<{
-  world: any;
-  chatId: string;
-  success: boolean;
-}> {
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
-    method: 'POST'
-  });
-  return await response.json();
-}
 
 
-// ========================
-// CONSOLIDATED CHAT OPERATIONS
-// ========================
 
-/**
- * Create new chat and set as current
- */
-export async function createNewChat(worldName: string, options?: {
-  name?: string;
-  description?: string;
-  captureSnapshot?: boolean
-}): Promise<{
-  world: any;
-  chatId: string;
-  success: boolean;
-}> {
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/new-chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options || {})
-  });
-  return await response.json();
-}
-
-/**
- * Load existing chat and set as current
- */
-export async function loadChatById(worldName: string, chatId: string): Promise<{
-  world: any;
-  chatId: string;
-  success: boolean;
-}> {
-  return await setCurrentChat(worldName, chatId);
-}

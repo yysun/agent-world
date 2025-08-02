@@ -28,7 +28,7 @@
  */
 
 import { app } from 'apprun';
-import type { ChatHistoryState, ChatInfo, WorldChat } from '../types';
+import type { ChatHistoryState } from '../types';
 
 export interface WorldChatHistoryProps {
   worldName: string;
@@ -37,14 +37,6 @@ export interface WorldChatHistoryProps {
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const { worldName, chatHistory } = props;
-
-  // AppRun pattern compliance: Using $onclick directives for event handling
-  // Following apprun-prompt.md guidelines for functional components
-
-  const formatDate = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   return (
     <fieldset className="settings-fieldset">

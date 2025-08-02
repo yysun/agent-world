@@ -22,13 +22,20 @@
  *   - Added turnLimit support to WorldUpdateSchema and update logic
  *   - Response format now consistent with GET /worlds/:worldName endpoint
  *   - Ensures agents are preserved and included in response to prevent client-side confusion
+ * - Added consistent serialization functions for API responses:
+ *   - serializeWorld(): Converts World objects to JSON with chats array and agent serialization
+ *   - serializeAgent(): Converts Agent objects to JSON with UI-specific properties (spriteIndex, messageCount)
+ *   - Updated all endpoints to use consistent serialization format
+ * - Added missing agent endpoints:
+ *   - GET /worlds/:worldName/agents - List all agents in world
+ *   - GET /worlds/:worldName/agents/:agentName - Get specific agent
  */
 import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, restoreWorldChat } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
-import { LLMProvider } from '../core/types.js';
+import { LLMProvider, World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
 const logger = createCategoryLogger('api');
 
@@ -36,6 +43,87 @@ const DEFAULT_WORLD_NAME = 'Default World';
 
 // Get default root path from storage-factory (no local defaults)
 const ROOT_PATH = getDefaultRootPath();
+
+/**
+ * Serialize World object for API responses
+ * Converts runtime World object to plain data object suitable for JSON serialization
+ * Includes chats array from world.listChats() for complete frontend state
+ */
+async function serializeWorld(world: World): Promise<{
+  id: string;
+  name: string;
+  description?: string;
+  turnLimit: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
+  currentChatId: string | null;
+  agents: any[];
+  chats: any[];
+}> {
+  // Convert agents Map to Array for response using serializeAgent
+  const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
+
+  // Get chats using the unified listChats() method
+  const chats = await world.listChats();
+
+  return {
+    id: world.id,
+    name: world.name,
+    description: world.description,
+    turnLimit: world.turnLimit,
+    chatLLMProvider: world.chatLLMProvider,
+    chatLLMModel: world.chatLLMModel,
+    currentChatId: world.currentChatId,
+    agents: agentsArray,
+    chats: chats
+  };
+}
+
+/**
+ * Serialize Agent object for API responses
+ * Converts runtime Agent object to plain data object suitable for JSON serialization
+ * Includes UI-specific properties for frontend compatibility
+ */
+function serializeAgent(agent: any): {
+  id: string;
+  name: string;
+  type: string;
+  status?: string;
+  provider: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+  llmCallCount: number;
+  lastLLMCall?: Date;
+  memory: any[];
+  createdAt?: Date;
+  lastActive?: Date;
+  description?: string;
+  spriteIndex: number;
+  messageCount: number;
+} {
+  return {
+    id: agent.id,
+    name: agent.name,
+    type: agent.type,
+    status: agent.status,
+    provider: agent.provider,
+    model: agent.model,
+    temperature: agent.temperature,
+    maxTokens: agent.maxTokens,
+    systemPrompt: agent.systemPrompt,
+    llmCallCount: agent.llmCallCount,
+    lastLLMCall: agent.lastLLMCall,
+    memory: agent.memory || [],
+    createdAt: agent.createdAt,
+    lastActive: agent.lastActive,
+    description: agent.description,
+    // UI-specific properties with defaults
+    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
+    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
+  };
+}
 
 // Utility functions
 function sendError(res: Response, status: number, message: string, code?: string, details?: any) {
@@ -114,36 +202,6 @@ const AgentUpdateSchema = z.object({
 
 const router = express.Router();
 
-// POST /worlds/:worldName/agents - Create new agent in world
-router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName } = req.params;
-    const validation = AgentCreateSchema.safeParse(req.body);
-    if (!validation.success) {
-      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
-      return;
-    }
-    const agentData = validation.data;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-    // Check for duplicate agent name
-    const isUnique = await isAgentNameUnique(world, agentData.name);
-    if (!isUnique) {
-      sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
-      return;
-    }
-    // Create agent in world
-    const createdAgent = await world.createAgent(agentData);
-    if (!createdAgent) {
-      sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
-      return;
-    }
-    res.status(201).json(createdAgent);
-  } catch (error) {
-    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
-  }
-});
 
 // GET /worlds/:worldName - Get specific world with agents
 router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
@@ -152,16 +210,9 @@ router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<vo
     const world = await getWorld(ROOT_PATH, worldName);
     if (!world) return;
 
-    // Convert Map to array for JSON serialization
-    const agents = Array.from(world.agents.values());
-
-    res.json({
-      name: world.name,
-      description: world.description,
-      id: world.id,
-      agents: agents,
-      turnLimit: world.turnLimit,
-    });
+    // Use consistent serialization format
+    const serializedWorld = await serializeWorld(world);
+    res.json(serializedWorld);
   } catch (error) {
     logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to get world', 'WORLD_GET_ERROR');
@@ -264,16 +315,8 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
     }
 
     // Return complete world data including agents (consistent with GET endpoint)
-    // Convert Map to array for JSON serialization
-    const agents = Array.from(world.agents.values());
-
-    res.json({
-      name: world.name,
-      description: world.description,
-      id: world.id,
-      agents: agents,
-      turnLimit: world.turnLimit,
-    });
+    const serializedWorld = await serializeWorld(world);
+    res.json(serializedWorld);
   } catch (error) {
     logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
@@ -299,6 +342,77 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
   } catch (error) {
     logger.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
+  }
+});
+
+// POST /worlds/:worldName/agents - Create new agent in world
+router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const validation = AgentCreateSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+    const agentData = validation.data;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+    // Check for duplicate agent name
+    const isUnique = await isAgentNameUnique(world, agentData.name);
+    if (!isUnique) {
+      sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
+      return;
+    }
+    // Create agent in world
+    const createdAgent = await world.createAgent(agentData);
+    if (!createdAgent) {
+      sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
+      return;
+    }
+    res.status(201).json(serializeAgent(createdAgent));
+  } catch (error) {
+    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
+  }
+});
+
+// DEPRECATED, use world.agents
+// GET /worlds/:worldName/agents - Get all agents in world
+router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    // Convert agents Map to Array for response using serializeAgent
+    const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
+    res.json(agentsArray);
+  } catch (error) {
+    logger.error('Error getting agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to get agents', 'AGENTS_GET_ERROR');
+  }
+});
+
+// DEPRECATED, use world.agents
+// GET /worlds/:worldName/agents/:agentName - Get specific agent
+router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+
+    const agent = await world.getAgent(agentName);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    res.json(serializeAgent(agent));
+  } catch (error) {
+    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to get agent', 'AGENT_GET_ERROR');
   }
 });
 
@@ -386,7 +500,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
       updatedAgent = updateResult;
     }
 
-    res.json(updatedAgent);
+    res.json(serializeAgent(updatedAgent));
   } catch (error) {
     logger.error('Error updating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
@@ -422,6 +536,7 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   }
 });
 
+// DEPRECATED, use world.agent[].memory
 // GET /worlds/:worldName/agents/:agentName/memory - Get agent memory
 router.get('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -913,118 +1028,7 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
   }
 });
 
-// Chat History Endpoints
-
-// Validation schemas for chat history
-const ChatCreateSchema = z.object({
-  name: z.string().min(1).max(100),
-  description: z.string().optional(),
-  captureSnapshot: z.boolean().optional().default(true)
-});
-
-const ChatUpdateSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  description: z.string().optional(),
-  summary: z.string().optional(),
-  tags: z.array(z.string()).optional()
-});
-
-// GET /worlds/:worldName/chats - List chat history
-router.get('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worldName = req.params.worldName;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const chats = await world.listChats();
-    res.json({ chats });
-
-  } catch (error) {
-    logger.error('Error listing chats', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to list chats', 'LIST_CHATS_ERROR');
-    }
-  }
-});
-
-// POST /worlds/:worldName/chats - Create new chat
-router.post('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worldName = req.params.worldName;
-    const validation = ChatCreateSchema.safeParse(req.body);
-
-    if (!validation.success) {
-      sendError(res, 400, 'Invalid request data', 'VALIDATION_ERROR', validation.error.format());
-      return;
-    }
-
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const chatData = await world.createChatData(validation.data);
-    const chat = chatData.chat;
-    res.status(201).json({ chat });
-
-  } catch (error) {
-    logger.error('Error creating chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to create chat', 'CREATE_CHAT_ERROR');
-    }
-  }
-});
-
-// GET /worlds/:worldName/chats/:chatId - Get specific chat
-router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, chatId } = req.params;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const chat = await world.loadChatFull(chatId);
-    if (!chat) {
-      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
-      return;
-    }
-
-    res.json({ chat });
-
-  } catch (error) {
-    logger.error('Error getting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to get chat', 'GET_CHAT_ERROR');
-    }
-  }
-});
-
-// PATCH /worlds/:worldName/chats/:chatId - Update chat
-router.patch('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, chatId } = req.params;
-    const validation = ChatUpdateSchema.safeParse(req.body);
-
-    if (!validation.success) {
-      sendError(res, 400, 'Invalid request data', 'VALIDATION_ERROR', validation.error.format());
-      return;
-    }
-
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
-
-    const chat = await world.updateChat(chatId, validation.data);
-    if (!chat) {
-      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
-      return;
-    }
-
-    res.json({ chat });
-
-  } catch (error) {
-    logger.error('Error updating chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to update chat', 'UPDATE_CHAT_ERROR');
-    }
-  }
-});
+// Chat Endpoints
 
 // DELETE /worlds/:worldName/chats/:chatId - Delete chat
 router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
@@ -1033,7 +1037,7 @@ router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Resp
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    const deleted = await world.deleteChat(chatId);
+    const deleted = await world.deleteChatData(chatId);
     if (!deleted) {
       sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
       return;
@@ -1045,28 +1049,6 @@ router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Resp
     logger.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to delete chat', 'DELETE_CHAT_ERROR');
-    }
-  }
-});
-
-// POST /worlds/:worldName/chats/:chatId/restore - Restore from chat
-router.post('/worlds/:worldName/chats/:chatId/restore', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName, chatId } = req.params;
-
-    // Use consolidated function that accepts chat ID directly
-    const restored = await restoreWorldChat(ROOT_PATH, worldName, chatId);
-    if (!restored) {
-      sendError(res, 400, 'Failed to restore world state from chat', 'RESTORE_ERROR');
-      return;
-    }
-
-    res.json({ message: 'World state restored successfully' });
-
-  } catch (error) {
-    logger.error('Error restoring from chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to restore from chat', 'RESTORE_CHAT_ERROR');
     }
   }
 });
@@ -1083,48 +1065,20 @@ router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): 
       return;
     }
 
-    // Create new chat via world method
-    const newChatId = await world.newChat();
+    // Create new chat via world method - now returns updated World object
+    const updatedWorld = await world.newChat();
 
-    // Convert agents Map to Array for response
-    const agentsArray = Array.from(world.agents.values()).map(agent => ({
-      id: agent.id,
-      name: agent.name,
-      type: agent.type,
-      status: agent.status,
-      provider: agent.provider,
-      model: agent.model,
-      temperature: agent.temperature,
-      maxTokens: agent.maxTokens,
-      systemPrompt: agent.systemPrompt,
-      llmCallCount: agent.llmCallCount,
-      lastLLMCall: agent.lastLLMCall,
-      memory: agent.memory,
-      createdAt: agent.createdAt,
-      lastActive: agent.lastActive
-    }));
-
-    // Return updated world with new currentChatId
+    // Return serialized world with new currentChatId (now includes chats array)
+    const serializedWorld = await serializeWorld(updatedWorld);
     res.json({
-      world: {
-        id: world.id,
-        name: world.name,
-        description: world.description,
-        turnLimit: world.turnLimit,
-        chatLLMProvider: world.chatLLMProvider,
-        chatLLMModel: world.chatLLMModel,
-        currentChatId: world.currentChatId,
-        agents: agentsArray
-      },
-      chatId: newChatId,
+      world: serializedWorld,
+      chatId: updatedWorld.currentChatId,
       success: true
     });
 
   } catch (error) {
     logger.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
-    }
+    sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
   }
 });
 
@@ -1143,36 +1097,10 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
     // Load chat via world method
     await world.loadChatById(chatId);
 
-    // Convert agents Map to Array for response
-    const agentsArray = Array.from(world.agents.values()).map(agent => ({
-      id: agent.id,
-      name: agent.name,
-      type: agent.type,
-      status: agent.status,
-      provider: agent.provider,
-      model: agent.model,
-      temperature: agent.temperature,
-      maxTokens: agent.maxTokens,
-      systemPrompt: agent.systemPrompt,
-      llmCallCount: agent.llmCallCount,
-      lastLLMCall: agent.lastLLMCall,
-      memory: agent.memory,
-      createdAt: agent.createdAt,
-      lastActive: agent.lastActive
-    }));
-
-    // Return updated world with loaded chat
+    // Return serialized world with loaded chat (consistent with other endpoints)
+    const serializedWorld = await serializeWorld(world);
     res.json({
-      world: {
-        id: world.id,
-        name: world.name,
-        description: world.description,
-        turnLimit: world.turnLimit,
-        chatLLMProvider: world.chatLLMProvider,
-        chatLLMModel: world.chatLLMModel,
-        currentChatId: world.currentChatId,
-        agents: agentsArray
-      },
+      world: serializedWorld,
       chatId: world.currentChatId,
       success: true
     });

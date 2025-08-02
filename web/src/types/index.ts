@@ -7,6 +7,7 @@
  * - Provides UI-specific extensions of core types
  * - Eliminates redundant type definitions across components
  * - Single source of truth for all UI state management
+ * - Matches server serialization structure for World interface
  * 
  * Implementation:
  * - Re-exports core types for consistency
@@ -14,12 +15,22 @@
  * - Consolidates message, agent, and world interfaces
  * - Provides type-safe state management interfaces
  * - Eliminates circular dependencies through proper organization
+ * - Web World interface matches server's serializeWorld output
  * 
  * Changes:
  * - Created centralized type consolidation
  * - Eliminated duplicate interfaces across web components
  * - Extended core types with UI-specific properties
  * - Consolidated SSE and AppRun state management types
+ * - Updated World interface to match server serialization:
+ *   - Added chatLLMProvider, chatLLMModel, currentChatId
+ *   - Added chats array for chat history
+ *   - Made id required to match server response
+ *   - Updated WorldFormData to include LLM configuration
+ * - Agent interface matches server's serializeAgent output:
+ *   - Includes UI-specific properties (spriteIndex, messageCount)
+ *   - Consistent with server serialization format
+ *   - Preserves all core agent properties
  */
 
 // Import core types for internal use only (not re-exported)
@@ -85,18 +96,21 @@ export interface Agent {
   messageCount: number;
 }
 
-// Web UI World Interface
+// Web UI World Interface - matches server serialization
 export interface World {
-  id?: string;
+  id: string;
   name: string;
   description?: string;
+  turnLimit: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
+  currentChatId: string | null;
   agents: Agent[];
-  llmCallLimit?: number;
-  turnLimit?: number;
+  chats: Chat[];
 }
 
 // Chat History Interfaces (from core types)
-export interface ChatInfo {
+export interface Chat {
   id: string;
   name: string;
   description?: string;
@@ -107,26 +121,13 @@ export interface ChatInfo {
   tags?: string[];
 }
 
-export interface WorldChat extends ChatInfo {
-  worldId: string;
-  world: any; // WorldData
-  agents: any[]; // AgentData[]
-  messages: any[]; // AgentMessage[]
-  metadata: {
-    capturedAt: Date;
-    version: string;
-    totalMessages: number;
-    activeAgents: number;
-  };
-}
-
 // Chat History State Management
 export interface ChatHistoryState {
   isOpen: boolean;
-  chats: ChatInfo[];
+  chats: Chat[];
   loading: boolean;
   error: string | null;
-  selectedChat: ChatInfo | null;
+  selectedChat: Chat | null;
   showDeleteConfirm: boolean;
   showLoadConfirm: boolean;
 }
@@ -284,6 +285,8 @@ export interface WorldFormData {
   name: string;
   description?: string;
   turnLimit?: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
 }
 
 export interface AgentFormData {
@@ -355,7 +358,9 @@ export const DEFAULT_AGENT_FORM_DATA: AgentFormData = {
 export const DEFAULT_WORLD_FORM_DATA: WorldFormData = {
   name: '',
   description: '',
-  turnLimit: UI_CONSTANTS.DEFAULT_TURN_LIMIT
+  turnLimit: UI_CONSTANTS.DEFAULT_TURN_LIMIT,
+  chatLLMProvider: 'ollama',
+  chatLLMModel: 'llama3.2:3b'
 };
 
 export const DEFAULT_CHAT_HISTORY_STATE: ChatHistoryState = {

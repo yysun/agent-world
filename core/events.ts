@@ -101,7 +101,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 
   try {
     // Get current chats using storage API
-    const chats = await world.storage.listChatHistories(world.id);
+    const chats = await world.storage.listChats(world.id);
 
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
@@ -141,7 +141,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 function generateChatTitleFromWorldMessages(world: World): string {
   // Collect all agent messages from world memory
   const allAgentMessages: { sender: string; content: string; createdAt: Date }[] = [];
-  
+
   for (const [, agent] of world.agents) {
     if (agent.memory && Array.isArray(agent.memory)) {
       agent.memory.forEach(msg => {
@@ -155,17 +155,17 @@ function generateChatTitleFromWorldMessages(world: World): string {
       });
     }
   }
-  
+
   // Sort by timestamp to get first agent message
   allAgentMessages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  
+
   if (allAgentMessages.length === 0) {
     return 'New Chat';
   }
-  
+
   const firstMessage = allAgentMessages[0];
   let content = firstMessage.content.trim();
-  
+
   // Remove common prefixes and formatting (same logic as web chatUtils)
   content = content
     .replace(/^(Hello|Hi|Hey)[,!.]?\s*/i, '')
@@ -175,13 +175,13 @@ function generateChatTitleFromWorldMessages(world: World): string {
     .replace(/\*([^*]+)\*/g, '$1') // Remove italic markdown
     .replace(/[#]+\s*/, '') // Remove headers
     .trim();
-  
+
   // Split into words and take first 10
   const words = content.split(/\s+/).slice(0, 10);
-  
+
   // Create title
   let title = words.join(' ');
-  
+
   // If too long, try to find a natural break point
   if (title.length > 50) {
     const sentences = title.split(/[.!?]/);
@@ -192,15 +192,15 @@ function generateChatTitleFromWorldMessages(world: World): string {
       title = words.slice(0, 6).join(' ');
     }
   }
-  
+
   // Clean up ending punctuation if it's mid-sentence
   title = title.replace(/[,;:]$/, '');
-  
+
   // Add ellipsis if we truncated
   if (words.length > 6 || content.split(/\s+/).length > words.length) {
     title += '...';
   }
-  
+
   return title || 'New Chat';
 }
 
@@ -217,15 +217,15 @@ async function handleAutoTitleAndPersistence(world: World, messageEvent: WorldMe
         totalAgentMessages += agent.memory.filter(msg => msg.role === 'assistant').length;
       }
     }
-    
+
     // Only auto-save on the first agent message
     if (totalAgentMessages === 1) {
       // Generate title from world messages
       const title = generateChatTitleFromWorldMessages(world);
-      
+
       // Create chat with generated title and current world state
       const chatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
+
       // Create chat data with snapshot
       const chatData: ChatData = {
         id: chatId,
@@ -238,17 +238,17 @@ async function handleAutoTitleAndPersistence(world: World, messageEvent: WorldMe
         summary: '',
         tags: ['auto-saved']
       };
-      
+
       // Save the chat
       await world.storage.saveChatData(world.id, chatData);
-      
+
       logger.debug('Auto-saved chat with generated title', {
         worldId: world.id,
         chatId,
         title,
         messageCount: totalAgentMessages
       });
-      
+
       // Emit SSE event to notify frontend about new chat
       publishSSE(world, {
         agentName: 'system',
@@ -258,9 +258,9 @@ async function handleAutoTitleAndPersistence(world: World, messageEvent: WorldMe
       });
     }
   } catch (error) {
-    logger.warn('Auto-title and persistence failed', { 
+    logger.warn('Auto-title and persistence failed', {
       worldId: world.id,
-      error: error instanceof Error ? error.message : error 
+      error: error instanceof Error ? error.message : error
     });
   }
 }
@@ -276,10 +276,10 @@ export function publishMessage(world: World, content: string, sender: string): v
     timestamp: new Date(),
     messageId: generateId()
   };
-  
+
   // Emit the message event first
   world.eventEmitter.emit('message', messageEvent);
-  
+
   // Automatically handle chat title generation and persistence for agent messages
   // This follows the requirement: "When new messages are published to the event emitter for a world, 
   // automatically generate a chat title and persist the world chat"
@@ -289,8 +289,8 @@ export function publishMessage(world: World, content: string, sender: string): v
       try {
         await handleAutoTitleAndPersistence(world, messageEvent);
       } catch (error) {
-        logger.debug('Auto-title and persistence failed', { 
-          error: error instanceof Error ? error.message : error 
+        logger.debug('Auto-title and persistence failed', {
+          error: error instanceof Error ? error.message : error
         });
       }
     }, 100); // Small delay to allow message processing to complete

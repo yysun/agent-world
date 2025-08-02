@@ -6,5 +6,8 @@
   - click "Create Agent"
   - [x] Enter "a1" as the agent name and create the agent.
   - [x] Wait for the agent to be created and loaded.
+- [x] Click "+ New Chat" to start a new chat session.
+- [x] Verify that "New Chat" is displayed in the chat list.
 - [x] Type "hi" in the chat message box and click "Send."
-- [x] Verify that the chat message appears in the chat history.
+- [x] Verify that the chat message appears in the chat area.
+- [x] Verify the "New Chat" in the chat list is replaced with anew chat title.

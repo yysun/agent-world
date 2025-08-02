@@ -12,11 +12,13 @@
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
  * - Chat session management with auto-save and restoration capabilities
+ * - World serialization utilities for consistent API responses
  *
  * Chat Session Management:
  * - Integrated into getWorld: Auto-restoration of last active chat with snapshot support
  * - Event-driven auto-save: Chat state automatically saved via event emitter
  * - generateChatTitleFromMessages: Extract meaningful titles from message content
+ * - Enhanced newChat(): Returns complete World object for consistent state management
  *
  * Performance Optimizations:
  * - Static imports for events, llm-manager, and utils modules eliminate dynamic import overhead
@@ -32,6 +34,7 @@
  * - deleteWorld: Remove world and all associated data
  * - listWorlds: Get all world IDs and basic info
  * - getWorldConfig: Get world configuration without runtime objects (lightweight)
+ * - serializeWorld: Convert World object to plain data for API responses
  *
  * Agent Functions:
  * - createAgent: Create new agent with configuration and system prompt
@@ -207,7 +210,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
     } else {
       // Fall back to last active chat if no currentChatId
       try {
-        const chats = await storageWrappers!.listChatHistories(normalizedWorldId);
+        const chats = await storageWrappers!.listChats(normalizedWorldId);
 
         if (chats.length > 0) {
           // Find the most recently updated chat
@@ -497,9 +500,9 @@ function createStorageManager(rootPath: string): StorageManager {
       return storageWrappers!.deleteChatData(worldId, chatId);
     },
 
-    async listChatHistories(worldId: string): Promise<ChatData[]> {
+    async listChats(worldId: string): Promise<ChatData[]> {
       await moduleInitialization;
-      return storageWrappers!.listChatHistories(worldId);
+      return storageWrappers!.listChats(worldId);
     },
 
     async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
@@ -649,6 +652,8 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
     }
   };
 }
+
+
 
 /**
  * Convert storage WorldData to runtime World object
@@ -833,8 +838,16 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       return await storageWrappers!.deleteChatData(world.id, chatId);
     },
 
-    async listChatHistories(): Promise<ChatData[]> {
-      return await storageWrappers!.listChatHistories(world.id);
+    async listChats(): Promise<ChatData[]> {
+      try {
+        return await storageWrappers!.listChats(world.id);
+      } catch (error) {
+        logger.error('Failed to list chats', {
+          worldId: world.id,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
     },
 
     async createWorldChat(): Promise<WorldChat> {
@@ -953,7 +966,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
     },
 
     // NEW: Enhanced Chat Management Methods
-    async newChat(): Promise<string> {
+    async newChat(): Promise<World> {
       try {
         // 1. Save current state to previous chat (if any)
         if (world.currentChatId) {
@@ -980,7 +993,8 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         // 5. Update currentChatId
         world.currentChatId = newChatData.id;
 
-        // 6. Save world data with new currentChatId
+        // 6. Auto-save initial state to new chat and save world once
+        await world.saveCurrentState();
         const worldData = {
           id: world.id,
           name: world.name,
@@ -996,15 +1010,13 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         };
         await storageWrappers!.saveWorld(worldData);
 
-        // 7. Auto-save initial state to new chat
-        await world.saveCurrentState();
-
         logger.debug('Created new chat', {
           worldId: world.id,
           chatId: world.currentChatId
         });
 
-        return world.currentChatId!; // Non-null assertion since we just set it
+        // Ensure returned world includes the new chat in chats array
+        return world; // Return the complete updated World object
       } catch (error) {
         logger.error('Failed to create new chat', {
           worldId: world.id,
@@ -1021,28 +1033,16 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
           await world.saveCurrentState();
         }
 
-        // 2. Validate chatId exists
-        const chatData = await getChatData('', world.id, chatId);
-        if (!chatData) {
-          throw new Error(`Chat ${chatId} not found`);
+        // 2. Use restoreWorldChat for consistent behavior
+        const success = await restoreWorldChat(world.rootPath, world.id, chatId);
+        if (!success) {
+          throw new Error(`Failed to restore chat ${chatId}`);
         }
 
-        // 3. Restore agent memory from chat data
-        if (chatData.chat && chatData.chat.agents) {
-          for (const snapshotAgent of chatData.chat.agents) {
-            const worldAgent = world.agents.get(snapshotAgent.id);
-            if (worldAgent && snapshotAgent.memory) {
-              worldAgent.memory = [...snapshotAgent.memory];
-              worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
-              worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
-            }
-          }
-        }
-
-        // 4. Update currentChatId
+        // 3. Update currentChatId in the runtime world object
         world.currentChatId = chatId;
 
-        // 5. Save world data with updated currentChatId
+        // 4. Save world data with updated currentChatId
         const worldData = {
           id: world.id,
           name: world.name,
@@ -1058,10 +1058,9 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         };
         await storageWrappers!.saveWorld(worldData);
 
-        logger.debug('Loaded chat', {
+        logger.debug('Loaded chat using restoreWorldChat', {
           worldId: world.id,
-          chatId: world.currentChatId,
-          messageCount: chatData.chat?.messages?.length || 0
+          chatId: world.currentChatId
         });
       } catch (error) {
         logger.error('Failed to load chat', {
@@ -1125,18 +1124,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         logger.error('Failed to save current state', {
           worldId: world.id,
           currentChatId: world.currentChatId,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    },
-
-    async listChats(): Promise<ChatData[]> {
-      try {
-        return await storageWrappers!.listChatHistories(world.id);
-      } catch (error) {
-        logger.error('Failed to list chats', {
-          worldId: world.id,
           error: error instanceof Error ? error.message : error
         });
         throw error;
@@ -1725,12 +1712,12 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   };
 
   await storageWrappers!.saveChatData(worldId, chatData);
-  
+
   // Save the snapshot data separately if it exists
   if (worldChat) {
     await storageWrappers!.saveWorldChat(worldId, chatId, worldChat);
   }
-  
+
   return chatData;
 }
 
@@ -1922,7 +1909,7 @@ export async function summarizeChat(rootPath: string, worldId: string, chatId: s
         return 'No messages to summarize.';
       }
 
-      const summaryPrompt = `Please provide a concise summary of this conversation between agents and users. Focus on key decisions, outcomes, and important information exchanged.
+      const summaryPrompt = `Please provide a concise title of this conversation between agents and users. 
 
 Conversation (${messages.length} messages):
 ${messages.map((m: any) => `${m.sender || m.role}: ${m.content}`).join('\n\n')}
@@ -1947,6 +1934,8 @@ Summary:`;
         llmCallCount: 0
       };
 
+      console.log('Generated summary messages:', summaryMessages);
+
       const summary = await llmManager.generateAgentResponse(tempWorld, tempAgent, summaryMessages);
 
       // Update chat with summary
@@ -1957,13 +1946,7 @@ Summary:`;
       logger.warn('Failed to generate LLM summary, using fallback', { error: error instanceof Error ? error.message : error });
     }
   }
-
-  // Fallback to simple summary
-  const messages = chatData.chat.messages || [];
-  const messageCount = messages.length;
-  const participants = [...new Set(messages.map((m: any) => m.sender || m.role).filter(Boolean))];
-
-  return `Chat with ${messageCount} messages from ${participants.length} participants: ${participants.join(', ')}. Created on ${chatData.createdAt.toLocaleDateString()}.`;
+  return `Chat with ${chatId}`;
 }
 
 // ========================
@@ -2118,11 +2101,11 @@ export async function publishMessageWithAutoSave(
       }
 
       if (allMessages.length > 0) {
-        const newChatId = await world.newChat();
+        const updatedWorld = await world.newChat();
 
         logger.debug('Created new chat for auto-save', {
           worldId: world.id,
-          chatId: newChatId,
+          chatId: updatedWorld.currentChatId,
           messageCount: allMessages.length,
           sender,
           messageId: messageEvent.messageId
@@ -2130,7 +2113,7 @@ export async function publishMessageWithAutoSave(
 
         return {
           messageId: messageEvent.messageId,
-          chatId: newChatId,
+          chatId: updatedWorld.currentChatId || undefined,
           autoSaved: true
         };
       }

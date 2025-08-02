@@ -377,14 +377,13 @@ export interface World {
   loadChatFull(chatId: string): Promise<WorldChat | null>; // Load complete WorldChat with merged data
   updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
   deleteChatData(chatId: string): Promise<boolean>;
-  listChatHistories(): Promise<ChatData[]>;
-  listChats(): Promise<ChatData[]>; // Alias for listChatHistories for API compatibility
+  listChats(): Promise<ChatData[]>; // Primary chat listing method
   createWorldChat(): Promise<WorldChat>;
   restoreFromWorldChat(chatId: string): Promise<boolean>;
   summarizeChat(chatId: string): Promise<string>;
 
   // NEW: Enhanced Chat Management Methods
-  newChat(): Promise<string>; // Create new chat and set as current
+  newChat(): Promise<World>; // Create new chat and set as current - returns updated world
   loadChatById(chatId: string): Promise<void>; // Switch to existing chat
   getCurrentChat(): Promise<ChatData | null>; // Get current active chat
   saveCurrentState(): Promise<void>; // Auto-save world state to current chat
@@ -442,7 +441,7 @@ export interface StorageManager {
   saveChatData(worldId: string, chat: ChatData): Promise<void>;
   loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChatHistories(worldId: string): Promise<ChatData[]>;
+  listChats(worldId: string): Promise<ChatData[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
   // Chat operations
@@ -483,7 +482,7 @@ export interface StorageAPI {
   saveChatData(worldId: string, chat: ChatData): Promise<void>;
   loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChatHistories(worldId: string): Promise<ChatData[]>;
+  listChats(worldId: string): Promise<ChatData[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
 
   // Chat operations

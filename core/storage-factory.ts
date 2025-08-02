@@ -169,12 +169,12 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    async listChatHistories(worldId: string): Promise<ChatData[]> {
+    async listChats(worldId: string): Promise<ChatData[]> {
       if (!storageInstance) return [];
       try {
-        return await storageInstance.listChatHistories(worldId);
+        return await storageInstance.listChats(worldId);
       } catch (err) {
-        throw new Error(`Failed to list chat histories: ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error(`Failed to list chats: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
 
@@ -388,7 +388,7 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       }
       return false;
     },
-    async listChatHistories(worldId: string): Promise<ChatData[]> {
+    async listChats(worldId: string): Promise<ChatData[]> {
       await ensureModulesLoaded();
       if (worldStorage?.listChatHistories) {
         return worldStorage.listChatHistories(rootPath, worldId);
@@ -521,7 +521,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       saveChatData: (worldId: string, chat: any) => saveChatData(ctx, worldId, chat),
       loadChatData: (worldId: string, chatId: string) => loadChatData(ctx, worldId, chatId),
       deleteChatData: (worldId: string, chatId: string) => deleteChatData(ctx, worldId, chatId),
-      listChatHistories: (worldId: string) => listChatHistories(ctx, worldId),
+      listChats: (worldId: string) => listChatHistories(ctx, worldId),
       updateChatData: (worldId: string, chatId: string, updates: any) => updateChatData(ctx, worldId, chatId, updates),
       // Chat operations
       saveWorldChat: (worldId: string, chatId: string, chat: any) => saveWorldChat(ctx, worldId, chatId, chat),

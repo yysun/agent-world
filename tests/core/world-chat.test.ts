@@ -46,6 +46,7 @@ const fullMockWrappers = (overrides = {}) => ({
   loadChatData: jest.fn(),
   deleteChatData: jest.fn(),
   listChatHistories: jest.fn().mockResolvedValue([]),
+  listChats: jest.fn().mockResolvedValue([]),
   updateChatData: jest.fn(),
 
   // Chat operations (required by StorageAPI)
