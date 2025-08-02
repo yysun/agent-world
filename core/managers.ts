@@ -1013,6 +1013,18 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
           chatId: world.currentChatId
         });
 
+        // Publish chat-created system message to frontend
+        events.publishSSE(world, {
+          agentName: 'system',
+          type: 'chat-created',
+          content: JSON.stringify({ 
+            chatId: world.currentChatId,
+            name: newChatData.name,
+            action: 'chat-created'
+          }),
+          messageId: utils.generateId()
+        });
+
         // Ensure returned world includes the new chat in chats array
         return world; // Return the complete updated World object
       } catch (error) {
