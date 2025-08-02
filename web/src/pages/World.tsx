@@ -64,8 +64,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false,
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
-      selectedChat: null,
-      showDeleteChatConfirm: false,
+      chatToDelete: null,
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -218,8 +217,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <WorldChatHistory
                 worldName={state.worldName}
                 world={state.world}
-                selectedChatForAction={state.selectedChat}
-                showDeleteChatConfirm={state.showDeleteChatConfirm}
+                chatToDelete={state.chatToDelete}
               />
             ) : (
               <WorldSettings

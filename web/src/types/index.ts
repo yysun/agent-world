@@ -197,8 +197,7 @@ export interface WorldComponentState extends SSEComponentState {
   selectedWorldForEdit: World | null;
 
   // Chat history UI state
-  selectedChat: Chat | null;
-  showDeleteChatConfirm: boolean;
+  chatToDelete: Chat | null;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
