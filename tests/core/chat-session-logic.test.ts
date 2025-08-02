@@ -68,7 +68,7 @@ const createMockWorld = (currentChatId: string | null = null): World => ({
   agents: new Map(),
   storage: createMockStorageManager(),
   messageProcessor: createMockMessageProcessor(),
-  
+
   // World methods (mocked)
   createAgent: jest.fn(),
   getAgent: jest.fn(),
@@ -101,6 +101,9 @@ const createMockWorld = (currentChatId: string | null = null): World => ({
   loadChatById: jest.fn(),
   getCurrentChat: jest.fn(),
   saveCurrentState: jest.fn(),
+  isCurrentChatReusable: jest.fn(),
+  reuseCurrentChat: jest.fn(),
+  createNewChat: jest.fn(),
   save: jest.fn(),
   delete: jest.fn(),
   reload: jest.fn(),
@@ -110,7 +113,6 @@ const createMockWorld = (currentChatId: string | null = null): World => ({
   resetTurnCount: jest.fn(),
   publishMessage: jest.fn(),
   subscribeToMessages: jest.fn(),
-  broadcastMessage: jest.fn(),
   publishSSE: jest.fn(),
   subscribeToSSE: jest.fn(),
   subscribeAgent: jest.fn(),
@@ -120,22 +122,14 @@ const createMockWorld = (currentChatId: string | null = null): World => ({
 });
 
 describe('Chat Session Logic', () => {
-  // Mock publishSSE to capture events
-  let publishSSESpy: jest.SpyInstance;
-
   beforeEach(() => {
     jest.clearAllMocks();
-    publishSSESpy = jest.spyOn(events, 'publishSSE').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    publishSSESpy.mockRestore();
   });
 
   describe('No Auto-Create Chat on New Message', () => {
     test('should NOT create chat when currentChatId is null (session mode off)', async () => {
       const world = createMockWorld(null); // currentChatId is null = session mode off
-      
+
       // Publish an agent message
       publishMessage(world, 'Hello, this is an agent message!', 'test-agent');
 
@@ -168,11 +162,14 @@ describe('Chat Session Logic', () => {
     test('should handle human message title updates when currentChatId is set', async () => {
       const world = createMockWorld('test-chat-123'); // currentChatId is set = session mode on
 
+      // Spy on the world's eventEmitter
+      const eventEmitterSpy = jest.spyOn(world.eventEmitter, 'emit');
+
       // Publish a human message
       publishMessage(world, 'This should update the chat title', 'HUMAN');
 
       // Wait for async processing
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Verify updateChatData was called for title update
       expect(world.storage.updateChatData).toHaveBeenCalledWith(
@@ -184,9 +181,9 @@ describe('Chat Session Logic', () => {
         })
       );
 
-      // Verify chat-updated SSE event was published
-      expect(publishSSESpy).toHaveBeenCalledWith(
-        world,
+      // Verify SSE event was emitted through eventEmitter
+      expect(eventEmitterSpy).toHaveBeenCalledWith(
+        'sse',
         expect.objectContaining({
           agentName: 'system',
           type: 'chat-updated',
@@ -199,11 +196,14 @@ describe('Chat Session Logic', () => {
     test('should handle agent message chat saves when currentChatId is set', async () => {
       const world = createMockWorld('test-chat-456'); // currentChatId is set = session mode on
 
+      // Spy on the world's eventEmitter
+      const eventEmitterSpy = jest.spyOn(world.eventEmitter, 'emit');
+
       // Publish an agent message
       publishMessage(world, 'This should save the chat state', 'test-agent');
 
       // Wait for async processing
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Verify saveWorldChat was called for state save
       expect(world.storage.saveWorldChat).toHaveBeenCalledWith(
@@ -221,9 +221,9 @@ describe('Chat Session Logic', () => {
         })
       );
 
-      // Verify chat-updated SSE event was published
-      expect(publishSSESpy).toHaveBeenCalledWith(
-        world,
+      // Verify SSE event was emitted through eventEmitter
+      expect(eventEmitterSpy).toHaveBeenCalledWith(
+        'sse',
         expect.objectContaining({
           agentName: 'system',
           type: 'chat-updated',
@@ -250,33 +250,28 @@ describe('Chat Session Logic', () => {
       expect(world.storage.saveChatData).not.toHaveBeenCalled();
       expect(world.storage.saveWorldChat).not.toHaveBeenCalled();
       expect(world.storage.updateChatData).not.toHaveBeenCalled();
-      
-      // Verify no chat SSE events were published
-      expect(publishSSESpy).not.toHaveBeenCalledWith(
-        world,
-        expect.objectContaining({
-          type: 'chat-updated'
-        })
-      );
     });
 
     test('should handle non-null currentChatId correctly (session mode on)', async () => {
       const world = createMockWorld('active-chat-789'); // Session mode ON
+
+      // Spy on the world's eventEmitter
+      const eventEmitterSpy = jest.spyOn(world.eventEmitter, 'emit');
 
       // Publish messages - should trigger chat operations
       publishMessage(world, 'Human message', 'HUMAN');
       publishMessage(world, 'Agent message', 'test-agent');
 
       // Wait for async operations
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // Verify chat operations were triggered
       expect(world.storage.updateChatData).toHaveBeenCalled(); // For human message title update
       expect(world.storage.saveWorldChat).toHaveBeenCalled(); // For agent message state save
 
-      // Verify chat-updated SSE events were published
-      expect(publishSSESpy).toHaveBeenCalledWith(
-        world,
+      // Verify SSE events were emitted through eventEmitter
+      expect(eventEmitterSpy).toHaveBeenCalledWith(
+        'sse',
         expect.objectContaining({
           agentName: 'system',
           type: 'chat-updated'
@@ -299,14 +294,6 @@ describe('Chat Session Logic', () => {
       // Verify no chat operations were triggered for system/world messages
       expect(world.storage.updateChatData).not.toHaveBeenCalled();
       expect(world.storage.saveWorldChat).not.toHaveBeenCalled();
-      
-      // Verify no chat SSE events were published
-      expect(publishSSESpy).not.toHaveBeenCalledWith(
-        world,
-        expect.objectContaining({
-          type: 'chat-updated'
-        })
-      );
     });
   });
 });

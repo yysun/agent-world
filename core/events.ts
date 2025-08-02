@@ -21,7 +21,6 @@
  * - subscribeToMessages: Subscribe to World.eventEmitter message events with cleanup
  * - publishSSE: Emit SSE events for streaming responses with structured data
  * - subscribeToSSE: Subscribe to SSE streaming events with proper typing
- * - broadcastToWorld: High-level message broadcasting with default sender handling
  *
  * Agent Events:
  * - subscribeAgentToMessages: Auto-subscribe agent to world messages with filtering and reset logic
@@ -245,7 +244,7 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
   try {
     // Generate title from the human message content
     const title = generateTitleFromContent(messageEvent.content);
-    
+
     // Update the chat with new title
     const updatedChat = await world.storage.updateChatData(world.id, world.currentChatId, {
       name: title,
@@ -262,9 +261,9 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
       // Publish chat-updated system message to frontend
       publishSSE(world, {
         agentName: 'system',
-        type: 'chat-updated',
-        content: JSON.stringify({ 
-          chatId: world.currentChatId, 
+        type: 'chat-updated' as const,
+        content: JSON.stringify({
+          chatId: world.currentChatId,
           title: title,
           action: 'title-updated'
         }),
@@ -289,10 +288,10 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
   try {
     // Create world chat snapshot
     const worldChat = await world.createWorldChat();
-    
+
     // Save the complete chat state
     await world.storage.saveWorldChat(world.id, world.currentChatId, worldChat);
-    
+
     // Update chat metadata
     const messageCount = await getCurrentMessageCount(world);
     await world.storage.updateChatData(world.id, world.currentChatId, {
@@ -310,7 +309,7 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
     publishSSE(world, {
       agentName: 'system',
       type: 'chat-updated',
-      content: JSON.stringify({ 
+      content: JSON.stringify({
         chatId: world.currentChatId,
         messageCount: messageCount,
         action: 'state-saved'
@@ -450,12 +449,7 @@ export function subscribeToSSE(
   return () => world.eventEmitter.off('sse', handler);
 }
 
-/**
- * Broadcast message to all agents in world
- */
-export function broadcastToWorld(world: World, message: string, sender?: string): void {
-  publishMessage(world, message, sender || 'HUMAN');
-}
+
 
 // Agent Events Functions (from agent-events.ts)
 

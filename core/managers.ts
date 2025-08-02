@@ -947,10 +947,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       return events.subscribeToMessages(world, handler);
     },
 
-    broadcastMessage(message: string, sender?: string) {
-      events.broadcastToWorld(world, message, sender);
-    },
-
     publishSSE(data: Partial<WorldSSEEvent>) {
       events.publishSSE(world, data);
     },
@@ -1157,7 +1153,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         events.publishSSE(world, {
           agentName: 'system',
           type: 'chat-created',
-          content: JSON.stringify({ 
+          content: JSON.stringify({
             chatId: world.currentChatId,
             name: newChatData.name,
             action: 'chat-created'

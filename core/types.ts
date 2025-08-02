@@ -402,7 +402,6 @@ export interface World {
   // Event methods (R1.2)
   publishMessage(content: string, sender: string): void;
   subscribeToMessages(handler: (event: WorldMessageEvent) => void): () => void;
-  broadcastMessage(message: string, sender?: string): void;
   publishSSE(data: Partial<WorldSSEEvent>): void;
   subscribeToSSE(handler: (event: WorldSSEEvent) => void): () => void;
 

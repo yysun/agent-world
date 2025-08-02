@@ -139,30 +139,30 @@ export class WorldTestBuilder {
       loadWorld: jest.fn(),
       deleteWorld: jest.fn(),
       listWorlds: jest.fn(),
-      
+
       // Agent operations
       saveAgent: jest.fn(),
       loadAgent: jest.fn(),
       deleteAgent: jest.fn(),
       listAgents: jest.fn(),
-      
+
       // Batch operations
       saveAgentsBatch: jest.fn(),
       loadAgentsBatch: jest.fn(),
-      
+
       // Chat data operations
       saveChatData: jest.fn(),
       loadChatData: jest.fn(),
       deleteChatData: jest.fn(),
       listChatHistories: jest.fn(),
       updateChatData: jest.fn(),
-      
+
       // World chat operations
       saveWorldChat: jest.fn(),
       loadWorldChat: jest.fn(),
       loadWorldChatFull: jest.fn(),
       restoreFromWorldChat: jest.fn(),
-      
+
       // Integrity operations
       validateIntegrity: jest.fn(),
       repairData: jest.fn(),
@@ -205,7 +205,6 @@ export class WorldTestBuilder {
       resetTurnCount: jest.fn(),
       publishMessage: jest.fn(),
       subscribeToMessages: jest.fn().mockReturnValue(() => { }),
-      broadcastMessage: jest.fn(),
       publishSSE: jest.fn(),
       subscribeToSSE: jest.fn().mockReturnValue(() => { }),
       subscribeAgent: jest.fn().mockReturnValue(() => { }),

@@ -185,7 +185,6 @@ export class WorldTestBuilder {
       resetTurnCount: jest.fn(),
       publishMessage: jest.fn(),
       subscribeToMessages: jest.fn().mockReturnValue(() => { }),
-      broadcastMessage: jest.fn(),
       publishSSE: jest.fn(),
       subscribeToSSE: jest.fn().mockReturnValue(() => { }),
       subscribeAgent: jest.fn().mockReturnValue(() => { }),
