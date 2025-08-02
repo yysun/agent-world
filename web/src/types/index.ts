@@ -205,9 +205,8 @@ export interface WorldComponentState extends SSEComponentState {
   worldEditMode: 'create' | 'edit' | 'delete';
   selectedWorldForEdit: World | null;
 
-  // Chat history and current chat state
+  // Chat history state (currentChat now derived from world.currentChatId)
   chatHistory: ChatHistoryState;
-  currentChat: CurrentChatState;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
@@ -373,13 +372,35 @@ export const DEFAULT_CHAT_HISTORY_STATE: ChatHistoryState = {
   showLoadConfirm: false
 };
 
-export const DEFAULT_CURRENT_CHAT_STATE: CurrentChatState = {
-  id: null,
-  name: 'New Chat',
-  isSaved: false,
-  messageCount: 0,
-  lastUpdated: new Date()
-};
-
 // Export commonly used type aliases for backward compatibility
 export type WorldAgent = Agent;
+
+// Helper functions for current chat lookup
+export function getCurrentChat(world: World | null): Chat | null {
+  if (!world || !world.currentChatId) {
+    return null;
+  }
+  return world.chats.find(chat => chat.id === world.currentChatId) || null;
+}
+
+export function getCurrentChatState(world: World | null): CurrentChatState {
+  const currentChat = getCurrentChat(world);
+  if (currentChat) {
+    return {
+      id: currentChat.id,
+      name: currentChat.name,
+      isSaved: true,
+      messageCount: currentChat.messageCount,
+      lastUpdated: new Date(currentChat.updatedAt)
+    };
+  }
+  
+  // Return default state for unsaved/new chats
+  return {
+    id: world?.currentChatId || null,
+    name: 'New Chat',
+    isSaved: false,
+    messageCount: 0,
+    lastUpdated: new Date()
+  };
+}

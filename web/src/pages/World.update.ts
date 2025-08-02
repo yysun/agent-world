@@ -50,7 +50,7 @@ import {
   handleError,
   handleComplete
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent } from '../types';
+import type { WorldComponentState, Agent, getCurrentChatState } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
 export const worldUpdateHandlers = {
@@ -98,13 +98,6 @@ export const worldUpdateHandlers = {
         showDeleteConfirm: false,
         showLoadConfirm: false
       };
-      let currentChat: import('../types').CurrentChatState = {
-        id: null,
-        name: 'New Chat',
-        isSaved: false,
-        messageCount: 0,
-        lastUpdated: new Date()
-      };
       let messages: any[] = [];
 
       // Check if specific chatId is provided
@@ -116,13 +109,6 @@ export const worldUpdateHandlers = {
             if (chatData.messages) {
               messages = chatData.messages;
             }
-            currentChat = {
-              id: chatData.id,
-              name: chatData.name,
-              isSaved: true,
-              messageCount: chatData.messageCount,
-              lastUpdated: new Date(chatData.updatedAt)
-            };
           }
         } catch (error) {
           console.warn('Failed to load specific chat:', error);
@@ -181,7 +167,6 @@ export const worldUpdateHandlers = {
         world,
         messages: finalMessages,
         chatHistory,
-        currentChat,
         loading: false,
         error: null,
         isWaiting: false,
@@ -708,16 +693,10 @@ export const worldUpdateHandlers = {
   'navigate-to-chat': async function* (state: WorldComponentState, worldName: string, chatId: string): AsyncGenerator<WorldComponentState> {
     try {
       // Update URL without triggering full reload
-      const newUrl = `/world/${encodeURIComponent(worldName)}/${encodeURIComponent(chatId)}`;
+      const newUrl = `/World/${encodeURIComponent(worldName)}/${encodeURIComponent(chatId)}`;
       window.history.pushState({}, '', newUrl);
 
-      return {
-        ...state,
-        currentChat: {
-          ...state.currentChat,
-          id: chatId
-        }
-      };
+      return state; // No state changes needed for navigation
     } catch (error: any) {
       return {
         ...state,
@@ -730,10 +709,10 @@ export const worldUpdateHandlers = {
   'navigate-to-world': async function* (state: WorldComponentState, worldName: string): AsyncGenerator<WorldComponentState> {
     try {
       // Update URL without triggering full reload
-      const newUrl = `/world/${encodeURIComponent(worldName)}`;
+      const newUrl = `/World/${encodeURIComponent(worldName)}`;
       window.history.pushState({}, '', newUrl);
 
-      return state;
+      return state; // No state changes needed for navigation
     } catch (error: any) {
       return {
         ...state,
@@ -751,17 +730,13 @@ export const worldUpdateHandlers = {
       const result = await api.createNewChat(state.worldName);
 
       if (result.success) {
+        // Immediately refresh world data to get updated chat list
+        const refreshedWorld = await api.getWorld(state.worldName);
+        
         yield {
           ...state,
           loading: false,
-          world: result.world,          // Updated world with currentChatId
-          currentChat: {
-            id: result.chatId,
-            name: 'New Chat',
-            isSaved: true,              // Already saved by server
-            messageCount: 0,
-            lastUpdated: new Date()
-          },
+          world: refreshedWorld,        // Updated world with currentChatId and refreshed chat list
           messages: [],                 // Fresh message state
           selectedAgent: null,
           activeAgent: null,
@@ -801,13 +776,6 @@ export const worldUpdateHandlers = {
           ...state,
           loading: false,
           world: result.world,          // Updated world with new currentChatId
-          currentChat: {
-            id: chatData.id,
-            name: chatData.name,
-            isSaved: true,
-            messageCount: chatData.messageCount,
-            lastUpdated: new Date(chatData.updatedAt)
-          },
           messages: chatData.messages || [],
           selectedAgent: null,
           activeAgent: null,
@@ -850,34 +818,26 @@ export const worldUpdateHandlers = {
 
       // Refresh chat history
       const world = await api.getWorld(state.worldName);
-      const updatedChats = world.chats || [];
 
-      // If we deleted the current chat, reset to new chat
-      let updatedCurrentChat = state.currentChat;
-      if (state.currentChat?.id === chatId) {
-        updatedCurrentChat = {
-          id: null,
-          name: 'New Chat',
-          isSaved: false,
-          messageCount: 0,
-          lastUpdated: new Date()
-        };
-
+      // If we deleted the current chat, the backend should clear currentChatId
+      const shouldClearMessages = world.currentChatId === null || world.currentChatId === chatId;
+      
+      if (shouldClearMessages) {
         // Navigate to world without chat ID
         app.run('navigate-to-world', state.worldName);
       }
 
       yield {
         ...state,
+        world, // Updated world with potentially cleared currentChatId
         chatHistory: {
           ...state.chatHistory,
-          chats: updatedChats || [],
+          chats: world.chats || [],
           loading: false,
           selectedChat: null,
           showDeleteConfirm: false
         },
-        currentChat: updatedCurrentChat,
-        messages: updatedCurrentChat.id === null ? [] : state.messages
+        messages: shouldClearMessages ? [] : state.messages
       };
 
     } catch (error: any) {
