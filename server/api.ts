@@ -949,7 +949,7 @@ router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Respons
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    const chat = await world.loadChat(chatId);
+    const chat = await world.loadChatFull(chatId);
     if (!chat) {
       sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
       return;

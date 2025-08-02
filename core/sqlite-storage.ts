@@ -513,6 +513,58 @@ export async function saveWorldChat(ctx: SQLiteStorageContext, worldId: string, 
   `, chatId, worldId, JSON.stringify(chat), chat.metadata?.version || '1.0');
 }
 
+export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<WorldChat | null> {
+  await ensureInitialized(ctx);
+  
+  // Get the chat metadata
+  const result = await get(ctx, `
+    SELECT id, name, description, message_count as messageCount,
+           summary, tags, created_at as createdAt, updated_at as updatedAt
+    FROM world_chats
+    WHERE id = ? AND world_id = ?
+  `, chatId, worldId);
+
+  if (!result) return null;
+
+  // Get the chat snapshot data
+  const chat = await get(ctx, `
+    SELECT snapshot_data as snapshotData, captured_at as capturedAt, version
+    FROM chat_snapshots
+    WHERE chat_id = ? AND world_id = ?
+    ORDER BY captured_at DESC
+    LIMIT 1
+  `, chatId, worldId);
+
+  if (!chat) return null; // No snapshot data found
+
+  const snapshotData = JSON.parse(chat.snapshotData);
+  
+  // Return merged WorldChat with snapshot fields accessible directly
+  // This matches the web interface expectation
+  return {
+    // Chat metadata (ChatInfo + worldId)
+    id: result.id,
+    worldId: worldId,
+    name: result.name,
+    description: result.description,
+    createdAt: new Date(result.createdAt),
+    updatedAt: new Date(result.updatedAt),
+    messageCount: result.messageCount,
+    summary: result.summary,
+    tags: JSON.parse(result.tags || '[]'),
+    
+    // Snapshot data (core WorldChat fields)
+    world: snapshotData.world,
+    agents: snapshotData.agents,
+    messages: snapshotData.messages,
+    metadata: {
+      ...snapshotData.metadata,
+      capturedAt: new Date(chat.capturedAt),
+      version: chat.version
+    }
+  } as any; // Use 'as any' since this is a merged type that differs between web and core
+}
+
 export async function loadWorldChat(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<WorldChat | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `

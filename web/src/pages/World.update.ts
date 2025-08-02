@@ -113,8 +113,8 @@ export const worldUpdateHandlers = {
           // Load specific chat with full state restoration
           const chatData = await api.getChat(worldName, chatId);
           if (chatData) {
-            if (chatData.snapshot && chatData.snapshot.messages) {
-              messages = chatData.snapshot.messages;
+            if (chatData.messages) {
+              messages = chatData.messages;
             }
             currentChat = {
               id: chatData.id,
@@ -811,7 +811,7 @@ export const worldUpdateHandlers = {
             messageCount: chatData.messageCount,
             lastUpdated: new Date(chatData.updatedAt)
           },
-          messages: chatData.snapshot?.messages || [],
+          messages: chatData.messages || [],
           selectedAgent: null,
           activeAgent: null,
           userInput: '',

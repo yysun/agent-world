@@ -373,6 +373,8 @@ export interface World {
   // Chat history methods
   createChatData(params: CreateChatParams): Promise<ChatData>;
   loadChatData(chatId: string): Promise<ChatData | null>;
+  loadChat(chatId: string): Promise<ChatData | null>; // Alias for loadChatData for API compatibility
+  loadChatFull(chatId: string): Promise<WorldChat | null>; // Load complete WorldChat with merged data
   updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
   deleteChatData(chatId: string): Promise<boolean>;
   listChatHistories(): Promise<ChatData[]>;
@@ -446,6 +448,7 @@ export interface StorageManager {
   // Chat operations
   saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
   loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null>;
   restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
 
   // Integrity operations
@@ -486,6 +489,7 @@ export interface StorageAPI {
   // Chat operations
   saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
   loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
+  loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null>;
   restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
 
   // Integrity operations

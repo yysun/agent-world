@@ -160,6 +160,7 @@ export class WorldTestBuilder {
       // World chat operations
       saveWorldChat: jest.fn(),
       loadWorldChat: jest.fn(),
+      loadWorldChatFull: jest.fn(),
       restoreFromWorldChat: jest.fn(),
       
       // Integrity operations
