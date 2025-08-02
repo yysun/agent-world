@@ -193,14 +193,16 @@ const ChatMessageSchema = z.object({
 });
 
 const AgentUpdateSchema = z.object({
-  status: z.enum(["active", "inactive"]).optional(),
-  config: z.object({}).optional(),
-  provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).default('openai'),
-  model: z.string().default('gpt-4'),
+  name: z.string().min(1).max(100).optional(),
+  type: z.string().optional(),
+  status: z.enum(["active", "inactive", "error"]).optional(),
+  provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
+  model: z.string().optional(),
   systemPrompt: z.string().optional(),
   temperature: z.number().min(0).max(1).optional(),
-  // maxTokens: z.number().min(1).optional(),
+  maxTokens: z.number().min(1).optional(),
   clearMemory: z.boolean().optional()
+  // Note: createdAt, lastActive, lastLLMCall are automatically managed by the core and cannot be set by clients
 });
 
 const router = express.Router();

@@ -296,7 +296,7 @@ export interface WorldChat {
  * Chat creation parameters
  */
 export interface CreateChatParams {
-  name: string;
+  name?: string;
   description?: string;
   captureChat?: boolean;
 }

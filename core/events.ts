@@ -149,7 +149,7 @@ function generateChatTitleFromWorldMessages(world: World): string {
           allAgentMessages.push({
             sender: agent.id,
             content: msg.content,
-            createdAt: msg.createdAt || new Date()
+            createdAt: msg.createdAt instanceof Date ? msg.createdAt : new Date(msg.createdAt || Date.now())
           });
         }
       });
@@ -157,7 +157,11 @@ function generateChatTitleFromWorldMessages(world: World): string {
   }
 
   // Sort by timestamp to get first agent message
-  allAgentMessages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  allAgentMessages.sort((a, b) => {
+    const timeA = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime();
+    const timeB = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime();
+    return timeA - timeB;
+  });
 
   if (allAgentMessages.length === 0) {
     return 'New Chat';

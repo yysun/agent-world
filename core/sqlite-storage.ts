@@ -333,7 +333,7 @@ async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agent
       VALUES (?, ?, ?, ?, ?, ?)
     `,
       agentId, worldId, message.role, message.content, message.sender,
-      message.createdAt?.toISOString() || new Date().toISOString()
+      message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
     );
   }
 }
@@ -509,7 +509,7 @@ export async function saveWorldChat(ctx: SQLiteStorageContext, worldId: string, 
 
 export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<WorldChat | null> {
   await ensureInitialized(ctx);
-  
+
   // Get the chat metadata
   const result = await get(ctx, `
     SELECT id, name, description, message_count as messageCount,
@@ -532,7 +532,7 @@ export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: stri
   if (!chat) return null; // No snapshot data found
 
   const snapshotData = JSON.parse(chat.snapshotData);
-  
+
   // Return merged WorldChat with snapshot fields accessible directly
   // This matches the web interface expectation
   return {
@@ -545,7 +545,7 @@ export async function loadWorldChatFull(ctx: SQLiteStorageContext, worldId: stri
     updatedAt: new Date(result.updatedAt),
     messageCount: result.messageCount,
     tags: JSON.parse(result.tags || '[]'),
-    
+
     // Snapshot data (core WorldChat fields)
     world: snapshotData.world,
     agents: snapshotData.agents,
@@ -611,8 +611,11 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, agent.id, worldId, agent.name, agent.type, agent.status || 'active',
           agent.provider, agent.model, agent.systemPrompt, agent.temperature,
-          agent.maxTokens, agent.createdAt?.toISOString(), agent.lastActive?.toISOString(),
-          agent.llmCallCount || 0, agent.lastLLMCall?.toISOString());
+          agent.maxTokens,
+          agent.createdAt instanceof Date ? agent.createdAt.toISOString() : agent.createdAt,
+          agent.lastActive instanceof Date ? agent.lastActive.toISOString() : agent.lastActive,
+          agent.llmCallCount || 0,
+          agent.lastLLMCall instanceof Date ? agent.lastLLMCall.toISOString() : agent.lastLLMCall);
 
         // Clear and restore agent memory
         await run(ctx, 'DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?', agent.id, worldId);
@@ -623,7 +626,7 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
               INSERT INTO agent_memory (agent_id, world_id, role, content, sender, created_at)
               VALUES (?, ?, ?, ?, ?, ?)
             `, agent.id, worldId, message.role, message.content, message.sender,
-              message.createdAt?.toISOString() || new Date().toISOString());
+              message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString()));
           }
         }
       }
@@ -648,8 +651,10 @@ export async function archiveAgentMemory(
 ): Promise<number> {
   await ensureInitialized(ctx);
   const participants = metadata?.participants || [...new Set(memory.map(m => m.sender).filter(Boolean))] as string[];
-  const startTime = metadata?.startTime || (memory.length > 0 ? memory[0].createdAt?.toISOString() : new Date().toISOString());
-  const endTime = metadata?.endTime || (memory.length > 0 ? memory[memory.length - 1].createdAt?.toISOString() : new Date().toISOString());
+  const firstMessage = memory.length > 0 ? memory[0] : null;
+  const lastMessage = memory.length > 0 ? memory[memory.length - 1] : null;
+  const startTime = metadata?.startTime || (firstMessage?.createdAt ? (firstMessage.createdAt instanceof Date ? firstMessage.createdAt.toISOString() : firstMessage.createdAt) : new Date().toISOString());
+  const endTime = metadata?.endTime || (lastMessage?.createdAt ? (lastMessage.createdAt instanceof Date ? lastMessage.createdAt.toISOString() : lastMessage.createdAt) : new Date().toISOString());
   const archiveResult = await run(ctx, `
     INSERT INTO memory_archives (
       agent_id, world_id, session_name, archive_reason, message_count,
@@ -668,7 +673,7 @@ export async function archiveAgentMemory(
       ) VALUES (?, ?, ?, ?, ?)
     `,
       archiveId, message.role, message.content, message.sender,
-      message.createdAt?.toISOString() || new Date().toISOString()
+      message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
     );
   }
   return archiveId;

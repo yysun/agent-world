@@ -87,6 +87,9 @@ const logger = createCategoryLogger('core');
 import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, ChatData, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider } from './types.js';
 import type { WorldData } from './world-storage.js';
 
+// Regular imports
+import { SenderType } from './types.js';
+
 // Static imports for core modules
 import { EventEmitter } from 'events';
 import * as events from './events.js';
@@ -331,7 +334,8 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
   // Merge updates with existing configuration
   const updatedData: WorldData = {
     ...existingData,
-    ...updates
+    ...updates,
+    lastUpdated: new Date() // Always update the timestamp on any world update
   };
 
   await storageWrappers!.saveWorld(updatedData);
@@ -1115,8 +1119,8 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
         // Sort messages by timestamp
         allMessages.sort((a, b) => {
-          const timeA = a.createdAt ? a.createdAt.getTime() : 0;
-          const timeB = b.createdAt ? b.createdAt.getTime() : 0;
+          const timeA = a.createdAt ? (a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0;
+          const timeB = b.createdAt ? (b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0;
           return timeA - timeB;
         });
 
@@ -1703,20 +1707,14 @@ export async function createChatData(rootPath: string, worldId: string, params: 
     worldChat = await createWorldChat(rootPath, worldId);
   }
 
-  // Generate chat title from messages if possible
-  let generatedTitle = params.name;
-  if (worldChat && worldChat.messages && worldChat.messages.length > 0) {
-    // Load world data to get LLM configuration for title generation
-    const worldData = await storageWrappers!.loadWorld(worldId);
-    const world = worldData ? worldDataToWorld(worldData, rootPath) : undefined;
-    generatedTitle = await generateChatTitleFromMessages(worldChat.messages, world);
-  }
+  // Always use "New Chat" as initial title
+  const initialTitle = params.name || "New Chat";
 
   // Create ChatData entry (metadata)
   const chatData: ChatData = {
     id: chatId,
     worldId,
-    name: generatedTitle,
+    name: initialTitle,
     description: params.description,
     createdAt: now,
     updatedAt: now,
@@ -1752,6 +1750,64 @@ export async function getChatData(rootPath: string, worldId: string, chatId: str
 }
 
 // (legacy getChat removed)
+
+/**
+ * Update chat title based on human messages when they are published
+ * This should be called when a human message is published to the event emitter
+ */
+async function updateChatTitleFromHumanMessage(world: World): Promise<void> {
+  try {
+    // Only update if there's a current chat
+    if (!world.currentChatId) {
+      return;
+    }
+
+    // Collect all human messages from agents' memory
+    const allHumanMessages: AgentMessage[] = [];
+    for (const agent of world.agents.values()) {
+      if (agent.memory) {
+        const humanMessages = agent.memory.filter(msg =>
+          msg.role === 'user' &&
+          msg.content &&
+          msg.content.trim().length > 0
+        );
+        allHumanMessages.push(...humanMessages);
+      }
+    }
+
+    // Sort by timestamp and get last 10
+    allHumanMessages.sort((a, b) =>
+      (a.createdAt || new Date(0)).getTime() - (b.createdAt || new Date(0)).getTime()
+    );
+    const last10HumanMessages = allHumanMessages.slice(-10);
+
+    if (last10HumanMessages.length === 0) {
+      return;
+    }
+
+    // Generate new title
+    const newTitle = await generateChatTitleFromMessages(last10HumanMessages, world);
+
+    // Update chat title in storage
+    await storageWrappers!.updateChatData(world.id, world.currentChatId, {
+      name: newTitle
+    });
+
+    logger.debug('Updated chat title from human message', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      newTitle,
+      messageCount: last10HumanMessages.length
+    });
+
+  } catch (error) {
+    logger.warn('Failed to update chat title from human message', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+}
 
 /**
  * Generate chat title from message content with LLM support
@@ -1796,24 +1852,24 @@ Generate only the title, no quotes or explanations:`;
         };
 
         const generatedTitle = await llmManager.generateAgentResponse(world, tempAgent, titleMessages);
-        
+
         // Clean up the generated title
         let title = generatedTitle.trim().replace(/^["']|["']$/g, ''); // Remove quotes
         title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
         title = title.replace(/\s+/g, ' '); // Normalize whitespace
-        
+
         // Truncate if too long
         if (title.length > maxLength) {
           title = title.substring(0, maxLength - 3) + '...';
         }
-        
+
         if (title && title.length > 0) {
           return title;
         }
       }
     } catch (error) {
-      logger.warn('Failed to generate LLM title, using fallback', { 
-        error: error instanceof Error ? error.message : error 
+      logger.warn('Failed to generate LLM title, using fallback', {
+        error: error instanceof Error ? error.message : error
       });
     }
   }
@@ -2015,8 +2071,8 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
       markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
       markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
       markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
-      markdown += `- **Created:** ${fullAgent.createdAt ? fullAgent.createdAt.toISOString() : 'Unknown'}\n`;
-      markdown += `- **Last Active:** ${fullAgent.lastActive ? fullAgent.lastActive.toISOString() : 'Unknown'}\n\n`;
+      markdown += `- **Created:** ${fullAgent.createdAt ? (fullAgent.createdAt instanceof Date ? fullAgent.createdAt.toISOString() : fullAgent.createdAt) : 'Unknown'}\n`;
+      markdown += `- **Last Active:** ${fullAgent.lastActive ? (fullAgent.lastActive instanceof Date ? fullAgent.lastActive.toISOString() : fullAgent.lastActive) : 'Unknown'}\n\n`;
 
       if (fullAgent.systemPrompt) {
         markdown += `**System Prompt:**\n`;
@@ -2030,7 +2086,7 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
         fullAgent.memory.forEach((message, index) => {
           markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
           if (message.createdAt) {
-            markdown += `   *${message.createdAt.toISOString()}*\n`;
+            markdown += `   *${message.createdAt instanceof Date ? message.createdAt.toISOString() : message.createdAt}*\n`;
           }
           markdown += '   ```markdown\n';
           // Pad each line of content with 4 spaces, preserving original newlines
@@ -2083,6 +2139,19 @@ export async function publishMessageWithAutoSave(
 
   // Use core events to publish the message
   events.publishMessage(world, content, sender);
+
+  // Update chat title if this is a human message
+  const senderType = utils.determineSenderType(sender);
+  if (senderType === SenderType.HUMAN) {
+    // Don't await to avoid blocking message publishing
+    updateChatTitleFromHumanMessage(world).catch(error => {
+      logger.warn('Failed to update chat title after human message', {
+        worldId: world.id,
+        sender,
+        error: error instanceof Error ? error.message : error
+      });
+    });
+  }
 
   // ENHANCED AUTO-SAVE: Use world's saveCurrentState method
   try {

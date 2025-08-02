@@ -1,6 +1,7 @@
 /**
  * Unit tests for new chat title generation logic in core/managers.ts
- * Tests the new LLM-based title generation and fallback to agent messages
+ * Tests the updated behavior where titles are "New Chat" on creation
+ * and updated when human messages are published
  */
 
 import type { CreateWorldParams, CreateChatParams, AgentMessage, World } from '../../core/types';
@@ -68,9 +69,9 @@ describe('Chat Title Generation', () => {
     mockLLMManager.generateAgentResponse.mockClear();
   });
 
-  it('should use LLM for title generation when world has LLM provider configured', async () => {
+  it('should always use "New Chat" as initial title when creating new chat', async () => {
     jest.resetModules();
-    
+
     const storageFactory = await import('../../core/storage-factory');
     jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
       loadWorld: jest.fn().mockResolvedValue({
@@ -83,33 +84,29 @@ describe('Chat Title Generation', () => {
       saveWorldChat: jest.fn()
     }));
 
-    // Mock LLM manager
+    // Mock LLM manager (should not be called during creation)
     const llmManager = await import('../../core/llm-manager');
     jest.spyOn(llmManager, 'generateAgentResponse').mockResolvedValue('AI Generated Title');
 
     const managers = await import('../../core/managers');
-    
-    const messages: AgentMessage[] = [
-      { role: 'user', content: 'Hello, can you help me with something?', createdAt: new Date() },
-      { role: 'assistant', content: 'Of course! What do you need help with?', createdAt: new Date() }
-    ];
 
     const chatParams: CreateChatParams = {
-      name: 'Default Chat Name',
+      name: 'Custom Chat Name',
       description: 'A chat for testing',
       captureChat: true
     };
 
     const result = await managers.createChatData(rootPath, 'test-world', chatParams);
-    
-    // Should have called LLM for title generation
-    expect(llmManager.generateAgentResponse).toHaveBeenCalled();
-    expect(result.name).toBe('Default Chat Name'); // Will use default since we're not creating actual chat messages
+
+    // Should NOT call LLM during chat creation
+    expect(llmManager.generateAgentResponse).not.toHaveBeenCalled();
+    // Should use provided name or default to "New Chat"
+    expect(result.name).toBe('Custom Chat Name');
   });
 
-  it('should fallback to agent message when no LLM provider is configured', async () => {
+  it('should use "New Chat" as default when no name is provided', async () => {
     jest.resetModules();
-    
+
     const storageFactory = await import('../../core/storage-factory');
     jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
       loadWorld: jest.fn().mockResolvedValue({
@@ -122,23 +119,23 @@ describe('Chat Title Generation', () => {
     }));
 
     const managers = await import('../../core/managers');
-    
+
     const chatParams: CreateChatParams = {
-      name: 'Default Chat Name',
       description: 'A chat for testing',
       captureChat: true
+      // No name provided
     };
 
     const result = await managers.createChatData(rootPath, 'test-world', chatParams);
-    
-    // Should not have called LLM since no provider is configured
+
+    // Should not have called LLM since titles are generated on message publish
     expect(mockLLMManager.generateAgentResponse).not.toHaveBeenCalled();
-    expect(result.name).toBe('Default Chat Name');
+    expect(result.name).toBe('New Chat');
   });
 
-  it('should fallback to default title when LLM generation fails', async () => {
+  it('should not modify title during chat creation even with snapshot data', async () => {
     jest.resetModules();
-    
+
     const storageFactory = await import('../../core/storage-factory');
     jest.spyOn(storageFactory, 'createStorageWithWrappers').mockResolvedValue(fullMockWrappers({
       loadWorld: jest.fn().mockResolvedValue({
@@ -148,25 +145,34 @@ describe('Chat Title Generation', () => {
         chatLLMModel: 'gpt-3.5-turbo'
       }),
       saveChatData: jest.fn(),
-      saveWorldChat: jest.fn()
+      saveWorldChat: jest.fn(),
+      listAgents: jest.fn().mockResolvedValue([
+        {
+          id: 'test-agent',
+          memory: [
+            { role: 'user', content: 'Hello, can you help me?', createdAt: new Date() },
+            { role: 'assistant', content: 'Of course! What do you need?', createdAt: new Date() }
+          ]
+        }
+      ])
     }));
 
-    // Mock LLM manager to throw error
+    // Mock LLM manager (should not be called)
     const llmManager = await import('../../core/llm-manager');
     jest.spyOn(llmManager, 'generateAgentResponse').mockRejectedValue(new Error('LLM Error'));
 
     const managers = await import('../../core/managers');
-    
+
     const chatParams: CreateChatParams = {
-      name: 'Default Chat Name',
+      name: 'Initial Chat Name',
       description: 'A chat for testing',
       captureChat: true
     };
 
     const result = await managers.createChatData(rootPath, 'test-world', chatParams);
-    
-    // Should have attempted LLM call but fallen back to default
-    expect(llmManager.generateAgentResponse).toHaveBeenCalled();
-    expect(result.name).toBe('Default Chat Name');
+
+    // Should NOT attempt LLM call during creation even with snapshot data
+    expect(llmManager.generateAgentResponse).not.toHaveBeenCalled();
+    expect(result.name).toBe('Initial Chat Name');
   });
 });

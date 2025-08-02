@@ -16,12 +16,12 @@
     "start": "node dist/server/index.js",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
-    "dev-web": "concurrently \"npm run server\" \"cd web && npm run dev\"",
+    "dev": "concurrently \"PORT=3000 && npm run server\" \"cd web && npm run dev\"",
     "test": "jest --config jest.config.js",
     "check": "tsc --noEmit",
     "build": "tsc && cd web && npm run build",
     "pkill": "pkill -f tsx",
-    "dev": "cd next && npm run dev"
+    "dev-next": "cd next && npm run dev"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [

@@ -233,9 +233,9 @@ export async function saveAgent(rootPath: string, worldId: string, agent: Agent)
   const { systemPrompt, memory, ...agentWithoutPromptAndMemory } = agent;
   const agentData = {
     ...agentWithoutPromptAndMemory,
-    createdAt: agent.createdAt?.toISOString(),
-    lastActive: agent.lastActive?.toISOString(),
-    lastLLMCall: agent.lastLLMCall?.toISOString()
+    createdAt: agent.createdAt instanceof Date ? agent.createdAt.toISOString() : agent.createdAt,
+    lastActive: agent.lastActive instanceof Date ? agent.lastActive.toISOString() : agent.lastActive,
+    lastLLMCall: agent.lastLLMCall instanceof Date ? agent.lastLLMCall.toISOString() : agent.lastLLMCall
   };
 
   const configPath = path.join(agentDir, 'config.json');
@@ -261,9 +261,9 @@ export async function saveAgentConfig(rootPath: string, worldId: string, agent: 
   const { systemPrompt, memory, ...agentWithoutPromptAndMemory } = agent;
   const agentData = {
     ...agentWithoutPromptAndMemory,
-    createdAt: agent.createdAt?.toISOString(),
-    lastActive: agent.lastActive?.toISOString(),
-    lastLLMCall: agent.lastLLMCall?.toISOString()
+    createdAt: agent.createdAt instanceof Date ? agent.createdAt.toISOString() : agent.createdAt,
+    lastActive: agent.lastActive instanceof Date ? agent.lastActive.toISOString() : agent.lastActive,
+    lastLLMCall: agent.lastLLMCall instanceof Date ? agent.lastLLMCall.toISOString() : agent.lastLLMCall
   };
 
   const configPath = path.join(agentDir, 'config.json');
