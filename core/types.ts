@@ -380,6 +380,9 @@ export interface World {
   restoreFromWorldChat(chatId: string): Promise<boolean>;
 
   // NEW: Enhanced Chat Management Methods
+  isCurrentChatReusable(): Promise<boolean>; // Check if current chat can be reused instead of creating new
+  reuseCurrentChat(): Promise<World>; // Reuse current chat with fresh agent state
+  createNewChat(): Promise<World>; // Create brand new chat (internal method)
   newChat(): Promise<World>; // Create new chat and set as current - returns updated world
   loadChatById(chatId: string): Promise<void>; // Switch to existing chat
   getCurrentChat(): Promise<ChatData | null>; // Get current active chat

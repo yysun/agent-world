@@ -111,6 +111,21 @@ async function initializeModules() {
 const moduleInitialization = initializeModules();
 
 // ========================
+// NEW CHAT OPTIMIZATION CONFIGURATION
+// ========================
+
+/**
+ * Configuration constants for new chat optimization
+ */
+const NEW_CHAT_CONFIG = {
+  // Chat title that indicates a potentially reusable chat
+  REUSABLE_CHAT_TITLE: 'New Chat',
+
+  // Enable/disable new chat optimization (for testing/debugging)
+  ENABLE_OPTIMIZATION: true
+} as const;
+
+// ========================
 // WORLD MANAGEMENT
 // ========================
 
@@ -967,8 +982,129 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       return world.agents.has(agentId);
     },
 
-    // NEW: Enhanced Chat Management Methods
-    async newChat(): Promise<World> {
+    // NEW: Chat Reuse Detection and Optimization
+    async isCurrentChatReusable(): Promise<boolean> {
+      try {
+        // Early exit if optimization is disabled
+        if (!NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION) {
+          logger.debug('Chat optimization disabled, not reusing', { worldId: world.id });
+          return false;
+        }
+
+        // No current chat - cannot reuse
+        if (!world.currentChatId) {
+          logger.debug('No current chat to reuse', { worldId: world.id });
+          return false;
+        }
+
+        // Load current chat data
+        const currentChat = await storageWrappers!.loadChatData(world.id, world.currentChatId);
+        if (!currentChat) {
+          logger.debug('Current chat not found, cannot reuse', {
+            worldId: world.id,
+            chatId: world.currentChatId
+          });
+          return false;
+        }
+
+        // Simplified reusability logic: title is "New Chat" OR message count is 0
+        const isTitleReusable = currentChat.name === NEW_CHAT_CONFIG.REUSABLE_CHAT_TITLE;
+        const isMessageCountReusable = currentChat.messageCount === 0;
+
+        if (!isTitleReusable && !isMessageCountReusable) {
+          logger.debug('Chat is not reusable - title not "New Chat" and has messages', {
+            worldId: world.id,
+            chatId: world.currentChatId,
+            title: currentChat.name,
+            messageCount: currentChat.messageCount
+          });
+          return false;
+        }
+
+        // Chat is reusable
+        logger.debug('Current chat is reusable', {
+          worldId: world.id,
+          chatId: world.currentChatId,
+          title: currentChat.name,
+          messageCount: currentChat.messageCount,
+          reusableByTitle: isTitleReusable,
+          reusableByMessageCount: isMessageCountReusable
+        });
+        return true;
+
+      } catch (error) {
+        logger.warn('Error checking chat reusability, defaulting to non-reusable', {
+          worldId: world.id,
+          chatId: world.currentChatId,
+          error: error instanceof Error ? error.message : error
+        });
+        return false;
+      }
+    },
+
+    async reuseCurrentChat(): Promise<World> {
+      try {
+        if (!world.currentChatId) {
+          throw new Error('No current chat to reuse');
+        }
+
+        logger.debug('Reusing current chat instead of creating new one', {
+          worldId: world.id,
+          chatId: world.currentChatId
+        });
+
+        // 1. Reset agent memories to fresh state (same as newChat)
+        for (const agent of world.agents.values()) {
+          agent.memory = [];
+          agent.llmCallCount = 0;
+          agent.lastLLMCall = undefined;
+        }
+
+        // 2. Update chat metadata to reflect reuse
+        await storageWrappers!.updateChatData(world.id, world.currentChatId, {
+          messageCount: 0 // Reset message count since we're clearing memories
+        });
+
+        // 3. Save the fresh agent states
+        await world.saveCurrentState();
+
+        // 4. Update world state and save
+        const worldData = {
+          id: world.id,
+          name: world.name,
+          description: world.description,
+          turnLimit: world.turnLimit,
+          chatLLMProvider: world.chatLLMProvider,
+          chatLLMModel: world.chatLLMModel,
+          currentChatId: world.currentChatId, // Keep same chat ID
+          createdAt: new Date(), // This should ideally preserve the original
+          lastUpdated: new Date(),
+          totalAgents: world.agents.size,
+          totalMessages: 0 // Reset since we cleared memories
+        };
+        await storageWrappers!.saveWorld(worldData);
+
+        logger.debug('Successfully reused current chat', {
+          worldId: world.id,
+          reuseId: world.currentChatId,
+          agentCount: world.agents.size
+        });
+
+        return world;
+
+      } catch (error) {
+        logger.error('Failed to reuse current chat, falling back to new chat creation', {
+          worldId: world.id,
+          chatId: world.currentChatId,
+          error: error instanceof Error ? error.message : error
+        });
+
+        // Fallback to creating new chat
+        return await world.createNewChat();
+      }
+    },
+
+    async createNewChat(): Promise<World> {
       try {
         // 1. Save current state to previous chat (if any)
         if (world.currentChatId) {
@@ -1033,6 +1169,36 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
         return world; // Return the complete updated World object
       } catch (error) {
         logger.error('Failed to create new chat', {
+          worldId: world.id,
+          error: error instanceof Error ? error.message : error
+        });
+        throw error;
+      }
+    },
+
+    async newChat(): Promise<World> {
+      try {
+        // NEW: Check if current chat is reusable before creating new one
+        if (NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION) {
+          const canReuse = await world.isCurrentChatReusable();
+          if (canReuse) {
+            logger.debug('Reusing current chat instead of creating new one', {
+              worldId: world.id,
+              chatId: world.currentChatId
+            });
+            return await world.reuseCurrentChat();
+          }
+        }
+
+        // Fallback to creating new chat
+        logger.debug('Creating new chat', {
+          worldId: world.id,
+          optimizationEnabled: NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION
+        });
+        return await world.createNewChat();
+
+      } catch (error) {
+        logger.error('Failed in newChat method', {
           worldId: world.id,
           error: error instanceof Error ? error.message : error
         });

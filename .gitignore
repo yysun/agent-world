@@ -35,3 +35,6 @@ tmp/
 temp/
 
 .specstory
+docs/plan/
+docs/requirements/
+docs/done/
