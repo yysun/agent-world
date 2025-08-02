@@ -64,15 +64,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false,
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
-      chatHistory: {
-        isOpen: false,
-        chats: [],
-        loading: false,
-        error: null,
-        selectedChat: null,
-        showDeleteConfirm: false,
-        showLoadConfirm: false
-      },
+      selectedChat: null,
+      showDeleteChatConfirm: false,
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -224,8 +217,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
             {state.selectedSettingsTarget === 'chat' ? (
               <WorldChatHistory
                 worldName={state.worldName}
-                chatHistory={state.chatHistory}
                 world={state.world}
+                selectedChatForAction={state.selectedChat}
+                showDeleteChatConfirm={state.showDeleteChatConfirm}
               />
             ) : (
               <WorldSettings
@@ -318,7 +312,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
     // Handler for loading a chat from history
     'load-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
       try {
-        
+
         await api.setCurrentChat(state.worldName, chatId);
         const world = await api.getWorld(state.worldName);
         return { ...state, world }

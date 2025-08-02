@@ -50,7 +50,7 @@ import {
   handleError,
   handleComplete
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, getCurrentChatState } from '../types';
+import type { WorldComponentState, Agent } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
 export const worldUpdateHandlers = {
@@ -88,16 +88,7 @@ export const worldUpdateHandlers = {
         return;
       }
 
-      // Initialize chat state
-      let chatHistory: import('../types').ChatHistoryState = {
-        isOpen: false,
-        chats: [],
-        loading: false,
-        error: null,
-        selectedChat: null,
-        showDeleteConfirm: false,
-        showLoadConfirm: false
-      };
+      // Initialize messages
       let messages: any[] = [];
 
       // Check if specific chatId is provided
@@ -115,13 +106,6 @@ export const worldUpdateHandlers = {
         }
       }
       // NOTE: No auto-restoration needed - core getWorld() already restored last chat automatically
-
-      // Fetch chat history for sidebar
-      try {
-        chatHistory.chats = world.chats || [];
-      } catch (err) {
-        console.warn('Failed to load chat history:', err);
-      }
 
       // Convert agent memories to messages as fallback if no chat messages
       let allMessages: any[] = [];
@@ -166,13 +150,14 @@ export const worldUpdateHandlers = {
         worldName,
         world,
         messages: finalMessages,
-        chatHistory,
         loading: false,
         error: null,
         isWaiting: false,
         selectedSettingsTarget: 'chat',
         selectedAgent: null,
-        activeAgent: null
+        activeAgent: null,
+        selectedChat: null,
+        showDeleteChatConfirm: false
       };
 
     } catch (error: any) {
@@ -399,31 +384,21 @@ export const worldUpdateHandlers = {
       selectedSettingsTarget: 'chat' as const,
       selectedAgent: null,
       messages: (state.messages || []).filter(message => !message.userEntered),
-      chatHistory: {
-        ...state.chatHistory,
-        loading: true,
-        error: null
-      }
+      loading: true,
+      error: null
     };
 
     try {
-      const chats = state.world.chats || [];
+      // Chat data is already available in world.chats
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          chats,
-          loading: false
-        }
+        loading: false
       };
     } catch (error: any) {
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          loading: false,
-          error: error.message || 'Failed to load chat history'
-        }
+        loading: false,
+        error: error.message || 'Failed to load chat history'
       };
     }
   },
@@ -447,32 +422,22 @@ export const worldUpdateHandlers = {
   'chat-history-refresh': async (state: WorldComponentState): Promise<WorldComponentState> => {
     const newState = {
       ...state,
-      chatHistory: {
-        ...state.chatHistory,
-        loading: true,
-        error: null
-      }
+      loading: true,
+      error: null
     };
 
     try {
       const world = await api.getWorld(state.worldName);
-      const chats = world.chats || [];
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          chats,
-          loading: false
-        }
+        world,
+        loading: false
       };
     } catch (error: any) {
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          loading: false,
-          error: error.message || 'Failed to refresh chat history'
-        }
+        loading: false,
+        error: error.message || 'Failed to refresh chat history'
       };
     }
   },
@@ -484,12 +449,8 @@ export const worldUpdateHandlers = {
       return {
         ...state,
         world,
-        chatHistory: {
-          ...state.chatHistory,
-          chats: world.chats || [],
-          loading: false,
-          error: null
-        }
+        loading: false,
+        error: null
       };
     } catch (error: any) {
       return {
@@ -499,92 +460,66 @@ export const worldUpdateHandlers = {
     }
   },
 
-  'chat-history-show-load-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
-    ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      showLoadConfirm: true,
-      selectedChat: chat
-    }
-  }),
+  'chat-history-show-load-confirm': (state: WorldComponentState, chat: any): WorldComponentState => {
+    // Direct load without confirmation modal
+    app.run('load-chat-from-history', chat.id);
+    return state;
+  },
 
   'chat-history-load-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    if (!state.chatHistory.selectedChat) return state;
-
-    // Use the unified load handler
-    app.run('load-chat-from-history', state.chatHistory.selectedChat.id);
-
-    return {
-      ...state,
-      chatHistory: {
-        ...state.chatHistory,
-        showLoadConfirm: false,
-        selectedChat: null
-      }
-    };
+    // This handler is no longer needed since we load directly
+    return state;
   },
 
   'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
     ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      showDeleteConfirm: true,
-      selectedChat: chat
-    }
+    showDeleteChatConfirm: true,
+    selectedChat: chat
   }),
 
   'chat-history-delete-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    if (!state.chatHistory.selectedChat) return state;
+    // This handler is no longer needed since we delete directly
+    return state;
+  },
 
-    // Use the unified delete handler
-    app.run('delete-chat-from-history', state.chatHistory.selectedChat.id);
-
+  // New simplified delete handler with built-in confirmation
+  'delete-chat-with-confirm': async (state: WorldComponentState, chat: any): Promise<WorldComponentState> => {
+    const confirmed = window.confirm(`Are you sure you want to delete chat "${chat.name}"? This action cannot be undone.`);
+    if (confirmed) {
+      app.run('delete-chat-from-history', chat.id);
+    }
     return state;
   },
 
   'chat-history-summarize': async (state: WorldComponentState, chat: any): Promise<WorldComponentState> => {
     const newState = {
       ...state,
-      chatHistory: {
-        ...state.chatHistory,
-        loading: true,
-        error: null
-      }
+      loading: true,
+      error: null
     };
 
     try {
       // Note: Chat summarization is now handled by core, no separate API call needed
       const world = await api.getWorld(state.worldName);
-      const chats = world.chats || [];
 
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          chats,
-          loading: false
-        }
+        world,
+        loading: false
       };
     } catch (error: any) {
       return {
         ...newState,
-        chatHistory: {
-          ...newState.chatHistory,
-          loading: false,
-          error: error.message || 'Failed to summarize chat'
-        }
+        loading: false,
+        error: error.message || 'Failed to summarize chat'
       };
     }
   },
 
   'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState => ({
     ...state,
-    chatHistory: {
-      ...state.chatHistory,
-      showLoadConfirm: false,
-      showDeleteConfirm: false,
-      selectedChat: null
-    }
+    showDeleteChatConfirm: false,
+    selectedChat: null
   }),
 
   // Agent deletion handler
@@ -754,7 +689,7 @@ export const worldUpdateHandlers = {
       if (result.success) {
         // Immediately refresh world data to get updated chat list
         const refreshedWorld = await api.getWorld(state.worldName);
-        
+
         yield {
           ...state,
           loading: false,
@@ -762,7 +697,9 @@ export const worldUpdateHandlers = {
           messages: [],                 // Fresh message state
           selectedAgent: null,
           activeAgent: null,
-          userInput: ''
+          userInput: '',
+          selectedChat: null,
+          showDeleteChatConfirm: false
         };
 
         // Update URL with new chatId
@@ -802,7 +739,9 @@ export const worldUpdateHandlers = {
           selectedAgent: null,
           activeAgent: null,
           userInput: '',
-          error: null
+          error: null,
+          selectedChat: null,
+          showDeleteChatConfirm: false
         };
 
         // Update URL with loaded chatId
@@ -829,10 +768,7 @@ export const worldUpdateHandlers = {
     try {
       yield {
         ...state,
-        chatHistory: {
-          ...state.chatHistory,
-          loading: true
-        }
+        loading: true
       };
 
       // Delete chat via API
@@ -843,7 +779,7 @@ export const worldUpdateHandlers = {
 
       // If we deleted the current chat, the backend should clear currentChatId
       const shouldClearMessages = world.currentChatId === null || world.currentChatId === chatId;
-      
+
       if (shouldClearMessages) {
         // Navigate to world without chat ID
         app.run('navigate-to-world', state.worldName);
@@ -852,24 +788,17 @@ export const worldUpdateHandlers = {
       yield {
         ...state,
         world, // Updated world with potentially cleared currentChatId
-        chatHistory: {
-          ...state.chatHistory,
-          chats: world.chats || [],
-          loading: false,
-          selectedChat: null,
-          showDeleteConfirm: false
-        },
+        loading: false,
+        selectedChat: null,
+        showDeleteChatConfirm: false,
         messages: shouldClearMessages ? [] : state.messages
       };
 
     } catch (error: any) {
       yield {
         ...state,
-        chatHistory: {
-          ...state.chatHistory,
-          loading: false,
-          error: error.message || 'Failed to delete chat'
-        }
+        loading: false,
+        error: error.message || 'Failed to delete chat'
       };
     }
   }

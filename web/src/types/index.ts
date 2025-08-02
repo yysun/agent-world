@@ -196,16 +196,9 @@ export interface WorldComponentState extends SSEComponentState {
   worldEditMode: 'create' | 'edit' | 'delete';
   selectedWorldForEdit: World | null;
 
-  // Chat history state (currentChat now derived from world.currentChatId)
-  chatHistory: {
-    isOpen: boolean;
-    chats: Chat[];
-    loading: boolean;
-    error: string | null;
-    selectedChat: Chat | null;
-    showDeleteConfirm: boolean;
-    showLoadConfirm: boolean;
-  };
+  // Chat history UI state
+  selectedChat: Chat | null;
+  showDeleteChatConfirm: boolean;
 
   // Additional missing properties from SSE state
   connectionStatus: string;
@@ -385,7 +378,7 @@ export function getCurrentChatState(world: World | null): CurrentChatState {
       lastUpdated: new Date(currentChat.updatedAt)
     };
   }
-  
+
   // Return default state for unsaved/new chats
   return {
     id: world?.currentChatId || null,
