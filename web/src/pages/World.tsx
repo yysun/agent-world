@@ -329,49 +329,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       selectedSettingsTarget: 'world' // Switch to world settings
     }),
 
-    // Auto-save handler for when first agent message is received
-    'auto-save-chat': async (state: WorldComponentState): Promise<WorldComponentState> => {
-      if (state.currentChat.isSaved || !shouldAutoSaveChat(state.messages, state.currentChat.isSaved)) {
-        return state; // No need to save
-      }
-
-      try {
-        // Generate title from agent messages
-        const title = generateChatTitle(state.messages);
-
-        // Create chat using core API
-        const chatData = await api.createChat(state.worldName, {
-          name: title,
-          description: `Auto-saved chat with ${state.messages.length} messages`,
-          captureSnapshot: true
-        });
-
-        // Update state to reflect saved chat
-        const updatedState = {
-          ...state,
-          currentChat: {
-            id: chatData.id,
-            name: chatData.name,
-            isSaved: true,
-            messageCount: chatData.messageCount,
-            lastUpdated: new Date(chatData.updatedAt)
-          }
-        };
-
-        // Refresh chat history
-        const chats = await listChats(state.worldName);
-        updatedState.chatHistory = {
-          ...state.chatHistory,
-          chats: chats || []
-        };
-
-        return updatedState;
-      } catch (error) {
-        console.error('Failed to auto-save chat:', error);
-        return state; // Return original state on error
-      }
-    },
-
     // Handler for loading a chat from history
     'load-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
       try {

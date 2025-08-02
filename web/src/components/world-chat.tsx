@@ -89,14 +89,6 @@ export default function WorldChat(props: WorldChatProps) {
       msg.sender !== 'system' &&
       msg.type !== 'user'
     );
-    
-    // If this is the first agent message, trigger auto-save
-    if (agentMessages.length === 1) {
-      // Use setTimeout to avoid calling during render
-      setTimeout(() => {
-        app.run('auto-save-chat');
-      }, 100);
-    }
   }
 
   // Helper function to determine if a message has sender/agent mismatch
