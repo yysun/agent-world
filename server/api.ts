@@ -114,6 +114,37 @@ const AgentUpdateSchema = z.object({
 
 const router = express.Router();
 
+// POST /worlds/:worldName/agents - Create new agent in world
+router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const validation = AgentCreateSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+    const agentData = validation.data;
+    const world = await getWorldOrError(res, worldName);
+    if (!world) return;
+    // Check for duplicate agent name
+    const isUnique = await isAgentNameUnique(world, agentData.name);
+    if (!isUnique) {
+      sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
+      return;
+    }
+    // Create agent in world
+    const createdAgent = await world.createAgent(agentData);
+    if (!createdAgent) {
+      sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
+      return;
+    }
+    res.status(201).json(createdAgent);
+  } catch (error) {
+    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
+  }
+});
+
 // GET /worlds/:worldName - Get specific world with agents
 router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
   try {
