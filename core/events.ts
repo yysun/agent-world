@@ -205,68 +205,182 @@ function generateChatTitleFromWorldMessages(world: World): string {
 }
 
 /**
- * Handle automatic chat title generation and persistence
- * Implements core requirement for auto-title generation and persistence
+ * Handle chat session messages based on sender type
+ * Implements new chat session logic:
+ * - Human messages: update chat title
+ * - Agent messages: save the chat
  */
-async function handleAutoTitleAndPersistence(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+async function handleChatSessionMessage(world: World, messageEvent: WorldMessageEvent): Promise<void> {
   try {
-    // Check if this is the first agent message by counting total agent messages
-    let totalAgentMessages = 0;
-    for (const [, agent] of world.agents) {
-      if (agent.memory && Array.isArray(agent.memory)) {
-        totalAgentMessages += agent.memory.filter(msg => msg.role === 'assistant').length;
-      }
-    }
+    const { sender } = messageEvent;
+    const isHumanMessage = sender === 'HUMAN' || sender === 'human';
+    const isAgentMessage = sender !== 'HUMAN' && sender !== 'human' && sender !== 'system' && sender !== 'world';
 
-    // Only auto-save on the first agent message
-    if (totalAgentMessages === 1) {
-      // Generate title from world messages
-      const title = generateChatTitleFromWorldMessages(world);
-
-      // Create chat with generated title and current world state
-      const chatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      // Create chat data with snapshot
-      const chatData: ChatData = {
-        id: chatId,
-        worldId: world.id,
-        name: title,
-        description: `Auto-saved chat: ${title}`,
-        messageCount: totalAgentMessages,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        tags: ['auto-saved']
-      };
-
-      // Save the chat
-      await world.storage.saveChatData(world.id, chatData);
-
-      logger.debug('Auto-saved chat with generated title', {
-        worldId: world.id,
-        chatId,
-        title,
-        messageCount: totalAgentMessages
-      });
-
-      // Emit SSE event to notify frontend about new chat
-      publishSSE(world, {
-        agentName: 'system',
-        type: 'chat-created',
-        content: JSON.stringify({ chatId, title }),
-        messageId: generateId()
-      });
+    if (isHumanMessage) {
+      // Human message should update the chat title
+      await updateChatTitle(world, messageEvent);
+    } else if (isAgentMessage) {
+      // Agent message should save the chat
+      await saveChatState(world, messageEvent);
     }
   } catch (error) {
-    logger.warn('Auto-title and persistence failed', {
+    logger.warn('Chat session message handling failed', {
       worldId: world.id,
+      currentChatId: world.currentChatId,
       error: error instanceof Error ? error.message : error
     });
   }
 }
 
 /**
+ * Update chat title based on human message content
+ */
+async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+  if (!world.currentChatId) return;
+
+  try {
+    // Generate title from the human message content
+    const title = generateTitleFromContent(messageEvent.content);
+    
+    // Update the chat with new title
+    const updatedChat = await world.storage.updateChatData(world.id, world.currentChatId, {
+      name: title,
+      messageCount: await getCurrentMessageCount(world)
+    });
+
+    if (updatedChat) {
+      logger.debug('Updated chat title from human message', {
+        worldId: world.id,
+        chatId: world.currentChatId,
+        newTitle: title
+      });
+
+      // Publish chat-updated system message to frontend
+      publishSSE(world, {
+        agentName: 'system',
+        type: 'chat-updated',
+        content: JSON.stringify({ 
+          chatId: world.currentChatId, 
+          title: title,
+          action: 'title-updated'
+        }),
+        messageId: generateId()
+      });
+    }
+  } catch (error) {
+    logger.warn('Failed to update chat title', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+}
+
+/**
+ * Save current chat state when agent responds
+ */
+async function saveChatState(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+  if (!world.currentChatId) return;
+
+  try {
+    // Create world chat snapshot
+    const worldChat = await world.createWorldChat();
+    
+    // Save the complete chat state
+    await world.storage.saveWorldChat(world.id, world.currentChatId, worldChat);
+    
+    // Update chat metadata
+    const messageCount = await getCurrentMessageCount(world);
+    await world.storage.updateChatData(world.id, world.currentChatId, {
+      messageCount: messageCount
+    });
+
+    logger.debug('Saved chat state from agent message', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      agentSender: messageEvent.sender,
+      messageCount: messageCount
+    });
+
+    // Publish chat-updated system message to frontend
+    publishSSE(world, {
+      agentName: 'system',
+      type: 'chat-updated',
+      content: JSON.stringify({ 
+        chatId: world.currentChatId,
+        messageCount: messageCount,
+        action: 'state-saved'
+      }),
+      messageId: generateId()
+    });
+  } catch (error) {
+    logger.warn('Failed to save chat state', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+}
+
+/**
+ * Generate a title from message content (simplified version)
+ */
+function generateTitleFromContent(content: string): string {
+  if (!content || content.trim().length === 0) {
+    return 'New Chat';
+  }
+
+  // Clean and truncate content for title
+  let title = content.trim()
+    .replace(/^(Hello|Hi|Hey)[,!.]?\s*/i, '')
+    .replace(/^I\s+(am|'m)\s+/i, '')
+    .replace(/^(Let me|I'll|I will)\s+/i, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove bold markdown
+    .replace(/\*([^*]+)\*/g, '$1') // Remove italic markdown
+    .replace(/[#]+\s*/, '') // Remove headers
+    .trim();
+
+  // Split into words and take first 8
+  const words = title.split(/\s+/).slice(0, 8);
+  title = words.join(' ');
+
+  // If too long, try to find a natural break point
+  if (title.length > 50) {
+    const sentences = title.split(/[.!?]/);
+    if (sentences[0] && sentences[0].length <= 50) {
+      title = sentences[0].trim();
+    } else {
+      title = words.slice(0, 5).join(' ');
+    }
+  }
+
+  // Clean up ending punctuation if it's mid-sentence
+  title = title.replace(/[,;:]$/, '');
+
+  // Add ellipsis if we truncated
+  if (words.length > 5 || content.split(/\s+/).length > words.length) {
+    title += '...';
+  }
+
+  return title || 'New Chat';
+}
+
+/**
+ * Get current total message count across all agents
+ */
+async function getCurrentMessageCount(world: World): Promise<number> {
+  let totalMessages = 0;
+  for (const [, agent] of world.agents) {
+    if (agent.memory && Array.isArray(agent.memory)) {
+      totalMessages += agent.memory.length;
+    }
+  }
+  return totalMessages;
+}
+
+/**
  * Message publishing using World.eventEmitter
- * Now includes automatic chat title generation and persistence when new messages are published
+ * Now includes chat session management based on currentChatId state
  */
 export function publishMessage(world: World, content: string, sender: string): void {
   const messageEvent: WorldMessageEvent = {
@@ -279,21 +393,20 @@ export function publishMessage(world: World, content: string, sender: string): v
   // Emit the message event first
   world.eventEmitter.emit('message', messageEvent);
 
-  // Automatically handle chat title generation and persistence for agent messages
-  // This follows the requirement: "When new messages are published to the event emitter for a world, 
-  // automatically generate a chat title and persist the world chat"
-  if (sender !== 'HUMAN' && sender !== 'human' && sender !== 'system' && sender !== 'world') {
-    // This is an agent message - trigger auto-save with title generation
+  // Handle chat session mode based on currentChatId
+  if (world.currentChatId) {
+    // Session mode is ON - handle different sender types
     setTimeout(async () => {
       try {
-        await handleAutoTitleAndPersistence(world, messageEvent);
+        await handleChatSessionMessage(world, messageEvent);
       } catch (error) {
-        logger.debug('Auto-title and persistence failed', {
+        logger.debug('Chat session message handling failed', {
           error: error instanceof Error ? error.message : error
         });
       }
     }, 100); // Small delay to allow message processing to complete
   }
+  // When currentChatId is null, session mode is OFF - no automatic chat operations
 }
 
 /**

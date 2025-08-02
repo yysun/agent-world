@@ -48,7 +48,9 @@ import {
   handleMessage,
   handleConnectionStatus,
   handleError,
-  handleComplete
+  handleComplete,
+  handleChatCreated,
+  handleChatUpdated
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent } from '../types';
 import toKebabCase from '../utils/toKebabCase';
@@ -281,6 +283,12 @@ export const worldUpdateHandlers = {
   },
   'handleComplete': (state: WorldComponentState, data: any): WorldComponentState => {
     return handleComplete(state as any, data) as WorldComponentState;
+  },
+  'handleChatCreated': (state: WorldComponentState, data: any): WorldComponentState => {
+    return handleChatCreated(state as any, data) as WorldComponentState;
+  },
+  'handleChatUpdated': (state: WorldComponentState, data: any): WorldComponentState => {
+    return handleChatUpdated(state as any, data) as WorldComponentState;
   },
 
   // Agent Message Clearing Handlers
@@ -794,6 +802,29 @@ export const worldUpdateHandlers = {
         loading: false,
         error: error.message || 'Failed to delete chat'
       };
+    }
+  },
+
+  // Reload world chats (triggered by SSE events)
+  'reloadWorldChats': async function* (state: WorldComponentState, data: { worldName?: string }): AsyncGenerator<WorldComponentState> {
+    try {
+      // Only reload if this event is for the current world
+      if (data.worldName && data.worldName !== state.worldName) {
+        return state;
+      }
+
+      // Refresh world data to get updated chat list
+      const refreshedWorld = await api.getWorld(state.worldName);
+      
+      if (refreshedWorld) {
+        yield {
+          ...state,
+          world: refreshedWorld
+        };
+      }
+    } catch (error: any) {
+      // Silently handle errors - don't disrupt user experience for background updates
+      console.warn('Failed to reload world chats:', error.message);
     }
   }
 };

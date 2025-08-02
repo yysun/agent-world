@@ -39,7 +39,7 @@ interface SSEBaseData {
 }
 
 interface SSEStreamEvent {
-  type: 'start' | 'chunk' | 'end' | 'error';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'chat-created' | 'chat-updated';
   messageId?: string;
   sender?: string;
   content?: string;
@@ -136,7 +136,7 @@ const handleSSEData = (data: SSEData): void => {
 };
 
 /**
- * Handle streaming SSE events (start, chunk, end, error)
+ * Handle streaming SSE events (start, chunk, end, error, chat-created, chat-updated)
  */
 const handleStreamingEvent = (data: SSEStreamingData): void => {
   const eventData = data.data;
@@ -222,6 +222,22 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
       // Clean up streaming state
       streamingState.activeMessages.delete(messageId);
+      break;
+
+    case 'chat-created':
+      // Handle chat creation event
+      publishEvent('handleChatCreated', {
+        worldName: eventData.worldName || streamingState.currentWorldName,
+        chatData: eventData.content ? JSON.parse(eventData.content) : {}
+      });
+      break;
+
+    case 'chat-updated':
+      // Handle chat update event
+      publishEvent('handleChatUpdated', {
+        worldName: eventData.worldName || streamingState.currentWorldName,
+        chatData: eventData.content ? JSON.parse(eventData.content) : {}
+      });
       break;
   }
 };
@@ -535,4 +551,30 @@ export const handleComplete = <T extends SSEComponentState>(state: T, payload: a
     isSending: false,
     isWaiting: false
   };
+};
+
+// Handle chat created events
+export const handleChatCreated = <T extends SSEComponentState>(state: T, data: { worldName?: string; chatData: any }): T => {
+  // Reload world chats when a new chat is created
+  if (isWorldComponentState(state) && data.worldName === state.worldName) {
+    // Trigger reload of world chats
+    setTimeout(() => {
+      publishEvent('reloadWorldChats', { worldName: data.worldName });
+    }, 100);
+  }
+  
+  return state;
+};
+
+// Handle chat updated events
+export const handleChatUpdated = <T extends SSEComponentState>(state: T, data: { worldName?: string; chatData: any }): T => {
+  // Reload world chats when a chat is updated
+  if (isWorldComponentState(state) && data.worldName === state.worldName) {
+    // Trigger reload of world chats
+    setTimeout(() => {
+      publishEvent('reloadWorldChats', { worldName: data.worldName });
+    }, 100);
+  }
+  
+  return state;
 };
