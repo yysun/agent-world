@@ -1725,6 +1725,12 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   };
 
   await storageWrappers!.saveChatData(worldId, chatData);
+  
+  // Save the snapshot data separately if it exists
+  if (worldChat) {
+    await storageWrappers!.saveWorldChat(worldId, chatId, worldChat);
+  }
+  
   return chatData;
 }
 
