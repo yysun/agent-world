@@ -557,7 +557,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'chat-created';
   content?: string;
   error?: string;
   messageId: string;

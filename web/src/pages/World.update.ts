@@ -298,6 +298,14 @@ export const worldUpdateHandlers = {
   'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
     const baseState = handleMessage(state as any, data) as WorldComponentState;
 
+    // Handle special SSE events for chat management
+    if (data?.data?.type === 'chat-created') {
+      // Chat was auto-created by core - refresh chat history
+      setTimeout(() => {
+        app.run('chat-history-refresh');
+      }, 100);
+    }
+
     // SIMPLIFIED: No session storage updates needed anymore
     return baseState;
   },
@@ -442,15 +450,16 @@ export const worldUpdateHandlers = {
 
   // Toggle between settings and chat history sidebar
   'toggle-settings-chat-history': (state: WorldComponentState): WorldComponentState => {
-    let nextTarget: 'world' | 'chat';
     if (state.selectedSettingsTarget !== 'world') {
-      nextTarget = 'world';
+      // Switch to world settings
       return {
         ...state,
-        selectedSettingsTarget: nextTarget
+        selectedSettingsTarget: 'world'
       };
     } else {
-      app.run('select-chat-history')
+      // Switch to chat history - trigger async handler
+      app.run('select-chat-history');
+      return state; // Return current state, async handler will update it
     }
   },
 
