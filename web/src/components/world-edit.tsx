@@ -219,8 +219,8 @@ export default class WorldEdit extends Component<WorldEditState> {
             {isDeleteMode ? (
               // Delete confirmation view
               <div className="delete-confirmation">
-                <p style="font-size: 1rem;">Are you sure you want to delete <span style="font-size: 1.2rem;">"{state.world.name}"</span>?</p>
-                <p style="font-size: 1rem;">This action cannot be undone and will delete all agents and messages in this world.</p>
+                <p className="delete-confirmation-text">Are you sure you want to delete <span className="delete-confirmation-name">"{state.world.name}"</span>?</p>
+                <p className="delete-confirmation-text">This action cannot be undone and will delete all agents and messages in this world.</p>
               </div>
             ) : (
               // Form view for create and edit modes

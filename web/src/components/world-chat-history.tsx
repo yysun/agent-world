@@ -89,10 +89,10 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
         <div className="modal-overlay" $onclick="chat-history-hide-modals">
           <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
             <h3>Delete Chat</h3>
-            <p>
-              Are you sure you want to delete chat "{chatHistory.selectedChat.name}"?
+            <p className="delete-confirmation-text">
+              Are you sure you want to delete chat <span className="delete-confirmation-name">"{chatHistory.selectedChat.name}"</span>?
             </p>
-            <p className="warning">
+            <p className="warning delete-confirmation-warning">
               ⚠️ This action cannot be undone.
             </p>
             <div className="form-actions">

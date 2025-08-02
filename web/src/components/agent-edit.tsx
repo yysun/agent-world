@@ -236,8 +236,8 @@ export default class AgentEdit extends Component<AgentEditState> {
             {isDeleteMode ? (
               // Delete confirmation view
               <div className="delete-confirmation">
-                <p style="font-size: 1rem;">Are you sure you want to delete <span style="font-size: 1.2rem;">"{state.agent.name}"</span>?</p>
-                <p style="font-size: 1rem;">This action cannot be undone.</p>
+                <p className="delete-confirmation-text">Are you sure you want to delete <span className="delete-confirmation-name">"{state.agent.name}"</span>?</p>
+                <p className="delete-confirmation-text">This action cannot be undone.</p>
               </div>
             ) : (
               // Form view for create and edit modes

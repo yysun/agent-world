@@ -1961,7 +1961,7 @@ legend {
   border-radius: 0.5rem;
   padding: 1.5rem;
   min-width: 400px;
-  max-width: 90vw;
+  max-width: 900px;
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
@@ -2018,6 +2018,19 @@ legend {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Delete confirmation text styles */
+.delete-confirmation-text {
+  font-size: 1rem;
+}
+
+.delete-confirmation-name {
+  font-size: 1.2rem;
+}
+
+.warning.delete-confirmation-warning {
+  font-size: 1rem;
 }
 
 .btn-danger {
