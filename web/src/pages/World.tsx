@@ -218,6 +218,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <WorldChatHistory
                 worldName={state.worldName}
                 chatHistory={state.chatHistory}
+                world={state.world}
               />
             ) : (
               <WorldSettings

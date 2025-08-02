@@ -279,10 +279,10 @@ export const worldUpdateHandlers = {
     const baseState = handleMessage(state as any, data) as WorldComponentState;
 
     // Handle special SSE events for chat management
-    if (data?.data?.type === 'chat-created') {
-      // Chat was auto-created by core - refresh chat history
+    if (data?.data?.type === 'chat-created' || data?.data?.type === 'chat-updated') {
+      // Chat was auto-created or updated by core - refresh world and chat history
       setTimeout(() => {
-        app.run('chat-history-refresh');
+        app.run('refresh-world-and-chat-history');
       }, 100);
     }
 
@@ -473,6 +473,28 @@ export const worldUpdateHandlers = {
           loading: false,
           error: error.message || 'Failed to refresh chat history'
         }
+      };
+    }
+  },
+
+  // Refresh both world and chat history (used when chat titles are updated)
+  'refresh-world-and-chat-history': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    try {
+      const world = await api.getWorld(state.worldName);
+      return {
+        ...state,
+        world,
+        chatHistory: {
+          ...state.chatHistory,
+          chats: world.chats || [],
+          loading: false,
+          error: null
+        }
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error.message || 'Failed to refresh world and chat history'
       };
     }
   },
