@@ -121,16 +121,7 @@ export interface Chat {
   tags?: string[];
 }
 
-// Chat History State Management
-export interface ChatHistoryState {
-  isOpen: boolean;
-  chats: Chat[];
-  loading: boolean;
-  error: string | null;
-  selectedChat: Chat | null;
-  showDeleteConfirm: boolean;
-  showLoadConfirm: boolean;
-}
+
 
 // Current Chat Session State
 export interface CurrentChatState {
@@ -206,7 +197,15 @@ export interface WorldComponentState extends SSEComponentState {
   selectedWorldForEdit: World | null;
 
   // Chat history state (currentChat now derived from world.currentChatId)
-  chatHistory: ChatHistoryState;
+  chatHistory: {
+    isOpen: boolean;
+    chats: Chat[];
+    loading: boolean;
+    error: string | null;
+    selectedChat: Chat | null;
+    showDeleteConfirm: boolean;
+    showLoadConfirm: boolean;
+  };
 
   // Additional missing properties from SSE state
   connectionStatus: string;
@@ -362,15 +361,7 @@ export const DEFAULT_WORLD_FORM_DATA: WorldFormData = {
   chatLLMModel: 'llama3.2:3b'
 };
 
-export const DEFAULT_CHAT_HISTORY_STATE: ChatHistoryState = {
-  isOpen: false,
-  chats: [],
-  loading: false,
-  error: null,
-  selectedChat: null,
-  showDeleteConfirm: false,
-  showLoadConfirm: false
-};
+
 
 // Export commonly used type aliases for backward compatibility
 export type WorldAgent = Agent;

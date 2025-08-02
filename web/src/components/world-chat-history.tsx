@@ -28,11 +28,19 @@
  */
 
 import { app } from 'apprun';
-import type { ChatHistoryState, World } from '../types';
+import type { World, Chat } from '../types';
 
 export interface WorldChatHistoryProps {
   worldName: string;
-  chatHistory: ChatHistoryState;
+  chatHistory: {
+    isOpen: boolean;
+    chats: Chat[];
+    loading: boolean;
+    error: string | null;
+    selectedChat: Chat | null;
+    showDeleteConfirm: boolean;
+    showLoadConfirm: boolean;
+  };
   world: World | null;
 }
 

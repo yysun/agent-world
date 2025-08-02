@@ -32,7 +32,6 @@
 
 import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent } from '../types';
-import { DEFAULT_CHAT_HISTORY_STATE } from '../types';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import WorldChatHistory from '../components/world-chat-history';
@@ -65,7 +64,15 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false,
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
-      chatHistory: { ...DEFAULT_CHAT_HISTORY_STATE },
+      chatHistory: {
+        isOpen: false,
+        chats: [],
+        loading: false,
+        error: null,
+        selectedChat: null,
+        showDeleteConfirm: false,
+        showLoadConfirm: false
+      },
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
