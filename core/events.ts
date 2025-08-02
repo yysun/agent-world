@@ -259,16 +259,12 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
       });
 
       // Publish chat-updated system message to frontend
-      publishSSE(world, {
-        agentName: 'system',
-        type: 'chat-updated' as const,
-        content: JSON.stringify({
-          chatId: world.currentChatId,
-          title: title,
-          action: 'title-updated'
-        }),
-        messageId: generateId()
-      });
+      publishMessage(world, JSON.stringify({
+        type: 'chat-updated',
+        chatId: world.currentChatId,
+        title: title,
+        action: 'title-updated'
+      }), 'system');
     }
   } catch (error) {
     logger.warn('Failed to update chat title', {
@@ -306,16 +302,12 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
     });
 
     // Publish chat-updated system message to frontend
-    publishSSE(world, {
-      agentName: 'system',
+    publishMessage(world, JSON.stringify({
       type: 'chat-updated',
-      content: JSON.stringify({
-        chatId: world.currentChatId,
-        messageCount: messageCount,
-        action: 'state-saved'
-      }),
-      messageId: generateId()
-    });
+      chatId: world.currentChatId,
+      messageCount: messageCount,
+      action: 'state-saved'
+    }), 'system');
   } catch (error) {
     logger.warn('Failed to save chat state', {
       worldId: world.id,

@@ -181,14 +181,14 @@ describe('Chat Session Logic', () => {
         })
       );
 
-      // Verify SSE event was emitted through eventEmitter
+      // Verify system message was emitted through eventEmitter
       expect(eventEmitterSpy).toHaveBeenCalledWith(
-        'sse',
+        'message',
         expect.objectContaining({
-          agentName: 'system',
-          type: 'chat-updated',
-          content: expect.stringMatching(/"action":"title-updated"/),
-          messageId: expect.any(String)
+          sender: 'system',
+          content: expect.stringMatching(/"type":"chat-updated"/),
+          messageId: expect.any(String),
+          timestamp: expect.any(Date)
         })
       );
     });
@@ -221,14 +221,14 @@ describe('Chat Session Logic', () => {
         })
       );
 
-      // Verify SSE event was emitted through eventEmitter
+      // Verify system message was emitted through eventEmitter
       expect(eventEmitterSpy).toHaveBeenCalledWith(
-        'sse',
+        'message',
         expect.objectContaining({
-          agentName: 'system',
-          type: 'chat-updated',
-          content: expect.stringMatching(/"action":"state-saved"/),
-          messageId: expect.any(String)
+          sender: 'system',
+          content: expect.stringMatching(/"type":"chat-updated"/),
+          messageId: expect.any(String),
+          timestamp: expect.any(Date)
         })
       );
     });
@@ -269,12 +269,12 @@ describe('Chat Session Logic', () => {
       expect(world.storage.updateChatData).toHaveBeenCalled(); // For human message title update
       expect(world.storage.saveWorldChat).toHaveBeenCalled(); // For agent message state save
 
-      // Verify SSE events were emitted through eventEmitter
+      // Verify system messages were emitted through eventEmitter
       expect(eventEmitterSpy).toHaveBeenCalledWith(
-        'sse',
+        'message',
         expect.objectContaining({
-          agentName: 'system',
-          type: 'chat-updated'
+          sender: 'system',
+          content: expect.stringMatching(/"type":"chat-updated"/)
         })
       );
     });
