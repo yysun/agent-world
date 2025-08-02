@@ -51,16 +51,19 @@
 // Export all core classes
 export { Agent } from './Agent.js';
 export { AgentManager } from './AgentManager.js';
+export { ChatManager } from './ChatManager.js';
 export { World } from './World.js';
 
 // Export configuration interfaces
 export type { AgentConfig, AgentMetrics } from './Agent.js';
 export type { AgentManagerConfig, AgentManagerMetrics, BatchResult } from './AgentManager.js';
+export type { ChatManagerConfig, ChatManagerMetrics } from './ChatManager.js';
 export type { WorldConfig, WorldMetrics } from './World.js';
 
 // Import for factory methods
 import { Agent, AgentConfig } from './Agent.js';
 import { AgentManager, AgentManagerConfig } from './AgentManager.js';
+import { ChatManager, ChatManagerConfig } from './ChatManager.js';
 import { World, WorldConfig } from './World.js';
 import type { BaseStorageManager } from '../storage/BaseStorageManager.js';
 import type { CreateAgentParams, CreateWorldParams, WorldData } from '../types.js';
@@ -76,6 +79,18 @@ export async function createAgent(
   const agent = new Agent(config);
   await agent.initialize(storageManager, worldId);
   return agent;
+}
+
+/**
+ * Factory method to create ChatManager instance
+ */
+export async function createChatManager(
+  storageManager: BaseStorageManager,
+  config: ChatManagerConfig
+): Promise<ChatManager> {
+  const manager = new ChatManager(storageManager, config);
+  await manager.initialize();
+  return manager;
 }
 
 /**
