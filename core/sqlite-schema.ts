@@ -51,7 +51,6 @@ export interface ArchiveMetadata {
   endTime?: string;
   participants: string[];
   tags?: string[];
-  summary?: string;
 }
 
 
@@ -175,7 +174,6 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       name TEXT NOT NULL,
       description TEXT,
       message_count INTEGER DEFAULT 0,
-      summary TEXT,
       tags TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -206,7 +204,6 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       end_time TIMESTAMP,
       participants TEXT,
       tags TEXT,
-      summary TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (agent_id, world_id) REFERENCES agents(id, world_id) ON DELETE CASCADE
     )

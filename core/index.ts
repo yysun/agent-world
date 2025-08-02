@@ -24,7 +24,7 @@
  * 
  * Private APIs (not exported):
  * - Internal agent functions: createAgent (via world instance), updateAgentMemory, loadAgentsIntoWorld, syncWorldAgents, etc.
- * - Internal chat functions: createChat, getChat, createWorldChat, summarizeChat (auto-summarization only)
+ * - Internal chat functions: createChat, getChat, createWorldChat
  * - Internal event functions: subscribeAgentToMessages, processAgentMessage, SSE functions
  * - Parameter types: CreateAgentParams, UpdateAgentParams, etc.
  * - Storage implementation: StorageManager, StorageAPI, storage factory functions

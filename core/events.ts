@@ -235,7 +235,6 @@ async function handleAutoTitleAndPersistence(world: World, messageEvent: WorldMe
         messageCount: totalAgentMessages,
         createdAt: new Date(),
         updatedAt: new Date(),
-        summary: '',
         tags: ['auto-saved']
       };
 

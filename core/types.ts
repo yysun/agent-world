@@ -273,7 +273,6 @@ export interface ChatData {
   createdAt: Date;
   updatedAt: Date;
   messageCount: number;
-  summary?: string; // LLM-generated summary
   tags?: string[];
   chat?: WorldChat; // Full world state when chat was created/saved
 }
@@ -306,7 +305,6 @@ export interface CreateChatParams {
  * Chat update parameters
  */
 export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captureChat'>> {
-  summary?: string;
   tags?: string[];
   messageCount?: number; // For autosave updates
 }
@@ -380,7 +378,6 @@ export interface World {
   listChats(): Promise<ChatData[]>; // Primary chat listing method
   createWorldChat(): Promise<WorldChat>;
   restoreFromWorldChat(chatId: string): Promise<boolean>;
-  summarizeChat(chatId: string): Promise<string>;
 
   // NEW: Enhanced Chat Management Methods
   newChat(): Promise<World>; // Create new chat and set as current - returns updated world

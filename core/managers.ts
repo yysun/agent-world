@@ -858,9 +858,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
       return await restoreWorldChat(world.rootPath, world.id, chatId);
     },
 
-    async summarizeChat(chatId: string): Promise<string> {
-      return await summarizeChat(world.rootPath, world.id, chatId);
-    },
+
 
     // World operation methods
     async save(): Promise<void> {
@@ -1696,7 +1694,10 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   // Generate chat title from messages if possible
   let generatedTitle = params.name;
   if (worldChat && worldChat.messages && worldChat.messages.length > 0) {
-    generatedTitle = generateChatTitleFromMessages(worldChat.messages);
+    // Load world data to get LLM configuration for title generation
+    const worldData = await storageWrappers!.loadWorld(worldId);
+    const world = worldData ? worldDataToWorld(worldData, rootPath) : undefined;
+    generatedTitle = await generateChatTitleFromMessages(worldChat.messages, world);
   }
 
   // Create ChatData entry (metadata)
@@ -1741,26 +1742,91 @@ export async function getChatData(rootPath: string, worldId: string, chatId: str
 // (legacy getChat removed)
 
 /**
- * Generate chat title from message content (extracted from frontend utils)
+ * Generate chat title from message content with LLM support
  */
-function generateChatTitleFromMessages(messages: AgentMessage[], maxLength: number = 50): string {
+async function generateChatTitleFromMessages(messages: AgentMessage[], world?: World, maxLength: number = 50): Promise<string> {
   if (!messages || messages.length === 0) {
     return 'New Chat';
   }
 
-  // Find first substantive user message
-  const userMessage = messages.find(msg =>
+  // Try LLM-based title generation if world has LLM provider configured
+  if (world && world.chatLLMProvider && world.chatLLMModel) {
+    try {
+      // Get last 10 human messages for title generation
+      const humanMessages = messages
+        .filter(msg => msg.role === 'user' && msg.content && msg.content.trim().length > 0)
+        .slice(-10);
+
+      if (humanMessages.length > 0) {
+        const titlePrompt = `Generate a concise, informative title for this chat conversation. The title should be descriptive but brief.
+
+Recent messages:
+${humanMessages.map(msg => `User: ${msg.content}`).join('\n')}
+
+Generate only the title, no quotes or explanations:`;
+
+        const titleMessages: AgentMessage[] = [
+          { role: 'user', content: titlePrompt, createdAt: new Date() }
+        ];
+
+        // Create a temporary agent configuration for title generation
+        const tempAgent: any = {
+          id: 'chat-title-generator',
+          name: 'Chat Title Generator',
+          type: 'title-generator',
+          provider: world.chatLLMProvider,
+          model: world.chatLLMModel,
+          systemPrompt: 'You are a helpful assistant that creates concise, informative titles for chat conversations.',
+          temperature: 0.8,
+          maxTokens: 50,
+          memory: [],
+          llmCallCount: 0
+        };
+
+        const generatedTitle = await llmManager.generateAgentResponse(world, tempAgent, titleMessages);
+        
+        // Clean up the generated title
+        let title = generatedTitle.trim().replace(/^["']|["']$/g, ''); // Remove quotes
+        title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
+        title = title.replace(/\s+/g, ' '); // Normalize whitespace
+        
+        // Truncate if too long
+        if (title.length > maxLength) {
+          title = title.substring(0, maxLength - 3) + '...';
+        }
+        
+        if (title && title.length > 0) {
+          return title;
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to generate LLM title, using fallback', { 
+        error: error instanceof Error ? error.message : error 
+      });
+    }
+  }
+
+  // Fallback: Use first agent message or user message
+  const firstAgentMessage = messages.find(msg =>
+    msg.role === 'assistant' &&
+    msg.content &&
+    msg.content.trim().length > 0
+  );
+
+  const firstUserMessage = messages.find(msg =>
     msg.role === 'user' &&
     msg.content &&
     msg.content.trim().length > 0 &&
     !msg.content.startsWith('@') // Skip mention-only messages
   );
 
-  if (!userMessage) {
+  const messageToUse = firstAgentMessage || firstUserMessage;
+
+  if (!messageToUse) {
     return 'New Chat';
   }
 
-  let title = userMessage.content.trim();
+  let title = messageToUse.content.trim();
 
   // Clean up the title
   title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
@@ -1880,74 +1946,7 @@ export async function restoreWorldChat(
   }
 }
 
-/**
- * Summarize chat using LLM
- */
-export async function summarizeChat(rootPath: string, worldId: string, chatId: string): Promise<string> {
-  // Ensure modules are initialized
-  await moduleInitialization;
 
-  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
-  if (!chatData || !chatData.chat) {
-    throw new Error('Chat or content not found');
-  }
-
-  const worldData = await storageWrappers!.loadWorld(worldId);
-  if (!worldData) {
-    throw new Error(`World ${worldId} not found`);
-  }
-
-  // Try to use world's configured LLM provider for summarization
-  if (worldData.chatLLMProvider && worldData.chatLLMModel) {
-    try {
-      // Create a temporary world object for LLM operations
-      const tempWorld = worldDataToWorld(worldData, rootPath);
-
-      // Prepare messages for summarization
-      const messages = chatData.chat.messages || [];
-      if (messages.length === 0) {
-        return 'No messages to summarize.';
-      }
-
-      const summaryPrompt = `Please provide a concise title of this conversation between agents and users. 
-
-Conversation (${messages.length} messages):
-${messages.map((m: any) => `${m.sender || m.role}: ${m.content}`).join('\n\n')}
-
-Summary:`;
-
-      const summaryMessages: AgentMessage[] = [
-        { role: 'user', content: summaryPrompt, createdAt: new Date() }
-      ];
-
-      // Create a temporary agent configuration for summarization
-      const tempAgent: any = {
-        id: 'chat-summarizer',
-        name: 'Chat Summarizer',
-        type: 'summarizer',
-        provider: worldData.chatLLMProvider,
-        model: worldData.chatLLMModel,
-        systemPrompt: 'You are a helpful assistant that creates concise, informative summaries of conversations.',
-        temperature: 0.3,
-        maxTokens: 500,
-        memory: [],
-        llmCallCount: 0
-      };
-
-      console.log('Generated summary messages:', summaryMessages);
-
-      const summary = await llmManager.generateAgentResponse(tempWorld, tempAgent, summaryMessages);
-
-      // Update chat with summary
-      await storageWrappers!.updateChatData(worldId, chatId, { summary });
-
-      return summary;
-    } catch (error) {
-      logger.warn('Failed to generate LLM summary, using fallback', { error: error instanceof Error ? error.message : error });
-    }
-  }
-  return `Chat with ${chatId}`;
-}
 
 // ========================
 // WORLD EXPORT
