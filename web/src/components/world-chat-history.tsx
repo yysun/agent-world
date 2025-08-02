@@ -33,12 +33,11 @@ import type { World, Chat } from '../types';
 export interface WorldChatHistoryProps {
   worldName: string;
   world: World | null;
-  selectedChatForAction: Chat | null;
-  showDeleteChatConfirm: boolean;
+  chatToDelete: Chat | null;
 }
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
-  const { worldName, world, selectedChatForAction, showDeleteChatConfirm } = props;
+  const { worldName, world, chatToDelete } = props;
 
   // Check if agents exist to enable/disable New Chat button
   const hasAgents = world && world.agents && world.agents.length > 0;
@@ -93,12 +92,12 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
       </div>
 
       {/* Delete Confirmation Modal */}
-      {showDeleteChatConfirm && selectedChatForAction && (
+      {chatToDelete && (
         <div className="modal-overlay" $onclick="chat-history-hide-modals">
           <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
             <h3>Delete Chat</h3>
             <p className="delete-confirmation-text">
-              Are you sure you want to delete chat <span className="delete-confirmation-name">"{selectedChatForAction.name}"</span>?
+              Are you sure you want to delete chat <span className="delete-confirmation-name">"{chatToDelete.name}"</span>?
             </p>
             <p className="warning delete-confirmation-warning">
               ⚠️ This action cannot be undone.
@@ -106,7 +105,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
             <div className="form-actions">
               <button
                 className="btn-danger"
-                $onclick={['delete-chat-from-history', selectedChatForAction.id]}
+                $onclick={['delete-chat-from-history', chatToDelete.id]}
               >
                 Delete Chat
               </button>

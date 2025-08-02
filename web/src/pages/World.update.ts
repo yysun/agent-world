@@ -156,8 +156,7 @@ export const worldUpdateHandlers = {
         selectedSettingsTarget: 'chat',
         selectedAgent: null,
         activeAgent: null,
-        selectedChat: null,
-        showDeleteChatConfirm: false
+        chatToDelete: null
       };
 
     } catch (error: any) {
@@ -473,8 +472,7 @@ export const worldUpdateHandlers = {
 
   'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
     ...state,
-    showDeleteChatConfirm: true,
-    selectedChat: chat
+    chatToDelete: chat
   }),
 
   'chat-history-delete-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
@@ -518,8 +516,7 @@ export const worldUpdateHandlers = {
 
   'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState => ({
     ...state,
-    showDeleteChatConfirm: false,
-    selectedChat: null
+    chatToDelete: null
   }),
 
   // Agent deletion handler
@@ -698,8 +695,7 @@ export const worldUpdateHandlers = {
           selectedAgent: null,
           activeAgent: null,
           userInput: '',
-          selectedChat: null,
-          showDeleteChatConfirm: false
+          chatToDelete: null
         };
 
         // Update URL with new chatId
@@ -740,8 +736,7 @@ export const worldUpdateHandlers = {
           activeAgent: null,
           userInput: '',
           error: null,
-          selectedChat: null,
-          showDeleteChatConfirm: false
+          chatToDelete: null
         };
 
         // Update URL with loaded chatId
@@ -789,8 +784,7 @@ export const worldUpdateHandlers = {
         ...state,
         world, // Updated world with potentially cleared currentChatId
         loading: false,
-        selectedChat: null,
-        showDeleteChatConfirm: false,
+        chatToDelete: null,
         messages: shouldClearMessages ? [] : state.messages
       };
 
