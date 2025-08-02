@@ -32,7 +32,6 @@
 
 import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent } from '../types';
-import { DEFAULT_CHAT_HISTORY_STATE, DEFAULT_CURRENT_CHAT_STATE } from '../types';
 import WorldChat from '../components/world-chat';
 import WorldSettings from '../components/world-settings';
 import WorldChatHistory from '../components/world-chat-history';
@@ -40,7 +39,7 @@ import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
 import api from '../api';
-import { generateChatTitle, shouldAutoSaveChat } from '../utils/chatUtils';
+import { getCurrentChatState } from '../types';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
@@ -65,8 +64,15 @@ export default class WorldComponent extends Component<WorldComponentState> {
       showWorldEdit: false,
       worldEditMode: 'edit',
       selectedWorldForEdit: null,
-      chatHistory: { ...DEFAULT_CHAT_HISTORY_STATE },
-      currentChat: { ...DEFAULT_CURRENT_CHAT_STATE },
+      chatHistory: {
+        isOpen: false,
+        chats: [],
+        loading: false,
+        error: null,
+        selectedChat: null,
+        showDeleteConfirm: false,
+        showLoadConfirm: false
+      },
       connectionStatus: 'disconnected',
       wsError: null,
       needScroll: false
@@ -173,16 +179,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
               </div>
             </div>
 
-            {/* Current Chat Header */}
-            {/* <div className="current-chat-header">
-              <div className="chat-title">
-                <span>{state.currentChat.name}</span>
-                {!state.currentChat.isSaved && (
-                  <span className="unsaved-indicator" title="Unsaved chat">●</span>
-                )}
-              </div>
-            </div> */}
-
             <WorldChat
               worldName={state.worldName}
               messages={state.messages}
@@ -192,7 +188,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
-              currentChat={state.currentChat}
+              currentChat={getCurrentChatState(state.world)}
             />
           </div>
 
@@ -229,6 +225,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <WorldChatHistory
                 worldName={state.worldName}
                 chatHistory={state.chatHistory}
+                world={state.world}
               />
             ) : (
               <WorldSettings
@@ -317,20 +314,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       // Refresh agents list and close modal
       location.reload();
     },
-
-    // New Chat functionality handlers
-    'create-new-chat': (state: WorldComponentState): WorldComponentState => ({
-      ...state,
-      messages: [], // Clear messages for new chat
-      currentChat: {
-        id: null,
-        name: 'New Chat',
-        isSaved: false,
-        messageCount: 0,
-        lastUpdated: new Date()
-      },
-      userInput: '' // Clear input - keep current settings target unchanged
-    }),
 
     // Handler for loading a chat from history
     'load-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {

@@ -28,15 +28,27 @@
  */
 
 import { app } from 'apprun';
-import type { ChatHistoryState } from '../types';
+import type { World, Chat } from '../types';
 
 export interface WorldChatHistoryProps {
   worldName: string;
-  chatHistory: ChatHistoryState;
+  chatHistory: {
+    isOpen: boolean;
+    chats: Chat[];
+    loading: boolean;
+    error: string | null;
+    selectedChat: Chat | null;
+    showDeleteConfirm: boolean;
+    showLoadConfirm: boolean;
+  };
+  world: World | null;
 }
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
-  const { worldName, chatHistory } = props;
+  const { worldName, chatHistory, world } = props;
+
+  // Check if agents exist to enable/disable New Chat button
+  const hasAgents = world && world.agents && world.agents.length > 0;
 
   return (
     <fieldset className="settings-fieldset">
@@ -46,7 +58,8 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
         <button
           className="new-chat-btn"
           $onclick="create-new-chat"
-          title="Create new chat session"
+          title={hasAgents ? "Create new chat session" : "Create an agent first to enable new chats"}
+          disabled={!hasAgents}
         >
           ✚ New Chat
         </button>
