@@ -38,7 +38,6 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
-import api from '../api';
 import { getCurrentChatState } from '../types';
 
 export default class WorldComponent extends Component<WorldComponentState> {
@@ -215,9 +214,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
             {state.selectedSettingsTarget === 'chat' ? (
               <WorldChatHistory
-                worldName={state.worldName}
                 world={state.world}
-                chatToDelete={state.chatToDelete}
               />
             ) : (
               <WorldSettings
@@ -246,6 +243,39 @@ export default class WorldComponent extends Component<WorldComponentState> {
             parentComponent={this}
           />
         }
+
+        {/* Chat Delete Confirmation Modal */}
+        {state.chatToDelete && (
+          <div className="modal-overlay" $onclick="chat-history-hide-modals">
+            <div className="modal-content chat-history-modal" onclick={(e: Event) => e.stopPropagation()}>
+              <button
+                className="modal-close-btn"
+                $onclick="chat-history-hide-modals"
+                title="Close"
+              >
+                ×
+              </button>
+              <h3>Delete Chat</h3>
+              <p className="delete-confirmation-text">
+                Are you sure you want to delete chat <span className="delete-confirmation-name">"{state.chatToDelete.name}"</span>?
+              </p>
+              <p className="warning delete-confirmation-warning">
+                ⚠️ This action cannot be undone.
+              </p>
+              <div className="form-actions">
+                <button
+                  className="btn-danger"
+                  $onclick={['delete-chat-from-history', state.chatToDelete.id]}
+                >
+                  Delete Chat
+                </button>
+                <button className="btn-secondary" $onclick="chat-history-hide-modals">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -307,36 +337,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
       location.reload();
     },
 
-    // Handler for loading a chat from history
-    'load-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
-      try {
 
-        await api.setCurrentChat(state.worldName, chatId);
-        const world = await api.getWorld(state.worldName);
-        return { ...state, world }
-      } catch (error) {
-        console.error('Failed to load chat:', error);
-        return {
-          ...state,
-          error: `Failed to load chat: ${error.message}`
-        };
-      }
-    },
 
-    // Handler for deleting a chat
-    'delete-chat-from-history': async (state: WorldComponentState, chatId: string): Promise<WorldComponentState> => {
-      try {
-        await api.deleteChat(state.worldName, chatId);
-        const world = await api.getWorld(state.worldName);
-        return { ...state, world }
-      } catch (error) {
-        console.error('Failed to delete chat:', error);
-        return {
-          ...state,
-          error: `Failed to delete chat: ${error.message}`
-        };
-      }
-    }
+
   };
 }
 

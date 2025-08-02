@@ -8,7 +8,7 @@
  * - Minimal frontend logic - just displays core state
  * - URL routing support for /world/:worldName/:chatId patterns
  * - Chat loading with full world state restoration via core
- * - Chat deletion with proper cleanup
+ * - Chat deletion with proper cleanup and modal management
  * - User message sending with core auto-save integration
  * - SSE event handlers for real-time chat streaming
  * - Agent message count updates and memory consolidation
@@ -26,7 +26,7 @@
  * - world-initialize: Uses core getWorld() with auto-restore
  * - create-new-chat: Uses core getWorldFresh() for fresh start
  * - load-chat-from-history: Uses core chat restoration  
- * - delete-chat-from-history: Removes chat with proper cleanup
+ * - delete-chat-from-history: Removes chat with proper cleanup and modal close
  * - send-message: Simple core publishMessage with auto-save
  * - SSE handlers: Real-time streaming from core events
  *
@@ -35,6 +35,7 @@
  * - Removed session storage utilities and complex frontend logic
  * - Enhanced core functions handle all business logic
  * - Frontend focuses on user interface and event handling
+ * - Fixed modal close issue on 2025-08-02: Removed duplicate handlers in World.tsx
  */
 
 import { app } from 'apprun';
@@ -261,18 +262,25 @@ export const worldUpdateHandlers = {
       activeAgent: null
     };
   },
-  'handleMessage': (state: WorldComponentState, data: any): WorldComponentState => {
+  'handleMessage': async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
     const baseState = handleMessage(state as any, data) as WorldComponentState;
 
     // Handle special SSE events for chat management
     if (data?.data?.type === 'chat-created' || data?.data?.type === 'chat-updated') {
-      // Chat was auto-created or updated by core - refresh world and chat history
-      setTimeout(() => {
-        app.run('refresh-world-and-chat-history');
-      }, 100);
+      const world = await api.getWorld(state.worldName);
+      if (!world) {
+        // Handle case where world is not found
+        return {
+          ...baseState,
+          error: 'World not found'
+        };
+      } else {
+        return {
+          ...baseState,
+          world
+        };
+      }
     }
-
-    // SIMPLIFIED: No session storage updates needed anymore
     return baseState;
   },
   'handleConnectionStatus': (state: WorldComponentState, data: any): WorldComponentState => {
@@ -425,58 +433,7 @@ export const worldUpdateHandlers = {
     }
   },
 
-  // Chat history event handlers
-  'chat-history-refresh': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    const newState = {
-      ...state,
-      loading: true,
-      error: null
-    };
 
-    try {
-      const world = await api.getWorld(state.worldName);
-      return {
-        ...newState,
-        world,
-        loading: false
-      };
-    } catch (error: any) {
-      return {
-        ...newState,
-        loading: false,
-        error: error.message || 'Failed to refresh chat history'
-      };
-    }
-  },
-
-  // Refresh both world and chat history (used when chat titles are updated)
-  'refresh-world-and-chat-history': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    try {
-      const world = await api.getWorld(state.worldName);
-      return {
-        ...state,
-        world,
-        loading: false,
-        error: null
-      };
-    } catch (error: any) {
-      return {
-        ...state,
-        error: error.message || 'Failed to refresh world and chat history'
-      };
-    }
-  },
-
-  'chat-history-show-load-confirm': (state: WorldComponentState, chat: any): WorldComponentState => {
-    // Direct load without confirmation modal
-    app.run('load-chat-from-history', chat.id);
-    return state;
-  },
-
-  'chat-history-load-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    // This handler is no longer needed since we load directly
-    return state;
-  },
 
   'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
     ...state,
@@ -486,40 +443,6 @@ export const worldUpdateHandlers = {
   'chat-history-delete-confirm': async (state: WorldComponentState): Promise<WorldComponentState> => {
     // This handler is no longer needed since we delete directly
     return state;
-  },
-
-  // New simplified delete handler with built-in confirmation
-  'delete-chat-with-confirm': async (state: WorldComponentState, chat: any): Promise<WorldComponentState> => {
-    const confirmed = window.confirm(`Are you sure you want to delete chat "${chat.name}"? This action cannot be undone.`);
-    if (confirmed) {
-      app.run('delete-chat-from-history', chat.id);
-    }
-    return state;
-  },
-
-  'chat-history-summarize': async (state: WorldComponentState, chat: any): Promise<WorldComponentState> => {
-    const newState = {
-      ...state,
-      loading: true,
-      error: null
-    };
-
-    try {
-      // Note: Chat summarization is now handled by core, no separate API call needed
-      const world = await api.getWorld(state.worldName);
-
-      return {
-        ...newState,
-        world,
-        loading: false
-      };
-    } catch (error: any) {
-      return {
-        ...newState,
-        loading: false,
-        error: error.message || 'Failed to summarize chat'
-      };
-    }
   },
 
   'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState => ({
@@ -650,39 +573,6 @@ export const worldUpdateHandlers = {
     }
   },
 
-  // Auto-save chat handler - triggers when conditions are met
-  // Navigate to specific chat
-  'navigate-to-chat': async function* (state: WorldComponentState, worldName: string, chatId: string): AsyncGenerator<WorldComponentState> {
-    try {
-      // Update URL without triggering full reload
-      const newUrl = `/World/${encodeURIComponent(worldName)}/${encodeURIComponent(chatId)}`;
-      window.history.pushState({}, '', newUrl);
-
-      return state; // No state changes needed for navigation
-    } catch (error: any) {
-      return {
-        ...state,
-        error: error.message || 'Navigation failed'
-      };
-    }
-  },
-
-  // Navigate to world (without specific chat)
-  'navigate-to-world': async function* (state: WorldComponentState, worldName: string): AsyncGenerator<WorldComponentState> {
-    try {
-      // Update URL without triggering full reload
-      const newUrl = `/World/${encodeURIComponent(worldName)}`;
-      window.history.pushState({}, '', newUrl);
-
-      return state; // No state changes needed for navigation
-    } catch (error: any) {
-      return {
-        ...state,
-        error: error.message || 'Navigation failed'
-      };
-    }
-  },
-
   // Create new chat - clears all state and starts fresh
   'create-new-chat': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
     try {
@@ -705,9 +595,6 @@ export const worldUpdateHandlers = {
           userInput: '',
           chatToDelete: null
         };
-
-        // Update URL with new chatId
-        app.run('navigate-to-chat', state.worldName, result.chatId);
       } else {
         yield {
           ...state,
@@ -746,9 +633,6 @@ export const worldUpdateHandlers = {
           error: null,
           chatToDelete: null
         };
-
-        // Update URL with loaded chatId
-        app.run('navigate-to-chat', state.worldName, chatId);
       } else {
         yield {
           ...state,
@@ -771,7 +655,8 @@ export const worldUpdateHandlers = {
     try {
       yield {
         ...state,
-        loading: true
+        loading: true,
+        chatToDelete: null
       };
 
       // Delete chat via API
@@ -782,11 +667,6 @@ export const worldUpdateHandlers = {
 
       // If we deleted the current chat, the backend should clear currentChatId
       const shouldClearMessages = world.currentChatId === null || world.currentChatId === chatId;
-
-      if (shouldClearMessages) {
-        // Navigate to world without chat ID
-        app.run('navigate-to-world', state.worldName);
-      }
 
       yield {
         ...state,
@@ -800,6 +680,7 @@ export const worldUpdateHandlers = {
       yield {
         ...state,
         loading: false,
+        chatToDelete: null,
         error: error.message || 'Failed to delete chat'
       };
     }

@@ -1967,6 +1967,19 @@ legend {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
 }
 
+/* Chat history specific modal styles */
+.modal-content.chat-history-modal {
+  max-width: 80vw;
+  position: relative;
+}
+
+.modal-content.chat-history-modal .modal-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1001;
+}
+
 .modal-content h3 {
   margin: 0 0 1rem 0;
   color: var(--text-primary);

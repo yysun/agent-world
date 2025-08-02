@@ -5,46 +5,41 @@
  * - List all chat history entries with details
  * - Create new chat history entries with snapshots
  * - Load and restore world state from chat history
- * - Delete chat history entries with confirmation
+ * - Delete chat history entries with confirmation (modal handled by parent)
  * - Generate summaries using LLM
  * - Real-time updates and error handling
  * 
  * Implementation:
  * - Functional component using AppRun JSX
- * - Props-based state management from parent World component
+ * - Simplified props - only receives world data
  * - AppRun $ directive pattern for event handling
  * - Fieldset layout matching other components
- * - Modal dialogs for create/delete operations
+ * - Delete confirmation modal moved to parent World component
  * - Integration with chat history API endpoints
  * 
  * This component replaces world-settings when chat history is selected
  * and provides full CRUD operations for chat management.
  * 
  * Changes:
- * - Created as standalone chat history management component
- * - Designed to integrate with existing World component architecture
- * - Uses consolidated types from centralized types/index.ts
- * - Follows AppRun component patterns established in the codebase
+ * - Simplified props interface to only include world
+ * - Removed delete confirmation modal (moved to parent World component)
+ * - Cleaned up component to focus on chat list display and basic actions
+ * - Delete confirmation popup now handled by parent component
  */
 
 import { app } from 'apprun';
-import type { World, Chat } from '../types';
+import type { World } from '../types';
 
 export interface WorldChatHistoryProps {
-  worldName: string;
   world: World | null;
-  chatToDelete: Chat | null;
 }
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
-  const { worldName, world, chatToDelete } = props;
+  const { world } = props;
 
   // Check if agents exist to enable/disable New Chat button
   const hasAgents = world && world.agents && world.agents.length > 0;
   const chats = world?.chats || [];
-
-  // Internal state for modal management - will be handled via AppRun events
-  // These will be managed through AppRun state updates rather than props
 
   return (
     <fieldset className="settings-fieldset">
@@ -90,32 +85,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           </ul>
         )}
       </div>
-
-      {/* Delete Confirmation Modal */}
-      {chatToDelete && (
-        <div className="modal-overlay" $onclick="chat-history-hide-modals">
-          <div className="modal-content" onclick={(e: Event) => e.stopPropagation()}>
-            <h3>Delete Chat</h3>
-            <p className="delete-confirmation-text">
-              Are you sure you want to delete chat <span className="delete-confirmation-name">"{chatToDelete.name}"</span>?
-            </p>
-            <p className="warning delete-confirmation-warning">
-              ⚠️ This action cannot be undone.
-            </p>
-            <div className="form-actions">
-              <button
-                className="btn-danger"
-                $onclick={['delete-chat-from-history', chatToDelete.id]}
-              >
-                Delete Chat
-              </button>
-              <button className="btn-secondary" $onclick="chat-history-hide-modals">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </fieldset>
   );
+  // ...existing code...
 }
