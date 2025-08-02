@@ -109,10 +109,6 @@ export interface ChatInfo {
 
 export interface WorldChat extends ChatInfo {
   worldId: string;
-  snapshot?: WorldSnapshot;
-}
-
-export interface WorldSnapshot {
   world: any; // WorldData
   agents: any[]; // AgentData[]
   messages: any[]; // AgentMessage[]

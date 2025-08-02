@@ -377,10 +377,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
       try {
         const chatData = await getChat(state.worldName, chatId);
 
-        if (chatData && chatData.snapshot) {
+        if (chatData && chatData.messages) {
           return {
             ...state,
-            messages: chatData.snapshot.messages || [],
+            messages: chatData.messages || [],
             currentChat: {
               id: chatData.id,
               name: chatData.name,

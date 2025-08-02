@@ -518,6 +518,11 @@ function createStorageManager(rootPath: string): StorageManager {
       return storageWrappers!.loadWorldChat(worldId, chatId);
     },
 
+    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
+      await moduleInitialization;
+      return storageWrappers!.loadWorldChatFull(worldId, chatId);
+    },
+
     async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
       await moduleInitialization;
       return storageWrappers!.restoreFromWorldChat(worldId, chat);
@@ -810,6 +815,14 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     async loadChatData(chatId: string): Promise<ChatData | null> {
       return await storageWrappers!.loadChatData(world.id, chatId);
+    },
+
+    async loadChat(chatId: string): Promise<ChatData | null> {
+      return await storageWrappers!.loadChatData(world.id, chatId);
+    },
+
+    async loadChatFull(chatId: string): Promise<WorldChat | null> {
+      return await storageWrappers!.loadWorldChatFull(world.id, chatId);
     },
 
     async updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {

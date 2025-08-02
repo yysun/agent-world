@@ -206,6 +206,15 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
+    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
+      if (!storageInstance) return null;
+      try {
+        return await storageInstance.loadWorldChatFull(worldId, chatId);
+      } catch (err) {
+        throw new Error(`Failed to load full world chat: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+
     async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
       if (!storageInstance) return false;
       try {
@@ -406,6 +415,13 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       }
       return null;
     },
+    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
+      await ensureModulesLoaded();
+      if (worldStorage?.loadWorldChatFull) {
+        return worldStorage.loadWorldChatFull(rootPath, worldId, chatId);
+      }
+      return null;
+    },
     async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
       await ensureModulesLoaded();
       // File storage doesn't support full chat restoration yet
@@ -480,6 +496,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       // Chat operations
       saveWorldChat,
       loadWorldChat,
+      loadWorldChatFull,
       restoreFromWorldChat
     } = await import('./sqlite-storage.js');
     const { initializeSchema } = await import('./sqlite-schema.js');
@@ -509,6 +526,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       // Chat operations
       saveWorldChat: (worldId: string, chatId: string, chat: any) => saveWorldChat(ctx, worldId, chatId, chat),
       loadWorldChat: (worldId: string, chatId: string) => loadWorldChat(ctx, worldId, chatId),
+      loadWorldChatFull: (worldId: string, chatId: string) => loadWorldChatFull(ctx, worldId, chatId),
       restoreFromWorldChat: async (worldId: string, chat: any) => {
         return await restoreFromWorldChat(ctx, worldId, chat);
       },

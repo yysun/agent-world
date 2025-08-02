@@ -45,6 +45,7 @@ jest.mock('../../core/world-storage', () => ({
   listWorldData: jest.fn<any>().mockResolvedValue([]),
   saveWorldChat: jest.fn<any>().mockResolvedValue(undefined),
   loadWorldChat: jest.fn<any>().mockResolvedValue(null),
+  loadWorldChatFull: jest.fn<any>().mockResolvedValue(null),
   deleteWorldChat: jest.fn<any>().mockResolvedValue(true),
   listWorldChats: jest.fn<any>().mockResolvedValue([])
 }));

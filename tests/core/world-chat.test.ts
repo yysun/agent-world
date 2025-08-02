@@ -51,6 +51,7 @@ const fullMockWrappers = (overrides = {}) => ({
   // Chat operations (required by StorageAPI)
   saveWorldChat: jest.fn(),
   loadWorldChat: jest.fn(),
+  loadWorldChatFull: jest.fn(),
   restoreFromWorldChat: jest.fn(),
 
   // Integrity operations (required by StorageAPI)
