@@ -64,6 +64,10 @@ import { configureLLMProvider } from '../core/llm-config.js';
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
 
+// Log class-based architecture status at startup
+import { isClassBasedArchitectureEnabled } from '../core/integration/CompatibilityLayer.js';
+console.log('[AgentWorld] Class-based architecture enabled:', isClassBasedArchitectureEnabled());
+
 // Timer management for prompt restoration
 interface GlobalState {
   promptTimer?: ReturnType<typeof setTimeout>;

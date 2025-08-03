@@ -20,6 +20,10 @@ dotenv.config();
 import open from 'open';
 import { createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
 import { configureLLMProvider } from '../core/llm-config.js';
+import { isClassBasedArchitectureEnabled } from '../core/integration/CompatibilityLayer.js';
+
+// Log class-based architecture status at startup
+console.log('[AgentWorld] Class-based architecture enabled:', isClassBasedArchitectureEnabled());
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
