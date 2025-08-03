@@ -265,6 +265,8 @@ export const worldUpdateHandlers = {
   'handleMessage': async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
     const baseState = handleMessage(state as any, data) as WorldComponentState;
 
+    console.log('Received message:', data);
+
     // Handle special SSE events for chat management
     if (data?.data?.type === 'chat-created' || data?.data?.type === 'chat-updated') {
       const world = await api.getWorld(state.worldName);

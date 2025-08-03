@@ -39,6 +39,7 @@
 import { app, safeHTML } from 'apprun';
 import type { Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
+import { getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 
 // Component Props Interfaces (consolidated from components)
@@ -80,17 +81,6 @@ export default function WorldChat(props: WorldChatProps) {
     currentChat
   } = props;
 
-  // Check if we need to auto-save (this will be called on every render)
-  if (currentChat && !currentChat.isSaved && messages.length > 0) {
-    // Count agent messages (non-human, non-system)
-    const agentMessages = messages.filter(msg => 
-      msg.sender !== 'HUMAN' && 
-      msg.sender !== 'human' && 
-      msg.sender !== 'system' &&
-      msg.type !== 'user'
-    );
-  }
-
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
     const senderLower = toKebabCase(message.sender);
@@ -115,20 +105,14 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             messages
-              // .filter(message => {
-              //   // Always show user messages
-              //   if (message.sender === 'HUMAN' || message.sender === 'human' || message.type === 'user' || message.sender === 'system' || message.sender === 'world') {
-              //     return true;
-              //   }
-              //   if (message.isStreaming === true) {
-              //     return true; // Currently streaming
-              //   }
-              //   // If an agent is selected for settings, filter to show only that agent's messages
-              //   if (selectedAgent?.id && message.fromAgentId !== selectedAgent.id) {
-              //     return false;
-              //   }
-              //   return true;
-              // })
+              .filter(message => {
+                // Use util to determine sender type
+                // Hide system messages
+                if (getSenderType(message.sender) === 'system') {
+                  return false;
+                }
+                return true;
+              })
               .map((message, index) => {
                 // Check if this is a cross-agent message
                 const isCrossAgentMessage = hasSenderAgentMismatch(message);

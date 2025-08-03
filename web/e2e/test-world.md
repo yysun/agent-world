@@ -1,4 +1,4 @@
-## Test World Deletion, Creation, and Agent Creation
+## Test World Deletion, Creation, Agent Creation, and Chat Flow
 - [x] Navigate to http://localhost:8080 using Playwright.
 - [x] Locate "test world" in the world selection list.
 - [x] Click the delete (×) button for "test world."
@@ -11,3 +11,6 @@
 - [x] Enter "a1" as the agent name and create the agent.
 - [x] Wait for the agent to be created and loaded.
 - [x] Type "hi" in the chat message box and click "Send."
+- [x] Click the "✚ New Chat" button.
+- [x] Type "who are you" in the chat message box and click "Send."
+- [x] Click on the "who are you" chat history entry to view the conversation.
