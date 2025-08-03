@@ -710,6 +710,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('SIGINT', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
+      console.log(`\n${boldCyan('Shutting down...')}`);
       clearPromptTimer(globalState);
       if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
