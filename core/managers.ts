@@ -1149,13 +1149,13 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
           chatId: world.currentChatId
         });
 
-        // Publish chat-created system message to frontend
-        events.publishMessage(world, JSON.stringify({
+        // Publish chat-created system event to frontend
+        events.publishEvent(world, 'system', {
           type: 'chat-created',
           chatId: world.currentChatId,
           name: newChatData.name,
           action: 'chat-created'
-        }), 'system');
+        });
 
         // Ensure returned world includes the new chat in chats array
         return world; // Return the complete updated World object
@@ -2387,4 +2387,15 @@ export async function publishMessageWithAutoSave(
  */
 export function publishMessage(world: World, content: string, sender: string): void {
   events.publishMessage(world, content, sender);
+}
+
+/**
+ * Publish event to a specific channel using World.eventEmitter (NEW)
+ * This enables separation of event types: 'system', 'message', 'sse'
+ * @param world - World instance
+ * @param type - Event type/channel ('system', 'message', 'sse')
+ * @param content - Event content (can be string or object)
+ */
+export function publishEvent(world: World, type: string, content: any): void {
+  events.publishEvent(world, type, content);
 }
