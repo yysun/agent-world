@@ -80,59 +80,6 @@ import { createCategoryLogger } from './logger.js';
 const logger = createCategoryLogger('events');
 
 /**
- * Simple world serialization for event publishing
- * Creates a lightweight serialized world object for events
- */
-async function serializeWorldForEvents(world: World): Promise<{
-  id: string;
-  name: string;
-  description?: string;
-  turnLimit: number;
-  chatLLMProvider?: string;
-  chatLLMModel?: string;
-  currentChatId: string | null;
-  agents: any[];
-  chats: any[];
-}> {
-  // Convert agents Map to Array for event data
-  const agentsArray = Array.from(world.agents.values()).map(agent => ({
-    id: agent.id,
-    name: agent.name,
-    type: agent.type,
-    status: agent.status,
-    provider: agent.provider,
-    model: agent.model,
-    temperature: agent.temperature,
-    maxTokens: agent.maxTokens,
-    systemPrompt: agent.systemPrompt,
-    llmCallCount: agent.llmCallCount,
-    lastLLMCall: agent.lastLLMCall,
-    memory: agent.memory || [],
-    createdAt: agent.createdAt,
-    lastActive: agent.lastActive,
-    description: agent.description,
-    // UI-specific properties with defaults
-    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
-    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
-  }));
-
-  // Get chats using the unified listChats() method
-  const chats = await world.listChats();
-
-  return {
-    id: world.id,
-    name: world.name,
-    description: world.description,
-    turnLimit: world.turnLimit,
-    chatLLMProvider: world.chatLLMProvider,
-    chatLLMModel: world.chatLLMModel,
-    currentChatId: world.currentChatId,
-    agents: agentsArray,
-    chats: chats
-  };
-}
-
-/**
  * Auto-save chat history message counts when enabled
  */
 let chatDataAutosaveEnabled = true;
@@ -311,10 +258,10 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
         newTitle: title
       });
 
-      // Publish chat-updated system event to frontend with complete world data
-      const serializedWorld = await serializeWorldForEvents(world);
+      // Publish chat-updated system event to frontend
       publishEvent(world, 'system', {
-        world: serializedWorld,
+        worldId: world.id,
+        chatId: world.currentChatId,
         action: 'title-updated'
       });
     }
@@ -353,10 +300,10 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
       messageCount: messageCount
     });
 
-    // Publish chat-updated system event to frontend with complete world data
-    const serializedWorld = await serializeWorldForEvents(world);
+    // Publish chat-updated system event to frontend
     publishEvent(world, 'system', {
-      world: serializedWorld,
+      worldId: world.id,
+      chatId: world.currentChatId,
       action: 'state-saved'
     });
   } catch (error) {

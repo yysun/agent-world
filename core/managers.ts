@@ -12,7 +12,6 @@
  * - Batch operations for performance optimization
  * - Memory archiving before clearing for data preservation
  * - Chat session management with auto-save and restoration capabilities
- * - World serialization utilities for consistent API responses
  *
  * Chat Session Management:
  * - Integrated into getWorld: Auto-restoration of last active chat with snapshot support
@@ -34,7 +33,6 @@
  * - deleteWorld: Remove world and all associated data
  * - listWorlds: Get all world IDs and basic info
  * - getWorldConfig: Get world configuration without runtime objects (lightweight)
- * - serializeWorld: Convert World object to plain data for API responses
  *
  * Agent Functions:
  * - createAgent: Create new agent with configuration and system prompt
@@ -673,59 +671,6 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
 }
 
 /**
- * Serialize World object for event publishing
- * Converts runtime World object to plain data object suitable for event publishing
- */
-async function serializeWorldForEvents(world: World): Promise<{
-  id: string;
-  name: string;
-  description?: string;
-  turnLimit: number;
-  chatLLMProvider?: string;
-  chatLLMModel?: string;
-  currentChatId: string | null;
-  agents: any[];
-  chats: any[];
-}> {
-  // Convert agents Map to Array for event data
-  const agentsArray = Array.from(world.agents.values()).map(agent => ({
-    id: agent.id,
-    name: agent.name,
-    type: agent.type,
-    status: agent.status,
-    provider: agent.provider,
-    model: agent.model,
-    temperature: agent.temperature,
-    maxTokens: agent.maxTokens,
-    systemPrompt: agent.systemPrompt,
-    llmCallCount: agent.llmCallCount,
-    lastLLMCall: agent.lastLLMCall,
-    memory: agent.memory || [],
-    createdAt: agent.createdAt,
-    lastActive: agent.lastActive,
-    description: agent.description,
-    // UI-specific properties with defaults
-    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
-    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
-  }));
-
-  // Get chats using the unified listChats() method
-  const chats = await world.listChats();
-
-  return {
-    id: world.id,
-    name: world.name,
-    description: world.description,
-    turnLimit: world.turnLimit,
-    chatLLMProvider: world.chatLLMProvider,
-    chatLLMModel: world.chatLLMModel,
-    currentChatId: world.currentChatId,
-    agents: agentsArray,
-    chats: chats
-  };
-}
-
-/**
  * Convert storage WorldData to runtime World object
  * Reconstructs EventEmitter and agents Map for runtime use
  */
@@ -1200,12 +1145,6 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
           chatId: world.currentChatId
         });
 
-        // Publish chat-created system event to frontend with complete world data
-        const serializedWorld = await serializeWorldForEvents(world);
-        events.publishEvent(world, 'system', {
-          world: serializedWorld,
-          action: 'chat-created'
-        });
 
         // Ensure returned world includes the new chat in chats array
         return world; // Return the complete updated World object
