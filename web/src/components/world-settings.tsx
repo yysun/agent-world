@@ -1,57 +1,16 @@
 /**
- * World Settings Component - Settings panel for world configuration
+ * World Settings Component - Dynamic settings panel for world/agent configuration
  * 
  * Features:
- * - Dynamic settings display based on selection (world vs agent)
- * - World settings: name, agent count, message count, LLM call limit
- * - Agent settings: name, message count, LLM provider, model, temperature, system prompt
- * - Clear messages button for message count
- * - World settings displayed as default state
- * - Improved layout with left-aligned values and right-aligned buttons
- * - Clear buttons sized to match gear button (32x32px)
- * - Two-line layout: field titles on top, values below
- * - Clean design without field dividers
- * 
- * Implementation:
- * - Functional component using AppRun JSX
- * - Props-based state management from parent World component
- * - AppRun $ directive pattern for event handling
- * - Fieldset layout matching chat component
- * - Conditional rendering based on selectedSettingsTarget
- * - Clear messages functionality with confirmation
- * - Accepts World and Agent objects directly in props for cleaner interface
- * - Responsive layout with proper spacing and alignment
- * - Clear message icons wrapped in spans for better styling control
- * 
- * Changes:
- * - Enhanced to support agent and world settings
- * - Added selectedAgent and selectedSettingsTarget props
- * - Implemented dynamic legend and content
- * - Removed notification checkbox as per requirements
- * - World settings now shown by default instead of prompt message
- * - Removed memorySize from agent settings for simplification
- * - Consolidated to use messageCount only for tracking agent activity
- * - Added LLM call limit to world settings
- * - Added LLM provider, model, temperature, and system prompt to agent settings
- * - Added clear messages button with proper event handling
- * - Updated props to accept World and Agent objects instead of individual properties
- * - Simplified props interface for better maintainability and type safety
- * - Fixed layout: left-aligned values, right-aligned buttons, consistent button sizing
- * - Switched to two-line layout for better readability
- * - Increased setting-value font size to 1.1rem
- * - Wrapped trash icons in .clear-message-icon spans
- * - Removed field dividers for cleaner appearance
+ * - Dynamic display based on selection (world vs agent settings)
+ * - World settings: name, agent count, message count, LLM configuration
+ * - Agent settings: LLM provider, model, temperature, system prompt, message counts
+ * - Clear messages functionality with proper event handling
+ * - AppRun JSX with fieldset layout and two-line value display
  */
 
 import { app } from 'apprun';
-import type { World, Agent } from '../types';
-
-export interface WorldSettingsProps {
-  world: World | null;
-  selectedSettingsTarget: 'world' | 'agent' | null;
-  selectedAgent: Agent | null;
-  totalMessages: number;
-}
+import type { WorldSettingsProps } from '../types';
 
 export default function WorldSettings(props: WorldSettingsProps) {
   const {

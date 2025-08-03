@@ -1,40 +1,16 @@
 /**
- * World Edit Component - Self-contained AppRun class component for world CRUD operations
+ * World Edit Component - Modal CRUD operations for world management
  * 
  * Features:
- * - Self-contained class component with internal state management using mounted lifecycle
- * - Handles all three modes: create, edit, and delete worlds
- * - Module-level state update functions for easy testing and better organization
- * - Success messaging with auto-close functionality for all operations
- * - Direct function references in $on directives for better performance
- * - Modal overlay with backdrop click to close
- * - Form validation and error handling
- * 
- * Implementation:
- * - AppRun class component using mounted pattern for props-to-state initialization
- * - Module-level functions defined in same file for consolidation
- * - Direct function references: $onclick={[saveWorld]}
- * - Success messages shown before auto-closing modal
- * - All business logic testable independently of UI
- * 
- * Event Flow:
- * - Form field changes: $bind="world.name"
- * - Save button: $onclick={[saveWorld]}
- * - Delete button: $onclick={[deleteWorld]}
- * - Cancel/Close: $onclick={[closeModal]}
- * - Backdrop click: $onclick={[closeModal]}
+ * - Self-contained AppRun class component with create/edit/delete modes
+ * - Modal overlay with backdrop click to close and form validation
+ * - Success messaging with auto-close and parent component integration  
+ * - Module-level functions for better testability and organization
  */
 
 import { app, Component } from 'apprun';
-import type { World } from '../types';
+import type { WorldEditProps, WorldEditState, World } from '../types';
 import api from '../api';
-
-// Props interface for the component initialization
-interface WorldEditProps {
-  world?: World | null;
-  mode?: 'create' | 'edit' | 'delete';
-  parentComponent?: any;
-}
 
 // Initialize component state from props
 const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
@@ -50,15 +26,6 @@ const getDefaultWorldData = (): Partial<World> => ({
   description: '',
   turnLimit: 5
 });
-
-export interface WorldEditState {
-  mode: 'create' | 'edit' | 'delete';
-  world: Partial<World>;
-  parentComponent?: any;
-  loading: boolean;
-  error?: string | null;
-  successMessage?: string | null;
-}
 
 // Save world function (handles both create and update)
 export const saveWorld = async function* (state: WorldEditState): AsyncGenerator<WorldEditState> {

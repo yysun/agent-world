@@ -1,33 +1,11 @@
 /**
  * World Component - Real-time world interface with agents and chat
  * 
- * Core Features:
- * - Centered agent list with message badges showing activity count
- * - Real-time SSE chat streaming with agent responses and visual indicators
- * - Interactive settings panel for world/agent configuration
- * - Agent selection highlighting with message filtering
- * - Agent Edit popup for CRUD operations with modal design
- * - Smart message deduplication using messageMap with createdAt sorting
- * 
- * Architecture:
- * - AppRun MVU pattern with async state initialization
- * - Modular components: WorldChat, WorldSettings, AgentEdit, WorldEdit
- * - TypeScript SSE client integration with proper error handling
- * - Extracted agent handlers to world-update.ts module
- * - Extracted world handlers to world-update-world.ts module
- * - State-driven rendering with loading/error states
- * 
- * Key Implementations:
- * - Message filtering: shows agent-specific messages when agent selected
- * - Real-time badge updates: increments messageCount on agent activity
- * - Toggle selection: click selected agent to deselect and show all messages
- * - Keyboard support: Escape key closes agent edit popup
- * - Agent memory consolidation with fromAgentId tracking
- * - User input pre-fill with @agent mentions when agent selected
- * 
- * Changes:
- * - Fixed create-new-chat handler to preserve current settings target instead of forcing world settings
- * - New chat creation now keeps current side panel state (chat history, agent settings, etc.)
+ * Features:
+ * - Centered agent list with message badges and real-time SSE chat streaming
+ * - Interactive settings panel for world/agent/chat configuration
+ * - Agent selection highlighting with message filtering and CRUD modals
+ * - AppRun MVU pattern with modular components and extracted handlers
  */
 
 import { app, Component, safeHTML } from 'apprun';
@@ -130,7 +108,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
     }
 
     const currentChat = state.world.chats.find(chat => chat.id === state.world.currentChatId) || null;
-    
+
     // Main content view
     return (
       <div className="world-container">

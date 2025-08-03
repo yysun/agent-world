@@ -1,44 +1,16 @@
 /**
- * Agent Edit Component - Self-contained AppRun class component for agent CRUD operations
+ * Agent Edit Component - Modal CRUD operations for agent management
  * 
  * Features:
- * - Self-contained class component with internal state management using mounted lifecycle
- * - Handles all three modes: create, edit, and delete agents
- * - Module-level state update functions for easy testing and better organization
- * - Success messaging with auto-close functionality for all operations
- * - Direct function references in $on directives for better performance
- * - Modal overlay with backdrop click to close
- * - Form validation and error handling
- * - Parent component integration for coordinated modal management
- * 
- * Implementation:
- * - AppRun class component using mounted pattern for props-to-state initialization
- * - Module-level functions defined in same file for consolidation
- * - Direct function references: $onclick={closeModal}
- * - Global events for parent coordination: 'agent-saved', 'agent-deleted'
- * - Parent component.run() calls when parentComponent prop provided
- * - Success messages shown before auto-closing modal
- * - All business logic testable independently of UI
- * 
- * Event Flow:
- * - Form field changes: $bind="agent.name"
- * - Save button: $onclick={[saveAgent]}
- * - Delete button: $onclick={[deleteAgent]}
- * - Cancel/Close: $onclick={closeModal}
- * - Backdrop click: $onclick={closeModal}
+ * - Self-contained AppRun class component with create/edit/delete modes
+ * - Modal overlay with backdrop click to close and form validation
+ * - Success messaging with auto-close and parent component integration
+ * - Global event publishing for coordinated modal management
  */
 
 import { app, Component } from 'apprun';
-import type { Agent, LLMProvider } from '../types';
+import type { AgentEditProps, AgentEditState, Agent, LLMProvider } from '../types';
 import api from '../api';
-
-// Props interface for the component initialization
-interface AgentEditProps {
-  agent?: Agent | null;
-  mode?: 'create' | 'edit' | 'delete';
-  worldName: string;
-  parentComponent?: any;
-}
 
 // Initialize component state from props
 const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
@@ -58,16 +30,6 @@ export const defaultAgentData: Partial<Agent> = {
   maxTokens: 2048,
   systemPrompt: 'You are a helpful assistant.',
 };
-
-export interface AgentEditState {
-  mode: 'create' | 'edit' | 'delete';
-  worldName: string;
-  agent: Partial<Agent>;
-  parentComponent?: any;
-  loading: boolean;
-  error?: string | null;
-  successMessage?: string | null;
-}
 
 
 // Save agent function (handles both create and update)

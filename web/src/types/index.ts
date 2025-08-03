@@ -1,63 +1,39 @@
 /**
- * Consolidated Type Definitions - Centralized types for web components
+ * Consolidated Web UI Types - Centralized type definitions for frontend components
  * 
  * Features:
- * - Reuses core types from ../../../core/types
- * - Consolidates duplicate interface definitions
- * - Provides UI-specific extensions of core types
- * - Eliminates redundant type definitions across components
- * - Single source of truth for all UI state management
- * - Matches server serialization structure for World interface
+ * - Extends core types with UI-specific properties (spriteIndex, messageCount, streaming states)
+ * - Consolidates duplicate interfaces across web components
+ * - Single source of truth for UI state management and server communication
+ * - Type-safe SSE event handling and component state management
  * 
  * Implementation:
- * - Re-exports core types for consistency
- * - Extends core interfaces for UI-specific properties
- * - Consolidates message, agent, and world interfaces
- * - Provides type-safe state management interfaces
- * - Eliminates circular dependencies through proper organization
- * - Web World interface matches server's serializeWorld output
+ * - Re-exports essential core types for consistency
+ * - UI-specific Message interface for streaming and error states  
+ * - Agent/World interfaces matching server serialization format
+ * - Consolidated AppRun component state interfaces
+ * - SSE event data structures for real-time updates
  * 
  * Changes:
- * - Created centralized type consolidation
- * - Eliminated duplicate interfaces across web components
- * - Extended core types with UI-specific properties
- * - Consolidated SSE and AppRun state management types
- * - Updated World interface to match server serialization:
- *   - Added chatLLMProvider, chatLLMModel, currentChatId
- *   - Added chats array for chat history
- *   - Made id required to match server response
- *   - Updated WorldFormData to include LLM configuration
- * - Agent interface matches server's serializeAgent output:
- *   - Includes UI-specific properties (spriteIndex, messageCount)
- *   - Consistent with server serialization format
- *   - Preserves all core agent properties
+ * - Consolidated comment blocks - removed redundant feature descriptions
+ * - Streamlined type imports - only essential core type dependencies
+ * - Eliminated duplicate interface documentation
+ * - Centralized SSE and component state type definitions
  */
 
-// Import core types for internal use only (not re-exported)
-import type {
-  AgentMessage,
-  LLMProvider
-} from '../../../core/types';
+// Essential core type imports
+import type { AgentMessage, LLMProvider } from '../../../core/types';
+import { EventType, SenderType, stripCustomFields, stripCustomFieldsFromMessages } from '../../../core/types';
 
-import {
-  EventType,
-  SenderType,
-  stripCustomFields,
-  stripCustomFieldsFromMessages
-} from '../../../core/types';
-
-// Export utilities that are still needed
-export {
-  EventType,
-  SenderType,
-  stripCustomFields,
-  stripCustomFieldsFromMessages
-};
-
-// Re-export LLMProvider type for components that need it
+// Re-export essential utilities
+export { EventType, SenderType, stripCustomFields, stripCustomFieldsFromMessages };
 export type { LLMProvider };
 
-// Web UI Message Interface
+// ========================================
+// UI DATA INTERFACES
+// ========================================
+
+// Web UI Message Interface - extends core with streaming states
 export interface Message {
   id: number | string;
   type: string;
@@ -73,7 +49,7 @@ export interface Message {
   fromAgentId?: string;
 }
 
-// Web UI Agent Interface (data-only, no methods)
+// Web UI Agent Interface - matches server serialization with UI extensions
 export interface Agent {
   id: string;
   name: string;
@@ -90,10 +66,8 @@ export interface Agent {
   lastLLMCall?: Date;
   memory: AgentMessage[];
   description?: string;
-
-  // UI-specific properties
-  spriteIndex: number;
-  messageCount: number;
+  spriteIndex: number;    // UI-specific
+  messageCount: number;   // UI-specific
 }
 
 // Web UI World Interface - matches server serialization
@@ -107,9 +81,10 @@ export interface World {
   currentChatId: string | null;
   agents: Agent[];
   chats: Chat[];
+  llmCallLimit?: number;  // For UI display
 }
 
-// Chat History Interfaces (from core types)
+// Chat Interface - from core types
 export interface Chat {
   id: string;
   name: string;
@@ -121,8 +96,85 @@ export interface Chat {
   tags?: string[];
 }
 
+// ========================================
+// COMPONENT PROP INTERFACES  
+// ========================================
 
-// Base SSE Component State (consolidated from sse-client.ts)
+// World Chat Component Props
+export interface WorldChatProps {
+  worldName: string;
+  messages?: Message[];
+  userInput?: string;
+  messagesLoading: boolean;
+  isSending: boolean;
+  isWaiting: boolean;
+  activeAgent?: { spriteIndex: number; name: string } | null;
+  selectedAgent?: { id?: string; name: string } | null;
+  currentChat?: string;
+}
+
+// World Settings Component Props
+export interface WorldSettingsProps {
+  world: World | null;
+  selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
+  selectedAgent: Agent | null;
+  loading?: boolean;
+  totalMessages: number;
+}
+
+// World Edit Component Props & State
+export interface WorldEditProps {
+  mode: 'create' | 'edit' | 'delete';
+  world?: World | null;
+  onClose?: () => void;
+  onSave?: (world: World) => void;
+  parentComponent?: any;
+}
+
+export interface WorldEditState {
+  mode: 'create' | 'edit' | 'delete';
+  world: Partial<World>;
+  parentComponent?: any;
+  loading: boolean;
+  error?: string | null;
+  successMessage?: string | null;
+}
+
+// Agent Edit Component Props & State
+export interface AgentEditProps {
+  mode: 'create' | 'edit' | 'delete';
+  agent?: Agent | null;
+  worldName: string;
+  onClose?: () => void;
+  onSave?: (agent: Agent) => void;
+  parentComponent?: any;
+}
+
+export interface AgentEditState {
+  mode: 'create' | 'edit' | 'delete';
+  worldName: string;
+  agent: Partial<Agent>;
+  parentComponent?: any;
+  loading: boolean;
+  error?: string | null;
+  successMessage?: string | null;
+}
+
+// Chat History Component Props
+export interface WorldChatHistoryProps {
+  world: World | null;
+  worldName?: string;
+  chats?: Chat[];
+  currentChatId?: string | null;
+  onChatSelect?: (chatId: string) => void;
+  onChatDelete?: (chat: Chat) => void;
+}
+
+// ========================================
+// COMPONENT STATE INTERFACES
+// ========================================
+
+// Base SSE Component State
 export interface SSEComponentState {
   messages: Message[];
   worldName?: string;
@@ -131,11 +183,11 @@ export interface SSEComponentState {
   needScroll?: boolean;
 }
 
-// World Component State (consolidated from world-update.ts)
+// Main World Component State - consolidated from multiple components
 export interface WorldComponentState extends SSEComponentState {
   worldName: string;
   world: World | null;
-  userInput?: string; // Made optional to handle undefined cases
+  userInput?: string;
   loading: boolean;
   error: string | null;
   messagesLoading: boolean;
@@ -145,26 +197,29 @@ export interface WorldComponentState extends SSEComponentState {
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;
 
-  // Simplified agent edit state - just boolean flags and mode
+  // Agent edit state
   showAgentEdit: boolean;
   agentEditMode: 'create' | 'edit' | 'delete';
   selectedAgentForEdit: Agent | null;
 
-  // Simplified world edit state - just boolean flags and mode
+  // World edit state  
   showWorldEdit: boolean;
   worldEditMode: 'create' | 'edit' | 'delete';
   selectedWorldForEdit: World | null;
 
-  // Chat history UI state
+  // Chat management state
   chatToDelete: Chat | null;
 
-  // Additional missing properties from SSE state
+  // SSE state (required overrides)
   connectionStatus: string;
   wsError: string | null;
   needScroll: boolean;
 }
 
-// SSE Event Handler Types
+// ========================================
+// SSE EVENT INTERFACES
+// ========================================
+
 export interface StreamStartData {
   messageId: string;
   sender: string;
@@ -193,7 +248,10 @@ export interface StreamErrorData {
   worldName?: string;
 }
 
-// API Request Types (consolidated from server/api.ts patterns)
+// ========================================
+// API REQUEST INTERFACES
+// ========================================
+
 export interface ApiRequestOptions {
   method?: string;
   headers?: Record<string, string>;

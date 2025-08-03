@@ -1,38 +1,15 @@
 /**
- * World Chat History Component - Chat history management for world conversations
+ * World Chat History Component - Chat history management interface
  * 
  * Features:
- * - List all chat history entries with details
- * - Create new chat history entries with snapshots
- * - Load and restore world state from chat history
- * - Delete chat history entries with confirmation (modal handled by parent)
- * - Generate summaries using LLM
- * - Real-time updates and error handling
- * 
- * Implementation:
- * - Functional component using AppRun JSX
- * - Simplified props - only receives world data
- * - AppRun $ directive pattern for event handling
- * - Fieldset layout matching other components
- * - Delete confirmation modal moved to parent World component
- * - Integration with chat history API endpoints
- * 
- * This component replaces world-settings when chat history is selected
- * and provides full CRUD operations for chat management.
- * 
- * Changes:
- * - Simplified props interface to only include world
- * - Removed delete confirmation modal (moved to parent World component)
- * - Cleaned up component to focus on chat list display and basic actions
- * - Delete confirmation popup now handled by parent component
+ * - List all chat history with create/load/delete operations
+ * - LLM-generated summaries and real-time updates
+ * - AppRun JSX with fieldset layout matching other components
+ * - Delete confirmation handled by parent World component
  */
 
 import { app } from 'apprun';
-import type { World } from '../types';
-
-export interface WorldChatHistoryProps {
-  world: World | null;
-}
+import type { WorldChatHistoryProps } from '../types';
 
 export default function WorldChatHistory(props: WorldChatHistoryProps) {
   const { world } = props;

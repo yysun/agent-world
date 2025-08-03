@@ -1,37 +1,18 @@
 /**
  * API Routes for Agent World
  *
- * Features: REST API + SSE streaming with Zod validation
- * Endpoints: World/agent management, real-time chat with SSE
- * Implementation: Core module integration with event handling
+ * Features:
+ * - REST API with Zod validation for world/agent management
+ * - SSE streaming for real-time chat responses
+ * - Consistent serialization with serializeWorld() and serializeAgent()
+ * - Optimized world existence checks using getWorldConfig
+ * - Timer management for streaming (15s initial, 5s stall timeout)
  * 
- * Recent Changes:
- * - Enhanced SSE streaming for chunked responses
- * - Fixed duplicate message prevention with case-insensitive filtering
- * - Consolidated redundant code and comments
- * - Improved timer management to prevent premature stream termination:
- *   - Initial response timer: 15s
- *   - Streaming stall timer: 5s between chunks
- *   - Completion timer: 3s after stream ends
- *   - Error completion timer: 2s
- *   - Regular message timer: 5s
- * - Fixed streaming timeout logic to prevent ending during active LLM responses
- * - Optimized world existence checks to use getWorldConfig instead of deprecated getWorld for performance
- * - Extracted world retrieval and error handling into reusable getWorldOrError utility function
- * - Fixed PATCH /worlds/:worldName to return complete world data including agents after update
- *   - Added turnLimit support to WorldUpdateSchema and update logic
- *   - Response format now consistent with GET /worlds/:worldName endpoint
- *   - Ensures agents are preserved and included in response to prevent client-side confusion
- * - Added consistent serialization functions for API responses:
- *   - serializeWorld(): Converts World objects to JSON with chats array and agent serialization
- *   - serializeAgent(): Converts Agent objects to JSON
- *   - Updated all endpoints to use consistent serialization format
- * - Simplified API by removing redundant endpoints since serialized World contains agents[] and chats[]:
- *   - Removed: GET /worlds/:worldName/agents (use world.agents instead)
- *   - Removed: GET /worlds/:worldName/agents/:agentName (use world.agents instead)
- *   - Removed: GET /worlds/:worldName/agents/:agentName/memory (use world.agents[].memory instead)
- *   - Kept: Action endpoints (POST, PATCH, DELETE) for agent management
- *   - Kept: DELETE /worlds/:worldName/agents/:agentName/memory for clearing agent memory
+ * Implementation:
+ * - Core module integration with event handling
+ * - Simplified API structure (World objects contain agents[] and chats[])
+ * - Reusable getWorldOrError utility for error handling
+ * - Non-streaming mode for CLI pipeline compatibility
  */
 import path from 'path';
 import express, { Request, Response } from 'express';
@@ -40,17 +21,13 @@ import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishM
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider, World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
+
 const logger = createCategoryLogger('api');
-
 const DEFAULT_WORLD_NAME = 'Default World';
-
-// Get default root path from storage-factory (no local defaults)
 const ROOT_PATH = getDefaultRootPath();
 
 /**
  * Serialize World object for API responses
- * Converts runtime World object to plain data object suitable for JSON serialization
- * Includes chats array from world.listChats() for complete frontend state
  */
 async function serializeWorld(world: World): Promise<{
   id: string;
@@ -63,10 +40,7 @@ async function serializeWorld(world: World): Promise<{
   agents: any[];
   chats: any[];
 }> {
-  // Convert agents Map to Array for response using serializeAgent
   const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
-
-  // Get chats using the unified listChats() method
   const chats = await world.listChats();
 
   return {
@@ -84,8 +58,6 @@ async function serializeWorld(world: World): Promise<{
 
 /**
  * Serialize Agent object for API responses
- * Converts runtime Agent object to plain data object suitable for JSON serialization
- * Includes UI-specific properties for frontend compatibility
  */
 function serializeAgent(agent: any): {
   id: string;
@@ -135,10 +107,6 @@ function toKebabCase(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
-function validateMemoryFormat(memory: any): memory is Array<any> {
-  return Array.isArray(memory);
-}
-
 async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: string): Promise<boolean> {
   if (excludeAgent && agentName === excludeAgent) return true;
   const existingAgent = await world.getAgent(agentName);
@@ -147,12 +115,10 @@ async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: s
 
 async function getWorldOrError(res: Response, worldName: string): Promise<any | null> {
   const world = await getWorld(ROOT_PATH, worldName);
-
   if (!world) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
     return null;
   }
-
   return world;
 }
 
@@ -197,27 +163,11 @@ const AgentUpdateSchema = z.object({
   temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().min(1).optional(),
   clearMemory: z.boolean().optional()
-  // Note: createdAt, lastActive, lastLLMCall are automatically managed by the core and cannot be set by clients
 });
 
 const router = express.Router();
 
-
-// GET /worlds/:worldName - Get specific world with agents
-router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { worldName } = req.params;
-    const world = await getWorld(ROOT_PATH, worldName);
-    if (!world) return;
-
-    // Use consistent serialization format
-    const serializedWorld = await serializeWorld(world);
-    res.json(serializedWorld);
-  } catch (error) {
-    logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    sendError(res, 500, 'Failed to get world', 'WORLD_GET_ERROR');
-  }
-});
+// World Routes
 
 // GET /worlds - List worlds or create default
 router.get('/worlds', async (req, res) => {
@@ -237,6 +187,21 @@ router.get('/worlds', async (req, res) => {
   } catch (error) {
     logger.error('Error listing worlds', { error: error instanceof Error ? error.message : error });
     sendError(res, 500, 'Failed to list worlds', 'WORLD_LIST_ERROR');
+  }
+});
+
+// GET /worlds/:worldName - Get specific world with agents
+router.get('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const world = await getWorld(ROOT_PATH, worldName);
+    if (!world) return;
+
+    const serializedWorld = await serializeWorld(world);
+    res.json(serializedWorld);
+  } catch (error) {
+    logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to get world', 'WORLD_GET_ERROR');
   }
 });
 
@@ -260,10 +225,7 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Create the world
-    const worldData = { name, description };
-    const world = await createWorld(ROOT_PATH, worldData);
-
+    const world = await createWorld(ROOT_PATH, { name, description });
     res.status(201).json({ name: world.name, id: worldId });
   } catch (error) {
     logger.error('Error creating world', { error: error instanceof Error ? error.message : error });
@@ -305,16 +267,13 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
 
     // Apply updates if any
     if (Object.keys(updates).length > 0) {
-      // Update world properties directly
       if (updates.name) world.name = updates.name;
       if (updates.description !== undefined) world.description = updates.description;
       if (updates.turnLimit !== undefined) world.turnLimit = updates.turnLimit;
-
-      // Save the world
       await world.save();
     }
 
-    // Return complete world data including agents (consistent with GET endpoint)
+    // Return complete world data including agents
     const serializedWorld = await serializeWorld(world);
     res.json(serializedWorld);
   } catch (error) {
@@ -331,7 +290,6 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    // Delete the world
     const deleted = await world.delete();
     if (!deleted) {
       sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
@@ -345,6 +303,8 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
   }
 });
 
+// Agent Routes
+
 // POST /worlds/:worldName/agents - Create new agent in world
 router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -354,21 +314,23 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
+
     const agentData = validation.data;
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
-    // Check for duplicate agent name
+
     const isUnique = await isAgentNameUnique(world, agentData.name);
     if (!isUnique) {
       sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
       return;
     }
-    // Create agent in world
+
     const createdAgent = await world.createAgent(agentData);
     if (!createdAgent) {
       sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
       return;
     }
+
     res.status(201).json(serializeAgent(createdAgent));
   } catch (error) {
     logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -376,34 +338,25 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
   }
 });
 
-
-
 // GET /worlds/:worldName/export - Export world to markdown
 router.get('/worlds/:worldName/export', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
 
-    // Check if world exists
     const worldExists = await getWorldConfig(ROOT_PATH, worldName);
     if (!worldExists) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    // Generate markdown using core function
     const markdown = await exportWorldToMarkdown(ROOT_PATH, worldName);
-
-    // Generate timestamp for filename
     const now = new Date();
-    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5); // Format: YYYY-MM-DDTHH-MM-SS
+    const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const filename = `${worldName}-${timestamp}.md`;
 
-    // Set headers for file download
     res.setHeader('Content-Type', 'text/markdown');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', Buffer.byteLength(markdown, 'utf8'));
-
-    // Send the markdown content
     res.send(markdown);
   } catch (error) {
     logger.error('Error exporting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -432,7 +385,6 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
       return;
     }
 
-    // Only update agent config/metadata, never memory unless clearMemory is set
     let updatedAgent = existingAgent;
 
     // If clearMemory is requested, clear memory first
@@ -442,11 +394,10 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
         sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
         return;
       }
-      // Re-fetch agent after memory clear
       updatedAgent = await world.getAgent(agentName);
     }
 
-    // Prepare updates, but exclude memory field if present
+    // Prepare updates, exclude memory-related fields
     const updates: any = { ...validation.data };
     delete updates.clearMemory;
     if ('memory' in updates) delete updates.memory;
@@ -477,14 +428,12 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
     const world = await getWorldOrError(res, worldName);
     if (!world) return;
 
-    // Check if agent exists
     const existingAgent = await world.getAgent(agentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    // Delete the agent
     const deleted = await world.deleteAgent(agentName);
     if (!deleted) {
       sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
@@ -512,7 +461,6 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
       return;
     }
 
-    // Clear agent memory
     const clearedAgent = await world.clearAgentMemory(agentName);
     if (!clearedAgent) {
       sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
@@ -526,77 +474,58 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
   }
 });
 
-// Helper function to handle non-streaming chat response (aligned with CLI pipeline mode)
+// Chat Helper Functions
+
+// Non-streaming chat response (aligned with CLI pipeline mode)
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
-  // Check if world exists
   const worldExists = await getWorldConfig(ROOT_PATH, worldName);
   if (!worldExists) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
     return;
   }
 
-  // Disable streaming to match CLI pipeline mode behavior
   disableStreaming();
 
   try {
-    // Collect response data
     let responseContent = '';
-    let responseSender = '';
     let isComplete = false;
     let hasError = false;
     let errorMessage = '';
 
-    // Set up response collection with timeout
     const responsePromise = new Promise<void>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout>;
-
-      const completeResponse = () => {
-        clearTimeout(timer);
-        isComplete = true;
-        resolve();
-      };
-
-      const handleError = (error: string) => {
-        clearTimeout(timer);
-        hasError = true;
-        errorMessage = error;
-        reject(new Error(error));
-      };
-
-      // Create client connection using CLI pipeline pattern
-      const client: ClientConnection = {
-        isOpen: true,
-        onWorldEvent: (eventType: string, eventData: any) => {
-          responseContent = JSON.stringify({
-            type: eventType,
-            data: eventData
-          });
-          completeResponse();
-        }
-      };
-
-      // Set timeout for response
-      timer = setTimeout(() => {
+      const timer = setTimeout(() => {
         if (!isComplete) {
-          handleError('Request timeout - no response received within 15 seconds');
+          hasError = true;
+          errorMessage = 'Request timeout - no response received within 15 seconds';
+          reject(new Error(errorMessage));
         }
       }, 15000);
 
-      // Subscribe to world and send message
+      const client: ClientConnection = {
+        isOpen: true,
+        onWorldEvent: (eventType: string, eventData: any) => {
+          responseContent = JSON.stringify({ type: eventType, data: eventData });
+          clearTimeout(timer);
+          isComplete = true;
+          resolve();
+        }
+      };
+
       subscribeWorld(worldName, ROOT_PATH, client).then(subscription => {
         if (!subscription) {
-          handleError('Failed to subscribe to world');
+          hasError = true;
+          errorMessage = 'Failed to subscribe to world';
+          reject(new Error(errorMessage));
           return;
         }
-
-        // Send the message
         publishMessage(subscription.world, message, sender);
       }).catch(error => {
-        handleError(`Failed to connect to world: ${error instanceof Error ? error.message : error}`);
+        hasError = true;
+        errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
+        reject(new Error(errorMessage));
       });
     });
 
-    // Wait for response to complete
     await responsePromise;
 
     if (hasError) {
@@ -604,12 +533,10 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
       return;
     }
 
-    // Send successful response
     res.json({
       success: true,
       message: 'Message processed successfully',
       data: {
-        sender: responseSender,
         content: responseContent || 'No response received',
         timestamp: new Date().toISOString()
       }
@@ -618,14 +545,12 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
   } catch (error) {
     sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
   } finally {
-    // Re-enable streaming for other requests
     enableStreaming();
   }
 }
 
-// Helper function to handle streaming chat response  
+// Streaming chat response
 async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
-  // Check if world exists before setting up SSE stream
   const worldExists = await getWorldConfig(ROOT_PATH, worldName);
   if (!worldExists) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
@@ -639,107 +564,64 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
-  // Initialize streaming state
   const streaming = {
     isActive: false,
-    content: '',
-    sender: undefined as string | undefined,
-    messageId: undefined as string | undefined,
     wait: undefined as ((delay: number) => void) | undefined,
     stopWait: undefined as (() => void) | undefined
   };
 
-  // Timer management
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const setupTimer = (callback: () => void, delay: number = 5000): void => {
-    clearTimer();
+    if (timer) clearTimeout(timer);
     timer = setTimeout(callback, delay);
   };
 
-  const clearTimer = (): void => {
+  streaming.wait = (delay: number) => {
+    setupTimer(() => {
+      if (streaming.isActive) {
+        logger.debug('Streaming appears stalled - timing out...');
+      }
+      res.end();
+    }, delay);
+  };
+
+  streaming.stopWait = () => {
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
     }
   };
 
-  // Setup streaming callbacks
-  streaming.wait = (delay: number) => {
-    // Clear any existing timer before setting up new one
-    clearTimer();
-    setupTimer(() => {
-      // Only timeout if streaming is not active or has stalled
-      if (streaming.isActive) {
-        logger.debug('Streaming appears stalled - timing out...');
-        resetStreamingState();
-      }
-      handleStreamingComplete();
-    }, delay);
-  };
-
-  streaming.stopWait = () => {
-    clearTimer();
-  };
-
-  const resetStreamingState = (): void => {
-    streaming.isActive = false;
-    streaming.content = '';
-    streaming.sender = undefined;
-    streaming.messageId = undefined;
-  };
-
-  const handleStreamingComplete = (): void => {
-    res.end();
-  };
-
-
-  // Helper function to send SSE data
   const sendSSE = (data: string) => {
     res.write(`data: ${data}\n\n`);
   };
 
-  // Create client connection using only onWorldEvent
   const client: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      sendSSE(JSON.stringify({
-        type: eventType,
-        data: eventData
-      }));
+      sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
-
     onError: (error: string) => {
       logger.error(`World error: ${error}`);
-      sendSSE(JSON.stringify({
-        type: 'error',
-        message: error
-      }));
+      sendSSE(JSON.stringify({ type: 'error', message: error }));
       res.end();
     }
   };
 
-  // Subscribe to world
   const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
-  // World existence already checked above, so subscription should not be null
   if (!subscription) {
     logger.error('Unexpected: subscription is null after world existence check');
-    sendSSE(JSON.stringify({
-      type: 'error',
-      message: 'Failed to subscribe to world'
-    }));
+    sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
     res.end();
     return;
   }
 
-  // Send message to world
   try {
     publishMessage(subscription.world, message, sender);
-    // Set initial wait timer to allow for LLM response
     if (streaming.wait) {
       streaming.wait(15000); // 15 second timeout for initial response
     }
-
   } catch (error) {
     sendSSE(JSON.stringify({
       type: 'error',
@@ -749,15 +631,14 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     res.end();
   }
 
-  // Cleanup on client disconnect
   req.on('close', () => {
     logger.debug('Chat client disconnected, cleaning up');
-    clearTimer();
-    if (subscription) {
-      subscription.unsubscribe();
-    }
+    streaming.stopWait?.();
+    subscription?.unsubscribe();
   });
 }
+
+// Chat Routes
 
 // POST /worlds/:worldName/chat - Send message with optional streaming
 router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Promise<void> => {
@@ -773,11 +654,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     const { message, sender, stream } = validation.data;
 
     // Route to appropriate handler based on stream flag
-    // Default behavior is streaming (stream defaults to true when omitted)
     if (stream === false) {
       await handleNonStreamingChat(res, worldName, message, sender);
     } else {
-      // stream === true (either explicitly set or defaulted when omitted)
       await handleStreamingChat(req, res, worldName, message, sender);
     }
 
@@ -788,8 +667,6 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
     }
   }
 });
-
-// Chat Endpoints
 
 // DELETE /worlds/:worldName/chats/:chatId - Delete chat
 router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
@@ -819,18 +696,15 @@ router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): 
   try {
     const worldName = req.params.worldName;
 
-    // Get world instance
     const world = await getWorld(ROOT_PATH, worldName);
     if (!world) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    // Create new chat via world method - now returns updated World object
     const updatedWorld = await world.newChat();
-
-    // Return serialized world with new currentChatId (now includes chats array)
     const serializedWorld = await serializeWorld(updatedWorld);
+
     res.json({
       world: serializedWorld,
       chatId: updatedWorld.currentChatId,
@@ -848,18 +722,15 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
   try {
     const { worldName, chatId } = req.params;
 
-    // Get world instance
     const world = await getWorld(ROOT_PATH, worldName);
     if (!world) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    // Load chat via world method
     await world.loadChatById(chatId);
-
-    // Return serialized world with loaded chat (consistent with other endpoints)
     const serializedWorld = await serializeWorld(world);
+
     res.json({
       world: serializedWorld,
       chatId: world.currentChatId,

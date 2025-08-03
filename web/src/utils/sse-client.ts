@@ -1,19 +1,10 @@
 /**
- * SSE Client - Server-Sent Events handler for Agent World
+ * SSE Client - Server-Sent Events handler for real-time chat streaming
  * 
- * Features: Complete SSE streaming, message accumulation, error handling
- * Architecture: Direct AppRun event publishing with streaming state management
- * Replaces complex multi-module approach with unified solution
- * 
- * Changes:
- * - Converted to full TypeScript with proper interfaces
- * - Added type safety for all SSE data structures
- * - Enhanced AppRun integration with typed events
- * - Improved error handling with typed error responses
- * - Removed memorySize tracking for simplified agent management
- * - Consolidated to use messageCount only for agent activity tracking
- * - Consolidated types using centralized types/index.ts
- * - Eliminated duplicate interface definitions
+ * Features:
+ * - Complete SSE streaming with message accumulation and error handling
+ * - Direct AppRun event publishing for real-time UI updates
+ * - Type-safe interfaces with consolidated streaming state management
  */
 
 import app from 'apprun';
@@ -26,7 +17,7 @@ import type {
   StreamErrorData,
 } from '../types';
 
-// TypeScript interfaces for SSE data structures
+// SSE data structure interfaces
 interface SSEBaseData {
   type: string;
   data?: any;
@@ -70,9 +61,7 @@ interface SSEErrorData extends SSEBaseData {
 
 interface SSEConnectionData extends SSEBaseData {
   type: 'connected';
-  payload?: {
-    worldName?: string;
-  };
+  payload?: { worldName?: string; };
 }
 
 interface SSECompleteData extends SSEBaseData {
@@ -82,7 +71,7 @@ interface SSECompleteData extends SSEBaseData {
 
 type SSEData = SSEStreamingData | SSEMessageData | SSEErrorData | SSEConnectionData | SSECompleteData | SSEBaseData;
 
-// Active streaming message interface
+// Streaming state management
 interface ActiveStreamMessage {
   content: string;
   sender: string;
@@ -90,13 +79,13 @@ interface ActiveStreamMessage {
   isStreaming: boolean;
 }
 
-// Streaming state interface
 interface StreamingState {
   activeMessages: Map<string, ActiveStreamMessage>;
   currentWorldName: string | null;
 }
 
 
+// Utility functions
 const publishEvent = (eventType: string, data?: any): void => {
   if (app?.run) {
     app.run(eventType, data);
@@ -105,29 +94,34 @@ const publishEvent = (eventType: string, data?: any): void => {
   }
 };
 
-// Streaming state
+// Global streaming state
 let streamingState: StreamingState = {
   activeMessages: new Map(),
   currentWorldName: null
 };
 
-// Handle SSE data and convert to AppRun events
+// Main SSE data handler - routes events to appropriate processors
 const handleSSEData = (data: SSEData): void => {
   if (!data || typeof data !== 'object') return;
 
-  if (data.type === 'sse') {
-    handleStreamingEvent(data as SSEStreamingData);
-  } else if (data.type === 'system') {
-    publishEvent('handleSystemEvent', data.data);
-  } else if (data.type === 'message') {
-    publishEvent('handleMessageEvent', data.data);
-  } else if (data.type === 'error') {
-    publishEvent('handleError', { message: data.message || 'SSE error' });
+  switch (data.type) {
+    case 'sse':
+      handleStreamingEvent(data as SSEStreamingData);
+      break;
+    case 'system':
+      publishEvent('handleSystemEvent', data.data);
+      break;
+    case 'message':
+      publishEvent('handleMessageEvent', data.data);
+      break;
+    case 'error':
+      publishEvent('handleError', { message: data.message || 'SSE error' });
+      break;
   }
 };
 
 /**
- * Handle streaming SSE events (start, chunk, end, error, chat-created, chat-updated)
+ * Process streaming SSE events and manage message state
  */
 const handleStreamingEvent = (data: SSEStreamingData): void => {
   const eventData = data.data;
@@ -138,7 +132,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
   switch (eventData.type) {
     case 'start':
-      // Initialize streaming message
       streamingState.activeMessages.set(messageId, {
         content: '',
         sender: agentName,
@@ -146,7 +139,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         isStreaming: true
       });
 
-      // Publish start event to AppRun
       publishEvent('handleStreamStart', {
         messageId,
         sender: agentName,
@@ -155,17 +147,14 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'chunk':
-      // Update streaming content
       const stream = streamingState.activeMessages.get(messageId);
       if (stream) {
-        // Use accumulated content if available, otherwise append
         const newContent = eventData.accumulatedContent !== undefined
           ? eventData.accumulatedContent
           : stream.content + (eventData.content || '');
 
         stream.content = newContent;
 
-        // Publish chunk event to AppRun
         publishEvent('handleStreamChunk', {
           messageId,
           sender: agentName,
@@ -177,14 +166,12 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'end':
-      // Finalize streaming message
       const endStream = streamingState.activeMessages.get(messageId);
       if (endStream) {
         const finalContent = eventData.finalContent !== undefined
           ? eventData.finalContent
           : endStream.content;
 
-        // Publish end event to AppRun
         publishEvent('handleStreamEnd', {
           messageId,
           sender: agentName,
@@ -192,18 +179,11 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           worldName: eventData.worldName || streamingState.currentWorldName
         });
 
-        // Clean up streaming state
         streamingState.activeMessages.delete(messageId);
-
-        // If no more active messages, we can consider the streaming session complete
-        if (streamingState.activeMessages.size === 0) {
-          // Note: Don't cleanup the SSE connection here - let it close naturally
-        }
       }
       break;
 
     case 'error':
-      // Handle streaming error
       publishEvent('handleStreamError', {
         messageId,
         sender: agentName,
@@ -211,21 +191,20 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         worldName: eventData.worldName || streamingState.currentWorldName
       });
 
-      // Clean up streaming state
       streamingState.activeMessages.delete(messageId);
       break;
   }
 };
 
 /**
- * Send chat message with SSE streaming (unified function)
- * @param {string} worldName - Name of the world
- * @param {string} message - Message to send
- * @param {string} sender - Sender identifier
- * @param {Function} [onMessage] - Optional callback for messages (for chat-demo.html compatibility)
- * @param {Function} [onError] - Optional callback for errors (for chat-demo.html compatibility)
- * @param {Function} [onComplete] - Optional callback for completion (for chat-demo.html compatibility)
- * @returns {Promise<Function>} Cleanup function
+ * Send chat message with SSE streaming response
+ * @param worldName - Target world name
+ * @param message - Message content to send
+ * @param sender - Message sender identifier (default: 'HUMAN')
+ * @param onMessage - Optional callback for legacy compatibility
+ * @param onError - Optional error callback for legacy compatibility
+ * @param onComplete - Optional completion callback for legacy compatibility
+ * @returns Cleanup function to cancel the stream
  */
 export async function sendChatMessage(
   worldName: string,
@@ -235,22 +214,15 @@ export async function sendChatMessage(
   onError?: (error: Error) => void,
   onComplete?: (data: any) => void
 ): Promise<() => void> {
-  if (!worldName || !message) {
-    throw new Error('World name and message are required');
+  if (!worldName || !message?.trim()) {
+    throw new Error('World name and non-empty message are required');
   }
 
-  if (!message.trim()) {
-    throw new Error('Message cannot be empty');
-  }
-
-  // Set current world context
   streamingState.currentWorldName = worldName;
-
-  const requestBody = { message, sender };
 
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chat`, {
     method: 'POST',
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({ message, sender }),
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
@@ -274,7 +246,7 @@ export async function sendChatMessage(
     }
   };
 
-  // Process SSE stream (this was missing in api.js!)
+  // Process SSE stream
   const processStream = async (): Promise<void> => {
     try {
       while (isActive) {
@@ -282,48 +254,31 @@ export async function sendChatMessage(
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.trim() === '') continue;
+          if (line.trim() === '' || !line.startsWith('data: ')) continue;
 
-          if (line.startsWith('data: ')) {
-            try {
-              const dataContent = line.slice(6).trim();
-              if (dataContent === '') continue;
+          try {
+            const dataContent = line.slice(6).trim();
+            if (dataContent === '') continue;
 
-              const data: SSEData = JSON.parse(dataContent);
+            const data: SSEData = JSON.parse(dataContent);
 
-              // Process SSE data
-              handleSSEData(data);
+            handleSSEData(data);
 
-              // Also call optional callbacks for backward compatibility (chat-demo.html)
-              if (onMessage) {
-                onMessage(data);
-              }
-
-              // Handle completion - but don't terminate immediately
-              // The stream should continue until we get streaming end events
-              if (data.type === 'complete') {
-                // Call completion callback if provided
-                if (onComplete) {
-                  onComplete(data.payload || data);
-                }
-              }
-
-            } catch (error) {
-              console.error('Error parsing SSE data:', error);
-              const errorObj = { message: 'Failed to parse SSE data' };
-              publishEvent('handleError', errorObj);
-
-              // Call error callback if provided
-              if (onError) {
-                onError(new Error(errorObj.message));
-              }
+            // Legacy callback support
+            onMessage?.(data);
+            if (data.type === 'complete') {
+              onComplete?.(data.payload || data);
             }
+
+          } catch (error) {
+            console.error('Error parsing SSE data:', error);
+            const errorObj = { message: 'Failed to parse SSE data' };
+            publishEvent('handleError', errorObj);
+            onError?.(new Error(errorObj.message));
           }
         }
       }
@@ -331,28 +286,22 @@ export async function sendChatMessage(
       console.error('SSE stream error:', error);
       const errorObj = { message: (error as Error).message || 'SSE stream error' };
       publishEvent('handleError', errorObj);
-
-      // Call error callback if provided
-      if (onError) {
-        onError(error as Error);
-      }
+      onError?.(error as Error);
     } finally {
       cleanup();
     }
   };
 
-  // Start processing stream
   processStream();
-
   return cleanup;
 }
 
 /**
- * AppRun event handlers for SSE events
- * These are the same handlers that home.js needs in its update object
+ * AppRun event handlers for SSE streaming events
+ * These handlers manage UI state updates during streaming
  */
 
-// Handle streaming start events
+// Initialize streaming message display
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
   const { messageId, sender } = data;
   return {
@@ -362,20 +311,18 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
       text: '',
       isStreaming: true,
       messageId: messageId,
-      // fromAgentId: fromAgentId
     }]
   };
 };
 
-// Handle streaming chunk events
+// Update streaming message content
 export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: StreamChunkData): T => {
   const { messageId, sender, content } = data;
   const messages = [...(state.messages || [])];
 
-  // Find the streaming message to update
+  // Find and update the streaming message
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].isStreaming && messages[i].messageId === messageId) {
-      // Update with content
       messages[i] = {
         ...messages[i],
         text: content || '',
@@ -390,7 +337,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
     }
   }
 
-  // If no streaming message found, create new one
+  // Create new streaming message if not found
   return {
     ...state,
     messages: [...messages, {
@@ -403,14 +350,13 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
   };
 };
 
-// Handle streaming end events
+// Finalize streaming message
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
-  // remove the streaming message
   state.messages = state.messages.filter(msg => msg.messageId !== data.messageId);
   return { ...state, needScroll: false };
-}
+};
 
-// Handle streaming error events
+// Handle streaming errors
 export const handleStreamError = <T extends SSEComponentState>(state: T, data: StreamErrorData): T => {
   const { messageId, sender, error } = data;
 

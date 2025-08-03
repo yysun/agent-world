@@ -1,65 +1,18 @@
 /**
- * World Chat Component - Chat interface for world conversations
+ * World Chat Component - Real-time chat interface with agent message filtering
  * 
  * Features:
- * - Real-time message display with streaming indicators
- * - User input handling with send functionality
- * - Message filtering for completed, streaming, and regular messages
- * - Agent-specific message filtering: shows only selected agent's messages when agent is selected using fromAgentId
- * - System message display: always shows GM/system messages regardless of agent selection
- * - Cross-agent message detection: identifies and styles messages where sender differs from source agent
- * - Scroll-to-bottom behavior for new messages
- * - Loading states for messages
- * - Send button state management
- * 
- * Implementation:
- * - Functional component using AppRun JSX
- * - Props-based state management from parent World component
- * - AppRun $ directive pattern for event handling
- * - Message filtering logic for SSE streams and regular messages
- * - Conditional message filtering based on selectedAgent prop
- * - Always shows user messages regardless of selected agent
- * - Always shows system/GM messages (turn limits, notifications) regardless of agent selection
- * - Proper createdAt formatting
- * 
- * Changes:
- * - Extracted from World component for better separation of concerns
- * - Maintained all original chat functionality
- * - Added proper TypeScript interfaces for props
- * - Updated to use AppRun $ directive pattern ($onclick, $oninput, $onkeypress)
- * - Fixed message filtering to show regular non-streaming messages (e.g., GM turn limit notifications)
- * - Added selectedAgent prop for agent-specific message filtering
- * - Enhanced message filtering: filters by selected agent while always showing user messages
- * - Fixed system message filtering to always show GM/system messages regardless of agent selection
- * - Removed hideUserEnteredMessages prop - userEntered messages are now filtered from state in parent component
- * - Updated message filtering to use fromAgentId instead of sender name for more reliable agent identification
- * - Added cross-agent message detection and styling for messages from different agents' memories
+ * - Real-time message streaming with agent selection filtering
+ * - Cross-agent message detection and system message display  
+ * - User input handling with send functionality and loading states
+ * - AppRun JSX with props-based state management
  */
 
 import { app, safeHTML } from 'apprun';
-import type { Message } from '../types';
+import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
-
-// Component Props Interfaces (consolidated from components)
-export interface WorldChatProps {
-  worldName: string;
-  messages?: Message[]; // Made optional with default in component
-  userInput?: string; // Made optional with default in component
-  messagesLoading: boolean;
-  isSending: boolean;
-  isWaiting: boolean;
-  activeAgent?: {
-    spriteIndex: number;
-    name: string;
-  } | null;
-  selectedAgent?: {
-    id?: string;
-    name: string;
-  } | null;
-  currentChat?: string;
-};
 
 
 const debug = true;
@@ -88,7 +41,7 @@ export default function WorldChat(props: WorldChatProps) {
       <legend>
         {worldName} {
           currentChat ? ` - ${currentChat}` :
-         <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
+            <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
@@ -102,45 +55,45 @@ export default function WorldChat(props: WorldChatProps) {
               // Check if this is a cross-agent message
               const isCrossAgentMessage = hasSenderAgentMismatch(message);
 
-                const isSystemMessage = message.sender === 'system' || message.sender === 'SYSTEM';
-                const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';
-                const systemClass = isSystemMessage ? 'system-message' : '';
-                const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
-                const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
+              const isSystemMessage = message.sender === 'system' || message.sender === 'SYSTEM';
+              const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';
+              const systemClass = isSystemMessage ? 'system-message' : '';
+              const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
 
-                return (
-                  <div key={message.id || index} className={messageClasses}>
-                    <div className="message-sender">
-                      {message.sender || (message.type === 'user' ? 'User' : 'Agent')}
-                      {isCrossAgentMessage && message.fromAgentId && (
-                        <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
-                          → {message.fromAgentId}
-                        </span>
-                      )}
-                    </div>
-                    <div className="message-content">
-                      {safeHTML(renderMarkdown(message.text))}
-                    </div>
-                    <div className="message-timestamp">
-                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                    </div>
-                    {message.isStreaming && (
-                      <div className="streaming-indicator">
-                        <div className="streaming-content">
-                          <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                          <span>responding ...</span>
-                        </div>
-                      </div>
+              return (
+                <div key={message.id || index} className={messageClasses}>
+                  <div className="message-sender">
+                    {message.sender || (message.type === 'user' ? 'User' : 'Agent')}
+                    {isCrossAgentMessage && message.fromAgentId && (
+                      <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
+                        → {message.fromAgentId}
+                      </span>
                     )}
-                    {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                    {debug && <div className="message-debug-info">{JSON.stringify({
-                      type: message.type,
-                      sender: message.sender,
-                      fromAgentId: message.fromAgentId,
-                    })}</div>}
                   </div>
-                );
-              })
+                  <div className="message-content">
+                    {safeHTML(renderMarkdown(message.text))}
+                  </div>
+                  <div className="message-timestamp">
+                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
+                  </div>
+                  {message.isStreaming && (
+                    <div className="streaming-indicator">
+                      <div className="streaming-content">
+                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                        <span>responding ...</span>
+                      </div>
+                    </div>
+                  )}
+                  {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                  {debug && <div className="message-debug-info">{JSON.stringify({
+                    type: message.type,
+                    sender: message.sender,
+                    fromAgentId: message.fromAgentId,
+                  })}</div>}
+                </div>
+              );
+            })
           )}
 
           {/* Waiting indicator - three dots when waiting for streaming to start */}
