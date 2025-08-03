@@ -2388,3 +2388,358 @@ export function publishMessage(world: World, content: string, sender: string): v
 export function publishEvent(world: World, type: string, content: any): void {
   events.publishEvent(world, type, content);
 }
+
+// ========================
+// ENHANCED CHAT SESSION MANAGEMENT (Function-Based)
+// ========================
+
+/**
+ * Check if current chat is reusable based on title and message count
+ * Enhanced version for function-based implementation
+ */
+export async function isCurrentChatReusable(world: World): Promise<boolean> {
+  if (!world.currentChatId) {
+    return false;
+  }
+
+  try {
+    const currentChat = await world.storage.loadChatData(world.id, world.currentChatId);
+    if (!currentChat) {
+      return false;
+    }
+
+    // Chat is reusable if title is "New Chat" OR message count is 0
+    return currentChat.name === "New Chat" || currentChat.messageCount === 0;
+
+  } catch (error) {
+    logger.warn('Error checking chat reusability', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+    return false;
+  }
+}
+
+/**
+ * Reuse current chat by resetting agent memories and updating metadata
+ * Enhanced version for function-based implementation
+ */
+export async function reuseCurrentChat(world: World): Promise<World> {
+  if (!world.currentChatId) {
+    throw new Error('No current chat to reuse');
+  }
+
+  try {
+    // Reset agent memories
+    for (const [, agent] of world.agents) {
+      if (agent.archiveMemory) {
+        await agent.archiveMemory();
+      } else {
+        // Fallback: clear memory directly
+        if (agent.memory) {
+          agent.memory.length = 0;
+        }
+      }
+    }
+
+    // Update chat metadata
+    await world.storage.updateChatData(world.id, world.currentChatId, {
+      messageCount: 0
+    });
+
+    // Save current state
+    await saveCurrentState(world);
+
+    logger.debug('Reused current chat', {
+      worldId: world.id,
+      chatId: world.currentChatId
+    });
+
+    // Emit chat reused system event
+    events.publishEvent(world, 'system', {
+      type: 'chat-reused',
+      content: {
+        chatId: world.currentChatId,
+        worldId: world.id,
+        timestamp: new Date()
+      }
+    });
+
+    return world;
+
+  } catch (error) {
+    logger.error('Failed to reuse current chat', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+    throw error;
+  }
+}
+
+/**
+ * Create new chat session with fresh agent memories
+ * Enhanced version for function-based implementation
+ */
+export async function createNewChat(world: World): Promise<World> {
+  try {
+    // Save current state if there's an active chat
+    if (world.currentChatId) {
+      await saveCurrentState(world);
+    }
+
+    // Create new chat
+    const newChatData = await createChatData('', world.id, {
+      name: 'New Chat',
+      description: 'New chat session',
+      captureChat: true
+    });
+
+    // Reset agent memories
+    for (const [, agent] of world.agents) {
+      if (agent.archiveMemory) {
+        await agent.archiveMemory();
+      } else {
+        // Fallback: clear memory directly
+        if (agent.memory) {
+          agent.memory.length = 0;
+        }
+      }
+    }
+
+    // Update current chat ID
+    world.currentChatId = newChatData.id;
+
+    // Save world state with new chat ID
+    await world.storage.saveWorld({
+      ...await world.storage.loadWorld(world.id),
+      currentChatId: world.currentChatId,
+      lastUpdated: new Date()
+    } as WorldData);
+
+    logger.debug('Created new chat', {
+      worldId: world.id,
+      chatId: world.currentChatId
+    });
+
+    // Emit new chat created system event
+    events.publishEvent(world, 'system', {
+      type: 'new-chat-created',
+      content: {
+        chatId: world.currentChatId,
+        worldId: world.id,
+        timestamp: new Date()
+      }
+    });
+
+    return world;
+
+  } catch (error) {
+    logger.error('Failed to create new chat', {
+      worldId: world.id,
+      error: error instanceof Error ? error.message : error
+    });
+    throw error;
+  }
+}
+
+/**
+ * Smart chat creation with reuse optimization
+ * Enhanced version for function-based implementation
+ */
+export async function newChat(world: World): Promise<World> {
+  try {
+    // Check if current chat is reusable
+    const canReuse = await isCurrentChatReusable(world);
+    if (canReuse) {
+      return await reuseCurrentChat(world);
+    }
+
+    return await createNewChat(world);
+
+  } catch (error) {
+    logger.error('Failed to create new chat with optimization', {
+      worldId: world.id,
+      error: error instanceof Error ? error.message : error
+    });
+    throw error;
+  }
+}
+
+/**
+ * Load specific chat by ID and restore world state
+ * Enhanced version for function-based implementation
+ */
+export async function loadChatById(world: World, chatId: string): Promise<void> {
+  try {
+    // Save current state
+    if (world.currentChatId && world.currentChatId !== chatId) {
+      await saveCurrentState(world);
+    }
+
+    // Restore chat state
+    const success = await restoreWorldChat('', world.id, chatId);
+    if (!success) {
+      throw new Error(`Failed to restore chat ${chatId}`);
+    }
+
+    // Update current chat ID
+    world.currentChatId = chatId;
+
+    // Save world state with updated chat ID
+    await world.storage.saveWorld({
+      ...await world.storage.loadWorld(world.id),
+      currentChatId: world.currentChatId,
+      lastUpdated: new Date()
+    } as WorldData);
+
+    logger.debug('Loaded chat by ID', {
+      worldId: world.id,
+      chatId: chatId
+    });
+
+    // Emit event
+    world.eventEmitter.emit('chatLoaded', {
+      chatId,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    logger.error('Failed to load chat by ID', {
+      worldId: world.id,
+      chatId,
+      error: error instanceof Error ? error.message : error
+    });
+    throw error;
+  }
+}
+
+/**
+ * Get current chat data
+ * Enhanced version for function-based implementation
+ */
+export async function getCurrentChat(world: World): Promise<ChatData | null> {
+  if (!world.currentChatId) {
+    return null;
+  }
+
+  try {
+    return await world.storage.loadChatData(world.id, world.currentChatId);
+  } catch (error) {
+    logger.warn('Failed to get current chat', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+    return null;
+  }
+}
+
+/**
+ * Save current world state to active chat
+ * Enhanced version for function-based implementation
+ */
+export async function saveCurrentState(world: World): Promise<void> {
+  if (!world.currentChatId) {
+    return;
+  }
+
+  try {
+    // Collect all messages
+    const allMessages: AgentMessage[] = [];
+    for (const [, agent] of world.agents) {
+      if (agent.memory && Array.isArray(agent.memory)) {
+        allMessages.push(...agent.memory);
+      }
+    }
+
+    // Update chat with current state
+    await world.storage.updateChatData(world.id, world.currentChatId, {
+      messageCount: allMessages.length
+    });
+
+    logger.debug('Saved current state', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      messageCount: allMessages.length
+    });
+
+    // Emit event
+    world.eventEmitter.emit('stateAutoSaved', {
+      chatId: world.currentChatId,
+      messageCount: allMessages.length,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    logger.error('Failed to save current state', {
+      worldId: world.id,
+      chatId: world.currentChatId,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+}
+
+/**
+ * Delete chat with smart fallback for currentChatId management
+ * Enhanced version for function-based implementation
+ */
+export async function deleteChatDataWithFallback(world: World, chatId: string): Promise<boolean> {
+  try {
+    const success = await world.storage.deleteChatData(world.id, chatId);
+
+    if (success) {
+      // Smart fallback: manage currentChatId state
+      if (world.currentChatId === chatId) {
+        // Find the latest remaining chat
+        const remainingChats = await world.storage.listChats(world.id);
+
+        if (remainingChats.length === 0) {
+          // No chats remaining - set to null
+          world.currentChatId = null;
+        } else {
+          // Switch to the most recently updated chat
+          const latestChat = remainingChats.reduce((latest, chat) =>
+            new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
+          );
+          world.currentChatId = latestChat.id;
+        }
+
+        // Save the updated world state
+        await world.storage.saveWorld({
+          ...await world.storage.loadWorld(world.id),
+          currentChatId: world.currentChatId,
+          lastUpdated: new Date()
+        } as WorldData);
+      }
+
+      logger.debug('Deleted chat with smart fallback', {
+        worldId: world.id,
+        deletedChatId: chatId,
+        newCurrentChatId: world.currentChatId
+      });
+
+      // Emit chat deleted system event
+      events.publishEvent(world, 'system', {
+        type: 'chat-deleted',
+        content: {
+          chatId,
+          newCurrentChatId: world.currentChatId,
+          worldId: world.id,
+          timestamp: new Date()
+        }
+      });
+    }
+
+    return success;
+
+  } catch (error) {
+    logger.error('Failed to delete chat with fallback', {
+      worldId: world.id,
+      chatId,
+      error: error instanceof Error ? error.message : error
+    });
+    throw error;
+  }
+}

@@ -65,7 +65,7 @@
 
 import {
   World, Agent, WorldMessageEvent, WorldSSEEvent, WorldSystemEvent,
-  AgentMessage, MessageData, SenderType, ChatData
+  AgentMessage, MessageData, SenderType, ChatData, WorldChat
 } from './types.js';
 import { generateId } from './utils.js';
 
@@ -216,7 +216,7 @@ function generateChatTitleFromWorldMessages(world: World): string {
  * - Human messages: update chat title
  * - Agent messages: save the chat
  */
-async function handleChatSessionMessage(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+export async function handleChatSessionMessage(world: World, messageEvent: WorldMessageEvent): Promise<void> {
   try {
     const { sender } = messageEvent;
     const isHumanMessage = sender === 'HUMAN' || sender === 'human';
@@ -224,10 +224,10 @@ async function handleChatSessionMessage(world: World, messageEvent: WorldMessage
 
     if (isHumanMessage) {
       // Human message should update the chat title
-      await updateChatTitle(world, messageEvent);
+      await updateChatTitleFromMessage(world, messageEvent);
     } else if (isAgentMessage) {
       // Agent message should save the chat
-      await saveChatState(world, messageEvent);
+      await saveChatStateFromMessage(world, messageEvent);
     }
   } catch (error) {
     logger.warn('Chat session message handling failed', {
@@ -240,8 +240,10 @@ async function handleChatSessionMessage(world: World, messageEvent: WorldMessage
 
 /**
  * Update chat title based on human message content
+ * Enhanced version for function-based implementation
+ * Uses the first human message to generate meaningful chat titles.
  */
-async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+export async function updateChatTitleFromMessage(world: World, messageEvent: WorldMessageEvent): Promise<void> {
   if (!world.currentChatId) return;
 
   try {
@@ -269,7 +271,7 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
       });
     }
   } catch (error) {
-    logger.warn('Failed to update chat title', {
+    logger.warn('Failed to update chat title from message', {
       worldId: world.id,
       chatId: world.currentChatId,
       error: error instanceof Error ? error.message : error
@@ -279,13 +281,53 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
 
 /**
  * Save current chat state when agent responds
+ * Enhanced version for function-based implementation
  */
-async function saveChatState(world: World, messageEvent: WorldMessageEvent): Promise<void> {
+export async function saveChatStateFromMessage(world: World, messageEvent: WorldMessageEvent): Promise<void> {
   if (!world.currentChatId) return;
 
   try {
-    // Create world chat snapshot
-    const worldChat = await world.createWorldChat();
+    // Create world chat snapshot using the world's storage interface
+    const worldData = await world.storage.loadWorld(world.id);
+    if (!worldData) {
+      throw new Error(`World ${world.id} not found`);
+    }
+
+    // Collect all agent data and messages
+    const allMessages: AgentMessage[] = [];
+    const agentsData: any[] = [];
+
+    for (const [, agent] of world.agents) {
+      if (agent.memory && agent.memory.length > 0) {
+        allMessages.push(...agent.memory);
+      }
+      agentsData.push({
+        id: agent.id,
+        name: agent.name,
+        memory: agent.memory || [],
+        systemPrompt: agent.systemPrompt,
+        status: agent.status || 'active'
+      });
+    }
+
+    // Sort messages by timestamp
+    allMessages.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeA - timeB;
+    });
+
+    const worldChat: WorldChat = {
+      world: worldData,
+      agents: agentsData,
+      messages: allMessages,
+      metadata: {
+        capturedAt: new Date(),
+        version: '1.0',
+        totalMessages: allMessages.length,
+        activeAgents: agentsData.filter(a => a.status === 'active').length
+      }
+    };
 
     // Save the complete chat state
     await world.storage.saveWorldChat(world.id, world.currentChatId, worldChat);
@@ -311,7 +353,7 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
     });
 
   } catch (error) {
-    logger.warn('Failed to save chat state', {
+    logger.warn('Failed to save chat state from message', {
       worldId: world.id,
       chatId: world.currentChatId,
       error: error instanceof Error ? error.message : error
@@ -320,7 +362,8 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
 }
 
 /**
- * Generate a title from message content (simplified version)
+ * Generate a title from message content (enhanced version)
+ * Improved version with better content cleaning and intelligent truncation
  */
 function generateTitleFromContent(content: string): string {
   if (!content || content.trim().length === 0) {
@@ -330,6 +373,8 @@ function generateTitleFromContent(content: string): string {
   // Clean and truncate content for title
   let title = content.trim()
     .replace(/^(Hello|Hi|Hey)[,!.]?\s*/i, '')
+    .replace(/^(Can you|Could you|Would you)[,!.]?\s*/i, '')
+    .replace(/^(help me )?/i, '')
     .replace(/^I\s+(am|'m)\s+/i, '')
     .replace(/^(Let me|I'll|I will)\s+/i, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove bold markdown
@@ -364,6 +409,7 @@ function generateTitleFromContent(content: string): string {
 
 /**
  * Get current total message count across all agents
+ * Enhanced version for function-based implementation
  */
 async function getCurrentMessageCount(world: World): Promise<number> {
   let totalMessages = 0;
@@ -383,10 +429,24 @@ async function getCurrentMessageCount(world: World): Promise<number> {
  * @param content - Event content (can be string or object)
  */
 export function publishEvent(world: World, type: string, content: any): void {
+  // Ensure messageId is always generated, with fallback if generateId fails
+  let messageId: string;
+  try {
+    messageId = generateId();
+  } catch (error) {
+    // Fallback ID generation if generateId fails
+    messageId = 'evt-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+  }
+  
+  // Ensure messageId is not undefined or empty
+  if (!messageId || typeof messageId !== 'string' || messageId.length === 0) {
+    messageId = 'evt-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+  }
+
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
-    messageId: generateId()
+    messageId
   };
 
   // Emit to the specified channel/type
@@ -398,11 +458,25 @@ export function publishEvent(world: World, type: string, content: any): void {
  * Now includes chat session management based on currentChatId state
  */
 export function publishMessage(world: World, content: string, sender: string): void {
+  // Ensure messageId is always generated, with fallback if generateId fails
+  let messageId: string;
+  try {
+    messageId = generateId();
+  } catch (error) {
+    // Fallback ID generation if generateId fails
+    messageId = 'msg-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+  }
+  
+  // Ensure messageId is not undefined or empty
+  if (!messageId || typeof messageId !== 'string' || messageId.length === 0) {
+    messageId = 'msg-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+  }
+
   const messageEvent: WorldMessageEvent = {
     content,
     sender,
     timestamp: new Date(),
-    messageId: generateId()
+    messageId
   };
 
   // Emit the message event first
