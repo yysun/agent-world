@@ -575,12 +575,12 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         isOpen: true,
         onWorldEvent: (eventType: string, eventData: any) => {
           // Skip system success messages (following CLI pattern)
-          if (eventData.content && eventData.content.includes('Success message sent')) return;
+          if (eventData.content && typeof eventData.content === 'string' && eventData.content.includes('Success message sent')) return;
 
           // Handle system events with proper deserialization
           if (eventType === 'system') {
             // System events now contain the entire event object
-            if (eventData.type === 'error' || (eventData.message && eventData.message.toLowerCase().includes('error'))) {
+            if (eventData.type === 'error' || (eventData.message && typeof eventData.message === 'string' && eventData.message.toLowerCase().includes('error'))) {
               handleError(eventData.message || 'System error');
             }
             return;
@@ -588,7 +588,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
 
           // Handle system/world events (legacy support)
           if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-            if (eventData.message.toLowerCase().includes('error')) {
+            if (typeof eventData.message === 'string' && eventData.message.toLowerCase().includes('error')) {
               handleError(eventData.message);
             }
           }
@@ -855,7 +855,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       }
 
       // Filter out success messages
-      if (eventData.content && eventData.content.includes('Success message sent')) {
+      if (eventData.content && typeof eventData.content === 'string' && eventData.content.includes('Success message sent')) {
         return;
       }
 
