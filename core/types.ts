@@ -559,7 +559,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'chat-created' | 'chat-updated';
+  type: 'start' | 'chunk' | 'end' | 'error';
   content?: string;
   error?: string;
   messageId: string;
@@ -568,6 +568,12 @@ export interface WorldSSEEvent {
     outputTokens: number;
     totalTokens: number;
   };
+}
+
+export interface WorldSystemEvent {
+  content: string;
+  timestamp: Date;
+  messageId: string;
 }
 
 

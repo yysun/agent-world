@@ -63,7 +63,10 @@
  * - LLM call count is saved to disk after every LLM call and memory save operation
  */
 
-import { World, Agent, WorldMessageEvent, WorldSSEEvent, AgentMessage, MessageData, SenderType, ChatData } from './types.js';
+import {
+  World, Agent, WorldMessageEvent, WorldSSEEvent, WorldSystemEvent,
+  AgentMessage, MessageData, SenderType, ChatData
+} from './types.js';
 import { generateId } from './utils.js';
 
 let globalStreamingEnabled = true;
@@ -379,10 +382,10 @@ async function getCurrentMessageCount(world: World): Promise<number> {
  * @param content - Event content (can be string or object)
  */
 export function publishEvent(world: World, type: string, content: any): void {
-  const event = {
+  const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
-    eventId: generateId()
+    messageId: generateId()
   };
 
   // Emit to the specified channel/type
@@ -478,7 +481,7 @@ export function subscribeToSSE(
 // Agent Events Functions (from agent-events.ts)
 
 // Import additional dependencies for agent events
-import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, messageDataToAgentMessage, prepareMessagesForLLM } from './utils.js';
+import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
 
 /**
  * Auto-mention utility functions for processAgentMessage

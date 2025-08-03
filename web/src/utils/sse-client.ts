@@ -36,7 +36,7 @@ interface SSEBaseData {
 }
 
 interface SSEStreamEvent {
-  type: 'start' | 'chunk' | 'end' | 'error' | 'chat-created' | 'chat-updated';
+  type: 'start' | 'chunk' | 'end' | 'error';
   messageId?: string;
   sender?: string;
   content?: string;
@@ -214,22 +214,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
       // Clean up streaming state
       streamingState.activeMessages.delete(messageId);
-      break;
-
-    case 'chat-created':
-      // Handle chat creation event
-      publishEvent('handleChatCreated', {
-        worldName: eventData.worldName || streamingState.currentWorldName,
-        chatData: eventData.content ? JSON.parse(eventData.content) : {}
-      });
-      break;
-
-    case 'chat-updated':
-      // Handle chat update event
-      publishEvent('handleChatUpdated', {
-        worldName: eventData.worldName || streamingState.currentWorldName,
-        chatData: eventData.content ? JSON.parse(eventData.content) : {}
-      });
       break;
   }
 };
