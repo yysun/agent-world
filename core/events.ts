@@ -265,7 +265,7 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
       publishEvent(world, 'system', {
         worldId: world.id,
         chatId: world.currentChatId,
-        action: 'title-updated'
+        type: 'chat-title-updated'
       });
     }
   } catch (error) {
@@ -307,8 +307,9 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
     publishEvent(world, 'system', {
       worldId: world.id,
       chatId: world.currentChatId,
-      action: 'state-saved'
+      type: 'chat-saved'
     });
+
   } catch (error) {
     logger.warn('Failed to save chat state', {
       worldId: world.id,

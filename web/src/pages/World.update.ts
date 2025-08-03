@@ -197,7 +197,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 // Handle regular messages
 const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
-  console.log('Received message event:', data);
+  // console.log('Received message event:', data);
 
   const messageData = data|| {};
   const senderName = messageData.sender || messageData.agentName || 'Agent';

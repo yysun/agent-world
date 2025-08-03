@@ -24,7 +24,7 @@
  *   - Ensures agents are preserved and included in response to prevent client-side confusion
  * - Added consistent serialization functions for API responses:
  *   - serializeWorld(): Converts World objects to JSON with chats array and agent serialization
- *   - serializeAgent(): Converts Agent objects to JSON with UI-specific properties (spriteIndex, messageCount)
+ *   - serializeAgent(): Converts Agent objects to JSON
  *   - Updated all endpoints to use consistent serialization format
  * - Simplified API by removing redundant endpoints since serialized World contains agents[] and chats[]:
  *   - Removed: GET /worlds/:worldName/agents (use world.agents instead)
@@ -103,8 +103,6 @@ function serializeAgent(agent: any): {
   createdAt?: Date;
   lastActive?: Date;
   description?: string;
-  spriteIndex: number;
-  messageCount: number;
 } {
   return {
     id: agent.id,
@@ -122,9 +120,6 @@ function serializeAgent(agent: any): {
     createdAt: agent.createdAt,
     lastActive: agent.lastActive,
     description: agent.description,
-    // UI-specific properties with defaults
-    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
-    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
   };
 }
 
@@ -502,8 +497,6 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
     sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
   }
 });
-
-
 
 // DELETE /worlds/:worldName/agents/:agentName/memory - Clear agent memory
 router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {

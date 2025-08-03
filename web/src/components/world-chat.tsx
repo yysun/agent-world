@@ -98,18 +98,9 @@ export default function WorldChat(props: WorldChatProps) {
           ) : messages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            messages
-              .filter(message => {
-                // Use util to determine sender type
-                // Hide system messages
-                if (getSenderType(message.sender) === 'system') {
-                  return false;
-                }
-                return true;
-              })
-              .map((message, index) => {
-                // Check if this is a cross-agent message
-                const isCrossAgentMessage = hasSenderAgentMismatch(message);
+            messages.map((message, index) => {
+              // Check if this is a cross-agent message
+              const isCrossAgentMessage = hasSenderAgentMismatch(message);
 
                 const isSystemMessage = message.sender === 'system' || message.sender === 'SYSTEM';
                 const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';

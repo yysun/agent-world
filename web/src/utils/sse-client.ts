@@ -25,7 +25,6 @@ import type {
   StreamEndData,
   StreamErrorData,
 } from '../types';
-import { isWorldComponentState } from '../types';
 
 // TypeScript interfaces for SSE data structures
 interface SSEBaseData {
@@ -134,8 +133,8 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   const eventData = data.data;
   if (!eventData) return;
 
-  const messageId = eventData.messageId || 'default';
-  const agentName = eventData.sender || 'Agent';
+  const messageId = eventData.messageId;
+  const agentName = eventData.sender;
 
   switch (eventData.type) {
     case 'start':
@@ -355,44 +354,27 @@ export async function sendChatMessage(
 
 // Handle streaming start events
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
-  const { messageId, sender, worldName } = data;
-  const senderName = sender || 'Agent';
-
-  // Find agent ID by sender name if state has agents
-  let fromAgentId: string | undefined;
-  if (isWorldComponentState(state) && state.world && Array.isArray(state.world.agents)) {
-    const agent = state.world.agents.find((a: any) => a.name === senderName);
-    fromAgentId = agent?.id;
-  }
-
+  const { messageId, sender } = data;
   return {
     ...state,
     messages: [...(state.messages || []), {
-      id: Date.now() + Math.random(),
-      type: 'agent-stream',
-      sender: senderName,
+      sender: sender,
       text: '',
-      createdAt: new Date().toISOString(),
-      worldName: worldName || state.worldName,
       isStreaming: true,
       messageId: messageId,
-      fromAgentId: fromAgentId
-    }],
-    needScroll: true
+      // fromAgentId: fromAgentId
+    }]
   };
 };
 
 // Handle streaming chunk events
 export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: StreamChunkData): T => {
-  const { messageId, sender, content, isAccumulated } = data;
+  const { messageId, sender, content } = data;
   const messages = [...(state.messages || [])];
 
   // Find the streaming message to update
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].isStreaming &&
-      (messages[i].messageId === messageId ||
-        (!messageId && messages[i].sender === sender && messages[i].type === 'agent-stream'))) {
-
+    if (messages[i].isStreaming && messages[i].messageId === messageId) {
       // Update with content
       messages[i] = {
         ...messages[i],
@@ -412,12 +394,8 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
   return {
     ...state,
     messages: [...messages, {
-      id: Date.now() + Math.random(),
-      type: 'agent-stream',
-      sender: sender || 'Agent',
+      sender: sender,
       text: content || '',
-      createdAt: new Date().toISOString(),
-      worldName: data.worldName || state.worldName,
       isStreaming: true,
       messageId: messageId
     }],
@@ -429,7 +407,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
   // remove the streaming message
   state.messages = state.messages.filter(msg => msg.messageId !== data.messageId);
-  return state;
+  return { ...state, needScroll: false };
 }
 
 // Handle streaming error events

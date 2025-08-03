@@ -122,47 +122,6 @@ export interface Chat {
 }
 
 
-
-// Current Chat Session State
-export interface CurrentChatState {
-  id: string | null; // null for unsaved chats, chatId for saved chats
-  name: string;
-  isSaved: boolean;
-  messageCount: number;
-  lastUpdated: Date;
-}
-
-// Agent Edit State Management
-export interface AgentEditState {
-  isOpen: boolean;
-  mode: 'create' | 'edit';
-  selectedAgent: Agent | null;
-  formData: {
-    name: string;
-    description: string;
-    provider: string;
-    model: string;
-    temperature: number;
-    systemPrompt: string;
-  };
-  loading: boolean;
-  error: string | null;
-}
-
-// World Edit State Management
-export interface WorldEditState {
-  isOpen: boolean;
-  mode: 'create' | 'edit';
-  selectedWorld: World | null;
-  formData: {
-    name: string;
-    description: string;
-    turnLimit: number;
-  };
-  loading: boolean;
-  error: string | null;
-}
-
 // Base SSE Component State (consolidated from sse-client.ts)
 export interface SSEComponentState {
   messages: Message[];
@@ -205,18 +164,6 @@ export interface WorldComponentState extends SSEComponentState {
   needScroll: boolean;
 }
 
-// API Response Types (consolidated from api.ts)
-export interface ApiResponse<T = any> {
-  data?: T;
-  error?: string;
-  code?: string;
-}
-
-export interface AgentMemoryResponse {
-  messages: Message[];
-  [key: string]: any;
-}
-
 // SSE Event Handler Types
 export interface StreamStartData {
   messageId: string;
@@ -246,22 +193,6 @@ export interface StreamErrorData {
   worldName?: string;
 }
 
-export interface MessageData {
-  data?: {
-    type?: string;
-    sender?: string;
-    agentName?: string;
-    content?: string;
-    message?: string;
-    createdAt?: string;
-    worldName?: string;
-  };
-}
-
-export interface ErrorData {
-  message: string;
-}
-
 // API Request Types (consolidated from server/api.ts patterns)
 export interface ApiRequestOptions {
   method?: string;
@@ -270,85 +201,3 @@ export interface ApiRequestOptions {
   [key: string]: any;
 }
 
-// Form Data Types
-export interface WorldFormData {
-  name: string;
-  description?: string;
-  turnLimit?: number;
-  chatLLMProvider?: string;
-  chatLLMModel?: string;
-}
-
-export interface AgentFormData {
-  name: string;
-  description: string;
-  provider: string;
-  model: string;
-  temperature: number;
-  systemPrompt: string;
-}
-
-// Event Handler Function Types
-export type StateUpdateFunction<T extends SSEComponentState> = (state: T, data?: any) => T;
-export type AsyncStateUpdateFunction<T extends SSEComponentState> = (state: T, data?: any) => Promise<T>;
-export type StateUpdateGenerator<T extends SSEComponentState> = (state: T, data?: any) => AsyncGenerator<T>;
-
-// AppRun Event Handler Types
-export interface AppRunEventHandlers<T extends SSEComponentState> {
-  [eventName: string]: StateUpdateFunction<T> | AsyncStateUpdateFunction<T> | StateUpdateGenerator<T>;
-}
-
-// Utility type for component state updates
-export type ComponentStateUpdate<T extends SSEComponentState> = Partial<T>;
-
-// Type guards for runtime type checking
-export function isAgent(obj: any): obj is Agent {
-  return obj && typeof obj === 'object' &&
-    typeof obj.id === 'string' &&
-    typeof obj.name === 'string' &&
-    typeof obj.spriteIndex === 'number' &&
-    typeof obj.messageCount === 'number';
-}
-
-export function isMessage(obj: any): obj is Message {
-  return obj && typeof obj === 'object' &&
-    typeof obj.sender === 'string' &&
-    typeof obj.text === 'string' &&
-    typeof obj.createdAt === 'string';
-}
-
-export function isWorldComponentState(obj: any): obj is WorldComponentState {
-  return obj && typeof obj === 'object' &&
-    typeof obj.worldName === 'string' &&
-    Array.isArray(obj.messages) &&
-    obj.world && Array.isArray(obj.world.agents);
-}
-
-// Constants for UI configuration
-export const UI_CONSTANTS = {
-  DEFAULT_TEMPERATURE: 0.7,
-  DEFAULT_TURN_LIMIT: 5,
-  DEFAULT_SPRITE_COUNT: 9,
-  MAX_MESSAGE_LENGTH: 4000,
-  MAX_SYSTEM_PROMPT_LENGTH: 2000,
-  MAX_AGENT_NAME_LENGTH: 50,
-  MAX_WORLD_NAME_LENGTH: 100,
-} as const;
-
-// Default values for forms
-export const DEFAULT_AGENT_FORM_DATA: AgentFormData = {
-  name: '',
-  description: '',
-  provider: 'ollama',
-  model: 'llama3.2:3b',
-  temperature: UI_CONSTANTS.DEFAULT_TEMPERATURE,
-  systemPrompt: ''
-};
-
-export const DEFAULT_WORLD_FORM_DATA: WorldFormData = {
-  name: '',
-  description: '',
-  turnLimit: UI_CONSTANTS.DEFAULT_TURN_LIMIT,
-  chatLLMProvider: 'ollama',
-  chatLLMModel: 'llama3.2:3b'
-};
