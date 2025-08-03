@@ -5,127 +5,304 @@
 ### A. Message Events
 - **Type:** `WorldMessageEvent`
 - **Fields:** `content`, `sender`, `timestamp`, `messageId`
-- **Emitted by:** `world.eventEmitter.emit('message', messageEvent)`
+- **Emitted by:** `publishMessage(world, content, sender)` → `world.eventEmitter.emit('message', messageEvent)`
 - **Purpose:** Represents a chat message (from human, agent, or system) within a world.
+- **Chat Integration:** Automatically triggers chat session management (title updates, auto-save)
 
 ### B. SSE Events
 - **Type:** `WorldSSEEvent`
 - **Fields:** `agentName`, `type`, `content`, `error`, `messageId`, `usage`
-- **Emitted by:** `world.eventEmitter.emit('sse', sseEvent)`
+- **Emitted by:** `publishSSE(world, data)` → `world.eventEmitter.emit('sse', sseEvent)`
 - **Purpose:** Used for streaming events (start, chunk, end, error, chat-created, chat-updated) to the frontend via Server-Sent Events.
+- **Types:** `'start' | 'chunk' | 'end' | 'error' | 'chat-created' | 'chat-updated'`
 
-### C. System Messages
-- **Type:** `WorldMessageEvent` (with `sender: 'system'`)
-- **Fields:** Same as message events, but content is typically a JSON string describing the event (e.g., chat-created, chat-updated).
-- **Purpose:** Used for system-level notifications (e.g., chat creation, chat updates) sent as regular messages.
+### C. System Events
+- **Type:** Generic events via `publishEvent(world, type, content)`
+- **Emitted by:** `world.eventEmitter.emit(type, content)`
+- **Purpose:** Channel-specific events for system notifications, world events, etc.
+- **Channels:** `'system'`, `'world'`, custom event types
 
----
-
-## 2. Event Flow and Transformation
-
-### A. World Event Emitter
-- **Source:** All events originate from the `World.eventEmitter`.
-- **Emits:**
-  - `'message'` events for chat messages and system notifications.
-  - `'sse'` events for streaming responses and real-time updates.
-
-### B. LLM (Language Model) Integration
-- **Consumes:** Message events for agent processing.
-- **Produces:** New agent messages, which are published back as message events.
-- **Streaming:** LLM responses may be chunked and emitted as SSE events for real-time frontend updates.
-
-### C. API Server
-- **Subscribes:** To both `'message'` and `'sse'` events from the world.
-- **Transforms:**
-  - **Message Events:** Used for chat history, system notifications, and agent responses.
-  - **SSE Events:** Transformed into HTTP SSE responses for the frontend.
-- **Routes:** REST endpoints and SSE streaming endpoints expose these events to the frontend.
-
-### D. Frontend
-- **Receives:**
-  - **SSE Events:** For real-time updates (streaming, chat-created, chat-updated).
-  - **Message Events:** For chat history and system notifications.
-- **Handles:** UI updates, chat rendering, and system notifications based on event type.
+### D. Chat Session Events
+- **Integration:** Chat events are published as both message events and SSE events
+- **Auto-save:** Agent messages trigger automatic chat state saving
+- **Title Generation:** Human messages trigger automatic chat title updates
+- **State Management:** currentChatId tracking for active chat sessions
 
 ---
 
-## 3. Mapping Table
+## 2. Event Flow and Architecture
 
-| Event Type      | Emitter/Source         | API Server Role         | Frontend Role           | Example Use Case                |
-|-----------------|-----------------------|-------------------------|-------------------------|---------------------------------|
-| message         | World.eventEmitter     | REST API, history       | Chat UI, notifications  | Human/agent/system messages     |
-| sse             | World.eventEmitter     | SSE endpoint            | Real-time UI updates    | Streaming LLM responses         |
-| system message  | World.eventEmitter     | REST API, history       | System notifications    | Chat-created, chat-updated      |
+### A. World EventEmitter (Core)
+- **Source:** All events originate from each `World.eventEmitter` instance
+- **Isolation:** Events are naturally scoped to individual World instances (no cross-world interference)
+- **Event Channels:**
+  - `'message'` - Chat messages, system notifications
+  - `'sse'` - Streaming responses and real-time updates
+  - Custom channels via `publishEvent(world, type, content)`
+
+### B. Core Event Functions
+- **publishMessage(world, content, sender):**
+  - Creates `WorldMessageEvent` with automatic ID and timestamp generation
+  - Emits to `world.eventEmitter.emit('message', messageEvent)`
+  - Triggers automatic chat session management (titles, auto-save)
+  
+- **publishSSE(world, data):**
+  - Creates `WorldSSEEvent` for streaming responses
+  - Emits to `world.eventEmitter.emit('sse', sseEvent)`
+  - Used by LLM streaming and real-time updates
+  
+- **publishEvent(world, type, content):**
+  - Generic event publishing for custom channels
+  - Emits to `world.eventEmitter.emit(type, content)`
+
+### C. Agent Event Processing
+- **Subscription:** `subscribeAgentToMessages(world, agent)` for automatic agent responses
+- **Message Processing:** Agents automatically process incoming messages via event handlers
+- **Response Generation:** Agent responses are published back as new message events
+- **Memory Management:** All messages are automatically saved to agent memory
+- **Auto-mention Logic:** Prevents agent loops while preserving explicit mentions
+
+### D. Chat Session Management
+- **Current Chat Tracking:** `world.currentChatId` maintains active chat session
+- **Auto-save:** Agent messages trigger automatic chat state saving
+- **Title Generation:** Human messages trigger automatic chat title updates from message content
+- **New Chat Optimization:** Reusable "New Chat" sessions to reduce database operations
 
 ---
 
-## 4. Mermaid Diagram
+## 3. API Server Integration
+
+### A. REST API Endpoints
+- **World Management:**
+  - `GET /worlds` - List all worlds
+  - `GET /worlds/:worldName` - Get world with serialized agents and chats
+  - `POST /worlds` - Create new world
+  - `PATCH /worlds/:worldName` - Update world configuration
+  - `DELETE /worlds/:worldName` - Delete world
+
+- **Agent Management:**
+  - `POST /worlds/:worldName/agents` - Create new agent
+  - `PATCH /worlds/:worldName/agents/:agentName` - Update agent
+  - `DELETE /worlds/:worldName/agents/:agentName` - Delete agent
+  - `DELETE /worlds/:worldName/agents/:agentName/memory` - Clear agent memory
+
+- **Chat Management:**
+  - `POST /worlds/:worldName/chat` - Send message (streaming or non-streaming)
+  - `POST /worlds/:worldName/new-chat` - Create new chat session
+  - `POST /worlds/:worldName/load-chat/:chatId` - Load existing chat
+  - `DELETE /worlds/:worldName/chats/:chatId` - Delete chat
+  - `GET /worlds/:worldName/export` - Export world to markdown
+
+### B. SSE Streaming Integration
+- **Endpoint:** `POST /worlds/:worldName/chat` with `stream: true`
+- **Headers:** `Content-Type: text/event-stream`, CORS headers
+- **Event Subscription:** API server subscribes to world's SSE events
+- **Data Format:** `data: {"type": "sse", "data": {...}}\n\n`
+- **Event Types:**
+  - `start` - Agent begins responding
+  - `chunk` - Streaming content chunk
+  - `end` - Response complete
+  - `error` - Streaming error
+  - `chat-created` - New chat session created
+  - `chat-updated` - Chat session updated
+
+### C. Response Serialization
+- **serializeWorld(world):** Converts World object to JSON with agents array and chats array
+- **serializeAgent(agent):** Converts Agent object to JSON with UI properties (spriteIndex, messageCount)
+- **Consistency:** All endpoints return serialized data format for frontend compatibility
+
+---
+
+## 4. Frontend Integration
+
+### A. SSE Client (`web/src/utils/sse-client.ts`)
+- **sendChatMessage(worldName, message, sender):** Unified SSE streaming function
+- **Event Processing:** Handles SSE data transformation to AppRun events
+- **State Management:** Maintains streaming state for active messages
+- **AppRun Integration:** Direct event publishing via `app.run(eventType, data)`
+
+### B. Event Handler Types
+- **handleStreamStart:** Initialize streaming message in UI
+- **handleStreamChunk:** Update streaming content with accumulated text
+- **handleStreamEnd:** Finalize streaming message and clean up state
+- **handleStreamError:** Handle streaming errors with user feedback
+- **handleChatCreated/Updated:** Chat session management notifications
+
+### C. Component State Management
+- **WorldComponentState:** Consolidated state interface for world components
+- **SSEComponentState:** Base interface for SSE-enabled components
+- **Message Interface:** UI message structure with streaming properties
+- **Type Safety:** Full TypeScript integration with proper interfaces
+
+### D. Real-time Updates
+- **Streaming Messages:** Live agent response rendering
+- **Chat Session Updates:** Real-time chat creation and loading
+- **Error Handling:** User-friendly error display with retry capabilities
+- **Connection Management:** Automatic reconnection and cleanup
+
+---
+
+## 5. Data Flow Summary
+
+### A. Message Publication Flow
+1. **Human Input:** User sends message via frontend
+2. **API Processing:** `POST /worlds/:worldName/chat` receives message
+3. **Event Publishing:** `publishMessage(world, content, "HUMAN")` 
+4. **World Events:** `world.eventEmitter.emit('message', messageEvent)`
+5. **Agent Processing:** Subscribed agents process message automatically
+6. **Agent Response:** Agent generates response and publishes new message
+7. **SSE Streaming:** Agent response streamed via SSE events to frontend
+8. **Chat Management:** Auto-save and title updates triggered automatically
+
+### B. SSE Streaming Flow
+1. **Agent Response:** LLM generates streaming response
+2. **SSE Events:** `publishSSE(world, {type: 'chunk', content, agentName})`
+3. **API Subscription:** Server subscribes to world SSE events
+4. **HTTP Stream:** `res.write(data: JSON.stringify(sseEvent))` 
+5. **Frontend Processing:** SSE client processes and transforms to AppRun events
+6. **UI Updates:** React-like state updates render streaming content
+
+### C. Chat Session Flow
+1. **Session Creation:** `newChat()` creates new chat with fresh agent state
+2. **Chat Tracking:** `world.currentChatId` maintains active session
+3. **Auto-save:** Agent messages trigger `saveChatState()` automatically
+4. **Title Updates:** Human messages trigger `updateChatTitle()` from content
+5. **Session Loading:** `loadChatById()` restores previous chat state
+6. **Export:** `exportWorldToMarkdown()` generates complete chat history
+
+---
+
+## 6. Architecture Diagrams
+
+### A. Event System Overview
 
 ```mermaid
 flowchart TD
     subgraph World Instance
-        A[World.eventEmitter]
-        A -- "emit('message', WorldMessageEvent)" --> B[Message Subscribers]
-        A -- "emit('sse', WorldSSEEvent)" --> C[SSE Subscribers]
+        WE[World.eventEmitter]
+        WE -- "publishMessage()" --> ME[Message Events]
+        WE -- "publishSSE()" --> SE[SSE Events] 
+        WE -- "publishEvent()" --> CE[Custom Events]
     end
 
-    subgraph LLM
-        B -- "Agent message triggers LLM" --> D[LLM Processing]
-        D -- "LLM response" --> A
-        D -- "Streaming response" --> A
+    subgraph Agent Processing
+        ME --> AP[Agent Subscriptions]
+        AP --> LLM[LLM Processing]
+        LLM --> AR[Agent Response]
+        AR --> WE
     end
 
     subgraph API Server
-        B -- "REST API: /chat, /history" --> E[API Endpoints]
-        C -- "SSE API: /chat (stream)" --> F[SSE Endpoint]
+        ME --> REST[REST Endpoints]
+        SE --> SSE[SSE Streaming]
+        CE --> SYS[System Events]
     end
 
     subgraph Frontend
-        E -- "Fetch chat history, system messages" --> G[Chat UI]
-        F -- "Receive SSE events" --> H[Streaming UI]
-        E -- "System notifications" --> I[System UI]
+        REST --> UI[Chat UI]
+        SSE --> STREAM[Streaming UI]
+        SYS --> NOTIFY[Notifications]
     end
 
-    %% System message mapping
-    A -- "emit('message', {sender: 'system', content: ...})" --> E
-    E -- "System message" --> I
+    subgraph Chat Management
+        ME --> CHAT[Chat Session Manager]
+        CHAT --> SAVE[Auto-save]
+        CHAT --> TITLE[Title Generation]
+        CHAT --> STATE[State Tracking]
+    end
+```
+
+### B. SSE Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant World
+    participant Agent
+    participant Frontend
+
+    User->>API: POST /chat {message, stream: true}
+    API->>World: publishMessage(content, "HUMAN")
+    World->>Agent: message event subscription
+    Agent->>World: publishSSE({type: "start"})
+    World->>API: SSE event subscription
+    API->>Frontend: SSE: {type: "start"}
+    
+    loop Streaming Response
+        Agent->>World: publishSSE({type: "chunk", content})
+        World->>API: SSE event
+        API->>Frontend: SSE: {type: "chunk"}
+    end
+    
+    Agent->>World: publishSSE({type: "end"})
+    Agent->>World: publishMessage(response, agentId)
+    World->>API: SSE: {type: "end"}
+    API->>Frontend: SSE: {type: "end"}
+```
+
+### C. Chat Session Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> NewSession: newChat()
+    NewSession --> Active: currentChatId set
+    Active --> TitleUpdate: Human message
+    TitleUpdate --> Active: Title generated
+    Active --> AutoSave: Agent response
+    AutoSave --> Active: State saved
+    Active --> LoadSession: Load different chat
+    LoadSession --> Active: Chat restored
+    Active --> Export: Export request
+    Export --> Active: Markdown generated
+    Active --> [*]: Session ends
 ```
 
 ---
 
-## 5. Detailed Transformation Example
+## 7. Key Implementation Details
 
-- **Human sends message:**  
-  → `publishMessage(world, "Hello!", "HUMAN")`  
-  → `World.eventEmitter.emit('message', ...)`  
-  → API server receives event, updates chat history  
-  → Frontend fetches chat history, displays message
+### A. Event Isolation
+- **Per-World EventEmitters:** Each World instance has its own EventEmitter preventing cross-world event interference
+- **Natural Scoping:** Events are automatically scoped to the world instance where they originate
+- **No Global State:** No global event system or complex event routing required
 
-- **Agent responds (LLM):**  
-  → LLM processes message, generates response  
-  → `publishMessage(world, "Hi there!", "agent-1")`  
-  → `World.eventEmitter.emit('message', ...)`  
-  → API server updates chat history  
-  → Frontend updates chat UI
+### B. Performance Optimizations
+- **Static Imports:** Core modules (events, llm-manager, utils) use static imports eliminating dynamic import overhead
+- **Storage Factory:** Environment-aware storage functions with single initialization
+- **Batch Operations:** Support for batch agent creation and memory operations
+- **Stream Management:** Efficient SSE streaming with proper timer management and cleanup
 
-- **Streaming LLM response:**  
-  → LLM streams response chunks  
-  → `publishSSE(world, {type: 'chunk', ...})`  
-  → API server sends SSE to frontend  
-  → Frontend displays streaming message
+### C. Type Safety
+- **TypeScript Integration:** Full type safety across event system with proper interfaces
+- **Event Payload Mapping:** `EventPayloadMap` ensures payload types match event types
+- **Runtime Validation:** Zod schemas for API request validation
+- **Type Guards:** Runtime type checking for component state management
 
-- **System event (chat-created):**  
-  → `publishMessage(world, JSON.stringify({type: 'chat-created', ...}), 'system')`  
-  → `World.eventEmitter.emit('message', ...)`  
-  → API server updates chat history  
-  → Frontend displays system notification
+### D. Error Handling
+- **Graceful Degradation:** SSE streaming falls back to non-streaming mode on errors
+- **Comprehensive Logging:** Category-based logging system for debugging and monitoring
+- **Connection Management:** Automatic cleanup and reconnection handling
+- **Validation:** Input validation at API boundaries with meaningful error messages
+
+### E. Chat Session Management
+- **Optimization:** Reusable "New Chat" sessions reduce database operations
+- **Auto-save:** Automatic chat state persistence based on message events
+- **Title Generation:** Intelligent chat title generation from message content analysis
+- **State Tracking:** Consistent currentChatId management across all operations
 
 ---
 
-## 6. Summary
+## 8. Summary
 
-- **Message events** are the backbone for chat and system notifications.
-- **SSE events** are used for real-time streaming and updates.
-- **System messages** (e.g., chat-created, chat-updated) are now sent as regular message events with `sender: 'system'`.
-- **API server** bridges the event system to REST and SSE endpoints.
-- **Frontend** consumes both message and SSE events for UI updates.
+The Agent World event system provides a robust, type-safe, and performant foundation for real-time chat applications with the following key characteristics:
+
+- **Decentralized Events:** Each World instance maintains its own EventEmitter for natural event scoping
+- **Unified API:** Core event functions (publishMessage, publishSSE, publishEvent) provide consistent interfaces
+- **Real-time Streaming:** Full SSE integration for live agent responses and system updates  
+- **Chat Management:** Integrated chat session lifecycle with auto-save and title generation
+- **Type Safety:** Complete TypeScript integration with runtime validation
+- **Performance:** Optimized for high-throughput scenarios with minimal overhead
+- **Scalability:** Architecture supports multiple worlds and agents without interference
+
+The system successfully bridges the gap between backend event processing and frontend real-time updates while maintaining clean separation of concerns and robust error handling throughout the entire stack.

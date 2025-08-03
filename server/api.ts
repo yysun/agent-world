@@ -574,39 +574,11 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
       const client: ClientConnection = {
         isOpen: true,
         onWorldEvent: (eventType: string, eventData: any) => {
-          // Skip system success messages (following CLI pattern)
-          if (eventData.content && typeof eventData.content === 'string' && eventData.content.includes('Success message sent')) return;
-
-          // Handle system events with proper deserialization
-          if (eventType === 'system') {
-            // System events now contain the entire event object
-            if (eventData.type === 'error' || (eventData.message && typeof eventData.message === 'string' && eventData.message.toLowerCase().includes('error'))) {
-              handleError(eventData.message || 'System error');
-            }
-            return;
-          }
-
-          // Handle system/world events (legacy support)
-          if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-            if (typeof eventData.message === 'string' && eventData.message.toLowerCase().includes('error')) {
-              handleError(eventData.message);
-            }
-          }
-
-          // Handle message events (main response from agents)
-          if (eventType === 'message' && eventData.content) {
-            // Skip user messages to prevent echo
-            if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
-              return;
-            }
-
-            responseContent = eventData.content;
-            responseSender = eventData.sender || 'agent';
-            completeResponse();
-          }
-        },
-        onError: (error: string) => {
-          handleError(error);
+          responseContent = JSON.stringify({
+            type: eventType,
+            data: eventData
+          });
+          completeResponse();
         }
       };
 
@@ -725,115 +697,9 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   };
 
   const handleStreamingComplete = (): void => {
-    // Send completion event
-    sendSSE(JSON.stringify({
-      type: 'complete',
-      message: 'Operation completed'
-    }));
     res.end();
   };
 
-  // Handle streaming events
-  const handleStreamingEvents = (eventType: string, eventData: any): boolean => {
-    if (eventType !== 'sse') return false;
-
-    // Handle chunk events
-    if (eventData.type === 'chunk' && eventData.content) {
-      if (!streaming.isActive) {
-        streaming.isActive = true;
-        streaming.content = '';
-        streaming.sender = eventData.agentName || eventData.sender;
-        streaming.messageId = eventData.messageId;
-
-        // Send start event
-        sendSSE(JSON.stringify({
-          type: 'sse',
-          data: {
-            type: 'start',
-            sender: streaming.sender,
-            messageId: streaming.messageId
-          }
-        }));
-
-        if (streaming.stopWait) {
-          streaming.stopWait();
-        }
-      }
-
-      if (streaming.messageId === eventData.messageId) {
-        streaming.content += eventData.content;
-
-        // Send chunk event
-        sendSSE(JSON.stringify({
-          type: 'sse',
-          data: {
-            type: 'chunk',
-            content: eventData.content,
-            sender: streaming.sender,
-            messageId: streaming.messageId
-          }
-        }));
-
-        // Reset stall timer with each chunk (clear previous and set new)
-        if (streaming.wait) {
-          streaming.wait(5000); // 5 second stall timeout between chunks
-        }
-      }
-      return true;
-    }
-
-    // Handle end events
-    if (eventData.type === 'end' &&
-      streaming.isActive &&
-      streaming.messageId === eventData.messageId) {
-
-      // Send end event
-      sendSSE(JSON.stringify({
-        type: 'sse',
-        data: {
-          type: 'end',
-          sender: streaming.sender,
-          messageId: streaming.messageId,
-          content: streaming.content
-        }
-      }));
-
-      resetStreamingState();
-
-      // Set completion timer (clear previous and set new) - shorter since streaming is complete
-      if (streaming.wait) {
-        streaming.wait(3000); // 3 second completion timeout
-      }
-      return true;
-    }
-
-    // Handle error events
-    if (eventData.type === 'error' &&
-      streaming.isActive &&
-      streaming.messageId === eventData.messageId) {
-
-      // Send error event
-      sendSSE(JSON.stringify({
-        type: 'sse',
-        data: {
-          type: 'error',
-          error: eventData.error || eventData.message,
-          sender: streaming.sender,
-          messageId: streaming.messageId
-        }
-      }));
-
-      resetStreamingState();
-
-      // Set completion timer (clear previous and set new) - shorter since there's an error
-      if (streaming.wait) {
-        streaming.wait(2000); // 2 second completion timeout for errors
-      }
-      return true;
-    }
-
-    return false;
-  };
 
   // Helper function to send SSE data
   const sendSSE = (data: string) => {
@@ -844,59 +710,12 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   const client: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      // Handle streaming events first
-      if (handleStreamingEvents(eventType, eventData)) {
-        return;
-      }
-
-      // Skip user messages to prevent echo
-      if (eventData.sender && ['human'].includes(eventData.sender.toLowerCase())) {
-        return;
-      }
-
-      // Filter out success messages
-      if (eventData.content && typeof eventData.content === 'string' && eventData.content.includes('Success message sent')) {
-        return;
-      }
-
-      // Handle system events with proper serialization
-      if (eventType === 'system') {
-        // System events now contain the entire event object
-        sendSSE(JSON.stringify({
-          type: 'system',
-          data: eventData // Send the entire event data as-is
-        }));
-        return;
-      }
-
-      // Handle system messages (legacy support)
-      if ((eventType === 'system' || eventType === 'world') && eventData.message) {
-        sendSSE(JSON.stringify({
-          type: eventType,
-          data: {
-            message: eventData.message,
-            sender: 'system'
-          }
-        }));
-      }
-
-      // Handle regular messages
-      if (eventType === 'message' && eventData.content) {
-        sendSSE(JSON.stringify({
-          type: 'message',
-          data: {
-            content: eventData.content,
-            sender: eventData.sender || 'agent',
-            timestamp: eventData.timestamp
-          }
-        }));
-
-        // Setup completion timer for non-streaming messages (clear previous and set new)
-        if (streaming.wait) {
-          streaming.wait(5000); // 5 second completion timeout for regular messages
-        }
-      }
+      sendSSE(JSON.stringify({
+        type: eventType,
+        data: eventData
+      }));
     },
+
     onError: (error: string) => {
       logger.error(`World error: ${error}`);
       sendSSE(JSON.stringify({
@@ -920,24 +739,9 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     return;
   }
 
-  // Send initial connection event
-  sendSSE(JSON.stringify({
-    type: 'connected',
-    payload: { worldName }
-  }));
-
   // Send message to world
   try {
     publishMessage(subscription.world, message, sender);
-
-    // Send success response
-    sendSSE(JSON.stringify({
-      type: 'response',
-      success: true,
-      message: 'Message sent to world',
-      data: { sender }
-    }));
-
     // Set initial wait timer to allow for LLM response
     if (streaming.wait) {
       streaming.wait(15000); // 15 second timeout for initial response

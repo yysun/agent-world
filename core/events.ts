@@ -380,7 +380,6 @@ async function getCurrentMessageCount(world: World): Promise<number> {
  */
 export function publishEvent(world: World, type: string, content: any): void {
   const event = {
-    type,
     content,
     timestamp: new Date(),
     eventId: generateId()

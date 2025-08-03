@@ -46,138 +46,217 @@ import {
   handleStreamChunk,
   handleStreamEnd,
   handleStreamError,
-  handleMessage,
-  handleConnectionStatus,
-  handleError,
-  handleComplete,
-  handleChatCreated,
-  handleChatUpdated
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
-export const worldUpdateHandlers = {
 
-  '/World': async function* (state: WorldComponentState, name: string, chatId: string): AsyncGenerator<WorldComponentState> {
-    if (!name) {
-      location.href = '/';
-      return;
-    }
-    const worldName = decodeURIComponent(name);
+async function* initWorld(state: WorldComponentState, name: string, chatId: string): AsyncGenerator<WorldComponentState> {
+  if (!name) {
+    location.href = '/';
+    return;
+  }
+  const worldName = decodeURIComponent(name);
 
-    try {
+  try {
+    yield {
+      ...state,
+      worldName,
+      loading: true,
+      error: null,
+      isWaiting: false,
+      activeAgent: null
+    };
+
+    // SIMPLIFIED: Use core getWorld() which automatically restores last chat
+    const world = await api.getWorld(worldName);
+    if (!world) {
       yield {
         ...state,
         worldName,
-        loading: true,
-        error: null,
-        isWaiting: false,
-        activeAgent: null
-      };
-
-      // SIMPLIFIED: Use core getWorld() which automatically restores last chat
-      const world = await api.getWorld(worldName);
-      if (!world) {
-        yield {
-          ...state,
-          worldName,
-          loading: false,
-          error: 'World not found',
-          isWaiting: false,
-          selectedSettingsTarget: 'world',
-          selectedAgent: null,
-          activeAgent: null
-        };
-        return;
-      }
-
-      // Initialize messages
-      let messages: any[] = [];
-
-      // Check if specific chatId is provided
-      if (chatId) {
-        try {
-          // Load specific chat with full state restoration
-          const chatData = await api.getChat(worldName, chatId);
-          if (chatData) {
-            if (chatData.messages) {
-              messages = chatData.messages;
-            }
-          }
-        } catch (error) {
-          console.warn('Failed to load specific chat:', error);
-        }
-      }
-      // NOTE: No auto-restoration needed - core getWorld() already restored last chat automatically
-
-      // Convert agent memories to messages as fallback if no chat messages
-      let allMessages: any[] = [];
-      const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
-        if (agent.memory && Array.isArray(agent.memory)) {
-          const agentMessages = agent.memory.map((memoryItem: any) => {
-            const sender = toKebabCase(memoryItem.sender || agent.name);
-            let messageType = 'agent';
-            if (sender === 'HUMAN' || sender === 'USER') {
-              messageType = 'user';
-            }
-            return {
-              id: memoryItem.id || `${memoryItem.createdAt || Date.now()}-${Math.random()}`,
-              sender,
-              text: memoryItem.text || memoryItem.content || '',
-              createdAt: memoryItem.createdAt || new Date().toISOString(),
-              type: messageType,
-              fromAgentId: agent.id
-            };
-          });
-          allMessages = allMessages.concat(agentMessages);
-        }
-        return {
-          ...agent,
-          spriteIndex: index % 9,
-          messageCount: agent.memory?.length || 0,
-        } as Agent;
-      }));
-
-      // Sort all messages by createdAt
-      const sortedMessages = allMessages.sort((a, b) => {
-        const timeA = new Date(a.createdAt).getTime();
-        const timeB = new Date(b.createdAt).getTime();
-        return timeA - timeB;
-      });
-
-      // Use chat messages if available, otherwise fall back to agent memory
-      const finalMessages = messages.length > 0 ? messages : sortedMessages;
-
-      yield {
-        ...state,
-        worldName,
-        world,
-        messages: finalMessages,
         loading: false,
-        error: null,
-        isWaiting: false,
-        selectedSettingsTarget: 'chat',
-        selectedAgent: null,
-        activeAgent: null,
-        chatToDelete: null
-      };
-
-    } catch (error: any) {
-      yield {
-        ...state,
-        worldName,
-        world: null,
-        loading: false,
-        error: error.message || 'Failed to load world data',
+        error: 'World not found',
         isWaiting: false,
         selectedSettingsTarget: 'world',
         selectedAgent: null,
         activeAgent: null
       };
+      return;
     }
-  },
 
-  // Message Handlers
+    // Initialize messages
+    let messages: any[] = [];
+
+    // Check if specific chatId is provided
+    if (chatId) {
+      try {
+        // Load specific chat with full state restoration
+        const chatData = await api.getChat(worldName, chatId);
+        if (chatData) {
+          if (chatData.messages) {
+            messages = chatData.messages;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to load specific chat:', error);
+      }
+    }
+    // NOTE: No auto-restoration needed - core getWorld() already restored last chat automatically
+
+    // Convert agent memories to messages as fallback if no chat messages
+    let allMessages: any[] = [];
+    const worldAgents: Agent[] = await Promise.all(world.agents.map(async (agent, index) => {
+      if (agent.memory && Array.isArray(agent.memory)) {
+        const agentMessages = agent.memory.map((memoryItem: any) => {
+          const sender = toKebabCase(memoryItem.sender || agent.name);
+          let messageType = 'agent';
+          if (sender === 'HUMAN' || sender === 'USER') {
+            messageType = 'user';
+          }
+          return {
+            id: memoryItem.id || `${memoryItem.createdAt || Date.now()}-${Math.random()}`,
+            sender,
+            text: memoryItem.text || memoryItem.content || '',
+            createdAt: memoryItem.createdAt || new Date().toISOString(),
+            type: messageType,
+            fromAgentId: agent.id
+          };
+        });
+        allMessages = allMessages.concat(agentMessages);
+      }
+      return {
+        ...agent,
+        spriteIndex: index % 9,
+        messageCount: agent.memory?.length || 0,
+      } as Agent;
+    }));
+
+    // Sort all messages by createdAt
+    const sortedMessages = allMessages.sort((a, b) => {
+      const timeA = new Date(a.createdAt).getTime();
+      const timeB = new Date(b.createdAt).getTime();
+      return timeA - timeB;
+    });
+
+    // Use chat messages if available, otherwise fall back to agent memory
+    const finalMessages = messages.length > 0 ? messages : sortedMessages;
+
+    yield {
+      ...state,
+      worldName,
+      world,
+      messages: finalMessages,
+      loading: false,
+      error: null,
+      isWaiting: false,
+      selectedSettingsTarget: 'chat',
+      selectedAgent: null,
+      activeAgent: null,
+      chatToDelete: null
+    };
+
+  } catch (error: any) {
+    yield {
+      ...state,
+      worldName,
+      world: null,
+      loading: false,
+      error: error.message || 'Failed to load world data',
+      isWaiting: false,
+      selectedSettingsTarget: 'world',
+      selectedAgent: null,
+      activeAgent: null
+    };
+  }
+}
+
+
+// handle system events
+const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
+
+  console.log('Received system event:', data);
+
+  if (data?.action === 'chat-created' || data?.action === 'chat-updated') {
+    const world = await api.getWorld(state.worldName);
+    if (!world) {
+      // Handle case where world is not found
+      return {
+        ...state,
+        error: 'World not found'
+      };
+    } else {
+      return {
+        ...state,
+        world
+      };
+    }
+  }
+  return state;
+};
+
+// Handle regular messages
+const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
+
+  console.log('Received message event:', data);
+
+  const messageData = data|| {};
+  const senderName = messageData.sender || messageData.agentName || 'Agent';
+
+  // Find agent ID by sender name if state has agents
+  let fromAgentId: string | undefined;
+  if (state.world && Array.isArray(state.world.agents)) {
+    const agent = state.world.agents.find((a: any) => a.name === senderName);
+    agent && agent.messageCount++;
+    fromAgentId = agent?.id;
+  }
+
+  const newMessage = {
+    id: Date.now() + Math.random(),
+    type: messageData.type || 'message',
+    sender: senderName,
+    text: messageData.content || messageData.message || '',
+    createdAt: messageData.createdAt || new Date().toISOString(),
+    worldName: messageData.worldName || state.worldName,
+    fromAgentId: fromAgentId
+  };
+
+  return {
+    ...state,
+    messages: [...(state.messages || []), newMessage],
+    needScroll: true,
+    isWaiting: false
+  };
+
+};
+
+// Handle errors
+const handleError = <T extends WorldComponentState>(state: T, error: any): T => {
+  const errorMessage = error.message || 'SSE error';
+
+  // Add error message to conversation
+  const errorMsg = {
+    id: Date.now() + Math.random(),
+    type: 'error',
+    sender: 'System',
+    text: errorMessage,
+    createdAt: new Date().toISOString(),
+    worldName: state.worldName,
+    hasError: true
+  };
+
+  return {
+    ...state,
+    wsError: errorMessage,
+    messages: [...(state.messages || []), errorMsg],
+    needScroll: true
+  };
+};
+
+
+export const worldUpdateHandlers = {
+
+  '/World': initWorld,
+
   'update-input': (state: WorldComponentState, e: any): WorldComponentState => ({
     ...state,
     userInput: e.target.value
@@ -229,77 +308,14 @@ export const worldUpdateHandlers = {
     }
   },
 
-  // SSE Event Handlers
-  'handleStreamStart': (state: WorldComponentState, data: any): WorldComponentState => {
-    const baseState = handleStreamStart(state as any, data) as WorldComponentState;
-    const agentName = data.sender;
-    const agent = state.world?.agents.find(a => a.name === agentName);
-
-    return {
-      ...baseState,
-      isWaiting: false,
-      activeAgent: agent ? { spriteIndex: agent.spriteIndex, name: agent.name } : null
-    };
-  },
-  'handleStreamChunk': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleStreamChunk(state as any, data) as WorldComponentState;
-  },
-  'handleStreamEnd': (state: WorldComponentState, data: any): WorldComponentState => {
-    const baseState = handleStreamEnd(state as any, data) as WorldComponentState;
-
-    // SIMPLIFIED: Auto-save is now handled automatically by core publishMessage
-    // No need for frontend auto-save triggers or session storage
-
-    return {
-      ...baseState,
-      activeAgent: null
-    };
-  },
-  'handleStreamError': (state: WorldComponentState, data: any): WorldComponentState => {
-    const baseState = handleStreamError(state as any, data) as WorldComponentState;
-    return {
-      ...baseState,
-      activeAgent: null
-    };
-  },
-  'handleMessage': async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
-    const baseState = handleMessage(state as any, data) as WorldComponentState;
-
-    console.log('Received message:', data);
-
-    // Handle special SSE events for chat management
-    if (data?.data?.type === 'chat-created' || data?.data?.type === 'chat-updated') {
-      const world = await api.getWorld(state.worldName);
-      if (!world) {
-        // Handle case where world is not found
-        return {
-          ...baseState,
-          error: 'World not found'
-        };
-      } else {
-        return {
-          ...baseState,
-          world
-        };
-      }
-    }
-    return baseState;
-  },
-  'handleConnectionStatus': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleConnectionStatus(state as any, data) as WorldComponentState;
-  },
-  'handleError': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleError(state as any, data) as WorldComponentState;
-  },
-  'handleComplete': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleComplete(state as any, data) as WorldComponentState;
-  },
-  'handleChatCreated': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleChatCreated(state as any, data) as WorldComponentState;
-  },
-  'handleChatUpdated': (state: WorldComponentState, data: any): WorldComponentState => {
-    return handleChatUpdated(state as any, data) as WorldComponentState;
-  },
+    // SSE Event Handlers
+  handleStreamStart,
+  handleStreamChunk,
+  handleStreamEnd,
+  handleStreamError,
+  handleMessageEvent,
+  handleSystemEvent,
+  handleError,
 
   // Agent Message Clearing Handlers
   'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
@@ -434,8 +450,6 @@ export const worldUpdateHandlers = {
       return state; // Return current state, async handler will update it
     }
   },
-
-
 
   'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
     ...state,
@@ -613,6 +627,7 @@ export const worldUpdateHandlers = {
       };
     }
   },  // Load specific chat from history with complete state restoration
+
   'load-chat-from-history': async function* (state: WorldComponentState, chatId: string): AsyncGenerator<WorldComponentState> {
     try {
       yield { ...state, loading: true };
@@ -698,7 +713,7 @@ export const worldUpdateHandlers = {
 
       // Refresh world data to get updated chat list
       const refreshedWorld = await api.getWorld(state.worldName);
-      
+
       if (refreshedWorld) {
         yield {
           ...state,

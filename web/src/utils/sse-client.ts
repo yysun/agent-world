@@ -20,13 +20,10 @@ import app from 'apprun';
 import { apiRequest } from '../api';
 import type {
   SSEComponentState,
-  Message,
   StreamStartData,
   StreamChunkData,
   StreamEndData,
   StreamErrorData,
-  MessageData,
-  ErrorData
 } from '../types';
 import { isWorldComponentState } from '../types';
 
@@ -122,54 +119,11 @@ const handleSSEData = (data: SSEData): void => {
   if (data.type === 'sse') {
     handleStreamingEvent(data as SSEStreamingData);
   } else if (data.type === 'system') {
-    handleSystemEvent(data as SSEBaseData);
+    publishEvent('handleSystemEvent', data.data);
   } else if (data.type === 'message') {
-    publishEvent('handleMessage', data);
-  } else if (data.type === 'response') {
-    // Response acknowledgment - just log, don't publish
+    publishEvent('handleMessageEvent', data.data);
   } else if (data.type === 'error') {
     publishEvent('handleError', { message: data.message || 'SSE error' });
-  } else if (data.type === 'connected') {
-    publishEvent('handleConnectionStatus', 'connected');
-    streamingState.currentWorldName = (data as SSEConnectionData).payload?.worldName || null;
-  } else if (data.type === 'complete') {
-    publishEvent('handleComplete', data.payload);
-  }
-};
-
-/**
- * Handle system events - route based on event type property
- */
-const handleSystemEvent = (data: SSEBaseData): void => {
-  const eventData = data.data;
-  if (!eventData) return;
-
-  // Route based on event type property
-  if (eventData.type === 'chat-created') {
-    publishEvent('handleChatCreated', {
-      worldName: streamingState.currentWorldName,
-      chatData: eventData
-    });
-  } else if (eventData.type === 'chat-updated') {
-    publishEvent('handleChatUpdated', {
-      worldName: streamingState.currentWorldName,
-      chatData: eventData
-    });
-  } else if (eventData.type === 'error') {
-    publishEvent('handleError', {
-      message: eventData.message || 'System error'
-    });
-  } else {
-    // Handle other system events as generic messages
-    publishEvent('handleMessage', {
-      type: 'system',
-      data: {
-        type: eventData.type || 'system',
-        sender: 'system',
-        content: eventData.message || JSON.stringify(eventData),
-        worldName: streamingState.currentWorldName
-      }
-    });
   }
 };
 
@@ -516,103 +470,4 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
     ...state,
     messages
   };
-};
-
-// Handle regular messages
-export const handleMessage = <T extends SSEComponentState>(state: T, data: MessageData): T => {
-  const messageData = data.data || {};
-  const senderName = messageData.sender || messageData.agentName || 'Agent';
-
-  // Find agent ID by sender name if state has agents
-  let fromAgentId: string | undefined;
-  if (isWorldComponentState(state) && state.world && Array.isArray(state.world.agents)) {
-    const agent = state.world.agents.find((a: any) => a.name === senderName);
-    agent && agent.messageCount++;
-    fromAgentId = agent?.id;
-  }
-
-  const newMessage = {
-    id: Date.now() + Math.random(),
-    type: messageData.type || 'message',
-    sender: senderName,
-    text: messageData.content || messageData.message || '',
-    createdAt: messageData.createdAt || new Date().toISOString(),
-    worldName: messageData.worldName || state.worldName,
-    fromAgentId: fromAgentId
-  };
-
-  return {
-    ...state,
-    messages: [...(state.messages || []), newMessage],
-    needScroll: true,
-    isWaiting: false
-  };
-};
-
-// Handle connection status changes
-export const handleConnectionStatus = <T extends SSEComponentState>(state: T, status: string): T => {
-  return {
-    ...state,
-    connectionStatus: status,
-    wsError: status === 'error' ? state.wsError : null
-  };
-};
-
-// Handle errors
-export const handleError = <T extends SSEComponentState>(state: T, error: ErrorData): T => {
-  const errorMessage = error.message || 'SSE error';
-
-  // Add error message to conversation
-  const errorMsg = {
-    id: Date.now() + Math.random(),
-    type: 'error',
-    sender: 'System',
-    text: errorMessage,
-    createdAt: new Date().toISOString(),
-    worldName: state.worldName,
-    hasError: true
-  };
-
-  return {
-    ...state,
-    wsError: errorMessage,
-    messages: [...(state.messages || []), errorMsg],
-    needScroll: true
-  };
-};
-
-// Handle completion
-export const handleComplete = <T extends SSEComponentState>(state: T, payload: any): T => {
-  return {
-    ...state,
-    connectionStatus: 'completed',
-    isSending: false,
-    isWaiting: false
-  };
-};
-
-// Handle chat created events
-export const handleChatCreated = <T extends SSEComponentState>(state: T, data: { worldName?: string; chatData: any }): T => {
-  // Reload world chats when a new chat is created
-  if (isWorldComponentState(state) && data.worldName === state.worldName) {
-    // Trigger reload of world chats
-    setTimeout(() => {
-      publishEvent('reloadWorldChats', { worldName: data.worldName });
-    }, 100);
-  }
-  
-  return state;
-};
-
-// Handle chat updated events
-export const handleChatUpdated = <T extends SSEComponentState>(state: T, data: { worldName?: string; chatData: any }): T => {
-  // Reload world chats when a chat is updated
-  if (isWorldComponentState(state) && data.worldName === state.worldName) {
-    // Trigger reload of world chats
-    setTimeout(() => {
-      publishEvent('reloadWorldChats', { worldName: data.worldName });
-    }, 100);
-  }
-  
-  return state;
 };
