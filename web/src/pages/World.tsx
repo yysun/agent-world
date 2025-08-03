@@ -38,7 +38,6 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
-import { getCurrentChatState } from '../types';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
@@ -71,6 +70,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
   };
 
   view = (state: WorldComponentState) => {
+
     // Guard clauses for loading and error states
     if (state.loading) {
       return (
@@ -129,6 +129,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
       );
     }
 
+    const currentChat = state.world.chats.find(chat => chat.id === state.world.currentChatId) || null;
+    
     // Main content view
     return (
       <div className="world-container">
@@ -179,7 +181,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
-              currentChat={getCurrentChatState(state.world)}
+              currentChat={currentChat?.name}
             />
           </div>
 

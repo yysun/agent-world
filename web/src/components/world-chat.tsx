@@ -58,13 +58,9 @@ export interface WorldChatProps {
     id?: string;
     name: string;
   } | null;
-  currentChat?: {
-    id: string | null;
-    name: string;
-    isSaved: boolean;
-    messageCount: number;
-  };
-}
+  currentChat?: string;
+};
+
 
 const debug = true;
 
@@ -77,7 +73,6 @@ export default function WorldChat(props: WorldChatProps) {
     isSending,
     isWaiting,
     activeAgent,
-    selectedAgent,
     currentChat
   } = props;
 
@@ -91,10 +86,9 @@ export default function WorldChat(props: WorldChatProps) {
   return (
     <fieldset className="chat-fieldset">
       <legend>
-        {worldName} - {currentChat ? currentChat.name : ''}
-        {currentChat && !currentChat.isSaved && (
-          <span className="unsaved-indicator" title="Unsaved chat"> ●</span>
-        )}
+        {worldName} {
+          currentChat ? ` - ${currentChat}` :
+         <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}

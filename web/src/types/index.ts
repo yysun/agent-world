@@ -352,38 +352,3 @@ export const DEFAULT_WORLD_FORM_DATA: WorldFormData = {
   chatLLMProvider: 'ollama',
   chatLLMModel: 'llama3.2:3b'
 };
-
-
-
-// Export commonly used type aliases for backward compatibility
-export type WorldAgent = Agent;
-
-// Helper functions for current chat lookup
-export function getCurrentChat(world: World | null): Chat | null {
-  if (!world || !world.currentChatId) {
-    return null;
-  }
-  return world.chats.find(chat => chat.id === world.currentChatId) || null;
-}
-
-export function getCurrentChatState(world: World | null): CurrentChatState {
-  const currentChat = getCurrentChat(world);
-  if (currentChat) {
-    return {
-      id: currentChat.id,
-      name: currentChat.name,
-      isSaved: true,
-      messageCount: currentChat.messageCount,
-      lastUpdated: new Date(currentChat.updatedAt)
-    };
-  }
-
-  // Return default state for unsaved/new chats
-  return {
-    id: world?.currentChatId || null,
-    name: 'New Chat',
-    isSaved: false,
-    messageCount: 0,
-    lastUpdated: new Date()
-  };
-}
