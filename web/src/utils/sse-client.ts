@@ -121,6 +121,8 @@ const handleSSEData = (data: SSEData): void => {
 
   if (data.type === 'sse') {
     handleStreamingEvent(data as SSEStreamingData);
+  } else if (data.type === 'system') {
+    handleSystemEvent(data as SSEBaseData);
   } else if (data.type === 'message') {
     publishEvent('handleMessage', data);
   } else if (data.type === 'response') {
@@ -132,6 +134,42 @@ const handleSSEData = (data: SSEData): void => {
     streamingState.currentWorldName = (data as SSEConnectionData).payload?.worldName || null;
   } else if (data.type === 'complete') {
     publishEvent('handleComplete', data.payload);
+  }
+};
+
+/**
+ * Handle system events - route based on event type property
+ */
+const handleSystemEvent = (data: SSEBaseData): void => {
+  const eventData = data.data;
+  if (!eventData) return;
+
+  // Route based on event type property
+  if (eventData.type === 'chat-created') {
+    publishEvent('handleChatCreated', {
+      worldName: streamingState.currentWorldName,
+      chatData: eventData
+    });
+  } else if (eventData.type === 'chat-updated') {
+    publishEvent('handleChatUpdated', {
+      worldName: streamingState.currentWorldName,
+      chatData: eventData
+    });
+  } else if (eventData.type === 'error') {
+    publishEvent('handleError', {
+      message: eventData.message || 'System error'
+    });
+  } else {
+    // Handle other system events as generic messages
+    publishEvent('handleMessage', {
+      type: 'system',
+      data: {
+        type: eventData.type || 'system',
+        sender: 'system',
+        content: eventData.message || JSON.stringify(eventData),
+        worldName: streamingState.currentWorldName
+      }
+    });
   }
 };
 

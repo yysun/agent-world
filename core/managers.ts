@@ -672,7 +672,58 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
   };
 }
 
+/**
+ * Serialize World object for event publishing
+ * Converts runtime World object to plain data object suitable for event publishing
+ */
+async function serializeWorldForEvents(world: World): Promise<{
+  id: string;
+  name: string;
+  description?: string;
+  turnLimit: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
+  currentChatId: string | null;
+  agents: any[];
+  chats: any[];
+}> {
+  // Convert agents Map to Array for event data
+  const agentsArray = Array.from(world.agents.values()).map(agent => ({
+    id: agent.id,
+    name: agent.name,
+    type: agent.type,
+    status: agent.status,
+    provider: agent.provider,
+    model: agent.model,
+    temperature: agent.temperature,
+    maxTokens: agent.maxTokens,
+    systemPrompt: agent.systemPrompt,
+    llmCallCount: agent.llmCallCount,
+    lastLLMCall: agent.lastLLMCall,
+    memory: agent.memory || [],
+    createdAt: agent.createdAt,
+    lastActive: agent.lastActive,
+    description: agent.description,
+    // UI-specific properties with defaults
+    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
+    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
+  }));
 
+  // Get chats using the unified listChats() method
+  const chats = await world.listChats();
+
+  return {
+    id: world.id,
+    name: world.name,
+    description: world.description,
+    turnLimit: world.turnLimit,
+    chatLLMProvider: world.chatLLMProvider,
+    chatLLMModel: world.chatLLMModel,
+    currentChatId: world.currentChatId,
+    agents: agentsArray,
+    chats: chats
+  };
+}
 
 /**
  * Convert storage WorldData to runtime World object
@@ -1149,13 +1200,12 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
           chatId: world.currentChatId
         });
 
-        // Publish chat-created system message to frontend
-        events.publishMessage(world, JSON.stringify({
-          type: 'chat-created',
-          chatId: world.currentChatId,
-          name: newChatData.name,
+        // Publish chat-created system event to frontend with complete world data
+        const serializedWorld = await serializeWorldForEvents(world);
+        events.publishEvent(world, 'system', {
+          world: serializedWorld,
           action: 'chat-created'
-        }), 'system');
+        });
 
         // Ensure returned world includes the new chat in chats array
         return world; // Return the complete updated World object
@@ -2387,4 +2437,15 @@ export async function publishMessageWithAutoSave(
  */
 export function publishMessage(world: World, content: string, sender: string): void {
   events.publishMessage(world, content, sender);
+}
+
+/**
+ * Publish event to a specific channel using World.eventEmitter (NEW)
+ * This enables separation of event types: 'system', 'message', 'sse'
+ * @param world - World instance
+ * @param type - Event type/channel ('system', 'message', 'sse')
+ * @param content - Event content (can be string or object)
+ */
+export function publishEvent(world: World, type: string, content: any): void {
+  events.publishEvent(world, type, content);
 }

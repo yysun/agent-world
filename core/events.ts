@@ -80,6 +80,59 @@ import { createCategoryLogger } from './logger.js';
 const logger = createCategoryLogger('events');
 
 /**
+ * Simple world serialization for event publishing
+ * Creates a lightweight serialized world object for events
+ */
+async function serializeWorldForEvents(world: World): Promise<{
+  id: string;
+  name: string;
+  description?: string;
+  turnLimit: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
+  currentChatId: string | null;
+  agents: any[];
+  chats: any[];
+}> {
+  // Convert agents Map to Array for event data
+  const agentsArray = Array.from(world.agents.values()).map(agent => ({
+    id: agent.id,
+    name: agent.name,
+    type: agent.type,
+    status: agent.status,
+    provider: agent.provider,
+    model: agent.model,
+    temperature: agent.temperature,
+    maxTokens: agent.maxTokens,
+    systemPrompt: agent.systemPrompt,
+    llmCallCount: agent.llmCallCount,
+    lastLLMCall: agent.lastLLMCall,
+    memory: agent.memory || [],
+    createdAt: agent.createdAt,
+    lastActive: agent.lastActive,
+    description: agent.description,
+    // UI-specific properties with defaults
+    spriteIndex: agent.spriteIndex || Math.floor(Math.random() * 9), // Default to random sprite (0-8)
+    messageCount: Array.isArray(agent.memory) ? agent.memory.length : 0
+  }));
+
+  // Get chats using the unified listChats() method
+  const chats = await world.listChats();
+
+  return {
+    id: world.id,
+    name: world.name,
+    description: world.description,
+    turnLimit: world.turnLimit,
+    chatLLMProvider: world.chatLLMProvider,
+    chatLLMModel: world.chatLLMModel,
+    currentChatId: world.currentChatId,
+    agents: agentsArray,
+    chats: chats
+  };
+}
+
+/**
  * Auto-save chat history message counts when enabled
  */
 let chatDataAutosaveEnabled = true;
@@ -258,13 +311,12 @@ async function updateChatTitle(world: World, messageEvent: WorldMessageEvent): P
         newTitle: title
       });
 
-      // Publish chat-updated system message to frontend
-      publishMessage(world, JSON.stringify({
-        type: 'chat-updated',
-        chatId: world.currentChatId,
-        title: title,
+      // Publish chat-updated system event to frontend with complete world data
+      const serializedWorld = await serializeWorldForEvents(world);
+      publishEvent(world, 'system', {
+        world: serializedWorld,
         action: 'title-updated'
-      }), 'system');
+      });
     }
   } catch (error) {
     logger.warn('Failed to update chat title', {
@@ -301,13 +353,12 @@ async function saveChatState(world: World, messageEvent: WorldMessageEvent): Pro
       messageCount: messageCount
     });
 
-    // Publish chat-updated system message to frontend
-    publishMessage(world, JSON.stringify({
-      type: 'chat-updated',
-      chatId: world.currentChatId,
-      messageCount: messageCount,
+    // Publish chat-updated system event to frontend with complete world data
+    const serializedWorld = await serializeWorldForEvents(world);
+    publishEvent(world, 'system', {
+      world: serializedWorld,
       action: 'state-saved'
-    }), 'system');
+    });
   } catch (error) {
     logger.warn('Failed to save chat state', {
       worldId: world.id,
@@ -374,6 +425,25 @@ async function getCurrentMessageCount(world: World): Promise<number> {
 }
 
 /**
+ * Publish event to a specific channel using World.eventEmitter
+ * This new function enables separation of event types: 'system', 'message', 'sse'
+ * @param world - World instance
+ * @param type - Event type/channel ('system', 'message', 'sse')
+ * @param content - Event content (can be string or object)
+ */
+export function publishEvent(world: World, type: string, content: any): void {
+  const event = {
+    type,
+    content,
+    timestamp: new Date(),
+    eventId: generateId()
+  };
+
+  // Emit to the specified channel/type
+  world.eventEmitter.emit(type, event);
+}
+
+/**
  * Message publishing using World.eventEmitter
  * Now includes chat session management based on currentChatId state
  */
@@ -402,6 +472,22 @@ export function publishMessage(world: World, content: string, sender: string): v
     }, 100); // Small delay to allow message processing to complete
   }
   // When currentChatId is null, session mode is OFF - no automatic chat operations
+}
+
+/**
+ * Subscribe to events from a specific channel using World.eventEmitter
+ * @param world - World instance
+ * @param type - Event type/channel to subscribe to
+ * @param handler - Event handler function
+ * @returns Cleanup function to unsubscribe
+ */
+export function subscribeToEvents(
+  world: World,
+  type: string,
+  handler: (event: any) => void
+): () => void {
+  world.eventEmitter.on(type, handler);
+  return () => world.eventEmitter.off(type, handler);
 }
 
 /**
@@ -712,7 +798,7 @@ export async function processAgentMessage(
 
     if (!response) {
       logger.error('LLM response is empty', { agentId: agent.id });
-      publishMessage(world, `[Error] LLM response is empty`, 'system');
+      publishEvent(world, 'system', { message: `[Error] LLM response is empty`, type: 'error' });
       return;
     }
 
@@ -755,7 +841,7 @@ export async function processAgentMessage(
 
   } catch (error) {
     logger.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-    publishMessage(world, `[Error] ${(error as Error).message}`, 'system');
+    publishEvent(world, 'system', { message: `[Error] ${(error as Error).message}`, type: 'error' });
   }
 }
 
