@@ -42,7 +42,13 @@ import { nanoid } from 'nanoid';
  * Generate unique ID for messages and events
  */
 export function generateId(): string {
-  return crypto.randomUUID();
+  try {
+    return nanoid();
+  } catch (error) {
+    // Fallback for environments where nanoid import fails
+    console.warn('[generateId] nanoid not available, using fallback');
+    return 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+  }
 }
 
 /**

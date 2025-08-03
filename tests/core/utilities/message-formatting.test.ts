@@ -269,9 +269,9 @@ describe('Message Formatting Utilities', () => {
         createdAt: new Date()
       })) as any;
 
-      const startTime = performance.now();
+      const startTime = Date.now();
       const messages = prepareMessagesForLLM(agent, messageData, history);
-      const endTime = performance.now();
+      const endTime = Date.now();
 
       expect(messages).toHaveLength(1002); // system + history + current
       expect(endTime - startTime).toBeLessThan(100); // Should be fast

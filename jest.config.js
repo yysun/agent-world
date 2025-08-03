@@ -37,18 +37,18 @@ export default {
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
   testPathIgnorePatterns: ['/public/', '/integration-tests/', '/web/', '/next/'],
-  setupFilesAfterEnv: ['<rootDir>/tests/core/setup.ts'], // Add setup file for core tests
+  setupFilesAfterEnv: ['<rootDir>/tests/core/setup.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
-    'core/**/*.ts', // Include core folder in coverage
+    'core/**/*.ts',
     '!src/**/*.d.ts',
-    '!src/cli/**',  // Exclude CLI
+    '!src/cli/**',
     '!core/**/*.d.ts'
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  testTimeout: 15000, // Reduced from 30000ms - faster tests with async utilities
-  maxWorkers: 1, // Prevent file system conflicts
+  testTimeout: 15000,
+  maxWorkers: 1,
   verbose: true,
   clearMocks: true,
   resetMocks: true,
@@ -65,13 +65,12 @@ export default {
       useESM: true,
       tsconfig: {
         module: 'esnext',
-        target: 'es2022',
+        target: 'es2020',
+        lib: ['es2020'],
         esModuleInterop: true,
         allowSyntheticDefaultImports: true,
-        moduleResolution: 'node',
-        allowImportingTsExtensions: true
+        moduleResolution: 'node'
       }
     }]
-  },
-  // Removed globalTeardown as all tests now use mocks instead of real file I/O
+  }
 };

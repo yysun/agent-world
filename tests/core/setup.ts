@@ -11,7 +11,18 @@
  * - Conditional mocking (excludes integration tests)
  */
 
+// Mock crypto and performance globals before any imports
+const mockCrypto = {
+  randomUUID: jest.fn<any>().mockReturnValue('mock-uuid-id')
+};
+global.crypto = mockCrypto as any;
+global.performance = {
+  now: jest.fn<any>().mockReturnValue(Date.now())
+} as any;
+
 import { jest } from '@jest/globals';
+
+// Mock core/utils module to prevent crypto dependency issues
 
 // Mock fs module globally (not fs/promises)
 jest.mock('fs', () => ({
@@ -54,12 +65,12 @@ jest.mock('../../core/world-storage', () => ({
 jest.mock('../../core/storage-factory', () => {
   // Import the actual module to get real function implementations
   const actualModule = jest.requireActual('../../core/storage-factory') as any;
-  
+
   return {
     // Re-export actual functions that integration tests need
     getDefaultRootPath: actualModule.getDefaultRootPath,
     createStorageFromEnv: actualModule.createStorageFromEnv,
-    
+
     // Override only the storage creation functions with mocks
     createStorageWrappers: jest.fn<any>().mockReturnValue({
       // World operations
@@ -68,7 +79,7 @@ jest.mock('../../core/storage-factory', () => {
       deleteWorld: jest.fn<any>().mockResolvedValue(true),
       listWorlds: jest.fn<any>().mockResolvedValue([]),
       worldExists: jest.fn<any>().mockResolvedValue(true),
-      
+
       // Agent operations
       saveAgent: jest.fn<any>().mockResolvedValue(undefined),
       saveAgentConfig: jest.fn<any>().mockResolvedValue(undefined),
@@ -78,29 +89,29 @@ jest.mock('../../core/storage-factory', () => {
       deleteAgent: jest.fn<any>().mockResolvedValue(true),
       listAgents: jest.fn<any>().mockResolvedValue([]),
       agentExists: jest.fn<any>().mockResolvedValue(true),
-      
+
       // Batch operations
       saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
       loadAgentsBatch: jest.fn<any>().mockResolvedValue({ successful: [], failed: [] }),
-      
+
       // Chat history operations
       saveChat: jest.fn<any>().mockResolvedValue(undefined),
       loadChat: jest.fn<any>().mockResolvedValue(null),
       deleteChat: jest.fn<any>().mockResolvedValue(true),
       listChats: jest.fn<any>().mockResolvedValue([]),
       updateChat: jest.fn<any>().mockResolvedValue(null),
-      
+
       // Snapshot operations
       saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
       loadSnapshot: jest.fn<any>().mockResolvedValue(null),
       restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
-      
+
       // Integrity operations
       validateIntegrity: jest.fn<any>().mockResolvedValue({ isValid: true }),
       repairData: jest.fn<any>().mockResolvedValue(true),
       archiveMemory: jest.fn<any>().mockResolvedValue(undefined)
     }),
-    
+
     createStorageWithWrappers: jest.fn<any>().mockResolvedValue({
       // Mirror the same API
       saveWorld: jest.fn<any>().mockResolvedValue(undefined),
@@ -167,13 +178,13 @@ jest.mock('../../core/sqlite-storage', () => ({
     loadWorld: jest.fn<any>().mockResolvedValue({}),
     deleteWorld: jest.fn<any>().mockResolvedValue(true),
     listWorlds: jest.fn<any>().mockResolvedValue([]),
-    
+
     // Agent operations
     saveAgent: jest.fn<any>().mockResolvedValue(undefined),
     loadAgent: jest.fn<any>().mockResolvedValue(null),
     deleteAgent: jest.fn<any>().mockResolvedValue(true),
     listAgents: jest.fn<any>().mockResolvedValue([]),
-    
+
     // Chat and snapshot operations
     saveChat: jest.fn<any>().mockResolvedValue(undefined),
     loadChat: jest.fn<any>().mockResolvedValue(null),
@@ -183,13 +194,13 @@ jest.mock('../../core/sqlite-storage', () => ({
     saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
     loadSnapshot: jest.fn<any>().mockResolvedValue(null),
     restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
-    
+
     // Batch and integrity operations
     saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
     loadAgentsBatch: jest.fn<any>().mockResolvedValue([]),
     validateIntegrity: jest.fn<any>().mockResolvedValue(true),
     repairData: jest.fn<any>().mockResolvedValue(true),
-    
+
     // Database management
     initialize: jest.fn<any>().mockResolvedValue(undefined),
     close: jest.fn<any>().mockResolvedValue(undefined)
