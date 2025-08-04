@@ -54,12 +54,6 @@ export {
   publishMessage,
 } from './managers.js';
 
-// === CHAT MANAGEMENT ===
-export {
-  createChatData,
-  getChatData,
-  restoreWorldChat,
-} from './managers.js';
 
 // === EVENT SYSTEM ===
 export {

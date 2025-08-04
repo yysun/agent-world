@@ -14,10 +14,9 @@
  * - Reusable getWorldOrError utility for error handling
  * - Non-streaming mode for CLI pipeline compatibility
  */
-import path from 'path';
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, restoreWorldChat } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider, World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
