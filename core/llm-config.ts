@@ -121,6 +121,22 @@ type LLMProviderConfigs = {
 let providerConfigs: LLMProviderConfigs = {};
 
 /**
+ * Initialize default configuration - configure Ollama with default URL if no providers configured
+ */
+function initializeDefaultConfiguration(): void {
+  // Only initialize if no providers are configured yet
+  if (Object.keys(providerConfigs).length === 0) {
+    // Configure Ollama with default URL as fallback
+    configureLLMProvider(LLMProvider.OLLAMA, {
+      baseUrl: 'http://localhost:11434/api'
+    });
+  }
+}
+
+// Initialize default configuration on module load
+initializeDefaultConfiguration();
+
+/**
  * Configure a specific LLM provider with type-safe configuration
  */
 export function configureLLMProvider<T extends LLMProvider>(

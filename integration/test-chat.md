@@ -1,4 +1,5 @@
-// npx tsx tests/integration/test-chat.integration.ts
+---
+cmd: npx tsx integration/test-chat.core.ts
 ---
 # Test steps
 - getFullWorld 'test-world'
