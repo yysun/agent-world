@@ -1,19 +1,19 @@
 /*
  * Jest Configuration for Integration Tests
- * 
+ *
  * Features:
  * - TypeScript testing with ESM support
  * - Node.js test environment for integration code
  * - Real file system operations (no mocking)
  * - Integration-specific test patterns
- * 
+ *
  * Logic:
  * - Uses ts-jest preset for TypeScript compilation
  * - Configures ESM module handling for modern JS features
  * - NO filesystem mocking - uses real file operations
  * - Separate test patterns for integration tests
  * - Higher timeout for file operations
- * 
+ *
  * Changes:
  * - Split from main Jest config to handle integration tests
  * - Real filesystem operations for world management tests
@@ -25,7 +25,8 @@ export default {
   extensionsToTreatAsEsm: ['.ts'],
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
-  testMatch: ['test/integration/'],
+  testMatch: ['**/integration/**/*.test.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/integration/setup.ts'],
   coverageDirectory: 'coverage-integration',
   coverageReporters: ['text', 'lcov', 'html'],
   testTimeout: 30000, // Higher timeout for real file operations
@@ -37,8 +38,9 @@ export default {
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
+  transformIgnorePatterns: [],
   transform: {
-    '^.+\\.ts$': ['ts-jest', {
+    '^.+\\.(ts|tsx)$': ['ts-jest', {
       useESM: true,
       tsconfig: {
         module: 'esnext',
@@ -48,6 +50,9 @@ export default {
         moduleResolution: 'node',
         allowImportingTsExtensions: true
       }
+    }],
+    '^.+\\.(js|jsx|mjs)$': ['ts-jest', {
+      useESM: true
     }]
   },
   // No global setup - use real fs operations
