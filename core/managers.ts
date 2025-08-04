@@ -193,9 +193,9 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
   // Load agents into world runtime - use normalizedWorldId consistently
   const agents = await storageWrappers!.listAgents(normalizedWorldId);
   for (const agentData of agents) {
-    // Enhance agent data with methods before adding to world
-    const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
-    world.agents.set(enhancedAgent.id, enhancedAgent);
+    // Create minimal agent before adding to world
+    const minimalAgent = createMinimalAgent(agentData);
+    world.agents.set(minimalAgent.id, minimalAgent);
   }
 
   // AUTO-RESTORE LAST CHAT: Load last chat and restore agent memory
@@ -308,15 +308,15 @@ export async function getWorldFresh(rootPath: string, worldId: string): Promise<
   // Load agents into world runtime with FRESH memory (no restoration)
   const agents = await storageWrappers!.listAgents(normalizedWorldId);
   for (const agentData of agents) {
-    // Enhance agent data with methods before adding to world
-    const enhancedAgent = enhanceAgentWithMethods(agentData, rootPath, normalizedWorldId);
+    // Create minimal agent before adding to world
+    const minimalAgent = createMinimalAgent(agentData);
 
     // FRESH START: Clear agent memory for new chat session
-    enhancedAgent.memory = [];
-    enhancedAgent.llmCallCount = 0;
-    enhancedAgent.lastLLMCall = undefined;
+    minimalAgent.memory = [];
+    minimalAgent.llmCallCount = 0;
+    minimalAgent.lastLLMCall = undefined;
 
-    world.agents.set(enhancedAgent.id, enhancedAgent);
+    world.agents.set(minimalAgent.id, minimalAgent);
   }
 
   logger.debug('Created fresh world with empty agent memory', {
@@ -469,7 +469,7 @@ function createStorageManager(rootPath: string): StorageManager {
     async loadAgent(worldId: string, agentId: string): Promise<Agent | null> {
       await moduleInitialization;
       const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-      return agentData ? enhanceAgentWithMethods(agentData, rootPath, worldId) : null;
+      return agentData ? createMinimalAgent(agentData) : null;
     },
 
     async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
@@ -480,7 +480,7 @@ function createStorageManager(rootPath: string): StorageManager {
     async listAgents(worldId: string): Promise<Agent[]> {
       await moduleInitialization;
       const agentList = await storageWrappers!.listAgents(worldId);
-      return agentList.map((agentData: any) => enhanceAgentWithMethods(agentData, rootPath, worldId));
+      return agentList.map((agentData: any) => createMinimalAgent(agentData));
     },
 
     // Batch operations
@@ -496,7 +496,7 @@ function createStorageManager(rootPath: string): StorageManager {
       const agents: Agent[] = [];
       for (const agentId of agentIds) {
         const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-        if (agentData) agents.push(enhanceAgentWithMethods(agentData, rootPath, worldId));
+        if (agentData) agents.push(createMinimalAgent(agentData));
       }
       return agents;
     },
@@ -602,7 +602,28 @@ function createMessageProcessor(): MessageProcessor {
 }
 
 /**
- * Enhance agent data with methods to create a full Agent object
+ * Create minimal agent with simplified structure for function-based approach
+ * Returns agent data with minimal method stubs for type compatibility
+ */
+function createMinimalAgent(agentData: any): Agent {
+  return {
+    ...agentData,
+    // Minimal method stubs for type compatibility - use standalone functions instead
+    generateResponse: async () => { throw new Error('Use generateAgentResponse(world, agent, messages) instead'); },
+    streamResponse: async () => { throw new Error('Use streamAgentResponse(world, agent, messages) instead'); },
+    completeChat: async () => { throw new Error('Use completeAgentChat(world, agent, messages) instead'); },
+    sendMessage: async () => { throw new Error('Use sendAgentMessage(world, agent, content) instead'); },
+    getMemory: async () => { return agentData.memory || []; },
+    clearMemory: async () => { throw new Error('Use clearAgentMemory(world, agentId) instead'); },
+    archiveMemory: async () => { throw new Error('Use archiveAgentMemory(world, agentId) instead'); },
+    saveConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
+    updateConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
+    updateMemory: async () => { throw new Error('Use updateAgentMemory(world, agentId, memoryUpdate) instead'); }
+  };
+}
+
+/**
+ * Enhance agent data with methods to create a full Agent object (LEGACY - TO BE REMOVED)
  * Uses statically imported functions from utils, events, and llm-manager modules
  */
 function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: string): Agent {
@@ -1424,7 +1445,7 @@ export async function loadAgentsIntoWorld(
           // Try loading again after repair
           const agentData = await storageWrappers!.loadAgentWithRetry(worldId, failure.agentId, loadOptions);
           if (agentData) {
-            const agent = enhanceAgentWithMethods(agentData, rootPath, worldId);
+            const agent = createMinimalAgent(agentData);
             const registered = await registerAgentRuntime(rootPath, worldId, agent);
             if (registered) {
               result.loadedCount++;
@@ -1662,7 +1683,7 @@ export async function getAgent(rootPath: string, worldId: string, agentId: strin
   await moduleInitialization;
 
   const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-  return agentData ? enhanceAgentWithMethods(agentData, rootPath, worldId) : null;
+  return agentData ? createMinimalAgent(agentData) : null;
 }
 
 /**
@@ -1693,7 +1714,7 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
   };
 
   await storageWrappers!.saveAgent(worldId, updatedAgent);
-  return enhanceAgentWithMethods(updatedAgent, rootPath, worldId);
+  return createMinimalAgent(updatedAgent);
 }
 
 /**
@@ -1750,7 +1771,7 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
   // Save memory to memory.json and update config timestamps
   await storageWrappers!.saveAgentMemory(worldId, agentId, updatedAgent.memory);
   await storageWrappers!.saveAgent(worldId, updatedAgent);
-  return enhanceAgentWithMethods(updatedAgent, rootPath, worldId);
+  return createMinimalAgent(updatedAgent);
 }
 
 /**
@@ -1810,7 +1831,7 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
     agentId,
     newLLMCallCount: updatedAgent.llmCallCount
   });
-  return enhanceAgentWithMethods(updatedAgent, rootPath, worldId);
+  return createMinimalAgent(updatedAgent);
 }
 
 /**
@@ -1826,7 +1847,7 @@ export async function getAgentConfig(rootPath: string, worldId: string, agentId:
     return null;
   }
 
-  const agent = enhanceAgentWithMethods(agentData, rootPath, worldId);
+  const agent = createMinimalAgent(agentData);
   const { memory, ...config } = agent;
   return config;
 }
