@@ -50,14 +50,12 @@ import {
   enableStreaming,
   disableStreaming
 } from '../core/index.js';
-import type { LoggerConfig, LogLevel } from '../core/index.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,
   createStreamingState,
   handleWorldEventWithStreaming,
-  isStreamingActive
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 

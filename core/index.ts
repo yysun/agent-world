@@ -54,6 +54,12 @@ export {
   publishMessage,
 } from './managers.js';
 
+// === CHAT MANAGEMENT ===
+export {
+  createChatData,
+  getChatData,
+  restoreWorldChat,
+} from './managers.js';
 
 // === EVENT SYSTEM ===
 export {
@@ -62,16 +68,97 @@ export {
 } from './events.js';
 
 // === CORE TYPES ===
-export type {
-  // Base interfaces for client use
-  World,
-  Agent,
+// Import full interfaces as internal types
+import type {
+  // World as CoreWorld,
+  // Agent as CoreAgent,
   AgentMessage,
-  WorldChat,
-  ChatData,
+  // WorldChat,
+  // ChatData,
 } from './types.js';
 
-export type { WorldInfo } from './managers.js';
+// Export public-only interfaces for client use
+export interface World {
+  // Core properties
+  readonly id: string;
+  readonly rootPath: string;
+  name: string;
+  description?: string;
+  turnLimit: number;
+  chatLLMProvider?: string;
+  chatLLMModel?: string;
+  currentChatId: string | null;
+
+  // Runtime objects (for CLI display)
+  readonly agents: Map<string, Agent>;
+
+  // Agent operations
+  createAgent(params: {
+    name: string;
+    type?: string;
+    provider: string;
+    model: string;
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<Agent>;
+  getAgent(agentName: string): Promise<Agent | null>;
+  updateAgent(agentName: string, updates: {
+    name?: string;
+    type?: string;
+    status?: 'active' | 'inactive' | 'error';
+    provider?: string;
+    model?: string;
+    systemPrompt?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<Agent | null>;
+  deleteAgent(agentName: string): Promise<boolean>;
+  clearAgentMemory(agentName: string): Promise<Agent | null>;
+
+  // Chat operations
+  listChats(): Promise<{
+    id: string;
+    worldId: string;
+    name: string;
+    description?: string;
+    createdAt: Date;
+    updatedAt: Date;
+    messageCount: number;
+    tags?: string[];
+  }[]>;
+  deleteChatData(chatId: string): Promise<boolean>;
+  newChat(): Promise<World>;
+  loadChatById(chatId: string): Promise<void>;
+
+  // World operations
+  delete(): Promise<boolean>;
+}
+
+export interface Agent {
+  // Core properties
+  readonly id: string;
+  name: string;
+  type: string;
+  status?: 'active' | 'inactive' | 'error';
+  provider: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+
+  // Metrics
+  llmCallCount: number;
+  lastLLMCall?: Date;
+  memory: AgentMessage[];
+  createdAt?: Date;
+  lastActive?: Date;
+  description?: string;
+}
+
+// Export full message types
+export type { AgentMessage };
+// export type { WorldInfo } from './managers.js';
 export type { LoggerConfig, LogLevel } from './logger.js';
 
 // LLM Provider enum (needed for agent configuration)

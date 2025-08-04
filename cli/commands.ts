@@ -1,14 +1,3 @@
-// Helper for world-required command validation
-function requireWorldOrError(world: World | null, command: string): CLIResponse | undefined {
-  if (!world) {
-    return {
-      success: false,
-      message: 'No world selected. World is required for this command.',
-      technicalDetails: `Command ${command} requires world context`
-    };
-  }
-  return undefined;
-}
 /**
  * CLI Commands Implementation - Direct Core Integration with Short Aliases
  * 
@@ -46,8 +35,7 @@ function requireWorldOrError(world: World | null, command: string): CLIResponse 
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, Agent, LLMProvider, createWorld, updateWorld, WorldInfo, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
-import type { ChatData } from '../core/index.js';
+import { World, LLMProvider, createWorld, updateWorld, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
@@ -56,6 +44,18 @@ import path from 'path';
 
 // Create CLI logger
 const logger = createCategoryLogger('cli');
+
+// Helper for world-required command validation
+function requireWorldOrError(world: World | null, command: string): CLIResponse | undefined {
+  if (!world) {
+    return {
+      success: false,
+      message: 'No world selected. World is required for this command.',
+      technicalDetails: `Command ${command} requires world context`
+    };
+  }
+  return undefined;
+}
 
 // CLI response and context types
 export interface CLIResponse {
@@ -926,7 +926,7 @@ export async function processCLICommand(
             };
           } else {
             let output = '\nAvailable Worlds:\n';
-            worlds.forEach((worldInfo: WorldInfo) => {
+            worlds.forEach((worldInfo) => {
               output += `  ID: ${worldInfo.id}\n`;
               output += `  Name: ${worldInfo.name}\n`;
               output += `  Description: ${worldInfo.description || 'No description'}\n`;
@@ -1600,7 +1600,7 @@ export async function processCLICommand(
               };
             } else {
               let output = '\nAvailable Worlds:\n';
-              worlds.forEach((worldInfo: WorldInfo) => {
+              worlds.forEach((worldInfo) => {
                 output += `  ID: ${worldInfo.id}\n`;
                 output += `  Name: ${worldInfo.name}\n`;
                 output += `  Description: ${worldInfo.description || 'No description'}\n`;
@@ -2178,7 +2178,7 @@ export async function processCLIInput(
   }
 
   try {
-    publishMessage(world, input, sender);
+    publishMessage(world as any, input, sender);
     return {
       success: true,
       message: 'Message sent to world',

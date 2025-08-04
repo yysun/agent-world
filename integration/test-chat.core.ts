@@ -32,10 +32,13 @@ const TEST_WORLD_ID = 'test-world';
 const TEST_MESSAGE = 'Hello, world!';
 
 // Color helpers for consistent output
-const boldRed = (text: string) => `\x1b[1m\x1b[31m${text}\x1b[0m`;
-const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
-const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text}\x1b[0m`;
-const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
+const boldRed = (text: string) => `\x1b[1m\x1b[31m${text.toString()}\x1b[0m`;
+const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text.toString()}\x1b[0m`;
+const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text.toString()}\x1b[0m`;
+const red = (text: string) => `\x1b[31m${text.toString()}\x1b[0m`;
+const green = (text: string) => `\x1b[32m${text.toString()}\x1b[0m`;
+const yellow = (text: string) => `\x1b[33m${text.toString()}\x1b[0m`;
+const cyan = (text: string) => `\x1b[36m${text.toString()}\x1b[0m`;
 
 // Helper to log for test output
 function log(label: string, value: any): void {
@@ -90,30 +93,39 @@ async function runIntegrationTest(): Promise<void> {
     if (!world) {
       throw new Error('World not loaded from subscription');
     }
-    log('Initial world loaded', {
-      id: world.id,
-      currentChatId: world.currentChatId,
-      agentCount: world.agents?.size || 0
-    });
+
+    // log('Initial world loaded', {
+    //   id: world.id,
+    //   currentChatId: world.currentChatId,
+    //   agentCount: world.agents?.size || 0
+    // });
 
     // Step 2: Log current chat id
     console.log('\n2. Logging current chat id...');
-    log('Current chat id', world.currentChatId);
+    log('Current chat id', yellow(world.currentChatId||''));
 
     // Step 3: Create new chat
     console.log('\n3. Creating new chat...');
 
-    world = await world.createNewChat();
+    await world.newChat();
+    log('Current chat id after new chat', yellow(world.currentChatId||''));
+    
+    const chatId = world.currentChatId;
+    console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
+
+    await world.newChat();
+    await world.newChat();
 
     // Step 4: Log current chat id after new chat
     console.log('\n4. Logging current chat id after new chat...');
-    log('Current chat id after new chat', world.currentChatId);
+    log('Current chat id after new chat 2 times', yellow(world.currentChatId||''));
+
+    console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
 
     // Step 5: Send message
     console.log('\n5. Sending message...');
     await publishMessage(world, TEST_MESSAGE, 'HUMAN');
-    log('Sent message', TEST_MESSAGE);
-
+    log('Sent message', cyan(TEST_MESSAGE));
 
     await wait(3000);
 
@@ -125,7 +137,7 @@ async function runIntegrationTest(): Promise<void> {
       id: world.id,
       currentChatId: world.currentChatId,
       agentCount: world.agents?.size || 0,
-      chats
+      chatCount: chats.length
     });
 
     console.log('\n' + '='.repeat(60));
