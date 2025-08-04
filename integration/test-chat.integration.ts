@@ -22,7 +22,7 @@ import {
   getChatData,
   restoreWorldChat,
   publishMessage,
-} from '../../core/index.js';
+} from '../core/index.js';
 
 const TEST_WORLD_ID = 'test-world';
 const TEST_MESSAGE = 'Hello, world!';

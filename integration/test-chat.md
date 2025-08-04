@@ -1,5 +1,4 @@
 // npx tsx tests/integration/test-chat.integration.ts
-// npx jest --config jest.integration.config.js --verbose tests/integration/test-chat.integration.test.ts
 ---
 # Test steps
 - getFullWorld 'test-world'
