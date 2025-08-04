@@ -50,8 +50,8 @@ export {
   updateAgent,
   deleteAgent,
   listAgents,
-  // Memory management (only clearAgentMemory needed for public API)
   clearAgentMemory,
+  publishMessage,
 } from './managers.js';
 
 // === CHAT MANAGEMENT ===
@@ -63,7 +63,6 @@ export {
 
 // === EVENT SYSTEM ===
 export {
-  publishMessage,
   enableStreaming,
   disableStreaming,
 } from './events.js';
@@ -74,7 +73,6 @@ export type {
   World,
   Agent,
   AgentMessage,
-  // Chat data types
   WorldChat,
   ChatData,
 } from './types.js';

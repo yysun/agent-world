@@ -665,7 +665,7 @@ function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: stri
       const worldData = await getWorldConfig(rootPath, worldId);
       if (!worldData) throw new Error(`World ${worldId} not found`);
       const world = worldDataToWorld(worldData, rootPath);
-      return events.publishMessage(world, content, agentData.id);
+      return publishMessage(world, content, agentData.id);
     }
   };
 }
@@ -936,7 +936,7 @@ function worldDataToWorld(data: WorldData, rootPath: string): World {
 
     // Event methods (R1.2)
     publishMessage(content: string, sender: string) {
-      events.publishMessage(world, content, sender);
+      world.publishMessage(content, sender);
     },
 
     subscribeToMessages(handler: (event: WorldMessageEvent) => void) {
@@ -2273,8 +2273,7 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
 export async function publishMessageWithAutoSave(
   world: World,
   content: string,
-  sender: string,
-  currentChatId?: string
+  sender: string
 ): Promise<{ messageId: string; chatId?: string; autoSaved?: boolean }> {
   // First publish the message using core events
   const messageEvent = {
@@ -2369,7 +2368,6 @@ export async function publishMessageWithAutoSave(
     };
   }
 }
-
 /**
  * Wrapper function for backward compatibility
  * Use publishMessageWithAutoSave for new implementations that need auto-save
@@ -2377,6 +2375,7 @@ export async function publishMessageWithAutoSave(
 export function publishMessage(world: World, content: string, sender: string): void {
   events.publishMessage(world, content, sender);
 }
+
 
 /**
  * Publish event to a specific channel using World.eventEmitter (NEW)
