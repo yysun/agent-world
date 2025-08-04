@@ -989,3 +989,13 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   logger.debug('AGENT message - should respond: ' + shouldRespond);
   return shouldRespond;
 }
+
+// Subscribe world to messages with cleanup function
+export function subscribeWorldToMessages(
+  world: World,
+): () => void {
+  logger.debug('Subscribing world to messages', { worldId: world.id });
+  return subscribeToMessages(world, (event) => {
+    console.log('World event received:', event);
+  });
+}

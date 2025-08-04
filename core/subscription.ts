@@ -8,6 +8,7 @@
  * - Memory leak prevention and proper resource cleanup
  * - World instance isolation and complete destruction during refresh
  * - EventEmitter recreation and agent map repopulation
+ * - World message subscription functions
  * 
  * Purpose:
  * - Preserve essential world subscription functionality
@@ -15,6 +16,7 @@
  * - Provide code reuse for event handling across transports
  * - Ensure proper world lifecycle management across refresh operations
  * - WebSocket command processing moved to server/ws.ts for better separation
+ * - Enable worlds to subscribe/unsubscribe to message events
  * 
  * World Refresh Architecture:
  * - Each subscription maintains reference to current world instance
@@ -26,7 +28,7 @@
 
 import { World } from './types.js';
 import { getWorld as coreGetWorld } from './managers.js';
-import { publishMessage, subscribeAgentToMessages } from './events.js';
+import { publishMessage, subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
 import { toKebabCase } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 
@@ -58,6 +60,8 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   for (const agent of currentWorld.agents.values()) {
     subscribeAgentToMessages(currentWorld, agent);
   }
+
+  subscribeWorldToMessages(currentWorld);
 
   // Helper function to destroy current world instance
   const destroyCurrentWorld = async () => {
