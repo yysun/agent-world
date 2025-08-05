@@ -624,16 +624,16 @@ function createMinimalAgent(agentData: any): Agent {
   return {
     ...agentData,
     // Minimal method stubs for type compatibility - use standalone functions instead
-    generateResponse: async () => { throw new Error('Use generateAgentResponse(world, agent, messages) instead'); },
-    streamResponse: async () => { throw new Error('Use streamAgentResponse(world, agent, messages) instead'); },
-    completeChat: async () => { throw new Error('Use completeAgentChat(world, agent, messages) instead'); },
-    sendMessage: async () => { throw new Error('Use sendAgentMessage(world, agent, content) instead'); },
-    getMemory: async () => { return agentData.memory || []; },
-    clearMemory: async () => { throw new Error('Use clearAgentMemory(world, agentId) instead'); },
-    archiveMemory: async () => { throw new Error('Use archiveAgentMemory(world, agentId) instead'); },
-    saveConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
-    updateConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
-    updateMemory: async () => { throw new Error('Use updateAgentMemory(world, agentId, memoryUpdate) instead'); }
+    // generateResponse: async () => { throw new Error('Use generateAgentResponse(world, agent, messages) instead'); },
+    // streamResponse: async () => { throw new Error('Use streamAgentResponse(world, agent, messages) instead'); },
+    // completeChat: async () => { throw new Error('Use completeAgentChat(world, agent, messages) instead'); },
+    // sendMessage: async () => { throw new Error('Use sendAgentMessage(world, agent, content) instead'); },
+    // getMemory: async () => { return agentData.memory || []; },
+    // clearMemory: async () => { throw new Error('Use clearAgentMemory(world, agentId) instead'); },
+    // archiveMemory: async () => { throw new Error('Use archiveAgentMemory(world, agentId) instead'); },
+    // saveConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
+    // updateConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
+    // updateMemory: async () => { throw new Error('Use updateAgentMemory(world, agentId, memoryUpdate) instead'); }
   };
 }
 
@@ -908,73 +908,73 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     memory: [],
 
     // LLM operation methods (R2.1)
-    async generateResponse(messages: AgentMessage[]): Promise<string> {
-      await moduleInitialization;
-      if (!agent.world) throw new Error('Agent not attached to world');
-      return llmManager.generateAgentResponse(agent.world, agent, messages);
-    },
+    // async generateResponse(messages: AgentMessage[]): Promise<string> {
+    //   await moduleInitialization;
+    //   if (!agent.world) throw new Error('Agent not attached to world');
+    //   return llmManager.generateAgentResponse(agent.world, agent, messages);
+    // },
 
-    async streamResponse(messages: AgentMessage[]): Promise<string> {
-      await moduleInitialization;
-      if (!agent.world) throw new Error('Agent not attached to world');
-      return llmManager.streamAgentResponse(agent.world, agent, messages, events.publishSSE);
-    },
+    // async streamResponse(messages: AgentMessage[]): Promise<string> {
+    //   await moduleInitialization;
+    //   if (!agent.world) throw new Error('Agent not attached to world');
+    //   return llmManager.streamAgentResponse(agent.world, agent, messages, events.publishSSE);
+    // },
 
-    // Memory management methods (R2.2)
-    async addToMemory(message: AgentMessage): Promise<void> {
-      await moduleInitialization;
-      agent.memory.push(message);
-      // Auto-save memory if agent is attached to world
-      if (agent.world) {
-        await storageWrappers!.saveAgentMemory(agent.world.id, agent.id, agent.memory);
-      }
-    },
+    // // Memory management methods (R2.2)
+    // async addToMemory(message: AgentMessage): Promise<void> {
+    //   await moduleInitialization;
+    //   agent.memory.push(message);
+    //   // Auto-save memory if agent is attached to world
+    //   if (agent.world) {
+    //     await storageWrappers!.saveAgentMemory(agent.world.id, agent.id, agent.memory);
+    //   }
+    // },
 
-    getMemorySize(): number {
-      return agent.memory.length;
-    },
+    // getMemorySize(): number {
+    //   return agent.memory.length;
+    // },
 
-    async archiveMemory(): Promise<void> {
-      await moduleInitialization;
-      if (agent.world) {
-        await storageWrappers!.archiveMemory(agent.world.id, agent.id, agent.memory);
-        agent.memory = [];
-      }
-    },
+    // async archiveMemory(): Promise<void> {
+    //   await moduleInitialization;
+    //   if (agent.world) {
+    //     await storageWrappers!.archiveMemory(agent.world.id, agent.id, agent.memory);
+    //     agent.memory = [];
+    //   }
+    // },
 
-    getMemorySlice(start: number, end: number): AgentMessage[] {
-      return agent.memory.slice(start, end);
-    },
+    // getMemorySlice(start: number, end: number): AgentMessage[] {
+    //   return agent.memory.slice(start, end);
+    // },
 
-    searchMemory(query: string): AgentMessage[] {
-      const lowerQuery = query.toLowerCase();
-      return agent.memory.filter(msg =>
-        msg.content.toLowerCase().includes(lowerQuery) ||
-        (msg.sender && msg.sender.toLowerCase().includes(lowerQuery))
-      );
-    },
+    // searchMemory(query: string): AgentMessage[] {
+    //   const lowerQuery = query.toLowerCase();
+    //   return agent.memory.filter(msg =>
+    //     msg.content.toLowerCase().includes(lowerQuery) ||
+    //     (msg.sender && msg.sender.toLowerCase().includes(lowerQuery))
+    //   );
+    // },
 
-    // Message processing methods (R2.3)
-    async shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean> {
-      await moduleInitialization;
-      if (!agent.world) return false;
-      return events.shouldAgentRespond(agent.world, agent, messageEvent);
-    },
+    // // Message processing methods (R2.3)
+    // async shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean> {
+    //   await moduleInitialization;
+    //   if (!agent.world) return false;
+    //   return events.shouldAgentRespond(agent.world, agent, messageEvent);
+    // },
 
-    async processMessage(messageEvent: WorldMessageEvent): Promise<void> {
-      await moduleInitialization;
-      if (!agent.world) throw new Error('Agent not attached to world');
-      return events.processAgentMessage(agent.world, agent, messageEvent);
-    },
+    // async processMessage(messageEvent: WorldMessageEvent): Promise<void> {
+    //   await moduleInitialization;
+    //   if (!agent.world) throw new Error('Agent not attached to world');
+    //   return events.processAgentMessage(agent.world, agent, messageEvent);
+    // },
 
-    extractMentions(content: string): string[] {
-      return utils.extractMentions(content);
-    },
+    // extractMentions(content: string): string[] {
+    //   return utils.extractMentions(content);
+    // },
 
-    isMentioned(content: string): boolean {
-      const mentions = agent.extractMentions(content);
-      return mentions.includes(agent.id.toLowerCase()) || mentions.includes(agent.name.toLowerCase());
-    }
+    // isMentioned(content: string): boolean {
+    //   const mentions = agent.extractMentions(content);
+    //   return mentions.includes(agent.id.toLowerCase()) || mentions.includes(agent.name.toLowerCase());
+    // }
   };
 
   // Save configuration and system prompt (config.json + system-prompt.md)

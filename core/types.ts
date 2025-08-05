@@ -43,21 +43,21 @@ export interface Agent {
   world?: World;
 
   // LLM operation methods (R2.1)
-  generateResponse(messages: AgentMessage[]): Promise<string>;
-  streamResponse(messages: AgentMessage[]): Promise<string>;
+  // generateResponse(messages: AgentMessage[]): Promise<string>;
+  // streamResponse(messages: AgentMessage[]): Promise<string>;
 
-  // Memory management methods (R2.2)
-  addToMemory(message: AgentMessage): Promise<void>;
-  getMemorySize(): number;
-  archiveMemory(): Promise<void>;
-  getMemorySlice(start: number, end: number): AgentMessage[];
-  searchMemory(query: string): AgentMessage[];
+  // // Memory management methods (R2.2)
+  // addToMemory(message: AgentMessage): Promise<void>;
+  // getMemorySize(): number;
+  // archiveMemory(): Promise<void>;
+  // getMemorySlice(start: number, end: number): AgentMessage[];
+  // searchMemory(query: string): AgentMessage[];
 
-  // Message processing methods (R2.3)
-  shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean>;
-  processMessage(messageEvent: WorldMessageEvent): Promise<void>;
-  extractMentions(content: string): string[];
-  isMentioned(content: string): boolean;
+  // // Message processing methods (R2.3)
+  // shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean>;
+  // processMessage(messageEvent: WorldMessageEvent): Promise<void>;
+  // extractMentions(content: string): string[];
+  // isMentioned(content: string): boolean;
 }
 
 // deprecated
