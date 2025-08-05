@@ -3,6 +3,10 @@
  * 
  * Provides centralized builders for creating test data across all reorganized test files.
  * These builders ensure consistency and reduce duplication in test setup.
+ * 
+ * Note: This file has been updated to align with the consolidated StorageAPI interface
+ * and the current Agent type definition. Removed deprecated methods that no longer exist
+ * in the actual interfaces (generateResponse, streamResponse, etc.).
  */
 
 import type {
@@ -13,9 +17,7 @@ import type {
   LLMProvider,
   CreateAgentParams,
   CreateWorldParams,
-  WorldData,
-  StorageManager,
-  MessageProcessor
+  StorageAPI,
 } from '../../../core/types';
 import { EventEmitter } from 'events';
 
@@ -50,17 +52,6 @@ export class AgentTestBuilder {
       llmCallCount: 0,
       lastLLMCall: new Date(),
       memory: [],
-      generateResponse: jest.fn().mockResolvedValue('Mock response'),
-      streamResponse: jest.fn().mockResolvedValue('Mock stream response'),
-      addToMemory: jest.fn().mockResolvedValue(undefined),
-      getMemorySize: jest.fn().mockReturnValue(0),
-      archiveMemory: jest.fn().mockResolvedValue(undefined),
-      getMemorySlice: jest.fn().mockReturnValue([]),
-      searchMemory: jest.fn().mockReturnValue([]),
-      shouldRespond: jest.fn().mockResolvedValue(false),
-      processMessage: jest.fn().mockResolvedValue(undefined),
-      extractMentions: jest.fn().mockReturnValue([]),
-      isMentioned: jest.fn().mockReturnValue(false),
     };
     return this;
   }
@@ -106,10 +97,9 @@ export class AgentTestBuilder {
   }
 
   withMockResponses(responses: string[]): AgentTestBuilder {
-    const responseQueue = [...responses];
-    this.agent.generateResponse = jest.fn().mockImplementation(() => {
-      return Promise.resolve(responseQueue.shift() || 'Default mock response');
-    });
+    // Note: Since Agent interface doesn't include generateResponse method,
+    // this is just for builder pattern compatibility
+    // Tests that need mock responses should implement them directly
     return this;
   }
 
@@ -133,18 +123,23 @@ export class WorldTestBuilder {
     const mockAgentsMap = new Map<string, Agent>();
 
     // Create mock storage manager
-    const mockStorage: StorageManager = {
+    const mockStorage: StorageAPI = {
       // World operations
       saveWorld: jest.fn(),
       loadWorld: jest.fn(),
       deleteWorld: jest.fn(),
       listWorlds: jest.fn(),
+      worldExists: jest.fn(),
 
       // Agent operations
       saveAgent: jest.fn(),
       loadAgent: jest.fn(),
+      loadAgentWithRetry: jest.fn(),
       deleteAgent: jest.fn(),
       listAgents: jest.fn(),
+      agentExists: jest.fn(),
+      saveAgentMemory: jest.fn(),
+      archiveMemory: jest.fn(),
 
       // Batch operations
       saveAgentsBatch: jest.fn(),
@@ -154,7 +149,7 @@ export class WorldTestBuilder {
       saveChatData: jest.fn(),
       loadChatData: jest.fn(),
       deleteChatData: jest.fn(),
-      listChatHistories: jest.fn(),
+      listChats: jest.fn(),
       updateChatData: jest.fn(),
 
       // World chat operations
@@ -168,49 +163,13 @@ export class WorldTestBuilder {
       repairData: jest.fn(),
     };
 
-    // Create mock message processor
-    const mockMessageProcessor: MessageProcessor = {
-      extractMentions: jest.fn().mockReturnValue([]),
-      extractParagraphBeginningMentions: jest.fn().mockReturnValue([]),
-      determineSenderType: jest.fn().mockReturnValue('agent'),
-      shouldAutoMention: jest.fn().mockReturnValue(false),
-      addAutoMention: jest.fn().mockReturnValue(''),
-      removeSelfMentions: jest.fn().mockReturnValue(''),
-    };
-
     this.world = {
       id: DEFAULT_WORLD_ID,
-      rootPath: DEFAULT_WORLD_PATH,
       name: 'Test World',
       description: 'A test world for unit testing',
       turnLimit: 10,
       eventEmitter: mockEventEmitter,
       agents: mockAgentsMap,
-      storage: mockStorage,
-      messageProcessor: mockMessageProcessor,
-      createAgent: jest.fn(),
-      getAgent: jest.fn(),
-      updateAgent: jest.fn(),
-      deleteAgent: jest.fn(),
-      clearAgentMemory: jest.fn(),
-      listAgents: jest.fn(),
-      updateAgentMemory: jest.fn(),
-      saveAgentConfig: jest.fn(),
-      save: jest.fn(),
-      delete: jest.fn(),
-      reload: jest.fn(),
-      getTurnLimit: jest.fn().mockReturnValue(10),
-      getCurrentTurnCount: jest.fn().mockReturnValue(0),
-      hasReachedTurnLimit: jest.fn().mockReturnValue(false),
-      resetTurnCount: jest.fn(),
-      publishMessage: jest.fn(),
-      subscribeToMessages: jest.fn().mockReturnValue(() => { }),
-      publishSSE: jest.fn(),
-      subscribeToSSE: jest.fn().mockReturnValue(() => { }),
-      subscribeAgent: jest.fn().mockReturnValue(() => { }),
-      unsubscribeAgent: jest.fn(),
-      getSubscribedAgents: jest.fn().mockReturnValue([]),
-      isAgentSubscribed: jest.fn().mockReturnValue(false),
     };
     return this;
   }
@@ -227,11 +186,6 @@ export class WorldTestBuilder {
 
   withDescription(description: string): WorldTestBuilder {
     this.world.description = description;
-    return this;
-  }
-
-  withRootPath(path: string): WorldTestBuilder {
-    this.world.rootPath = path;
     return this;
   }
 
@@ -455,8 +409,10 @@ export class TestDataPresets {
     };
   }
 
-  static createWorldData(): WorldData {
+  static createWorldData(): World {
     return {
+      eventEmitter: new EventEmitter(),
+      agents: new Map<string, Agent>(),
       id: DEFAULT_WORLD_ID,
       name: 'Test World',
       description: 'A test world',

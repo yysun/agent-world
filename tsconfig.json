@@ -31,7 +31,8 @@
     "index.ts",
     "cli/**/*",
     "server/**/*",
-    "core/**/*"
+    "core/**/*",
+    "tests/**/*"
   ],
   "exclude": [
     "node_modules",

@@ -40,26 +40,21 @@ import {
   clearAgentMemory,
 
   // Chat operations
-  createChatData,
-  getChatData,
-  listChatHistories,
-  deleteChatData,
+  listChats,
+  deleteChat,
   newChat,
-  loadChatById,
+  restoreChat,
 
   // Types
   type World,
   type Agent,
-  type LLMProvider,
+  type Chat,
 } from './index.js';
 
 import type {
   CreateAgentParams,
   UpdateAgentParams,
   UpdateWorldParams,
-  CreateChatParams,
-  AgentInfo,
-  ChatData,
 } from './types.js';
 
 /**
@@ -147,7 +142,7 @@ export class WorldClass {
   /**
    * List all agents in this world
    */
-  async listAgents(): Promise<AgentInfo[]> {
+  async listAgents(): Promise<Agent[]> {
     return await listAgents(this.rootPath, this.worldId);
   }
 
@@ -163,24 +158,10 @@ export class WorldClass {
   // ========================
 
   /**
-   * Create new chat data entry
-   */
-  async createChatData(params: CreateChatParams): Promise<ChatData> {
-    return await createChatData(this.rootPath, this.worldId, params);
-  }
-
-  /**
-   * Get chat data by ID
-   */
-  async getChatData(chatId: string): Promise<ChatData | null> {
-    return await getChatData(this.rootPath, this.worldId, chatId);
-  }
-
-  /**
    * List all chats for this world
    */
-  async listChats(): Promise<ChatData[]> {
-    return await listChatHistories(this.rootPath, this.worldId);
+  async listChats(): Promise<Chat[]> {
+    return await listChats(this.rootPath, this.worldId);
   }
 
   /**
@@ -193,15 +174,15 @@ export class WorldClass {
   /**
    * Load specific chat by ID and optionally set as current
    */
-  async loadChatById(chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
-    return await loadChatById(this.rootPath, this.worldId, chatId, setAsCurrent);
+  async restoreChat(chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
+    return await restoreChat(this.rootPath, this.worldId, chatId);
   }
 
   /**
    * Delete chat data by ID
    */
-  async deleteChatData(chatId: string): Promise<boolean> {
-    return await deleteChatData(this.rootPath, this.worldId, chatId);
+  async deleteChat(chatId: string): Promise<boolean> {
+    return await deleteChat(this.rootPath, this.worldId, chatId);
   }
 
   // ========================

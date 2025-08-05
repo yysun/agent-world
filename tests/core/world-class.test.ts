@@ -50,12 +50,10 @@ describe('WorldClass', () => {
     expect(typeof worldClass.clearAgentMemory).toBe('function');
 
     // Chat operations
-    expect(typeof worldClass.createChatData).toBe('function');
-    expect(typeof worldClass.getChatData).toBe('function');
     expect(typeof worldClass.listChats).toBe('function');
-    expect(typeof worldClass.deleteChatData).toBe('function');
+    expect(typeof worldClass.deleteChat).toBe('function');
     expect(typeof worldClass.newChat).toBe('function');
-    expect(typeof worldClass.loadChatById).toBe('function');
+    expect(typeof worldClass.restoreChat).toBe('function');
   });
 
   it('should maintain consistent ID and path', () => {

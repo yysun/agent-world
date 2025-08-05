@@ -32,9 +32,9 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { toKebabCase } from './utils.js';
-import { logger } from './logger.js';
-import type { WorldChat, ChatData, CreateChatParams, UpdateChatParams } from './types.js';
+import { toKebabCase } from '../utils.js';
+import { logger } from '../logger.js';
+import type { World, Chat, CreateChatParams, UpdateChatParams } from '../types.js';
 
 // Extract readdir and exists from fs for convenience
 const { readdir, access } = fs;
@@ -47,22 +47,6 @@ const exists = async (path: string): Promise<boolean> => {
   }
 };
 
-/**
- * Serializable world data for storage (flat structure, no EventEmitter, no agents Map)
- */
-export interface WorldData {
-  id: string;
-  name: string;
-  description?: string;
-  turnLimit: number;
-  chatLLMProvider?: string; // For chat summarization
-  chatLLMModel?: string; // For chat summarization
-  currentChatId?: string | null; // Track active chat session
-  createdAt: Date;
-  lastUpdated: Date;
-  totalAgents: number;
-  totalMessages: number;
-}
 
 /**
  * File utility functions
@@ -106,7 +90,7 @@ export async function worldExists(root: string, worldId: string): Promise<boolea
 /**
  * Save world to disk
  */
-export async function saveWorld(root: string, worldData: WorldData): Promise<void> {
+export async function saveWorld(root: string, worldData: World): Promise<void> {
   await ensureWorldDirectory(root, worldData.id);
 
   const worldDir = getWorldDir(root, worldData.id);
@@ -118,12 +102,12 @@ export async function saveWorld(root: string, worldData: WorldData): Promise<voi
 /**
  * Load world from disk
  */
-export async function loadWorld(root: string, worldId: string): Promise<WorldData | null> {
+export async function loadWorld(root: string, worldId: string): Promise<World | null> {
   try {
     const worldDir = getWorldDir(root, worldId);
     const configPath = path.join(worldDir, 'config.json');
 
-    const worldData = await readJsonFile<WorldData>(configPath);
+    const worldData = await readJsonFile<World>(configPath);
 
     // Reconstruct Date objects
     if (worldData.createdAt) worldData.createdAt = new Date(worldData.createdAt);
@@ -151,10 +135,10 @@ export async function deleteWorld(root: string, worldId: string): Promise<boolea
 /**
  * List all worlds in root directory
  */
-export async function listWorlds(root: string): Promise<WorldData[]> {
+export async function listWorlds(root: string): Promise<World[]> {
   try {
     const entries = await fs.readdir(root, { withFileTypes: true });
-    const worlds: WorldData[] = [];
+    const worlds: World[] = [];
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
@@ -192,7 +176,7 @@ export async function ensureChatDirectory(rootPath: string, worldId: string): Pr
 /**
  * Save chat data (metadata + content) to disk
  */
-export async function saveChatData(rootPath: string, worldId: string, chatData: ChatData): Promise<void> {
+export async function saveChatData(rootPath: string, worldId: string, chatData: Chat): Promise<void> {
   await ensureChatDirectory(rootPath, worldId);
 
   // Save the complete ChatData object
@@ -203,17 +187,14 @@ export async function saveChatData(rootPath: string, worldId: string, chatData: 
 /**
  * Load chat data (metadata + content) from disk
  */
-export async function loadChatData(rootPath: string, worldId: string, chatId: string): Promise<ChatData | null> {
+export async function loadChatData(rootPath: string, worldId: string, chatId: string): Promise<Chat | null> {
   try {
     const chatPath = getChatFilePath(rootPath, worldId, chatId);
-    const chatData = await readJsonFile<ChatData>(chatPath);
+    const chatData = await readJsonFile<Chat>(chatPath);
 
     // Reconstruct Date objects
     if (chatData.createdAt) chatData.createdAt = new Date(chatData.createdAt);
     if (chatData.updatedAt) chatData.updatedAt = new Date(chatData.updatedAt);
-    if (chatData.chat?.metadata?.capturedAt) {
-      chatData.chat.metadata.capturedAt = new Date(chatData.chat.metadata.capturedAt);
-    }
 
     return chatData;
   } catch (error) {
@@ -225,7 +206,7 @@ export async function loadChatData(rootPath: string, worldId: string, chatId: st
 /**
  * Update chat data on disk
  */
-export async function updateChatData(rootPath: string, worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
+export async function updateChatData(rootPath: string, worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
   const chatData = await loadChatData(rootPath, worldId, chatId);
   if (!chatData) return null;
 
@@ -256,7 +237,7 @@ export async function deleteChatData(rootPath: string, worldId: string, chatId: 
 /**
  * List chat histories (metadata only)
  */
-export async function listChatHistories(rootPath: string, worldId: string): Promise<ChatData[]> {
+export async function listChatHistories(rootPath: string, worldId: string): Promise<Chat[]> {
   try {
     const chatDir = getChatDir(rootPath, worldId);
 
@@ -267,7 +248,7 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
     const files = await readdir(chatDir);
     const chatFiles = files.filter((file: string) => file.endsWith('.json'));
 
-    const chats: ChatData[] = [];
+    const chats: Chat[] = [];
 
     for (const file of chatFiles) {
       const chatId = file.replace('.json', '');
@@ -275,7 +256,7 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
 
       if (chatData) {
         // Extract just the metadata
-        const chatInfo: ChatData = {
+        const chatInfo: Chat = {
           id: chatData.id,
           worldId: worldId,
           name: chatData.name,
@@ -283,7 +264,6 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
           createdAt: chatData.createdAt,
           updatedAt: chatData.updatedAt,
           messageCount: chatData.messageCount,
-          tags: chatData.tags
         };
         chats.push(chatInfo);
       }

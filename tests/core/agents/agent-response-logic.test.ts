@@ -20,7 +20,7 @@ import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../
 import { createMockAgent } from '../mock-helpers';
 
 // Mock dependencies
-jest.mock('../../../core/agent-storage', () => ({
+jest.mock('../../../core/storage/agent-storage', () => ({
   saveAgentConfigToDisk: jest.fn(),
   saveAgentMemoryToDisk: jest.fn(),
   saveAgentToDisk: jest.fn()
@@ -59,7 +59,7 @@ describe('shouldAgentRespond', () => {
         removeAllListeners: jest.fn()
       } as any,
       turnLimit: 5
-    } as World;
+    } as any;
 
     mockAgent = createMockAgent({
       id: 'test-agent',

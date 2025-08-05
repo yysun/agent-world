@@ -37,8 +37,8 @@
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { Agent, AgentMessage } from './types.js';
-import { toKebabCase } from './utils.js';
+import { Agent, AgentMessage } from '../types.js';
+import { toKebabCase } from '../utils.js';
 
 /**
  * Agent loading options for enhanced control
@@ -568,14 +568,3 @@ async function readTextFile(filePath: string): Promise<string> {
     return `You are an AI agent.`; // Default fallback
   }
 }
-
-// Backward compatibility exports (old function names)
-export const saveAgentToDisk = saveAgent;
-export const saveAgentConfigToDisk = saveAgentConfig;
-export const saveAgentMemoryToDisk = saveAgentMemory;
-export const loadAgentFromDisk = loadAgent;
-export const loadAgentFromDiskWithRetry = loadAgentWithRetry;
-export const loadAllAgentsFromDiskBatch = loadAgentsBatch;
-export const loadAllAgentsFromDisk = listAgents;
-export const deleteAgentFromDisk = deleteAgent;
-export const agentExistsOnDisk = agentExists;

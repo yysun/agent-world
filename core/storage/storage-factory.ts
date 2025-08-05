@@ -27,13 +27,14 @@
  * - 2025-08-01: Full chat CRUD and snapshot support, strict type safety for chat operations
  * - See git history for previous changes
  */
-import type { StorageManager, StorageAPI, ChatData, UpdateChatParams, WorldChat, Agent, AgentMessage } from './types.js';
+import type { StorageAPI, Chat, UpdateChatParams, WorldChat, Agent, AgentMessage } from '../types.js';
 import { SQLiteConfig } from './sqlite-schema.js';
-import { isNodeEnvironment } from './utils.js';
+import { isNodeEnvironment } from '../utils.js';
 import * as path from 'path';
+import * as fs from 'fs';
 
 // Re-export StorageAPI type for external use
-export type { StorageAPI } from './types.js';
+export type { StorageAPI } from '../types.js';
 
 export interface StorageConfig {
   type: 'file' | 'sqlite';
@@ -45,7 +46,7 @@ export interface StorageConfig {
  * StorageWrappers factory function - creates an object that implements StorageAPI and delegates to storage instance
  * This provides a unified interface that works across all storage backends
  */
-export function createStorageWrappers(storageInstance: StorageManager | null): StorageAPI {
+export function createStorageWrappers(storageInstance: StorageAPI | null): StorageAPI {
   return {
     // World operations - standardized naming
     async saveWorld(worldData: any): Promise<void> {
@@ -80,11 +81,6 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
 
     // Agent operations - standardized naming
     async saveAgent(worldId: string, agent: any): Promise<void> {
-      if (!storageInstance) return;
-      return storageInstance.saveAgent(worldId, agent);
-    },
-
-    async saveAgentConfig(worldId: string, agent: any): Promise<void> {
       if (!storageInstance) return;
       return storageInstance.saveAgent(worldId, agent);
     },
@@ -128,21 +124,9 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    // Batch operations
-    async saveAgentsBatch(worldId: string, agents: any[]): Promise<void> {
-      if (!storageInstance) return;
-      return storageInstance.saveAgentsBatch(worldId, agents);
-    },
-
-    async loadAgentsBatch(worldId: string, agentIds: string[], options?: any): Promise<{ successful: any[]; failed: any[] }> {
-      if (!storageInstance) return { successful: [], failed: [] };
-      const agents = await storageInstance.loadAgentsBatch(worldId, agentIds);
-      return { successful: agents, failed: [] };
-    },
-
     // Chat history operations
 
-    async saveChatData(worldId: string, chat: ChatData): Promise<void> {
+    async saveChatData(worldId: string, chat: Chat): Promise<void> {
       if (!storageInstance) return;
       try {
         return await storageInstance.saveChatData(worldId, chat);
@@ -151,7 +135,7 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    async loadChatData(worldId: string, chatId: string): Promise<ChatData | null> {
+    async loadChatData(worldId: string, chatId: string): Promise<Chat | null> {
       if (!storageInstance) return null;
       try {
         return await storageInstance.loadChatData(worldId, chatId);
@@ -169,7 +153,7 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    async listChats(worldId: string): Promise<ChatData[]> {
+    async listChats(worldId: string): Promise<Chat[]> {
       if (!storageInstance) return [];
       try {
         return await storageInstance.listChats(worldId);
@@ -178,7 +162,7 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
+    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
       if (!storageInstance) return null;
       try {
         return await storageInstance.updateChatData(worldId, chatId, updates);
@@ -224,18 +208,6 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
       }
     },
 
-    // Integrity operations
-    async validateIntegrity(worldId: string, agentId?: string): Promise<{ isValid: boolean }> {
-      if (!storageInstance) return { isValid: false };
-      const isValid = await storageInstance.validateIntegrity(worldId, agentId);
-      return { isValid };
-    },
-
-    async repairData(worldId: string, agentId?: string): Promise<boolean> {
-      if (!storageInstance) return false;
-      return storageInstance.repairData(worldId, agentId);
-    },
-
     async archiveMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
       if (!storageInstance) return;
       // Try to use the storage instance's archiveAgentMemory if available
@@ -245,12 +217,80 @@ export function createStorageWrappers(storageInstance: StorageManager | null): S
         // Fallback to file storage implementation
         const agentStorage = await import('./agent-storage.js');
       }
+    },
+
+    // Batch operations
+    async saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void> {
+      if (!storageInstance) return;
+      if ('saveAgentsBatch' in storageInstance) {
+        return storageInstance.saveAgentsBatch(worldId, agents);
+      } else {
+        // Fallback: save agents one by one
+        for (const agent of agents) {
+          await this.saveAgent(worldId, agent);
+        }
+      }
+    },
+
+    async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]> {
+      if (!storageInstance) return [];
+      if ('loadAgentsBatch' in storageInstance) {
+        return storageInstance.loadAgentsBatch(worldId, agentIds);
+      } else {
+        // Fallback: load agents one by one
+        const agents: Agent[] = [];
+        for (const agentId of agentIds) {
+          const agent = await this.loadAgent(worldId, agentId);
+          if (agent) agents.push(agent);
+        }
+        return agents;
+      }
+    },
+
+    // Integrity operations
+    async validateIntegrity(worldId: string, agentId?: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      if ('validateIntegrity' in storageInstance) {
+        return storageInstance.validateIntegrity(worldId, agentId);
+      } else {
+        // Fallback: check if data exists
+        try {
+          if (agentId) {
+            const agent = await this.loadAgent(worldId, agentId);
+            return !!agent;
+          } else {
+            const world = await this.loadWorld(worldId);
+            return !!world;
+          }
+        } catch {
+          return false;
+        }
+      }
+    },
+
+    async repairData(worldId: string, agentId?: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      if ('repairData' in storageInstance) {
+        return storageInstance.repairData(worldId, agentId);
+      } else {
+        // Fallback: basic repair - ensure data can be loaded
+        try {
+          if (agentId) {
+            await this.loadAgent(worldId, agentId);
+          } else {
+            await this.loadWorld(worldId);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      }
     }
   };
 }
 
 // File storage implementation adapter (function-based)
-function createFileStorageAdapter(rootPath: string): StorageManager {
+function createFileStorageAdapter(rootPath: string): StorageAPI {
   let worldStorage: any;
   let agentStorage: any;
 
@@ -269,13 +309,13 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
   }
 
   return {
-    async saveWorld(worldData: import('./types.js').WorldData): Promise<void> {
+    async saveWorld(worldData: import('../types.js').World): Promise<void> {
       await ensureModulesLoaded();
       if (worldStorage?.saveWorld) {
         return worldStorage.saveWorld(rootPath, worldData);
       }
     },
-    async loadWorld(worldId: string): Promise<import('./types.js').WorldData | null> {
+    async loadWorld(worldId: string): Promise<import('../types.js').World | null> {
       await ensureModulesLoaded();
       if (worldStorage?.loadWorld) {
         return worldStorage.loadWorld(rootPath, worldId);
@@ -289,7 +329,7 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       }
       return false;
     },
-    async listWorlds(): Promise<import('./types.js').WorldData[]> {
+    async listWorlds(): Promise<import('../types.js').World[]> {
       await ensureModulesLoaded();
       if (worldStorage?.listWorlds) {
         return worldStorage.listWorlds(rootPath);
@@ -368,13 +408,13 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
     },
 
     // Chat history operations - now fully supported in file storage
-    async saveChatData(worldId: string, chat: ChatData): Promise<void> {
+    async saveChatData(worldId: string, chat: Chat): Promise<void> {
       await ensureModulesLoaded();
       if (worldStorage?.saveChatData) {
         return worldStorage.saveChatData(rootPath, worldId, chat);
       }
     },
-    async loadChatData(worldId: string, chatId: string): Promise<ChatData | null> {
+    async loadChatData(worldId: string, chatId: string): Promise<Chat | null> {
       await ensureModulesLoaded();
       if (worldStorage?.loadChatData) {
         return worldStorage.loadChatData(rootPath, worldId, chatId);
@@ -388,14 +428,14 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       }
       return false;
     },
-    async listChats(worldId: string): Promise<ChatData[]> {
+    async listChats(worldId: string): Promise<Chat[]> {
       await ensureModulesLoaded();
       if (worldStorage?.listChatHistories) {
         return worldStorage.listChatHistories(rootPath, worldId);
       }
       return [];
     },
-    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
+    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
       await ensureModulesLoaded();
       if (worldStorage?.updateChatData) {
         return worldStorage.updateChatData(rootPath, worldId, chatId, updates);
@@ -428,12 +468,65 @@ function createFileStorageAdapter(rootPath: string): StorageManager {
       // This would require implementing agent restoration logic
       console.warn('[file-storage] World chat restoration not yet implemented for file storage');
       return false;
+    },
+
+    // Additional StorageAPI methods
+    async worldExists(worldId: string): Promise<boolean> {
+      await ensureModulesLoaded();
+      if (worldStorage?.worldExists) {
+        return worldStorage.worldExists(rootPath, worldId);
+      }
+      return false;
+    },
+
+    async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {
+      await ensureModulesLoaded();
+      // Simple retry logic for file storage
+      let retries = options?.retries || 3;
+      while (retries > 0) {
+        try {
+          const agent = await this.loadAgent(worldId, agentId);
+          if (agent) return agent;
+        } catch (error) {
+          console.warn(`[file-storage] Retry attempt ${retries} failed:`, error);
+        }
+        retries--;
+        if (retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, options?.delay || 100));
+        }
+      }
+      return null;
+    },
+
+    async agentExists(worldId: string, agentId: string): Promise<boolean> {
+      await ensureModulesLoaded();
+      try {
+        const agent = await this.loadAgent(worldId, agentId);
+        return !!agent;
+      } catch {
+        return false;
+      }
+    },
+
+    async saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
+      await ensureModulesLoaded();
+      const agent = await this.loadAgent(worldId, agentId);
+      if (agent) {
+        agent.memory = memory;
+        await this.saveAgent(worldId, agent);
+      }
+    },
+
+    async archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
+      await ensureModulesLoaded();
+      // File storage doesn't support memory archiving yet
+      console.warn('[file-storage] Memory archiving not yet implemented for file storage');
     }
   };
 }
 
 // Simple in-memory cache for storage instances
-const storageCache = new Map<string, StorageManager>();
+const storageCache = new Map<string, StorageAPI>();
 
 /**
  * Create storage-aware wrapper that handles environment detection
@@ -450,13 +543,13 @@ export async function createStorageWithWrappers(): Promise<StorageAPI> {
   }
 }
 
-export async function createStorage(config: StorageConfig): Promise<StorageManager> {
+export async function createStorage(config: StorageConfig): Promise<StorageAPI> {
   const cacheKey = `${config.type}-${config.rootPath}`;
   if (storageCache.has(cacheKey)) {
     return storageCache.get(cacheKey)!;
   }
 
-  let storage: StorageManager;
+  let storage: StorageAPI;
 
   if (config.type === 'sqlite') {
     if (!isNodeEnvironment()) {
@@ -497,7 +590,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       saveWorldChat,
       loadWorldChat,
       loadWorldChatFull,
-      restoreFromWorldChat
+      restoreFromWorldChat,
+      archiveAgentMemory
     } = await import('./sqlite-storage.js');
     const { initializeSchema } = await import('./sqlite-schema.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
@@ -530,6 +624,55 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
       restoreFromWorldChat: async (worldId: string, chat: any) => {
         return await restoreFromWorldChat(ctx, worldId, chat);
       },
+
+      // Additional StorageAPI methods for SQLite
+      worldExists: async (worldId: string) => {
+        try {
+          const world = await loadWorld(ctx, worldId);
+          return !!world;
+        } catch {
+          return false;
+        }
+      },
+
+      loadAgentWithRetry: async (worldId: string, agentId: string, options?: any) => {
+        let retries = options?.retries || 3;
+        while (retries > 0) {
+          try {
+            const agent = await loadAgent(ctx, worldId, agentId);
+            if (agent) return agent;
+          } catch (error) {
+            console.warn(`[sqlite-storage] Retry attempt ${retries} failed:`, error);
+          }
+          retries--;
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, options?.delay || 100));
+          }
+        }
+        return null;
+      },
+
+      agentExists: async (worldId: string, agentId: string) => {
+        try {
+          const agent = await loadAgent(ctx, worldId, agentId);
+          return !!agent;
+        } catch {
+          return false;
+        }
+      },
+
+      saveAgentMemory: async (worldId: string, agentId: string, memory: any[]) => {
+        const agent = await loadAgent(ctx, worldId, agentId);
+        if (agent) {
+          agent.memory = memory;
+          await saveAgent(ctx, worldId, agent);
+        }
+      },
+
+      archiveMemory: async (worldId: string, agentId: string, memory: any[]) => {
+        await archiveAgentMemory(ctx, worldId, agentId, memory);
+      },
+
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)
     } as any;
@@ -540,8 +683,6 @@ export async function createStorage(config: StorageConfig): Promise<StorageManag
   storageCache.set(cacheKey, storage);
   return storage;
 }
-
-import * as fs from 'fs';
 
 export function getDefaultRootPath(): string {
   let rootPath = process.env.AGENT_WORLD_DATA_PATH;
@@ -563,7 +704,7 @@ export function getDefaultRootPath(): string {
   }
 }
 
-export async function createStorageFromEnv(): Promise<StorageManager> {
+export async function createStorageFromEnv(): Promise<StorageAPI> {
   // Default to 'sqlite' unless overridden by env
   const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
   const rootPath = getDefaultRootPath();
@@ -597,79 +738,3 @@ export async function createStorageFromEnv(): Promise<StorageManager> {
   return createStorage(config);
 }
 
-export function getCachedStorage(type: string, rootPath: string): StorageManager | null {
-  const cacheKey = `${type}-${rootPath}`;
-  return storageCache.get(cacheKey) || null;
-}
-
-export function clearStorageCache(): void {
-  storageCache.clear();
-}
-
-export async function closeAllStorages(): Promise<void> {
-  const closePromises: Promise<void>[] = [];
-  for (const storage of storageCache.values()) {
-    if ('close' in storage && typeof (storage as any).close === 'function') {
-      closePromises.push((storage as any).close());
-    }
-  }
-  await Promise.all(closePromises);
-  clearStorageCache();
-}
-
-// Utility for recommending storage type
-export function getRecommendedStorageType(options: {
-  expectedAgentCount?: number;
-  expectedArchiveCount?: number;
-  requiresSearch?: boolean;
-  requiresAnalytics?: boolean;
-  performanceCritical?: boolean;
-}): 'file' | 'sqlite' {
-  const {
-    expectedAgentCount = 0,
-    expectedArchiveCount = 0,
-    requiresSearch = false,
-    requiresAnalytics = false,
-    performanceCritical = false
-  } = options;
-
-  if (
-    expectedAgentCount > 10 ||
-    expectedArchiveCount > 100 ||
-    requiresSearch ||
-    requiresAnalytics ||
-    performanceCritical
-  ) {
-    return 'sqlite';
-  }
-  return 'file';
-}
-
-// Migration helper
-export async function needsStorageMigration(
-  fromConfig: StorageConfig,
-  toConfig: StorageConfig
-): Promise<boolean> {
-  if (fromConfig.type === toConfig.type) {
-    return false;
-  }
-  try {
-    const sourceStorage = await createStorage(fromConfig);
-    const worlds = await sourceStorage.listWorlds();
-    return worlds.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-// Default config (for reference)
-export const DEFAULT_STORAGE_CONFIG: Partial<StorageConfig> = {
-  type: 'sqlite',
-  sqlite: {
-    database: 'agent-world.db',
-    enableWAL: true,
-    busyTimeout: 30000,
-    cacheSize: -64000,
-    enableForeignKeys: true
-  }
-};

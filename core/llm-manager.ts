@@ -71,14 +71,24 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { World, Agent, AgentMessage, LLMProvider, stripCustomFieldsFromMessages, WorldSSEEvent } from './types.js';
+import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
-
-// Create LLM category logger - initialized when module loads
 const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config.js';
+
+// LLM Integration Utilities
+
+function stripCustomFields(message: AgentMessage): ChatMessage {
+  const { sender, ...llmMessage } = message;
+  return llmMessage;
+}
+
+function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
+  return messages.map(stripCustomFields);
+}
+
 
 /**
  * Global LLM call queue to ensure serialized execution

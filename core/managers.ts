@@ -1,143 +1,61 @@
 /**
- * Unified Managers Module - World, Agent, and Message Management
- *
- * Features:
- * - Complete world lifecycle management (create, read, update, delete)
- * - Complete agent lifecycle management with configuration and memory
- * - High-level message broadcasting and routing
+ * Unified Managers Module - World, Agent, and Chat Management
+ * 
+ * Core Features:
+ * - Complete lifecycle management for worlds, agents, and chat sessions
  * - EventEmitter integration for runtime world instances
- * - Agent event subscriptions handled automatically during world loading
- * - Static imports for events, llm-manager, and utils modules for improved separation of concerns
- * - Enhanced runtime agent registration and world synchronization
- * - Batch operations for performance optimization
- * - Memory archiving before clearing for data preservation
- * - Chat session management with auto-save and restoration capabilities
- *
- * Chat Session Management:
- * - Integrated into getWorld: Auto-restoration of last active chat with snapshot support
- * - Event-driven auto-save: Chat state automatically saved via event emitter
- * - generateChatTitleFromMessages: Extract meaningful titles from message content
- * - Enhanced newChat(): Returns complete World object for consistent state management
- *
- * Performance Optimizations:
- * - Static imports for events, llm-manager, and utils modules eliminate dynamic import overhead
- * - Environment detection delegated to storage-factory for clean separation of concerns
- * - Pre-initialized storage function wrappers from storage factory
+ * - Memory management with archiving and restoration capabilities
+ * - Chat session management with auto-save and title generation
+ * - Static imports and environment-aware storage operations
+ * 
+ * API Functions:
+ * World: createWorld, getWorld, updateWorld, deleteWorld, listWorlds
+ * Agent: createAgent, getAgent, updateAgent, deleteAgent, listAgents, updateAgentMemory, clearAgentMemory
+ * Chat: createChatData, getChatData, listChatHistories, deleteChatData, newChat, loadChatById
+ * Snapshot: createWorldChat, restoreWorldChat, exportWorldToMarkdown
+ * 
+ * Implementation Notes:
+ * - Wraps storage layer with business logic and runtime object reconstruction
+ * - Automatic ID normalization to kebab-case for consistency
+ * - Environment detection delegated to storage-factory module
  * - Single moduleInitialization promise for all async operations
- * - Eliminated per-method import overhead and file system lookups
- *
- * World Functions:
- * - createWorld: Create new world with configuration
- * - getWorld: Load world with EventEmitter reconstruction and agent subscriptions (complete functionality)
- * - updateWorld: Update world configuration
- * - deleteWorld: Remove world and all associated data
- * - listWorlds: Get all world IDs and basic info
- * - getWorldConfig: Get world configuration without runtime objects (lightweight)
- *
- * Agent Functions:
- * - createAgent: Create new agent with configuration and system prompt
- * - getAgent: Load agent by ID with full configuration and memory
- * - updateAgent: Update agent configuration and/or memory
- * - deleteAgent: Remove agent and all associated data
- * - listAgents: Get all agent IDs and basic info
- * - updateAgentMemory: Add messages to agent memory
- * - clearAgentMemory: Archive existing memory then reset to empty state and reset LLM call count
- * - loadAgentsIntoWorld: Load all agents from disk into world runtime
- * - syncWorldAgents: Synchronize world agents Map with disk state
- * - createAgentsBatch: Create multiple agents atomically
- * - registerAgentRuntime: Register agent in world runtime without persistence
- *
- * Chat Functions:
- * - createChat: Create new chat with optional snapshot
- * - getChat: Load chat by ID with snapshot data
- * - updateChat: Update chat metadata and message counts
- * - deleteChat: Remove chat and associated snapshots
- * - listChat: Get all chats for a world
- *
- * Message Functions:
- * - getWorldMessages: Get message history (placeholder)
- *
- * Implementation:
- * - Wraps storage modules with business logic
- * - Reconstructs EventEmitter and agents Map for runtime World objects
- * - Automatically subscribes agents to world messages during world loading
- * - Storage layer works with plain data objects (no EventEmitter)
- * - Static imports for events, llm-manager, and utils modules
- * - Environment detection handled by storage-factory module
- * - Clean separation of storage data from runtime objects
- * - Complete isolation from other internal modules
- * - Environment-aware storage function wrappers from storage factory
- *
- * Separation of Concerns:
- * - Static imports: events.js, llm-manager.js, utils.js (no dynamic imports)
- * - Environment detection: Delegated to storage-factory.js
- * - Storage operations: Wrapped functions from storage-factory with environment awareness
- * - NoOp implementations: Provided by storage-factory for browser environments
  */
 
-// Import logger and initialize function
+// Core module imports
 import { createCategoryLogger, initializeLogger } from './logger.js';
-
-// Create core category logger for managers
-const logger = createCategoryLogger('core');
-
-// Type-only imports
-import type { World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams, AgentInfo, AgentMessage, StorageManager, MessageProcessor, WorldMessageEvent, WorldSSEEvent, ChatData, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider } from './types.js';
-import type { WorldData } from './world-storage.js';
-
-// Regular imports
-import { SenderType } from './types.js';
-
-// Static imports for core modules
 import { EventEmitter } from 'events';
-import * as events from './events.js';
 import * as llmManager from './llm-manager.js';
-import * as storageFactory from './storage-factory.js';
+import * as storageFactory from './storage/storage-factory.js';
 import * as utils from './utils.js';
 
-// Storage wrapper instance - initialized from storage factory
+// Type imports
+import type {
+  World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams,
+  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider
+} from './types.js';
+
+// Initialize logger
+const logger = createCategoryLogger('core');
+
+// Storage and module initialization
 let storageWrappers: storageFactory.StorageAPI | null = null;
 
-// Initialize modules and storage from environment-aware storage factory
 async function initializeModules() {
   initializeLogger();
-
-  // Get storage wrapper instance from storage factory (handles environment detection)
   storageWrappers = await storageFactory.createStorageWithWrappers();
 }
 
 const moduleInitialization = initializeModules();
 
-// ========================
-// NEW CHAT OPTIMIZATION CONFIGURATION
-// ========================
-
-/**
- * Configuration constants for new chat optimization
- */
+// Configuration constants
 const NEW_CHAT_CONFIG = {
-  // Chat title that indicates a potentially reusable chat
   REUSABLE_CHAT_TITLE: 'New Chat',
-
-  // Enable/disable new chat optimization (for testing/debugging)
-  ENABLE_OPTIMIZATION: true
 } as const;
-
-// ========================
-// WORLD MANAGEMENT
-// ========================
-
-/**
- * World listing information - extends WorldData with computed agentCount
- */
-export interface WorldInfo extends WorldData {
-  agentCount: number;
-}
 
 /**
  * Create new world with configuration
  */
-export async function createWorld(rootPath: string, params: CreateWorldParams): Promise<World> {
+export async function createWorld(rootPath: string, params: CreateWorldParams): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
@@ -150,7 +68,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     throw new Error(`World with name '${params.name}' already exists`);
   }
 
-  const worldData: WorldData = {
+  const worldData: World = {
     id: worldId,
     name: params.name,
     description: params.description,
@@ -158,178 +76,19 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     createdAt: new Date(),
     lastUpdated: new Date(),
     totalAgents: 0,
-    totalMessages: 0
+    totalMessages: 0,
+    eventEmitter: new EventEmitter(),
+    agents: new Map<string, Agent>(),
   };
 
   await storageWrappers!.saveWorld(worldData);
 
   // Return runtime World object with EventEmitter and agents Map
-  return createWorldFromData(worldData, rootPath);
-}
-
-
-
-/**
- * Load world by ID with EventEmitter reconstruction and agent loading
- * This is the function used by the subscription layer for complete world setup
- * Automatically converts worldId to kebab-case for consistent lookup
- */
-export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = utils.toKebabCase(worldId);
-
-  const worldData = await storageWrappers!.loadWorld(normalizedWorldId);
-
-  if (!worldData) {
-    return null;
-  }
-
-  // Create runtime World with fresh EventEmitter and methods
-  const world = createWorldFromData(worldData, rootPath);
-
-  // Load agents into world runtime - use normalizedWorldId consistently
-  const agents = await storageWrappers!.listAgents(normalizedWorldId);
-  for (const agentData of agents) {
-    // Create minimal agent before adding to world
-    const minimalAgent = createMinimalAgent(agentData);
-    world.agents.set(minimalAgent.id, minimalAgent);
-  }
-
-  // AUTO-RESTORE LAST CHAT: Load last chat and restore agent memory
-  try {
-    // If world has a currentChatId, restore that specific chat
-    if (worldData.currentChatId) {
-      const chatData = await storageWrappers!.loadChatData(normalizedWorldId, worldData.currentChatId);
-      if (chatData?.chat) {
-        // Restore agent memory from current chat content
-        if (chatData.chat.agents) {
-          for (const snapshotAgent of chatData.chat.agents) {
-            const worldAgent = world.agents.get(snapshotAgent.id);
-            if (worldAgent && snapshotAgent.memory) {
-              // Restore memory while preserving agent config
-              worldAgent.memory = [...snapshotAgent.memory];
-              worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
-              worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
-            }
-          }
-        }
-
-        logger.debug('Auto-restored current chat', {
-          worldId: normalizedWorldId,
-          chatId: worldData.currentChatId,
-          messageCount: 0 // Will be calculated when messages are loaded
-        });
-      }
-    } else {
-      // Fall back to last active chat if no currentChatId
-      try {
-        const chats = await storageWrappers!.listChats(normalizedWorldId);
-
-        if (chats.length > 0) {
-          // Find the most recently updated chat
-          const lastChatInfo = chats.reduce((latest: ChatData, current: ChatData) =>
-            new Date(current.updatedAt) > new Date(latest.updatedAt) ? current : latest
-          );
-
-          // Load the complete chat data
-          const lastChatData = await storageWrappers!.loadChatData(normalizedWorldId, lastChatInfo.id);
-
-          if (lastChatData) {
-            if (lastChatData.chat?.agents) {
-              // Restore agent memory from chat content
-              for (const snapshotAgent of lastChatData.chat.agents) {
-                const worldAgent = world.agents.get(snapshotAgent.id);
-                if (worldAgent && snapshotAgent.memory) {
-                  // Restore memory while preserving agent config
-                  worldAgent.memory = [...snapshotAgent.memory];
-                  worldAgent.llmCallCount = snapshotAgent.llmCallCount || 0;
-                  worldAgent.lastLLMCall = snapshotAgent.lastLLMCall ? new Date(snapshotAgent.lastLLMCall) : undefined;
-                }
-              }
-            }
-
-            // Update world's currentChatId to the restored chat
-            world.currentChatId = lastChatData.id;
-
-            // Save the updated currentChatId to world data
-            const updatedWorldData = {
-              ...worldData,
-              currentChatId: lastChatData.id
-            };
-            await storageWrappers!.saveWorld(updatedWorldData);
-
-            logger.debug('Auto-restored last chat and set as current', {
-              worldId: normalizedWorldId,
-              chatId: lastChatData.id,
-              messageCount: lastChatData.messageCount
-            });
-          }
-        }
-      } catch (error) {
-        logger.warn('Failed to auto-restore chat, continuing with fresh agents', {
-          worldId: normalizedWorldId,
-          error: error instanceof Error ? error.message : error
-        });
-      }
-    }
-  } catch (error) {
-    logger.warn('Failed to auto-restore chat, continuing with fresh agents', {
-      worldId: normalizedWorldId,
-      error: error instanceof Error ? error.message : error
-    });
-  }
-
-  return world;
-}
-
-/**
- * Get world with fresh agent configurations (no memory restoration)
- * Use this for new chat sessions where agents should start with empty memory
- */
-export async function getWorldFresh(rootPath: string, worldId: string): Promise<World | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  // Automatically convert worldId to kebab-case for consistent lookup
-  const normalizedWorldId = utils.toKebabCase(worldId);
-
-  const worldData = await storageWrappers!.loadWorld(normalizedWorldId);
-
-  if (!worldData) {
-    return null;
-  }
-
-  // Create runtime World with fresh EventEmitter and methods
-  const world = createWorldFromData(worldData, rootPath);
-
-  // Load agents into world runtime with FRESH memory (no restoration)
-  const agents = await storageWrappers!.listAgents(normalizedWorldId);
-  for (const agentData of agents) {
-    // Create minimal agent before adding to world
-    const minimalAgent = createMinimalAgent(agentData);
-
-    // FRESH START: Clear agent memory for new chat session
-    minimalAgent.memory = [];
-    minimalAgent.llmCallCount = 0;
-    minimalAgent.lastLLMCall = undefined;
-
-    world.agents.set(minimalAgent.id, minimalAgent);
-  }
-
-  logger.debug('Created fresh world with empty agent memory', {
-    worldId: normalizedWorldId,
-    agentCount: agents.length
-  });
-
-  return world;
+  return getWorld(rootPath, worldId);
 }
 
 /**
  * Update world configuration
- * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function updateWorld(rootPath: string, worldId: string, updates: UpdateWorldParams): Promise<World | null> {
   // Ensure modules are initialized
@@ -345,19 +104,18 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
   }
 
   // Merge updates with existing configuration
-  const updatedData: WorldData = {
+  const updatedData: World = {
     ...existingData,
     ...updates,
     lastUpdated: new Date() // Always update the timestamp on any world update
   };
 
   await storageWrappers!.saveWorld(updatedData);
-  return createWorldFromData(updatedData, rootPath);
+  return getWorld(rootPath, normalizedWorldId);
 }
 
 /**
  * Delete world and all associated data
- * Automatically converts worldId to kebab-case for consistent lookup
  */
 export async function deleteWorld(rootPath: string, worldId: string): Promise<boolean> {
   // Ensure modules are initialized
@@ -372,7 +130,7 @@ export async function deleteWorld(rootPath: string, worldId: string): Promise<bo
 /**
  * Get all world IDs and basic information
  */
-export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
+export async function listWorlds(rootPath: string): Promise<World[]> {
   // Ensure modules are initialized
   await moduleInitialization;
 
@@ -380,7 +138,7 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
 
   // Count agents for each world
   const worldsWithAgentCount = await Promise.all(
-    allWorldData.map(async (data: WorldData) => {
+    allWorldData.map(async (data: World) => {
       try {
         const agents = await storageWrappers!.listAgents(data.id);
         return {
@@ -401,10 +159,9 @@ export async function listWorlds(rootPath: string): Promise<WorldInfo[]> {
 }
 
 /**
- * Get world configuration without runtime objects (lightweight operation)
- * Automatically converts worldId to kebab-case for consistent lookup
+ * Get world configuration and create runtime instance
  */
-export async function getWorldConfig(rootPath: string, worldId: string): Promise<WorldData | null> {
+export async function getWorld(rootPath: string, worldId: string): Promise<World | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
@@ -430,449 +187,11 @@ export async function getWorldConfig(rootPath: string, worldId: string): Promise
     return null;
   }
 
-  return worldData;
-}
-
-/**
- * Create a pure data World object from WorldData
- * Replaces the massive worldDataToWorld function with simple data transformation
- */
-function createWorldFromData(worldData: WorldData, rootPath: string): World {
   return {
     ...worldData,
-    rootPath,
     eventEmitter: new EventEmitter(),
     agents: new Map(), // Empty agents map - to be populated by agent manager
-    chatLLMProvider: worldData.chatLLMProvider ? worldData.chatLLMProvider as LLMProvider : undefined,
-    currentChatId: worldData.currentChatId ?? null,
   };
-}
-
-/**
- * Create StorageManager implementation (R3.1)
- * Uses direct StorageAPI wrapper functions to eliminate extra mapping layer
- */
-function createStorageManager(rootPath: string): StorageManager {
-  return {
-    // World operations
-    async saveWorld(worldData: WorldData): Promise<void> {
-      await moduleInitialization;
-      return storageWrappers!.saveWorld(worldData);
-    },
-
-    async loadWorld(worldId: string): Promise<WorldData | null> {
-      await moduleInitialization;
-      return storageWrappers!.loadWorld(worldId);
-    },
-
-    async deleteWorld(worldId: string): Promise<boolean> {
-      await moduleInitialization;
-      return storageWrappers!.deleteWorld(worldId);
-    },
-
-    async listWorlds(): Promise<WorldData[]> {
-      await moduleInitialization;
-      return storageWrappers!.listWorlds();
-    },
-
-    // Agent operations  
-    async saveAgent(worldId: string, agent: Agent): Promise<void> {
-      await moduleInitialization;
-      return storageWrappers!.saveAgent(worldId, agent);
-    },
-
-    async loadAgent(worldId: string, agentId: string): Promise<Agent | null> {
-      await moduleInitialization;
-      const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-      return agentData ? createMinimalAgent(agentData) : null;
-    },
-
-    async deleteAgent(worldId: string, agentId: string): Promise<boolean> {
-      await moduleInitialization;
-      return storageWrappers!.deleteAgent(worldId, agentId);
-    },
-
-    async listAgents(worldId: string): Promise<Agent[]> {
-      await moduleInitialization;
-      const agentList = await storageWrappers!.listAgents(worldId);
-      return agentList.map((agentData: any) => createMinimalAgent(agentData));
-    },
-
-    // Batch operations
-    async saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void> {
-      await moduleInitialization;
-      for (const agent of agents) {
-        await storageWrappers!.saveAgent(worldId, agent);
-      }
-    },
-
-    async loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]> {
-      await moduleInitialization;
-      const agents: Agent[] = [];
-      for (const agentId of agentIds) {
-        const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-        if (agentData) agents.push(createMinimalAgent(agentData));
-      }
-      return agents;
-    },
-
-    // Chat history operations
-    async saveChatData(worldId: string, chat: ChatData): Promise<void> {
-      await moduleInitialization;
-      return storageWrappers!.saveChatData(worldId, chat);
-    },
-
-    async loadChatData(worldId: string, chatId: string): Promise<ChatData | null> {
-      await moduleInitialization;
-      return storageWrappers!.loadChatData(worldId, chatId);
-    },
-
-    async deleteChatData(worldId: string, chatId: string): Promise<boolean> {
-      await moduleInitialization;
-      return storageWrappers!.deleteChatData(worldId, chatId);
-    },
-
-    async listChats(worldId: string): Promise<ChatData[]> {
-      await moduleInitialization;
-      return storageWrappers!.listChats(worldId);
-    },
-
-    async updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
-      await moduleInitialization;
-      return storageWrappers!.updateChatData(worldId, chatId, updates);
-    },
-
-    // Chat operations
-    async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
-      await moduleInitialization;
-      return storageWrappers!.saveWorldChat(worldId, chatId, chat);
-    },
-
-    async loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null> {
-      await moduleInitialization;
-      return storageWrappers!.loadWorldChat(worldId, chatId);
-    },
-
-    async loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null> {
-      await moduleInitialization;
-      return storageWrappers!.loadWorldChatFull(worldId, chatId);
-    },
-
-    async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
-      await moduleInitialization;
-      return storageWrappers!.restoreFromWorldChat(worldId, chat);
-    },
-
-    // Integrity operations
-    async validateIntegrity(worldId: string, agentId?: string): Promise<boolean> {
-      await moduleInitialization;
-      if (agentId) {
-        const result = await storageWrappers!.validateIntegrity(worldId, agentId);
-        return result.isValid;
-      } else {
-        return storageWrappers!.worldExists(worldId);
-      }
-    },
-
-    async repairData(worldId: string, agentId?: string): Promise<boolean> {
-      await moduleInitialization;
-      if (agentId) {
-        return storageWrappers!.repairData(worldId, agentId);
-      }
-      return false; // World repair not implemented yet
-    }
-  };
-}
-
-/**
- * Create MessageProcessor implementation (R4.1)
- * Uses statically imported functions from utils and events modules
- */
-function createMessageProcessor(): MessageProcessor {
-  return {
-    extractMentions(content: string): string[] {
-      return utils.extractMentions(content);
-    },
-
-    extractParagraphBeginningMentions(content: string): string[] {
-      return utils.extractParagraphBeginningMentions(content);
-    },
-
-    determineSenderType(sender: string | undefined) {
-      return utils.determineSenderType(sender);
-    },
-
-    shouldAutoMention(response: string, sender: string, agentId: string): boolean {
-      return events.shouldAutoMention(response, sender, agentId);
-    },
-
-    addAutoMention(response: string, sender: string): string {
-      return events.addAutoMention(response, sender);
-    },
-
-    removeSelfMentions(response: string, agentId: string): string {
-      return events.removeSelfMentions(response, agentId);
-    }
-  };
-}
-
-/**
- * Create minimal agent with simplified structure for function-based approach
- * Returns agent data with minimal method stubs for type compatibility
- */
-function createMinimalAgent(agentData: any): Agent {
-  return {
-    ...agentData,
-    // Minimal method stubs for type compatibility - use standalone functions instead
-    // generateResponse: async () => { throw new Error('Use generateAgentResponse(world, agent, messages) instead'); },
-    // streamResponse: async () => { throw new Error('Use streamAgentResponse(world, agent, messages) instead'); },
-    // completeChat: async () => { throw new Error('Use completeAgentChat(world, agent, messages) instead'); },
-    // sendMessage: async () => { throw new Error('Use sendAgentMessage(world, agent, content) instead'); },
-    // getMemory: async () => { return agentData.memory || []; },
-    // clearMemory: async () => { throw new Error('Use clearAgentMemory(world, agentId) instead'); },
-    // archiveMemory: async () => { throw new Error('Use archiveAgentMemory(world, agentId) instead'); },
-    // saveConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
-    // updateConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
-    // updateMemory: async () => { throw new Error('Use updateAgentMemory(world, agentId, memoryUpdate) instead'); }
-  };
-}
-
-// ========================
-// AGENT MANAGEMENT
-// ========================
-
-/**
- * Batch agent creation parameters
- */
-export interface BatchCreateParams {
-  agents: CreateAgentParams[];
-  failOnError?: boolean;
-  maxConcurrency?: number;
-}
-
-/**
- * Batch creation result
- */
-export interface BatchCreateResult {
-  successful: Agent[];
-  failed: Array<{ params: CreateAgentParams; error: string }>;
-  totalCount: number;
-  successCount: number;
-  failureCount: number;
-}
-
-/**
- * Agent runtime registration options
- */
-export interface RuntimeRegistrationOptions {
-  updateWorldMap?: boolean;
-  validateAgent?: boolean;
-}
-
-/**
- * World synchronization result
- */
-export interface WorldSyncResult {
-  loadedCount: number;
-  errorCount: number;
-  repairedCount: number;
-  errors: Array<{ agentId: string; error: string }>;
-}
-
-/**
- * Register agent in world runtime without persistence
- */
-export async function registerAgentRuntime(
-  rootPath: string,
-  worldId: string,
-  agent: Agent,
-  options: RuntimeRegistrationOptions = {}
-): Promise<boolean> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  const {
-    updateWorldMap = true,
-    validateAgent = false
-  } = options;
-
-  try {
-    // Validate agent if requested
-    if (validateAgent) {
-      if (!agent.id || !agent.type || !agent.name || !agent.provider || !agent.model) {
-        throw new Error('Invalid agent structure for runtime registration');
-      }
-    }
-
-    // Agent registration is handled by world-manager
-    // Event subscriptions are handled automatically when world loads agents
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Load all agents from disk into world runtime
- */
-export async function loadAgentsIntoWorld(
-  rootPath: string,
-  worldId: string,
-  options: any = {}
-): Promise<WorldSyncResult> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  const { repairCorrupted = true, ...loadOptions } = options;
-
-  const result: WorldSyncResult = {
-    loadedCount: 0,
-    errorCount: 0,
-    repairedCount: 0,
-    errors: []
-  };
-
-  try {
-    // Load agents using batch loading
-    const batchResult = await storageWrappers!.loadAgentsBatch(worldId, [], loadOptions);
-
-    // Register successful agents in runtime
-    for (const agent of batchResult.successful) {
-      const registered = await registerAgentRuntime(rootPath, worldId, agent, {
-        updateWorldMap: true,
-        validateAgent: false // Already validated during loading
-      });
-
-      if (registered) {
-        result.loadedCount++;
-      } else {
-        result.errors.push({
-          agentId: agent.id,
-          error: 'Failed to register agent in runtime'
-        });
-        result.errorCount++;
-      }
-    }
-
-    // Handle failed loads
-    for (const failure of batchResult.failed) {
-      if (repairCorrupted && failure.agentId !== 'SYSTEM') {
-        // Attempt to repair the agent
-        const repaired = await storageWrappers!.repairData(worldId, failure.agentId);
-        if (repaired) {
-          result.repairedCount++;
-
-          // Try loading again after repair
-          const agentData = await storageWrappers!.loadAgentWithRetry(worldId, failure.agentId, loadOptions);
-          if (agentData) {
-            const agent = createMinimalAgent(agentData);
-            const registered = await registerAgentRuntime(rootPath, worldId, agent);
-            if (registered) {
-              result.loadedCount++;
-            } else {
-              result.errors.push({
-                agentId: failure.agentId,
-                error: 'Failed to register repaired agent in runtime'
-              });
-              result.errorCount++;
-            }
-          } else {
-            result.errors.push({
-              agentId: failure.agentId,
-              error: 'Failed to load agent after repair'
-            });
-            result.errorCount++;
-          }
-        } else {
-          result.errors.push({
-            agentId: failure.agentId,
-            error: `Repair failed: ${failure.error}`
-          });
-          result.errorCount++;
-        }
-      } else {
-        result.errors.push(failure);
-        result.errorCount++;
-      }
-    }
-
-  } catch (error) {
-    result.errors.push({
-      agentId: 'SYSTEM',
-      error: error instanceof Error ? error.message : 'Unknown error during world sync'
-    });
-    result.errorCount++;
-  }
-
-  return result;
-}
-
-/**
- * Synchronize world agents Map with disk state
- */
-export async function syncWorldAgents(rootPath: string, worldId: string): Promise<WorldSyncResult> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  return loadAgentsIntoWorld(rootPath, worldId, {
-    includeMemory: true,
-    allowPartialLoad: true,
-    validateIntegrity: true,
-    repairCorrupted: true
-  });
-}
-
-/**
- * Create multiple agents atomically
- */
-export async function createAgentsBatch(rootPath: string, worldId: string, params: BatchCreateParams): Promise<BatchCreateResult> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  const { agents, failOnError = false, maxConcurrency = 5 } = params;
-
-  const result: BatchCreateResult = {
-    successful: [],
-    failed: [],
-    totalCount: agents.length,
-    successCount: 0,
-    failureCount: 0
-  };
-
-  // Process agents in batches to avoid overwhelming the system
-  const batches: CreateAgentParams[][] = [];
-  for (let i = 0; i < agents.length; i += maxConcurrency) {
-    batches.push(agents.slice(i, i + maxConcurrency));
-  }
-
-  for (const batch of batches) {
-    const batchPromises = batch.map(async (agentParams) => {
-      try {
-        const agent = await createAgent(rootPath, worldId, agentParams);
-        result.successful.push(agent);
-        result.successCount++;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        result.failed.push({ params: agentParams, error: errorMessage });
-        result.failureCount++;
-
-        if (failOnError) {
-          throw error;
-        }
-      }
-    });
-
-    try {
-      await Promise.all(batchPromises);
-    } catch (error) {
-      if (failOnError) {
-        throw error;
-      }
-    }
-  }
-
-  return result;
 }
 
 /**
@@ -906,93 +225,9 @@ export async function createAgent(rootPath: string, worldId: string, params: Cre
     lastActive: now,
     llmCallCount: 0,
     memory: [],
-
-    // LLM operation methods (R2.1)
-    // async generateResponse(messages: AgentMessage[]): Promise<string> {
-    //   await moduleInitialization;
-    //   if (!agent.world) throw new Error('Agent not attached to world');
-    //   return llmManager.generateAgentResponse(agent.world, agent, messages);
-    // },
-
-    // async streamResponse(messages: AgentMessage[]): Promise<string> {
-    //   await moduleInitialization;
-    //   if (!agent.world) throw new Error('Agent not attached to world');
-    //   return llmManager.streamAgentResponse(agent.world, agent, messages, events.publishSSE);
-    // },
-
-    // // Memory management methods (R2.2)
-    // async addToMemory(message: AgentMessage): Promise<void> {
-    //   await moduleInitialization;
-    //   agent.memory.push(message);
-    //   // Auto-save memory if agent is attached to world
-    //   if (agent.world) {
-    //     await storageWrappers!.saveAgentMemory(agent.world.id, agent.id, agent.memory);
-    //   }
-    // },
-
-    // getMemorySize(): number {
-    //   return agent.memory.length;
-    // },
-
-    // async archiveMemory(): Promise<void> {
-    //   await moduleInitialization;
-    //   if (agent.world) {
-    //     await storageWrappers!.archiveMemory(agent.world.id, agent.id, agent.memory);
-    //     agent.memory = [];
-    //   }
-    // },
-
-    // getMemorySlice(start: number, end: number): AgentMessage[] {
-    //   return agent.memory.slice(start, end);
-    // },
-
-    // searchMemory(query: string): AgentMessage[] {
-    //   const lowerQuery = query.toLowerCase();
-    //   return agent.memory.filter(msg =>
-    //     msg.content.toLowerCase().includes(lowerQuery) ||
-    //     (msg.sender && msg.sender.toLowerCase().includes(lowerQuery))
-    //   );
-    // },
-
-    // // Message processing methods (R2.3)
-    // async shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean> {
-    //   await moduleInitialization;
-    //   if (!agent.world) return false;
-    //   return events.shouldAgentRespond(agent.world, agent, messageEvent);
-    // },
-
-    // async processMessage(messageEvent: WorldMessageEvent): Promise<void> {
-    //   await moduleInitialization;
-    //   if (!agent.world) throw new Error('Agent not attached to world');
-    //   return events.processAgentMessage(agent.world, agent, messageEvent);
-    // },
-
-    // extractMentions(content: string): string[] {
-    //   return utils.extractMentions(content);
-    // },
-
-    // isMentioned(content: string): boolean {
-    //   const mentions = agent.extractMentions(content);
-    //   return mentions.includes(agent.id.toLowerCase()) || mentions.includes(agent.name.toLowerCase());
-    // }
   };
 
-  // Save configuration and system prompt (config.json + system-prompt.md)
-  // Memory starts empty and is saved separately to memory.json
   await storageWrappers!.saveAgent(worldId, agent);
-
-  // Register in runtime
-  const registered = await registerAgentRuntime(rootPath, worldId, agent, {
-    updateWorldMap: true,
-    validateAgent: false
-  });
-
-  if (!registered) {
-    // Clean up if runtime registration failed
-    await storageWrappers!.deleteAgent(worldId, agent.id);
-    throw new Error('Failed to register agent in world runtime');
-  }
-
   return agent;
 }
 
@@ -1004,7 +239,7 @@ export async function getAgent(rootPath: string, worldId: string, agentId: strin
   await moduleInitialization;
 
   const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-  return agentData ? createMinimalAgent(agentData) : null;
+  return agentData;
 }
 
 /**
@@ -1035,7 +270,7 @@ export async function updateAgent(rootPath: string, worldId: string, agentId: st
   };
 
   await storageWrappers!.saveAgent(worldId, updatedAgent);
-  return createMinimalAgent(updatedAgent);
+  return updatedAgent;
 }
 
 /**
@@ -1051,23 +286,11 @@ export async function deleteAgent(rootPath: string, worldId: string, agentId: st
 /**
  * Get all agent IDs and basic information
  */
-export async function listAgents(rootPath: string, worldId: string): Promise<AgentInfo[]> {
+export async function listAgents(rootPath: string, worldId: string): Promise<Agent[]> {
   // Ensure modules are initialized
   await moduleInitialization;
-
   const allAgents = await storageWrappers!.listAgents(worldId);
-
-  return allAgents.map((agent: Agent) => ({
-    id: agent.id,
-    name: agent.name,
-    type: agent.type,
-    model: agent.model,
-    status: agent.status,
-    createdAt: agent.createdAt,
-    lastActive: agent.lastActive,
-    memorySize: agent.memory.length,
-    llmCallCount: agent.llmCallCount
-  }));
+  return allAgents;
 }
 
 /**
@@ -1092,12 +315,11 @@ export async function updateAgentMemory(rootPath: string, worldId: string, agent
   // Save memory to memory.json and update config timestamps
   await storageWrappers!.saveAgentMemory(worldId, agentId, updatedAgent.memory);
   await storageWrappers!.saveAgent(worldId, updatedAgent);
-  return createMinimalAgent(updatedAgent);
+  return updatedAgent;
 }
 
 /**
- * Clear agent memory (archive current memory then reset to empty state)
- * Also resets the LLM call count to 0
+ * Clear agent memory and reset LLM call count
  */
 export async function clearAgentMemory(rootPath: string, worldId: string, agentId: string): Promise<Agent | null> {
   // Ensure modules are initialized
@@ -1152,39 +374,13 @@ export async function clearAgentMemory(rootPath: string, worldId: string, agentI
     agentId,
     newLLMCallCount: updatedAgent.llmCallCount
   });
-  return createMinimalAgent(updatedAgent);
+  return updatedAgent;
 }
 
 /**
- * Get agent configuration without memory (lightweight operation)
+ * Create new chat data entry with optional world snapshot
  */
-export async function getAgentConfig(rootPath: string, worldId: string, agentId: string): Promise<Omit<Agent, 'memory'> | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  const agentData = await storageWrappers!.loadAgent(worldId, agentId);
-
-  if (!agentData) {
-    return null;
-  }
-
-  const agent = createMinimalAgent(agentData);
-  const { memory, ...config } = agent;
-  return config;
-}
-
-// ========================
-// CHAT HISTORY MANAGEMENT
-// ========================
-
-/**
- * Create new chat history entry with optional snapshot
- */
-/**
- * Create a new chat data entry with optional world snapshot
- * This properly separates ChatData (metadata) from WorldChat (content)
- */
-export async function createChatData(rootPath: string, worldId: string, params: CreateChatParams): Promise<ChatData> {
+async function createChat(rootPath: string, worldId: string, params: CreateChatParams): Promise<Chat> {
   await moduleInitialization;
 
   const chatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -1200,7 +396,7 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   const initialTitle = params.name || "New Chat";
 
   // Create ChatData entry (metadata)
-  const chatData: ChatData = {
+  const chatData: Chat = {
     id: chatId,
     worldId,
     name: initialTitle,
@@ -1208,7 +404,6 @@ export async function createChatData(rootPath: string, worldId: string, params: 
     createdAt: now,
     updatedAt: now,
     messageCount: worldChat?.messages?.length || 0,
-    chat: worldChat
   };
 
   await storageWrappers!.saveChatData(worldId, chatData);
@@ -1221,39 +416,6 @@ export async function createChatData(rootPath: string, worldId: string, params: 
   return chatData;
 }
 
-// ...existing code...
-
-/**
- * Load chat history entry with snapshot
- */
-/**
- * Get chat data with metadata and content
- */
-export async function getChatData(rootPath: string, worldId: string, chatId: string): Promise<ChatData | null> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  // Load complete ChatData
-  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
-  return chatData;
-}
-
-/**
- * List chat histories for a world
- */
-export async function listChatHistories(rootPath: string, worldId: string): Promise<ChatData[]> {
-  await moduleInitialization;
-  return await storageWrappers!.listChats(worldId);
-}
-
-/**
- * Delete chat data by ID
- */
-export async function deleteChatData(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
-  await moduleInitialization;
-  return await storageWrappers!.deleteChatData(worldId, chatId);
-}
-
 /**
  * Create a new chat and optionally set it as current for a world
  */
@@ -1261,7 +423,7 @@ export async function newChat(rootPath: string, worldId: string, setAsCurrent: b
   await moduleInitialization;
 
   // Create a new chat
-  const chatData = await createChatData(rootPath, worldId, {
+  const chatData = await createChat(rootPath, worldId, {
     name: "New Chat",
     captureChat: false
   });
@@ -1278,95 +440,44 @@ export async function newChat(rootPath: string, worldId: string, setAsCurrent: b
   return await getWorld(rootPath, worldId);
 }
 
-/**
- * Load a specific chat by ID and optionally set it as current
- */
-export async function loadChatById(rootPath: string, worldId: string, chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
+export async function listChats(rootPath: string, worldId: string): Promise<Chat[]> {
   await moduleInitialization;
+  return await storageWrappers!.listChats(worldId);
+}
+
+export async function deleteChat(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
+  await moduleInitialization;
+  return await storageWrappers!.deleteChatData(worldId, chatId);
+}
+
+export async function restoreChat(rootPath: string, worldId: string, chatId: string): Promise<World | null> {
+  await moduleInitialization;
+  // return await storageWrappers!.restoreChatData(worldId, chatId);
 
   // Check if chat exists
-  const chatData = await getChatData(rootPath, worldId, chatId);
+  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
   if (!chatData) {
     return null;
   }
 
-  if (setAsCurrent) {
-    // Update world's currentChatId and restore state if there's a snapshot
-    const world = await updateWorld(rootPath, worldId, {
-      currentChatId: chatId
-    });
+  let world = await getWorld(rootPath, worldId);
+  if (!world) {
+    return null;
+  }
 
-    // If the chat has content, restore it
-    if (chatData.chat) {
-      await restoreWorldChat(rootPath, worldId, chatData.chat);
-    }
-
+  if (world.currentChatId === chatId && chatData.worldId === worldId) {
     return world;
   }
 
-  // Return the world without updating currentChatId
-  return await getWorld(rootPath, worldId);
+  world = await updateWorld(rootPath, worldId, {
+    currentChatId: chatId
+  });
+  return world;
 }
 
-// (legacy getChat removed)
 
-/**
- * Update chat title based on human messages when they are published
- * This should be called when a human message is published to the event emitter
- */
-async function updateChatTitleFromHumanMessage(world: World): Promise<void> {
-  try {
-    // Only update if there's a current chat
-    if (!world.currentChatId) {
-      return;
-    }
 
-    // Collect all human messages from agents' memory
-    const allHumanMessages: AgentMessage[] = [];
-    for (const agent of world.agents.values()) {
-      if (agent.memory) {
-        const humanMessages = agent.memory.filter(msg =>
-          msg.role === 'user' &&
-          msg.content &&
-          msg.content.trim().length > 0
-        );
-        allHumanMessages.push(...humanMessages);
-      }
-    }
 
-    // Sort by timestamp and get last 10
-    allHumanMessages.sort((a, b) =>
-      (a.createdAt || new Date(0)).getTime() - (b.createdAt || new Date(0)).getTime()
-    );
-    const last10HumanMessages = allHumanMessages.slice(-10);
-
-    if (last10HumanMessages.length === 0) {
-      return;
-    }
-
-    // Generate new title
-    const newTitle = await generateChatTitleFromMessages(last10HumanMessages, world);
-
-    // Update chat title in storage
-    await storageWrappers!.updateChatData(world.id, world.currentChatId, {
-      name: newTitle
-    });
-
-    logger.debug('Updated chat title from human message', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      newTitle,
-      messageCount: last10HumanMessages.length
-    });
-
-  } catch (error) {
-    logger.warn('Failed to update chat title from human message', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      error: error instanceof Error ? error.message : error
-    });
-  }
-}
 
 /**
  * Generate chat title from message content with LLM support
@@ -1506,92 +617,11 @@ export async function createWorldChat(rootPath: string, worldId: string): Promis
   return snapshot;
 }
 
-/**
- * Restore world state from snapshot
- */
-/**
- * Restore world state from snapshot (consolidated function)
- * Can accept either a snapshot object or a chat ID to load snapshot from
- */
-export async function restoreWorldChat(
-  rootPath: string,
-  worldId: string,
-  snapshotOrChatId: WorldChat | string
-): Promise<boolean> {
-  // Ensure modules are initialized
-  await moduleInitialization;
-
-  try {
-    let snapshot: WorldChat;
-
-    // Handle different input types
-    if (typeof snapshotOrChatId === 'string') {
-      // It's a chat ID - load the chat data and extract WorldChat
-      const chatId = snapshotOrChatId;
-      const chatData = await storageWrappers!.loadChatData(worldId, chatId);
-      if (!chatData || !chatData.chat) {
-        logger.warn('Chat not found or has no content', { worldId, chatId });
-        return false;
-      }
-      snapshot = chatData.chat;
-      logger.debug('Loaded snapshot from chat', { worldId, chatId });
-    } else {
-      // It's already a snapshot object
-      snapshot = snapshotOrChatId;
-      logger.debug('Using provided snapshot', { worldId });
-    }
-
-    // Core restoration logic
-    // Save world configuration
-    await storageWrappers!.saveWorld(snapshot.world);
-
-    // Clear existing agents and restore from snapshot
-    const existingAgents = await storageWrappers!.listAgents(worldId);
-    for (const agent of existingAgents) {
-      await storageWrappers!.deleteAgent(worldId, agent.id);
-    }
-
-    // Restore agents with their memory
-    for (const agentData of snapshot.agents) {
-      // Cast AgentData to Agent since storage layer handles data-only objects
-      await storageWrappers!.saveAgent(worldId, agentData as any);
-      if (agentData.memory && agentData.memory.length > 0) {
-        await storageWrappers!.saveAgentMemory(worldId, agentData.id, agentData.memory);
-      }
-    }
-
-    return true;
-  } catch (error) {
-    const errorContext = typeof snapshotOrChatId === 'string'
-      ? { worldId, chatId: snapshotOrChatId }
-      : { worldId };
-    logger.error('Failed to restore from snapshot', {
-      ...errorContext,
-      error: error instanceof Error ? error.message : error
-    });
-    return false;
-  }
-}
-
-
-
-// ========================
-// WORLD EXPORT
-// ========================
-
-/**
- * Export world and agents to markdown format
- * 
- * @param rootPath - Root path for worlds data
- * @param worldName - World name or ID to export
- * @returns Promise<string> - Markdown content as string
- */
 export async function exportWorldToMarkdown(rootPath: string, worldName: string): Promise<string> {
-  // Ensure modules are initialized
   await moduleInitialization;
 
   // Load world configuration
-  const worldData = await getWorldConfig(rootPath, worldName);
+  const worldData = await getWorld(rootPath, worldName);
   if (!worldData) {
     throw new Error(`World '${worldName}' not found`);
   }

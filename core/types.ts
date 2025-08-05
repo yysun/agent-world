@@ -9,10 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  */
 
-// Chat Message Types - AI SDK Compatible
-
-import { EventEmitter } from 'events';
-import type { WorldData } from './world-storage.js';
+import { type EventEmitter } from 'events';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -40,24 +37,6 @@ export interface Agent {
   llmCallCount: number;
   lastLLMCall?: Date;
   memory: AgentMessage[];
-  world?: World;
-
-  // LLM operation methods (R2.1)
-  // generateResponse(messages: AgentMessage[]): Promise<string>;
-  // streamResponse(messages: AgentMessage[]): Promise<string>;
-
-  // // Memory management methods (R2.2)
-  // addToMemory(message: AgentMessage): Promise<void>;
-  // getMemorySize(): number;
-  // archiveMemory(): Promise<void>;
-  // getMemorySlice(start: number, end: number): AgentMessage[];
-  // searchMemory(query: string): AgentMessage[];
-
-  // // Message processing methods (R2.3)
-  // shouldRespond(messageEvent: WorldMessageEvent): Promise<boolean>;
-  // processMessage(messageEvent: WorldMessageEvent): Promise<void>;
-  // extractMentions(content: string): string[];
-  // isMentioned(content: string): boolean;
 }
 
 // deprecated
@@ -116,28 +95,6 @@ export type EventPayloadMap = {
   [EventType.WORLD]: WorldEventPayload;
 };
 
-/**
- * Type-safe event structure using conditional types
- * Ensures payload type matches the event type
- */
-export type TypedEvent<T extends EventType> = {
-  id: string;
-  type: T;
-  timestamp: string;
-  sender: string;
-  senderType: SenderType;
-  payload: EventPayloadMap[T];
-};
-
-export interface Event {
-  id: string;
-  type: EventType;
-  timestamp: string;
-  sender: string;
-  senderType: SenderType;
-  payload: MessageEventPayload | SystemEventPayload | SSEEventPayload | WorldEventPayload;
-}
-
 export enum EventType {
   MESSAGE = 'message',
   WORLD = 'world',
@@ -175,67 +132,7 @@ export interface UpdateAgentParams extends Partial<Omit<CreateAgentParams, 'id'>
   status?: 'active' | 'inactive' | 'error';
 }
 
-/**
- * Agent information type - derived from Agent interface for consistency
- * Uses Pick utility type to ensure automatic synchronization with Agent changes
- */
-export type AgentInfo = Pick<Agent,
-  'id' | 'name' | 'type' | 'model' | 'status' | 'createdAt' | 'lastActive' | 'llmCallCount'
-> & {
-  memorySize: number; // Computed field - derived from memory.length
-}
-
-/**
- * Storage-safe agent data type - clean interface for persistence
- * Replaces complex AgentStorage with explicit properties
- */
-export interface AgentData {
-  id: string;
-  name: string;
-  type: string;
-  status?: 'active' | 'inactive' | 'error';
-  provider: LLMProvider;
-  model: string;
-  systemPrompt?: string;
-  temperature?: number;
-  maxTokens?: number;
-  createdAt?: Date;
-  lastActive?: Date;
-  llmCallCount: number;
-  lastLLMCall?: Date;
-  memory: AgentMessage[];
-}
-
-/**
- * @deprecated Use AgentData instead for cleaner, more maintainable code
- * 
- * AgentStorage uses complex Omit operations making it harder to maintain.
- * AgentData provides explicit properties for better IDE support and type safety.
- * 
- * Storage-safe agent type - excludes runtime methods for persistence
- * Uses Omit utility type to remove all methods, keeping only data properties
- */
-export type AgentStorage = Omit<Agent,
-  | 'generateResponse'
-  | 'streamResponse'
-  | 'addToMemory'
-  | 'getMemorySize'
-  | 'archiveMemory'
-  | 'getMemorySlice'
-  | 'searchMemory'
-  | 'shouldRespond'
-  | 'processMessage'
-  | 'extractMentions'
-  | 'isMentioned'
-  | 'world' // Exclude circular reference for storage
->
-
-// World Chat History Types
-
-/**
- * World chat history entry
- */
-export interface ChatData {
+export interface Chat {
   id: string; // nanoid
   worldId: string;
   name: string;
@@ -243,16 +140,14 @@ export interface ChatData {
   createdAt: Date;
   updatedAt: Date;
   messageCount: number;
-  tags?: string[];
-  chat?: WorldChat; // Full world state when chat was created/saved
 }
 
 /**
  * World chat for full state capture
  */
 export interface WorldChat {
-  world: WorldData;
-  agents: AgentData[];
+  world: World;
+  agents: Agent[];
   messages: AgentMessage[];
   metadata: {
     capturedAt: Date;
@@ -305,77 +200,54 @@ export interface UpdateWorldParams extends Partial<CreateWorldParams> {
 }
 
 /**
- * Enhanced World interface with flattened configuration
+ * Serializable world data for storage (flat structure, no EventEmitter, no agents Map)
  */
 export interface World {
-  // Identity & Storage
-  id: string; // kebab-case of world name
-  rootPath: string;
-
-  // Flattened Configuration (no nested config object)
+  id: string;
   name: string;
   description?: string;
   turnLimit: number;
-  chatLLMProvider?: LLMProvider; // For chat summarization
+  chatLLMProvider?: string; // For chat summarization
   chatLLMModel?: string; // For chat summarization
+  currentChatId?: string | null; // Track active chat session
+  createdAt: Date;
+  lastUpdated: Date;
+  totalAgents: number;
+  totalMessages: number;
 
-  // Chat State Management
-  currentChatId: string | null; // Track active chat session
-
-  // Runtime Objects (minimal)
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
-
-  // NO METHODS - Pure data interface
-  // All operations now use standalone functions:
-  // - createAgent(worldId, params)
-  // - getAgent(worldId, agentName)
-  // - updateAgent(worldId, agentName, updates)
-  // - deleteAgent(worldId, agentName)
-  // - clearAgentMemory(worldId, agentName)
-  // - listAgents(worldId)
-  // - updateAgentMemory(worldId, agentName, messages)
-  // - createChatData(worldId, params)
-  // - loadChatData(worldId, chatId)
-  // - updateChatData(worldId, chatId, updates)
-  // - deleteChatData(worldId, chatId)
-  // - listChats(worldId)
-  // - createWorldChat(worldId)
-  // - newChat(worldId)
-  // - getCurrentChat(worldId)
-  // - publishMessage(worldId, content, sender)
 }
 
-/**
- * Storage-safe world data type - excludes runtime objects for persistence
- * Consolidation: Use WorldData from world-storage.ts as the single source of truth
- */
-export type { WorldData } from './world-storage.js';
-
-// Unified Storage Interface (R3.1)
-export interface StorageManager {
+// Unified Storage Interface - Consolidated from StorageManager and StorageAPI
+export interface StorageAPI {
   // World operations
-  saveWorld(worldData: WorldData): Promise<void>;
-  loadWorld(worldId: string): Promise<WorldData | null>;
+  saveWorld(worldData: World): Promise<void>;
+  loadWorld(worldId: string): Promise<World | null>;
   deleteWorld(worldId: string): Promise<boolean>;
-  listWorlds(): Promise<WorldData[]>;
+  listWorlds(): Promise<World[]>;
+  worldExists(worldId: string): Promise<boolean>;
 
   // Agent operations
   saveAgent(worldId: string, agent: Agent): Promise<void>;
   loadAgent(worldId: string, agentId: string): Promise<Agent | null>;
+  loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null>;
   deleteAgent(worldId: string, agentId: string): Promise<boolean>;
   listAgents(worldId: string): Promise<Agent[]>;
+  agentExists(worldId: string, agentId: string): Promise<boolean>;
+  saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
+  archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
 
   // Batch operations
   saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;
   loadAgentsBatch(worldId: string, agentIds: string[]): Promise<Agent[]>;
 
   // Chat history operations
-  saveChatData(worldId: string, chat: ChatData): Promise<void>;
-  loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
+  saveChatData(worldId: string, chat: Chat): Promise<void>;
+  loadChatData(worldId: string, chatId: string): Promise<Chat | null>;
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChats(worldId: string): Promise<ChatData[]>;
-  updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
+  listChats(worldId: string): Promise<Chat[]>;
+  updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null>;
 
   // Chat operations
   saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
@@ -388,71 +260,8 @@ export interface StorageManager {
   repairData(worldId: string, agentId?: string): Promise<boolean>;
 }
 
-// Standardized Storage API Interface (R3.2) - Unified interface for all storage implementations
-export interface StorageAPI {
-  // World operations - standardized naming
-  saveWorld(worldData: WorldData): Promise<void>;
-  loadWorld(worldId: string): Promise<WorldData | null>;
-  deleteWorld(worldId: string): Promise<boolean>;
-  listWorlds(): Promise<WorldData[]>;
-  worldExists(worldId: string): Promise<boolean>;
-
-  // Agent operations - standardized naming
-  saveAgent(worldId: string, agent: Agent): Promise<void>;
-  saveAgentConfig(worldId: string, agent: Agent): Promise<void>;
-  saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
-  loadAgent(worldId: string, agentId: string): Promise<Agent | null>;
-  loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null>;
-  deleteAgent(worldId: string, agentId: string): Promise<boolean>;
-  listAgents(worldId: string): Promise<Agent[]>;
-  agentExists(worldId: string, agentId: string): Promise<boolean>;
-
-  // Batch operations
-  saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;
-  loadAgentsBatch(worldId: string, agentIds: string[], options?: any): Promise<{ successful: Agent[]; failed: any[] }>;
-
-  // Chat history operations
-  saveChatData(worldId: string, chat: ChatData): Promise<void>;
-  loadChatData(worldId: string, chatId: string): Promise<ChatData | null>;
-  deleteChatData(worldId: string, chatId: string): Promise<boolean>;
-  listChats(worldId: string): Promise<ChatData[]>;
-  updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
-
-  // Chat operations
-  saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;
-  loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
-  loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null>;
-  restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
-
-  // Integrity operations
-  validateIntegrity(worldId: string, agentId?: string): Promise<{ isValid: boolean }>;
-  repairData(worldId: string, agentId?: string): Promise<boolean>;
-  archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
-}
-
-// Message Processing Interface (R4.1)
-export interface MessageProcessor {
-  extractMentions(content: string): string[];
-  extractParagraphBeginningMentions(content: string): string[];
-  determineSenderType(sender: string | undefined): SenderType;
-  shouldAutoMention(response: string, sender: string, agentId: string): boolean;
-  addAutoMention(response: string, sender: string): string;
-  removeSelfMentions(response: string, agentId: string): string;
-}
-
-
-
-// Storage Types
-export interface FileStorageOptions {
-  dataPath?: string;
-  enableLogging?: boolean;
-}
-
-export interface StoragePaths {
-  agents: string;
-  messages: string;
-  events: string;
-}
+// Legacy alias for backward compatibility - will be removed in future versions
+export interface StorageManager extends StorageAPI { }
 
 // LLM Provider Types
 export enum LLMProvider {
@@ -463,19 +272,7 @@ export enum LLMProvider {
   XAI = 'xai',
   OPENAI_COMPATIBLE = 'openai-compatible',
   OLLAMA = 'ollama'
-}
-
-// LLM Integration Utilities
-
-export function stripCustomFields(message: AgentMessage): ChatMessage {
-  const { sender, ...llmMessage } = message;
-  return llmMessage;
-}
-
-export function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
-  return messages.map(stripCustomFields);
-}
-
+};
 // World EventEmitter Types
 
 /**

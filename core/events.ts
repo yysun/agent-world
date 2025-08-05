@@ -1,6 +1,3 @@
-
-
-
 /**
  * Unified Events Module - World and Agent Event Functions
  *
@@ -65,7 +62,7 @@
 
 import {
   World, Agent, WorldMessageEvent, WorldSSEEvent, WorldSystemEvent,
-  AgentMessage, MessageData, SenderType, ChatData, WorldChat
+  AgentMessage, MessageData, SenderType, Chat, WorldChat
 } from './types.js';
 import { generateId } from './utils.js';
 
@@ -110,7 +107,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
-      const activeChat = chats.reduce((latest: ChatData, chat: ChatData) =>
+      const activeChat = chats.reduce((latest: Chat, chat: Chat) =>
         new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
       );
 
@@ -566,7 +563,7 @@ export function subscribeToSSE(
 
 // Import additional dependencies for agent events
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
-import * as storageFactory from './storage-factory.js';
+import * as storageFactory from './storage/storage-factory.js';
 
 // Storage wrapper instance - initialized lazily
 let storageWrappers: storageFactory.StorageAPI | null = null;

@@ -4,7 +4,7 @@
  * SQLite Storage Implementation for Agent World System
  *
  * Features:
- * - Full implementation of StorageManager interface for SQLite backend
+ * - Full implementation of StorageAPI interface for SQLite backend
  * - Complete chat operations with proper TypeScript types (WorldChat, ChatData, etc.)
  * - Enhanced snapshot operations for world state preservation and restoration
  * - Enhanced archive management with rich metadata and search capabilities
@@ -54,8 +54,8 @@ import {
   ArchiveMetadata,
   ArchiveStatistics
 } from './sqlite-schema.js';
-import type { StorageManager, WorldData, Agent, AgentMessage, ChatData, CreateChatParams, UpdateChatParams, WorldChat } from './types.js';
-import { toKebabCase } from './utils.js';
+import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
+import { toKebabCase } from '../utils.js';
 
 /**
  * Enhanced archive query options
@@ -186,7 +186,7 @@ async function all(ctx: SQLiteStorageContext, sql: string, ...params: any[]): Pr
 }
 
 // WORLD OPERATIONS
-export async function saveWorld(ctx: SQLiteStorageContext, worldData: WorldData): Promise<void> {
+export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Promise<void> {
   await ensureInitialized(ctx);
   // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
@@ -203,13 +203,13 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: WorldData)
     worldData.chatLLMProvider, worldData.chatLLMModel);
 }
 
-export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<WorldData | null> {
+export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<World | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel
     FROM worlds WHERE id = ?
-  `, worldId) as WorldData | undefined;
+  `, worldId) as World | undefined;
   return result || null;
 }
 
@@ -223,14 +223,14 @@ export async function deleteWorld(ctx: SQLiteStorageContext, worldId: string): P
   }
 }
 
-export async function listWorlds(ctx: SQLiteStorageContext): Promise<WorldData[]> {
+export async function listWorlds(ctx: SQLiteStorageContext): Promise<World[]> {
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel
     FROM worlds
     ORDER BY name
-  `) as WorldData[];
+  `) as World[];
   return results || [];
 }
 
@@ -382,7 +382,7 @@ export async function repairData(ctx: SQLiteStorageContext, worldId: string, age
 }
 
 // CHAT HISTORY OPERATIONS
-export async function saveChatData(ctx: SQLiteStorageContext, worldId: string, chat: ChatData): Promise<void> {
+export async function saveChatData(ctx: SQLiteStorageContext, worldId: string, chat: Chat): Promise<void> {
   await ensureInitialized(ctx);
   await run(ctx, `
     INSERT INTO world_chats (id, world_id, name, description, message_count, tags, updated_at)
@@ -393,11 +393,10 @@ export async function saveChatData(ctx: SQLiteStorageContext, worldId: string, c
       message_count = excluded.message_count,
       tags = excluded.tags,
       updated_at = CURRENT_TIMESTAMP
-  `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0,
-    JSON.stringify(chat.tags || []));
+  `, chat.id, worldId, chat.name, chat.description, chat.messageCount || 0);
 }
 
-export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<ChatData | null> {
+export async function loadChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<Chat | null> {
   await ensureInitialized(ctx);
   const result = await get(ctx, `
     SELECT id, world_id as worldId, name, description, message_count as messageCount,
@@ -441,7 +440,7 @@ export async function deleteChatData(ctx: SQLiteStorageContext, worldId: string,
   return result.changes > 0;
 }
 
-export async function listChatHistories(ctx: SQLiteStorageContext, worldId: string): Promise<ChatData[]> {
+export async function listChatHistories(ctx: SQLiteStorageContext, worldId: string): Promise<Chat[]> {
   await ensureInitialized(ctx);
   const results = await all(ctx, `
     SELECT id, name, description, message_count as messageCount,
@@ -459,7 +458,7 @@ export async function listChatHistories(ctx: SQLiteStorageContext, worldId: stri
   }));
 }
 
-export async function updateChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
+export async function updateChatData(ctx: SQLiteStorageContext, worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
   await ensureInitialized(ctx);
 
   const setClauses: string[] = [];

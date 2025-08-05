@@ -39,7 +39,7 @@ jest.mock('fs', () => ({
 }));
 
 // Mock agent-storage module globally to prevent actual disk I/O
-jest.mock('../../core/agent-storage', () => ({
+jest.mock('../../core/storage/agent-storage', () => ({
   saveAgentMemoryToDisk: jest.fn<any>().mockResolvedValue(undefined),
   saveAgentConfigToDisk: jest.fn<any>().mockResolvedValue(undefined),
   loadAgentMemoryFromDisk: jest.fn<any>().mockResolvedValue([]),
@@ -49,7 +49,7 @@ jest.mock('../../core/agent-storage', () => ({
 }));
 
 // Mock world-storage module for new world storage operations
-jest.mock('../../core/world-storage', () => ({
+jest.mock('../../core/storage/world-storage', () => ({
   saveWorldData: jest.fn<any>().mockResolvedValue(undefined),
   loadWorldData: jest.fn<any>().mockResolvedValue({}),
   deleteWorldData: jest.fn<any>().mockResolvedValue(true),
@@ -62,9 +62,9 @@ jest.mock('../../core/world-storage', () => ({
 }));
 
 // Mock storage-factory module with enhanced API coverage
-jest.mock('../../core/storage-factory', () => {
+jest.mock('../../core/storage/storage-factory', () => {
   // Import the actual module to get real function implementations
-  const actualModule = jest.requireActual('../../core/storage-factory') as any;
+  const actualModule = jest.requireActual('../../core/storage/storage-factory') as any;
 
   return {
     // Re-export actual functions that integration tests need
@@ -171,7 +171,7 @@ jest.mock('nanoid', () => ({
 }));
 
 // Mock SQLite storage modules for new storage backend
-jest.mock('../../core/sqlite-storage', () => ({
+jest.mock('../../core/storage/sqlite-storage', () => ({
   SQLiteStorage: jest.fn<any>().mockImplementation(() => ({
     // World operations
     saveWorld: jest.fn<any>().mockResolvedValue(undefined),

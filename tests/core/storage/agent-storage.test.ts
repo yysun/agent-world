@@ -2,7 +2,7 @@
  * Unit Tests for Agent Storage (Core System)
  *
  * Features:
- * - Tests for loadAllAgentsFromDisk function with mocked file I/O
+ * - Tests for listAgents function with mocked file I/O
  * - Tests for agent creation and persistence with mocked file system
  * - Tests for error handling with corrupted files using mocks
  * - Tests for missing files and recovery using mocked scenarios
@@ -19,15 +19,15 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 
 // We need to unmock agent-storage for this test since we're testing it
-jest.unmock('../../../core/agent-storage');
+jest.unmock('../../../core/storage/agent-storage');
 
 import {
-  loadAllAgentsFromDisk,
-  loadAgentFromDisk,
-  saveAgentToDisk,
-  deleteAgentFromDisk,
-  agentExistsOnDisk
-} from '../../../core/agent-storage';
+  listAgents,
+  loadAgent,
+  saveAgent,
+  deleteAgent,
+  agentExists
+} from '../../../core/storage/agent-storage';
 import { Agent, LLMProvider } from '../../../core/types';
 import { createMockAgent } from '../mock-helpers';
 
@@ -47,12 +47,12 @@ describe('Core Agent Storage with Mocks', () => {
     delete process.env.AGENT_WORLD_DATA_PATH;
   });
 
-  describe('loadAllAgentsFromDisk', () => {
+  describe('listAgents', () => {
     test('should return empty array when no agents exist', async () => {
       // Mock empty directory
       fs.readdir.mockResolvedValue([]);
 
-      const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
+      const loadedAgents = await listAgents('test-data/worlds', worldId);
       expect(loadedAgents).toEqual([]);
     });
 
@@ -87,7 +87,7 @@ describe('Core Agent Storage with Mocks', () => {
         throw new Error('File not found');
       });
 
-      const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
+      const loadedAgents = await listAgents('test-data/worlds', worldId);
 
       expect(loadedAgents).toHaveLength(1);
       expect(loadedAgents[0].id).toBe(agentId);
@@ -109,7 +109,7 @@ describe('Core Agent Storage with Mocks', () => {
         throw new Error('File not found');
       });
 
-      const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
+      const loadedAgents = await listAgents('test-data/worlds', worldId);
 
       // Should skip corrupted agent and return empty array
       expect(loadedAgents).toEqual([]);
@@ -148,7 +148,7 @@ describe('Core Agent Storage with Mocks', () => {
         throw new Error('File not found');
       });
 
-      const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
+      const loadedAgents = await listAgents('test-data/worlds', worldId);
 
       expect(loadedAgents).toHaveLength(1);
       expect(loadedAgents[0].memory).toHaveLength(2);
@@ -157,12 +157,12 @@ describe('Core Agent Storage with Mocks', () => {
     });
   });
 
-  describe('loadAgentFromDisk', () => {
+  describe('loadAgent', () => {
     test('should return null for non-existent agent', async () => {
       // Mock file access failure
       fs.readFile.mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
-      const loadedAgent = await loadAgentFromDisk('test-data/worlds', worldId, 'non-existent');
+      const loadedAgent = await loadAgent('test-data/worlds', worldId, 'non-existent');
       expect(loadedAgent).toBeNull();
     });
 
@@ -193,7 +193,7 @@ describe('Core Agent Storage with Mocks', () => {
         throw new Error('File not found');
       });
 
-      const loadedAgent = await loadAgentFromDisk('test-data/worlds', worldId, agentId);
+      const loadedAgent = await loadAgent('test-data/worlds', worldId, agentId);
 
       expect(loadedAgent).not.toBeNull();
       expect(loadedAgent!.id).toBe('mock-agent');
@@ -202,7 +202,7 @@ describe('Core Agent Storage with Mocks', () => {
     });
   });
 
-  describe('saveAgentToDisk', () => {
+  describe('saveAgent', () => {
     test('should create proper directory structure with mocks', async () => {
       const agentId = 'save-agent';
       const agent = createMockAgent({
@@ -219,7 +219,7 @@ describe('Core Agent Storage with Mocks', () => {
         memory: []
       });
 
-      await saveAgentToDisk('test-data/worlds', worldId, agent);
+      await saveAgent('test-data/worlds', worldId, agent);
 
       // Verify directory creation
       expect(fs.mkdir).toHaveBeenCalledWith(
@@ -260,19 +260,19 @@ describe('Core Agent Storage with Mocks', () => {
       });
 
       // Should not throw and should save successfully
-      await expect(saveAgentToDisk('test-data/worlds', worldId, agent)).resolves.toBeUndefined();
+      await expect(saveAgent('test-data/worlds', worldId, agent)).resolves.toBeUndefined();
 
       // Verify files were written
       expect(fs.writeFile).toHaveBeenCalledTimes(3); // config, system-prompt, memory
     });
   });
 
-  describe('deleteAgentFromDisk', () => {
+  describe('deleteAgent', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
       fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
-      const result = await deleteAgentFromDisk('test-data/worlds', worldId, 'non-existent');
+      const result = await deleteAgent('test-data/worlds', worldId, 'non-existent');
       expect(result).toBe(false);
     });
 
@@ -282,7 +282,7 @@ describe('Core Agent Storage with Mocks', () => {
       // Mock successful access
       fs.access.mockResolvedValue(undefined);
 
-      const result = await deleteAgentFromDisk('test-data/worlds', worldId, agentId);
+      const result = await deleteAgent('test-data/worlds', worldId, agentId);
       expect(result).toBe(true);
 
       // Verify deletion was called
@@ -293,12 +293,12 @@ describe('Core Agent Storage with Mocks', () => {
     });
   });
 
-  describe('agentExistsOnDisk', () => {
+  describe('agentExists', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
       fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
-      const exists = await agentExistsOnDisk('test-data/worlds', worldId, 'non-existent');
+      const exists = await agentExists('test-data/worlds', worldId, 'non-existent');
       expect(exists).toBe(false);
     });
 
@@ -308,7 +308,7 @@ describe('Core Agent Storage with Mocks', () => {
       // Mock successful access
       fs.access.mockResolvedValue(undefined);
 
-      const exists = await agentExistsOnDisk('test-data/worlds', worldId, agentId);
+      const exists = await agentExists('test-data/worlds', worldId, agentId);
       expect(exists).toBe(true);
 
       // Verify access was called with config path
@@ -335,7 +335,7 @@ describe('Core Agent Storage with Mocks', () => {
         throw new Error('File not found');
       });
 
-      const loadedAgents = await loadAllAgentsFromDisk('test-data/worlds', worldId);
+      const loadedAgents = await listAgents('test-data/worlds', worldId);
       expect(loadedAgents).toEqual([]);
     });
 
@@ -361,7 +361,7 @@ describe('Core Agent Storage with Mocks', () => {
       (diskError as any).code = 'ENOSPC';
       fs.writeFile.mockRejectedValue(diskError);
 
-      await expect(saveAgentToDisk('test-data/worlds', worldId, agent))
+      await expect(saveAgent('test-data/worlds', worldId, agent))
         .rejects.toThrow('ENOSPC: no space left on device');
     });
   });

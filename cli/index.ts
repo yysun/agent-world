@@ -50,7 +50,7 @@ import {
   disableStreaming
 } from '../core/index.js';
 import { World } from '../core/types.js';
-import { getDefaultRootPath } from '../core/storage-factory.js';
+import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput } from './commands.js';
 import {
   StreamingState,

@@ -35,8 +35,7 @@
  * - Agent persistence maintained across refresh cycles
  */
 
-import { LLMProvider, createWorld, getWorld, updateWorld, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, createAgent, clearAgentMemory, listChatHistories, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
-import { deleteChatData } from '../core/world-storage.js';
+import { LLMProvider, createWorld, getWorld, updateWorld, publishMessage, listWorlds, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, createAgent, clearAgentMemory, listChats, exportWorldToMarkdown, newChat, restoreChat, deleteChat } from '../core/index.js';
 import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
@@ -561,7 +560,7 @@ async function exportWorldToMarkdownFile(
     await fs.promises.writeFile(filePath, markdown, 'utf8');
 
     // Get agent count for response data
-    const worldData = await getWorldConfig(rootPath, worldName);
+    const worldData = await getWorld(rootPath, worldName);
     const world = await getWorld(rootPath, worldData!.id);
     if (!world) throw new Error(`World ${worldName} not found`);
     const agents = await listAgents(rootPath, worldData!.id);
@@ -935,7 +934,7 @@ export async function processCLICommand(
               output += `  Name: ${worldInfo.name}\n`;
               output += `  Description: ${worldInfo.description || 'No description'}\n`;
               output += `  Turn Limit: ${worldInfo.turnLimit}\n`;
-              output += `  Agents: ${worldInfo.agentCount}\n`;
+              output += `  Agents: ${worldInfo.totalAgents}\n`;
               output += `  ---\n`;
             });
             cliResponse = {
@@ -955,7 +954,7 @@ export async function processCLICommand(
 
       case 'showWorld':
         try {
-          const worldData = await getWorldConfig(context.rootPath, collectedParams.name);
+          const worldData = await getWorld(context.rootPath, collectedParams.name);
           if (!worldData) {
             cliResponse = {
               success: false,
@@ -997,7 +996,7 @@ export async function processCLICommand(
 
       case 'updateWorld':
         try {
-          const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+          const existingWorld = await getWorld(context.rootPath, collectedParams.name);
           if (!existingWorld) {
             cliResponse = {
               success: false,
@@ -1060,7 +1059,7 @@ export async function processCLICommand(
 
       case 'deleteWorld':
         try {
-          const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+          const existingWorld = await getWorld(context.rootPath, collectedParams.name);
           if (!existingWorld) {
             cliResponse = {
               success: false,
@@ -1133,7 +1132,7 @@ export async function processCLICommand(
               output += `  Type: ${agent.type}\n`;
               output += `  Model: ${agent.model}\n`;
               output += `  Status: ${agent.status || 'active'}\n`;
-              output += `  Memory Size: ${agent.memorySize} messages\n`;
+              output += `  Memory Size: ${agent.memory?.length || 0} messages\n`;
               output += `  LLM Calls: ${agent.llmCallCount}\n`;
               output += `  Created: ${agent.createdAt ? agent.createdAt.toISOString().split('T')[0] : 'Unknown'}\n`;
               output += `  Last Active: ${agent.lastActive ? agent.lastActive.toISOString().split('T')[0] : 'Unknown'}\n`;
@@ -1375,7 +1374,7 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chats = await listChatHistories(context.rootPath, world!.id);
+          const chats = await listChats(context.rootPath, world!.id);
           if (chats.length === 0) {
             cliResponse = {
               success: true,
@@ -1383,12 +1382,11 @@ export async function processCLICommand(
             };
           } else {
             let output = `\nChat history in world '${world!.name}':\n`;
-            chats.forEach(chat => {
+            chats.forEach((chat: any) => {
               output += `  ID: ${chat.id}\n`;
               output += `  Name: ${chat.name}\n`;
               if (chat.description) output += `  Description: ${chat.description}\n`;
               output += `  Messages: ${chat.messageCount}\n`;
-              if (chat.tags && chat.tags.length > 0) output += `  Tags: ${chat.tags.join(', ')}\n`;
               output += `  Created: ${chat.createdAt.toISOString().split('T')[0]}\n`;
               output += `  Updated: ${chat.updatedAt.toISOString().split('T')[0]}\n`;
               output += `  ---\n`;
@@ -1417,17 +1415,22 @@ export async function processCLICommand(
           // Join remaining args as description if provided
           const description = args.length > 1 ? args.slice(1).join(' ') : undefined;
 
-          const chat = await createChatData(context.rootPath, world!.id, {
-            name: collectedParams.name,
-            description: description || `Chat created on ${new Date().toLocaleDateString()}`,
-            captureChat: true
-          });
+          // Create a simple new chat using the available API
+          const updatedWorld = await newChat(context.rootPath, world!.id, true);
 
-          cliResponse = {
-            success: true,
-            message: `Chat '${chat.name}' created successfully with ID: ${chat.id}`,
-            data: chat
-          };
+          if (updatedWorld) {
+            cliResponse = {
+              success: true,
+              message: `New chat created successfully for world '${updatedWorld.name}'`,
+              data: { worldId: updatedWorld.id, currentChatId: updatedWorld.currentChatId }
+            };
+          } else {
+            cliResponse = {
+              success: false,
+              message: 'Failed to create new chat',
+              error: 'Unknown error occurred'
+            };
+          }
         } catch (error) {
           cliResponse = {
             success: false,
@@ -1443,56 +1446,22 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chatData) {
+          // Simplified: use restoreChat function directly
+          const restored = await restoreChat(context.rootPath, world!.id, collectedParams.chatId);
+          if (!restored) {
             cliResponse = {
               success: false,
-              message: `Chat '${collectedParams.chatId}' not found`
+              message: `Chat '${collectedParams.chatId}' not found or could not be restored`
             };
             break;
           }
 
-          if (!chatData.chat) {
-            cliResponse = {
-              success: false,
-              message: `Chat '${chatData.name}' has no content to restore`
-            };
-            break;
-          }
-
-          // Confirmation prompt
-          const confirmPrompt = {
-            type: 'confirm',
-            name: 'confirmed',
-            message: `Are you sure you want to restore from chat '${chatData.name}'? This will replace the current world state.`,
-            initial: false
+          cliResponse = {
+            success: true,
+            message: `Successfully restored world state from chat '${collectedParams.chatId}'`,
+            data: { worldId: restored.id, currentChatId: restored.currentChatId },
+            needsWorldRefresh: true
           };
-
-          const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
-
-          if (!confirmed) {
-            cliResponse = {
-              success: true,
-              message: 'Chat restore cancelled'
-            };
-            break;
-          }
-
-          const restored = await restoreWorldChat(context.rootPath, world!.id, chatData.chat);
-
-          if (restored) {
-            cliResponse = {
-              success: true,
-              message: `Successfully restored world state from chat '${chatData.name}'`,
-              data: chatData,
-              needsWorldRefresh: true
-            };
-          } else {
-            cliResponse = {
-              success: false,
-              message: 'Failed to restore from chat snapshot'
-            };
-          }
         } catch (error) {
           cliResponse = {
             success: false,
@@ -1508,44 +1477,18 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chatData = await getChatData(context.rootPath, world!.id, collectedParams.chatId);
-          if (!chatData) {
-            cliResponse = {
-              success: false,
-              message: `Chat '${collectedParams.chatId}' not found`
-            };
-            break;
-          }
-
-          // Confirmation prompt
-          const confirmPrompt = {
-            type: 'confirm',
-            name: 'confirmed',
-            message: `Are you sure you want to delete chat '${chatData.name}'? This action cannot be undone.`,
-            initial: false
-          };
-
-          const { confirmed } = await enquirer.prompt(confirmPrompt) as ConfirmationAnswer;
-
-          if (!confirmed) {
-            cliResponse = {
-              success: true,
-              message: 'Chat deletion cancelled'
-            };
-            break;
-          }
-
-          const deleted = await deleteChatData(context.rootPath, world!.id, chatData.id);
+          // Simplified: use deleteChat function directly
+          const deleted = await deleteChat(context.rootPath, world!.id, collectedParams.chatId);
 
           if (deleted) {
             cliResponse = {
               success: true,
-              message: `Chat '${chatData.name}' deleted successfully`
+              message: `Chat '${collectedParams.chatId}' deleted successfully`
             };
           } else {
             cliResponse = {
               success: false,
-              message: 'Failed to delete chat'
+              message: 'Failed to delete chat - chat may not exist'
             };
           }
         } catch (error) {
@@ -1586,7 +1529,7 @@ export async function processCLICommand(
                 output += `  Type: ${agent.type}\n`;
                 output += `  Model: ${agent.model}\n`;
                 output += `  Status: ${agent.status || 'active'}\n`;
-                output += `  Memory Size: ${agent.memorySize} messages\n`;
+                output += `  Memory Size: ${agent.memory?.length || 0} messages\n`;
                 output += `  LLM Calls: ${agent.llmCallCount}\n`;
                 output += `  Created: ${agent.createdAt ? agent.createdAt.toISOString().split('T')[0] : 'Unknown'}\n`;
                 output += `  Last Active: ${agent.lastActive ? agent.lastActive.toISOString().split('T')[0] : 'Unknown'}\n`;
@@ -1622,7 +1565,7 @@ export async function processCLICommand(
                 output += `  Name: ${worldInfo.name}\n`;
                 output += `  Description: ${worldInfo.description || 'No description'}\n`;
                 output += `  Turn Limit: ${worldInfo.turnLimit}\n`;
-                output += `  Agents: ${worldInfo.agentCount}\n`;
+                output += `  Agents: ${worldInfo.totalAgents}\n`;
                 output += `  ---\n`;
               });
               cliResponse = {
@@ -1688,7 +1631,7 @@ export async function processCLICommand(
         } else {
           // If no world selected, show world
           try {
-            const worldData = await getWorldConfig(context.rootPath, collectedParams.name);
+            const worldData = await getWorld(context.rootPath, collectedParams.name);
             if (!worldData) {
               cliResponse = {
                 success: false,
@@ -1819,7 +1762,7 @@ export async function processCLICommand(
         } else {
           // If no world selected, edit world (redirect to updateWorld)
           try {
-            const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+            const existingWorld = await getWorld(context.rootPath, collectedParams.name);
             if (!existingWorld) {
               cliResponse = {
                 success: false,
@@ -1938,7 +1881,7 @@ export async function processCLICommand(
         } else {
           // If no world selected, delete world
           try {
-            const existingWorld = await getWorldConfig(context.rootPath, collectedParams.name);
+            const existingWorld = await getWorld(context.rootPath, collectedParams.name);
             if (!existingWorld) {
               cliResponse = {
                 success: false,
