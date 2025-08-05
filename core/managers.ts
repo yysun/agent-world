@@ -1247,6 +1247,14 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
 }
 
 /**
+ * Delete chat data by ID
+ */
+export async function deleteChatData(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
+  await moduleInitialization;
+  return await storageWrappers!.deleteChatData(worldId, chatId);
+}
+
+/**
  * Create a new chat and optionally set it as current for a world
  */
 export async function newChat(rootPath: string, worldId: string, setAsCurrent: boolean = true): Promise<World | null> {

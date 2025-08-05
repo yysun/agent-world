@@ -13,12 +13,19 @@
  * - Simplified API structure (World objects contain agents[] and chats[])
  * - Reusable getWorldOrError utility for error handling
  * - Non-streaming mode for CLI pipeline compatibility
+ * - **Updated to use WorldClass for object-oriented world management**
+ * 
+ * WorldClass Usage:
+ * - Most routes now use WorldClass for cleaner, more maintainable code
+ * - Example: const worldClass = new WorldClass(ROOT_PATH, worldName); await worldClass.delete();
+ * - Eliminates repetitive rootPath, worldId parameter passing
+ * - Provides better encapsulation and type safety
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, listChatHistories, getAgent, clearAgentMemory, newChat, loadChatById } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, listChatHistories, getAgent, clearAgentMemory, newChat, loadChatById, WorldClass, World } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
-import { LLMProvider, World } from '../core/types.js';
+import { LLMProvider } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
 
 const logger = createCategoryLogger('api');
@@ -106,19 +113,20 @@ function toKebabCase(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
-async function isAgentNameUnique(world: any, agentName: string, excludeAgent?: string): Promise<boolean> {
+async function isAgentNameUnique(worldClass: WorldClass, agentName: string, excludeAgent?: string): Promise<boolean> {
   if (excludeAgent && agentName === excludeAgent) return true;
-  const existingAgent = await world.getAgent(agentName);
+  const existingAgent = await worldClass.getAgent(agentName);
   return !existingAgent;
 }
 
-async function getWorldOrError(res: Response, worldName: string): Promise<any | null> {
+async function getWorldOrError(res: Response, worldName: string): Promise<WorldClass | null> {
   const world = await getWorld(ROOT_PATH, worldName);
   if (!world) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
     return null;
   }
-  return world;
+  // Return WorldClass instance for OOP operations
+  return new WorldClass(ROOT_PATH, world.id);
 }
 
 // Validation schemas
@@ -243,13 +251,20 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       return;
     }
 
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
+
+    // Get current world data for validation
+    const currentWorld = await worldClass.reload();
+    if (!currentWorld) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
 
     const { name, description, turnLimit } = validation.data;
 
     // If name is being changed, check for duplicates
-    if (name && name !== world.name) {
+    if (name && name !== currentWorld.name) {
       const newWorldId = toKebabCase(name);
       const existingWorld = await getWorldConfig(ROOT_PATH, newWorldId);
       if (existingWorld) {
@@ -258,22 +273,25 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       }
     }
 
-    // Update world metadata
+    // Update world metadata using WorldClass
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
     if (turnLimit !== undefined) updates.turnLimit = turnLimit;
 
     // Apply updates if any
+    let updatedWorld = currentWorld;
     if (Object.keys(updates).length > 0) {
-      if (updates.name) world.name = updates.name;
-      if (updates.description !== undefined) world.description = updates.description;
-      if (updates.turnLimit !== undefined) world.turnLimit = updates.turnLimit;
-      await world.save();
+      const updateResult = await worldClass.update(updates);
+      if (!updateResult) {
+        sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
+        return;
+      }
+      updatedWorld = updateResult;
     }
 
     // Return complete world data including agents
-    const serializedWorld = await serializeWorld(world);
+    const serializedWorld = await serializeWorld(updatedWorld);
     res.json(serializedWorld);
   } catch (error) {
     logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -286,10 +304,10 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
   try {
     const { worldName } = req.params;
 
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
 
-    const deleted = await world.delete();
+    const deleted = await worldClass.delete();
     if (!deleted) {
       sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
       return;
@@ -315,16 +333,18 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
     }
 
     const agentData = validation.data;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
 
-    const isUnique = await isAgentNameUnique(world, agentData.name);
+    // Check if agent name is unique using WorldClass
+    const isUnique = await isAgentNameUnique(worldClass, agentData.name);
     if (!isUnique) {
       sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
       return;
     }
 
-    const createdAgent = await world.createAgent(agentData);
+    // Use WorldClass to create agent
+    const createdAgent = await worldClass.createAgent(agentData as any);
     if (!createdAgent) {
       sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
       return;
@@ -342,13 +362,16 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
   try {
     const { worldName } = req.params;
 
-    const worldExists = await getWorldConfig(ROOT_PATH, worldName);
+    const worldClass = new WorldClass(ROOT_PATH, worldName);
+
+    // Check if world exists first
+    const worldExists = await worldClass.reload();
     if (!worldExists) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const markdown = await exportWorldToMarkdown(ROOT_PATH, worldName);
+    const markdown = await worldClass.exportToMarkdown();
     const now = new Date();
     const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const filename = `${worldName}-${timestamp}.md`;
@@ -375,10 +398,10 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     }
 
     const { clearMemory } = validation.data;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
 
-    const existingAgent = await world.getAgent(agentName);
+    const existingAgent = await worldClass.getAgent(agentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
@@ -388,12 +411,15 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
 
     // If clearMemory is requested, clear memory first
     if (clearMemory) {
-      const cleared = await world.clearAgentMemory(agentName);
+      const cleared = await worldClass.clearAgentMemory(agentName);
       if (!cleared) {
         sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
         return;
       }
-      updatedAgent = await world.getAgent(agentName);
+      const refreshedAgent = await worldClass.getAgent(agentName);
+      if (refreshedAgent) {
+        updatedAgent = refreshedAgent;
+      }
     }
 
     // Prepare updates, exclude memory-related fields
@@ -404,7 +430,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     // Only update if there are non-memory fields to update
     const updateKeys = Object.keys(updates).filter(k => k !== 'memory');
     if (updateKeys.length > 0) {
-      const updateResult = await world.updateAgent(agentName, updates);
+      const updateResult = await worldClass.updateAgent(agentName, updates);
       if (!updateResult) {
         sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
         return;
@@ -424,16 +450,16 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   try {
     const { worldName, agentName } = req.params;
 
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
 
-    const existingAgent = await world.getAgent(agentName);
+    const existingAgent = await worldClass.getAgent(agentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const deleted = await world.deleteAgent(agentName);
+    const deleted = await worldClass.deleteAgent(agentName);
     if (!deleted) {
       sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
       return;
@@ -671,10 +697,10 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, chatId } = req.params;
-    const world = await getWorldOrError(res, worldName);
-    if (!world) return;
+    const worldClass = await getWorldOrError(res, worldName);
+    if (!worldClass) return;
 
-    const deleted = await world.deleteChatData(chatId);
+    const deleted = await worldClass.deleteChatData(chatId);
     if (!deleted) {
       sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
       return;
@@ -695,13 +721,16 @@ router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): 
   try {
     const worldName = req.params.worldName;
 
-    const world = await getWorld(ROOT_PATH, worldName);
-    if (!world) {
+    const worldClass = new WorldClass(ROOT_PATH, worldName);
+
+    // Check if world exists first
+    const currentWorld = await worldClass.reload();
+    if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const updatedWorld = await newChat(ROOT_PATH, world.id, true);
+    const updatedWorld = await worldClass.newChat(true);
     if (!updatedWorld) {
       sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
       return;
@@ -726,13 +755,16 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
   try {
     const { worldName, chatId } = req.params;
 
-    const world = await getWorld(ROOT_PATH, worldName);
-    if (!world) {
+    const worldClass = new WorldClass(ROOT_PATH, worldName);
+
+    // Check if world exists first
+    const currentWorld = await worldClass.reload();
+    if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const updatedWorld = await loadChatById(ROOT_PATH, world.id, chatId, true);
+    const updatedWorld = await worldClass.loadChatById(chatId, true);
     if (!updatedWorld) {
       sendError(res, 404, 'Chat not found or failed to load', 'LOAD_CHAT_ERROR');
       return;

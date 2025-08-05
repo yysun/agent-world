@@ -60,6 +60,7 @@ export {
   getChatData,
   restoreWorldChat,
   listChatHistories,
+  deleteChatData,
   newChat,
   loadChatById,
 } from './managers.js';
@@ -73,7 +74,7 @@ export {
 
 // Export full message types
 import type { AgentMessage } from './types.js';
-  
+
 // === CORE TYPES ===
 // Export public-only interfaces for client use
 export interface World {
@@ -166,6 +167,8 @@ export {
   createCategoryLogger,
 } from './logger.js';
 
+// === WORLD CLASS WRAPPER ===
+export { WorldClass } from './world-class.js';
 
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';
