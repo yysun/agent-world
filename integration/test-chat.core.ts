@@ -26,8 +26,8 @@ import {
   ClientConnection,
   type World,
   disableStreaming,
-  createChatData,
-  listChatHistories,
+  newChat,
+  listChats,
 
 } from '../core/index.js';
 
@@ -111,14 +111,14 @@ async function runIntegrationTest(): Promise<void> {
     // Step 3: Create new chat
     console.log('\n3. Creating new chat...');
 
-    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
+    await newChat(ROOT_PATH, TEST_WORLD_ID);
     log('Current chat id after new chat', yellow(world.currentChatId || ''));
 
     const chatId = world.currentChatId;
     console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
 
-    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
-    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
+    await newChat(ROOT_PATH, TEST_WORLD_ID);
+    await newChat(ROOT_PATH, TEST_WORLD_ID);
 
     // Step 4: Log current chat id after new chat
     console.log('\n4. Logging current chat id after new chat...');
@@ -133,7 +133,7 @@ async function runIntegrationTest(): Promise<void> {
 
     await wait(3000);
 
-    const chats = await listChatHistories(ROOT_PATH, TEST_WORLD_ID);
+    const chats = await listChats(ROOT_PATH, TEST_WORLD_ID);
 
     // Step 6: Get updated world state from subscription
     console.log('\n6. Checking updated world state...');
