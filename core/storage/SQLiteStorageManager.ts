@@ -38,15 +38,16 @@
  */
 
 import { BaseStorageManager, StorageConfig } from './BaseStorageManager.js';
-import type { 
-  Agent, 
-  AgentMessage, 
-  WorldData, 
-  ChatData, 
-  UpdateChatParams, 
-  WorldChat 
+import type {
+  Agent,
+  AgentMessage,
+  WorldData,
+  ChatData,
+  UpdateChatParams,
+  WorldChat
 } from '../types.js';
-import type { SQLiteConfig, SQLiteStorageContext } from '../sqlite-schema.js';
+import type { SQLiteConfig } from '../sqlite-schema.js';
+import type { SQLiteStorageContext } from '../sqlite-storage.js';
 import * as path from 'path';
 
 /**
@@ -68,10 +69,10 @@ export class SQLiteStorageManager extends BaseStorageManager {
   private context: SQLiteStorageContext | null = null;
   private sqliteConfig: SQLiteConfig;
   private sqliteFunctions: any = null;
-  
+
   constructor(config: SQLiteStorageConfig) {
     super(config);
-    
+
     // Setup SQLite-specific configuration
     this.sqliteConfig = {
       database: config.database || path.join(config.rootPath, 'database.db'),
@@ -79,7 +80,6 @@ export class SQLiteStorageManager extends BaseStorageManager {
       busyTimeout: config.busyTimeout || 30000,
       cacheSize: config.cacheSize || -64000,
       enableForeignKeys: config.enableForeignKeys !== false,
-      pragmas: config.pragmas || {}
     };
   }
 
@@ -95,38 +95,38 @@ export class SQLiteStorageManager extends BaseStorageManager {
       // Dynamically import SQLite functions
       const sqliteModule = await import('../sqlite-storage.js');
       const schemaModule = await import('../sqlite-schema.js');
-      
+
       this.sqliteFunctions = sqliteModule;
-      
+
       // Create storage context
       this.context = await sqliteModule.createSQLiteStorageContext(this.sqliteConfig);
-      
+
       // Initialize schema
       await schemaModule.initializeSchema(this.context.schemaCtx);
-      
+
       // Initialize with defaults
       await sqliteModule.initializeWithDefaults(this.context);
-      
+
       this.setConnectionStatus(true);
-      
+
       if (this.config.enableLogging) {
-        this.emit('initialized', { 
+        this.emit('initialized', {
           database: this.sqliteConfig.database,
-          timestamp: new Date() 
+          timestamp: new Date()
         });
       }
-      
+
     } catch (error) {
       this.setConnectionStatus(false);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
+
       if (this.config.enableLogging) {
-        this.emit('initializationError', { 
+        this.emit('initializationError', {
           error: errorMessage,
-          timestamp: new Date() 
+          timestamp: new Date()
         });
       }
-      
+
       throw new Error(`Failed to initialize SQLite storage: ${errorMessage}`);
     }
   }
@@ -140,21 +140,21 @@ export class SQLiteStorageManager extends BaseStorageManager {
         await this.sqliteFunctions.close(this.context);
         this.context = null;
         this.setConnectionStatus(false);
-        
+
         if (this.config.enableLogging) {
           this.emit('closed', { timestamp: new Date() });
         }
-        
+
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        
+
         if (this.config.enableLogging) {
-          this.emit('closeError', { 
+          this.emit('closeError', {
             error: errorMessage,
-            timestamp: new Date() 
+            timestamp: new Date()
           });
         }
-        
+
         throw new Error(`Failed to close SQLite storage: ${errorMessage}`);
       }
     }
@@ -174,9 +174,9 @@ export class SQLiteStorageManager extends BaseStorageManager {
       return stats && typeof stats.version === 'string';
     } catch (error) {
       if (this.config.enableLogging) {
-        this.emit('healthCheckFailed', { 
+        this.emit('healthCheckFailed', {
           error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date() 
+          timestamp: new Date()
         });
       }
       return false;
@@ -190,7 +190,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async saveWorld(worldData: WorldData): Promise<void> {
     this.validateWorldId(worldData.id);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('saveWorld', async () => {
       return await this.sqliteFunctions.saveWorld(this.context!, worldData);
     });
@@ -203,7 +203,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async loadWorld(worldId: string): Promise<WorldData | null> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('loadWorld', async () => {
       return await this.sqliteFunctions.loadWorld(this.context!, worldId);
     });
@@ -218,7 +218,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async deleteWorld(worldId: string): Promise<boolean> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('deleteWorld', async () => {
       return await this.sqliteFunctions.deleteWorld(this.context!, worldId);
     });
@@ -232,7 +232,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
 
   async listWorlds(): Promise<WorldData[]> {
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('listWorlds', async () => {
       return await this.sqliteFunctions.listWorlds(this.context!);
     });
@@ -247,7 +247,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async worldExists(worldId: string): Promise<boolean> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     try {
       const world = await this.loadWorld(worldId);
       return world !== null;
@@ -264,7 +264,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agent.id);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('saveAgent', async () => {
       return await this.sqliteFunctions.saveAgent(this.context!, worldId, agent);
     });
@@ -278,7 +278,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agentId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('loadAgent', async () => {
       return await this.sqliteFunctions.loadAgent(this.context!, worldId, agentId);
     });
@@ -294,7 +294,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agentId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('deleteAgent', async () => {
       return await this.sqliteFunctions.deleteAgent(this.context!, worldId, agentId);
     });
@@ -309,7 +309,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async listAgents(worldId: string): Promise<Agent[]> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('listAgents', async () => {
       return await this.sqliteFunctions.listAgents(this.context!, worldId);
     });
@@ -325,7 +325,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agentId);
     this.ensureConnection();
-    
+
     try {
       const agent = await this.loadAgent(worldId, agentId);
       return agent !== null;
@@ -342,7 +342,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agentId);
     this.ensureConnection();
-    
+
     // Load existing agent and update memory
     const agent = await this.loadAgent(worldId, agentId);
     if (!agent) {
@@ -357,7 +357,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateAgentId(agentId);
     this.ensureConnection();
-    
+
     // SQLite implementation can use archive functionality if available
     // For now, this is a placeholder - could be implemented with separate archive tables
     if (this.config.enableLogging) {
@@ -377,7 +377,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('saveAgentsBatch', async () => {
       return await this.sqliteFunctions.saveAgentsBatch(this.context!, worldId, agents);
     });
@@ -391,7 +391,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     agentIds.forEach(id => this.validateAgentId(id));
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('loadAgentsBatch', async () => {
       return await this.sqliteFunctions.loadAgentsBatch(this.context!, worldId, agentIds);
     });
@@ -411,7 +411,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chat.id);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('saveChatData', async () => {
       return await this.sqliteFunctions.saveChatData(this.context!, worldId, chat);
     });
@@ -425,7 +425,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chatId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('loadChatData', async () => {
       return await this.sqliteFunctions.loadChatData(this.context!, worldId, chatId);
     });
@@ -441,7 +441,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chatId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('deleteChatData', async () => {
       return await this.sqliteFunctions.deleteChatData(this.context!, worldId, chatId);
     });
@@ -456,7 +456,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async listChats(worldId: string): Promise<ChatData[]> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('listChats', async () => {
       return await this.sqliteFunctions.listChatHistories(this.context!, worldId);
     });
@@ -472,7 +472,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chatId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('updateChatData', async () => {
       return await this.sqliteFunctions.updateChatData(this.context!, worldId, chatId, updates);
     });
@@ -492,7 +492,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chatId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('saveWorldChat', async () => {
       return await this.sqliteFunctions.saveWorldChat(this.context!, worldId, chatId, chat);
     });
@@ -506,7 +506,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
     this.validateWorldId(worldId);
     this.validateChatId(chatId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('loadWorldChat', async () => {
       return await this.sqliteFunctions.loadWorldChatFull(this.context!, worldId, chatId);
     });
@@ -521,7 +521,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
   async restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean> {
     this.validateWorldId(worldId);
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('restoreFromWorldChat', async () => {
       return await this.sqliteFunctions.restoreFromWorldChat(this.context!, worldId, chat);
     });
@@ -543,15 +543,15 @@ export class SQLiteStorageManager extends BaseStorageManager {
       this.validateAgentId(agentId);
     }
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('validateIntegrity', async () => {
       return await this.sqliteFunctions.validateIntegrity(this.context!, worldId, agentId);
     });
 
     if (!result.success) {
-      return { 
-        isValid: false, 
-        errors: [result.error || 'Failed to validate integrity'] 
+      return {
+        isValid: false,
+        errors: [result.error || 'Failed to validate integrity']
       };
     }
 
@@ -564,7 +564,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
       this.validateAgentId(agentId);
     }
     this.ensureConnection();
-    
+
     const result = await this.executeOperation('repairData', async () => {
       return await this.sqliteFunctions.repairData(this.context!, worldId, agentId);
     });
@@ -602,7 +602,7 @@ export class SQLiteStorageManager extends BaseStorageManager {
    */
   async getDatabaseStats(): Promise<any> {
     this.ensureConnection();
-    
+
     try {
       return await this.sqliteFunctions.getDatabaseStats(this.context!);
     } catch (error) {

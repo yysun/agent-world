@@ -43,13 +43,13 @@ import readline from 'readline';
 import {
   listWorlds,
   subscribeWorld,
-  World,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
   enableStreaming,
   disableStreaming
 } from '../core/index.js';
+import { World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
 import { processCLIInput } from './commands.js';
 import {
@@ -61,10 +61,6 @@ import { configureLLMProvider } from '../core/llm-config.js';
 
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
-
-// Log class-based architecture status at startup
-import { isClassBasedArchitectureEnabled } from '../core/integration/CompatibilityLayer.js';
-console.log('[AgentWorld] Class-based architecture enabled:', isClassBasedArchitectureEnabled());
 
 // Timer management for prompt restoration
 interface GlobalState {
@@ -367,7 +363,7 @@ async function handleSubscribe(
   const subscription = await subscribeWorld(worldName, rootPath, cliClient);
   if (!subscription) throw new Error('Failed to load world');
 
-  return { subscription, world: subscription.world };
+  return { subscription, world: subscription.world as World };
 }
 
 // Handle world events with streaming support

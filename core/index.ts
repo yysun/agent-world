@@ -46,12 +46,12 @@ export {
 
 // === AGENT MANAGEMENT ===
 export {
+  createAgent,
   getAgent,
   updateAgent,
   deleteAgent,
   listAgents,
   clearAgentMemory,
-  publishMessage,
 } from './managers.js';
 
 // === CHAT MANAGEMENT ===
@@ -59,24 +59,22 @@ export {
   createChatData,
   getChatData,
   restoreWorldChat,
+  listChatHistories,
+  newChat,
+  loadChatById,
 } from './managers.js';
 
 // === EVENT SYSTEM ===
 export {
   enableStreaming,
   disableStreaming,
+  publishMessage,
 } from './events.js';
 
+// Export full message types
+import type { AgentMessage } from './types.js';
+  
 // === CORE TYPES ===
-// Import full interfaces as internal types
-import type {
-  // World as CoreWorld,
-  // Agent as CoreAgent,
-  AgentMessage,
-  // WorldChat,
-  // ChatData,
-} from './types.js';
-
 // Export public-only interfaces for client use
 export interface World {
   // Core properties
@@ -93,46 +91,46 @@ export interface World {
   readonly agents: Map<string, Agent>;
 
   // Agent operations
-  createAgent(params: {
-    name: string;
-    type?: string;
-    provider: string;
-    model: string;
-    systemPrompt?: string;
-    temperature?: number;
-    maxTokens?: number;
-  }): Promise<Agent>;
-  getAgent(agentName: string): Promise<Agent | null>;
-  updateAgent(agentName: string, updates: {
-    name?: string;
-    type?: string;
-    status?: 'active' | 'inactive' | 'error';
-    provider?: string;
-    model?: string;
-    systemPrompt?: string;
-    temperature?: number;
-    maxTokens?: number;
-  }): Promise<Agent | null>;
-  deleteAgent(agentName: string): Promise<boolean>;
-  clearAgentMemory(agentName: string): Promise<Agent | null>;
+  // createAgent(params: {
+  //   name: string;
+  //   type?: string;
+  //   provider: string;
+  //   model: string;
+  //   systemPrompt?: string;
+  //   temperature?: number;
+  //   maxTokens?: number;
+  // }): Promise<Agent>;
+  // getAgent(agentName: string): Promise<Agent | null>;
+  // updateAgent(agentName: string, updates: {
+  //   name?: string;
+  //   type?: string;
+  //   status?: 'active' | 'inactive' | 'error';
+  //   provider?: string;
+  //   model?: string;
+  //   systemPrompt?: string;
+  //   temperature?: number;
+  //   maxTokens?: number;
+  // }): Promise<Agent | null>;
+  // deleteAgent(agentName: string): Promise<boolean>;
+  // clearAgentMemory(agentName: string): Promise<Agent | null>;
 
-  // Chat operations
-  listChats(): Promise<{
-    id: string;
-    worldId: string;
-    name: string;
-    description?: string;
-    createdAt: Date;
-    updatedAt: Date;
-    messageCount: number;
-    tags?: string[];
-  }[]>;
-  deleteChatData(chatId: string): Promise<boolean>;
-  newChat(): Promise<World>;
-  loadChatById(chatId: string): Promise<void>;
+  // // Chat operations
+  // listChats(): Promise<{
+  //   id: string;
+  //   worldId: string;
+  //   name: string;
+  //   description?: string;
+  //   createdAt: Date;
+  //   updatedAt: Date;
+  //   messageCount: number;
+  //   tags?: string[];
+  // }[]>;
+  // deleteChatData(chatId: string): Promise<boolean>;
+  // newChat(): Promise<World>;
+  // loadChatById(chatId: string): Promise<void>;
 
-  // World operations
-  delete(): Promise<boolean>;
+  // // World operations
+  // delete(): Promise<boolean>;
 }
 
 export interface Agent {
@@ -156,27 +154,20 @@ export interface Agent {
   description?: string;
 }
 
-// Export full message types
-export type { AgentMessage };
-// export type { WorldInfo } from './managers.js';
-export type { LoggerConfig, LogLevel } from './logger.js';
-
 // LLM Provider enum (needed for agent configuration)
 export { LLMProvider } from './types.js';
 
 // === UTILITIES ===
+// export type { WorldInfo } from './managers.js';
+export type { LoggerConfig, LogLevel } from './logger.js';
+
 export {
   logger,
   createCategoryLogger,
 } from './logger.js';
 
-export {
-  generateId,
-  toKebabCase
-} from './utils.js';
 
 // === SUBSCRIPTION SYSTEM ===
-// Export subscription functionality for server API
-export * from './subscription.js';
+export { type ClientConnection, subscribeWorld } from './subscription.js';
 
 export const VERSION = '3.0.0';

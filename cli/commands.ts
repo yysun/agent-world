@@ -35,7 +35,9 @@
  * - Agent persistence maintained across refresh cycles
  */
 
-import { World, LLMProvider, createWorld, getWorld, updateWorld, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
+import { LLMProvider, createWorld, getWorld, updateWorld, publishMessage, listWorlds, getWorldConfig, deleteWorld, listAgents, getAgent, updateAgent, deleteAgent, createAgent, clearAgentMemory, listChatHistories, exportWorldToMarkdown, createChatData, getChatData, restoreWorldChat } from '../core/index.js';
+import { deleteChatData } from '../core/world-storage.js';
+import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
 import enquirer from 'enquirer';
@@ -562,7 +564,7 @@ async function exportWorldToMarkdownFile(
     const worldData = await getWorldConfig(rootPath, worldName);
     const world = await getWorld(rootPath, worldData!.id);
     if (!world) throw new Error(`World ${worldName} not found`);
-    const agents = await listAgents(world);
+    const agents = await listAgents(rootPath, worldData!.id);
 
     return {
       success: true,
@@ -802,7 +804,7 @@ export async function processCLICommand(
 
             const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
 
-            const agent = await world!.createAgent({
+            const agent = await createAgent(context.rootPath, world!.id, {
               name: answers.name,
               type: 'conversational',
               provider: answers.provider,
@@ -827,7 +829,7 @@ export async function processCLICommand(
           }
         } else {
           // Legacy mode with command arguments
-          const agent = await world!.createAgent({
+          const agent = await createAgent(context.rootPath, world!.id, {
             name: collectedParams.name,
             type: 'conversational',
             provider: LLMProvider.OPENAI,
@@ -860,7 +862,7 @@ export async function processCLICommand(
           const clearedAgents: string[] = [];
           for (const [agentName] of world!.agents) {
             logger.debug('Clearing memory for agent', { agentName });
-            await world!.clearAgentMemory(agentName);
+            await clearAgentMemory(context.rootPath, world!.id, agentName);
             clearedAgents.push(agentName);
           }
           cliResponse = {
@@ -893,7 +895,7 @@ export async function processCLICommand(
         });
 
         try {
-          const result = await world!.clearAgentMemory(collectedParams.agentName);
+          const result = await clearAgentMemory(context.rootPath, world!.id, collectedParams.agentName);
           logger.debug('clearAgentMemory result', {
             success: !!result,
             resultAgentId: result?.id,
@@ -963,7 +965,7 @@ export async function processCLICommand(
             // Get agent count
             const world = await getWorld(context.rootPath, worldData.id);
             if (!world) throw new Error(`World ${collectedParams.name} not found`);
-            const agents = await listAgents(world);
+            const agents = await listAgents(context.rootPath, worldData.id);
             let output = `\nWorld Details:\n`;
             output += `  ID: ${worldData.id}\n`;
             output += `  Name: ${worldData.name}\n`;
@@ -1118,7 +1120,7 @@ export async function processCLICommand(
           // Get world instance first
           const worldInstance = await getWorld(context.rootPath, world!.id);
           if (!worldInstance) throw new Error(`World not found`);
-          const agents = await listAgents(worldInstance);
+          const agents = await listAgents(context.rootPath, world!.id);
           if (agents.length === 0) {
             cliResponse = {
               success: true,
@@ -1160,7 +1162,7 @@ export async function processCLICommand(
         try {
           const worldInstance = await getWorld(context.rootPath, world!.id);
           if (!worldInstance) throw new Error(`World not found`);
-          const agent = await getAgent(worldInstance, collectedParams.name);
+          const agent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!agent) {
             cliResponse = {
               success: false,
@@ -1208,7 +1210,7 @@ export async function processCLICommand(
         try {
           const worldInstance = await getWorld(context.rootPath, world!.id);
           if (!worldInstance) throw new Error(`World not found`);
-          const existingAgent = await getAgent(worldInstance, collectedParams.name);
+          const existingAgent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!existingAgent) {
             cliResponse = {
               success: false,
@@ -1260,7 +1262,7 @@ export async function processCLICommand(
 
           const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
 
-          const updatedAgent = await updateAgent(worldInstance, existingAgent.id, {
+          const updatedAgent = await updateAgent(context.rootPath, world!.id, existingAgent.id, {
             name: answers.name,
             provider: answers.provider,
             model: answers.model,
@@ -1299,7 +1301,7 @@ export async function processCLICommand(
         try {
           const worldInstance = await getWorld(context.rootPath, world!.id);
           if (!worldInstance) throw new Error(`World not found`);
-          const existingAgent = await getAgent(worldInstance, collectedParams.name);
+          const existingAgent = await getAgent(context.rootPath, world!.id, collectedParams.name);
           if (!existingAgent) {
             cliResponse = {
               success: false,
@@ -1326,7 +1328,7 @@ export async function processCLICommand(
             break;
           }
 
-          const deleted = await deleteAgent(worldInstance, existingAgent.id);
+          const deleted = await deleteAgent(context.rootPath, world!.id, existingAgent.id);
 
           if (deleted) {
             cliResponse = {
@@ -1373,7 +1375,7 @@ export async function processCLICommand(
           if (worldError) return worldError;
         }
         try {
-          const chats = await world!.listChats();
+          const chats = await listChatHistories(context.rootPath, world!.id);
           if (chats.length === 0) {
             cliResponse = {
               success: true,
@@ -1533,7 +1535,7 @@ export async function processCLICommand(
             break;
           }
 
-          const deleted = await world!.deleteChatData(chatData.id);
+          const deleted = await deleteChatData(context.rootPath, world!.id, chatData.id);
 
           if (deleted) {
             cliResponse = {
@@ -1571,7 +1573,7 @@ export async function processCLICommand(
           try {
             const worldInstance = await getWorld(context.rootPath, context.currentWorld.id);
             if (!worldInstance) throw new Error(`Current world not found`);
-            const agents = await listAgents(worldInstance);
+            const agents = await listAgents(context.rootPath, context.currentWorld.id);
             if (agents.length === 0) {
               cliResponse = {
                 success: true,
@@ -1645,7 +1647,7 @@ export async function processCLICommand(
           try {
             const worldInstance = await getWorld(context.rootPath, context.currentWorld.id);
             if (!worldInstance) throw new Error(`Current world not found`);
-            const agent = await getAgent(worldInstance, collectedParams.name);
+            const agent = await getAgent(context.rootPath, worldInstance.id, collectedParams.name);
             if (!agent) {
               cliResponse = {
                 success: false,
@@ -1696,7 +1698,7 @@ export async function processCLICommand(
               // Get agent count
               const worldInstance = await getWorld(context.rootPath, worldData.id);
               if (!worldInstance) throw new Error(`World not found`);
-              const agents = await listAgents(worldInstance);
+              const agents = await listAgents(context.rootPath, worldInstance.id);
               let output = `\nWorld Details:\n`;
               output += `  ID: ${worldData.id}\n`;
               output += `  Name: ${worldData.name}\n`;
@@ -1733,7 +1735,7 @@ export async function processCLICommand(
           try {
             const worldInstance = await getWorld(context.rootPath, context.currentWorld.id);
             if (!worldInstance) throw new Error(`Current world not found`);
-            const existingAgent = await getAgent(worldInstance, collectedParams.name);
+            const existingAgent = await getAgent(context.rootPath, worldInstance.id, collectedParams.name);
             if (!existingAgent) {
               cliResponse = {
                 success: false,
@@ -1785,7 +1787,7 @@ export async function processCLICommand(
 
             const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
 
-            const updatedAgent = await updateAgent(worldInstance, existingAgent.id, {
+            const updatedAgent = await updateAgent(context.rootPath, worldInstance.id, existingAgent.id, {
               name: answers.name,
               provider: answers.provider,
               model: answers.model,
@@ -1885,7 +1887,7 @@ export async function processCLICommand(
           try {
             const worldInstance = await getWorld(context.rootPath, context.currentWorld.id);
             if (!worldInstance) throw new Error(`Current world not found`);
-            const existingAgent = await getAgent(worldInstance, collectedParams.name);
+            const existingAgent = await getAgent(context.rootPath, worldInstance.id, collectedParams.name);
             if (!existingAgent) {
               cliResponse = {
                 success: false,
@@ -1912,7 +1914,7 @@ export async function processCLICommand(
               break;
             }
 
-            const deleted = await deleteAgent(worldInstance, existingAgent.id);
+            const deleted = await deleteAgent(context.rootPath, worldInstance.id, existingAgent.id);
 
             if (deleted) {
               cliResponse = {
@@ -2032,7 +2034,7 @@ export async function processCLICommand(
 
             const answers = await enquirer.prompt(prompts) as AgentCreateAnswers;
 
-            const agent = await context.currentWorld.createAgent({
+            const agent = await createAgent(context.rootPath, context.currentWorld.id, {
               name: answers.name,
               type: 'conversational',
               provider: answers.provider,

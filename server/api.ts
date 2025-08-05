@@ -16,7 +16,7 @@
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, getWorldConfig, publishMessage, getWorld, enableStreaming, disableStreaming, exportWorldToMarkdown, listChatHistories, getAgent, clearAgentMemory, newChat, loadChatById } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/subscription.js';
 import { LLMProvider, World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage-factory.js';
@@ -40,7 +40,7 @@ async function serializeWorld(world: World): Promise<{
   chats: any[];
 }> {
   const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
-  const chats = await world.listChats();
+  const chats = await listChatHistories(ROOT_PATH, world.id);
 
   return {
     id: world.id,
@@ -454,13 +454,13 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
     const world = await getWorld(ROOT_PATH, worldName);
     if (!world) return;
 
-    const agent = await world.getAgent(agentName);
+    const agent = await getAgent(ROOT_PATH, world.id, agentName);
     if (!agent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const clearedAgent = await world.clearAgentMemory(agentName);
+    const clearedAgent = await clearAgentMemory(ROOT_PATH, world.id, agentName);
     if (!clearedAgent) {
       sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
       return;
@@ -701,7 +701,12 @@ router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): 
       return;
     }
 
-    const updatedWorld = await world.newChat();
+    const updatedWorld = await newChat(ROOT_PATH, world.id, true);
+    if (!updatedWorld) {
+      sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
+      return;
+    }
+
     const serializedWorld = await serializeWorld(updatedWorld);
 
     res.json({
@@ -727,12 +732,17 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
       return;
     }
 
-    await world.loadChatById(chatId);
-    const serializedWorld = await serializeWorld(world);
+    const updatedWorld = await loadChatById(ROOT_PATH, world.id, chatId, true);
+    if (!updatedWorld) {
+      sendError(res, 404, 'Chat not found or failed to load', 'LOAD_CHAT_ERROR');
+      return;
+    }
+
+    const serializedWorld = await serializeWorld(updatedWorld);
 
     res.json({
       world: serializedWorld,
-      chatId: world.currentChatId,
+      chatId: updatedWorld.currentChatId,
       success: true
     });
 

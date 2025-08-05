@@ -102,8 +102,11 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
   if (!chatDataAutosaveEnabled) return;
 
   try {
+    // Get storage wrappers
+    const storage = await getStorageWrappers();
+
     // Get current chats using storage API
-    const chats = await world.storage.listChats(world.id);
+    const chats = await storage.listChats(world.id);
 
     // Find the most recently updated chat (likely the active one)
     if (chats.length > 0) {
@@ -119,7 +122,7 @@ async function updateActiveChatMessageCounts(world: World): Promise<void> {
 
       // Update the active chat's message count if it has changed
       if (activeChat.messageCount !== totalMessages) {
-        await world.storage.updateChatData(world.id, activeChat.id, {
+        await storage.updateChatData(world.id, activeChat.id, {
           messageCount: totalMessages
         });
 
@@ -247,11 +250,14 @@ export async function updateChatTitleFromMessage(world: World, messageEvent: Wor
   if (!world.currentChatId) return;
 
   try {
+    // Get storage wrappers
+    const storage = await getStorageWrappers();
+
     // Generate title from the human message content
     const title = generateTitleFromContent(messageEvent.content);
 
     // Update the chat with new title
-    const updatedChat = await world.storage.updateChatData(world.id, world.currentChatId, {
+    const updatedChat = await storage.updateChatData(world.id, world.currentChatId, {
       name: title,
       messageCount: await getCurrentMessageCount(world)
     });
@@ -287,8 +293,11 @@ export async function saveChatStateFromMessage(world: World, messageEvent: World
   if (!world.currentChatId) return;
 
   try {
+    // Get storage wrappers
+    const storage = await getStorageWrappers();
+
     // Create world chat snapshot using the world's storage interface
-    const worldData = await world.storage.loadWorld(world.id);
+    const worldData = await storage.loadWorld(world.id);
     if (!worldData) {
       throw new Error(`World ${world.id} not found`);
     }
@@ -330,11 +339,11 @@ export async function saveChatStateFromMessage(world: World, messageEvent: World
     };
 
     // Save the complete chat state
-    await world.storage.saveWorldChat(world.id, world.currentChatId, worldChat);
+    await storage.saveWorldChat(world.id, world.currentChatId, worldChat);
 
     // Update chat metadata
     const messageCount = await getCurrentMessageCount(world);
-    await world.storage.updateChatData(world.id, world.currentChatId, {
+    await storage.updateChatData(world.id, world.currentChatId, {
       messageCount: messageCount
     });
 
@@ -437,7 +446,7 @@ export function publishEvent(world: World, type: string, content: any): void {
     // Fallback ID generation if generateId fails
     messageId = 'evt-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
   }
-  
+
   // Ensure messageId is not undefined or empty
   if (!messageId || typeof messageId !== 'string' || messageId.length === 0) {
     messageId = 'evt-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -466,7 +475,7 @@ export function publishMessage(world: World, content: string, sender: string): v
     // Fallback ID generation if generateId fails
     messageId = 'msg-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
   }
-  
+
   // Ensure messageId is not undefined or empty
   if (!messageId || typeof messageId !== 'string' || messageId.length === 0) {
     messageId = 'msg-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
@@ -557,6 +566,18 @@ export function subscribeToSSE(
 
 // Import additional dependencies for agent events
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
+import * as storageFactory from './storage-factory.js';
+
+// Storage wrapper instance - initialized lazily
+let storageWrappers: storageFactory.StorageAPI | null = null;
+
+// Initialize storage wrappers
+async function getStorageWrappers(): Promise<storageFactory.StorageAPI> {
+  if (!storageWrappers) {
+    storageWrappers = await storageFactory.createStorageWithWrappers();
+  }
+  return storageWrappers;
+}
 
 /**
  * Auto-mention utility functions for processAgentMessage
@@ -752,7 +773,8 @@ export async function saveIncomingMessageToMemory(
 
     // Auto-save memory using storage factory (database or disk)
     try {
-      await world.storage.saveAgent(world.id, agent);
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
 
       // Auto-update chat history message counts
       await updateActiveChatMessageCounts(world);
@@ -806,7 +828,8 @@ export async function processAgentMessage(
 
     // Auto-save agent state after LLM call count increment
     try {
-      await world.storage.saveAgent(world.id, agent);
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
     } catch (error) {
       logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -850,7 +873,8 @@ export async function processAgentMessage(
 
     // Auto-save memory after adding final response
     try {
-      await world.storage.saveAgent(world.id, agent);
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
 
       // Auto-update chat history message counts
       await updateActiveChatMessageCounts(world);
@@ -893,7 +917,8 @@ export async function resetLLMCallCountIfNeeded(
 
       // Auto-save agent state after turn limit reset
       try {
-        await world.storage.saveAgent(world.id, agent);
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
       } catch (error) {
         logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
       }
@@ -996,6 +1021,6 @@ export function subscribeWorldToMessages(
 ): () => void {
   logger.debug('Subscribing world to messages', { worldId: world.id });
   return subscribeToMessages(world, (event) => {
-    console.log('World event received:', event);
+    // console.log('World event received:', event);
   });
 }

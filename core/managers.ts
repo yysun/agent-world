@@ -164,7 +164,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
   await storageWrappers!.saveWorld(worldData);
 
   // Return runtime World object with EventEmitter and agents Map
-  return worldDataToWorld(worldData, rootPath);
+  return createWorldFromData(worldData, rootPath);
 }
 
 
@@ -188,7 +188,7 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
   }
 
   // Create runtime World with fresh EventEmitter and methods
-  const world = worldDataToWorld(worldData, rootPath);
+  const world = createWorldFromData(worldData, rootPath);
 
   // Load agents into world runtime - use normalizedWorldId consistently
   const agents = await storageWrappers!.listAgents(normalizedWorldId);
@@ -303,7 +303,7 @@ export async function getWorldFresh(rootPath: string, worldId: string): Promise<
   }
 
   // Create runtime World with fresh EventEmitter and methods
-  const world = worldDataToWorld(worldData, rootPath);
+  const world = createWorldFromData(worldData, rootPath);
 
   // Load agents into world runtime with FRESH memory (no restoration)
   const agents = await storageWrappers!.listAgents(normalizedWorldId);
@@ -352,7 +352,7 @@ export async function updateWorld(rootPath: string, worldId: string, updates: Up
   };
 
   await storageWrappers!.saveWorld(updatedData);
-  return worldDataToWorld(updatedData, rootPath);
+  return createWorldFromData(updatedData, rootPath);
 }
 
 /**
@@ -431,6 +431,21 @@ export async function getWorldConfig(rootPath: string, worldId: string): Promise
   }
 
   return worldData;
+}
+
+/**
+ * Create a pure data World object from WorldData
+ * Replaces the massive worldDataToWorld function with simple data transformation
+ */
+function createWorldFromData(worldData: WorldData, rootPath: string): World {
+  return {
+    ...worldData,
+    rootPath,
+    eventEmitter: new EventEmitter(),
+    agents: new Map(), // Empty agents map - to be populated by agent manager
+    chatLLMProvider: worldData.chatLLMProvider ? worldData.chatLLMProvider as LLMProvider : undefined,
+    currentChatId: worldData.currentChatId ?? null,
+  };
 }
 
 /**
@@ -620,700 +635,6 @@ function createMinimalAgent(agentData: any): Agent {
     updateConfig: async () => { throw new Error('Use updateAgent(world, agentId, updates) instead'); },
     updateMemory: async () => { throw new Error('Use updateAgentMemory(world, agentId, memoryUpdate) instead'); }
   };
-}
-
-/**
- * Enhance agent data with methods to create a full Agent object (LEGACY - TO BE REMOVED)
- * Uses statically imported functions from utils, events, and llm-manager modules
- */
-function enhanceAgentWithMethods(agentData: any, rootPath: string, worldId: string): Agent {
-  return {
-    ...agentData,
-    // LLM Operations
-    generateResponse: async (prompt: string, options?: any) => {
-      await moduleInitialization;
-      const worldData = await getWorldConfig(rootPath, worldId);
-      if (!worldData) throw new Error(`World ${worldId} not found`);
-      const world = worldDataToWorld(worldData, rootPath);
-      const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await llmManager.generateAgentResponse(world, agentData, messages);
-    },
-    streamResponse: async (prompt: string, options?: any) => {
-      await moduleInitialization;
-      const worldData = await getWorldConfig(rootPath, worldId);
-      if (!worldData) throw new Error(`World ${worldId} not found`);
-      const world = worldDataToWorld(worldData, rootPath);
-      const messages = [{ role: 'user' as const, content: prompt, createdAt: new Date() }];
-      return await llmManager.streamAgentResponse(world, agentData, messages, events.publishSSE);
-    },
-    completeChat: async (messages: any[], options?: any) => {
-      await moduleInitialization;
-      const worldData = await getWorldConfig(rootPath, worldId);
-      if (!worldData) throw new Error(`World ${worldId} not found`);
-      const world = worldDataToWorld(worldData, rootPath);
-      return await llmManager.generateAgentResponse(world, agentData, messages);
-    },
-
-    // Memory Management
-    addMemory: async (message: any) => {
-      await moduleInitialization;
-      agentData.memory = agentData.memory || [];
-      agentData.memory.push(message);
-      await storageWrappers!.saveAgentMemory(worldId, agentData.id, agentData.memory);
-      return message;
-    },
-    getMemory: async () => {
-      return agentData.memory || [];
-    },
-    clearMemory: async () => {
-      return await clearAgentMemory(rootPath, worldId, agentData.id);
-    },
-    archiveMemory: async () => {
-      await moduleInitialization;
-      return await storageWrappers!.archiveMemory(worldId, agentData.id, agentData.memory || []);
-    },
-
-    // Message Processing
-    processMessage: async (message: any) => {
-      await moduleInitialization;
-      const worldData = await getWorldConfig(rootPath, worldId);
-      if (!worldData) throw new Error(`World ${worldId} not found`);
-      const world = worldDataToWorld(worldData, rootPath);
-      return await events.processAgentMessage(world, agentData, message);
-    },
-    sendMessage: async (content: string, type?: string) => {
-      await moduleInitialization;
-      const worldData = await getWorldConfig(rootPath, worldId);
-      if (!worldData) throw new Error(`World ${worldId} not found`);
-      const world = worldDataToWorld(worldData, rootPath);
-      return publishMessage(world, content, agentData.id);
-    }
-  };
-}
-
-/**
- * Convert storage WorldData to runtime World object
- * Reconstructs EventEmitter and agents Map for runtime use
- */
-function worldDataToWorld(data: WorldData, rootPath: string): World {
-  const world: World = {
-    id: data.id,
-    rootPath: rootPath,
-    name: data.name,
-    description: data.description,
-    turnLimit: data.turnLimit,
-    chatLLMProvider: data.chatLLMProvider as LLMProvider,
-    chatLLMModel: data.chatLLMModel,
-    currentChatId: data.currentChatId || null, // NEW: Initialize from data
-    eventEmitter: new EventEmitter(),
-    agents: new Map(), // Empty agents map - to be populated by agent manager
-
-    // Unified interfaces (R3.2, R4.2)
-    storage: createStorageManager(rootPath),
-    messageProcessor: createMessageProcessor(),
-
-    // Agent operation methods
-    async createAgent(params) {
-      // Automatically convert agent name to kebab-case for consistent ID
-      const agentParams = {
-        ...params,
-        id: utils.toKebabCase(params.name)
-      };
-
-      const agent = await createAgent(world.rootPath, world.id, agentParams);
-      // Update runtime map
-      world.agents.set(agent.id, agent);
-      return agent;
-    },
-
-    async getAgent(agentName) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      try {
-        return await getAgent(world.rootPath, world.id, agentId);
-      } catch (error) {
-        return null;
-      }
-    },
-
-    async updateAgent(agentName, updates) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      try {
-        const updatedAgent = await updateAgent(world.rootPath, world.id, agentId, updates);
-
-        if (updatedAgent) {
-          // Update runtime map
-          world.agents.set(updatedAgent.id, updatedAgent);
-        }
-        return updatedAgent;
-      } catch (error) {
-        return null;
-      }
-    },
-
-    async deleteAgent(agentName) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      try {
-        const success = await deleteAgent(world.rootPath, world.id, agentId);
-
-        if (success) {
-          // Remove from runtime map
-          world.agents.delete(agentId);
-        }
-        return success;
-      } catch (error) {
-        return false;
-      }
-    },
-
-    async clearAgentMemory(agentName) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      logger.debug('World.clearAgentMemory called', {
-        originalAgentName: agentName,
-        convertedAgentId: agentId,
-        worldRootPath: world.rootPath,
-        worldId: world.id,
-        agentsInMap: Array.from(world.agents.keys())
-      });
-
-      try {
-        const clearedAgent = await clearAgentMemory(world.rootPath, world.id, agentId);
-
-        logger.debug('Core clearAgentMemory result', {
-          success: !!clearedAgent,
-          clearedAgentId: clearedAgent?.id,
-          clearedAgentName: clearedAgent?.name,
-          memoryLength: clearedAgent?.memory?.length || 0
-        });
-
-        if (clearedAgent) {
-          // Update runtime map
-          world.agents.set(clearedAgent.id, clearedAgent);
-          logger.debug('Updated world.agents map with cleared agent');
-        }
-        return clearedAgent;
-      } catch (error) {
-        logger.error('clearAgentMemory error in world manager', { agentName, error: error instanceof Error ? error.message : error });
-        return null;
-      }
-    },
-
-    async listAgents() {
-      try {
-        return await listAgents(world.rootPath, world.id);
-      } catch (error) {
-        return [];
-      }
-    },
-
-    async updateAgentMemory(agentName, messages) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      try {
-        const updatedAgent = await updateAgentMemory(world.rootPath, world.id, agentId, messages);
-
-        if (updatedAgent) {
-          // Update runtime map
-          world.agents.set(updatedAgent.id, updatedAgent);
-        }
-        return updatedAgent;
-      } catch (error) {
-        return null;
-      }
-    },
-
-    async saveAgentConfig(agentName) {
-      // Always convert agent name to kebab-case for consistent ID lookup
-      const agentId = utils.toKebabCase(agentName);
-
-      try {
-        const agent = await getAgent(world.rootPath, world.id, agentId);
-
-        if (!agent) {
-          throw new Error(`Agent ${agentName} not found`);
-        }
-
-        // Save only agent configuration without memory
-        await storageWrappers!.saveAgent(world.id, agent);
-      } catch (error) {
-        throw error;
-      }
-    },
-
-    // Chat history methods - implemented using new ChatData model
-    async createChatData(params: CreateChatParams): Promise<ChatData> {
-      // Delegate to the createChatData function
-      return await createChatData(world.rootPath, world.id, params);
-    },
-
-    async loadChatData(chatId: string): Promise<ChatData | null> {
-      return await storageWrappers!.loadChatData(world.id, chatId);
-    },
-
-    async loadChat(chatId: string): Promise<ChatData | null> {
-      return await storageWrappers!.loadChatData(world.id, chatId);
-    },
-
-    async loadChatFull(chatId: string): Promise<WorldChat | null> {
-      return await storageWrappers!.loadWorldChatFull(world.id, chatId);
-    },
-
-    async updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null> {
-      return await storageWrappers!.updateChatData(world.id, chatId, updates);
-    },
-
-    async deleteChatData(chatId: string): Promise<boolean> {
-      return await storageWrappers!.deleteChatData(world.id, chatId);
-    },
-
-    async listChats(): Promise<ChatData[]> {
-      try {
-        return await storageWrappers!.listChats(world.id);
-      } catch (error) {
-        logger.error('Failed to list chats', {
-          worldId: world.id,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    },
-
-    async createWorldChat(): Promise<WorldChat> {
-      return await createWorldChat(world.rootPath, world.id);
-    },
-
-    async restoreFromWorldChat(chatId: string): Promise<boolean> {
-      return await restoreWorldChat(world.rootPath, world.id, chatId);
-    },
-
-
-
-    // World operation methods
-    async save(): Promise<void> {
-      const worldData: WorldData = {
-        id: world.id,
-        name: world.name,
-        description: world.description,
-        turnLimit: world.turnLimit,
-        chatLLMProvider: world.chatLLMProvider,
-        chatLLMModel: world.chatLLMModel,
-        currentChatId: world.currentChatId,
-        createdAt: new Date(), // This should ideally preserve the original
-        lastUpdated: new Date(),
-        totalAgents: world.agents.size,
-        totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
-      };
-      await storageWrappers!.saveWorld(worldData);
-    },
-
-    async delete() {
-      return await storageWrappers!.deleteWorld(world.id);
-    },
-
-    async reload() {
-      const worldData = await storageWrappers!.loadWorld(world.id);
-      if (worldData) {
-        world.name = worldData.name;
-        world.description = worldData.description;
-        world.turnLimit = worldData.turnLimit;
-        world.chatLLMProvider = worldData.chatLLMProvider as LLMProvider;
-        world.chatLLMModel = worldData.chatLLMModel;
-      }
-    },
-
-    // Utility methods (R1.1)
-    getTurnLimit() {
-      return world.turnLimit;
-    },
-
-    getCurrentTurnCount() {
-      // Implementation: Get current turn count from agent call counts
-      let totalCalls = 0;
-      for (const agent of world.agents.values()) {
-        totalCalls += agent.llmCallCount;
-      }
-      return totalCalls;
-    },
-
-    hasReachedTurnLimit() {
-      return world.getCurrentTurnCount() >= world.turnLimit;
-    },
-
-    resetTurnCount() {
-      // Reset all agent LLM call counts
-      for (const agent of world.agents.values()) {
-        agent.llmCallCount = 0;
-        agent.lastLLMCall = undefined;
-      }
-    },
-
-    // Event methods (R1.2)
-    publishMessage(content: string, sender: string) {
-      world.publishMessage(content, sender);
-    },
-
-    subscribeToMessages(handler: (event: WorldMessageEvent) => void) {
-      return events.subscribeToMessages(world, handler);
-    },
-
-    publishSSE(data: Partial<WorldSSEEvent>) {
-      events.publishSSE(world, data);
-    },
-
-    subscribeToSSE(handler: (event: WorldSSEEvent) => void) {
-      return events.subscribeToSSE(world, handler);
-    },
-
-    // Agent subscription methods (R1.3)
-    subscribeAgent(agent: Agent) {
-      return events.subscribeAgentToMessages(world, agent);
-    },
-
-    unsubscribeAgent(agentId: string) {
-      // Implementation: Remove agent from subscription registry
-      // This would require tracking subscriptions - for now, placeholder
-      logger.debug('Unsubscribing agent from messages', { agentId, worldId: world.id });
-    },
-
-    getSubscribedAgents() {
-      // Implementation: Return list of subscribed agent IDs
-      // This would require tracking subscriptions - for now, return all agents
-      return Array.from(world.agents.keys());
-    },
-
-    isAgentSubscribed(agentId: string) {
-      // Implementation: Check if agent is subscribed
-      // For now, assume all agents in the map are subscribed
-      return world.agents.has(agentId);
-    },
-
-    // NEW: Chat Reuse Detection and Optimization
-    async isCurrentChatReusable(): Promise<boolean> {
-      try {
-        // Early exit if optimization is disabled
-        if (!NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION) {
-          logger.debug('Chat optimization disabled, not reusing', { worldId: world.id });
-          return false;
-        }
-
-        // No current chat - cannot reuse
-        if (!world.currentChatId) {
-          logger.debug('No current chat to reuse', { worldId: world.id });
-          return false;
-        }
-
-        // Load current chat data
-        const currentChat = await storageWrappers!.loadChatData(world.id, world.currentChatId);
-        if (!currentChat) {
-          logger.debug('Current chat not found, cannot reuse', {
-            worldId: world.id,
-            chatId: world.currentChatId
-          });
-          return false;
-        }
-
-        // Simplified reusability logic: title is "New Chat" OR message count is 0
-        const isTitleReusable = currentChat.name === NEW_CHAT_CONFIG.REUSABLE_CHAT_TITLE;
-        const isMessageCountReusable = currentChat.messageCount === 0;
-
-        if (!isTitleReusable && !isMessageCountReusable) {
-          logger.debug('Chat is not reusable - title not "New Chat" and has messages', {
-            worldId: world.id,
-            chatId: world.currentChatId,
-            title: currentChat.name,
-            messageCount: currentChat.messageCount
-          });
-          return false;
-        }
-
-        // Chat is reusable
-        logger.debug('Current chat is reusable', {
-          worldId: world.id,
-          chatId: world.currentChatId,
-          title: currentChat.name,
-          messageCount: currentChat.messageCount,
-          reusableByTitle: isTitleReusable,
-          reusableByMessageCount: isMessageCountReusable
-        });
-        return true;
-
-      } catch (error) {
-        logger.warn('Error checking chat reusability, defaulting to non-reusable', {
-          worldId: world.id,
-          chatId: world.currentChatId,
-          error: error instanceof Error ? error.message : error
-        });
-        return false;
-      }
-    },
-
-    async reuseCurrentChat(): Promise<World> {
-      try {
-        if (!world.currentChatId) {
-          throw new Error('No current chat to reuse');
-        }
-
-        logger.debug('Reusing current chat instead of creating new one', {
-          worldId: world.id,
-          chatId: world.currentChatId
-        });
-
-        // 1. Reset agent memories to fresh state (same as newChat)
-        for (const agent of world.agents.values()) {
-          agent.memory = [];
-          agent.llmCallCount = 0;
-          agent.lastLLMCall = undefined;
-        }
-
-        // 2. Update chat metadata to reflect reuse
-        await storageWrappers!.updateChatData(world.id, world.currentChatId, {
-          messageCount: 0 // Reset message count since we're clearing memories
-        });
-
-        // 3. Save the fresh agent states
-        await world.saveCurrentState();
-
-        // 4. Update world state and save
-        const worldData = {
-          id: world.id,
-          name: world.name,
-          description: world.description,
-          turnLimit: world.turnLimit,
-          chatLLMProvider: world.chatLLMProvider,
-          chatLLMModel: world.chatLLMModel,
-          currentChatId: world.currentChatId, // Keep same chat ID
-          createdAt: new Date(), // This should ideally preserve the original
-          lastUpdated: new Date(),
-          totalAgents: world.agents.size,
-          totalMessages: 0 // Reset since we cleared memories
-        };
-        await storageWrappers!.saveWorld(worldData);
-
-        logger.debug('Successfully reused current chat', {
-          worldId: world.id,
-          reuseId: world.currentChatId,
-          agentCount: world.agents.size
-        });
-
-        return world;
-
-      } catch (error) {
-        logger.error('Failed to reuse current chat, falling back to new chat creation', {
-          worldId: world.id,
-          chatId: world.currentChatId,
-          error: error instanceof Error ? error.message : error
-        });
-
-        // Fallback to creating new chat
-        return await world.createNewChat();
-      }
-    },
-
-    async createNewChat(): Promise<World> {
-      try {
-        // 1. Save current state to previous chat (if any)
-        if (world.currentChatId) {
-          await world.saveCurrentState();
-        }
-
-        // 2. Generate new chat ID
-        const newChatId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-        // 3. Create new chat record
-        const newChatData = await createChatData('', world.id, {
-          name: 'New Chat',
-          description: 'New chat session',
-          captureChat: true
-        });
-
-        // 4. Reset agent memories to fresh state
-        for (const agent of world.agents.values()) {
-          agent.memory = [];
-          agent.llmCallCount = 0;
-          agent.lastLLMCall = undefined;
-        }
-
-        // 5. Update currentChatId
-        world.currentChatId = newChatData.id;
-
-        // 6. Auto-save initial state to new chat and save world once
-        await world.saveCurrentState();
-        const worldData = {
-          id: world.id,
-          name: world.name,
-          description: world.description,
-          turnLimit: world.turnLimit,
-          chatLLMProvider: world.chatLLMProvider,
-          chatLLMModel: world.chatLLMModel,
-          currentChatId: world.currentChatId,
-          createdAt: new Date(), // This should ideally preserve the original
-          lastUpdated: new Date(),
-          totalAgents: world.agents.size,
-          totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
-        };
-        await storageWrappers!.saveWorld(worldData);
-
-        logger.debug('Created new chat', {
-          worldId: world.id,
-          chatId: world.currentChatId
-        });
-
-
-        // Ensure returned world includes the new chat in chats array
-        return world; // Return the complete updated World object
-      } catch (error) {
-        logger.error('Failed to create new chat', {
-          worldId: world.id,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    },
-
-    async newChat(): Promise<World> {
-      try {
-        // NEW: Check if current chat is reusable before creating new one
-        if (NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION) {
-          const canReuse = await world.isCurrentChatReusable();
-          if (canReuse) {
-            logger.debug('Reusing current chat instead of creating new one', {
-              worldId: world.id,
-              chatId: world.currentChatId
-            });
-            return await world.reuseCurrentChat();
-          }
-        }
-
-        // Fallback to creating new chat
-        logger.debug('Creating new chat', {
-          worldId: world.id,
-          optimizationEnabled: NEW_CHAT_CONFIG.ENABLE_OPTIMIZATION
-        });
-        return await world.createNewChat();
-
-      } catch (error) {
-        logger.error('Failed in newChat method', {
-          worldId: world.id,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    },
-
-    async loadChatById(chatId: string): Promise<void> {
-      try {
-        // 1. Save current state to previous chat (if any)
-        if (world.currentChatId && world.currentChatId !== chatId) {
-          await world.saveCurrentState();
-        }
-
-        // 2. Use restoreWorldChat for consistent behavior
-        const success = await restoreWorldChat(world.rootPath, world.id, chatId);
-        if (!success) {
-          throw new Error(`Failed to restore chat ${chatId}`);
-        }
-
-        // 3. Update currentChatId in the runtime world object
-        world.currentChatId = chatId;
-
-        // 4. Save world data with updated currentChatId
-        const worldData = {
-          id: world.id,
-          name: world.name,
-          description: world.description,
-          turnLimit: world.turnLimit,
-          chatLLMProvider: world.chatLLMProvider,
-          chatLLMModel: world.chatLLMModel,
-          currentChatId: world.currentChatId,
-          createdAt: new Date(), // This should ideally preserve the original
-          lastUpdated: new Date(),
-          totalAgents: world.agents.size,
-          totalMessages: Array.from(world.agents.values()).reduce((total, agent) => total + agent.memory.length, 0)
-        };
-        await storageWrappers!.saveWorld(worldData);
-
-        logger.debug('Loaded chat using restoreWorldChat', {
-          worldId: world.id,
-          chatId: world.currentChatId
-        });
-      } catch (error) {
-        logger.error('Failed to load chat', {
-          worldId: world.id,
-          chatId,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    },
-
-    async getCurrentChat(): Promise<ChatData | null> {
-      try {
-        if (!world.currentChatId) {
-          return null;
-        }
-        return await storageWrappers!.loadChatData(world.id, world.currentChatId);
-      } catch (error) {
-        logger.warn('Failed to get current chat', {
-          worldId: world.id,
-          currentChatId: world.currentChatId,
-          error: error instanceof Error ? error.message : error
-        });
-        return null;
-      }
-    },
-
-    async saveCurrentState(): Promise<void> {
-      try {
-        if (!world.currentChatId) {
-          logger.debug('No current chat to save state to', { worldId: world.id });
-          return;
-        }
-
-        // 1. Capture current agent memories and create messages
-        const allMessages: AgentMessage[] = [];
-        for (const agent of world.agents.values()) {
-          if (agent.memory && agent.memory.length > 0) {
-            allMessages.push(...agent.memory);
-          }
-        }
-
-        // Sort messages by timestamp
-        allMessages.sort((a, b) => {
-          const timeA = a.createdAt ? (a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0;
-          const timeB = b.createdAt ? (b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0;
-          return timeA - timeB;
-        });
-
-        // 2. Update chat with current state
-        await storageWrappers!.updateChatData(world.id, world.currentChatId, {
-          messageCount: allMessages.length
-        });
-
-        logger.debug('Saved current world state to chat', {
-          worldId: world.id,
-          chatId: world.currentChatId,
-          messageCount: allMessages.length
-        });
-      } catch (error) {
-        logger.error('Failed to save current state', {
-          worldId: world.id,
-          currentChatId: world.currentChatId,
-          error: error instanceof Error ? error.message : error
-        });
-        throw error;
-      }
-    }
-  };
-
-  return world;
 }
 
 // ========================
@@ -1917,6 +1238,68 @@ export async function getChatData(rootPath: string, worldId: string, chatId: str
   return chatData;
 }
 
+/**
+ * List chat histories for a world
+ */
+export async function listChatHistories(rootPath: string, worldId: string): Promise<ChatData[]> {
+  await moduleInitialization;
+  return await storageWrappers!.listChats(worldId);
+}
+
+/**
+ * Create a new chat and optionally set it as current for a world
+ */
+export async function newChat(rootPath: string, worldId: string, setAsCurrent: boolean = true): Promise<World | null> {
+  await moduleInitialization;
+
+  // Create a new chat
+  const chatData = await createChatData(rootPath, worldId, {
+    name: "New Chat",
+    captureChat: false
+  });
+
+  if (setAsCurrent) {
+    // Update world's currentChatId
+    const world = await updateWorld(rootPath, worldId, {
+      currentChatId: chatData.id
+    });
+    return world;
+  }
+
+  // Return the world without updating currentChatId
+  return await getWorld(rootPath, worldId);
+}
+
+/**
+ * Load a specific chat by ID and optionally set it as current
+ */
+export async function loadChatById(rootPath: string, worldId: string, chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
+  await moduleInitialization;
+
+  // Check if chat exists
+  const chatData = await getChatData(rootPath, worldId, chatId);
+  if (!chatData) {
+    return null;
+  }
+
+  if (setAsCurrent) {
+    // Update world's currentChatId and restore state if there's a snapshot
+    const world = await updateWorld(rootPath, worldId, {
+      currentChatId: chatId
+    });
+
+    // If the chat has content, restore it
+    if (chatData.chat) {
+      await restoreWorldChat(rootPath, worldId, chatData.chat);
+    }
+
+    return world;
+  }
+
+  // Return the world without updating currentChatId
+  return await getWorld(rootPath, worldId);
+}
+
 // (legacy getChat removed)
 
 /**
@@ -2280,486 +1663,4 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
   }
 
   return markdown;
-}
-
-// ========================
-// ENHANCED MESSAGE PUBLISHING WITH AUTO-SAVE
-// ========================
-
-/**
- * Enhanced message publishing with automatic chat session management
- * This wraps the core events.publishMessage with auto-save functionality
- * Use this instead of directly calling events.publishMessage for chat sessions
- */
-export async function publishMessageWithAutoSave(
-  world: World,
-  content: string,
-  sender: string
-): Promise<{ messageId: string; chatId?: string; autoSaved?: boolean }> {
-  // First publish the message using core events
-  const messageEvent = {
-    content,
-    sender,
-    timestamp: new Date(),
-    messageId: utils.generateId()
-  };
-
-  // Use core events to publish the message
-  events.publishMessage(world, content, sender);
-
-  // Update chat title if this is a human message
-  const senderType = utils.determineSenderType(sender);
-  if (senderType === SenderType.HUMAN) {
-    // Don't await to avoid blocking message publishing
-    updateChatTitleFromHumanMessage(world).catch(error => {
-      logger.warn('Failed to update chat title after human message', {
-        worldId: world.id,
-        sender,
-        error: error instanceof Error ? error.message : error
-      });
-    });
-  }
-
-  // ENHANCED AUTO-SAVE: Use world's saveCurrentState method
-  try {
-    // If world has a current chat, auto-save to it
-    if (world.currentChatId) {
-      await world.saveCurrentState();
-
-      logger.debug('Auto-saved to current chat', {
-        worldId: world.id,
-        chatId: world.currentChatId,
-        sender,
-        messageId: messageEvent.messageId
-      });
-
-      return {
-        messageId: messageEvent.messageId,
-        chatId: world.currentChatId,
-        autoSaved: true
-      };
-    } else {
-      // No current chat - create new one if we have messages
-      const allMessages: AgentMessage[] = [];
-      for (const agent of world.agents.values()) {
-        if (agent.memory && agent.memory.length > 0) {
-          allMessages.push(...agent.memory);
-        }
-      }
-
-      if (allMessages.length > 0) {
-        const updatedWorld = await world.newChat();
-
-        logger.debug('Created new chat for auto-save', {
-          worldId: world.id,
-          chatId: updatedWorld.currentChatId,
-          messageCount: allMessages.length,
-          sender,
-          messageId: messageEvent.messageId
-        });
-
-        return {
-          messageId: messageEvent.messageId,
-          chatId: updatedWorld.currentChatId || undefined,
-          autoSaved: true
-        };
-      }
-    }
-
-    // Return message ID even if auto-save wasn't triggered
-    return {
-      messageId: messageEvent.messageId,
-      chatId: world.currentChatId || undefined,
-      autoSaved: false
-    };
-
-  } catch (error) {
-    // Log error but don't fail message publishing
-    logger.error('Auto-save error during message publishing', {
-      worldId: world.id,
-      sender,
-      messageId: messageEvent.messageId,
-      error: error instanceof Error ? error.message : error
-    });
-
-    return {
-      messageId: messageEvent.messageId,
-      chatId: world.currentChatId || undefined,
-      autoSaved: false
-    };
-  }
-}
-/**
- * Wrapper function for backward compatibility
- * Use publishMessageWithAutoSave for new implementations that need auto-save
- */
-export function publishMessage(world: World, content: string, sender: string): void {
-  events.publishMessage(world, content, sender);
-}
-
-
-/**
- * Publish event to a specific channel using World.eventEmitter (NEW)
- * This enables separation of event types: 'system', 'message', 'sse'
- * @param world - World instance
- * @param type - Event type/channel ('system', 'message', 'sse')
- * @param content - Event content (can be string or object)
- */
-export function publishEvent(world: World, type: string, content: any): void {
-  events.publishEvent(world, type, content);
-}
-
-// ========================
-// ENHANCED CHAT SESSION MANAGEMENT (Function-Based)
-// ========================
-
-/**
- * Check if current chat is reusable based on title and message count
- * Enhanced version for function-based implementation
- */
-export async function isCurrentChatReusable(world: World): Promise<boolean> {
-  if (!world.currentChatId) {
-    return false;
-  }
-
-  try {
-    const currentChat = await world.storage.loadChatData(world.id, world.currentChatId);
-    if (!currentChat) {
-      return false;
-    }
-
-    // Chat is reusable if title is "New Chat" OR message count is 0
-    return currentChat.name === "New Chat" || currentChat.messageCount === 0;
-
-  } catch (error) {
-    logger.warn('Error checking chat reusability', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      error: error instanceof Error ? error.message : error
-    });
-    return false;
-  }
-}
-
-/**
- * Reuse current chat by resetting agent memories and updating metadata
- * Enhanced version for function-based implementation
- */
-export async function reuseCurrentChat(world: World): Promise<World> {
-  if (!world.currentChatId) {
-    throw new Error('No current chat to reuse');
-  }
-
-  try {
-    // Reset agent memories
-    for (const [, agent] of world.agents) {
-      if (agent.archiveMemory) {
-        await agent.archiveMemory();
-      } else {
-        // Fallback: clear memory directly
-        if (agent.memory) {
-          agent.memory.length = 0;
-        }
-      }
-    }
-
-    // Update chat metadata
-    await world.storage.updateChatData(world.id, world.currentChatId, {
-      messageCount: 0
-    });
-
-    // Save current state
-    await saveCurrentState(world);
-
-    logger.debug('Reused current chat', {
-      worldId: world.id,
-      chatId: world.currentChatId
-    });
-
-    // Emit chat reused system event
-    events.publishEvent(world, 'system', {
-      type: 'chat-reused',
-      content: {
-        chatId: world.currentChatId,
-        worldId: world.id,
-        timestamp: new Date()
-      }
-    });
-
-    return world;
-
-  } catch (error) {
-    logger.error('Failed to reuse current chat', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      error: error instanceof Error ? error.message : error
-    });
-    throw error;
-  }
-}
-
-/**
- * Create new chat session with fresh agent memories
- * Enhanced version for function-based implementation
- */
-export async function createNewChat(world: World): Promise<World> {
-  try {
-    // Save current state if there's an active chat
-    if (world.currentChatId) {
-      await saveCurrentState(world);
-    }
-
-    // Create new chat
-    const newChatData = await createChatData('', world.id, {
-      name: 'New Chat',
-      description: 'New chat session',
-      captureChat: true
-    });
-
-    // Reset agent memories
-    for (const [, agent] of world.agents) {
-      if (agent.archiveMemory) {
-        await agent.archiveMemory();
-      } else {
-        // Fallback: clear memory directly
-        if (agent.memory) {
-          agent.memory.length = 0;
-        }
-      }
-    }
-
-    // Update current chat ID
-    world.currentChatId = newChatData.id;
-
-    // Save world state with new chat ID
-    await world.storage.saveWorld({
-      ...await world.storage.loadWorld(world.id),
-      currentChatId: world.currentChatId,
-      lastUpdated: new Date()
-    } as WorldData);
-
-    logger.debug('Created new chat', {
-      worldId: world.id,
-      chatId: world.currentChatId
-    });
-
-    // Emit new chat created system event
-    events.publishEvent(world, 'system', {
-      type: 'new-chat-created',
-      content: {
-        chatId: world.currentChatId,
-        worldId: world.id,
-        timestamp: new Date()
-      }
-    });
-
-    return world;
-
-  } catch (error) {
-    logger.error('Failed to create new chat', {
-      worldId: world.id,
-      error: error instanceof Error ? error.message : error
-    });
-    throw error;
-  }
-}
-
-/**
- * Smart chat creation with reuse optimization
- * Enhanced version for function-based implementation
- */
-export async function newChat(world: World): Promise<World> {
-  try {
-    // Check if current chat is reusable
-    const canReuse = await isCurrentChatReusable(world);
-    if (canReuse) {
-      return await reuseCurrentChat(world);
-    }
-
-    return await createNewChat(world);
-
-  } catch (error) {
-    logger.error('Failed to create new chat with optimization', {
-      worldId: world.id,
-      error: error instanceof Error ? error.message : error
-    });
-    throw error;
-  }
-}
-
-/**
- * Load specific chat by ID and restore world state
- * Enhanced version for function-based implementation
- */
-export async function loadChatById(world: World, chatId: string): Promise<void> {
-  try {
-    // Save current state
-    if (world.currentChatId && world.currentChatId !== chatId) {
-      await saveCurrentState(world);
-    }
-
-    // Restore chat state
-    const success = await restoreWorldChat('', world.id, chatId);
-    if (!success) {
-      throw new Error(`Failed to restore chat ${chatId}`);
-    }
-
-    // Update current chat ID
-    world.currentChatId = chatId;
-
-    // Save world state with updated chat ID
-    await world.storage.saveWorld({
-      ...await world.storage.loadWorld(world.id),
-      currentChatId: world.currentChatId,
-      lastUpdated: new Date()
-    } as WorldData);
-
-    logger.debug('Loaded chat by ID', {
-      worldId: world.id,
-      chatId: chatId
-    });
-
-    // Emit event
-    world.eventEmitter.emit('chatLoaded', {
-      chatId,
-      timestamp: new Date()
-    });
-
-  } catch (error) {
-    logger.error('Failed to load chat by ID', {
-      worldId: world.id,
-      chatId,
-      error: error instanceof Error ? error.message : error
-    });
-    throw error;
-  }
-}
-
-/**
- * Get current chat data
- * Enhanced version for function-based implementation
- */
-export async function getCurrentChat(world: World): Promise<ChatData | null> {
-  if (!world.currentChatId) {
-    return null;
-  }
-
-  try {
-    return await world.storage.loadChatData(world.id, world.currentChatId);
-  } catch (error) {
-    logger.warn('Failed to get current chat', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      error: error instanceof Error ? error.message : error
-    });
-    return null;
-  }
-}
-
-/**
- * Save current world state to active chat
- * Enhanced version for function-based implementation
- */
-export async function saveCurrentState(world: World): Promise<void> {
-  if (!world.currentChatId) {
-    return;
-  }
-
-  try {
-    // Collect all messages
-    const allMessages: AgentMessage[] = [];
-    for (const [, agent] of world.agents) {
-      if (agent.memory && Array.isArray(agent.memory)) {
-        allMessages.push(...agent.memory);
-      }
-    }
-
-    // Update chat with current state
-    await world.storage.updateChatData(world.id, world.currentChatId, {
-      messageCount: allMessages.length
-    });
-
-    logger.debug('Saved current state', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      messageCount: allMessages.length
-    });
-
-    // Emit event
-    world.eventEmitter.emit('stateAutoSaved', {
-      chatId: world.currentChatId,
-      messageCount: allMessages.length,
-      timestamp: new Date()
-    });
-
-  } catch (error) {
-    logger.error('Failed to save current state', {
-      worldId: world.id,
-      chatId: world.currentChatId,
-      error: error instanceof Error ? error.message : error
-    });
-  }
-}
-
-/**
- * Delete chat with smart fallback for currentChatId management
- * Enhanced version for function-based implementation
- */
-export async function deleteChatDataWithFallback(world: World, chatId: string): Promise<boolean> {
-  try {
-    const success = await world.storage.deleteChatData(world.id, chatId);
-
-    if (success) {
-      // Smart fallback: manage currentChatId state
-      if (world.currentChatId === chatId) {
-        // Find the latest remaining chat
-        const remainingChats = await world.storage.listChats(world.id);
-
-        if (remainingChats.length === 0) {
-          // No chats remaining - set to null
-          world.currentChatId = null;
-        } else {
-          // Switch to the most recently updated chat
-          const latestChat = remainingChats.reduce((latest, chat) =>
-            new Date(chat.updatedAt) > new Date(latest.updatedAt) ? chat : latest
-          );
-          world.currentChatId = latestChat.id;
-        }
-
-        // Save the updated world state
-        await world.storage.saveWorld({
-          ...await world.storage.loadWorld(world.id),
-          currentChatId: world.currentChatId,
-          lastUpdated: new Date()
-        } as WorldData);
-      }
-
-      logger.debug('Deleted chat with smart fallback', {
-        worldId: world.id,
-        deletedChatId: chatId,
-        newCurrentChatId: world.currentChatId
-      });
-
-      // Emit chat deleted system event
-      events.publishEvent(world, 'system', {
-        type: 'chat-deleted',
-        content: {
-          chatId,
-          newCurrentChatId: world.currentChatId,
-          worldId: world.id,
-          timestamp: new Date()
-        }
-      });
-    }
-
-    return success;
-
-  } catch (error) {
-    logger.error('Failed to delete chat with fallback', {
-      worldId: world.id,
-      chatId,
-      error: error instanceof Error ? error.message : error
-    });
-    throw error;
-  }
 }

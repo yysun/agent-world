@@ -300,7 +300,9 @@ export interface CreateWorldParams {
 /**
  * World update parameters - partial for flexible updates
  */
-export interface UpdateWorldParams extends Partial<CreateWorldParams> { }
+export interface UpdateWorldParams extends Partial<CreateWorldParams> {
+  currentChatId?: string | null;
+}
 
 /**
  * Enhanced World interface with flattened configuration
@@ -317,69 +319,31 @@ export interface World {
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
 
-  // Chat State Management (NEW)
+  // Chat State Management
   currentChatId: string | null; // Track active chat session
 
-  // Runtime Objects
+  // Runtime Objects (minimal)
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
 
-  // Unified interfaces (R3.2, R4.2)
-  storage: StorageManager;
-  messageProcessor: MessageProcessor;
-
-  // Agent operation methods
-  createAgent(params: CreateAgentParams): Promise<Agent>;
-  getAgent(agentName: string): Promise<Agent | null>;
-  updateAgent(agentName: string, updates: UpdateAgentParams): Promise<Agent | null>;
-  deleteAgent(agentName: string): Promise<boolean>;
-  clearAgentMemory(agentName: string): Promise<Agent | null>;
-  listAgents(): Promise<AgentInfo[]>;
-  updateAgentMemory(agentName: string, messages: AgentMessage[]): Promise<Agent | null>;
-  saveAgentConfig(agentName: string): Promise<void>;
-
-  // Chat history methods
-  createChatData(params: CreateChatParams): Promise<ChatData>;
-  loadChatData(chatId: string): Promise<ChatData | null>;
-  loadChat(chatId: string): Promise<ChatData | null>; // Alias for loadChatData for API compatibility
-  loadChatFull(chatId: string): Promise<WorldChat | null>; // Load complete WorldChat with merged data
-  updateChatData(chatId: string, updates: UpdateChatParams): Promise<ChatData | null>;
-  deleteChatData(chatId: string): Promise<boolean>;
-  listChats(): Promise<ChatData[]>; // Primary chat listing method
-  createWorldChat(): Promise<WorldChat>;
-  restoreFromWorldChat(chatId: string): Promise<boolean>;
-
-  // NEW: Enhanced Chat Management Methods
-  isCurrentChatReusable(): Promise<boolean>; // Check if current chat can be reused instead of creating new
-  reuseCurrentChat(): Promise<World>; // Reuse current chat with fresh agent state
-  createNewChat(): Promise<World>; // Create brand new chat (internal method)
-  newChat(): Promise<World>; // Create new chat and set as current - returns updated world
-  loadChatById(chatId: string): Promise<void>; // Switch to existing chat
-  getCurrentChat(): Promise<ChatData | null>; // Get current active chat
-  saveCurrentState(): Promise<void>; // Auto-save world state to current chat
-
-  // World operations
-  save(): Promise<void>;
-  delete(): Promise<boolean>;
-  reload(): Promise<void>;
-
-  // Utility methods (R1.1)
-  getTurnLimit(): number;
-  getCurrentTurnCount(): number;
-  hasReachedTurnLimit(): boolean;
-  resetTurnCount(): void;
-
-  // Event methods (R1.2)
-  publishMessage(content: string, sender: string): void;
-  subscribeToMessages(handler: (event: WorldMessageEvent) => void): () => void;
-  publishSSE(data: Partial<WorldSSEEvent>): void;
-  subscribeToSSE(handler: (event: WorldSSEEvent) => void): () => void;
-
-  // Agent subscription methods (R1.3)
-  subscribeAgent(agent: Agent): () => void;
-  unsubscribeAgent(agentId: string): void;
-  getSubscribedAgents(): string[];
-  isAgentSubscribed(agentId: string): boolean;
+  // NO METHODS - Pure data interface
+  // All operations now use standalone functions:
+  // - createAgent(worldId, params)
+  // - getAgent(worldId, agentName)
+  // - updateAgent(worldId, agentName, updates)
+  // - deleteAgent(worldId, agentName)
+  // - clearAgentMemory(worldId, agentName)
+  // - listAgents(worldId)
+  // - updateAgentMemory(worldId, agentName, messages)
+  // - createChatData(worldId, params)
+  // - loadChatData(worldId, chatId)
+  // - updateChatData(worldId, chatId, updates)
+  // - deleteChatData(worldId, chatId)
+  // - listChats(worldId)
+  // - createWorldChat(worldId)
+  // - newChat(worldId)
+  // - getCurrentChat(worldId)
+  // - publishMessage(worldId, content, sender)
 }
 
 /**

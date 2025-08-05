@@ -30,7 +30,8 @@
   "include": [
     "index.ts",
     "cli/**/*",
-    "server/**/*"
+    "server/**/*",
+    "core/**/*"
   ],
   "exclude": [
     "node_modules",

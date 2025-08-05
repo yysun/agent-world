@@ -25,9 +25,13 @@ import {
   publishMessage,
   ClientConnection,
   type World,
-  disableStreaming
+  disableStreaming,
+  createChatData,
+  listChatHistories,
+
 } from '../core/index.js';
 
+const ROOT_PATH = '.';
 const TEST_WORLD_ID = 'test-world';
 const TEST_MESSAGE = 'Hello, world!';
 
@@ -85,7 +89,7 @@ async function runIntegrationTest(): Promise<void> {
 
     // Step 1: Subscribe to world
     console.log('\n1. Subscribing to world...');
-    worldSubscription = await subscribeWorld(TEST_WORLD_ID, '.', testClient);
+    worldSubscription = await subscribeWorld(TEST_WORLD_ID, ROOT_PATH, testClient);
     if (!worldSubscription) {
       throw new Error('World not found');
     }
@@ -102,34 +106,34 @@ async function runIntegrationTest(): Promise<void> {
 
     // Step 2: Log current chat id
     console.log('\n2. Logging current chat id...');
-    log('Current chat id', yellow(world.currentChatId||''));
+    log('Current chat id', yellow(world.currentChatId || ''));
 
     // Step 3: Create new chat
     console.log('\n3. Creating new chat...');
 
-    await world.newChat();
-    log('Current chat id after new chat', yellow(world.currentChatId||''));
-    
+    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
+    log('Current chat id after new chat', yellow(world.currentChatId || ''));
+
     const chatId = world.currentChatId;
     console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
 
-    await world.newChat();
-    await world.newChat();
+    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
+    await createChatData(ROOT_PATH, TEST_WORLD_ID, {});
 
     // Step 4: Log current chat id after new chat
     console.log('\n4. Logging current chat id after new chat...');
-    log('Current chat id after new chat 2 times', yellow(world.currentChatId||''));
+    log('Current chat id after new chat 2 times', yellow(world.currentChatId || ''));
 
     console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
 
     // Step 5: Send message
     console.log('\n5. Sending message...');
-    await publishMessage(world, TEST_MESSAGE, 'HUMAN');
+    await publishMessage(worldSubscription.world, TEST_MESSAGE, 'HUMAN');
     log('Sent message', cyan(TEST_MESSAGE));
 
     await wait(3000);
 
-    const chats = await world.listChats();
+    const chats = await listChatHistories(ROOT_PATH, TEST_WORLD_ID);
 
     // Step 6: Get updated world state from subscription
     console.log('\n6. Checking updated world state...');
