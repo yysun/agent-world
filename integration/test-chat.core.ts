@@ -30,24 +30,11 @@ import {
   listChats,
 
 } from '../core/index.js';
+import { boldRed, boldGreen, boldYellow, red, green, yellow, cyan, log } from './utils.js';
 
 const ROOT_PATH = '.';
 const TEST_WORLD_ID = 'test-world';
 const TEST_MESSAGE = 'Hello, world!';
-
-// Color helpers for consistent output
-const boldRed = (text: string) => `\x1b[1m\x1b[31m${text.toString()}\x1b[0m`;
-const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text.toString()}\x1b[0m`;
-const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text.toString()}\x1b[0m`;
-const red = (text: string) => `\x1b[31m${text.toString()}\x1b[0m`;
-const green = (text: string) => `\x1b[32m${text.toString()}\x1b[0m`;
-const yellow = (text: string) => `\x1b[33m${text.toString()}\x1b[0m`;
-const cyan = (text: string) => `\x1b[36m${text.toString()}\x1b[0m`;
-
-// Helper to log for test output
-function log(label: string, value: any): void {
-  console.log(`${label}:`, value);
-}
 
 // Helper function to wait for a specified duration
 function wait(ms: number): Promise<void> {
@@ -98,11 +85,11 @@ async function runIntegrationTest(): Promise<void> {
       throw new Error('World not loaded from subscription');
     }
 
-    // log('Initial world loaded', {
-    //   id: world.id,
-    //   currentChatId: world.currentChatId,
-    //   agentCount: world.agents?.size || 0
-    // });
+    log('Initial world loaded', {
+      id: world.id,
+      currentChatId: world.currentChatId,
+      totalAgents: world.agents?.size || 0
+    });
 
     // Step 2: Log current chat id
     console.log('\n2. Logging current chat id...');
@@ -131,7 +118,7 @@ async function runIntegrationTest(): Promise<void> {
     await publishMessage(worldSubscription.world, TEST_MESSAGE, 'HUMAN');
     log('Sent message', cyan(TEST_MESSAGE));
 
-    await wait(3000);
+    await wait(5000);
 
     const chats = await listChats(ROOT_PATH, TEST_WORLD_ID);
 
