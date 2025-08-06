@@ -231,9 +231,9 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
-    const { name, description } = validation.data;
+    const { name, description, turnLimit } = validation.data;
     const worldId = toKebabCase(name);
-    const world = await createWorld(ROOT_PATH, { name, description });
+    const world = await createWorld(ROOT_PATH, { name, description, turnLimit });
     if (world) {
       res.status(201).json({ name: world.name, id: worldId });
     } else {
@@ -241,7 +241,15 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
     }
 
   } catch (error) {
-    logger.error('Error creating world', { error: error instanceof Error ? error.message : error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Check for duplicate world error
+    if (errorMessage.includes('already exists')) {
+      sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
+      return;
+    }
+
+    logger.error('Error creating world', { error: errorMessage });
     sendError(res, 500, 'Failed to create world', 'WORLD_CREATE_ERROR');
   }
 });
