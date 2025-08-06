@@ -383,7 +383,8 @@ export async function loadAgentWithRetry(
           memory = rawMemory.map(msg => ({
             ...msg,
             content: typeof msg.content === 'string' ? msg.content.replace(/\\n/g, '\n') : msg.content,
-            createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date()
+            createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
+            chatId: msg.chatId // Preserve chatId field for filtering
           }));
         } catch {
           // Create missing memory file if allowing partial load

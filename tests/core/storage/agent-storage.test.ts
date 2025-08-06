@@ -7,6 +7,7 @@
  * - Tests for error handling with corrupted files using mocks
  * - Tests for missing files and recovery using mocked scenarios
  * - Tests for data validation and consistency with mocked data
+ * - Tests for chatId field support and memory filtering
  *
  * Implementation:
  * - Uses mock helpers for consistent test data and file system mocking
@@ -14,6 +15,7 @@
  * - Validates proper Date object reconstruction with mocked data
  * - Tests file system error scenarios using mock failures
  * - Verifies agent memory structure integrity with mocked file content
+ * - Tests chatId field preservation and filtering functionality
  */
 
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
@@ -141,8 +143,9 @@ describe('Core Agent Storage with Mocks', () => {
         }
         if (path.includes('memory.json')) {
           return JSON.stringify([
-            { role: 'user', content: 'Hello', createdAt: '2023-01-01T00:00:00.000Z' },
-            { role: 'assistant', content: 'Hi there!', createdAt: '2023-01-01T00:01:00.000Z' }
+            { role: 'user', content: 'Hello', createdAt: '2023-01-01T00:00:00.000Z', chatId: 'chat-1' },
+            { role: 'assistant', content: 'Hi there!', createdAt: '2023-01-01T00:01:00.000Z', chatId: 'chat-1' },
+            { role: 'user', content: 'Legacy message', createdAt: '2023-01-01T00:02:00.000Z' } // No chatId - legacy
           ]);
         }
         throw new Error('File not found');
@@ -151,9 +154,12 @@ describe('Core Agent Storage with Mocks', () => {
       const loadedAgents = await listAgents('test-data/worlds', worldId);
 
       expect(loadedAgents).toHaveLength(1);
-      expect(loadedAgents[0].memory).toHaveLength(2);
+      expect(loadedAgents[0].memory).toHaveLength(3);
       expect(loadedAgents[0].memory[0].createdAt).toBeInstanceOf(Date);
       expect(loadedAgents[0].memory[1].createdAt).toBeInstanceOf(Date);
+      expect(loadedAgents[0].memory[0].chatId).toBe('chat-1');
+      expect(loadedAgents[0].memory[1].chatId).toBe('chat-1');
+      expect(loadedAgents[0].memory[2].chatId).toBeUndefined(); // Legacy message
     });
   });
 
@@ -249,12 +255,14 @@ describe('Core Agent Storage with Mocks', () => {
             role: 'user',
             content: 'Complex message with unicode: 你好 🌟',
             createdAt: new Date(),
-            sender: 'test-user'
+            sender: 'test-user',
+            chatId: 'chat-1'
           },
           {
             role: 'assistant',
             content: 'Response with special chars: @#$%^&*()',
-            createdAt: new Date()
+            createdAt: new Date(),
+            chatId: 'chat-1'
           }
         ]
       });
@@ -264,6 +272,61 @@ describe('Core Agent Storage with Mocks', () => {
 
       // Verify files were written
       expect(fs.writeFile).toHaveBeenCalledTimes(3); // config, system-prompt, memory
+    });
+
+    test('should preserve chatId field when saving agents with mocks', async () => {
+      const agentId = 'chatid-agent';
+      const agent = createMockAgent({
+        id: agentId,
+        name: 'ChatId Test Agent',
+        type: 'test',
+        status: 'active',
+        provider: LLMProvider.OPENAI,
+        model: 'gpt-4',
+        systemPrompt: 'You are a test agent',
+        createdAt: new Date(),
+        lastActive: new Date(),
+        llmCallCount: 0,
+        memory: [
+          {
+            role: 'user',
+            content: 'Message in chat 1',
+            createdAt: new Date(),
+            sender: 'user',
+            chatId: 'chat-1'
+          },
+          {
+            role: 'user',
+            content: 'Message in chat 2',
+            createdAt: new Date(),
+            sender: 'user',
+            chatId: 'chat-2'
+          },
+          {
+            role: 'user',
+            content: 'Legacy message with no chatId',
+            createdAt: new Date(),
+            sender: 'user'
+            // No chatId field - legacy message
+          }
+        ]
+      });
+
+      await saveAgent('test-data/worlds', worldId, agent);
+
+      // Verify memory file was written with chatId values
+      const memoryCallIndex = Array.from({ length: fs.writeFile.mock.calls.length }, (_, i) => i)
+        .find(i => fs.writeFile.mock.calls[i][0].includes('memory.json'));
+      
+      expect(memoryCallIndex).toBeDefined();
+      
+      if (memoryCallIndex !== undefined) {
+        const savedMemoryData = JSON.parse(fs.writeFile.mock.calls[memoryCallIndex][1]);
+        expect(savedMemoryData).toHaveLength(3);
+        expect(savedMemoryData[0].chatId).toBe('chat-1');
+        expect(savedMemoryData[1].chatId).toBe('chat-2');
+        expect(savedMemoryData[2].chatId).toBeUndefined(); // Legacy message
+      }
     });
   });
 

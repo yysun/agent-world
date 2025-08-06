@@ -125,7 +125,10 @@ export class WorldClass {
    * Get agent by name/id
    */
   async getAgent(agentName: string): Promise<Agent | null> {
-    return await getAgent(this.worldId, agentName);
+    // Get world to access currentChatId for memory filtering
+    const world = await getWorld(this.worldId);
+    const currentChatId = world?.currentChatId;
+    return await getAgent(this.worldId, agentName, currentChatId);
   }
 
   /**
