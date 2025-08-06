@@ -33,11 +33,12 @@
  * - Provides transaction support for data consistency
  * - Includes comprehensive error handling and validation
  * - Complete type safety with proper TypeScript interfaces
- * 
+ *
  * Recent Changes:
  * - 2025-08-01: Added proper TypeScript types for all chat operations
  * - 2025-08-01: Implemented restoreFromSnapshot with atomic transactions
  * - 2025-08-01: Enhanced type safety removing any types
+ * - 2025-08-06: Fixed initialization order - migration check before schema initialization
  */
 
 
@@ -131,9 +132,13 @@ export async function createSQLiteStorageContext(config: SQLiteConfig): Promise<
 
 async function ensureInitialized(ctx: SQLiteStorageContext): Promise<void> {
   if (!ctx.isInitialized) {
-    await initializeSchema(ctx.schemaCtx);
+    // Check if migration is needed first
     if (await needsMigration(ctx.schemaCtx)) {
+      // Migration handles both fresh databases and existing ones
       await migrate(ctx.schemaCtx);
+    } else {
+      // No migration needed, just ensure schema is initialized
+      await initializeSchema(ctx.schemaCtx);
     }
     ctx.isInitialized = true;
   }
@@ -491,7 +496,7 @@ export async function updateChatData(ctx: SQLiteStorageContext, worldId: string,
   params.push(chatId, worldId);
 
   await run(ctx, `
-    UPDATE world_chats 
+    UPDATE world_chats
     SET ${setClauses.join(', ')}
     WHERE id = ? AND world_id = ?
   `, ...params);
@@ -592,7 +597,7 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
     // Restore world data
     if (chat.world) {
       await run(ctx, `
-        UPDATE worlds 
+        UPDATE worlds
         SET name = ?, description = ?, turn_limit = ?, chat_llm_provider = ?, chat_llm_model = ?
         WHERE id = ?
       `, chat.world.name, chat.world.description, chat.world.turnLimit,

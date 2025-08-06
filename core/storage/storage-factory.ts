@@ -567,9 +567,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       restoreFromWorldChat,
       archiveAgentMemory
     } = await import('./sqlite-storage.js');
-    const { initializeSchema } = await import('./sqlite-schema.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
-    await initializeSchema(ctx.schemaCtx);
+    // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
     await initializeWithDefaults(ctx);
     storage = {
       saveWorld: (worldData: any) => saveWorld(ctx, worldData),

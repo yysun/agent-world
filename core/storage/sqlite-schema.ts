@@ -23,6 +23,7 @@
  * - Cascading deletes for data consistency
  * - Prepared statements for security and performance
  * - 2025-07-27: Ensures parent directory for SQLite database exists before opening (prevents SQLITE_CANTOPEN)
+ * - 2025-08-06: Fixed migration logic to properly handle existing databases missing chat_id column
  */
 
 // Types only import - will be stripped at runtime
@@ -270,28 +271,28 @@ export async function createIndexes(ctx: SQLiteSchemaContext): Promise<void> {
 export async function createTriggers(ctx: SQLiteSchemaContext): Promise<void> {
   const run = promisify(ctx.db.run.bind(ctx.db));
   await run(`
-    CREATE TRIGGER IF NOT EXISTS worlds_updated_at 
+    CREATE TRIGGER IF NOT EXISTS worlds_updated_at
     AFTER UPDATE ON worlds
     BEGIN
       UPDATE worlds SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END
   `);
   await run(`
-    CREATE TRIGGER IF NOT EXISTS agents_last_active 
+    CREATE TRIGGER IF NOT EXISTS agents_last_active
     AFTER UPDATE ON agents
     BEGIN
       UPDATE agents SET last_active = CURRENT_TIMESTAMP WHERE id = NEW.id AND world_id = NEW.world_id;
     END
   `);
   await run(`
-    CREATE TRIGGER IF NOT EXISTS world_chats_updated_at 
+    CREATE TRIGGER IF NOT EXISTS world_chats_updated_at
     AFTER UPDATE ON world_chats
     BEGIN
       UPDATE world_chats SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
     END
   `);
   await run(`
-    CREATE TRIGGER IF NOT EXISTS archive_statistics_updated_at 
+    CREATE TRIGGER IF NOT EXISTS archive_statistics_updated_at
     AFTER UPDATE ON archive_statistics
     BEGIN
       UPDATE archive_statistics SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
@@ -320,13 +321,65 @@ export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean>
   return currentVersion < targetVersion;
 }
 
+// Global migration lock to prevent concurrent migrations on the same database
+const migrationLocks = new Map<string, Promise<void>>();
+
 export async function migrate(ctx: SQLiteSchemaContext): Promise<void> {
+  const dbPath = ctx.config.database;
+
+  // Check if there's already a migration in progress for this database
+  if (migrationLocks.has(dbPath)) {
+    await migrationLocks.get(dbPath);
+    return;
+  }
+
+  const migrationPromise = performMigration(ctx);
+  migrationLocks.set(dbPath, migrationPromise);
+
+  try {
+    await migrationPromise;
+  } finally {
+    migrationLocks.delete(dbPath);
+  }
+}
+
+async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
   const currentVersion = await getSchemaVersion(ctx);
   const run = promisify(ctx.db.run.bind(ctx.db));
-  
+  const get = promisify(ctx.db.get.bind(ctx.db));
+  const all = promisify(ctx.db.all.bind(ctx.db));
+
   if (currentVersion === 0) {
-    await initializeSchema(ctx);
-    await setSchemaVersion(ctx, 2);
+    // Check if tables exist (existing database) or need to be created (fresh database)
+    try {
+      const tableCheck = await get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_memory'") as any;
+
+      if (!tableCheck) {
+        // Fresh database - create all tables with current schema
+        await initializeSchema(ctx);
+        await setSchemaVersion(ctx, 2);
+      } else {
+        // Existing database with version 0 - check if chat_id column exists
+        try {
+          const columns = await all("PRAGMA table_info(agent_memory)") as any[];
+          const hasChatIdColumn = columns && Array.isArray(columns) && columns.some((col: any) => col.name === 'chat_id');
+
+          if (!hasChatIdColumn) {
+            // Add missing chat_id column
+            await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
+            await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
+          }
+          await setSchemaVersion(ctx, 2);
+        } catch (error) {
+          console.warn('[sqlite-schema] Migration warning for chat_id column:', error);
+          // Try to continue anyway
+          await setSchemaVersion(ctx, 2);
+        }
+      }
+    } catch (error) {
+      console.error('[sqlite-schema] Migration error:', error);
+      throw error;
+    }
   } else if (currentVersion === 1) {
     // Migration from version 1 to 2: Add chatId column to agent_memory
     try {
@@ -339,9 +392,7 @@ export async function migrate(ctx: SQLiteSchemaContext): Promise<void> {
     }
   }
   // Future migrations would go here
-}
-
-export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
+} export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
   const get = promisify(ctx.db.get.bind(ctx.db));
   const all = promisify(ctx.db.all.bind(ctx.db));
   const errors: string[] = [];
