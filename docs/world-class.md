@@ -2,6 +2,8 @@
 
 The `WorldClass` provides an object-oriented wrapper around the functional world management API from `core/index.js`. This allows for cleaner, more intuitive code when working with worlds in an object-oriented style.
 
+> **Updated**: Documentation now reflects the actual implementation with simplified constructor (worldId only), automatic path management via storage factory, and streamlined chat operations.
+
 ## Installation
 
 The `WorldClass` is exported from the core module:
@@ -16,30 +18,28 @@ import { WorldClass } from './core/index.js';
 
 ```typescript
 import { WorldClass, createWorld } from './core/index.js';
-import { getDefaultRootPath } from './core/storage-factory.js';
 
 // First create a world using the functional API
-const world = await createWorld(getDefaultRootPath(), {
+const world = await createWorld({
   name: 'My World',
   description: 'A world for my agents'
 });
 
 // Then wrap it with WorldClass for OOP operations
-const worldClass = new WorldClass(getDefaultRootPath(), world.id);
+const worldClass = new WorldClass(world.id);
 ```
 
 ### Basic Operations
 
 ```typescript
 // World operations
-await worldClass.delete();                    // deleteWorld(rootPath, worldId)
-await worldClass.update({ turnLimit: 10 });  // updateWorld(rootPath, worldId, updates)
-await worldClass.reload();                    // getWorld(rootPath, worldId)
-await worldClass.exportToMarkdown();          // exportWorldToMarkdown(rootPath, worldId)
+await worldClass.delete();                    // deleteWorld(worldId)
+await worldClass.update({ turnLimit: 10 });  // updateWorld(worldId, updates)
+await worldClass.reload();                    // getWorld(worldId)
+await worldClass.exportToMarkdown();          // exportWorldToMarkdown(worldId)
 
 // Properties
 console.log(worldClass.id);                  // Get world ID
-console.log(worldClass.path);                // Get root path
 console.log(worldClass.toString());          // WorldClass(world-id)
 ```
 
@@ -68,16 +68,13 @@ await worldClass.deleteAgent('agent-name');
 ```typescript
 // Chat operations
 await worldClass.newChat();                           // Create new chat
-await worldClass.loadChatById('chat-id');            // Load specific chat
+await worldClass.restoreChat('chat-id');             // Load specific chat
 const chats = await worldClass.listChats();          // List all chats
-const chat = await worldClass.getChatData('chat-id'); // Get chat data
-await worldClass.deleteChatData('chat-id');          // Delete chat
+await worldClass.deleteChat('chat-id');              // Delete chat
 
-// Create chat with custom data
-const chatData = await worldClass.createChatData({
-  name: 'Important Conversation',
-  description: 'Discussion about project requirements'
-});
+// Create chat with optional current setting
+await worldClass.newChat(false);                     // Create new chat without setting as current
+await worldClass.restoreChat('chat-id', false);      // Load chat without setting as current
 ```
 
 ## API Reference
@@ -85,49 +82,48 @@ const chatData = await worldClass.createChatData({
 ### Constructor
 
 ```typescript
-constructor(rootPath: string, worldId: string)
+constructor(worldId: string)
 ```
+
+The constructor takes only the world ID. The root path is handled automatically by the storage factory.
 
 ### World Operations
 
-| Method | Description | Equivalent Function |
-|--------|-------------|-------------------|
-| `delete()` | Delete world and all data | `deleteWorld(rootPath, worldId)` |
-| `update(updates)` | Update world configuration | `updateWorld(rootPath, worldId, updates)` |
-| `reload()` | Get fresh world data | `getWorld(rootPath, worldId)` |
-| `exportToMarkdown()` | Export to markdown | `exportWorldToMarkdown(rootPath, worldId)` |
-| `save()` | No-op (stateless design) | - |
+| Method               | Description                | Equivalent Function              |
+| -------------------- | -------------------------- | -------------------------------- |
+| `delete()`           | Delete world and all data  | `deleteWorld(worldId)`           |
+| `update(updates)`    | Update world configuration | `updateWorld(worldId, updates)`  |
+| `reload()`           | Get fresh world data       | `getWorld(worldId)`              |
+| `exportToMarkdown()` | Export to markdown         | `exportWorldToMarkdown(worldId)` |
+| `save()`             | No-op (stateless design)   | -                                |
 
 ### Agent Operations
 
-| Method | Description | Equivalent Function |
-|--------|-------------|-------------------|
-| `createAgent(params)` | Create new agent | `createAgent(rootPath, worldId, params)` |
-| `getAgent(name)` | Get agent by name | `getAgent(rootPath, worldId, name)` |
-| `updateAgent(name, updates)` | Update agent | `updateAgent(rootPath, worldId, name, updates)` |
-| `deleteAgent(name)` | Delete agent | `deleteAgent(rootPath, worldId, name)` |
-| `listAgents()` | List all agents | `listAgents(rootPath, worldId)` |
-| `clearAgentMemory(name)` | Clear agent memory | `clearAgentMemory(rootPath, worldId, name)` |
+| Method                       | Description        | Equivalent Function                   |
+| ---------------------------- | ------------------ | ------------------------------------- |
+| `createAgent(params)`        | Create new agent   | `createAgent(worldId, params)`        |
+| `getAgent(name)`             | Get agent by name  | `getAgent(worldId, name)`             |
+| `updateAgent(name, updates)` | Update agent       | `updateAgent(worldId, name, updates)` |
+| `deleteAgent(name)`          | Delete agent       | `deleteAgent(worldId, name)`          |
+| `listAgents()`               | List all agents    | `listAgents(worldId)`                 |
+| `clearAgentMemory(name)`     | Clear agent memory | `clearAgentMemory(worldId, name)`     |
 
 ### Chat Operations
 
-| Method | Description | Equivalent Function |
-|--------|-------------|-------------------|
-| `createChatData(params)` | Create chat data | `createChatData(rootPath, worldId, params)` |
-| `getChatData(chatId)` | Get chat by ID | `getChatData(rootPath, worldId, chatId)` |
-| `listChats()` | List all chats | `listChatHistories(rootPath, worldId)` |
-| `deleteChatData(chatId)` | Delete chat | `deleteChatData(rootPath, worldId, chatId)` |
-| `newChat(setAsCurrent?)` | Create new chat | `newChat(rootPath, worldId, setAsCurrent)` |
-| `loadChatById(chatId, setAsCurrent?)` | Load chat | `loadChatById(rootPath, worldId, chatId, setAsCurrent)` |
+| Method                               | Description     | Equivalent Function                                |
+| ------------------------------------ | --------------- | -------------------------------------------------- |
+| `listChats()`                        | List all chats  | `listChats(worldId)`                               |
+| `deleteChat(chatId)`                 | Delete chat     | `deleteChat(worldId, chatId)`                      |
+| `newChat(setAsCurrent?)`             | Create new chat | `newChat(worldId, setAsCurrent)`                   |
+| `restoreChat(chatId, setAsCurrent?)` | Load chat       | `restoreChat(worldId, chatId)` or verify existence |
 
 ### Utility Methods
 
-| Method | Description |
-|--------|-------------|
-| `id` | Get world ID (readonly) |
-| `path` | Get root path (readonly) |
-| `toString()` | String representation |
-| `toJSON()` | JSON representation |
+| Method       | Description             |
+| ------------ | ----------------------- |
+| `id`         | Get world ID (readonly) |
+| `toString()` | String representation   |
+| `toJSON()`   | JSON representation     |
 
 ## Comparison: Functional vs OOP
 
@@ -135,16 +131,16 @@ constructor(rootPath: string, worldId: string)
 ```typescript
 import { deleteWorld, createAgent, listAgents } from './core/index.js';
 
-await deleteWorld(rootPath, worldId);
-await createAgent(rootPath, worldId, agentParams);
-const agents = await listAgents(rootPath, worldId);
+await deleteWorld(worldId);
+await createAgent(worldId, agentParams);
+const agents = await listAgents(worldId);
 ```
 
 ### OOP API (New)
 ```typescript
 import { WorldClass } from './core/index.js';
 
-const world = new WorldClass(rootPath, worldId);
+const world = new WorldClass(worldId);
 await world.delete();
 await world.createAgent(agentParams);
 const agents = await world.listAgents();
@@ -154,9 +150,10 @@ const agents = await world.listAgents();
 
 - **Stateless**: Each method call fetches fresh data from storage
 - **Consistency**: Returns same types as functional API
-- **Clean**: No need to pass `rootPath` and `worldId` to every method
+- **Clean**: No need to pass `worldId` to every method
 - **Type-safe**: Full TypeScript support with proper type inference
 - **Backwards Compatible**: Functional API remains unchanged
+- **Path Management**: Storage factory handles root path automatically
 
 ## Examples
 
