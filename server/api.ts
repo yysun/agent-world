@@ -21,6 +21,13 @@
  * - Eliminates repetitive rootPath, worldId parameter passing
  * - Provides better encapsulation and type safety
  * - Root path parameter removed - storage factory handles path management
+ *
+ * Recent Changes:
+ * - Fixed PATCH /worlds/:worldName to handle all schema fields including chatLLMProvider and chatLLMModel
+ * - Previously only processed name, description, turnLimit; now handles complete WorldUpdateSchema
+ * - Added .nullable() support for chatLLMProvider and chatLLMModel to handle null values from clients
+ * - Updated update logic to filter out null values (treat as no-op rather than validation error)
+ * - Added comprehensive test coverage for world update endpoint validation and null handling
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -141,16 +148,16 @@ const WorldCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
   turnLimit: z.number().min(1).optional(),
-  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
-  chatLLMModel: z.string().optional()
+  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
+  chatLLMModel: z.string().nullable().optional()
 });
 
 const WorldUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().optional(),
   turnLimit: z.number().min(1).optional(),
-  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
-  chatLLMModel: z.string().optional()
+  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
+  chatLLMModel: z.string().nullable().optional()
 });
 
 const AgentCreateSchema = z.object({
@@ -245,8 +252,8 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       name,
       description,
       turnLimit,
-      chatLLMProvider: chatLLMProvider as LLMProvider,
-      chatLLMModel
+      chatLLMProvider: (chatLLMProvider || undefined) as LLMProvider | undefined,
+      chatLLMModel: chatLLMModel || undefined
     });
     if (world) {
       res.status(201).json({ name: world.name, id: worldId });
@@ -289,13 +296,15 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       return;
     }
 
-    const { name, description, turnLimit } = validation.data;
+    const { name, description, turnLimit, chatLLMProvider, chatLLMModel } = validation.data;
 
     // Update world metadata using WorldClass
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
     if (turnLimit !== undefined) updates.turnLimit = turnLimit;
+    if (chatLLMProvider !== undefined && chatLLMProvider !== null) updates.chatLLMProvider = chatLLMProvider;
+    if (chatLLMModel !== undefined && chatLLMModel !== null) updates.chatLLMModel = chatLLMModel;
 
     // Apply updates if any
     let updatedWorld = currentWorld;
