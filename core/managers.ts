@@ -247,7 +247,7 @@ export async function getAgent(worldId: string, agentId: string, currentChatId?:
   if (!agentData) return null;
 
   // Filter memory by chatId if currentChatId is provided
-  if (currentChatId !== undefined && agentData.memory) {
+  if (currentChatId && agentData.memory) {
     agentData.memory = agentData.memory.filter(message => {
       // Legacy messages (no chatId) should match all chats for backward compatibility
       if (message.chatId === undefined || message.chatId === null) {

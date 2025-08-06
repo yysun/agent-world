@@ -117,8 +117,11 @@ function toKebabCase(name: string): string {
 }
 
 async function isAgentNameUnique(worldClass: WorldClass, agentName: string, excludeAgent?: string): Promise<boolean> {
-  if (excludeAgent && agentName === excludeAgent) return true;
-  const existingAgent = await worldClass.getAgent(agentName);
+  const normalizedAgentName = toKebabCase(agentName);
+  const normalizedExcludeAgent = excludeAgent ? toKebabCase(excludeAgent) : undefined;
+
+  if (normalizedExcludeAgent && normalizedAgentName === normalizedExcludeAgent) return true;
+  const existingAgent = await worldClass.getAgent(normalizedAgentName);
   return !existingAgent;
 }
 
@@ -416,7 +419,9 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     const worldClass = await getWorldOrError(res, worldName);
     if (!worldClass) return;
 
-    const existingAgent = await worldClass.getAgent(agentName);
+    // Normalize agent name to handle case-insensitive lookups
+    const normalizedAgentName = toKebabCase(agentName);
+    const existingAgent = await worldClass.getAgent(normalizedAgentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
@@ -426,12 +431,12 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
 
     // If clearMemory is requested, clear memory first
     if (clearMemory) {
-      const cleared = await worldClass.clearAgentMemory(agentName);
+      const cleared = await worldClass.clearAgentMemory(normalizedAgentName);
       if (!cleared) {
         sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
         return;
       }
-      const refreshedAgent = await worldClass.getAgent(agentName);
+      const refreshedAgent = await worldClass.getAgent(normalizedAgentName);
       if (refreshedAgent) {
         updatedAgent = refreshedAgent;
       }
@@ -445,7 +450,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     // Only update if there are non-memory fields to update
     const updateKeys = Object.keys(updates).filter(k => k !== 'memory');
     if (updateKeys.length > 0) {
-      const updateResult = await worldClass.updateAgent(agentName, updates);
+      const updateResult = await worldClass.updateAgent(normalizedAgentName, updates);
       if (!updateResult) {
         sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
         return;
@@ -468,13 +473,15 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
     const worldClass = await getWorldOrError(res, worldName);
     if (!worldClass) return;
 
-    const existingAgent = await worldClass.getAgent(agentName);
+    // Normalize agent name to handle case-insensitive lookups
+    const normalizedAgentName = toKebabCase(agentName);
+    const existingAgent = await worldClass.getAgent(normalizedAgentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const deleted = await worldClass.deleteAgent(agentName);
+    const deleted = await worldClass.deleteAgent(normalizedAgentName);
     if (!deleted) {
       sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
       return;
@@ -495,13 +502,15 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
     const worldClass = await getWorldOrError(res, worldName);
     if (!worldClass) return;
 
-    const agent = await worldClass.getAgent(agentName);
+    // Normalize agent name to handle case-insensitive lookups
+    const normalizedAgentName = toKebabCase(agentName);
+    const agent = await worldClass.getAgent(normalizedAgentName);
     if (!agent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const clearedAgent = await worldClass.clearAgentMemory(agentName);
+    const clearedAgent = await worldClass.clearAgentMemory(normalizedAgentName);
     if (!clearedAgent) {
       sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
       return;
