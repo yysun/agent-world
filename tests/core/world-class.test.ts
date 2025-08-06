@@ -1,6 +1,6 @@
 /**
  * Basic Test for WorldClass
- * 
+ *
  * Simple test to verify WorldClass basic functionality
  */
 
@@ -11,28 +11,26 @@ describe('WorldClass', () => {
   const worldId = 'test-world';
 
   it('should create WorldClass instance and provide basic properties', () => {
-    const worldClass = new WorldClass(rootPath, worldId);
+    const worldClass = new WorldClass(worldId);
 
     // Test basic properties
     expect(worldClass.id).toBe(worldId);
-    expect(worldClass.path).toBe(rootPath);
     expect(worldClass.toString()).toBe(`WorldClass(${worldId})`);
 
     // Test JSON serialization
     const json = worldClass.toJSON();
     expect(json.id).toBe(worldId);
-    expect(json.rootPath).toBe(rootPath);
   });
 
   it('should handle save method as no-op', async () => {
-    const worldClass = new WorldClass(rootPath, worldId);
+    const worldClass = new WorldClass(worldId);
 
     // save() should not throw and should be a no-op
     await expect(worldClass.save()).resolves.toBeUndefined();
   });
 
   it('should have all expected methods defined', () => {
-    const worldClass = new WorldClass(rootPath, worldId);
+    const worldClass = new WorldClass(worldId);
 
     // World operations
     expect(typeof worldClass.delete).toBe('function');
@@ -41,7 +39,7 @@ describe('WorldClass', () => {
     expect(typeof worldClass.exportToMarkdown).toBe('function');
     expect(typeof worldClass.save).toBe('function');
 
-    // Agent operations  
+    // Agent operations
     expect(typeof worldClass.createAgent).toBe('function');
     expect(typeof worldClass.getAgent).toBe('function');
     expect(typeof worldClass.updateAgent).toBe('function');
@@ -57,17 +55,14 @@ describe('WorldClass', () => {
   });
 
   it('should maintain consistent ID and path', () => {
-    const worldClass1 = new WorldClass(rootPath, worldId);
-    const worldClass2 = new WorldClass('/different/path', 'different-id');
+    const worldClass1 = new WorldClass(worldId);
+    const worldClass2 = new WorldClass('different-id');
 
     expect(worldClass1.id).toBe(worldId);
-    expect(worldClass1.path).toBe(rootPath);
 
     expect(worldClass2.id).toBe('different-id');
-    expect(worldClass2.path).toBe('/different/path');
 
     // Each instance should be independent
     expect(worldClass1.id).not.toBe(worldClass2.id);
-    expect(worldClass1.path).not.toBe(worldClass2.path);
   });
 });

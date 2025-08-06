@@ -678,13 +678,13 @@ export function getDefaultRootPath(): string {
 export async function createStorageFromEnv(): Promise<StorageAPI> {
   const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
   const rootPath = getDefaultRootPath();
-  
+
   // Use a special cache key for environment-based storage
   const envCacheKey = `env-${type}-${rootPath}`;
   if (storageCache.has(envCacheKey)) {
     return storageCache.get(envCacheKey)!;
   }
-  
+
   // Ensure directory exists
   if (isNodeEnvironment() && rootPath && typeof fs.existsSync === 'function' && !fs.existsSync(rootPath)) {
     if (typeof fs.mkdirSync === 'function') {
@@ -707,7 +707,7 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
   };
 
   console.log('🟢 Storage path:', config.rootPath + ' - ' + config.type);
-  
+
   const storage = await createStorage(config);
   // Cache with the special environment key
   storageCache.set(envCacheKey, storage);

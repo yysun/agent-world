@@ -76,7 +76,7 @@ async function runIntegrationTest(): Promise<void> {
 
     // Step 1: Subscribe to world
     console.log('\n1. Subscribing to world...');
-    worldSubscription = await subscribeWorld(TEST_WORLD_ID, ROOT_PATH, testClient);
+    worldSubscription = await subscribeWorld(TEST_WORLD_ID, testClient);
     if (!worldSubscription) {
       throw new Error('World not found');
     }
@@ -98,14 +98,14 @@ async function runIntegrationTest(): Promise<void> {
     // Step 3: Create new chat
     console.log('\n3. Creating new chat...');
 
-    await newChat(ROOT_PATH, TEST_WORLD_ID);
+    await newChat(TEST_WORLD_ID);
     log('Current chat id after new chat', yellow(world.currentChatId || ''));
 
     const chatId = world.currentChatId;
     console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
 
-    await newChat(ROOT_PATH, TEST_WORLD_ID);
-    await newChat(ROOT_PATH, TEST_WORLD_ID);
+    await newChat(TEST_WORLD_ID);
+    await newChat(TEST_WORLD_ID);
 
     // Step 4: Log current chat id after new chat
     console.log('\n4. Logging current chat id after new chat...');
@@ -120,7 +120,7 @@ async function runIntegrationTest(): Promise<void> {
 
     await wait(5000);
 
-    const chats = await listChats(ROOT_PATH, TEST_WORLD_ID);
+    const chats = await listChats(TEST_WORLD_ID);
 
     // Step 6: Get updated world state from subscription
     console.log('\n6. Checking updated world state...');

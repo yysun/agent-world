@@ -6,7 +6,7 @@ dotenv.config();
 
 /**
  * Agent World CLI Entry Point - Dual-Mode Console Interface
- * 
+ *
  * Provides pipeline and interactive modes with unified subscription system,
  * real-time streaming, and comprehensive world management.
  *
@@ -203,8 +203,6 @@ function printCLIResult(result: any) {
 
 // Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
-  const rootPath = options.root || DEFAULT_ROOT_PATH;
-
   disableStreaming();
 
   try {
@@ -247,7 +245,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
     };
 
     if (options.world) {
-      worldSubscription = await subscribeWorld(options.world, rootPath, pipelineClient);
+      worldSubscription = await subscribeWorld(options.world, pipelineClient);
       if (!worldSubscription) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
         process.exit(1);
@@ -261,7 +259,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         console.error(boldRed('Error: World must be specified to send user messages'));
         process.exit(1);
       }
-      const result = await processCLIInput(options.command, world, rootPath, 'HUMAN');
+      const result = await processCLIInput(options.command, world, 'HUMAN');
       printCLIResult(result);
 
       // Only set timer if sending message to world (not for commands)
@@ -285,7 +283,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         console.error(boldRed('Error: World must be specified to send user messages'));
         process.exit(1);
       }
-      const result = await processCLIInput(messageFromArgs, world, rootPath, 'HUMAN');
+      const result = await processCLIInput(messageFromArgs, world, 'HUMAN');
       printCLIResult(result);
 
       // Set timer with longer delay for message processing (always needed for messages)
@@ -308,7 +306,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           console.error(boldRed('Error: World must be specified to send user messages'));
           process.exit(1);
         }
-        const result = await processCLIInput(input.trim(), world, rootPath, 'HUMAN');
+        const result = await processCLIInput(input.trim(), world, 'HUMAN');
         printCLIResult(result);
 
         // Set timer with longer delay for message processing (always needed for stdin messages)
@@ -360,7 +358,7 @@ async function handleSubscribe(
     }
   };
 
-  const subscription = await subscribeWorld(worldName, rootPath, cliClient);
+  const subscription = await subscribeWorld(worldName, cliClient);
   if (!subscription) throw new Error('Failed to load world');
 
   return { subscription, world: subscription.world as World };
@@ -391,7 +389,7 @@ function handleWorldEvent(
 // World discovery and selection
 async function getAvailableWorldNames(rootPath: string): Promise<string[]> {
   try {
-    const worldInfos = await listWorlds(rootPath);
+    const worldInfos = await listWorlds();
     return worldInfos.map(info => info.id);
   } catch (error) {
     console.error('Error listing worlds:', error);
@@ -570,13 +568,12 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (worldState) cleanupWorldSubscription(worldState);
         rl.close();
         process.exit(0);
-        return;
       }
 
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
       try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, rootPath, 'HUMAN');
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
@@ -588,7 +585,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           if (worldState) cleanupWorldSubscription(worldState);
           rl.close();
           process.exit(0);
-          return;
         }
 
         // Handle world selection command

@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAgent, listAgents, getWorld, LLMProvider } from '@agent-world/core';
-import path from 'path';
-
-const ROOT_PATH = path.join(process.cwd(), process.env.AGENT_WORLD_DATA_PATH || './data/worlds');
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { worldId } = await params;
-    const world = await getWorld(ROOT_PATH, worldId);
+    const world = await getWorld(worldId);
 
     if (!world) {
       return NextResponse.json(
@@ -19,7 +16,7 @@ export async function GET(
       );
     }
 
-    const agents = await listAgents(ROOT_PATH, worldId);
+    const agents = await listAgents(worldId);
     return NextResponse.json({ agents });
   } catch (error) {
     console.error('Error listing agents:', error);
@@ -37,7 +34,7 @@ export async function POST(
   try {
     const { worldId } = await params;
     const body = await request.json();
-    const { name, description, system } = body;
+    const { name, system } = body;
 
     if (!name) {
       return NextResponse.json(
@@ -46,7 +43,7 @@ export async function POST(
       );
     }
 
-    const world = await getWorld(ROOT_PATH, worldId);
+    const world = await getWorld(worldId);
     if (!world) {
       return NextResponse.json(
         { error: 'World not found' },
@@ -54,7 +51,7 @@ export async function POST(
       );
     }
 
-    const agent = await createAgent(ROOT_PATH, worldId, {
+    const agent = await createAgent(worldId, {
       name,
       type: 'general',
       provider: LLMProvider.OPENAI,

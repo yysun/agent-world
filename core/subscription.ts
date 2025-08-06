@@ -1,6 +1,6 @@
 /**
  * World Subscription Management Module
- * 
+ *
  * Features:
  * - Centralized world subscription and event handling
  * - Transport-agnostic client connection interface
@@ -9,7 +9,7 @@
  * - World instance isolation and complete destruction during refresh
  * - EventEmitter recreation and agent map repopulation
  * - World message subscription functions
- * 
+ *
  * Purpose:
  * - Preserve essential world subscription functionality
  * - Maintain transport abstraction for CLI and WebSocket
@@ -17,7 +17,7 @@
  * - Ensure proper world lifecycle management across refresh operations
  * - WebSocket command processing moved to server/ws.ts for better separation
  * - Enable worlds to subscribe/unsubscribe to message events
- * 
+ *
  * World Refresh Architecture:
  * - Each subscription maintains reference to current world instance
  * - Refresh completely destroys old world (EventEmitter, agents map, listeners)
@@ -46,7 +46,7 @@ export interface ClientConnection {
 export interface WorldSubscription {
   world: World;
   unsubscribe: () => Promise<void>;
-  refresh: (rootPath: string) => Promise<World>;
+  refresh: () => Promise<World>;
   destroy: () => Promise<void>;
 }
 
@@ -95,7 +95,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       await destroyCurrentWorld();
       currentWorld = null;
     },
-    refresh: async (rootPath: string) => {
+    refresh: async () => {
       const worldId = currentWorld?.id || '';
       logger.debug('Refreshing world subscription', { worldId });
 
@@ -103,7 +103,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       await destroyCurrentWorld();
 
       // Create a completely new world instance
-      const refreshedWorld = await getWorld(rootPath, worldId);
+      const refreshedWorld = await getWorld(worldId);
       if (!refreshedWorld) {
         throw new Error(`Failed to refresh world: ${worldId}`);
       }
@@ -132,13 +132,12 @@ export async function startWorld(world: World, client: ClientConnection): Promis
 // World subscription management
 export async function subscribeWorld(
   worldIdentifier: string,
-  rootPath: string,
   client: ClientConnection
 ): Promise<WorldSubscription | null> {
   try {
     // Load world using core manager (convert to kebab-case internally)
     const worldId = toKebabCase(worldIdentifier);
-    const currentWorld = await getWorld(rootPath, worldId);
+    const currentWorld = await getWorld(worldId);
 
     if (!currentWorld) {
       if (client.onError) {

@@ -7,19 +7,20 @@
  * - Consistent serialization with serializeWorld() and serializeAgent()
  * - Optimized world existence checks using getWorldConfig
  * - Timer management for streaming (15s initial, 5s stall timeout)
- * 
+ *
  * Implementation:
  * - Core module integration with event handling
  * - Simplified API structure (World objects contain agents[] and chats[])
  * - Reusable getWorldOrError utility for error handling
  * - Non-streaming mode for CLI pipeline compatibility
  * - **Updated to use WorldClass for object-oriented world management**
- * 
+ *
  * WorldClass Usage:
  * - Most routes now use WorldClass for cleaner, more maintainable code
- * - Example: const worldClass = new WorldClass(ROOT_PATH, worldName); await worldClass.delete();
+ * - Example: const worldClass = new WorldClass(worldName); await worldClass.delete();
  * - Eliminates repetitive rootPath, worldId parameter passing
  * - Provides better encapsulation and type safety
+ * - Root path parameter removed - storage factory handles path management
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -48,7 +49,7 @@ async function serializeWorld(world: World): Promise<{
   const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
 
   // Use WorldClass to get chats
-  const worldClass = new WorldClass(ROOT_PATH, world.id);
+  const worldClass = new WorldClass(world.id);
   const chats = await worldClass.listChats();
 
   return {
@@ -122,7 +123,7 @@ async function isAgentNameUnique(worldClass: WorldClass, agentName: string, excl
 }
 
 async function getWorldOrError(res: Response, worldName: string): Promise<WorldClass | null> {
-  const worldClass = new WorldClass(ROOT_PATH, worldName);
+  const worldClass = new WorldClass(worldName);
   const world = await worldClass.reload();
   if (!world) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
@@ -182,9 +183,9 @@ const router = express.Router();
 // GET /worlds - List worlds or create default
 router.get('/worlds', async (req, res) => {
   try {
-    const worlds = await listWorlds(ROOT_PATH);
+    const worlds = await listWorlds();
     if (!worlds?.length) {
-      const world = await createWorld(ROOT_PATH, { name: DEFAULT_WORLD_NAME });
+      const world = await createWorld({ name: DEFAULT_WORLD_NAME });
       if (world) {
         res.json([{ name: world.name, agentCount: 0 }]);
       } else {
@@ -233,7 +234,7 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
     }
     const { name, description, turnLimit } = validation.data;
     const worldId = toKebabCase(name);
-    const world = await createWorld(ROOT_PATH, { name, description, turnLimit });
+    const world = await createWorld({ name, description, turnLimit });
     if (world) {
       res.status(201).json({ name: world.name, id: worldId });
     } else {
@@ -366,7 +367,7 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
   try {
     const { worldName } = req.params;
 
-    const worldClass = new WorldClass(ROOT_PATH, worldName);
+    const worldClass = new WorldClass(worldName);
 
     // Check if world exists first
     const worldExists = await worldClass.reload();
@@ -534,7 +535,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         }
       };
 
-      subscribeWorld(worldName, ROOT_PATH, client).then(subscription => {
+      subscribeWorld(worldName, client).then(subscription => {
         if (!subscription) {
           hasError = true;
           errorMessage = 'Failed to subscribe to world';
@@ -626,7 +627,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     }
   };
 
-  const subscription = await subscribeWorld(worldName, ROOT_PATH, client);
+  const subscription = await subscribeWorld(worldName, client);
   if (!subscription) {
     logger.error('Unexpected: subscription is null after world existence check');
     sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
@@ -713,7 +714,7 @@ router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): 
   try {
     const worldName = req.params.worldName;
 
-    const worldClass = new WorldClass(ROOT_PATH, worldName);
+    const worldClass = new WorldClass(worldName);
 
     // Check if world exists first
     const currentWorld = await worldClass.reload();
@@ -747,7 +748,7 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
   try {
     const { worldName, chatId } = req.params;
 
-    const worldClass = new WorldClass(ROOT_PATH, worldName);
+    const worldClass = new WorldClass(worldName);
 
     // Check if world exists first
     const currentWorld = await worldClass.reload();

@@ -3,14 +3,14 @@
  *
  * Features:
  * - Clean OOP interface wrapping core function-based API
- * - Maintains rootPath and worldId for seamless method chaining
+ * - Maintains worldId for seamless method chaining
  * - All methods delegate to core/managers functions
  * - Type-safe with full TypeScript support
  * - Stateless design - each method call fetches fresh data
  *
  * Usage:
  * ```typescript
- * const world = new WorldClass(rootPath, worldId);
+ * const world = new WorldClass(worldId);
  * await world.delete();
  * const agent = await world.createAgent({...});
  * const agents = await world.listAgents();
@@ -19,9 +19,10 @@
  *
  * Design:
  * - Each method internally calls the corresponding core function
- * - Handles rootPath and worldId automatically
+ * - Handles worldId automatically
  * - Returns same types as core functions for consistency
  * - No internal state management - always fetches latest data
+ * - Root path parameter removed - storage factory handles path management
  */
 
 import {
@@ -63,7 +64,6 @@ import { toKebabCase } from './utils.js';
  */
 export class WorldClass {
   constructor(
-    private readonly rootPath: string,
     private readonly worldId: string
   ) {
     this.worldId = toKebabCase(this.worldId);
@@ -77,28 +77,28 @@ export class WorldClass {
    * Delete this world and all associated data
    */
   async delete(): Promise<boolean> {
-    return await deleteWorld(this.rootPath, this.worldId);
+    return await deleteWorld(this.worldId);
   }
 
   /**
    * Update world configuration
    */
   async update(updates: UpdateWorldParams): Promise<World | null> {
-    return await updateWorld(this.rootPath, this.worldId, updates);
+    return await updateWorld(this.worldId, updates);
   }
 
   /**
    * Get fresh world data with agent loading
    */
   async reload(): Promise<World | null> {
-    return await getWorld(this.rootPath, this.worldId);
+    return await getWorld(this.worldId);
   }
 
   /**
    * Export world to markdown format
    */
   async exportToMarkdown(): Promise<string> {
-    return await exportWorldToMarkdown(this.rootPath, this.worldId);
+    return await exportWorldToMarkdown(this.worldId);
   }
 
   /**
@@ -118,42 +118,42 @@ export class WorldClass {
    * Create new agent in this world
    */
   async createAgent(params: CreateAgentParams): Promise<Agent> {
-    return await createAgent(this.rootPath, this.worldId, params);
+    return await createAgent(this.worldId, params);
   }
 
   /**
    * Get agent by name/id
    */
   async getAgent(agentName: string): Promise<Agent | null> {
-    return await getAgent(this.rootPath, this.worldId, agentName);
+    return await getAgent(this.worldId, agentName);
   }
 
   /**
    * Update agent configuration
    */
   async updateAgent(agentName: string, updates: UpdateAgentParams): Promise<Agent | null> {
-    return await updateAgent(this.rootPath, this.worldId, agentName, updates);
+    return await updateAgent(this.worldId, agentName, updates);
   }
 
   /**
    * Delete agent from this world
    */
   async deleteAgent(agentName: string): Promise<boolean> {
-    return await deleteAgent(this.rootPath, this.worldId, agentName);
+    return await deleteAgent(this.worldId, agentName);
   }
 
   /**
    * List all agents in this world
    */
   async listAgents(): Promise<Agent[]> {
-    return await listAgents(this.rootPath, this.worldId);
+    return await listAgents(this.worldId);
   }
 
   /**
    * Clear agent memory (archive existing and reset to empty)
    */
   async clearAgentMemory(agentName: string): Promise<Agent | null> {
-    return await clearAgentMemory(this.rootPath, this.worldId, agentName);
+    return await clearAgentMemory(this.worldId, agentName);
   }
 
   // ========================
@@ -164,14 +164,14 @@ export class WorldClass {
    * List all chats for this world
    */
   async listChats(): Promise<Chat[]> {
-    return await listChats(this.rootPath, this.worldId);
+    return await listChats(this.worldId);
   }
 
   /**
    * Create new chat and optionally set as current
    */
   async newChat(setAsCurrent: boolean = true): Promise<World | null> {
-    return await newChat(this.rootPath, this.worldId, setAsCurrent);
+    return await newChat(this.worldId, setAsCurrent);
   }
 
   /**
@@ -179,13 +179,13 @@ export class WorldClass {
    */
   async restoreChat(chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
     if (setAsCurrent) {
-      return await restoreChat(this.rootPath, this.worldId, chatId);
+      return await restoreChat(this.worldId, chatId);
     } else {
       // Just verify the chat exists without setting as current
-      const chats = await listChats(this.rootPath, this.worldId);
+      const chats = await listChats(this.worldId);
       const chatExists = chats.some(c => c.id === chatId);
       if (chatExists) {
-        return await getWorld(this.rootPath, this.worldId);
+        return await getWorld(this.worldId);
       } else {
         return null;
       }
@@ -196,7 +196,7 @@ export class WorldClass {
    * Delete chat data by ID
    */
   async deleteChat(chatId: string): Promise<boolean> {
-    return await deleteChat(this.rootPath, this.worldId, chatId);
+    return await deleteChat(this.worldId, chatId);
   }
 
   // ========================
@@ -211,13 +211,6 @@ export class WorldClass {
   }
 
   /**
-   * Get the root path
-   */
-  get path(): string {
-    return this.rootPath;
-  }
-
-  /**
    * Create a string representation of this world
    */
   toString(): string {
@@ -227,10 +220,9 @@ export class WorldClass {
   /**
    * Get JSON representation
    */
-  toJSON(): { id: string; rootPath: string } {
+  toJSON(): { id: string } {
     return {
-      id: this.worldId,
-      rootPath: this.rootPath
+      id: this.worldId
     };
   }
 }
