@@ -217,6 +217,7 @@ export interface World {
 
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
+  chats: Map<string, Chat>;
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

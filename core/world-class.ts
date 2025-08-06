@@ -57,6 +57,7 @@ import type {
   UpdateWorldParams,
 } from './types.js';
 
+import { toKebabCase } from './utils.js';
 /**
  * Object-oriented wrapper for World management functions
  */
@@ -64,7 +65,9 @@ export class WorldClass {
   constructor(
     private readonly rootPath: string,
     private readonly worldId: string
-  ) { }
+  ) {
+    this.worldId = toKebabCase(this.worldId);
+  }
 
   // ========================
   // WORLD OPERATIONS
@@ -175,7 +178,18 @@ export class WorldClass {
    * Load specific chat by ID and optionally set as current
    */
   async restoreChat(chatId: string, setAsCurrent: boolean = true): Promise<World | null> {
-    return await restoreChat(this.rootPath, this.worldId, chatId);
+    if (setAsCurrent) {
+      return await restoreChat(this.rootPath, this.worldId, chatId);
+    } else {
+      // Just verify the chat exists without setting as current
+      const chats = await listChats(this.rootPath, this.worldId);
+      const chatExists = chats.some(c => c.id === chatId);
+      if (chatExists) {
+        return await getWorld(this.rootPath, this.worldId);
+      } else {
+        return null;
+      }
+    }
   }
 
   /**

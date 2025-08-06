@@ -25,7 +25,7 @@
 import { createCategoryLogger, initializeLogger } from './logger.js';
 import { EventEmitter } from 'events';
 import * as llmManager from './llm-manager.js';
-import * as storageFactory from './storage/storage-factory.js';
+import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import * as utils from './utils.js';
 
 // Type imports
@@ -38,11 +38,11 @@ import type {
 const logger = createCategoryLogger('core');
 
 // Storage and module initialization
-let storageWrappers: storageFactory.StorageAPI | null = null;
+let storageWrappers: StorageAPI | null = null;
 
 async function initializeModules() {
   initializeLogger();
-  storageWrappers = await storageFactory.createStorageWithWrappers();
+  storageWrappers = await createStorageWithWrappers();
 }
 
 const moduleInitialization = initializeModules();
@@ -79,6 +79,7 @@ export async function createWorld(rootPath: string, params: CreateWorldParams): 
     totalMessages: 0,
     eventEmitter: new EventEmitter(),
     agents: new Map<string, Agent>(),
+    chats: new Map<string, Chat>(),
   };
 
   await storageWrappers!.saveWorld(worldData);
@@ -187,10 +188,13 @@ export async function getWorld(rootPath: string, worldId: string): Promise<World
     return null;
   }
 
+  const agents = await storageWrappers!.listAgents(normalizedWorldId);
+  const chats = await storageWrappers!.listChats(normalizedWorldId);
   return {
     ...worldData,
     eventEmitter: new EventEmitter(),
-    agents: new Map(), // Empty agents map - to be populated by agent manager
+    agents: new Map(agents.map((agent: Agent) => [agent.id, agent])),
+    chats: new Map(chats.map((chat: Chat) => [chat.id, chat])),
   };
 }
 
@@ -647,7 +651,7 @@ export async function exportWorldToMarkdown(rootPath: string, worldName: string)
 
     for (const agentInfo of agents) {
       // Load full agent data to get memory
-      const fullAgent = await getAgent(rootPath, worldData.id, agentInfo.name);
+      const fullAgent = await getAgent(rootPath, worldData.id, agentInfo.id);
       if (!fullAgent) continue;
 
       markdown += `### ${fullAgent.name}\n\n`;

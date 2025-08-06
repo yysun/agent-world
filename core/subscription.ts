@@ -27,8 +27,8 @@
  */
 
 import { World } from './types.js';
-import { getWorld as coreGetWorld } from './managers.js';
-import { publishMessage, subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
+import { getWorld } from './managers.js';
+import { subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
 import { toKebabCase } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 
@@ -103,7 +103,7 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       await destroyCurrentWorld();
 
       // Create a completely new world instance
-      const refreshedWorld = await coreGetWorld(rootPath, worldId);
+      const refreshedWorld = await getWorld(rootPath, worldId);
       if (!refreshedWorld) {
         throw new Error(`Failed to refresh world: ${worldId}`);
       }
@@ -138,7 +138,7 @@ export async function subscribeWorld(
   try {
     // Load world using core manager (convert to kebab-case internally)
     const worldId = toKebabCase(worldIdentifier);
-    const currentWorld = await coreGetWorld(rootPath, worldId);
+    const currentWorld = await getWorld(rootPath, worldId);
 
     if (!currentWorld) {
       if (client.onError) {
@@ -220,30 +220,4 @@ export async function cleanupWorldSubscription(world: World, worldEventListeners
       error: error instanceof Error ? error.message : error
     });
   }
-}
-
-// Get world wrapper function for subscription layer
-export async function getWorld(
-  worldIdentifier: string,
-  rootPath: string
-): Promise<World | null> {
-  try {
-    const worldId = toKebabCase(worldIdentifier);
-    return await coreGetWorld(rootPath, worldId);
-  } catch (error) {
-    logger.error('Failed to get world', {
-      worldIdentifier,
-      error: error instanceof Error ? error.message : error
-    });
-    return null;
-  }
-}
-
-// Message publishing helper
-export function handleMessagePublish(world: World, eventMessage: string, sender?: string): void {
-  // Normalize sender to standard format
-  const normalizedSender = sender === 'WebSocket' || sender === 'CLI' || sender?.startsWith('user') ? 'HUMAN' : sender || 'HUMAN';
-
-  // Publish message to world events
-  publishMessage(world, eventMessage, normalizedSender);
 }

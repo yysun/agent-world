@@ -66,6 +66,8 @@ import {
 } from './types.js';
 import { generateId } from './utils.js';
 
+import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
+
 let globalStreamingEnabled = true;
 export function enableStreaming(): void {
   globalStreamingEnabled = true;
@@ -566,12 +568,12 @@ import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, 
 import * as storageFactory from './storage/storage-factory.js';
 
 // Storage wrapper instance - initialized lazily
-let storageWrappers: storageFactory.StorageAPI | null = null;
+let storageWrappers: StorageAPI | null = null;
 
 // Initialize storage wrappers
-async function getStorageWrappers(): Promise<storageFactory.StorageAPI> {
+async function getStorageWrappers(): Promise<StorageAPI> {
   if (!storageWrappers) {
-    storageWrappers = await storageFactory.createStorageWithWrappers();
+    storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers;
 }

@@ -131,7 +131,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId: stri
       loading: false,
       error: null,
       isWaiting: false,
-      selectedSettingsTarget: 'chat',
+      selectedSettingsTarget: 'world',
       selectedAgent: null,
       activeAgent: null,
       chatToDelete: null
