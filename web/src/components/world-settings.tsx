@@ -145,7 +145,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
             </div>
             <div className="setting-item">
               <label>LLM Call Limit:</label>
-              <span className="setting-value">{world.llmCallLimit || 'Unlimited'}</span>
+              <span className="setting-value">{world.turnLimit || 'Unlimited'}</span>
             </div>
           </div>
         ) : (

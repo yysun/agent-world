@@ -146,7 +146,7 @@ async function getWorldOrError(res: Response, worldName: string): Promise<WorldC
 // Validation schemas
 const WorldCreateSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   turnLimit: z.number().min(1).optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional()
@@ -154,7 +154,7 @@ const WorldCreateSchema = z.object({
 
 const WorldUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional(),
   turnLimit: z.number().min(1).optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional()
