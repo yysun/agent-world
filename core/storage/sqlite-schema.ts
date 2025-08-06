@@ -317,7 +317,7 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
 
 export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
   const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 2; // Increment version for chatId column
+  const targetVersion = 3; // Increment version for chat LLM fields
   return currentVersion < targetVersion;
 }
 
@@ -357,7 +357,7 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       if (!tableCheck) {
         // Fresh database - create all tables with current schema
         await initializeSchema(ctx);
-        await setSchemaVersion(ctx, 2);
+        await setSchemaVersion(ctx, 3);
       } else {
         // Existing database with version 0 - check if chat_id column exists
         try {
@@ -369,11 +369,24 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
             await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
             await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
           }
-          await setSchemaVersion(ctx, 2);
+
+          // Check and add LLM provider/model columns
+          const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
+          const hasLLMProvider = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_provider');
+          const hasLLMModel = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_model');
+
+          if (!hasLLMProvider) {
+            await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
+          }
+          if (!hasLLMModel) {
+            await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
+          }
+
+          await setSchemaVersion(ctx, 3);
         } catch (error) {
           console.warn('[sqlite-schema] Migration warning for chat_id column:', error);
           // Try to continue anyway
-          await setSchemaVersion(ctx, 2);
+          await setSchemaVersion(ctx, 3);
         }
       }
     } catch (error) {
@@ -389,6 +402,28 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
     } catch (error) {
       // Column might already exist, check and continue
       console.warn('[sqlite-schema] Migration warning:', error);
+    }
+  }
+
+  if (currentVersion < 3) {
+    // Migration to version 3: Add LLM provider/model columns to worlds table
+    try {
+      const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
+      const hasLLMProvider = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_provider');
+      const hasLLMModel = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_model');
+
+      if (!hasLLMProvider) {
+        await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
+      }
+      if (!hasLLMModel) {
+        await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
+      }
+
+      await setSchemaVersion(ctx, 3);
+    } catch (error) {
+      console.warn('[sqlite-schema] Migration warning for LLM columns:', error);
+      // Try to continue anyway
+      await setSchemaVersion(ctx, 3);
     }
   }
   // Future migrations would go here

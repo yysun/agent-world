@@ -24,7 +24,7 @@
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, publishMessage, enableStreaming, disableStreaming, WorldClass, type World } from '../core/index.js';
+import { createWorld, listWorlds, createCategoryLogger, publishMessage, enableStreaming, disableStreaming, WorldClass, type World, LLMProvider } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
 import { getDefaultRootPath } from '../core/index.js';
 
@@ -137,13 +137,17 @@ async function getWorldOrError(res: Response, worldName: string): Promise<WorldC
 const WorldCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
-  turnLimit: z.number().min(1).optional()
+  turnLimit: z.number().min(1).optional(),
+  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
+  chatLLMModel: z.string().optional()
 });
 
 const WorldUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().optional(),
-  turnLimit: z.number().min(1).optional()
+  turnLimit: z.number().min(1).optional(),
+  chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
+  chatLLMModel: z.string().optional()
 });
 
 const AgentCreateSchema = z.object({
@@ -232,9 +236,15 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
-    const { name, description, turnLimit } = validation.data;
+    const { name, description, turnLimit, chatLLMProvider, chatLLMModel } = validation.data;
     const worldId = toKebabCase(name);
-    const world = await createWorld({ name, description, turnLimit });
+    const world = await createWorld({
+      name,
+      description,
+      turnLimit,
+      chatLLMProvider: chatLLMProvider as LLMProvider,
+      chatLLMModel
+    });
     if (world) {
       res.status(201).json({ name: world.name, id: worldId });
     } else {
