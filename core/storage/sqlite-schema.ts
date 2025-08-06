@@ -163,6 +163,7 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
       content TEXT NOT NULL,
       sender TEXT,
+      chat_id TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (agent_id, world_id) REFERENCES agents(id, world_id) ON DELETE CASCADE
     )
@@ -250,6 +251,7 @@ export async function createIndexes(ctx: SQLiteSchemaContext): Promise<void> {
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_agent_world ON agent_memory(agent_id, world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_created_at ON agent_memory(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_sender ON agent_memory(sender)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_world_id ON world_chats(world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_created_at ON world_chats(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_updated_at ON world_chats(updated_at)`);
@@ -314,15 +316,27 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
 
 export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
   const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 1;
+  const targetVersion = 2; // Increment version for chatId column
   return currentVersion < targetVersion;
 }
 
 export async function migrate(ctx: SQLiteSchemaContext): Promise<void> {
   const currentVersion = await getSchemaVersion(ctx);
+  const run = promisify(ctx.db.run.bind(ctx.db));
+  
   if (currentVersion === 0) {
     await initializeSchema(ctx);
-    await setSchemaVersion(ctx, 1);
+    await setSchemaVersion(ctx, 2);
+  } else if (currentVersion === 1) {
+    // Migration from version 1 to 2: Add chatId column to agent_memory
+    try {
+      await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
+      await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
+      await setSchemaVersion(ctx, 2);
+    } catch (error) {
+      // Column might already exist, check and continue
+      console.warn('[sqlite-schema] Migration warning:', error);
+    }
   }
   // Future migrations would go here
 }

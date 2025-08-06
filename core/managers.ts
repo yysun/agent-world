@@ -235,12 +235,31 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
 
 /**
  * Load agent by ID with full configuration and memory
+ * If currentChatId is provided, filter memory items by chatId
  */
-export async function getAgent(worldId: string, agentId: string): Promise<Agent | null> {
+export async function getAgent(worldId: string, agentId: string, currentChatId?: string | null): Promise<Agent | null> {
   // Ensure modules are initialized
   await moduleInitialization;
 
   const agentData = await storageWrappers!.loadAgent(worldId, agentId);
+  if (!agentData) return null;
+
+  // Filter memory by chatId if currentChatId is provided
+  if (currentChatId !== undefined && agentData.memory) {
+    agentData.memory = agentData.memory.filter(message => {
+      // Legacy messages (no chatId) should match all chats for backward compatibility
+      if (message.chatId === undefined || message.chatId === null) {
+        return true;
+      }
+      // If currentChatId is null, include all messages
+      if (currentChatId === null) {
+        return true;
+      }
+      // Match specific chatId
+      return message.chatId === currentChatId;
+    });
+  }
+
   return agentData;
 }
 
@@ -647,8 +666,8 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
     markdown += `## Agents (${agents.length})\n\n`;
 
     for (const agentInfo of agents) {
-      // Load full agent data to get memory
-      const fullAgent = await getAgent(worldData.id, agentInfo.id);
+      // Load full agent data to get memory (all memory for export, not filtered by chat)
+      const fullAgent = await getAgent(worldData.id, agentInfo.id, null);
       if (!fullAgent) continue;
 
       markdown += `### ${fullAgent.name}\n\n`;

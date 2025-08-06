@@ -764,7 +764,8 @@ export async function saveIncomingMessageToMemory(
       role: 'user',
       content: messageEvent.content,
       sender: messageEvent.sender,
-      createdAt: messageEvent.timestamp
+      createdAt: messageEvent.timestamp,
+      chatId: world.currentChatId || null
     };
 
     // Add to agent memory
@@ -865,7 +866,8 @@ export async function processAgentMessage(
     const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: finalResponse,
-      createdAt: new Date()
+      createdAt: new Date(),
+      chatId: world.currentChatId || null
     };
 
     agent.memory.push(assistantMessage);
