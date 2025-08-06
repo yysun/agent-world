@@ -27,6 +27,7 @@ import type {
 interface ErrorResponse {
   error: string;
   code?: string;
+  details?: any[];
 }
 
 // Base API URL - can be configured
@@ -49,6 +50,7 @@ export async function apiRequest(endpoint: string, options: ApiRequestOptions = 
 
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      let errorDetails = null;
 
       // Try to parse structured error response
       try {
@@ -58,12 +60,20 @@ export async function apiRequest(endpoint: string, options: ApiRequestOptions = 
           if (errorData.code) {
             errorMessage += ` (${errorData.code})`;
           }
+          // Pass through detailed validation errors
+          if (errorData.details) {
+            errorDetails = errorData.details;
+          }
         }
       } catch (parseError) {
         // Fall back to status text if JSON parsing fails
       }
 
-      throw new Error(errorMessage);
+      const error = new Error(errorMessage) as any;
+      if (errorDetails) {
+        error.details = errorDetails;
+      }
+      throw error;
     }
 
     return response;

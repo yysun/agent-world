@@ -23,10 +23,10 @@
 
 // Essential core type imports
 import type { AgentMessage, LLMProvider } from '../../../core/types';
-import { EventType, SenderType, stripCustomFields, stripCustomFieldsFromMessages } from '../../../core/types';
+import { EventType, SenderType } from '../../../core/types';
 
 // Re-export essential utilities
-export { EventType, SenderType, stripCustomFields, stripCustomFieldsFromMessages };
+export { EventType, SenderType };
 export type { LLMProvider };
 
 // ========================================
@@ -137,6 +137,7 @@ export interface WorldEditState {
   parentComponent?: any;
   loading: boolean;
   error?: string | null;
+  errorDetails?: any[] | null;
   successMessage?: string | null;
 }
 
@@ -157,6 +158,7 @@ export interface AgentEditState {
   parentComponent?: any;
   loading: boolean;
   error?: string | null;
+  errorDetails?: any[] | null;
   successMessage?: string | null;
 }
 

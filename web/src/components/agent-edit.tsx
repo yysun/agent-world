@@ -11,6 +11,8 @@
 import { app, Component } from 'apprun';
 import type { AgentEditProps, AgentEditState, Agent, LLMProvider } from '../types';
 import api from '../api';
+import { formatErrorAsHtml, formatValidationError } from '../utils/error-formatting';
+import type { ValidationError } from '../utils/error-formatting';
 
 // Initialize component state from props
 const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
@@ -19,6 +21,8 @@ const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
   agent: props.agent || defaultAgentData,
   parentComponent: props.parentComponent,
   loading: false,
+  error: null,
+  errorDetails: null,
 });
 
 export const defaultAgentData: Partial<Agent> = {
@@ -63,10 +67,12 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
     }, 2000);
 
   } catch (error: any) {
+    const formattedError = formatErrorAsHtml(error);
     yield {
       ...state,
       loading: false,
-      error: error.message || 'Failed to save agent'
+      error: formattedError.message,
+      errorDetails: formattedError.details || null
     };
   }
 };
@@ -92,10 +98,12 @@ export const deleteAgent = async function* (state: AgentEditState): AsyncGenerat
     }, 2000);
 
   } catch (error: any) {
+    const formattedError = formatErrorAsHtml(error);
     yield {
       ...state,
       loading: false,
-      error: error.message || 'Failed to delete agent'
+      error: formattedError.message,
+      errorDetails: formattedError.details || null
     };
   }
 };
@@ -119,6 +127,8 @@ export default class AgentEdit extends Component<AgentEditState> {
     agent: defaultAgentData,
     parentComponent: undefined,
     loading: true,
+    error: null,
+    errorDetails: null,
   };
 
   view = (state: AgentEditState) => {
@@ -191,7 +201,19 @@ export default class AgentEdit extends Component<AgentEditState> {
           <div className="modal-body">
             {state.error && (
               <div className="error-message">
-                {state.error}
+                <div className="error-main">{state.error}</div>
+                {state.errorDetails && state.errorDetails.length > 0 && (
+                  <div className="error-details">
+                    <div className="error-details-title">Validation errors:</div>
+                    <ul className="error-details-list">
+                      {state.errorDetails.map((detail: ValidationError, index: number) => (
+                        <li key={index} className="error-detail-item">
+                          {formatValidationError(detail)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

@@ -45,7 +45,7 @@ const ROOT_PATH = getDefaultRootPath();
 async function serializeWorld(world: World): Promise<{
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   turnLimit: number;
   chatLLMProvider?: string;
   chatLLMModel?: string;

@@ -11,6 +11,8 @@
 import { app, Component } from 'apprun';
 import type { WorldEditProps, WorldEditState, World } from '../types';
 import api from '../api';
+import { formatErrorAsHtml, formatValidationError } from '../utils/error-formatting';
+import type { ValidationError } from '../utils/error-formatting';
 
 // Initialize component state from props
 const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
@@ -18,6 +20,8 @@ const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
   world: props.world || getDefaultWorldData(),
   parentComponent: props.parentComponent,
   loading: false,
+  error: null,
+  errorDetails: null,
 });
 
 // Helper function to get default world data
@@ -65,10 +69,12 @@ export const saveWorld = async function* (state: WorldEditState): AsyncGenerator
     }, 2000);
 
   } catch (error: any) {
+    const formattedError = formatErrorAsHtml(error);
     yield {
       ...state,
       loading: false,
-      error: error.message || 'Failed to save world'
+      error: formattedError.message,
+      errorDetails: formattedError.details || null
     };
   }
 };
@@ -94,10 +100,12 @@ export const deleteWorld = async function* (state: WorldEditState): AsyncGenerat
     }, 2000);
 
   } catch (error: any) {
+    const formattedError = formatErrorAsHtml(error);
     yield {
       ...state,
       loading: false,
-      error: error.message || 'Failed to delete world'
+      error: formattedError.message,
+      errorDetails: formattedError.details || null
     };
   }
 };
@@ -121,6 +129,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     parentComponent: undefined,
     loading: false,
     error: null,
+    errorDetails: null,
     successMessage: null
   };
 
@@ -179,7 +188,19 @@ export default class WorldEdit extends Component<WorldEditState> {
           <div className="modal-body">
             {state.error && (
               <div className="error-message">
-                {state.error}
+                <div className="error-main">{state.error}</div>
+                {state.errorDetails && state.errorDetails.length > 0 && (
+                  <div className="error-details">
+                    <div className="error-details-title">Validation errors:</div>
+                    <ul className="error-details-list">
+                      {state.errorDetails.map((detail: ValidationError, index: number) => (
+                        <li key={index} className="error-detail-item">
+                          {formatValidationError(detail)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

@@ -187,7 +187,7 @@ export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captur
  */
 export interface CreateWorldParams {
   name: string;
-  description?: string;
+  description?: string | null;
   turnLimit?: number;
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
@@ -206,7 +206,7 @@ export interface UpdateWorldParams extends Partial<CreateWorldParams> {
 export interface World {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   turnLimit: number;
   chatLLMProvider?: string; // For chat summarization
   chatLLMModel?: string; // For chat summarization

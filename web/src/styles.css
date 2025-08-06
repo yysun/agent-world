@@ -1734,6 +1734,37 @@ legend {
   font-size: 0.9rem;
 }
 
+.error-main {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.error-details {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #fdd;
+}
+
+.error-details-title {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.error-details-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+.error-detail-item {
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 /* Button variants for modal */
 .btn-danger {
   background-color: #dc3545;
