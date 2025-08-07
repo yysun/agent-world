@@ -35,7 +35,7 @@ const moduleInitialization = initializeModules();
 const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: 'New Chat' } as const;
 
 /**
- * Create new world with configuration
+ * Create new world with configuration and automatically create a new chat
  */
 export async function createWorld(params: CreateWorldParams): Promise<World | null> {
   await moduleInitialization;
@@ -65,7 +65,14 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
 
   await storageWrappers!.saveWorld(worldData);
 
-  return getWorld(worldId);
+  // Automatically create a new chat for the world
+  const world = await getWorld(worldId);
+  if (world) {
+    await newChat(worldId);
+    return await getWorld(worldId);
+  }
+
+  return world;
 }
 
 /**
@@ -123,7 +130,7 @@ export async function listWorlds(): Promise<World[]> {
 }
 
 /**
- * Get world configuration and create runtime instance
+ * Get world configuration and create runtime instance, creating a new chat if none exist
  */
 export async function getWorld(worldId: string): Promise<World | null> {
   await moduleInitialization;
@@ -150,6 +157,23 @@ export async function getWorld(worldId: string): Promise<World | null> {
 
   const agents = await storageWrappers!.listAgents(normalizedWorldId);
   const chats = await storageWrappers!.listChats(normalizedWorldId);
+
+  // If there are no chats, create a new one
+  if (chats.length === 0) {
+    logger.debug('No chats found for world, creating new chat');
+    await newChat(normalizedWorldId);
+    // Reload chats after creating the new one
+    const updatedChats = await storageWrappers!.listChats(normalizedWorldId);
+    const updatedWorldData = await storageWrappers!.loadWorld(normalizedWorldId);
+
+    return {
+      ...(updatedWorldData || worldData),
+      eventEmitter: new EventEmitter(),
+      agents: new Map(agents.map((agent: Agent) => [agent.id, agent])),
+      chats: new Map(updatedChats.map((chat: Chat) => [chat.id, chat])),
+    };
+  }
+
   return {
     ...worldData,
     eventEmitter: new EventEmitter(),
@@ -373,7 +397,39 @@ export async function listChats(worldId: string): Promise<Chat[]> {
 
 export async function deleteChat(worldId: string, chatId: string): Promise<boolean> {
   await moduleInitialization;
-  return await storageWrappers!.deleteChatData(worldId, chatId);
+
+  // First, delete all agent memory items associated with this chat
+  const deletedMemoryCount = await storageWrappers!.deleteMemoryByChatId(worldId, chatId);
+  logger.debug('Deleted memory items for chat', { worldId, chatId, deletedMemoryCount });
+
+  // Get the world to check if this was the current chat
+  const world = await getWorld(worldId);
+  let shouldSetNewCurrentChat = false;
+
+  if (world && world.currentChatId === chatId) {
+    shouldSetNewCurrentChat = true;
+  }
+
+  // Then delete the chat itself
+  const chatDeleted = await storageWrappers!.deleteChatData(worldId, chatId);
+
+  // If this was the current chat, set a fallback current chat
+  if (shouldSetNewCurrentChat && chatDeleted) {
+    const remainingChats = await storageWrappers!.listChats(worldId);
+    if (remainingChats.length > 0) {
+      // Set the most recently updated chat as current
+      const latestChat = remainingChats.sort((a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )[0];
+      await updateWorld(worldId, { currentChatId: latestChat.id });
+    } else {
+      // No chats left, create a new one
+      logger.debug('No chats remaining after deletion, creating new chat');
+      await newChat(worldId);
+    }
+  }
+
+  return chatDeleted;
 }
 
 export async function restoreChat(worldId: string, chatId: string): Promise<World | null> {

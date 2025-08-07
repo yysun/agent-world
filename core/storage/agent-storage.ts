@@ -533,6 +533,46 @@ export async function deleteAgent(rootPath: string, worldId: string, agentId: st
 }
 
 /**
+ * Delete all memory items with a specific chat ID from all agents in a world
+ * Returns the number of memory items deleted
+ */
+export async function deleteMemoryByChatId(rootPath: string, worldId: string, chatId: string): Promise<number> {
+  let deletedCount = 0;
+
+  try {
+    // Get list of all agents in the world
+    const agents = await listAgents(rootPath, worldId);
+
+    // Process each agent
+    for (const agent of agents) {
+      try {
+        // Load full agent data including memory
+        const fullAgent = await loadAgent(rootPath, worldId, agent.id);
+        if (!fullAgent || !fullAgent.memory) continue;
+
+        // Filter out memory items with the specified chat ID
+        const originalMemoryLength = fullAgent.memory.length;
+        fullAgent.memory = fullAgent.memory.filter(msg => msg.chatId !== chatId);
+        const newMemoryLength = fullAgent.memory.length;
+
+        // If memory was modified, save the agent
+        if (originalMemoryLength !== newMemoryLength) {
+          await saveAgentMemory(rootPath, worldId, agent.id, fullAgent.memory);
+          deletedCount += (originalMemoryLength - newMemoryLength);
+        }
+      } catch (error) {
+        // Log error but continue processing other agents
+        console.warn(`Failed to process agent ${agent.id} for memory deletion:`, error);
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to delete memory by chat ID ${chatId}:`, error);
+  }
+
+  return deletedCount;
+}
+
+/**
  * Write JSON file with atomic operation
  */
 async function writeJsonFile<T>(filePath: string, data: T): Promise<void> {

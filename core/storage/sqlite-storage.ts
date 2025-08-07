@@ -348,6 +348,15 @@ async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agent
   }
 }
 
+// MEMORY CLEANUP OPERATIONS
+export async function deleteMemoryByChatId(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<number> {
+  await ensureInitialized(ctx);
+  const result = await run(ctx, `
+    DELETE FROM agent_memory WHERE world_id = ? AND chat_id = ?
+  `, worldId, chatId);
+  return result.changes || 0;
+}
+
 // BATCH OPERATIONS
 export async function saveAgentsBatch(ctx: SQLiteStorageContext, worldId: string, agents: Agent[]): Promise<void> {
   await ensureInitialized(ctx);

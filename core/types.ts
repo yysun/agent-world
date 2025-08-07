@@ -239,6 +239,7 @@ export interface StorageAPI {
   agentExists(worldId: string, agentId: string): Promise<boolean>;
   saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
   archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
+  deleteMemoryByChatId(worldId: string, chatId: string): Promise<number>;
 
   // Batch operations
   saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void>;

@@ -209,6 +209,14 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
     },
 
+    async deleteMemoryByChatId(worldId: string, chatId: string): Promise<number> {
+      if (!storageInstance) return 0;
+      if ('deleteMemoryByChatId' in storageInstance) {
+        return (storageInstance as any).deleteMemoryByChatId(worldId, chatId);
+      }
+      return 0;
+    },
+
     // Batch operations
     async saveAgentsBatch(worldId: string, agents: Agent[]): Promise<void> {
       if (!storageInstance) return;
@@ -500,6 +508,15 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
         return worldStorage.worldExists(rootPath, worldId);
       }
       return false;
+    },
+
+    async deleteMemoryByChatId(worldId: string, chatId: string): Promise<number> {
+      await ensureModulesLoaded();
+      if (agentStorage?.deleteMemoryByChatId) {
+        return agentStorage.deleteMemoryByChatId(rootPath, worldId, chatId);
+      }
+      console.warn('[file-storage] Memory deletion by chat ID not available');
+      return 0;
     }
   };
 }
@@ -565,7 +582,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       loadWorldChat,
       loadWorldChatFull,
       restoreFromWorldChat,
-      archiveAgentMemory
+      archiveAgentMemory,
+      deleteMemoryByChatId
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
@@ -641,6 +659,10 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
 
       archiveMemory: async (worldId: string, agentId: string, memory: any[]) => {
         await archiveAgentMemory(ctx, worldId, agentId, memory);
+      },
+
+      deleteMemoryByChatId: async (worldId: string, chatId: string) => {
+        return await deleteMemoryByChatId(ctx, worldId, chatId);
       },
 
       close: () => close(ctx),
