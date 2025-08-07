@@ -31,13 +31,14 @@
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
-import { createWorld, listWorlds, createCategoryLogger, publishMessage, enableStreaming, disableStreaming, WorldClass, type World, LLMProvider } from '../core/index.js';
+import {
+  createWorld, listWorlds, createCategoryLogger, publishMessage, enableStreaming, disableStreaming, WorldClass,
+  type World, type Agent, type Chat, LLMProvider
+} from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
-import { getDefaultRootPath } from '../core/index.js';
 
 const logger = createCategoryLogger('api');
 const DEFAULT_WORLD_NAME = 'Default World';
-const ROOT_PATH = getDefaultRootPath();
 
 /**
  * Serialize World object for API responses
@@ -54,7 +55,7 @@ async function serializeWorld(world: World): Promise<{
   chats: any[];
 }> {
   const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
-
+  const chatsArray = Array.from(world.chats.values()).map(chat => serializeChat(chat));
   // Use WorldClass to get chats
   const worldClass = new WorldClass(world.id);
   const chats = await worldClass.listChats();
@@ -68,18 +69,16 @@ async function serializeWorld(world: World): Promise<{
     chatLLMModel: world.chatLLMModel,
     currentChatId: world.currentChatId || null,
     agents: agentsArray,
-    chats: chats
+    chats: chatsArray
   };
 }
 
 /**
  * Serialize Agent object for API responses
  */
-function serializeAgent(agent: any): {
+function serializeAgent(agent: Agent): {
   id: string;
   name: string;
-  type: string;
-  status?: string;
   provider: string;
   model: string;
   temperature?: number;
@@ -88,26 +87,29 @@ function serializeAgent(agent: any): {
   llmCallCount: number;
   lastLLMCall?: Date;
   memory: any[];
-  createdAt?: Date;
-  lastActive?: Date;
-  description?: string;
 } {
   return {
     id: agent.id,
     name: agent.name,
-    type: agent.type,
-    status: agent.status,
     provider: agent.provider,
     model: agent.model,
     temperature: agent.temperature,
     maxTokens: agent.maxTokens,
     systemPrompt: agent.systemPrompt,
     llmCallCount: agent.llmCallCount,
-    lastLLMCall: agent.lastLLMCall,
     memory: agent.memory || [],
-    createdAt: agent.createdAt,
-    lastActive: agent.lastActive,
-    description: agent.description,
+  };
+}
+
+function serializeChat(chat: Chat): {
+  id: string;
+  name: string;
+  messageCount: number;
+} {
+  return {
+    id: chat.id,
+    name: chat.name,
+    messageCount: chat.messageCount
   };
 }
 
