@@ -64,7 +64,7 @@ describe('Managers Module - Enhanced Chat Management', () => {
       expect(typeof managers.updateWorld).toBe('function');
       expect(typeof managers.deleteWorld).toBe('function');
       expect(typeof managers.listWorlds).toBe('function');
-      expect(typeof managers.exportWorldToMarkdown).toBe('function');
+      // Note: exportWorldToMarkdown has been moved to core/export.ts
     });
   });
 

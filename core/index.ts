@@ -40,8 +40,11 @@ export {
   updateWorld,
   deleteWorld,
   listWorlds,
-  exportWorldToMarkdown,
 } from './managers.js';
+
+export {
+  exportWorldToMarkdown,
+} from './export.js';
 
 // === AGENT MANAGEMENT ===
 export {

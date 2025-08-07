@@ -9,7 +9,9 @@
  * - Environment-aware storage operations through storage-factory
  *
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory), 
- * Chat (newChat/listChats/deleteChat/restoreChat), Export (exportWorldToMarkdown)
+ * Chat (newChat/listChats/deleteChat/restoreChat)
+ * 
+ * Note: Export functionality has been moved to core/export.ts
  */// Core module imports
 import { createCategoryLogger, initializeLogger } from './logger.js';
 import { EventEmitter } from 'events';
@@ -453,82 +455,4 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     currentChatId: chatId
   });
   return world;
-}
-
-export async function exportWorldToMarkdown(worldName: string): Promise<string> {
-  await moduleInitialization;
-
-  // Load world configuration
-  const worldData = await getWorld(worldName);
-  if (!worldData) {
-    throw new Error(`World '${worldName}' not found`);
-  }
-
-  const agents = await listAgents(worldData.id);
-
-  let markdown = `# World Export: ${worldData.name}\n\n`;
-  markdown += `**Exported on:** ${new Date().toISOString()}\n\n`;
-
-  markdown += `## World Configuration\n\n`;
-  markdown += `- **Name:** ${worldData.name}\n`;
-  markdown += `- **ID:** ${worldData.id}\n`;
-  markdown += `- **Description:** ${worldData.description || 'No description'}\n`;
-  markdown += `- **Turn Limit:** ${worldData.turnLimit}\n`;
-  markdown += `- **Total Agents:** ${agents.length}\n\n`;
-
-  if (agents.length > 0) {
-    markdown += `## Agents (${agents.length})\n\n`;
-
-    for (const agentInfo of agents) {
-      const fullAgent = await getAgent(worldData.id, agentInfo.id);
-      if (!fullAgent) continue;
-
-      markdown += `### ${fullAgent.name}\n\n`;
-      markdown += `**Configuration:**\n`;
-      markdown += `- **ID:** ${fullAgent.id}\n`;
-      markdown += `- **Type:** ${fullAgent.type}\n`;
-      markdown += `- **LLM Provider:** ${fullAgent.provider}\n`;
-      markdown += `- **Model:** ${fullAgent.model}\n`;
-      markdown += `- **Status:** ${fullAgent.status || 'active'}\n`;
-      markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
-      markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
-      markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
-      markdown += `- **Created:** ${fullAgent.createdAt ? (fullAgent.createdAt instanceof Date ? fullAgent.createdAt.toISOString() : fullAgent.createdAt) : 'Unknown'}\n`;
-      markdown += `- **Last Active:** ${fullAgent.lastActive ? (fullAgent.lastActive instanceof Date ? fullAgent.lastActive.toISOString() : fullAgent.lastActive) : 'Unknown'}\n\n`;
-
-      if (fullAgent.systemPrompt) {
-        markdown += `**System Prompt:**\n`;
-        markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
-      }
-
-      if (fullAgent.memory && fullAgent.memory.length > 0) {
-        markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
-
-        fullAgent.memory.forEach((message, index) => {
-          markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
-          if (message.createdAt) {
-            markdown += `   *${message.createdAt instanceof Date ? message.createdAt.toISOString() : message.createdAt}*\n`;
-          }
-          markdown += '   ```markdown\n';
-          let paddedContent = '';
-          if (typeof message.content === 'string') {
-            paddedContent = message.content
-              .split(/(\n)/)
-              .map(part => part === '\n' ? '\n' : '    ' + part)
-              .join('');
-          }
-          markdown += `${paddedContent}\n`;
-          markdown += '   ```\n\n';
-        });
-      } else {
-        markdown += `**Memory:** No messages\n\n`;
-      }
-
-      markdown += `---\n\n`;
-    }
-  } else {
-    markdown += `## Agents\n\nNo agents found in this world.\n\n`;
-  }
-
-  return markdown;
 }
