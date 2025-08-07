@@ -237,7 +237,7 @@ export async function processAgentMessage(
       logger.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Prepare messages for LLM
+    // Prepare messages for LLM with chat ID filtering
     const messageData: MessageData = {
       id: messageId,
       name: 'message',
@@ -245,7 +245,7 @@ export async function processAgentMessage(
       content: messageEvent.content,
       payload: {}
     };
-    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
+    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory, world.currentChatId);
 
     // Increment LLM call count and save agent state
     agent.llmCallCount++;

@@ -185,11 +185,13 @@ export function messageDataToAgentMessage(messageData: MessageData): AgentMessag
 
 /**
  * Prepare messages array for LLM using standard chat message format
+ * Filters conversation history by chatId if provided
  */
 export function prepareMessagesForLLM(
   agent: Agent,
   messageData: MessageData,
-  conversationHistory: AgentMessage[] = []
+  conversationHistory: AgentMessage[] = [],
+  chatId?: string | null
 ): AgentMessage[] {
   const messages: AgentMessage[] = [];
 
@@ -202,8 +204,14 @@ export function prepareMessagesForLLM(
     });
   }
 
-  // Add conversation history
-  messages.push(...conversationHistory);
+  // Filter conversation history by chatId if provided
+  let filteredHistory = conversationHistory;
+  if (chatId !== undefined) {
+    filteredHistory = conversationHistory.filter(msg => msg.chatId === chatId);
+  }
+
+  // Add filtered conversation history
+  messages.push(...filteredHistory);
 
   // Add current message as user input
   messages.push(messageDataToAgentMessage(messageData));

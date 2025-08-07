@@ -276,5 +276,149 @@ describe('Message Formatting Utilities', () => {
       expect(messages).toHaveLength(1002); // system + history + current
       expect(endTime - startTime).toBeLessThan(100); // Should be fast
     });
+
+    test('should filter conversation history by chatId when provided', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const history = [
+        { role: 'user', content: 'Chat 1 message 1', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'assistant', content: 'Chat 1 response 1', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'user', content: 'Chat 2 message 1', createdAt: new Date(), chatId: 'chat-2' },
+        { role: 'assistant', content: 'Chat 2 response 1', createdAt: new Date(), chatId: 'chat-2' },
+        { role: 'user', content: 'Chat 1 message 2', createdAt: new Date(), chatId: 'chat-1' }
+      ] as any;
+
+      const messages = prepareMessagesForLLM(agent, messageData, history, 'chat-1');
+
+      expect(messages).toHaveLength(5); // system + 3 chat-1 messages + current
+      expect(messages[0].role).toBe('system');
+      expect(messages[1].content).toBe('Chat 1 message 1');
+      expect(messages[2].content).toBe('Chat 1 response 1');
+      expect(messages[3].content).toBe('Chat 1 message 2');
+      expect(messages[4].content).toBe('Current message');
+    });
+
+    test('should include all messages when chatId is undefined', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const history = [
+        { role: 'user', content: 'Chat 1 message', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'user', content: 'Chat 2 message', createdAt: new Date(), chatId: 'chat-2' },
+        { role: 'user', content: 'No chat ID message', createdAt: new Date() }
+      ] as any;
+
+      const messages = prepareMessagesForLLM(agent, messageData, history, undefined);
+
+      expect(messages).toHaveLength(5); // system + all 3 history messages + current
+      expect(messages[1].content).toBe('Chat 1 message');
+      expect(messages[2].content).toBe('Chat 2 message');
+      expect(messages[3].content).toBe('No chat ID message');
+    });
+
+    test('should include only messages with null chatId when filtering by null', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const history = [
+        { role: 'user', content: 'Chat 1 message', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'user', content: 'No chat ID message 1', createdAt: new Date(), chatId: null },
+        { role: 'user', content: 'No chat ID message 2', createdAt: new Date(), chatId: null },
+        { role: 'user', content: 'Chat 2 message', createdAt: new Date(), chatId: 'chat-2' }
+      ] as any;
+
+      const messages = prepareMessagesForLLM(agent, messageData, history, null);
+
+      expect(messages).toHaveLength(4); // system + 2 null chatId messages + current
+      expect(messages[1].content).toBe('No chat ID message 1');
+      expect(messages[2].content).toBe('No chat ID message 2');
+    });
+
+    test('should return only system and current message when no history matches chatId', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const history = [
+        { role: 'user', content: 'Chat 1 message', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'user', content: 'Chat 2 message', createdAt: new Date(), chatId: 'chat-2' }
+      ] as any;
+
+      const messages = prepareMessagesForLLM(agent, messageData, history, 'chat-3');
+
+      expect(messages).toHaveLength(2); // system + current (no history matches)
+      expect(messages[0].role).toBe('system');
+      expect(messages[1].content).toBe('Current message');
+    });
+
+    test('should handle empty history with chatId filtering', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const messages = prepareMessagesForLLM(agent, messageData, [], 'chat-1');
+
+      expect(messages).toHaveLength(2); // system + current
+      expect(messages[0].role).toBe('system');
+      expect(messages[1].content).toBe('Current message');
+    });
+
+    test('should maintain backward compatibility when chatId parameter is omitted', () => {
+      const agent = {
+        systemPrompt: 'You are a helpful assistant.',
+        id: 'test-agent'
+      } as any;
+
+      const messageData = {
+        content: 'Current message',
+        sender: 'user'
+      } as any;
+
+      const history = [
+        { role: 'user', content: 'Message 1', createdAt: new Date(), chatId: 'chat-1' },
+        { role: 'user', content: 'Message 2', createdAt: new Date(), chatId: 'chat-2' }
+      ] as any;
+
+      // Call without chatId parameter (original signature)
+      const messages = prepareMessagesForLLM(agent, messageData, history);
+
+      expect(messages).toHaveLength(4); // system + all history + current
+      expect(messages[1].content).toBe('Message 1');
+      expect(messages[2].content).toBe('Message 2');
+    });
   });
 });
