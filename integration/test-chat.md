@@ -2,10 +2,22 @@
 cmd: npx tsx integration/test-chat.core.ts
 ---
 # Test steps
-- getFullWorld 'test-world'
-- log current chat id
-- new chat
-- log current chat id
-- sendMessage 'Hello, world!'
-- getFullWorld 'test-world'
-- log full the new chat
+- get 'test-world'
+- if exists, delete it
+- create 'test-world'
+- verify world has current chat as 'New Chat'
+- store the new chat id
+- create new chat 3 times
+- verify world has only one chat 'New Chat' 
+- verify current chat is the original new chat id
+- create an agent 'a1'
+- verify agent 'a1' exists
+- subscribe to world events
+- send message to world '@a1 Hello, world!'
+- wait agent 'a1' processed the message
+- verify agent 'a1's memory contains the message
+- verify agent 'a1's memory messages have chat id match the new chat id
+- delete the chat
+- verify world has another 'New Chat' and new chat id
+- verify world's current chat is the new chat id
+- verify agent 'a1's memory messages of the old chat id are gone
