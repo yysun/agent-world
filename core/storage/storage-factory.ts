@@ -1,24 +1,26 @@
 /**
  * Storage Factory
  *
- * Unified, type-safe interface for file-based and SQLite-based storage backends.
+ * Unified, type-safe interface for file-based, SQLite-based, and memory-based storage backends.
  * Provides environment detection, dynamic loading, caching, and NoOp browser implementations.
  *
  * Features:
  * - Environment detection (Node.js vs browser) with dynamic module loading
- * - Storage type selection (file/SQLite) via configuration or environment variables
+ * - Storage type selection (file/SQLite/memory) via configuration or environment variables
  * - Instance caching for performance and resource management
  * - Complete chat CRUD operations with strict type safety
- * - NoOp implementations for browser environments
+ * - Memory storage for unit tests and browser environments
  * - Default SQLite storage in Node.js environments
  *
  * Implementation:
  * - File storage: Dynamic imports with disk-based JSON files
  * - SQLite storage: Schema-based with context and migration helpers
- * - Browser: NoOp implementations with graceful degradation
+ * - Memory storage: In-memory Maps with full feature parity
+ * - Browser: Memory storage with graceful environment detection
  * - Centralized environment detection and error handling
  *
  * Changes:
+ * - 2025-08-07: Added memory storage for non-Node environments
  * - 2025-08-05: Consolidated code and removed redundant comments
  * - 2025-08-01: Added full chat CRUD and snapshot support
  * - 2025-07-27: Changed default storage type to SQLite
@@ -33,7 +35,7 @@ import * as fs from 'fs';
 export type { StorageAPI } from '../types.js';
 
 export interface StorageConfig {
-  type: 'file' | 'sqlite';
+  type: 'file' | 'sqlite' | 'memory';
   rootPath: string;
   sqlite?: SQLiteConfig;
 }
@@ -532,7 +534,10 @@ export async function createStorageWithWrappers(): Promise<StorageAPI> {
     const storageInstance = await createStorageFromEnv();
     return createStorageWrappers(storageInstance);
   } else {
-    return createStorageWrappers(null);
+    // Use memory storage for non-Node environments (tests, browser)
+    const { createMemoryStorage } = await import('./memory-storage.js');
+    const memoryStorage = createMemoryStorage();
+    return createStorageWrappers(memoryStorage);
   }
 }
 
@@ -544,7 +549,11 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
 
   let storage: StorageAPI;
 
-  if (config.type === 'sqlite') {
+  if (config.type === 'memory') {
+    // Use memory storage - available in all environments
+    const { createMemoryStorage } = await import('./memory-storage.js');
+    storage = createMemoryStorage();
+  } else if (config.type === 'sqlite') {
     if (!isNodeEnvironment()) {
       throw new Error('SQLite storage not available in browser environment');
     }
@@ -697,7 +706,7 @@ export function getDefaultRootPath(): string {
 }
 
 export async function createStorageFromEnv(): Promise<StorageAPI> {
-  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite') || 'sqlite';
+  const type = (process.env.AGENT_WORLD_STORAGE_TYPE as 'file' | 'sqlite' | 'memory') || 'sqlite';
   const rootPath = getDefaultRootPath();
 
   // Use a special cache key for environment-based storage
@@ -706,8 +715,8 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
     return storageCache.get(envCacheKey)!;
   }
 
-  // Ensure directory exists
-  if (isNodeEnvironment() && rootPath && typeof fs.existsSync === 'function' && !fs.existsSync(rootPath)) {
+  // Ensure directory exists (except for memory storage)
+  if (isNodeEnvironment() && rootPath && typeof fs.existsSync === 'function' && !fs.existsSync(rootPath) && type !== 'memory') {
     if (typeof fs.mkdirSync === 'function') {
       fs.mkdirSync(rootPath, { recursive: true });
     }
