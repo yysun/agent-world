@@ -171,10 +171,10 @@ export class WorldClass {
   }
 
   /**
-   * Create new chat and optionally set as current
+   * Create a new chat session for this world
    */
   async newChat(setAsCurrent: boolean = true): Promise<World | null> {
-    return await newChat(this.worldId, setAsCurrent);
+    return await newChat(this.worldId);
   }
 
   /**
