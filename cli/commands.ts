@@ -1414,7 +1414,7 @@ export async function processCLICommand(
           const description = args.length > 1 ? args.slice(1).join(' ') : undefined;
 
           // Create a simple new chat using the available API
-          const updatedWorld = await newChat(world!.id, true);
+          const updatedWorld = await newChat(world!.id);
 
           if (updatedWorld) {
             cliResponse = {

@@ -87,19 +87,20 @@ async function runIntegrationTest(): Promise<void> {
 
     log('Initial world loaded', {
       id: world.id,
-      currentChatId: world.currentChatId,
-      totalAgents: world.agents?.size || 0
+      currentChatId: world.currentChatId || 'NULL',
+      totalAgents: world.agents?.size || 0,
+      totalChats: world.chats?.size || 0
     });
 
     // Step 2: Log current chat id
-    console.log('\n2. Logging current chat id...');
-    log('Current chat id', yellow(world.currentChatId || ''));
+    console.log('\n2. Logging current chats...');
+    log('Current chats id', world.chats);
 
     // Step 3: Create new chat
     console.log('\n3. Creating new chat...');
 
     await newChat(TEST_WORLD_ID);
-    log('Current chat id after new chat', yellow(world.currentChatId || ''));
+    log('Current chat id after new chat', yellow(world.currentChatId || 'NULL'));
 
     const chatId = world.currentChatId;
     console.assert(chatId === world.currentChatId, red('Expected reuse the same chat'));
@@ -128,7 +129,7 @@ async function runIntegrationTest(): Promise<void> {
       id: world.id,
       currentChatId: world.currentChatId,
       agentCount: world.agents?.size || 0,
-      chatCount: chats.length
+      chats: chats
     });
 
     console.log('\n' + '='.repeat(60));

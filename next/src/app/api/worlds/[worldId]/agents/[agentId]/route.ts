@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAgent, updateAgent, deleteAgent } from '@agent-world/core';
-import path from 'path';
-
-const ROOT_PATH = path.join(process.cwd(), process.env.AGENT_WORLD_DATA_PATH || './data/worlds');
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { worldId, agentId } = await params;
-    const agent = await getAgent(ROOT_PATH, worldId, agentId);
+    const agent = await getAgent(worldId, agentId);
 
     if (!agent) {
       return NextResponse.json(
@@ -36,14 +33,14 @@ export async function PUT(
   try {
     const { worldId, agentId } = await params;
     const body = await request.json();
-    const { name, description, system } = body;
+    const { name, system } = body;
 
-    await updateAgent(ROOT_PATH, worldId, agentId, {
+    await updateAgent(worldId, agentId, {
       name,
       systemPrompt: system
     });
 
-    const agent = await getAgent(ROOT_PATH, worldId, agentId);
+    const agent = await getAgent(worldId, agentId);
     return NextResponse.json({ agent });
   } catch (error) {
     console.error('Error updating agent:', error);
@@ -60,7 +57,7 @@ export async function DELETE(
 ) {
   try {
     const { worldId, agentId } = await params;
-    await deleteAgent(ROOT_PATH, worldId, agentId);
+    await deleteAgent(worldId, agentId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
