@@ -29,8 +29,10 @@ import {
 } from './types.js';
 import { generateId } from './utils.js';
 import { generateAgentResponse } from './llm-manager.js';
-
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
+import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
+import { createCategoryLogger } from './logger.js';
+const logger = createCategoryLogger('events');
 
 // Global streaming control
 let globalStreamingEnabled = true;
@@ -46,21 +48,6 @@ async function getStorageWrappers(): Promise<StorageAPI> {
   return storageWrappers;
 }
 
-// Create events category logger
-import { createCategoryLogger } from './logger.js';
-const logger = createCategoryLogger('events');
-
-/**
- * Generate message ID with fallback
- */
-function generateMessageId(prefix: string = 'evt'): string {
-  try {
-    return generateId();
-  } catch (error) {
-    return `${prefix}-${Math.random().toString(36).substr(2, 9)}-${Date.now().toString(36)}`;
-  }
-}
-
 /**
  * Publish event to a specific channel using World.eventEmitter
  */
@@ -68,7 +55,7 @@ export function publishEvent(world: World, type: string, content: any): void {
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
-    messageId: generateMessageId('evt')
+    messageId: generateId()
   };
   world.eventEmitter.emit(type, event);
 }
@@ -81,7 +68,7 @@ export function publishMessage(world: World, content: string, sender: string): v
     content,
     sender,
     timestamp: new Date(),
-    messageId: generateMessageId('msg')
+    messageId: generateId()
   };
   world.eventEmitter.emit('message', messageEvent);
 }
@@ -92,14 +79,6 @@ export function subscribeToMessages(
 ): () => void {
   world.eventEmitter.on('message', handler);
   return () => world.eventEmitter.off('message', handler);
-}
-
-export function subscribeToSSE(
-  world: World,
-  handler: (event: WorldSSEEvent) => void
-): () => void {
-  world.eventEmitter.on('sse', handler);
-  return () => world.eventEmitter.off('sse', handler);
 }
 
 /**
@@ -116,12 +95,6 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
   };
   world.eventEmitter.emit('sse', sseEvent);
 }
-
-
-
-// Agent Events Functions
-// Import additional dependencies for agent events
-import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
 
 // Check if response has any mention at paragraph beginning (prevents auto-mention loops)
 export function hasAnyMentionAtBeginning(response: string): boolean {
