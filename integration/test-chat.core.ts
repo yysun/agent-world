@@ -13,10 +13,12 @@
  * 2. Verify initial 'New Chat' and store chat ID
  * 3. Test chat reuse logic (3 new chats should reuse same ID)
  * 4. Create agent 'a1' with Ollama provider and verify existence
- * 5. Send message to agent and verify processing
- * 6. Verify agent memory contains message with correct chat ID
- * 7. Delete chat and verify fallback to new 'New Chat'
- * 8. Verify agent memory cleanup for deleted chat
+ * 5. Subscribe to world events
+ * 6. Send message to agent and verify processing
+ * 7. Verify agent memory contains message with correct chat ID
+ * 8. Get world again and verify chat title updated by LLM
+ * 9. Delete chat and verify fallback to new 'New Chat'
+ * 10. Verify agent memory cleanup for deleted chat
  *
  * Implementation:
  * - Uses public API from 'core' module
@@ -69,6 +71,7 @@ async function runIntegrationTest(): Promise<void> {
   let world: World | null = null;
   let worldSubscription: any = null;
   let originalChatId: string | null = null;
+  let updatedChatId: string | null = null;
   let agentProcessedMessage = false;
   let agentAttemptedProcessing = false; // Track if agent attempted to process (even if LLM failed)
 
@@ -122,13 +125,8 @@ async function runIntegrationTest(): Promise<void> {
     assert(world !== null, 'World created successfully');
     assert(world!.id === TEST_WORLD_ID, 'World has correct ID');
 
-    // Step 2: Subscribe to world and verify initial state
-    console.log('\n2. Subscribing to world and verifying initial state...');
-    worldSubscription = await subscribeWorld(TEST_WORLD_ID, testClient);
-    assert(worldSubscription !== null, 'World subscription successful');
-
-    world = worldSubscription.world;
-    assert(world !== null, 'World loaded from subscription');
+    // Step 2: Verify initial state
+    console.log('\n2. Verifying initial state...');
 
     // Verify world has current chat as 'New Chat'
     const chats = await listChats(TEST_WORLD_ID);
@@ -175,19 +173,21 @@ async function runIntegrationTest(): Promise<void> {
     assert(retrievedAgent !== null, 'Agent exists and can be retrieved');
     assert(retrievedAgent!.id === TEST_AGENT_ID, 'Retrieved agent has correct ID');
 
-    // Unsubscribe and resubscribe to world to ensure new agent is included
-    console.log('  - Unsubscribing from world...');
-    await worldSubscription.unsubscribe();
-
-    console.log('  - Resubscribing to world to include new agent...');
+    // Step 5: Subscribe to world events
+    console.log('\n5. Subscribing to world events...');
     worldSubscription = await subscribeWorld(TEST_WORLD_ID, testClient);
-    assert(worldSubscription !== null, 'World resubscription successful');
+    assert(worldSubscription !== null, 'World subscription successful');
+
     world = worldSubscription.world;
+    assert(world !== null, 'World loaded from subscription');
 
-    // Step 5: Send message to world and wait for agent processing
-    console.log('\n5. Sending message to agent...');
+    // Step 6: Send message to world and wait for agent processing
+    console.log('\n6. Sending message to agent...');
 
-    await publishMessage(world!, TEST_MESSAGE, 'HUMAN');
+    console.log(`  - Before message: world.currentChatId = ${world!.currentChatId}`);
+    console.log(`  - Sending message with sender = 'human'`);
+
+    await publishMessage(world!, TEST_MESSAGE, 'human');
     console.log(`  - Sent message: ${cyan(TEST_MESSAGE)}`);
 
     // Wait for agent to process the message
@@ -202,8 +202,12 @@ async function runIntegrationTest(): Promise<void> {
 
     assert(agentProcessedMessage, 'Agent processed the message within timeout');
 
-    // Step 6: Verify agent memory contains the message with correct chat ID
-    console.log('\n6. Verifying agent memory...');
+    // Wait a bit more for potential title generation to complete
+    console.log('  - Waiting for potential title generation...');
+    await wait(2000); // Wait 2 more seconds for title generation
+
+    // Step 7: Verify agent memory contains the message with correct chat ID
+    console.log('\n7. Verifying agent memory...');
 
     const agentAfterMessage = await getAgent(TEST_WORLD_ID, TEST_AGENT_ID);
     assert(agentAfterMessage !== null, 'Agent retrieved after message processing');
@@ -218,33 +222,47 @@ async function runIntegrationTest(): Promise<void> {
     console.log(`  - Agent memory contains ${memoryMessages.length} messages`);
     console.log(`  - Human message chat ID: ${humanMessage!.chatId}`);
 
-    // Step 7: Delete the chat and verify fallback behavior
-    console.log('\n7. Deleting chat and verifying fallback...');
+    // Step 8: Get world again and verify chat title updated by LLM
+    console.log('\n8. Verifying chat title updated by LLM...');
 
-    const chatDeleted = await deleteChat(TEST_WORLD_ID, originalChatId!);
+    const worldAfterMessage = await getWorld(TEST_WORLD_ID);
+    assert(worldAfterMessage !== null, 'World retrieved after message processing');
+
+    const chatsAfterMessage = await listChats(TEST_WORLD_ID);
+    assert(chatsAfterMessage.length === 1, 'World still has exactly one chat');
+
+    // Verify current chat is not 'New Chat' (updated by LLM)
+    const currentChatAfterMessage = chatsAfterMessage.find(chat => chat.id === originalChatId);
+    assert(currentChatAfterMessage !== undefined, 'Current chat still exists');
+    assert(currentChatAfterMessage!.name !== 'New Chat', 'Current chat name was updated by LLM');
+    console.log(`  - Current chat name: "${currentChatAfterMessage!.name}"`);
+
+    // Step 9: Delete the chat and verify fallback behavior
+    console.log('\n9. Deleting chat and verifying fallback...');
+
+    const chatDeleted = await deleteChat(TEST_WORLD_ID, updatedChatId!);
     assert(chatDeleted, 'Chat deleted successfully');
 
     // Verify world has another 'New Chat' with new chat ID
     const chatsAfterDeletion = await listChats(TEST_WORLD_ID);
     assert(chatsAfterDeletion.length === 1, 'World has exactly one chat after deletion');
     assert(chatsAfterDeletion[0].name === 'New Chat', 'New chat has name "New Chat"');
-    assert(chatsAfterDeletion[0].id !== originalChatId, 'New chat has different ID');
+    assert(chatsAfterDeletion[0].id !== updatedChatId, 'New chat has different ID');
 
     // Verify world's current chat is the new chat ID
     const worldAfterDeletion = await getWorld(TEST_WORLD_ID);
     assert(worldAfterDeletion !== null, 'World retrieved after chat deletion');
     assert(worldAfterDeletion!.currentChatId === chatsAfterDeletion[0].id, 'Current chat ID updated to new chat');
-
     console.log(`  - New chat ID: ${chatsAfterDeletion[0].id}`);
 
-    // Step 8: Verify agent memory cleanup for deleted chat
-    console.log('\n8. Verifying agent memory cleanup...');
+    // Step 10: Verify agent memory cleanup for deleted chat
+    console.log('\n10. Verifying agent memory cleanup...');
 
     const agentAfterDeletion = await getAgent(TEST_WORLD_ID, TEST_AGENT_ID);
     assert(agentAfterDeletion !== null, 'Agent retrieved after chat deletion');
 
     // Check that memory messages of the old chat ID are gone
-    const remainingMessages = agentAfterDeletion!.memory.filter(msg => msg.chatId === originalChatId);
+    const remainingMessages = agentAfterDeletion!.memory.filter(msg => msg.chatId === updatedChatId);
     assert(remainingMessages.length === 0, 'Agent memory messages of deleted chat are gone');
 
     console.log(`  - Agent memory after cleanup: ${agentAfterDeletion!.memory.length} messages`);

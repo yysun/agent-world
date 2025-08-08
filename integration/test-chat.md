@@ -17,6 +17,9 @@ cmd: npx tsx integration/test-chat.core.ts
 - wait agent 'a1' processed the message
 - verify agent 'a1's memory contains the message
 - verify agent 'a1's memory messages have chat id match the new chat id
+- get 'test-world' again
+- verify world has current chat is not 'New Chat' (updated by LLM)
+- store the new chat id
 - delete the chat
 - verify world has another 'New Chat' and new chat id
 - verify world's current chat is the new chat id

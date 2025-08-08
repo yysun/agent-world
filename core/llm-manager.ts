@@ -81,7 +81,7 @@ import { getLLMProviderConfig } from './llm-config.js';
 // LLM Integration Utilities
 
 function stripCustomFields(message: AgentMessage): ChatMessage {
-  const { sender, ...llmMessage } = message;
+  const { sender, chatId, ...llmMessage } = message;
   return llmMessage;
 }
 
@@ -346,7 +346,8 @@ async function executeGenerateAgentResponse(
 ): Promise<string> {
   const model = loadLLMProvider(agent);
   const llmMessages = stripCustomFieldsFromMessages(messages);
-
+  const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
+  llmMessages.unshift({ role: 'system', content: systemPrompt });
   logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
   try {
     const { text } = await generateText({

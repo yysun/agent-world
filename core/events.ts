@@ -411,98 +411,69 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
  */
 export function subscribeWorldToMessages(world: World): () => void {
   logger.debug('Subscribing world to messages', { worldId: world.id });
-  return subscribeToMessages(world, (event) => {
-    // World message event received
+  return subscribeToMessages(world, async (event: WorldMessageEvent) => {
+
+    if (event.sender.toLowerCase() === 'human' && world.currentChatId) {
+      const title = await generateChatTitleFromMessages(world, event.content);
+      logger.debug('Generated chat title', { worldId: world.id, title });
+
+      const chat = world.chats.get(world.currentChatId || '') || null;
+      if (chat) {
+        chat.name = title;
+        logger.debug('Updated chat name', { worldId: world.id, chatId: chat.id, name: title });
+      }
+
+      const storage = await getStorageWrappers();
+      await storage.updateChatData(world.id, world.currentChatId, {
+        name: title
+      });
+    }
+
   });
 }
 
 /**
  * Generate chat title from message content with LLM support and fallback
  */
-async function generateChatTitleFromMessages(world: World): Promise<string> {
+async function generateChatTitleFromMessages(world: World, content: string): Promise<string> {
+
+  let title = content.trim();
 
   const maxLength = 100; // Max title length
 
-  const storage = await getStorageWrappers();
-  const messages = await storage.getMemory(world.id, world.currentChatId || null);
   try {
-
     const firstAgent = Array.from(world.agents.values())[0];
-    const humanMessages = messages
-      .filter((msg: AgentMessage) => msg.sender?.toLocaleLowerCase() === 'human');
 
-    if (humanMessages.length > 0) {
-      const titlePrompt = `Generate a concise, informative title for this chat conversation. The title should be descriptive but brief.
+    const storage = await getStorageWrappers();
+    const messages = await storage.getMemory(world.id);
+    messages.push({ role: 'user', content });
 
-Recent messages:
-${humanMessages.map((msg: AgentMessage) => `User: ${msg.content}`).join('\n')}
+    const tempAgent: any = {
+      provider: world.chatLLMProvider || firstAgent.provider,
+      model: world.chatLLMModel || firstAgent.model,
+      systemPrompt: 'You are a helpful assistant that turns conversations into concise titles.',
+      temperature: 0.8,
+      maxTokens: 50,
+    };
 
-Generate only the title, no quotes or explanations:`;
+    const userPrompt = {
+      role: 'user' as const,
+      content: `Below is a conversation. Generate a short, punchy title (3–6 words) that captures its main topic.
 
-      const titleMessages: AgentMessage[] = [
-        { role: 'user', content: titlePrompt, createdAt: new Date() }
-      ];
+      ${messages.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+      `
+    };
 
-      // Create temporary agent for title generation
-      const tempAgent: any = {
-        id: 'chat-title-generator',
-        name: 'Chat Title Generator',
-        type: 'title-generator',
-        provider: world.chatLLMProvider || firstAgent.provider,
-        model: world.chatLLMModel || firstAgent.model,
-        systemPrompt: 'You are a helpful assistant that creates concise, informative titles for chat conversations.',
-        temperature: 0.8,
-        maxTokens: 50,
-        memory: [],
-        llmCallCount: 0
-      };
+    title = await generateAgentResponse(world, tempAgent, [userPrompt]);
 
-      const generatedTitle = await generateAgentResponse(world, tempAgent, titleMessages);
-
-      // Clean up the generated title
-      let title = generatedTitle.trim().replace(/^["']|["']$/g, ''); // Remove quotes
-      title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
-      title = title.replace(/\s+/g, ' '); // Normalize whitespace
-
-      // Truncate if too long
-      if (title.length > maxLength) {
-        title = title.substring(0, maxLength - 3) + '...';
-      }
-
-      if (title && title.length > 0) {
-        return title;
-      }
-    }
   } catch (error) {
     logger.warn('Failed to generate LLM title, using fallback', {
       error: error instanceof Error ? error.message : error
     });
   }
 
-
-  // Fallback: Use first agent message or user message
-  const firstAgentMessage = messages.find((msg: AgentMessage) =>
-    msg.role === 'assistant' &&
-    msg.content &&
-    msg.content.trim().length > 0
-  );
-
-  const firstUserMessage = messages.find(msg =>
-    msg.role === 'user' &&
-    msg.content &&
-    msg.content.trim().length > 0 &&
-    !msg.content.startsWith('@') // Skip mention-only messages
-  );
-
-  const messageToUse = firstAgentMessage || firstUserMessage;
-
-  if (!messageToUse) {
-    return 'New Chat';
-  }
-
-  let title = messageToUse.content.trim();
-
-  // Clean up the title
+  // Clean up the generated title
+  title = title.trim().replace(/^["']|["']$/g, ''); // Remove quotes
   title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
   title = title.replace(/\s+/g, ' '); // Normalize whitespace
 
@@ -511,5 +482,5 @@ Generate only the title, no quotes or explanations:`;
     title = title.substring(0, maxLength - 3) + '...';
   }
 
-  return title || 'New Chat';
+  return title;
 }
