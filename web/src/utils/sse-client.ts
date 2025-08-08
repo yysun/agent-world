@@ -304,15 +304,14 @@ export async function sendChatMessage(
 // Initialize streaming message display
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
   const { messageId, sender } = data;
-  return {
-    ...state,
-    messages: [...(state.messages || []), {
-      sender: sender,
-      text: '',
-      isStreaming: true,
-      messageId: messageId,
-    }]
-  };
+  state.messages = state.messages.filter(msg => !msg.userEntered);
+  state.messages.push({
+    sender: sender,
+    text: '...',
+    isStreaming: true,
+    messageId: messageId,
+  } as any);
+  return { ...state, needScroll: true };
 };
 
 // Update streaming message content
