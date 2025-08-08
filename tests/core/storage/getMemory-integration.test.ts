@@ -3,7 +3,7 @@
  * 
  * Tests for the getMemory functionality across different storage backends.
  */
-import { createStorageWithWrappers } from '../../../core/storage/storage-factory.js';
+import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
 import type { StorageAPI, World, Agent } from '../../../core/types.js';
 import { LLMProvider } from '../../../core/types.js';
 import { EventEmitter } from 'events';
@@ -12,7 +12,12 @@ describe('getMemory Integration', () => {
   let storage: StorageAPI;
 
   beforeEach(async () => {
-    storage = await createStorageWithWrappers();
+    // Use memory storage directly for this integration test
+    storage = createMemoryStorage();
+
+    // Ensure storage is properly initialized
+    expect(storage).toBeDefined();
+    expect(typeof storage.saveWorld).toBe('function');
   });
 
   const testWorld: World = {
@@ -97,7 +102,7 @@ describe('getMemory Integration', () => {
     // Test getMemory functionality
     const memoryChat1 = await (storage as any).getMemory('test-world', 'chat-1');
     expect(memoryChat1).toHaveLength(3);
-    
+
     // Should be sorted by createdAt
     expect(memoryChat1[0].content).toBe('First message');
     expect(memoryChat1[1].content).toBe('First response');
