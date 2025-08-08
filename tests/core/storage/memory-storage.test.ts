@@ -1,6 +1,6 @@
 /**
  * Memory Storage Tests
- * 
+ *
  * Tests for the in-memory storage implementation used in non-Node environments.
  */
 import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
@@ -166,6 +166,74 @@ describe('Memory Storage', () => {
 
       const loaded = await storage.loadAgent('test-world', 'test-agent');
       expect(loaded?.memory).toHaveLength(0);
+    });
+
+    test('should get aggregated memory across agents', async () => {
+      // Create multiple agents with different memory
+      const agent1: Agent = {
+        ...testAgent,
+        id: 'agent-1',
+        memory: [
+          {
+            role: 'user',
+            content: 'Hello from user',
+            sender: 'human',
+            createdAt: new Date('2024-01-01T10:00:00Z'),
+            chatId: 'chat-1'
+          },
+          {
+            role: 'assistant',
+            content: 'Hello back',
+            sender: 'agent-1',
+            createdAt: new Date('2024-01-01T10:01:00Z'),
+            chatId: 'chat-1'
+          }
+        ]
+      };
+
+      const agent2: Agent = {
+        ...testAgent,
+        id: 'agent-2',
+        memory: [
+          {
+            role: 'user',
+            content: 'Another message',
+            sender: 'human',
+            createdAt: new Date('2024-01-01T10:02:00Z'),
+            chatId: 'chat-1'
+          },
+          {
+            role: 'user',
+            content: 'Different chat message',
+            sender: 'human',
+            createdAt: new Date('2024-01-01T10:03:00Z'),
+            chatId: 'chat-2'
+          }
+        ]
+      };
+
+      await storage.saveAgent('test-world', agent1);
+      await storage.saveAgent('test-world', agent2);
+
+      // Test getting all memory for chat-1
+      const memoryChat1 = await (storage as any).getMemory('test-world', 'chat-1');
+      expect(memoryChat1).toHaveLength(3);
+      expect(memoryChat1[0].content).toBe('Hello from user');
+      expect(memoryChat1[1].content).toBe('Hello back');
+      expect(memoryChat1[2].content).toBe('Another message');
+
+      // Test getting memory for chat-2
+      const memoryChat2 = await (storage as any).getMemory('test-world', 'chat-2');
+      expect(memoryChat2).toHaveLength(1);
+      expect(memoryChat2[0].content).toBe('Different chat message');
+
+      // Test getting all memory (empty chatId)
+      const allMemory = await (storage as any).getMemory('test-world', '');
+      expect(allMemory).toHaveLength(4);
+
+      // Test non-existent world
+      const noMemory = await (storage as any).getMemory('non-existent', 'chat-1');
+      expect(noMemory).toHaveLength(0);
     });
 
     test('should handle batch operations', async () => {

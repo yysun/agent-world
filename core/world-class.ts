@@ -14,10 +14,10 @@
  */
 
 import {
-  getWorld, updateWorld, deleteWorld, exportWorldToMarkdown,
+  getWorld, updateWorld, deleteWorld, exportWorldToMarkdown, getMemory,
   createAgent, getAgent, updateAgent, deleteAgent, listAgents, clearAgentMemory,
   listChats, deleteChat, newChat, restoreChat,
-  type World, type Agent, type Chat,
+  type World, type Agent, type Chat, type AgentMessage,
 } from './index.js';
 
 import type { CreateAgentParams, UpdateAgentParams, UpdateWorldParams } from './types.js';
@@ -94,6 +94,10 @@ export class WorldClass {
 
   async deleteChat(chatId: string): Promise<boolean> {
     return await deleteChat(this.worldId, chatId);
+  }
+
+  async getMemory(chatId?: string | null): Promise<AgentMessage[] | null> {
+    return await getMemory(this.worldId, chatId);
   }
 
   // UTILITY METHODS

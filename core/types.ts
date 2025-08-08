@@ -1,9 +1,9 @@
 /**
  * Core type definitions for the Agent World system.
- * 
+ *
  * Features:
  * - Agent configuration with comprehensive LLM provider support and memory management
- * - Event system with strict payload typing and union types for type safety  
+ * - Event system with strict payload typing and union types for type safety
  * - AI SDK compatible chat messages with utility functions for seamless integration
  * - Storage interfaces and world-specific file operations with EventEmitter integration
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
@@ -229,6 +229,8 @@ export interface StorageAPI {
   deleteWorld(worldId: string): Promise<boolean>;
   listWorlds(): Promise<World[]>;
   worldExists(worldId: string): Promise<boolean>;
+
+  getMemory(worldId: string, chatId?: string | null): Promise<AgentMessage[]>;
 
   // Agent operations
   saveAgent(worldId: string, agent: Agent): Promise<void>;

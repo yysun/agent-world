@@ -52,6 +52,9 @@ describe('WorldClass', () => {
     expect(typeof worldClass.deleteChat).toBe('function');
     expect(typeof worldClass.newChat).toBe('function');
     expect(typeof worldClass.restoreChat).toBe('function');
+
+    // Memory operations
+    expect(typeof worldClass.getMemory).toBe('function');
   });
 
   it('should maintain consistent ID and path', () => {
@@ -64,5 +67,10 @@ describe('WorldClass', () => {
 
     // Each instance should be independent
     expect(worldClass1.id).not.toBe(worldClass2.id);
+  });
+
+  it('should have getMemory method', () => {
+    const worldClass = new WorldClass(worldId);
+    expect(typeof worldClass.getMemory).toBe('function');
   });
 });

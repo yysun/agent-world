@@ -8,9 +8,9 @@
  * - Automatic ID normalization to kebab-case for consistency
  * - Environment-aware storage operations through storage-factory
  *
- * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory), 
+ * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
  * Chat (newChat/listChats/deleteChat/restoreChat)
- * 
+ *
  * Note: Export functionality has been moved to core/export.ts
  */// Core module imports
 import { createCategoryLogger, initializeLogger } from './logger.js';
@@ -455,4 +455,15 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     currentChatId: chatId
   });
   return world;
+}
+
+export async function getMemory(worldId: string, chatId?: string | null): Promise<AgentMessage[] | null> {
+  await moduleInitialization;
+
+  let world = await getWorld(worldId);
+  if (!world) {
+    return null;
+  }
+
+  return await storageWrappers!.getMemory(worldId, chatId || world.currentChatId);
 }

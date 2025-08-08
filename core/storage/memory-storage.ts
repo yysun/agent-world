@@ -132,6 +132,30 @@ export class MemoryStorage implements StorageAPI {
     return this.worlds.has(worldId);
   }
 
+  async getMemory(worldId: string, chatId: string): Promise<AgentMessage[]> {
+    const messages: AgentMessage[] = [];
+    const worldAgents = this.agents.get(worldId);
+    if (!worldAgents) return [];
+
+    for (const agent of worldAgents.values()) {
+      const mem = Array.isArray(agent.memory) ? agent.memory : [];
+      for (const msg of mem) {
+        if (!chatId || msg.chatId === chatId) {
+          messages.push(deepClone(msg));
+        }
+      }
+    }
+
+    // Sort by createdAt ascending
+    messages.sort((a, b) => {
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return at - bt;
+    });
+
+    return messages;
+  }
+
   // Agent operations
   async saveAgent(worldId: string, agent: Agent): Promise<void> {
     if (!agent.id) {

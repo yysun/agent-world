@@ -77,6 +77,14 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
     },
 
+    async getMemory(worldId: string, chatId: string): Promise<AgentMessage[]> {
+      if (!storageInstance) return [];
+      if ('getMemory' in storageInstance) {
+        return (storageInstance as any).getMemory(worldId, chatId);
+      }
+      return [];
+    },
+
     // Agent operations
     async saveAgent(worldId: string, agent: any): Promise<void> {
       if (!storageInstance) return;
@@ -329,6 +337,29 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       await ensureModulesLoaded();
       if (worldStorage?.listWorlds) {
         return worldStorage.listWorlds(rootPath);
+      }
+      return [];
+    },
+    async getMemory(worldId: string, chatId: string): Promise<AgentMessage[]> {
+      await ensureModulesLoaded();
+      // Aggregate from agents' memory, filter by chatId
+      if (agentStorage?.listAgents && agentStorage?.loadAgent) {
+        const agents: Agent[] = await agentStorage.listAgents(rootPath, worldId);
+        const messages: AgentMessage[] = [];
+        for (const agent of agents) {
+          const full = await agentStorage.loadAgent(rootPath, worldId, agent.id);
+          const mem = full?.memory || [];
+          for (const m of mem) {
+            if (!chatId || m.chatId === chatId) messages.push(m);
+          }
+        }
+        // Sort by createdAt asc
+        messages.sort((a, b) => {
+          const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return at - bt;
+        });
+        return messages;
       }
       return [];
     },
@@ -592,7 +623,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       loadWorldChatFull,
       restoreFromWorldChat,
       archiveAgentMemory,
-      deleteMemoryByChatId
+      deleteMemoryByChatId,
+      getMemory
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
@@ -673,6 +705,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       deleteMemoryByChatId: async (worldId: string, chatId: string) => {
         return await deleteMemoryByChatId(ctx, worldId, chatId);
       },
+
+      getMemory: (worldId: string, chatId: string) => getMemory(ctx, worldId, chatId),
 
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)
