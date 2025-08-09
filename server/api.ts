@@ -1,65 +1,68 @@
 /**
- * API Routes for Agent World
+ * Agent World API Routes
  *
- * Features:
- * - REST API with Zod validation for world/agent management
- * - SSE streaming for real-time chat responses
- * - Consistent serialization with serializeWorld() and serializeAgent()
- * - Optimized world existence checks using getWorldConfig
- * - Timer management for streaming (15s initial, 5s stall timeout)
- *
- * Implementation:
- * - Core module integration with event handling
- * - Simplified API structure (World objects contain agents[] and chats[])
- * - Reusable getWorldOrError utility for error handling
- * - Non-streaming mode for CLI pipeline compatibility
- * - **Updated to use WorldClass for object-oriented world management**
- *
- * WorldClass Usage:
- * - Most routes now use WorldClass for cleaner, more maintainable code
- * - Example: const worldClass = new WorldClass(worldName); await worldClass.delete();
- * - Eliminates repetitive rootPath, worldId parameter passing
- * - Provides better encapsulation and type safety
- * - Root path parameter removed - storage factory handles path management
- *
- * Recent Changes:
- * - Fixed PATCH /worlds/:worldName to handle all schema fields including chatLLMProvider and chatLLMModel
- * - Previously only processed name, description, turnLimit; now handles complete WorldUpdateSchema
- * - Added .nullable() support for chatLLMProvider and chatLLMModel to handle null values from clients
- * - Updated update logic to filter out null values (treat as no-op rather than validation error)
- * - Added comprehensive test coverage for world update endpoint validation and null handling
+ * REST API with Zod validation, SSE streaming for chat, and function-based world context.
+ * Supports world/agent/chat management with optimized serialization and error handling.
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import {
-  createWorld, listWorlds, createCategoryLogger, publishMessage, enableStreaming, disableStreaming, WorldClass,
-  type World, type Agent, type Chat, LLMProvider
+  createWorld,
+  listWorlds,
+  createCategoryLogger,
+  publishMessage,
+  enableStreaming,
+  disableStreaming,
+  // core managers (function-based)
+  getWorld,
+  updateWorld,
+  deleteWorld,
+  createAgent,
+  getAgent,
+  updateAgent,
+  deleteAgent,
+  listChats,
+  newChat,
+  restoreChat,
+  deleteChat as deleteChatCore,
+  clearAgentMemory,
+  listAgents as listAgentsCore,
+  getMemory as coreGetMemory,
+  exportWorldToMarkdown,
+  type World,
+  type Agent,
+  type Chat,
+  LLMProvider
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
 
 const logger = createCategoryLogger('api');
 const DEFAULT_WORLD_NAME = 'Default World';
 
-/**
- * Serialize World object for API responses
- */
-async function serializeWorld(world: World): Promise<{
-  id: string;
-  name: string;
-  description?: string | null;
-  turnLimit: number;
-  chatLLMProvider?: string;
-  chatLLMModel?: string;
-  currentChatId: string | null;
-  agents: any[];
-  chats: any[];
-}> {
-  const agentsArray = Array.from(world.agents.values()).map(agent => serializeAgent(agent));
-  const chatsArray = Array.from(world.chats.values()).map(chat => serializeChat(chat));
-  // Use WorldClass to get chats
-  const worldClass = new WorldClass(world.id);
-  const chats = await worldClass.listChats();
+// World context factory - eliminates repetitive worldId passing
+function createWorldContext(worldId: string) {
+  const id = toKebabCase(worldId);
+  return {
+    id,
+    reload: () => getWorld(id),
+    update: (updates: any) => updateWorld(id, updates),
+    delete: () => deleteWorld(id),
+    createAgent: (params: any) => createAgent(id, params),
+    getAgent: (agentName: string) => getAgent(id, toKebabCase(agentName)),
+    updateAgent: (agentName: string, updates: any) => updateAgent(id, toKebabCase(agentName), updates),
+    deleteAgent: (agentName: string) => deleteAgent(id, toKebabCase(agentName)),
+    listAgents: () => listAgentsCore(id),
+    clearAgentMemory: (agentName: string) => clearAgentMemory(id, toKebabCase(agentName)),
+    listChats: () => listChats(id),
+    newChat: () => newChat(id),
+    restoreChat: (chatId: string) => restoreChat(id, chatId),
+    deleteChat: (chatId: string) => deleteChatCore(id, chatId),
+    getMemory: (chatId?: string | null) => coreGetMemory(id, chatId),
+  } as const;
+}
 
+// Serialization functions
+async function serializeWorld(world: World) {
   return {
     id: world.id,
     name: world.name,
@@ -68,26 +71,12 @@ async function serializeWorld(world: World): Promise<{
     chatLLMProvider: world.chatLLMProvider,
     chatLLMModel: world.chatLLMModel,
     currentChatId: world.currentChatId || null,
-    agents: agentsArray,
-    chats: chatsArray
+    agents: Array.from(world.agents.values()).map(serializeAgent),
+    chats: Array.from(world.chats.values()).map(serializeChat)
   };
 }
 
-/**
- * Serialize Agent object for API responses
- */
-function serializeAgent(agent: Agent): {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  systemPrompt?: string;
-  llmCallCount: number;
-  lastLLMCall?: Date;
-  memory: any[];
-} {
+function serializeAgent(agent: Agent) {
   return {
     id: agent.id,
     name: agent.name,
@@ -101,11 +90,7 @@ function serializeAgent(agent: Agent): {
   };
 }
 
-function serializeChat(chat: Chat): {
-  id: string;
-  name: string;
-  messageCount: number;
-} {
+function serializeChat(chat: Chat) {
   return {
     id: chat.id,
     name: chat.name,
@@ -125,24 +110,22 @@ function toKebabCase(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
-async function isAgentNameUnique(worldClass: WorldClass, agentName: string, excludeAgent?: string): Promise<boolean> {
+async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>, agentName: string, excludeAgent?: string): Promise<boolean> {
   const normalizedAgentName = toKebabCase(agentName);
   const normalizedExcludeAgent = excludeAgent ? toKebabCase(excludeAgent) : undefined;
-
   if (normalizedExcludeAgent && normalizedAgentName === normalizedExcludeAgent) return true;
-  const existingAgent = await worldClass.getAgent(normalizedAgentName);
+  const existingAgent = await worldCtx.getAgent(normalizedAgentName);
   return !existingAgent;
 }
 
-async function getWorldOrError(res: Response, worldName: string): Promise<WorldClass | null> {
-  const worldClass = new WorldClass(worldName);
-  const world = await worldClass.reload();
+async function getWorldOrError(res: Response, worldName: string) {
+  const worldCtx = createWorldContext(worldName);
+  const world = await worldCtx.reload();
   if (!world) {
     sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
     return null;
   }
-  // Return WorldClass instance for OOP operations
-  return worldClass;
+  return worldCtx;
 }
 
 // Validation schemas
@@ -195,8 +178,6 @@ const AgentUpdateSchema = z.object({
 const router = express.Router();
 
 // World Routes
-
-// GET /worlds - List worlds or create default
 router.get('/worlds', async (req, res) => {
   try {
     const worlds = await listWorlds();
@@ -221,14 +202,13 @@ router.get('/worlds', async (req, res) => {
   }
 });
 
-// GET /worlds/:worldName - Get a specific world
 router.get('/worlds/:worldName', async (req, res) => {
   try {
     const worldName = req.params.worldName;
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    const world = await worldClass.reload();
+    const world = await worldCtx.reload();
     if (!world) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
@@ -240,7 +220,6 @@ router.get('/worlds/:worldName', async (req, res) => {
   }
 });
 
-// POST /worlds - Create new world
 router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
   try {
     const validation = WorldCreateSchema.safeParse(req.body);
@@ -262,45 +241,36 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
     } else {
       sendError(res, 500, 'Failed to create world', 'WORLD_CREATE_ERROR');
     }
-
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-
-    // Check for duplicate world error
     if (errorMessage.includes('already exists')) {
       sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
       return;
     }
-
     logger.error('Error creating world', { error: errorMessage });
     sendError(res, 500, 'Failed to create world', 'WORLD_CREATE_ERROR');
   }
 });
 
-// PATCH /worlds/:worldName - Update world metadata
 router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
     const validation = WorldUpdateSchema.safeParse(req.body);
-
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    // Get current world data for validation
-    const currentWorld = await worldClass.reload();
+    const currentWorld = await worldCtx.reload();
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
     const { name, description, turnLimit, chatLLMProvider, chatLLMModel } = validation.data;
-
-    // Update world metadata using WorldClass
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
@@ -308,10 +278,9 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
     if (chatLLMProvider !== undefined && chatLLMProvider !== null) updates.chatLLMProvider = chatLLMProvider;
     if (chatLLMModel !== undefined && chatLLMModel !== null) updates.chatLLMModel = chatLLMModel;
 
-    // Apply updates if any
     let updatedWorld = currentWorld;
     if (Object.keys(updates).length > 0) {
-      const updateResult = await worldClass.update(updates);
+      const updateResult = await worldCtx.update(updates);
       if (!updateResult) {
         sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
         return;
@@ -319,29 +288,24 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       updatedWorld = updateResult;
     }
 
-    // Return complete world data including agents
-    const serializedWorld = await serializeWorld(updatedWorld);
-    res.json(serializedWorld);
+    res.json(await serializeWorld(updatedWorld));
   } catch (error) {
     logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
   }
 });
 
-// DELETE /worlds/:worldName - Delete world
 router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
-
-    const deleted = await worldClass.delete();
+    const deleted = await worldCtx.delete();
     if (!deleted) {
       sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
       return;
     }
-
     res.status(204).send();
   } catch (error) {
     logger.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -350,8 +314,6 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
 });
 
 // Agent Routes
-
-// POST /worlds/:worldName/agents - Create new agent in world
 router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
@@ -362,23 +324,20 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
     }
 
     const agentData = validation.data;
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    // Check if agent name is unique using WorldClass
-    const isUnique = await isAgentNameUnique(worldClass, agentData.name);
+    const isUnique = await isAgentNameUnique(worldCtx, agentData.name);
     if (!isUnique) {
       sendError(res, 409, 'Agent with this name already exists', 'AGENT_EXISTS');
       return;
     }
 
-    // Use WorldClass to create agent
-    const createdAgent = await worldClass.createAgent(agentData as any);
+    const createdAgent = await worldCtx.createAgent(agentData);
     if (!createdAgent) {
       sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
       return;
     }
-
     res.status(201).json(serializeAgent(createdAgent));
   } catch (error) {
     logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -386,21 +345,54 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
   }
 });
 
-// GET /worlds/:worldName/export - Export world to markdown
+router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
+
+    const world = await worldCtx.reload();
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+    res.json(Array.from(world.agents.values()).map(serializeAgent));
+  } catch (error) {
+    logger.error('Error listing agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to list agents', 'AGENT_LIST_ERROR');
+  }
+});
+
+router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, agentName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
+
+    const agent = await worldCtx.getAgent(agentName);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+    res.json(serializeAgent(agent));
+  } catch (error) {
+    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    sendError(res, 500, 'Failed to get agent', 'AGENT_GET_ERROR');
+  }
+});
+
 router.get('/worlds/:worldName/export', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
+    const worldCtx = createWorldContext(worldName);
 
-    const worldClass = new WorldClass(worldName);
-
-    // Check if world exists first
-    const worldExists = await worldClass.reload();
+    const worldExists = await worldCtx.reload();
     if (!worldExists) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const markdown = await worldClass.exportToMarkdown();
+    const markdown = await exportWorldToMarkdown(worldCtx.id);
     const now = new Date();
     const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const filename = `${worldName}-${timestamp}.md`;
@@ -415,24 +407,21 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
   }
 });
 
-// PATCH /worlds/:worldName/agents/:agentName - Update agent
 router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, agentName } = req.params;
     const validation = AgentUpdateSchema.safeParse(req.body);
-
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
     const { clearMemory } = validation.data;
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    // Normalize agent name to handle case-insensitive lookups
     const normalizedAgentName = toKebabCase(agentName);
-    const existingAgent = await worldClass.getAgent(normalizedAgentName);
+    const existingAgent = await worldCtx.getAgent(normalizedAgentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
@@ -440,28 +429,25 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
 
     let updatedAgent = existingAgent;
 
-    // If clearMemory is requested, clear memory first
     if (clearMemory) {
-      const cleared = await worldClass.clearAgentMemory(normalizedAgentName);
+      const cleared = await worldCtx.clearAgentMemory(normalizedAgentName);
       if (!cleared) {
         sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
         return;
       }
-      const refreshedAgent = await worldClass.getAgent(normalizedAgentName);
+      const refreshedAgent = await worldCtx.getAgent(normalizedAgentName);
       if (refreshedAgent) {
         updatedAgent = refreshedAgent;
       }
     }
 
-    // Prepare updates, exclude memory-related fields
     const updates: any = { ...validation.data };
     delete updates.clearMemory;
     if ('memory' in updates) delete updates.memory;
 
-    // Only update if there are non-memory fields to update
     const updateKeys = Object.keys(updates).filter(k => k !== 'memory');
     if (updateKeys.length > 0) {
-      const updateResult = await worldClass.updateAgent(normalizedAgentName, updates);
+      const updateResult = await worldCtx.updateAgent(normalizedAgentName, updates);
       if (!updateResult) {
         sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
         return;
@@ -476,28 +462,24 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
   }
 });
 
-// DELETE /worlds/:worldName/agents/:agentName - Delete agent
 router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, agentName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
-
-    // Normalize agent name to handle case-insensitive lookups
     const normalizedAgentName = toKebabCase(agentName);
-    const existingAgent = await worldClass.getAgent(normalizedAgentName);
+    const existingAgent = await worldCtx.getAgent(normalizedAgentName);
     if (!existingAgent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const deleted = await worldClass.deleteAgent(normalizedAgentName);
+    const deleted = await worldCtx.deleteAgent(normalizedAgentName);
     if (!deleted) {
       sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
       return;
     }
-
     res.status(204).send();
   } catch (error) {
     logger.error('Error deleting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
@@ -505,28 +487,24 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   }
 });
 
-// DELETE /worlds/:worldName/agents/:agentName/memory - Clear agent memory
 router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, agentName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
-
-    // Normalize agent name to handle case-insensitive lookups
     const normalizedAgentName = toKebabCase(agentName);
-    const agent = await worldClass.getAgent(normalizedAgentName);
+    const agent = await worldCtx.getAgent(normalizedAgentName);
     if (!agent) {
       sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
       return;
     }
 
-    const clearedAgent = await worldClass.clearAgentMemory(normalizedAgentName);
+    const clearedAgent = await worldCtx.clearAgentMemory(normalizedAgentName);
     if (!clearedAgent) {
       sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
       return;
     }
-
     res.status(204).send();
   } catch (error) {
     logger.error('Error clearing agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
@@ -535,11 +513,8 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request
 });
 
 // Chat Helper Functions
-
-// Non-streaming chat response (aligned with CLI pipeline mode)
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   disableStreaming();
-
   try {
     let responseContent = '';
     let isComplete = false;
@@ -595,7 +570,6 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         timestamp: new Date().toISOString()
       }
     });
-
   } catch (error) {
     sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
   } finally {
@@ -603,9 +577,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
   }
 }
 
-// Streaming chat response
 async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
-  // Set up SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -668,7 +640,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   try {
     publishMessage(subscription.world, message, sender);
     if (streaming.wait) {
-      streaming.wait(15000); // 15 second timeout for initial response
+      streaming.wait(15000);
     }
   } catch (error) {
     sendSSE(JSON.stringify({
@@ -687,27 +659,21 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 }
 
 // Chat Routes
-
-// POST /worlds/:worldName/chat - Send message with optional streaming
 router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
     const validation = ChatMessageSchema.safeParse(req.body);
-
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
     const { message, sender, stream } = validation.data;
-
-    // Route to appropriate handler based on stream flag
     if (stream === false) {
       await handleNonStreamingChat(res, worldName, message, sender);
     } else {
       await handleStreamingChat(req, res, worldName, message, sender);
     }
-
   } catch (error) {
     logger.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     if (!res.headersSent) {
@@ -716,21 +682,18 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
   }
 });
 
-// DELETE /worlds/:worldName/chats/:chatId - Delete chat
 router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, chatId } = req.params;
-    const worldClass = await getWorldOrError(res, worldName);
-    if (!worldClass) return;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
 
-    const deleted = await worldClass.deleteChat(chatId);
+    const deleted = await worldCtx.deleteChat(chatId);
     if (!deleted) {
       sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
       return;
     }
-
     res.json({ message: 'Chat deleted successfully' });
-
   } catch (error) {
     logger.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
@@ -739,68 +702,107 @@ router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Resp
   }
 });
 
-// POST /worlds/:worldName/new-chat - Create new chat and set as current
-router.post('/worlds/:worldName/new-chat', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
+
+    const chats = await worldCtx.listChats();
+    res.json(chats.map(serializeChat));
+  } catch (error) {
+    logger.error('Error listing chats', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    sendError(res, 500, 'Failed to list chats', 'CHAT_LIST_ERROR');
+  }
+});
+
+router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
+
+    const world = await worldCtx.reload();
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+    const chat = world.chats.get(chatId);
+    if (!chat) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+    res.json(serializeChat(chat));
+  } catch (error) {
+    logger.error('Error getting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    sendError(res, 500, 'Failed to get chat', 'CHAT_GET_ERROR');
+  }
+});
+
+router.get('/worlds/:worldName/chats/:chatId/messages', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { worldName, chatId } = req.params;
+    const worldCtx = await getWorldOrError(res, worldName);
+    if (!worldCtx) return;
+
+    const messages = await worldCtx.getMemory(chatId);
+    res.json(messages || []);
+  } catch (error) {
+    logger.error('Error getting chat messages', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    sendError(res, 500, 'Failed to get chat messages', 'CHAT_MESSAGES_ERROR');
+  }
+});
+
+router.post('/worlds/:worldName/message', async (req: Request, res: Response): Promise<void> => {
   try {
     const worldName = req.params.worldName;
+    const worldCtx = createWorldContext(worldName);
 
-    const worldClass = new WorldClass(worldName);
-
-    // Check if world exists first
-    const currentWorld = await worldClass.reload();
+    const currentWorld = await worldCtx.reload();
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const updatedWorld = await worldClass.newChat(true);
+    const updatedWorld = await worldCtx.newChat();
     if (!updatedWorld) {
       sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
       return;
     }
 
-    const serializedWorld = await serializeWorld(updatedWorld);
-
     res.json({
-      world: serializedWorld,
+      world: await serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
       success: true
     });
-
   } catch (error) {
     logger.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
   }
 });
 
-// POST /worlds/:worldName/load-chat/:chatId - Load specific chat and set as current
 router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName, chatId } = req.params;
+    const worldCtx = createWorldContext(worldName);
 
-    const worldClass = new WorldClass(worldName);
-
-    // Check if world exists first
-    const currentWorld = await worldClass.reload();
+    const currentWorld = await worldCtx.reload();
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const updatedWorld = await worldClass.restoreChat(chatId, true);
+    const updatedWorld = await worldCtx.restoreChat(chatId);
     if (!updatedWorld) {
       sendError(res, 404, 'Chat not found or failed to load', 'LOAD_CHAT_ERROR');
       return;
     }
 
-    const serializedWorld = await serializeWorld(updatedWorld);
-
     res.json({
-      world: serializedWorld,
+      world: await serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
       success: true
     });
-
   } catch (error) {
     logger.error('Error loading chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
