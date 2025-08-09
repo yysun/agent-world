@@ -157,23 +157,14 @@ export async function getWorld(worldId: string): Promise<World | null> {
     return null;
   }
 
-  const agents = await storageWrappers!.listAgents(normalizedWorldId);
-  const chats = await storageWrappers!.listChats(normalizedWorldId);
+  let agents = await storageWrappers!.listAgents(normalizedWorldId);
+  let chats = await storageWrappers!.listChats(normalizedWorldId);
 
   // If there are no chats, create a new one
   if (chats.length === 0) {
     logger.debug('No chats found for world, creating new chat');
     await newChat(normalizedWorldId);
-    // Reload chats after creating the new one
-    const updatedChats = await storageWrappers!.listChats(normalizedWorldId);
-    const updatedWorldData = await storageWrappers!.loadWorld(normalizedWorldId);
-
-    return {
-      ...(updatedWorldData || worldData),
-      eventEmitter: new EventEmitter(),
-      agents: new Map(agents.map((agent: Agent) => [agent.id, agent])),
-      chats: new Map(updatedChats.map((chat: Chat) => [chat.id, chat])),
-    };
+    chats = await storageWrappers!.listChats(normalizedWorldId);
   }
 
   return {

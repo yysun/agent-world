@@ -3,6 +3,11 @@
  *
  * REST API with Zod validation, SSE streaming for chat, and function-based world context.
  * Supports world/agent/chat management with optimized serialization and error handling.
+ *
+ * Changes:
+ * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
+ * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
+ * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -38,13 +43,30 @@ import { subscribeWorld, ClientConnection } from '../core/index.js';
 
 const logger = createCategoryLogger('api');
 const DEFAULT_WORLD_NAME = 'Default World';
+type WorldContext = {
+  id: string;
+  load: () => Promise<World | null>;
+  update: (updates: any) => Promise<World | null>;
+  delete: () => Promise<boolean>;
+  createAgent: (params: any) => Promise<Agent | null>;
+  getAgent: (agentName: string) => Promise<Agent | null>;
+  updateAgent: (agentName: string, updates: any) => Promise<Agent | null>;
+  deleteAgent: (agentName: string) => Promise<boolean>;
+  listAgents: () => Promise<Agent[]>;
+  clearAgentMemory: (agentName: string) => Promise<Agent | null>;
+  listChats: () => Promise<Chat[]>;
+  newChat: () => Promise<World | null>;
+  restoreChat: (chatId: string) => Promise<World | null>;
+  deleteChat: (chatId: string) => Promise<boolean>;
+  getMemory: (chatId?: string | null) => Promise<any>;
+};
 
 // World context factory - eliminates repetitive worldId passing
 function createWorldContext(worldId: string) {
   const id = toKebabCase(worldId);
-  return {
+  const worldContext: WorldContext = {
     id,
-    reload: () => getWorld(id),
+    load: () => getWorld(id),
     update: (updates: any) => updateWorld(id, updates),
     delete: () => deleteWorld(id),
     createAgent: (params: any) => createAgent(id, params),
@@ -58,11 +80,12 @@ function createWorldContext(worldId: string) {
     restoreChat: (chatId: string) => restoreChat(id, chatId),
     deleteChat: (chatId: string) => deleteChatCore(id, chatId),
     getMemory: (chatId?: string | null) => coreGetMemory(id, chatId),
-  } as const;
+  };
+  return worldContext;
 }
 
 // Serialization functions
-async function serializeWorld(world: World) {
+function serializeWorld(world: World) {
   return {
     id: world.id,
     name: world.name,
@@ -118,14 +141,22 @@ async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>
   return !existingAgent;
 }
 
-async function getWorldOrError(res: Response, worldName: string) {
+// Validation middleware for world existence
+function validateWorld(req: Request, res: Response, next: Function) {
+  const worldName = req.params.worldName;
   const worldCtx = createWorldContext(worldName);
-  const world = await worldCtx.reload();
-  if (!world) {
-    sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-    return null;
-  }
-  return worldCtx;
+  worldCtx.load().then(world => {
+    if (!world) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+    // Attach worldCtx to request for downstream handlers
+    (req as any).worldCtx = worldCtx;
+    (req as any).world = world;
+    next();
+  }).catch(error => {
+    sendError(res, 500, 'Failed to validate world', 'WORLD_VALIDATE_ERROR', error);
+  });
 }
 
 // Validation schemas
@@ -202,20 +233,13 @@ router.get('/worlds', async (req, res) => {
   }
 });
 
-router.get('/worlds/:worldName', async (req, res) => {
+router.get('/worlds/:worldName', validateWorld, async (req: Request, res: Response) => {
   try {
-    const worldName = req.params.worldName;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
-
-    const world = await worldCtx.reload();
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
-    res.json(await serializeWorld(world));
+    // const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const world = (req as any).world;
+    res.json(serializeWorld(world));
   } catch (error) {
-    console.error('Error getting world:', error);
+    logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
   }
 });
@@ -252,24 +276,15 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+router.patch('/worlds/:worldName', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
     const validation = WorldUpdateSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
-
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
-
-    const currentWorld = await worldCtx.reload();
-    if (!currentWorld) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
-
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const currentWorld = (req as any).world;
     const { name, description, turnLimit, chatLLMProvider, chatLLMModel } = validation.data;
     const updates: any = {};
     if (name !== undefined) updates.name = name;
@@ -288,18 +303,21 @@ router.patch('/worlds/:worldName', async (req: Request, res: Response): Promise<
       updatedWorld = updateResult;
     }
 
-    res.json(await serializeWorld(updatedWorld));
+    res.json(serializeWorld(updatedWorld));
   } catch (error) {
     logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
   }
 });
 
-router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise<void> => {
+router.delete('/worlds/:worldName', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext> | undefined;
+    if (!worldCtx) {
+      // Fallback if middleware not used (should not happen once standardized)
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
 
     const deleted = await worldCtx.delete();
     if (!deleted) {
@@ -314,9 +332,8 @@ router.delete('/worlds/:worldName', async (req: Request, res: Response): Promise
 });
 
 // Agent Routes
-router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/agents', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
     const validation = AgentCreateSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
@@ -324,8 +341,7 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
     }
 
     const agentData = validation.data;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const isUnique = await isAgentNameUnique(worldCtx, agentData.name);
     if (!isUnique) {
@@ -345,13 +361,11 @@ router.post('/worlds/:worldName/agents', async (req: Request, res: Response): Pr
   }
 });
 
-router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/agents', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
-    const world = await worldCtx.reload();
+    const world = await worldCtx.load();
     if (!world) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
@@ -363,11 +377,10 @@ router.get('/worlds/:worldName/agents', async (req: Request, res: Response): Pro
   }
 });
 
-router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/agents/:agentName', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, agentName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { agentName } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const agent = await worldCtx.getAgent(agentName);
     if (!agent) {
@@ -381,16 +394,10 @@ router.get('/worlds/:worldName/agents/:agentName', async (req: Request, res: Res
   }
 });
 
-router.get('/worlds/:worldName/export', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/export', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const { worldName } = req.params;
-    const worldCtx = createWorldContext(worldName);
-
-    const worldExists = await worldCtx.reload();
-    if (!worldExists) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const markdown = await exportWorldToMarkdown(worldCtx.id);
     const now = new Date();
@@ -407,9 +414,9 @@ router.get('/worlds/:worldName/export', async (req: Request, res: Response): Pro
   }
 });
 
-router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+router.patch('/worlds/:worldName/agents/:agentName', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, agentName } = req.params;
+    const { agentName } = req.params;
     const validation = AgentUpdateSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
@@ -417,8 +424,7 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
     }
 
     const { clearMemory } = validation.data;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const normalizedAgentName = toKebabCase(agentName);
     const existingAgent = await worldCtx.getAgent(normalizedAgentName);
@@ -462,11 +468,10 @@ router.patch('/worlds/:worldName/agents/:agentName', async (req: Request, res: R
   }
 });
 
-router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: Response): Promise<void> => {
+router.delete('/worlds/:worldName/agents/:agentName', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, agentName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { agentName } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const normalizedAgentName = toKebabCase(agentName);
     const existingAgent = await worldCtx.getAgent(normalizedAgentName);
@@ -487,11 +492,10 @@ router.delete('/worlds/:worldName/agents/:agentName', async (req: Request, res: 
   }
 });
 
-router.delete('/worlds/:worldName/agents/:agentName/memory', async (req: Request, res: Response): Promise<void> => {
+router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, agentName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { agentName } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const normalizedAgentName = toKebabCase(agentName);
     const agent = await worldCtx.getAgent(normalizedAgentName);
@@ -659,9 +663,9 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 }
 
 // Chat Routes
-router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/chat', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
     const validation = ChatMessageSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
@@ -670,9 +674,9 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
 
     const { message, sender, stream } = validation.data;
     if (stream === false) {
-      await handleNonStreamingChat(res, worldName, message, sender);
+      await handleNonStreamingChat(res, worldCtx.id, message, sender);
     } else {
-      await handleStreamingChat(req, res, worldName, message, sender);
+      await handleStreamingChat(req, res, worldCtx.id, message, sender);
     }
   } catch (error) {
     logger.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -682,11 +686,10 @@ router.post('/worlds/:worldName/chat', async (req: Request, res: Response): Prom
   }
 });
 
-router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+router.delete('/worlds/:worldName/chats/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, chatId } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { chatId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const deleted = await worldCtx.deleteChat(chatId);
     if (!deleted) {
@@ -702,11 +705,9 @@ router.delete('/worlds/:worldName/chats/:chatId', async (req: Request, res: Resp
   }
 });
 
-router.get('/worlds/:worldName/chats', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/chats', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const chats = await worldCtx.listChats();
     res.json(chats.map(serializeChat));
@@ -716,13 +717,12 @@ router.get('/worlds/:worldName/chats', async (req: Request, res: Response): Prom
   }
 });
 
-router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/chats/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, chatId } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { chatId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
-    const world = await worldCtx.reload();
+    const world = await worldCtx.load();
     if (!world) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
@@ -739,11 +739,10 @@ router.get('/worlds/:worldName/chats/:chatId', async (req: Request, res: Respons
   }
 });
 
-router.get('/worlds/:worldName/chats/:chatId/messages', async (req: Request, res: Response): Promise<void> => {
+router.get('/worlds/:worldName/chats/:chatId/messages', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, chatId } = req.params;
-    const worldCtx = await getWorldOrError(res, worldName);
-    if (!worldCtx) return;
+    const { chatId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
     const messages = await worldCtx.getMemory(chatId);
     res.json(messages || []);
@@ -753,12 +752,11 @@ router.get('/worlds/:worldName/chats/:chatId/messages', async (req: Request, res
   }
 });
 
-router.post('/worlds/:worldName/message', async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/message', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const worldName = req.params.worldName;
-    const worldCtx = createWorldContext(worldName);
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
-    const currentWorld = await worldCtx.reload();
+    const currentWorld = await worldCtx.load();
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
@@ -771,7 +769,7 @@ router.post('/worlds/:worldName/message', async (req: Request, res: Response): P
     }
 
     res.json({
-      world: await serializeWorld(updatedWorld),
+      world: serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
       success: true
     });
@@ -781,12 +779,12 @@ router.post('/worlds/:worldName/message', async (req: Request, res: Response): P
   }
 });
 
-router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/load-chat/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { worldName, chatId } = req.params;
-    const worldCtx = createWorldContext(worldName);
+    const { chatId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
 
-    const currentWorld = await worldCtx.reload();
+    const currentWorld = await worldCtx.load();
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
@@ -799,7 +797,7 @@ router.post('/worlds/:worldName/load-chat/:chatId', async (req: Request, res: Re
     }
 
     res.json({
-      world: await serializeWorld(updatedWorld),
+      world: serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
       success: true
     });
