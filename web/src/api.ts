@@ -270,7 +270,7 @@ export async function setCurrentChat(worldName: string, chatId: string): Promise
   chatId: string;
   success: boolean;
 }> {
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/currentChat/${encodeURIComponent(chatId)}`, {
     method: 'POST'
   });
   return await response.json();

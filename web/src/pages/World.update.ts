@@ -72,113 +72,58 @@ const createMessageFromMemory = (memoryItem: any, agent: Agent): any => {
   };
 };
 
-const processAgentMemories = async (agents: any[]): Promise<{ agents: Agent[], messages: any[] }> => {
-  let allMessages: any[] = [];
-
-  const processedAgents: Agent[] = await Promise.all(agents.map(async (agent, index) => {
-    if (agent.memory && Array.isArray(agent.memory)) {
-      const agentMessages = agent.memory.map((memoryItem: any) =>
-        createMessageFromMemory(memoryItem, agent)
-      );
-      allMessages = allMessages.concat(agentMessages);
-    }
-
-    return {
-      ...agent,
-      spriteIndex: index % 9,
-      messageCount: agent.memory?.length || 0,
-    } as Agent;
-  }));
-
-  // Sort messages by creation time
-  const sortedMessages = allMessages.sort((a, b) =>
-    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
-
-  return { agents: processedAgents, messages: sortedMessages };
-};
-
 // World initialization with core auto-restore
 async function* initWorld(state: WorldComponentState, name: string, chatId: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
     location.href = '/';
     return;
   }
-
-  const worldName = decodeURIComponent(name);
-
-  // Load persisted selectedSettingsTarget
-  const persistedSettingsTarget = loadSelectedSettingsTarget();
-
   try {
-    yield {
-      ...state,
-      worldName,
-      loading: true,
-      error: null,
-      isWaiting: false,
-      activeAgent: null
-    };
+    const worldName = decodeURIComponent(name);
 
-    // Core getWorld() automatically restores last chat
+    // Load persisted selectedSettingsTarget
+    const persistedSettingsTarget = loadSelectedSettingsTarget();
+
+    state.selectedSettingsTarget = persistedSettingsTarget;
+    state.worldName = worldName;
+    state.loading = true;
+
+
     const world = await api.getWorld(worldName);
     if (!world) {
-      yield {
-        ...state,
-        worldName,
-        loading: false,
-        error: 'World not found',
-        isWaiting: false,
-        selectedSettingsTarget: persistedSettingsTarget,
-        selectedAgent: null,
-        activeAgent: null
-      };
-      return;
+      throw new Error('World not found: ' + worldName);
+    }
+
+    if (!chatId || !(chatId in world.chats)) {
+      chatId = world.currentChatId;
+    }
+
+    if (world.currentChatId !== chatId) {
+      await api.setCurrentChat(worldName, chatId);
     }
 
     let messages: any[] = [];
 
-    // Load specific chat if chatId provided
-    if (chatId) {
-      try {
-        const chatData = await api.getChat(worldName, chatId);
-        if (chatData?.messages) {
-          messages = chatData.messages;
-        }
-      } catch (error) {
-        console.warn('Failed to load specific chat:', error);
+    for (const agent of world.agents.values()) {
+      for (const memoryItem of agent.memory || []) {
+        const message = createMessageFromMemory(memoryItem, agent);
+        messages.push(message);
       }
     }
 
-    // Process agent memories as fallback
-    const { agents: worldAgents, messages: agentMessages } = await processAgentMemories(world.agents);
-    const finalMessages = messages.length > 0 ? messages : agentMessages;
-
     yield {
       ...state,
-      worldName,
-      world: { ...world, agents: worldAgents },
-      messages: finalMessages,
+      world,
+      currentChat: world.chats[chatId],
+      messages,
       loading: false,
-      error: null,
-      isWaiting: false,
-      selectedSettingsTarget: persistedSettingsTarget,
-      selectedAgent: null,
-      activeAgent: null,
-      chatToDelete: null
     };
 
   } catch (error: any) {
     yield {
       ...state,
-      worldName,
-      world: null,
-      loading: false,
       error: error.message || 'Failed to load world data',
-      isWaiting: false,
-      selectedSettingsTarget: persistedSettingsTarget,
-      selectedAgent: null,
-      activeAgent: null
+      loading: false,
     };
   }
 }
@@ -242,7 +187,7 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
 
   return {
     ...state,
-    wsError: errorMessage,
+    error: errorMessage,
     messages: [...(state.messages || []), errorMsg],
     needScroll: true
   };

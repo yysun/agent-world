@@ -181,7 +181,7 @@ export interface SSEComponentState {
   messages: Message[];
   worldName?: string;
   connectionStatus?: string;
-  wsError?: string | null;
+  error?: string | null;
   needScroll?: boolean;
 }
 
@@ -210,11 +210,11 @@ export interface WorldComponentState extends SSEComponentState {
   selectedWorldForEdit: World | null;
 
   // Chat management state
+  currentChat: Chat | null;
   chatToDelete: Chat | null;
 
   // SSE state (required overrides)
   connectionStatus: string;
-  wsError: string | null;
   needScroll: boolean;
 }
 

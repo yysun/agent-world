@@ -19,32 +19,29 @@ import { worldUpdateHandlers } from './World.update';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
-  state = async (): Promise<WorldComponentState> => {
-    // Minimal default state; all async world/chat loading is handled in /World handler
-    return {
-      worldName: 'World',
-      world: null,
-      messages: [],
-      userInput: '',
-      loading: true,
-      error: null,
-      messagesLoading: false,
-      isSending: false,
-      isWaiting: false,
-      selectedSettingsTarget: 'chat',
-      selectedAgent: null,
-      activeAgent: null,
-      showAgentEdit: false,
-      agentEditMode: 'create',
-      selectedAgentForEdit: null,
-      showWorldEdit: false,
-      worldEditMode: 'edit',
-      selectedWorldForEdit: null,
-      chatToDelete: null,
-      connectionStatus: 'disconnected',
-      wsError: null,
-      needScroll: false
-    };
+  state = {
+    worldName: 'World',
+    world: null,
+    messages: [],
+    userInput: '',
+    loading: true,
+    error: null,
+    messagesLoading: false,
+    isSending: false,
+    isWaiting: false,
+    selectedSettingsTarget: 'chat' as const,
+    selectedAgent: null,
+    activeAgent: null,
+    showAgentEdit: false,
+    agentEditMode: 'create' as const,
+    selectedAgentForEdit: null,
+    showWorldEdit: false,
+    worldEditMode: 'edit' as const,
+    selectedWorldForEdit: null,
+    chatToDelete: null,
+    connectionStatus: 'disconnected',
+    needScroll: false,
+    currentChat: null
   };
 
   view = (state: WorldComponentState) => {
@@ -107,8 +104,6 @@ export default class WorldComponent extends Component<WorldComponentState> {
       );
     }
 
-    const currentChat = state.world.chats.find(chat => chat.id === state.world.currentChatId) || null;
-
     // Main content view
     return (
       <div className="world-container">
@@ -159,7 +154,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               isWaiting={state.isWaiting}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
-              currentChat={currentChat?.name}
+              currentChat={state.currentChat?.name}
             />
           </div>
 
