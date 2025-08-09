@@ -108,6 +108,7 @@ function serializeAgent(agent: Agent) {
     systemPrompt: agent.systemPrompt,
     llmCallCount: agent.llmCallCount,
     memory: agent.memory || [],
+    messageCount: agent.memory?.length || 0
   };
 }
 

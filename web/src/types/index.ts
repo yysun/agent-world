@@ -161,12 +161,9 @@ export interface AgentEditState {
 
 // Chat History Component Props
 export interface WorldChatHistoryProps {
+  // Simplified to only the field used by WorldChatHistory component
+  // Changes: Removed unused props (worldName, chats, currentChatId, onChatSelect, onChatDelete)
   world: World | null;
-  worldName?: string;
-  chats?: Chat[];
-  currentChatId?: string | null;
-  onChatSelect?: (chatId: string) => void;
-  onChatDelete?: (chat: Chat) => void;
 }
 
 // ========================================

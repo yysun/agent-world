@@ -106,7 +106,7 @@ const handleSSEData = (data: SSEData): void => {
 
   switch (data.type) {
     case 'sse':
-      handleStreamingEvent(data as SSEStreamingData);
+      handleStreamingEvent(data.data);
       break;
     case 'system':
       publishEvent('handleSystemEvent', data.data);
@@ -124,11 +124,10 @@ const handleSSEData = (data: SSEData): void => {
  * Process streaming SSE events and manage message state
  */
 const handleStreamingEvent = (data: SSEStreamingData): void => {
-  const eventData = data.data;
+  const eventData = data as any;
   if (!eventData) return;
-
   const messageId = eventData.messageId;
-  const agentName = eventData.sender;
+  const agentName = eventData.agentName;
 
   switch (eventData.type) {
     case 'start':

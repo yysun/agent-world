@@ -17,6 +17,7 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
   // Check if agents exist to enable/disable New Chat button
   const hasAgents = world && world.agents && world.agents.length > 0;
   const chats = world?.chats || [];
+  const currentChatId = world?.currentChatId ?? null;
 
   return (
     <fieldset className="settings-fieldset">
@@ -41,24 +42,31 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
           </div>
         ) : (
           <ul className="chat-list simplified-chat-list">
-            {chats.map(chat => (
-              <li key={chat.id} className="chat-item simplified-chat-item chat-list-li">
-                <span
-                  className="chat-title clickable chat-list-title"
+            {chats.map(chat => {
+              const isCurrent = currentChatId === chat.id;
+              return (
+                <li
+                  key={chat.id}
                   $onclick={["load-chat-from-history", chat.id]}
-                  title={chat.name}
+                  className={`chat-item simplified-chat-item chat-list-li${isCurrent ? ' current' : ''}`}
                 >
-                  {chat.name}
-                </span>
-                <button
-                  className="chat-close-btn chat-list-close-btn"
-                  $onclick={["chat-history-show-delete-confirm", chat]}
-                  title="Delete chat"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
+                  <span
+                    className={`chat-title clickable chat-list-title${isCurrent ? ' current' : ''}`}
+                    
+                    title={chat.name}
+                  >
+                    {chat.name}
+                  </span>
+                  <button
+                    className="chat-close-btn chat-list-close-btn"
+                    $onclick={["chat-history-show-delete-confirm", chat]}
+                    title="Delete chat"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

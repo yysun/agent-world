@@ -1859,7 +1859,9 @@ legend {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  min-height: 300px;
+  /* Fill the remaining vertical space within settings fieldset */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .chat-history-header {
@@ -1878,7 +1880,9 @@ legend {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 400px;
+  /* Use all available space with internal scrolling */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1894,6 +1898,7 @@ legend {
   padding: 0.5rem 1rem;
   background: var(--bg-secondary);
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .chat-list-li:hover {
@@ -1904,13 +1909,17 @@ legend {
   font-size: 1rem;
   font-weight: 500;
   color: var(--text-primary);
-  cursor: pointer;
   flex: 1;
   transition: color 0.2s;
 }
 
 .chat-list-title:hover {
   color: var(--accent-primary);
+}
+
+.chat-list-li.current {
+  font-weight: 800;
+  border: var(--text-primary) 1px solid;
 }
 
 .chat-list-close-btn {

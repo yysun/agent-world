@@ -428,7 +428,7 @@ export function subscribeWorldToMessages(world: World): () => void {
         name: title
       });
 
-      publishMessage(world, `chat-title-updated`, 'system');
+      publishEvent(world, 'system', `chat-title-updated`);
     }
 
   });

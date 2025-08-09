@@ -73,7 +73,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
 };
 
 // World initialization with core auto-restore
-async function* initWorld(state: WorldComponentState, name: string, chatId: string): AsyncGenerator<WorldComponentState> {
+async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
     location.href = '/';
     return;
@@ -87,7 +87,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId: stri
     state.selectedSettingsTarget = persistedSettingsTarget;
     state.worldName = worldName;
     state.loading = true;
-
 
     const world = await api.getWorld(worldName);
     if (!world) {
@@ -136,25 +135,17 @@ async function* initWorld(state: WorldComponentState, name: string, chatId: stri
 // Event handlers for SSE and system events
 const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
   console.log('Received system event:', data);
-
-  if (data?.action === 'chat-created' || data?.action === 'chat-updated') {
-    const world = await api.getWorld(state.worldName);
-    return world ? { ...state, world } : { ...state, error: 'World not found' };
-  }
-  return state;
-};
-
-const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
-
   // console.log('Received message event:', data);
-
-  if (data.sender === 'system' && data.action === 'chat-title-updated') {
+  if (data.content === 'chat-title-updated') {
     const updates = initWorld(state, state.worldName, data.chatId);
     for await (const update of updates) {
       state = { ...state, ...update };
     }
     return state;
   }
+};
+
+const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
 
   const messageData = data || {};
   const senderName = messageData.sender;
@@ -164,6 +155,9 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   if (state.world?.agents) {
     const agent = state.world.agents.find((a: any) => a.name === senderName);
     if (agent) {
+      if (!agent.messageCount) {
+        agent.messageCount = 0;
+      }
       agent.messageCount++;
       fromAgentId = agent.id;
     }
@@ -210,6 +204,8 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
 
 
 export const worldUpdateHandlers = {
+
+  initWorld,
 
   '/World': initWorld,
 
@@ -459,18 +455,7 @@ export const worldUpdateHandlers = {
         yield { ...state, loading: false, error: 'Failed to create new chat' };
         return;
       }
-
-      const refreshedWorld = await api.getWorld(state.worldName);
-      yield {
-        ...state,
-        loading: false,
-        world: refreshedWorld,
-        messages: [],
-        selectedAgent: null,
-        activeAgent: null,
-        userInput: '',
-        chatToDelete: null
-      };
+      app.run('initWorld', state.worldName);
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to create new chat' };
     }
@@ -484,12 +469,7 @@ export const worldUpdateHandlers = {
       if (!result.success) {
         yield state;
       }
-
-      const new_state = await initWorld(state, state.worldName, chatId);
-      for await (const update of new_state) {
-        yield update;
-      }
-
+      app.run('initWorld', state.worldName, chatId);
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to load chat from history' };
     }
@@ -498,18 +478,8 @@ export const worldUpdateHandlers = {
   'delete-chat-from-history': async function* (state: WorldComponentState, chatId: string): AsyncGenerator<WorldComponentState> {
     try {
       yield { ...state, loading: true, chatToDelete: null };
-
       await api.deleteChat(state.worldName, chatId);
-      const world = await api.getWorld(state.worldName);
-      const shouldClearMessages = world.currentChatId === null || world.currentChatId === chatId;
-
-      yield {
-        ...state,
-        world,
-        loading: false,
-        chatToDelete: null,
-        messages: shouldClearMessages ? [] : state.messages
-      };
+      app.run('initWorld', state.worldName);
     } catch (error: any) {
       yield { ...state, loading: false, chatToDelete: null, error: error.message || 'Failed to delete chat' };
     }
