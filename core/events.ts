@@ -427,6 +427,8 @@ export function subscribeWorldToMessages(world: World): () => void {
       await storage.updateChatData(world.id, world.currentChatId, {
         name: title
       });
+
+      publishMessage(world, `chat-title-updated`, 'system');
     }
 
   });

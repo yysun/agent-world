@@ -220,7 +220,7 @@ export async function sendChatMessage(
 
   streamingState.currentWorldName = worldName;
 
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chat`, {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
     method: 'POST',
     body: JSON.stringify({ message, sender }),
     headers: {
@@ -325,7 +325,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       messages[i] = {
         ...messages[i],
         text: content || '',
-        createdAt: new Date().toISOString()
+        createdAt: new Date()
       };
 
       return {

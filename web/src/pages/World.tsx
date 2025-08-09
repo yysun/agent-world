@@ -47,33 +47,33 @@ export default class WorldComponent extends Component<WorldComponentState> {
   view = (state: WorldComponentState) => {
 
     // Guard clauses for loading and error states
-    if (state.loading) {
-      return (
-        <div className="world-container">
-          <div className="world-columns">
-            <div className="chat-column">
-              <div className="agents-section">
-                <div className="agents-row">
-                  <div className="loading-agents">Loading...</div>
-                </div>
-              </div>
-              <div className="loading-state">
-                <p>Loading world data...</p>
-              </div>
-            </div>
-            <div className="settings-column">
-              <div className="settings-section">
-                <div className="settings-row">
-                  <button className="world-settings-btn" title="World Settings">
-                    <span className="world-gear-icon">⚙</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // if (state.loading) {
+    //   return (
+    //     <div className="world-container">
+    //       <div className="world-columns">
+    //         <div className="chat-column">
+    //           <div className="agents-section">
+    //             <div className="agents-row">
+    //               <div className="loading-agents">Loading...</div>
+    //             </div>
+    //           </div>
+    //           <div className="loading-state">
+    //             <p>Loading world data...</p>
+    //           </div>
+    //         </div>
+    //         <div className="settings-column">
+    //           <div className="settings-section">
+    //             <div className="settings-row">
+    //               <button className="world-settings-btn" title="World Settings">
+    //                 <span className="world-gear-icon">⚙</span>
+    //               </button>
+    //             </div>
+    //           </div>
+    //         </div>
+    //       </div>
+    //     </div>
+    //   );
+    // }
 
     if (state.error) {
       return (
@@ -119,9 +119,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   </a>
                 </div>
                 <div className="agents-list-container">
-                  {state.loading ? (
-                    <div className="loading-agents">Loading agents...</div>
-                  ) : !(state.world?.agents?.length) ? (
+                  {!state.world?.agents?.length ? (
                     <div className="no-agents">No agents in this world:
                       <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>')}</span>
                     </div>

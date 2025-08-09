@@ -99,7 +99,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId: stri
     }
 
     if (world.currentChatId !== chatId) {
-      await api.setCurrentChat(worldName, chatId);
+      await api.setChat(worldName, chatId);
     }
 
     let messages: any[] = [];
@@ -144,9 +144,20 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   return state;
 };
 
-const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
+const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
+
+  // console.log('Received message event:', data);
+
+  if (data.sender === 'system' && data.action === 'chat-title-updated') {
+    const updates = initWorld(state, state.worldName, data.chatId);
+    for await (const update of updates) {
+      state = { ...state, ...update };
+    }
+    return state;
+  }
+
   const messageData = data || {};
-  const senderName = messageData.sender || messageData.agentName || 'Agent';
+  const senderName = messageData.sender;
 
   // Find and update agent message count
   let fromAgentId: string | undefined;
@@ -336,23 +347,14 @@ export const worldUpdateHandlers = {
     };
   },
 
-  'select-chat-history': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    saveSelectedSettingsTarget('chat');
-    return {
-      ...state,
-      selectedSettingsTarget: 'chat',
-      selectedAgent: null,
-      messages: (state.messages || []).filter(message => !message.userEntered)
-    };
-  },
 
   'toggle-settings-chat-history': (state: WorldComponentState): WorldComponentState => {
     if (state.selectedSettingsTarget !== 'world') {
       saveSelectedSettingsTarget('world');
       return { ...state, selectedSettingsTarget: 'world' };
     } else {
-      app.run('select-chat-history');
-      return state;
+      saveSelectedSettingsTarget('chat');
+      return { ...state, selectedSettingsTarget: 'chat' };
     }
   },
 
@@ -452,7 +454,7 @@ export const worldUpdateHandlers = {
     try {
       yield { ...state, loading: true };
 
-      const result = await api.createNewChat(state.worldName);
+      const result = await api.newChat(state.worldName);
       if (!result.success) {
         yield { ...state, loading: false, error: 'Failed to create new chat' };
         return;
@@ -478,24 +480,16 @@ export const worldUpdateHandlers = {
     try {
       yield { ...state, loading: true };
 
-      const result = await api.loadChatById(state.worldName, chatId);
+      const result = await api.setChat(state.worldName, chatId);
       if (!result.success) {
-        yield { ...state, loading: false, error: 'Failed to load chat' };
-        return;
+        yield state;
       }
 
-      const chatData = await api.getChat(state.worldName, chatId);
-      yield {
-        ...state,
-        loading: false,
-        world: result.world,
-        messages: chatData.messages || [],
-        selectedAgent: null,
-        activeAgent: null,
-        userInput: '',
-        error: null,
-        chatToDelete: null
-      };
+      const new_state = await initWorld(state, state.worldName, chatId);
+      for await (const update of new_state) {
+        yield update;
+      }
+
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to load chat from history' };
     }
@@ -520,17 +514,4 @@ export const worldUpdateHandlers = {
       yield { ...state, loading: false, chatToDelete: null, error: error.message || 'Failed to delete chat' };
     }
   },
-
-  'reloadWorldChats': async function* (state: WorldComponentState, data: { worldName?: string }): AsyncGenerator<WorldComponentState> {
-    try {
-      if (data.worldName && data.worldName !== state.worldName) return;
-
-      const refreshedWorld = await api.getWorld(state.worldName);
-      if (refreshedWorld) {
-        yield { ...state, world: refreshedWorld };
-      }
-    } catch (error: any) {
-      console.warn('Failed to reload world chats:', error.message);
-    }
-  }
 };

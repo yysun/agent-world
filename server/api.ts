@@ -56,9 +56,8 @@ type WorldContext = {
   clearAgentMemory: (agentName: string) => Promise<Agent | null>;
   listChats: () => Promise<Chat[]>;
   newChat: () => Promise<World | null>;
-  restoreChat: (chatId: string) => Promise<World | null>;
+  setChat: (chatId: string) => Promise<World | null>;
   deleteChat: (chatId: string) => Promise<boolean>;
-  getMemory: (chatId?: string | null) => Promise<any>;
 };
 
 // World context factory - eliminates repetitive worldId passing
@@ -77,9 +76,8 @@ function createWorldContext(worldId: string) {
     clearAgentMemory: (agentName: string) => clearAgentMemory(id, toKebabCase(agentName)),
     listChats: () => listChats(id),
     newChat: () => newChat(id),
-    restoreChat: (chatId: string) => restoreChat(id, chatId),
+    setChat: (chatId: string) => restoreChat(id, chatId),
     deleteChat: (chatId: string) => deleteChatCore(id, chatId),
-    getMemory: (chatId?: string | null) => coreGetMemory(id, chatId),
   };
   return worldContext;
 }
@@ -663,7 +661,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 }
 
 // Chat Routes
-router.post('/worlds/:worldName/chat', validateWorld, async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
     const validation = ChatMessageSchema.safeParse(req.body);
@@ -717,57 +715,49 @@ router.get('/worlds/:worldName/chats', validateWorld, async (req: Request, res: 
   }
 });
 
-router.get('/worlds/:worldName/chats/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
+// router.get('/worlds/:worldName/chats/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const { chatId } = req.params;
+//     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+
+//     const world = await worldCtx.load();
+//     if (!world) {
+//       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+//       return;
+//     }
+//     const chat = world.chats.get(chatId);
+//     if (!chat) {
+//       sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+//       return;
+//     }
+//     res.json(serializeChat(chat));
+//   } catch (error) {
+//     logger.error('Error getting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+//     sendError(res, 500, 'Failed to get chat', 'CHAT_GET_ERROR');
+//   }
+// });
+
+// router.get('/worlds/:worldName/chats/:chatId/messages', validateWorld, async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const { chatId } = req.params;
+//     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+
+//     const messages = await worldCtx.getMemory(chatId);
+//     res.json(messages || []);
+//   } catch (error) {
+//     logger.error('Error getting chat messages', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+//     sendError(res, 500, 'Failed to get chat messages', 'CHAT_MESSAGES_ERROR');
+//   }
+// });
+
+router.post('/worlds/:worldName/chats', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { chatId } = req.params;
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-
-    const world = await worldCtx.load();
-    if (!world) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
-    const chat = world.chats.get(chatId);
-    if (!chat) {
-      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
-      return;
-    }
-    res.json(serializeChat(chat));
-  } catch (error) {
-    logger.error('Error getting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    sendError(res, 500, 'Failed to get chat', 'CHAT_GET_ERROR');
-  }
-});
-
-router.get('/worlds/:worldName/chats/:chatId/messages', validateWorld, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { chatId } = req.params;
-    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-
-    const messages = await worldCtx.getMemory(chatId);
-    res.json(messages || []);
-  } catch (error) {
-    logger.error('Error getting chat messages', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    sendError(res, 500, 'Failed to get chat messages', 'CHAT_MESSAGES_ERROR');
-  }
-});
-
-router.post('/worlds/:worldName/message', validateWorld, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-
-    const currentWorld = await worldCtx.load();
-    if (!currentWorld) {
-      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
-      return;
-    }
-
     const updatedWorld = await worldCtx.newChat();
     if (!updatedWorld) {
-      sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
+      sendError(res, 400, 'Failed to create new chat', 'CHAT_CREATION_ERROR');
       return;
     }
-
     res.json({
       world: serializeWorld(updatedWorld),
       chatId: updatedWorld.currentChatId,
@@ -779,20 +769,23 @@ router.post('/worlds/:worldName/message', validateWorld, async (req: Request, re
   }
 });
 
-router.post('/worlds/:worldName/load-chat/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
+router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const { chatId } = req.params;
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-
-    const currentWorld = await worldCtx.load();
+    const currentWorld = (req as any).world;
     if (!currentWorld) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
 
-    const updatedWorld = await worldCtx.restoreChat(chatId);
+    const updatedWorld = await worldCtx.setChat(chatId);
     if (!updatedWorld) {
-      sendError(res, 404, 'Chat not found or failed to load', 'LOAD_CHAT_ERROR');
+      res.json({
+        world: serializeWorld(currentWorld),
+        chatId: currentWorld.currentChatId,
+        success: false
+      });
       return;
     }
 

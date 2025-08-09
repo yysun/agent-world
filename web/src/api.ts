@@ -265,12 +265,12 @@ async function getWorldMarkdown(worldName: string): Promise<string> {
   return response.text();
 }
 
-export async function setCurrentChat(worldName: string, chatId: string): Promise<{
+export async function setChat(worldName: string, chatId: string): Promise<{
   world: any;
   chatId: string;
   success: boolean;
 }> {
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/currentChat/${encodeURIComponent(chatId)}`, {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/setChat/${encodeURIComponent(chatId)}`, {
     method: 'POST'
   });
   return await response.json();
@@ -289,7 +289,7 @@ async function deleteChat(worldName: string, chatId: string): Promise<void> {
 /**
  * Create a new chat and set it as current
  */
-async function createNewChat(worldName: string): Promise<{
+async function newChat(worldName: string): Promise<{
   world: any;
   chatId: string;
   success: boolean;
@@ -298,44 +298,11 @@ async function createNewChat(worldName: string): Promise<{
     throw new Error('World name is required');
   }
 
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/new-chat`, {
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/chats`, {
     method: 'POST'
   });
   return await response.json();
 }
-
-/**
- * Load a specific chat by ID and set it as current
- */
-async function loadChatById(worldName: string, chatId: string): Promise<{
-  world: any;
-  chatId: string;
-  success: boolean;
-}> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/load-chat/${encodeURIComponent(chatId)}`, {
-    method: 'POST'
-  });
-  return await response.json();
-}
-
-/**
- * Get a specific chat data (using setCurrentChat for now)
- */
-async function getChat(worldName: string, chatId: string): Promise<any> {
-  if (!worldName || !chatId) {
-    throw new Error('World name and chat ID are required');
-  }
-
-  // Use setCurrentChat as it loads the chat and returns data
-  const result = await setCurrentChat(worldName, chatId);
-  return result.world;
-}
-
-
 
 // Export the API functions
 export default {
@@ -352,7 +319,6 @@ export default {
   getWorldMarkdown,
 
   // Agent management - simplified to use world.agents
-  // Note: getAgents and getAgent removed - use getWorld().agents instead
   createAgent,
   updateAgent,
   deleteAgent,
@@ -361,11 +327,9 @@ export default {
   clearAgentMemory,
 
   // Chat management
-  setCurrentChat,
+  setChat,
   deleteChat,
-  createNewChat,
-  loadChatById,
-  getChat,
+  newChat,
 };
 
 

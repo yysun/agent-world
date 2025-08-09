@@ -428,17 +428,12 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 export async function restoreChat(worldId: string, chatId: string): Promise<World | null> {
   await moduleInitialization;
 
-  const chatData = await storageWrappers!.loadChatData(worldId, chatId);
-  if (!chatData) {
-    return null;
-  }
-
   let world = await getWorld(worldId);
   if (!world) {
     return null;
   }
 
-  if (world.currentChatId === chatId && chatData.worldId === worldId) {
+  if (world.currentChatId === chatId) {
     return world;
   }
 
