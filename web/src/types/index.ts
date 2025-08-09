@@ -22,12 +22,8 @@
  */
 
 // Essential core type imports
-import type { AgentMessage, LLMProvider } from '../../../core/types';
-import { EventType, SenderType } from '../../../core/types';
-
-// Re-export essential utilities
-export { EventType, SenderType };
-export type { LLMProvider };
+import type { AgentMessage, LLMProvider, EventType, SenderType } from '../../../core/types';
+export type { EventType, SenderType, AgentMessage, LLMProvider };
 
 // ========================================
 // UI DATA INTERFACES
@@ -35,11 +31,12 @@ export type { LLMProvider };
 
 // Web UI Message Interface - extends core with streaming states
 export interface Message {
-  id: number | string;
+  id: string;
+
   type: string;
   sender: string;
   text: string;
-  createdAt: string;
+  createdAt: Date;
   worldName?: string;
   isStreaming?: boolean;
   hasError?: boolean;

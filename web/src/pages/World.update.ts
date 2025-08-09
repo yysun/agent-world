@@ -26,7 +26,7 @@ import {
   handleStreamEnd,
   handleStreamError,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -58,17 +58,17 @@ function loadSelectedSettingsTarget(): 'world' | 'agent' | 'chat' | null {
 }
 
 // Utility functions for message processing
-const createMessageFromMemory = (memoryItem: any, agent: Agent): any => {
-  const sender = toKebabCase(memoryItem.sender || agent.name);
+const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
+  const sender = toKebabCase(memoryItem.sender || agentName);
   const messageType = (sender === 'HUMAN' || sender === 'USER') ? 'user' : 'agent';
 
   return {
-    id: memoryItem.id || `${memoryItem.createdAt || Date.now()}-${Math.random()}`,
+    id: `msg-${Date.now() + Math.random()}`,
     sender,
-    text: memoryItem.text || memoryItem.content || '',
-    createdAt: memoryItem.createdAt || new Date().toISOString(),
+    text: memoryItem.content || '',
+    createdAt: memoryItem.createdAt,
     type: messageType,
-    fromAgentId: agent.id
+    fromAgentId: agentName
   };
 };
 
@@ -105,16 +105,20 @@ async function* initWorld(state: WorldComponentState, name: string, chatId: stri
     let messages: any[] = [];
 
     for (const agent of world.agents.values()) {
+      agent.messageCount = 0; // Reset message count for UI
       for (const memoryItem of agent.memory || []) {
-        const message = createMessageFromMemory(memoryItem, agent);
-        messages.push(message);
+        if (memoryItem.chatId === chatId) {
+          agent.messageCount++;
+          const message = createMessageFromMemory(memoryItem, agent.name);
+          messages.push(message);
+        }
       }
     }
 
     yield {
       ...state,
       world,
-      currentChat: world.chats[chatId],
+      currentChat: world.chats.find(c => c.id === chatId) || null,
       messages,
       loading: false,
     };
@@ -215,11 +219,11 @@ export const worldUpdateHandlers = {
     if (!messageText) return state;
 
     const userMessage = {
-      id: Date.now() + Math.random(),
+      id: `msg-${Date.now() + Math.random()}`,
       type: 'user',
       sender: 'HUMAN',
       text: messageText,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(),
       worldName: state.worldName,
       userEntered: true
     };

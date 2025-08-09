@@ -62,7 +62,7 @@ export default function WorldChat(props: WorldChatProps) {
               const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
 
               return (
-                <div key={message.id || index} className={messageClasses}>
+                <div key={message.id || 'msg-' + index} className={messageClasses}>
                   <div className="message-sender">
                     {message.sender || (message.type === 'user' ? 'User' : 'Agent')}
                     {isCrossAgentMessage && message.fromAgentId && (
