@@ -12,9 +12,8 @@
  * - Agent/world memory management and UI controls
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
- * - Persistent selectedSettingsTarget across sessions using localStorage
  * 
- * Updated: 2025-08-08 - Added selectedSettingsTarget persistence
+ * Updated: 2025-08-09 - Removed selectedSettingsTarget localStorage persistence
  */
 
 import { app } from 'apprun';
@@ -29,33 +28,6 @@ import {
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
-
-// Persistence helpers for selectedSettingsTarget
-const SETTINGS_TARGET_KEY = 'agent-world-selectedSettingsTarget';
-
-function saveSelectedSettingsTarget(target: 'world' | 'agent' | 'chat' | null): void {
-  try {
-    if (target) {
-      localStorage.setItem(SETTINGS_TARGET_KEY, target);
-    } else {
-      localStorage.removeItem(SETTINGS_TARGET_KEY);
-    }
-  } catch (error) {
-    console.warn('Failed to save selectedSettingsTarget:', error);
-  }
-}
-
-function loadSelectedSettingsTarget(): 'world' | 'agent' | 'chat' | null {
-  try {
-    const saved = localStorage.getItem(SETTINGS_TARGET_KEY);
-    if (saved === 'world' || saved === 'agent' || saved === 'chat') {
-      return saved;
-    }
-  } catch (error) {
-    console.warn('Failed to load selectedSettingsTarget:', error);
-  }
-  return 'world'; // Default fallback
-}
 
 // Utility functions for message processing
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
@@ -81,10 +53,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
   try {
     const worldName = decodeURIComponent(name);
 
-    // Load persisted selectedSettingsTarget
-    const persistedSettingsTarget = loadSelectedSettingsTarget();
-
-    state.selectedSettingsTarget = persistedSettingsTarget;
+    // Default selectedSettingsTarget to 'world' on init (no persistence)
+    state.selectedSettingsTarget = 'world';
     state.worldName = worldName;
     state.loading = true;
 
@@ -310,7 +280,6 @@ export const worldUpdateHandlers = {
 
   // Settings and navigation handlers
   'select-world-settings': (state: WorldComponentState): WorldComponentState => {
-    saveSelectedSettingsTarget('world');
     return {
       ...state,
       selectedSettingsTarget: 'world',
@@ -323,7 +292,6 @@ export const worldUpdateHandlers = {
     const isCurrentlySelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
 
     if (isCurrentlySelected) {
-      saveSelectedSettingsTarget('world');
       return {
         ...state,
         selectedSettingsTarget: 'world',
@@ -333,7 +301,6 @@ export const worldUpdateHandlers = {
       };
     }
 
-    saveSelectedSettingsTarget('agent');
     return {
       ...state,
       selectedSettingsTarget: 'agent',
@@ -346,10 +313,8 @@ export const worldUpdateHandlers = {
 
   'toggle-settings-chat-history': (state: WorldComponentState): WorldComponentState => {
     if (state.selectedSettingsTarget !== 'world') {
-      saveSelectedSettingsTarget('world');
       return { ...state, selectedSettingsTarget: 'world' };
     } else {
-      saveSelectedSettingsTarget('chat');
       return { ...state, selectedSettingsTarget: 'chat' };
     }
   },

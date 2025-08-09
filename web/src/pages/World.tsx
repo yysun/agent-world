@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Centered agent list with message badges and real-time SSE chat streaming
- * - Interactive settings panel for world/agent/chat configuration
+ * - Right panel always shows Chat History (no settings panel toggle)
  * - Agent selection highlighting with message filtering and CRUD modals
  * - AppRun MVU pattern with modular components and extracted handlers
  */
@@ -11,7 +11,6 @@
 import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent } from '../types';
 import WorldChat from '../components/world-chat';
-import WorldSettings from '../components/world-settings';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
@@ -128,7 +127,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         return (
-                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['select-agent-settings', agent]}>
+                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['open-agent-edit', agent]}>
                             <div className="agent-sprite-container">
                               <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
                               <div className="message-badge">{agent.messageCount}</div>
@@ -161,10 +160,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <div className="settings-row">
                 <button
                   className="world-settings-btn"
-                  title="Toggle Settings/Chat History"
-                  $onclick="toggle-settings-chat-history"
+                  title="World Settings"
+                  $onclick="open-world-edit"
                 >
-                  <span className="world-gear-icon">⊕</span>
+                  <span className="world-gear-icon">⚙</span>
                 </button>
                 <button
                   className="world-settings-btn"
@@ -185,18 +184,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
               </div>
             </div>
 
-            {state.selectedSettingsTarget === 'chat' ? (
-              <WorldChatHistory
-                world={state.world}
-              />
-            ) : (
-              <WorldSettings
-                world={state.world}
-                selectedSettingsTarget={state.selectedSettingsTarget}
-                selectedAgent={state.selectedAgent}
-                totalMessages={(state.messages || []).length}
-              />
-            )}
+            <WorldChatHistory
+              world={state.world}
+            />
           </div>
         </div>
 

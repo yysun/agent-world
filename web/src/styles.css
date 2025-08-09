@@ -1931,12 +1931,24 @@ legend {
   margin-left: 0.5rem;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s, color 0.2s, opacity 0.15s ease-in-out;
+  /* Hidden by default; revealed on hover/focus for cleaner UI */
+  opacity: 0;
+  pointer-events: none;
 }
 
 .chat-list-close-btn:hover {
   background: var(--bg-accent);
   color: var(--accent-primary);
+}
+
+/* Reveal delete button when hovering the list item or focusing within */
+.chat-list-li:hover .chat-list-close-btn,
+.chat-list-li:focus-within .chat-list-close-btn,
+.chat-list-close-btn:focus,
+.chat-list-close-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .no-chats {
