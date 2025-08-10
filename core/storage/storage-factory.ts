@@ -541,6 +541,9 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
 // Instance caching for performance optimization
 const storageCache = new Map<string, StorageAPI>();
 
+// Flag to prevent duplicate log messages
+let hasLoggedStorageInit = false;
+
 /**
  * Creates storage with environment-aware wrappers for browser/Node.js compatibility.
  */
@@ -754,7 +757,11 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
       : undefined
   };
 
-  console.log('🟢 Storage path:', config.rootPath + ' - ' + config.type);
+  // Only log on first initialization to avoid duplicate logs
+  if (!hasLoggedStorageInit) {
+    console.log('🟢 Storage path:', config.rootPath + ' - ' + config.type);
+    hasLoggedStorageInit = true;
+  }
 
   const storage = await createStorage(config);
   // Cache with the special environment key
