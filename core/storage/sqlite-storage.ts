@@ -361,7 +361,7 @@ export async function deleteMemoryByChatId(ctx: SQLiteStorageContext, worldId: s
 export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<AgentMessage[]> {
   await ensureInitialized(ctx);
   const rows = await all(ctx, `
-    SELECT role, content, sender, chat_id as chatId, created_at as createdAt
+    SELECT role, content, sender, chat_id as chatId, agent_id as agentId, created_at as createdAt
     FROM agent_memory
     WHERE world_id = ? AND (? = '' OR chat_id = ?)
     ORDER BY datetime(created_at) ASC, rowid ASC
@@ -372,6 +372,7 @@ export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chat
     content: r.content,
     sender: r.sender,
     chatId: r.chatId,
+    agentId: r.agentId,
     createdAt: r.createdAt ? new Date(r.createdAt) : new Date()
   }));
 }

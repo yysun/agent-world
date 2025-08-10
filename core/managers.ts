@@ -7,9 +7,15 @@
  * - Chat session management with auto-save and title generation
  * - Automatic ID normalization to kebab-case for consistency
  * - Environment-aware storage operations through storage-factory
+ * - Agent message management with automatic agentId assignment
  *
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
  * Chat (newChat/listChats/deleteChat/restoreChat)
+ *
+ * Implementation Details:
+ * - Ensures all agent messages include agentId for proper export functionality
+ * - Compatible with both SQLite and memory storage backends
+ * - Automatic agent identification for message source tracking
  *
  * Note: Export functionality has been moved to core/export.ts
  */// Core module imports
@@ -278,9 +284,15 @@ export async function updateAgentMemory(worldId: string, agentId: string, messag
     return null;
   }
 
+  // Ensure messages have the agentId set
+  const messagesWithAgentId = messages.map(msg => ({
+    ...msg,
+    agentId: agentId
+  }));
+
   const updatedAgent: Agent = {
     ...existingAgentData,
-    memory: [...existingAgentData.memory, ...messages],
+    memory: [...existingAgentData.memory, ...messagesWithAgentId],
     lastActive: new Date()
   };
 

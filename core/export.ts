@@ -1,35 +1,42 @@
 /**
- * World Export Module - Markdown Export Functionality
+ * World Markdown Export Functionality
  *
  * Provides comprehensive world export functionality to Markdown format including:
  * - World configuration and metadata
- * - Agent configurations, system prompts, and memory
+ * - Agent configurations and system prompts (memory excluded)
  * - Chat sessions with complete message histories
  * - Structured formatting with proper markdown syntax
  * - Timestamp formatting and content preservation
  *
  * Features:
- * - Complete world state export including all chats
- * - Agent memory and configuration details
- * - Chat message histories with proper formatting
+ * - Complete world export with only the current chat
+ * - Agent configuration details (without memory)
+ * - Current chat message history with proper formatting
  * - Structured markdown with clear sections and navigation
- * - Support for both WorldChat snapshots and individual agent memories
+ * - Uses getMemory() for efficient message retrieval
+ * - Automatic sender labeling for assistant messages using agent names
  *
  * Implementation:
  * - Uses managers module for data access
  * - Formats dates consistently as ISO strings
  * - Preserves message content with proper escaping
- * - Organizes export by logical sections (world → agents → chats)
+ * - Organizes export by logical sections (world → agents → current chat)
+ * - Simplified chat loading using world.chats.get() and getMemory()
+ * - Maps agentId to agent names for assistant messages without sender
  *
  * Changes:
  * - 2025-08-07: Extracted from managers.ts and enhanced with chat export
  * - 2025-08-07: Added complete chat message history support
  * - 2025-08-07: Enhanced formatting and structure for better readability
+ * - 2025-08-09: Exclude agent memory and export only current chat
+ * - 2025-08-09: Add sender label formatting (human → HUMAN)
+ * - 2025-08-09: Simplified chat loading using getMemory() instead of complex fallback logic
+ * - 2025-08-09: Added agentId to AgentMessage and automatic agent name fallback for assistant messages
  */
 
 // Core module imports
 import { createCategoryLogger } from './logger.js';
-import { getWorld, listAgents, getAgent, listChats } from './managers.js';
+import { getWorld, listAgents, getAgent, getMemory } from './managers.js';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js';
 
 // Type imports
@@ -49,6 +56,29 @@ const moduleInitialization = initializeModules();
  * Export world configuration, agents, and chats to Markdown format
  */
 export async function exportWorldToMarkdown(worldName: string): Promise<string> {
+
+  function formatSenderLabel(message: AgentMessage, agentsMap: Map<string, Agent>): string | undefined {
+    const raw = message.sender;
+    const agent = message.agentId ? agentsMap.get(message.agentId) : null;
+    const agentName = agent ? agent.name : message.agentId;
+
+    if (message.role === 'user' || message.role === 'assistant') {
+      if (raw) {
+        // If there is a sender, show "sender → agent name"
+        const senderLabel = raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
+        return agentName ? `${senderLabel} → ${agentName}` : senderLabel;
+      } else {
+        // Otherwise, show just the agent name
+        return agentName || undefined;
+      }
+    }
+
+    // For system messages or other roles, keep original behavior
+    if (raw) {
+      return raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
+    }
+    return undefined;
+  }
   await moduleInitialization;
 
   // Load world configuration
@@ -58,7 +88,19 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
   }
 
   const agents = await listAgents(worldData.id);
-  const chats = await listChats(worldData.id);
+
+  // Create agents map for quick lookup
+  const agentsMap = new Map<string, Agent>();
+  for (const agentInfo of agents) {
+    const fullAgent = await getAgent(worldData.id, agentInfo.id);
+    if (fullAgent) {
+      agentsMap.set(fullAgent.id, fullAgent);
+    }
+  }
+
+  // Get the current chat directly from the world, if any
+  const currentChat = worldData.currentChatId ? worldData.chats.get(worldData.currentChatId) : null;
+  const hasCurrentChat = currentChat !== null;
 
   let markdown = `# World Export: ${worldData.name}\n\n`;
   markdown += `**Exported on:** ${new Date().toISOString()}\n\n`;
@@ -76,7 +118,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
     markdown += `- **Chat LLM Model:** ${worldData.chatLLMModel}\n`;
   }
   markdown += `- **Total Agents:** ${agents.length}\n`;
-  markdown += `- **Total Chats:** ${chats.length}\n`;
+  markdown += `- **Total Chats:** ${hasCurrentChat ? 1 : 0}\n`;
   markdown += `- **Current Chat ID:** ${worldData.currentChatId || 'None'}\n`;
   markdown += `- **Created:** ${formatDate(worldData.createdAt)}\n`;
   markdown += `- **Last Updated:** ${formatDate(worldData.lastUpdated)}\n\n`;
@@ -107,16 +149,46 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
         markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
       }
 
-      if (fullAgent.memory && fullAgent.memory.length > 0) {
-        markdown += `**Memory (${fullAgent.memory.length} messages):**\n\n`;
+      // Memory intentionally excluded from agent export
 
-        fullAgent.memory.forEach((message, index) => {
-          markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
+      markdown += `---\n\n`;
+    }
+  } else {
+    markdown += `## Agents\n\nNo agents found in this world.\n\n`;
+  }
+
+  // Current Chat Section
+  if (hasCurrentChat && currentChat) {
+    markdown += `## Current Chat\n\n`;
+
+    markdown += `### ${currentChat.name}\n\n`;
+    markdown += `**Chat Information:**\n`;
+    markdown += `- **ID:** ${currentChat.id}\n`;
+    markdown += `- **Name:** ${currentChat.name}\n`;
+    markdown += `- **Description:** ${currentChat.description || 'No description'}\n`;
+    markdown += `- **Message Count:** ${currentChat.messageCount}\n`;
+    markdown += `- **Created:** ${formatDate(currentChat.createdAt)}\n`;
+    markdown += `- **Updated:** ${formatDate(currentChat.updatedAt)}\n`;
+    markdown += `- **Status:** Current active chat\n\n`;
+
+    // Get chat messages using getMemory
+    try {
+      const chatMessages = await getMemory(worldData.id, currentChat.id);
+      if (chatMessages && chatMessages.length > 0) {
+        markdown += `**Messages (${chatMessages.length}):**\n\n`;
+
+        // Sort messages by timestamp if available
+        const sortedMessages = chatMessages.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateA - dateB;
+        });
+
+        sortedMessages.forEach((message, index) => {
+          const senderLabel = formatSenderLabel(message, agentsMap);
+          markdown += `${index + 1}. **${message.role}** ${senderLabel ? `(${senderLabel})` : ''}:\n`;
           if (message.createdAt) {
             markdown += `   *${formatDate(message.createdAt)}*\n`;
-          }
-          if (message.chatId) {
-            markdown += `   *Chat ID: ${message.chatId}*\n`;
           }
           markdown += '   ```markdown\n';
           let paddedContent = '';
@@ -130,157 +202,16 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           markdown += '   ```\n\n';
         });
       } else {
-        markdown += `**Memory:** No messages\n\n`;
+        markdown += `**Messages:** No messages found for this chat\n\n`;
       }
-
-      markdown += `---\n\n`;
+    } catch (error) {
+      logger.warn('Failed to load chat messages', { chatId: currentChat.id, error: error instanceof Error ? error.message : error });
+      markdown += `**Messages:** Unable to load messages (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
     }
+
+    markdown += `---\n\n`;
   } else {
-    markdown += `## Agents\n\nNo agents found in this world.\n\n`;
-  }
-
-  // Chats Section
-  if (chats.length > 0) {
-    markdown += `## Chats (${chats.length})\n\n`;
-
-    for (const chat of chats) {
-      markdown += `### ${chat.name}\n\n`;
-      markdown += `**Chat Information:**\n`;
-      markdown += `- **ID:** ${chat.id}\n`;
-      markdown += `- **Name:** ${chat.name}\n`;
-      markdown += `- **Description:** ${chat.description || 'No description'}\n`;
-      markdown += `- **Message Count:** ${chat.messageCount}\n`;
-      markdown += `- **Created:** ${formatDate(chat.createdAt)}\n`;
-      markdown += `- **Updated:** ${formatDate(chat.updatedAt)}\n`;
-
-      // Check if this is the current chat
-      if (worldData.currentChatId === chat.id) {
-        markdown += `- **Status:** Current active chat\n`;
-      }
-      markdown += `\n`;
-
-      // Load chat messages from WorldChat if available
-      try {
-        const worldChat = await storageWrappers?.loadWorldChatFull?.(worldData.id, chat.id);
-        if (worldChat && worldChat.messages && worldChat.messages.length > 0) {
-          markdown += `**Messages (${worldChat.messages.length}):**\n\n`;
-
-          // Sort messages by timestamp if available
-          const sortedMessages = worldChat.messages.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateA - dateB;
-          });
-
-          sortedMessages.forEach((message, index) => {
-            markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
-            if (message.createdAt) {
-              markdown += `   *${formatDate(message.createdAt)}*\n`;
-            }
-            markdown += '   ```markdown\n';
-            let paddedContent = '';
-            if (typeof message.content === 'string') {
-              paddedContent = message.content
-                .split(/(\n)/)
-                .map(part => part === '\n' ? '\n' : '    ' + part)
-                .join('');
-            }
-            markdown += `${paddedContent}\n`;
-            markdown += '   ```\n\n';
-          });
-        } else {
-          // Fallback: try to gather messages from agent memories that belong to this chat
-          const chatMessages: AgentMessage[] = [];
-          for (const agentInfo of agents) {
-            const fullAgent = await getAgent(worldData.id, agentInfo.id);
-            if (fullAgent && fullAgent.memory) {
-              const agentChatMessages = fullAgent.memory.filter(msg => msg.chatId === chat.id);
-              chatMessages.push(...agentChatMessages);
-            }
-          }
-
-          if (chatMessages.length > 0) {
-            // Sort by timestamp
-            const sortedMessages = chatMessages.sort((a, b) => {
-              const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-              const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-              return dateA - dateB;
-            });
-
-            markdown += `**Messages (${sortedMessages.length} from agent memories):**\n\n`;
-
-            sortedMessages.forEach((message, index) => {
-              markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
-              if (message.createdAt) {
-                markdown += `   *${formatDate(message.createdAt)}*\n`;
-              }
-              markdown += '   ```markdown\n';
-              let paddedContent = '';
-              if (typeof message.content === 'string') {
-                paddedContent = message.content
-                  .split(/(\n)/)
-                  .map(part => part === '\n' ? '\n' : '    ' + part)
-                  .join('');
-              }
-              markdown += `${paddedContent}\n`;
-              markdown += '   ```\n\n';
-            });
-          } else {
-            markdown += `**Messages:** No messages found for this chat\n\n`;
-          }
-        }
-      } catch (error) {
-        logger.warn('Failed to load chat messages', { chatId: chat.id, error: error instanceof Error ? error.message : error });
-
-        // Fallback: try to gather messages from agent memories that belong to this chat
-        try {
-          const chatMessages: AgentMessage[] = [];
-          for (const agentInfo of agents) {
-            const fullAgent = await getAgent(worldData.id, agentInfo.id);
-            if (fullAgent && fullAgent.memory) {
-              const agentChatMessages = fullAgent.memory.filter(msg => msg.chatId === chat.id);
-              chatMessages.push(...agentChatMessages);
-            }
-          }
-
-          if (chatMessages.length > 0) {
-            // Sort by timestamp
-            const sortedMessages = chatMessages.sort((a, b) => {
-              const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-              const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-              return dateA - dateB;
-            });
-
-            markdown += `**Messages (${sortedMessages.length} from agent memories):**\n\n`;
-
-            sortedMessages.forEach((message, index) => {
-              markdown += `${index + 1}. **${message.role}** ${message.sender ? `(${message.sender})` : ''}\n`;
-              if (message.createdAt) {
-                markdown += `   *${formatDate(message.createdAt)}*\n`;
-              }
-              markdown += '   ```markdown\n';
-              let paddedContent = '';
-              if (typeof message.content === 'string') {
-                paddedContent = message.content
-                  .split(/(\n)/)
-                  .map(part => part === '\n' ? '\n' : '    ' + part)
-                  .join('');
-              }
-              markdown += `${paddedContent}\n`;
-              markdown += '   ```\n\n';
-            });
-          } else {
-            markdown += `**Messages:** Unable to load messages (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
-          }
-        } catch (fallbackError) {
-          markdown += `**Messages:** Unable to load messages (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
-        }
-      }
-
-      markdown += `---\n\n`;
-    }
-  } else {
-    markdown += `## Chats\n\nNo chats found in this world.\n\n`;
+    markdown += `## Current Chat\n\nNo current chat found in this world.\n\n`;
   }
 
   // Export metadata
@@ -288,7 +219,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
   markdown += `- **Export Format Version:** 1.0\n`;
   markdown += `- **Agent World Version:** ${process.env.npm_package_version || 'Unknown'}\n`;
   markdown += `- **Total Export Size:** ${markdown.length} characters\n`;
-  markdown += `- **Sections:** World Configuration, Agents (${agents.length}), Chats (${chats.length})\n`;
+  markdown += `- **Sections:** World Configuration, Agents (${agents.length}), Current Chat (${hasCurrentChat ? 1 : 0})\n`;
 
   return markdown;
 }

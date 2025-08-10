@@ -12,6 +12,7 @@
  * - Batch operations with atomic-like behavior
  * - Memory archiving and cleanup operations
  * - Data validation and integrity checks
+ * - Compatible agentId inclusion in getMemory for export functionality
  *
  * Implementation:
  * - Uses nested Maps for hierarchical data organization
@@ -19,9 +20,11 @@
  * - Deep cloning for data isolation and immutability
  * - Proper error handling with meaningful error messages
  * - ID-based lookups with existence validation
+ * - Ensures getMemory includes agentId for message source identification
  *
  * Changes:
  * - 2025-08-07: Initial implementation for non-Node environments
+ * - 2025-08-09: Added agentId to getMemory response for storage compatibility
  */
 import type {
   StorageAPI,
@@ -141,7 +144,10 @@ export class MemoryStorage implements StorageAPI {
       const mem = Array.isArray(agent.memory) ? agent.memory : [];
       for (const msg of mem) {
         if (!chatId || msg.chatId === chatId) {
-          messages.push(deepClone(msg));
+          const messageWithAgentId = deepClone(msg);
+          // Ensure agentId is included in the message
+          messageWithAgentId.agentId = agent.id;
+          messages.push(messageWithAgentId);
         }
       }
     }

@@ -342,24 +342,8 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
     },
     async getMemory(worldId: string, chatId: string): Promise<AgentMessage[]> {
       await ensureModulesLoaded();
-      // Aggregate from agents' memory, filter by chatId
-      if (agentStorage?.listAgents && agentStorage?.loadAgent) {
-        const agents: Agent[] = await agentStorage.listAgents(rootPath, worldId);
-        const messages: AgentMessage[] = [];
-        for (const agent of agents) {
-          const full = await agentStorage.loadAgent(rootPath, worldId, agent.id);
-          const mem = full?.memory || [];
-          for (const m of mem) {
-            if (!chatId || m.chatId === chatId) messages.push(m);
-          }
-        }
-        // Sort by createdAt asc
-        messages.sort((a, b) => {
-          const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return at - bt;
-        });
-        return messages;
+      if (worldStorage?.getMemory) {
+        return worldStorage.getMemory(rootPath, worldId, chatId);
       }
       return [];
     },

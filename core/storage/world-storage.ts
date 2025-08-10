@@ -4,6 +4,7 @@
  * Features:
  * - World configuration persistence to config.json with flattened structure
  * - Complete chat operations with file-based storage (chats directory)
+ * - Cross-agent memory aggregation for world-level chat sessions
  * - Kebab-case directory naming from world names
  * - Clean separation of storage data from runtime objects
  * - Handles World serialization without EventEmitter and agents Map
@@ -25,6 +26,7 @@
  * - deleteChatData: Remove chat files
  * - listChatHistories: List all chat metadata for a world
  * - updateChatData: Update existing chat with partial data
+ * - getMemory: Aggregate memory across all agents for chat sessions
  *
  * Version: 2.0.0 - Updated for new ChatData/WorldChat architecture
  * Date: 2025-08-01
@@ -34,7 +36,8 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { toKebabCase } from '../utils.js';
 import { logger } from '../logger.js';
-import type { World, Chat, CreateChatParams, UpdateChatParams } from '../types.js';
+import type { World, Chat, CreateChatParams, UpdateChatParams, AgentMessage } from '../types.js';
+import { listAgents, loadAgent } from './agent-storage.js';
 
 // Extract readdir and exists from fs for convenience
 const { readdir, access } = fs;
@@ -272,6 +275,41 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
     return chats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   } catch (error) {
     logger.error('Error listing chat histories:', error);
+    return [];
+  }
+}
+
+/**
+ * Get aggregated memory across all agents for a given chat
+ * Filters messages by chatId and includes agentId for proper message attribution
+ */
+export async function getMemory(rootPath: string, worldId: string, chatId: string): Promise<AgentMessage[]> {
+  try {
+    const agents = await listAgents(rootPath, worldId);
+    const messages: AgentMessage[] = [];
+
+    for (const agent of agents) {
+      const fullAgent = await loadAgent(rootPath, worldId, agent.id);
+      const mem = fullAgent?.memory || [];
+      for (const m of mem) {
+        if (!chatId || m.chatId === chatId) {
+          // Ensure agentId is included in the message
+          const messageWithAgentId = { ...m, agentId: agent.id };
+          messages.push(messageWithAgentId);
+        }
+      }
+    }
+
+    // Sort by createdAt ascending
+    messages.sort((a, b) => {
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return at - bt;
+    });
+
+    return messages;
+  } catch (error) {
+    logger.error('Error getting aggregated memory:', error);
     return [];
   }
 }

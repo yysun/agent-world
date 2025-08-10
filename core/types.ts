@@ -20,6 +20,7 @@ export interface ChatMessage {
 export interface AgentMessage extends ChatMessage {
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
+  agentId?: string; // Agent ID for identifying message source
 }
 
 // Agent Types
