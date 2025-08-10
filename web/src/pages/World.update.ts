@@ -1,10 +1,10 @@
 /**
  * World Update Handlers - Core-Centric AppRun Event System
- * 
+ *
  * Architecture:
  * - Core handles: Auto-restoration, auto-save, memory management
  * - Frontend handles: Display, user input, SSE streaming, UI state
- * 
+ *
  * Features:
  * - World initialization with core auto-restore via getWorld()
  * - Chat management (create, load, delete) with proper state restoration
@@ -12,7 +12,7 @@
  * - Agent/world memory management and UI controls
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
- * 
+ *
  * Updated: 2025-08-09 - Removed selectedSettingsTarget localStorage persistence
  */
 
@@ -134,18 +134,19 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   }
 
   const newMessage = {
-    id: Date.now() + Math.random(),
+    id: messageData.id || `msg-${Date.now() + Math.random()}`,
     type: messageData.type || 'message',
     sender: senderName,
     text: messageData.content || messageData.message || '',
     createdAt: messageData.createdAt || new Date().toISOString(),
-    worldName: messageData.worldName || state.worldName,
     fromAgentId
   };
 
+  state.messages = state.messages.filter(msg => !msg.userEntered);
+  state.messages.push(newMessage);
+
   return {
     ...state,
-    messages: [...(state.messages || []), newMessage],
     needScroll: true,
     isWaiting: false
   };
@@ -195,19 +196,19 @@ export const worldUpdateHandlers = {
     const messageText = state.userInput?.trim();
     if (!messageText) return state;
 
-    const userMessage = {
-      id: `msg-${Date.now() + Math.random()}`,
-      type: 'user',
-      sender: 'HUMAN',
-      text: messageText,
-      createdAt: new Date(),
-      worldName: state.worldName,
-      userEntered: true
-    };
+    // const userMessage = {
+    //   id: `msg-${Date.now() + Math.random()}`,
+    //   type: 'user',
+    //   sender: 'HUMAN',
+    //   text: messageText,
+    //   createdAt: new Date(),
+    //   worldName: state.worldName,
+    //   userEntered: true
+    // };
 
     const newState = {
       ...state,
-      messages: [...(state.messages || []), userMessage],
+      // messages: [...(state.messages || []), userMessage],
       userInput: '',
       isSending: true,
       isWaiting: true
@@ -278,46 +279,6 @@ export const worldUpdateHandlers = {
     }
   },
 
-  // Settings and navigation handlers
-  'select-world-settings': (state: WorldComponentState): WorldComponentState => {
-    return {
-      ...state,
-      selectedSettingsTarget: 'world',
-      selectedAgent: null,
-      messages: (state.messages || []).filter(message => !message.userEntered)
-    };
-  },
-
-  'select-agent-settings': (state: WorldComponentState, agent: Agent): WorldComponentState => {
-    const isCurrentlySelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
-
-    if (isCurrentlySelected) {
-      return {
-        ...state,
-        selectedSettingsTarget: 'world',
-        selectedAgent: null,
-        messages: (state.messages || []).filter(message => !message.userEntered),
-        userInput: ''
-      };
-    }
-
-    return {
-      ...state,
-      selectedSettingsTarget: 'agent',
-      selectedAgent: agent,
-      messages: (state.messages || []).filter(message => !message.userEntered),
-      userInput: '@' + toKebabCase(agent.name || '') + ' '
-    };
-  },
-
-
-  'toggle-settings-chat-history': (state: WorldComponentState): WorldComponentState => {
-    if (state.selectedSettingsTarget !== 'world') {
-      return { ...state, selectedSettingsTarget: 'world' };
-    } else {
-      return { ...state, selectedSettingsTarget: 'chat' };
-    }
-  },
 
   // Modal and deletion handlers
   'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
@@ -382,10 +343,10 @@ export const worldUpdateHandlers = {
         h1, h2, h3 { color: #2c3e50; }
         h1 { border-bottom: 2px solid #3498db; padding-bottom: 10px; }
         h2 { border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; }
-        code { 
-            background: #f8f9fa; 
-            padding: 2px 4px; 
-            border-radius: 3px; 
+        code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 3px;
             font-family: 'Monaco', 'Consolas', monospace;
         }
         pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }

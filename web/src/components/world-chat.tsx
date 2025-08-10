@@ -1,9 +1,9 @@
 /**
  * World Chat Component - Real-time chat interface with agent message filtering
- * 
+ *
  * Features:
  * - Real-time message streaming with agent selection filtering
- * - Cross-agent message detection and system message display  
+ * - Cross-agent message detection and system message display
  * - User input handling with send functionality and loading states
  * - AppRun JSX with props-based state management
  */
@@ -11,11 +11,10 @@
 import { app, safeHTML } from 'apprun';
 import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
-import { getSenderType } from '../utils/sender-type.js';
+import { SenderType,  getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 
-
-const debug = true;
+const debug = false;
 
 export default function WorldChat(props: WorldChatProps) {
   const {
@@ -33,7 +32,7 @@ export default function WorldChat(props: WorldChatProps) {
   const hasSenderAgentMismatch = (message: Message): boolean => {
     const senderLower = toKebabCase(message.sender);
     const agentIdLower = toKebabCase(message.fromAgentId);
-    return senderLower !== agentIdLower;
+    return senderLower !== agentIdLower && !message.isStreaming;
   };
 
   return (
@@ -53,19 +52,18 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             messages.filter(message => message.sender !== 'system')
               .map((message, index) => {
-                // Check if this is a cross-agent message
-                const isCrossAgentMessage = hasSenderAgentMismatch(message);
 
-                const isSystemMessage = message.sender === 'system' || message.sender === 'SYSTEM';
-                const baseMessageClass = (message.sender === 'HUMAN' || message.sender === 'USER') || message.type === 'user' ? 'user-message' : 'agent-message';
-                const systemClass = isSystemMessage ? 'system-message' : '';
+                const senderType = getSenderType(message.sender);
+                const isCrossAgentMessage = hasSenderAgentMismatch(message);
+                const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
+                const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
                 const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
                 const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
 
                 return (
                   <div key={message.id || 'msg-' + index} className={messageClasses}>
                     <div className="message-sender">
-                      {message.sender || (message.type === 'user' ? 'User' : 'Agent')}
+                      {message.sender}
                       {isCrossAgentMessage && message.fromAgentId && (
                         <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
                           → {message.fromAgentId}
