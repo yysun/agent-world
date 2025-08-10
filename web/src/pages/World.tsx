@@ -1,6 +1,6 @@
 /**
  * World Component - Real-time world interface with agents and chat
- * 
+ *
  * Features:
  * - Centered agent list with message badges and real-time SSE chat streaming
  * - Right panel always shows Chat History (no settings panel toggle)
@@ -160,8 +160,16 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <div className="settings-row">
                 <button
                   className="world-settings-btn"
+                  title="Create New Agent"
+                  $onclick="open-agent-create"
+                >
+                  <span className="world-gear-icon">+</span>
+                </button>
+                <button
+                  className="world-settings-btn"
                   title="World Settings"
                   $onclick="open-world-edit"
+                  style={{ marginLeft: '8px' }}
                 >
                   <span className="world-gear-icon">⚙</span>
                 </button>
