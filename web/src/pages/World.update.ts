@@ -73,8 +73,10 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
     let messages: any[] = [];
 
-    for (const agent of world.agents.values()) {
-      agent.messageCount = 0; // Reset message count for UI
+    const agents: Agent[] = Array.from(world.agents.values());
+    for (const agent of agents) {
+      agent.spriteIndex = agents.indexOf(agent) % 9; 
+      agent.messageCount = 0; 
       for (const memoryItem of agent.memory || []) {
         if (memoryItem.chatId === chatId) {
           agent.messageCount++;
@@ -123,7 +125,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   // Find and update agent message count
   let fromAgentId: string | undefined;
   if (state.world?.agents) {
-    const agent = state.world.agents.find((a: any) => a.name === senderName);
+    const agent = state.world.agents.find((a: any) => a.name.toLowerCase() === senderName.toLowerCase());
     if (agent) {
       if (!agent.messageCount) {
         agent.messageCount = 0;
@@ -147,8 +149,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
 
   return {
     ...state,
-    needScroll: true,
-    isWaiting: false
+    needScroll: true
   };
 };
 

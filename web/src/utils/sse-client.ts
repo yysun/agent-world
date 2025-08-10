@@ -310,7 +310,7 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
     isStreaming: true,
     messageId: messageId,
   } as any);
-  return { ...state, needScroll: true };
+  return { ...state, needScroll: true, isWaiting: false };
 };
 
 // Update streaming message content
