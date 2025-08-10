@@ -1,3 +1,7 @@
+v0.5.0
+- Support chat history
+- Allow export world state, including agents and current chat
+
 v0.4.3
 - Launched CLI interface from `npx agent-world`: pipeline, command and interaction modes
 - Launched Web interface from `npx agent-world-server`

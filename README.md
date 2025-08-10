@@ -128,58 +128,9 @@ npx agent-world -w default-world "hi"
 echo "hi" | npx agent-world -w default-world
 ```
 
-## Project Structure (npm workspaces)
+## Project Structure
 
-This project uses npm workspaces with two main packages:
-
-- **`core/`** - Reusable agent management library
-  - World-mediated agent management system
-  - Event-driven architecture
-  - LLM provider abstraction
-  - Cross-platform compatibility (Node.js/Browser)
-
-- **`next/`** - Next.js web application
-  - React frontend with Tailwind CSS
-  - API routes for CRUD operations
-  - Real-time chat with streaming support
-  - Modern, minimalistic UI
-
-### Cross-workspace imports
-```typescript
-// In next/ workspace
-import { createWorld, listAgents, publishMessage } from '@agent-world/core';
-```
-
-### Web Interface Features
-
-The Next.js workspace provides a modern web interface with:
-
-- **Home Page**: World selector and creator with clean card-based UI
-- **World Page**: Chat interface with agent management sidebar
-  - Real-time messaging with agents
-  - Toggle between streaming and non-streaming modes
-  - Agent creation with custom system prompts
-  - Responsive design with Tailwind CSS
-
-### API Endpoints
-
-The Next.js workspace exposes REST APIs for integration:
-
-```
-GET    /api/worlds                     # List all worlds
-POST   /api/worlds                     # Create new world
-GET    /api/worlds/:id                 # Get world details
-PUT    /api/worlds/:id                 # Update world
-DELETE /api/worlds/:id                 # Delete world
-
-GET    /api/worlds/:id/agents          # List agents in world
-POST   /api/worlds/:id/agents          # Create new agent
-GET    /api/worlds/:id/agents/:agentId # Get agent details
-PUT    /api/worlds/:id/agents/:agentId # Update agent
-DELETE /api/worlds/:id/agents/:agentId # Delete agent
-
-POST   /api/worlds/:id/chat            # Send message (streaming/non-streaming)
-```
+See [Project Structure Documentation](project.md)
 
 ### Environment Setup
 
