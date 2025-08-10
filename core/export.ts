@@ -118,10 +118,8 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
     markdown += `- **Chat LLM Model:** ${worldData.chatLLMModel}\n`;
   }
   markdown += `- **Total Agents:** ${agents.length}\n`;
-  markdown += `- **Total Chats:** ${hasCurrentChat ? 1 : 0}\n`;
-  markdown += `- **Current Chat ID:** ${worldData.currentChatId || 'None'}\n`;
-  markdown += `- **Created:** ${formatDate(worldData.createdAt)}\n`;
-  markdown += `- **Last Updated:** ${formatDate(worldData.lastUpdated)}\n\n`;
+  markdown += `- **Total Chats:** ${worldData.chats.size}\n`;
+  markdown += `- **Current Chat:** ${currentChat ? currentChat.name : 'None'}\n`;
 
   // Agents Section
   if (agents.length > 0) {
@@ -134,18 +132,14 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
       markdown += `### ${fullAgent.name}\n\n`;
       markdown += `**Configuration:**\n`;
       markdown += `- **ID:** ${fullAgent.id}\n`;
-      markdown += `- **Type:** ${fullAgent.type}\n`;
       markdown += `- **LLM Provider:** ${fullAgent.provider}\n`;
       markdown += `- **Model:** ${fullAgent.model}\n`;
-      markdown += `- **Status:** ${fullAgent.status || 'active'}\n`;
       markdown += `- **Temperature:** ${fullAgent.temperature || 'default'}\n`;
       markdown += `- **Max Tokens:** ${fullAgent.maxTokens || 'default'}\n`;
       markdown += `- **LLM Calls:** ${fullAgent.llmCallCount}\n`;
-      markdown += `- **Created:** ${formatDate(fullAgent.createdAt)}\n`;
-      markdown += `- **Last Active:** ${formatDate(fullAgent.lastActive)}\n\n`;
 
       if (fullAgent.systemPrompt) {
-        markdown += `**System Prompt:**\n`;
+        markdown += `- **System Prompt:**\n`;
         markdown += `\`\`\`\n${fullAgent.systemPrompt}\n\`\`\`\n\n`;
       }
 
@@ -159,17 +153,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
 
   // Current Chat Section
   if (hasCurrentChat && currentChat) {
-    markdown += `## Current Chat\n\n`;
-
-    markdown += `### ${currentChat.name}\n\n`;
-    markdown += `**Chat Information:**\n`;
-    markdown += `- **ID:** ${currentChat.id}\n`;
-    markdown += `- **Name:** ${currentChat.name}\n`;
-    markdown += `- **Description:** ${currentChat.description || 'No description'}\n`;
-    markdown += `- **Message Count:** ${currentChat.messageCount}\n`;
-    markdown += `- **Created:** ${formatDate(currentChat.createdAt)}\n`;
-    markdown += `- **Updated:** ${formatDate(currentChat.updatedAt)}\n`;
-    markdown += `- **Status:** Current active chat\n\n`;
+    markdown += `## Current Chat - ${currentChat.name}\n\n`;
 
     // Get chat messages using getMemory
     try {
