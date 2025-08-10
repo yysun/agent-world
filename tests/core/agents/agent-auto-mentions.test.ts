@@ -4,6 +4,7 @@
  * Features:
  * - Tests for hasAnyMentionAtBeginning function - detects any mention at paragraph start
  * - Tests for addAutoMention function - adds mention when none exists at start
+ * - Tests for world tags: <world>STOP|DONE|PASS</world> and <world>TO: a,b,c</world>
  * - Tests for removeSelfMentions function - removes agent's own mentions from beginning
  * - Tests for loop prevention integration - prevents mention loops in agent conversations
  *
@@ -12,6 +13,7 @@
  * - No file I/O or LLM dependencies
  * - Tests edge cases and integration scenarios
  * - Validates mention processing and loop prevention logic
+ * - Validates world tag processing for advanced mention control with stop keywords
  */
 
 import { describe, test, expect } from '@jest/globals';
@@ -65,6 +67,56 @@ describe('Agent Auto-Mention Utilities', () => {
     test('should trim response but preserve original structure', () => {
       expect(addAutoMention('  Hello there!  ', 'human')).toBe('@human Hello there!');
     });
+
+    describe('world tags', () => {
+      test('should handle <world>STOP|DONE|PASS</world> tags - no auto mention', () => {
+        expect(addAutoMention('<world>STOP</world> I will not respond further.', 'human')).toBe('I will not respond further.');
+        expect(addAutoMention('<world>DONE</world> Task completed.', 'gm')).toBe('Task completed.');
+        expect(addAutoMention('<world>PASS</world> Passing to another agent.', 'pro')).toBe('Passing to another agent.');
+        expect(addAutoMention('Some text <world>STOP</world> more text', 'gm')).toBe('Some text  more text');
+        expect(addAutoMention('<world>stop</world> Case insensitive test', 'pro')).toBe('Case insensitive test');
+        expect(addAutoMention('<world>done</world> Lowercase test', 'human')).toBe('Lowercase test');
+        expect(addAutoMention('<world>PASS</world> Uppercase test', 'gm')).toBe('Uppercase test');
+      });
+
+      test('should handle <world>TO: a,b,c</world> tag - add specific mentions', () => {
+        expect(addAutoMention('<world>TO: alice,bob</world> Please work together.', 'human')).toBe('@alice\n@bob\n\nPlease work together.');
+        expect(addAutoMention('<world>TO: pro, gm, con</world> Team meeting.', 'human')).toBe('@pro\n@gm\n@con\n\nTeam meeting.');
+        expect(addAutoMention('Prefix <world>TO: alice</world> suffix', 'gm')).toBe('@alice\n\nPrefix  suffix');
+      });
+
+      test('should handle TO tag with extra whitespace', () => {
+        expect(addAutoMention('<world>TO:  alice , bob , charlie  </world> Clean this up.', 'human')).toBe('@alice\n@bob\n@charlie\n\nClean this up.');
+        expect(addAutoMention('<world>TO: alice,  , bob</world> Handle empty names.', 'gm')).toBe('@alice\n@bob\n\nHandle empty names.');
+      });
+
+      test('should handle case insensitive world tags', () => {
+        expect(addAutoMention('<WORLD>STOP</WORLD> Case test', 'human')).toBe('Case test');
+        expect(addAutoMention('<WORLD>DONE</WORLD> Case test', 'human')).toBe('Case test');
+        expect(addAutoMention('<WORLD>PASS</WORLD> Case test', 'human')).toBe('Case test');
+        expect(addAutoMention('<World>TO: alice</World> Case test', 'human')).toBe('@alice\n\nCase test');
+      });
+
+      test('should handle empty TO tag gracefully', () => {
+        expect(addAutoMention('<world>TO:</world> No recipients.', 'human')).toBe('@human No recipients.');
+        expect(addAutoMention('<world>TO: ,, </world> Only commas.', 'gm')).toBe('@gm Only commas.');
+      });
+
+      test('should prioritize world tags over existing mentions', () => {
+        expect(addAutoMention('@existing <world>STOP</world> Override mention.', 'human')).toBe('Override mention.');
+        expect(addAutoMention('@existing <world>DONE</world> Override mention.', 'human')).toBe('Override mention.');
+        expect(addAutoMention('@existing <world>PASS</world> Override mention.', 'human')).toBe('Override mention.');
+        expect(addAutoMention('@existing <world>TO: alice</world> Replace mention.', 'human')).toBe('@alice\n\nReplace mention.');
+        expect(addAutoMention('@existing, <world>TO: bob</world> Remove comma too.', 'human')).toBe('@bob\n\nRemove comma too.');
+      });
+
+      test('should remove multiple mentions at beginning with stop tags', () => {
+        expect(addAutoMention('@alice @bob <world>STOP</world> No more mentions.', 'human')).toBe('No more mentions.');
+        expect(addAutoMention('@user1\n@user2 <world>DONE</world> Clean response.', 'gm')).toBe('Clean response.');
+        expect(addAutoMention('@mention <world>PASS</world>\n@another content', 'pro')).toBe('content');
+        expect(addAutoMention('@alice, @bob, <world>STOP</world> Remove commas too.', 'human')).toBe('Remove commas too.');
+      });
+    });
   });
 
   describe('removeSelfMentions', () => {
@@ -84,6 +136,26 @@ describe('Agent Auto-Mention Utilities', () => {
     test('should handle empty strings', () => {
       expect(removeSelfMentions('', 'alice')).toBe('');
       expect(removeSelfMentions('   ', 'gm')).toBe('   ');
+    });
+
+    test('should remove self-mentions from beginning of all paragraphs', () => {
+      expect(removeSelfMentions('@alice First paragraph.\n@alice Second paragraph.', 'alice')).toBe('First paragraph.\nSecond paragraph.');
+      expect(removeSelfMentions('@gm Line 1\n@gm @gm Line 2\nNormal line\n@gm Line 4', 'gm')).toBe('Line 1\nLine 2\nNormal line\nLine 4');
+    });
+
+    test('should handle lines with only self-mentions', () => {
+      expect(removeSelfMentions('@alice\n@alice @alice\nContent here', 'alice')).toBe('\n\nContent here');
+      expect(removeSelfMentions('@gm @gm @gm', 'gm')).toBe(''); // Remove all self-mentions completely
+      expect(removeSelfMentions('@alice @alice', 'alice')).toBe(''); // Single line with only self-mentions
+      expect(removeSelfMentions('  @gm  @gm  ', 'gm')).toBe('  '); // Preserve leading whitespace when only self-mentions
+    });
+
+    test('should remove commas with mentions', () => {
+      expect(removeSelfMentions('@alice, hello there', 'alice')).toBe('hello there');
+      expect(removeSelfMentions('@gm, @gm, how are you?', 'gm')).toBe('how are you?');
+      expect(removeSelfMentions('@alice,@alice,start here', 'alice')).toBe('start here');
+      expect(removeSelfMentions('@pro, @pro , working on it', 'pro')).toBe('working on it');
+      expect(removeSelfMentions('@a2, let me tell you a story about a wonderful elephant!', 'a2')).toBe('let me tell you a story about a wonderful elephant!');
     });
   });
 
@@ -125,6 +197,32 @@ describe('Agent Auto-Mention Utilities', () => {
       // Step 2: Add auto-mention (should add because no mention exists)
       response = addAutoMention(response, 'human');
       expect(response).toBe('@human I understand your request.');
+    });
+
+    test('should handle world tags in loop prevention', () => {
+      // Test STOP tag prevents auto-mention
+      let response = '<world>STOP</world> I will not respond further.';
+      response = removeSelfMentions(response, 'gm');
+      response = addAutoMention(response, 'human');
+      expect(response).toBe('I will not respond further.');
+
+      // Test DONE tag prevents auto-mention
+      response = '<world>DONE</world> Task is complete.';
+      response = removeSelfMentions(response, 'gm');
+      response = addAutoMention(response, 'human');
+      expect(response).toBe('Task is complete.');
+
+      // Test PASS tag prevents auto-mention
+      response = '<world>PASS</world> Passing to next agent.';
+      response = removeSelfMentions(response, 'gm');
+      response = addAutoMention(response, 'human');
+      expect(response).toBe('Passing to next agent.');
+
+      // Test TO tag overrides normal auto-mention
+      response = '<world>TO: alice, bob</world> Please collaborate.';
+      response = removeSelfMentions(response, 'gm');
+      response = addAutoMention(response, 'human');
+      expect(response).toBe('@alice\n@bob\n\nPlease collaborate.');
     });
   });
 });

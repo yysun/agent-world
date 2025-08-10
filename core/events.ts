@@ -6,6 +6,7 @@
  * - Natural event isolation per World instance preventing cross-world interference
  * - Auto-mention logic with loop prevention and case-insensitive matching
  * - LLM call count management with turn limits and auto-save persistence
+ * - World tags: <world>STOP|DONE|PASS</world> and <world>TO: a,b,c</world>
  *
  * World Events: publishMessage, subscribeToMessages, publishSSE, subscribeToSSE
  * Agent Events: subscribeAgentToMessages, processAgentMessage, shouldAgentRespond
@@ -102,12 +103,90 @@ export function hasAnyMentionAtBeginning(response: string): boolean {
   return extractParagraphBeginningMentions(response).length > 0;
 }
 
+// Remove all mentions from paragraph beginnings (including commas and spaces)
+export function removeMentionsFromParagraphBeginnings(text: string, specificMention?: string): string {
+  if (!text?.trim()) return text;
+
+  const lines = text.split('\n');
+  const processedLines = lines.map(line => {
+    const trimmed = line.trimStart();
+    let cleaned = trimmed;
+
+    if (specificMention) {
+      // For specific mentions, escape special regex characters and handle consecutive mentions
+      const escapedMention = specificMention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Pattern to match @mention followed by optional comma/space combinations
+      const mentionPattern = new RegExp(`^@${escapedMention}(?:[,\\s]+|$)`, 'gi');
+
+      // Keep removing mentions from the beginning until no more are found
+      while (mentionPattern.test(cleaned)) {
+        cleaned = cleaned.replace(mentionPattern, '');
+        mentionPattern.lastIndex = 0; // Reset regex for next iteration
+      }
+    } else {
+      // For any mentions
+      const mentionPattern = /^@\w+(?:[-_]\w+)*(?:[,\s]+|$)/;
+
+      // Keep removing mentions from the beginning until no more are found
+      while (mentionPattern.test(cleaned)) {
+        cleaned = cleaned.replace(mentionPattern, '');
+      }
+    }
+
+    const leadingWhitespace = line.match(/^(\s*)/)?.[1] || '';
+    return leadingWhitespace + cleaned;
+  });
+
+  return processedLines.join('\n');
+}
+
 // Add auto-mention at beginning if no existing mentions (prevents loops)
+// Supports world tags: <world>STOP|DONE|PASS</world> and <world>TO: a,b,c</world>
 export function addAutoMention(response: string, sender: string): string {
-  if (!response?.trim() || !sender || hasAnyMentionAtBeginning(response)) {
+  if (!response?.trim() || !sender) {
     return response;
   }
-  return `@${sender} ${response.trim()}`;
+
+  // Consolidated regex patterns for world tags (case insensitive)
+  const worldTagPattern = /<world>(STOP|DONE|PASS|TO:\s*([^<]*))<\/world>/gi;
+  let match;
+  let processedResponse = response;
+
+  while ((match = worldTagPattern.exec(response)) !== null) {
+    const [fullMatch, action, toRecipients] = match;
+
+    // Remove the world tag from response
+    processedResponse = processedResponse.replace(fullMatch, '');
+
+    const upperAction = action.toUpperCase();
+    if (upperAction === 'STOP' || upperAction === 'DONE' || upperAction === 'PASS') {
+      // Stop tags prevent auto-mention and remove ALL mentions at beginning of paragraphs
+      const cleanResponse = processedResponse.trim();
+      return removeMentionsFromParagraphBeginnings(cleanResponse).trim();
+    } else if (upperAction.startsWith('TO:')) {
+      // TO tag with recipients - also remove existing mentions
+      const recipients = toRecipients?.split(',').map(name => name.trim()).filter(name => name) || [];
+
+      // Remove existing mentions from the response
+      const cleanResponse = removeMentionsFromParagraphBeginnings(processedResponse.trim()).trim();
+
+      if (recipients.length > 0) {
+        const mentions = recipients.map(recipient => `@${recipient}`).join('\n');
+        return `${mentions}\n\n${cleanResponse}`;
+      } else {
+        // Empty TO tag - fall back to normal auto-mention behavior
+        if (hasAnyMentionAtBeginning(cleanResponse)) {
+          return cleanResponse;
+        }
+        return `@${sender} ${cleanResponse}`;
+      }
+    }
+  }  // Existing logic: add auto-mention if no existing mentions at beginning
+  if (hasAnyMentionAtBeginning(processedResponse)) {
+    return processedResponse;
+  }
+  return `@${sender} ${processedResponse.trim()}`;
 }
 
 // Get valid mentions excluding self-mentions (case-insensitive)
@@ -132,18 +211,14 @@ export function removeSelfMentions(response: string, agentId: string): string {
   const trimmedResponse = response.trim();
   if (!trimmedResponse) return response;
 
-  const selfMentionPattern = new RegExp(`^(@${agentId}\\s*)+`, 'gi');
-  const cleaned = trimmedResponse.replace(selfMentionPattern, '');
-
-  if (!cleaned.trim()) return response;
+  // Use the helper function to remove self-mentions
+  const result = removeMentionsFromParagraphBeginnings(trimmedResponse, agentId);
 
   // Preserve original leading whitespace
   const originalMatch = response.match(/^(\s*)/);
   const originalLeadingWhitespace = originalMatch ? originalMatch[1] : '';
-  return originalLeadingWhitespace + cleaned.trim();
-}
-
-/**
+  return originalLeadingWhitespace + result;
+}/**
  * Agent subscription with automatic message processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
