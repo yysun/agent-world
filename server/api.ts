@@ -8,6 +8,13 @@
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
  * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
+ * - Enhanced handleStreamingChat with intelligent timeout management:
+ *   - Tracks active agents and pending events to prevent premature stream closure
+ *   - Implements adaptive timeout logic (8s normal, 3s check intervals, 15s max without events)
+ *   - Better error handling that doesn't immediately close streams on non-critical errors
+ *   - Agent activity tracking via SSE start/end events for accurate completion detection
+ *   - Detailed logging for debugging streaming issues
+ *   - Graceful handling of race conditions between timers and event processing
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -587,48 +594,104 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
-  const streaming = {
-    isActive: false,
-    wait: undefined as ((delay: number) => void) | undefined,
-    stopWait: undefined as (() => void) | undefined
-  };
-
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let hasReceivedEvents = false;
+  let isResponseEnded = false;
+  let lastEventTime = Date.now();
+  let activeAgents = new Set<string>();
+  let pendingEvents = 0;
 
-  const setupTimer = (callback: () => void, delay: number = 5000): void => {
+  const resetTimer = (delay: number = 8000): void => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(callback, delay);
-  };
+    if (isResponseEnded) return;
 
-  streaming.wait = (delay: number) => {
-    setupTimer(() => {
-      if (streaming.isActive) {
-        logger.debug('Streaming appears stalled - timing out...');
+    timer = setTimeout(() => {
+      if (!isResponseEnded) {
+        const timeSinceLastEvent = Date.now() - lastEventTime;
+        const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0;
+
+        logger.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}`);
+
+        // Only end if we've had events and no recent activity
+        if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
+          logger.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
+          endResponse();
+        } else if (!hasReceivedEvents && timeSinceLastEvent >= 15000) {
+          // Fallback: if no events received at all after 15 seconds
+          logger.debug('Ending stream: no events received within 15 seconds');
+          endResponse();
+        } else {
+          // Continue waiting - reset timer for shorter interval
+          resetTimer(3000);
+        }
       }
-      res.end();
     }, delay);
   };
 
-  streaming.stopWait = () => {
+  const endResponse = (): void => {
+    if (isResponseEnded) return;
+    isResponseEnded = true;
+
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
     }
+
+    logger.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}`);
+
+    try {
+      if (!res.destroyed) {
+        res.end();
+      }
+    } catch (error) {
+      logger.debug('Error ending response (likely already closed):', error);
+    }
   };
 
   const sendSSE = (data: string) => {
-    res.write(`data: ${data}\n\n`);
+    if (isResponseEnded || res.destroyed) return;
+
+    try {
+      res.write(`data: ${data}\n\n`);
+      hasReceivedEvents = true;
+      lastEventTime = Date.now();
+      // Reset the timer on each event to allow for continued activity
+      resetTimer(8000);
+    } catch (error) {
+      logger.debug('Error writing SSE data:', error);
+      endResponse();
+    }
   };
 
   const client: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
+      // Track agent activity for better timeout management
+      if (eventType === 'sse') {
+        const agentName = eventData.agentName;
+        if (agentName) {
+          if (eventData.type === 'start') {
+            activeAgents.add(agentName);
+            pendingEvents++;
+            logger.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+          } else if (eventData.type === 'end' || eventData.type === 'error') {
+            activeAgents.delete(agentName);
+            pendingEvents = Math.max(0, pendingEvents - 1);
+            logger.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+          }
+        }
+      }
+
       sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
     onError: (error: string) => {
       logger.error(`World error: ${error}`);
       sendSSE(JSON.stringify({ type: 'error', message: error }));
-      res.end();
+      // Don't immediately end on error - let natural timeout handle it
+      // unless it's a critical error
+      if (error.includes('Failed to') || error.includes('Critical')) {
+        setTimeout(() => endResponse(), 1000);
+      }
     }
   };
 
@@ -636,27 +699,27 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   if (!subscription) {
     logger.error('Unexpected: subscription is null after world existence check');
     sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
-    res.end();
+    endResponse();
     return;
   }
 
   try {
     publishMessage(subscription.world, message, sender);
-    if (streaming.wait) {
-      streaming.wait(15000);
-    }
-  } catch (error) {
+    // Start the initial timer - give more time for the first event
+    resetTimer(12000);
+  }
+  catch (error) {
     sendSSE(JSON.stringify({
       type: 'error',
       message: 'Failed to send message',
       data: { error: error instanceof Error ? error.message : String(error) }
     }));
-    res.end();
+    setTimeout(() => endResponse(), 1000);
   }
 
   req.on('close', () => {
     logger.debug('Chat client disconnected, cleaning up');
-    streaming.stopWait?.();
+    endResponse();
     subscription?.unsubscribe();
   });
 }
