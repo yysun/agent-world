@@ -410,27 +410,23 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
  * Subscribe world to messages with cleanup function
  */
 export function subscribeWorldToMessages(world: World): () => void {
-  logger.debug('Subscribing world to messages', { worldId: world.id });
   return subscribeToMessages(world, async (event: WorldMessageEvent) => {
 
-    if (event.sender.toLowerCase() === 'human' && world.currentChatId) {
-      const title = await generateChatTitleFromMessages(world, event.content);
-      logger.debug('Generated chat title', { worldId: world.id, title });
-
+    // if (event.sender.toLowerCase() === 'human' && world.currentChatId) {
+    if (world.currentChatId) {
       const chat = world.chats.get(world.currentChatId || '') || null;
-      if (chat) {
-        chat.name = title;
-        logger.debug('Updated chat name', { worldId: world.id, chatId: chat.id, name: title });
+      if (chat && chat.name === 'New Chat') {
+        const title = await generateChatTitleFromMessages(world, event.content);
+        if (title) {
+          chat.name = title;
+          const storage = await getStorageWrappers();
+          await storage.updateChatData(world.id, world.currentChatId, {
+            name: title
+          });
+          publishEvent(world, 'system', `chat-title-updated`);
+        }
       }
-
-      const storage = await getStorageWrappers();
-      await storage.updateChatData(world.id, world.currentChatId, {
-        name: title
-      });
-
-      publishEvent(world, 'system', `chat-title-updated`);
     }
-
   });
 }
 
@@ -439,7 +435,7 @@ export function subscribeWorldToMessages(world: World): () => void {
  */
 async function generateChatTitleFromMessages(world: World, content: string): Promise<string> {
 
-  let title = content.trim();
+  let title = '';
 
   const maxLength = 100; // Max title length
 
@@ -462,7 +458,7 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
       role: 'user' as const,
       content: `Below is a conversation between a user and an assistant. Generate a short, punchy title (3–6 words) that captures its main topic.
 
-      ${messages.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+${messages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
       `
     };
 
@@ -474,9 +470,10 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
     });
   }
 
-  // Clean up the generated title
+  if (!title) title = content.trim();
+
   title = title.trim().replace(/^["']|["']$/g, ''); // Remove quotes
-  title = title.replace(/[\n\r]+/g, ' '); // Replace newlines with spaces
+  title = title.replace(/[\n\r\*]+/g, ' '); // Replace newlines with spaces
   title = title.replace(/\s+/g, ' '); // Normalize whitespace
 
   // Truncate if too long
