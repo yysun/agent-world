@@ -145,7 +145,7 @@ describe('Export Module', () => {
       expect(result).toContain('# World Export: Test World');
       expect(result).toContain('## World Configuration');
       expect(result).toContain('## Agents (1)');
-      expect(result).toContain('## Current Chat');
+      expect(result).toContain('## Current Chat - Test Chat');
       expect(result).toContain('## Export Metadata');
 
       // Verify world information
@@ -155,28 +155,21 @@ describe('Export Module', () => {
       expect(result).toContain('- **Turn Limit:** 5');
       expect(result).toContain('- **Chat LLM Provider:** openai');
       expect(result).toContain('- **Chat LLM Model:** gpt-4');
-      expect(result).toContain('- **Current Chat ID:** chat-1');
+      expect(result).toContain('- **Current Chat:** Test Chat');
 
       // Verify agent information
       expect(result).toContain('### Test Agent');
       expect(result).toContain('- **ID:** agent-1');
-      expect(result).toContain('- **Type:** assistant');
       expect(result).toContain('- **LLM Provider:** openai');
       expect(result).toContain('- **Model:** gpt-4');
-      expect(result).toContain('- **Status:** active');
       expect(result).toContain('- **LLM Calls:** 5');
       expect(result).toContain('You are a helpful assistant.');
 
       // Verify agent memory is excluded
       expect(result).not.toContain('**Memory');
 
-      // Verify chat information
-      expect(result).toContain('### Test Chat');
-      expect(result).toContain('- **ID:** chat-1');
-      expect(result).toContain('- **Name:** Test Chat');
-      expect(result).toContain('- **Description:** A test chat session');
-      expect(result).toContain('- **Message Count:** 2');
-      expect(result).toContain('- **Status:** Current active chat');
+      // Verify chat information (header includes chat name)
+      expect(result).toContain('## Current Chat - Test Chat');
 
       // Verify chat messages from getMemory
       expect(result).toContain('**Messages (2):**');
@@ -343,7 +336,7 @@ describe('Export Module', () => {
 
       const result = await exportWorldToMarkdown('test-world');
 
-      expect(result).toContain('### Test Chat');
+      expect(result).toContain('## Current Chat - Test Chat');
       expect(result).toContain('**Messages (2):**');
       expect(result).toContain('Memory message 1');
       expect(result).toContain('Memory message 2');

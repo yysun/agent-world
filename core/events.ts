@@ -455,12 +455,12 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
       model: world.chatLLMModel || firstAgent.model,
       systemPrompt: 'You are a helpful assistant that turns conversations into concise titles.',
       temperature: 0.8,
-      maxTokens: 50,
+      maxTokens: 20,
     };
 
     const userPrompt = {
       role: 'user' as const,
-      content: `Below is a conversation. Generate a short, punchy title (3–6 words) that captures its main topic.
+      content: `Below is a conversation between a user and an assistant. Generate a short, punchy title (3–6 words) that captures its main topic.
 
       ${messages.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
       `
