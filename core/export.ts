@@ -168,8 +168,91 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           return dateA - dateB;
         });
 
-        sortedMessages.forEach((message, index) => {
-          const senderLabel = formatSenderLabel(message, agentsMap);
+        // Consolidate duplicate messages (same content, role, and timestamp)
+        const consolidatedMessages = [] as Array<AgentMessage & { agentIds?: string[], agentNames?: string[] }>;
+        for (const message of sortedMessages) {
+          // Find if this message already exists (same content, role, and close timestamp)
+          const existingIndex = consolidatedMessages.findIndex(m => {
+            if (m.role !== message.role || m.content !== message.content) {
+              return false;
+            }
+            // Check if timestamps are within 1 second of each other
+            if (m.createdAt && message.createdAt) {
+              const timeDiff = Math.abs(
+                new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()
+              );
+              return timeDiff < 1000; // Within 1 second
+            }
+            return !m.createdAt && !message.createdAt; // Both have no timestamp
+          });
+
+          if (existingIndex >= 0) {
+            // Merge agent information
+            const existing = consolidatedMessages[existingIndex];
+            if (message.agentId) {
+              if (!existing.agentIds) {
+                existing.agentIds = existing.agentId ? [existing.agentId] : [];
+              }
+              if (!existing.agentIds.includes(message.agentId)) {
+                existing.agentIds.push(message.agentId);
+              }
+              // Also collect agent names for display
+              const agent = agentsMap.get(message.agentId);
+              if (agent) {
+                if (!existing.agentNames) {
+                  existing.agentNames = [];
+                  // Add the original agent's name if exists
+                  if (existing.agentId) {
+                    const originalAgent = agentsMap.get(existing.agentId);
+                    if (originalAgent && !existing.agentNames.includes(originalAgent.name)) {
+                      existing.agentNames.push(originalAgent.name);
+                    }
+                  }
+                }
+                if (!existing.agentNames.includes(agent.name)) {
+                  existing.agentNames.push(agent.name);
+                }
+              }
+            }
+          } else {
+            // Add as new message
+            consolidatedMessages.push({
+              ...message,
+              agentIds: message.agentId ? [message.agentId] : undefined,
+              agentNames: message.agentId && agentsMap.get(message.agentId)
+                ? [agentsMap.get(message.agentId)!.name]
+                : undefined
+            });
+          }
+        }
+
+        // Format consolidated messages
+        consolidatedMessages.forEach((message, index) => {
+          let senderLabel: string | undefined;
+          if (message.role === 'user' || message.role === 'assistant') {
+            const raw = message.sender;
+            // Determine agent names to display
+            let agentNamesStr: string | undefined;
+            if (message.agentNames && message.agentNames.length > 0) {
+              agentNamesStr = message.agentNames.join(', ');
+            } else if (message.agentIds && message.agentIds.length > 0) {
+              agentNamesStr = message.agentIds.join(', ');
+            } else if (message.agentId) {
+              const agent = agentsMap.get(message.agentId);
+              agentNamesStr = agent ? agent.name : message.agentId;
+            }
+            if (raw) {
+              const senderName = raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
+              senderLabel = agentNamesStr ? `${senderName} → ${agentNamesStr}` : senderName;
+            } else {
+              senderLabel = agentNamesStr;
+            }
+          } else {
+            // For system messages or other roles
+            if (message.sender) {
+              senderLabel = message.sender.toLowerCase() === 'human' ? 'HUMAN' : message.sender;
+            }
+          }
           markdown += `${index + 1}. **${message.role}** ${senderLabel ? `(${senderLabel})` : ''}:\n`;
           if (message.createdAt) {
             markdown += `   *${formatDate(message.createdAt)}*\n`;
@@ -185,6 +268,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           markdown += `${paddedContent}\n`;
           markdown += '   ```\n\n';
         });
+        markdown += `*Note: ${sortedMessages.length} original messages, ${consolidatedMessages.length} after consolidation*\n\n`;
       } else {
         markdown += `**Messages:** No messages found for this chat\n\n`;
       }
