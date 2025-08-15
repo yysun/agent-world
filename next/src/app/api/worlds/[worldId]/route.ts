@@ -36,9 +36,13 @@ export async function PUT(
   try {
     const { worldId } = await params;
     const body = await request.json();
-    const { name, description } = body;
+    const { name, description, mcpConfig } = body;
 
-    await updateWorld(ROOT_PATH, worldId, { name, description });
+    await updateWorld(ROOT_PATH, worldId, { 
+      name, 
+      description,
+      mcpConfig: mcpConfig !== undefined ? mcpConfig : undefined
+    });
     const world = await getWorldConfig(ROOT_PATH, worldId);
 
     return NextResponse.json({ world });

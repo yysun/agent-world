@@ -20,7 +20,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, description } = body;
+    const { name, description, mcpConfig } = body;
 
     if (!name) {
       return NextResponse.json(
@@ -31,7 +31,8 @@ export async function POST(request: NextRequest) {
 
     const world = await createWorld(ROOT_PATH, {
       name,
-      description
+      description,
+      mcpConfig: mcpConfig || null
     });
 
     return NextResponse.json({ world }, { status: 201 });
