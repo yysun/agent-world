@@ -39,7 +39,8 @@ const getDefaultWorldData = (): Partial<World> => ({
   turnLimit: 5,
   // Defaults aligned with Agent Edit
   chatLLMProvider: 'ollama',
-  chatLLMModel: 'llama3.2:3b'
+  chatLLMModel: 'llama3.2:3b',
+  mcpConfig: null
 });
 
 // Save world function (handles both create and update)
@@ -48,6 +49,16 @@ export const saveWorld = async function* (state: WorldEditState): AsyncGenerator
   if (!state.world.name.trim()) {
     yield { ...state, error: 'World name is required' };
     return;
+  }
+
+  // Validate mcpConfig if provided
+  if (state.world.mcpConfig && state.world.mcpConfig.trim()) {
+    try {
+      JSON.parse(state.world.mcpConfig);
+    } catch (error) {
+      yield { ...state, error: 'MCP Config must be valid JSON' };
+      return;
+    }
   }
 
   // Set loading state
@@ -308,10 +319,10 @@ export default class WorldEdit extends Component<WorldEditState> {
                       <textarea
                         id="world-mcp"
                         className="form-textarea world-mcp-textarea"
-                        placeholder="Enter MCP servers..."
+                        placeholder="Enter MCP servers configuration as JSON..."
                         rows={12}
-                        value="{}"
-                        // $bind="world.mcp"
+                        value={state.world.mcpConfig || ''}
+                        $bind="world.mcpConfig"
                         disabled={state.loading}
                       />
                     </div>

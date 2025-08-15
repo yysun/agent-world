@@ -76,6 +76,7 @@ export interface World {
   chatLLMProvider?: string;
   chatLLMModel?: string;
   currentChatId: string | null;
+  mcpConfig?: string | null;
   agents: Agent[];
   chats: Chat[];
   llmCallLimit?: number;  // For UI display
