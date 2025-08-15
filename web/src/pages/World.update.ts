@@ -396,7 +396,10 @@ export const worldUpdateHandlers = {
       if (!result.success) {
         yield state;
       }
-      app.run('initWorld', state.worldName, chatId);
+      // app.run('initWorld', state.worldName, chatId);
+      const path = `/World/${encodeURIComponent(state.worldName)}/${encodeURIComponent(chatId)}`;
+      app.route(path);
+      history.pushState(null, '', path);
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to load chat from history' };
     }
@@ -406,7 +409,9 @@ export const worldUpdateHandlers = {
     try {
       yield { ...state, loading: true, chatToDelete: null };
       await api.deleteChat(state.worldName, chatId);
-      app.run('initWorld', state.worldName);
+      const path = `/World/${encodeURIComponent(state.worldName)}`;
+      app.route(path);
+      history.pushState(null, '', path);
     } catch (error: any) {
       yield { ...state, loading: false, chatToDelete: null, error: error.message || 'Failed to delete chat' };
     }
