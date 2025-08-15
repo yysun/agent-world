@@ -47,6 +47,13 @@ import {
   LLMProvider
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
+import {
+  listMCPServers,
+  restartMCPServer,
+  getMCPSystemHealth,
+  getMCPRegistryStats,
+  MCPServerInstance
+} from '../core/mcp-server-registry.js';
 
 const logger = createCategoryLogger('api');
 const DEFAULT_WORLD_NAME = 'Default World';
@@ -868,6 +875,87 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to load chat', 'LOAD_CHAT_ERROR');
     }
+  }
+});
+
+// MCP Server Management Routes
+router.get('/mcp/servers', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const servers = listMCPServers();
+    const serversInfo = servers.map(server => ({
+      id: server.id.slice(0, 8), // Truncated ID for display
+      name: server.config.name,
+      transport: server.config.transport,
+      status: server.status,
+      referenceCount: server.referenceCount,
+      startedAt: server.startedAt,
+      lastHealthCheck: server.lastHealthCheck,
+      associatedWorlds: Array.from(server.associatedWorlds),
+      error: server.error?.message
+    }));
+
+    const stats = getMCPRegistryStats();
+
+    res.json({
+      servers: serversInfo,
+      stats
+    });
+  } catch (error) {
+    logger.error('Error listing MCP servers', { error: error instanceof Error ? error.message : error });
+    sendError(res, 500, 'Failed to list MCP servers', 'MCP_LIST_ERROR');
+  }
+});
+
+router.post('/mcp/servers/:serverId/restart', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { serverId } = req.params;
+
+    // Find full server ID from partial ID
+    const servers = listMCPServers();
+    const server = servers.find(s => s.id.startsWith(serverId) || s.id === serverId);
+
+    if (!server) {
+      sendError(res, 404, 'MCP server not found', 'MCP_SERVER_NOT_FOUND');
+      return;
+    }
+
+    const success = await restartMCPServer(server.id);
+
+    if (success) {
+      res.json({
+        success: true,
+        message: `MCP server ${server.config.name} restarted successfully`,
+        serverId: server.id.slice(0, 8)
+      });
+    } else {
+      sendError(res, 500, 'Failed to restart MCP server', 'MCP_RESTART_ERROR');
+    }
+  } catch (error) {
+    logger.error('Error restarting MCP server', {
+      error: error instanceof Error ? error.message : error,
+      serverId: req.params.serverId
+    });
+    sendError(res, 500, 'Failed to restart MCP server', 'MCP_RESTART_ERROR');
+  }
+});
+
+router.get('/mcp/health', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const health = getMCPSystemHealth();
+    const stats = getMCPRegistryStats();
+
+    res.json({
+      ...health,
+      timestamp: new Date().toISOString(),
+      registry: stats
+    });
+  } catch (error) {
+    logger.error('Error getting MCP health', { error: error instanceof Error ? error.message : error });
+    res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: 'Failed to get MCP system health'
+    });
   }
 });
 

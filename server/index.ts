@@ -27,6 +27,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { Server } from 'http';
 import apiRouter from './api.js';
+import { initializeMCPRegistry, shutdownAllMCPServers } from '../core/mcp-server-registry.js';
 
 // ES modules setup
 const __filename = fileURLToPath(import.meta.url);
@@ -136,6 +137,10 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
   return new Promise((resolve, reject) => {
     configureLLMProvidersFromEnv();
 
+    // Initialize MCP registry
+    initializeMCPRegistry();
+    serverLogger.info('MCP registry initialized');
+
     const server = app.listen(port, host, () => {
       const serverAddress = server.address();
       if (serverAddress && typeof serverAddress === 'object') {
@@ -150,6 +155,50 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
     });
 
     server.on('error', reject);
+
+    // Setup graceful shutdown handlers
+    const gracefulShutdown = async (signal: string) => {
+      serverLogger.info(`Received ${signal}, initiating graceful shutdown`);
+
+      try {
+        // Shutdown MCP servers first
+        await shutdownAllMCPServers();
+        serverLogger.info('MCP servers shut down');
+
+        // Close Express server
+        server.close((err) => {
+          if (err) {
+            serverLogger.error('Error closing server', { error: err.message });
+            process.exit(1);
+          } else {
+            serverLogger.info('Express server closed');
+            process.exit(0);
+          }
+        });
+      } catch (error) {
+        serverLogger.error('Error during graceful shutdown', {
+          error: error instanceof Error ? error.message : error
+        });
+        process.exit(1);
+      }
+    };
+
+    // Register shutdown handlers
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+    // Handle uncaught exceptions and unhandled rejections
+    process.on('uncaughtException', (error) => {
+      serverLogger.error('Uncaught exception', { error: error.message });
+      gracefulShutdown('uncaughtException');
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      serverLogger.error('Unhandled rejection', {
+        reason: reason instanceof Error ? reason.message : reason,
+        promise: promise.toString()
+      });
+    });
   });
 }
 

@@ -28,9 +28,12 @@
 
 import { World } from './types.js';
 import { getWorld } from './managers.js';
-import { subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
-import { toKebabCase } from './utils.js';
 import { createCategoryLogger } from './logger.js';
+import { subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
+
+function toKebabCase(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
 
 // Create subscription category logger (part of core functionality)
 const logger = createCategoryLogger('core');
@@ -146,8 +149,18 @@ export async function subscribeWorld(
       return null;
     }
 
+    // MCP servers will be started on-demand in getMCPToolsForWorld()
+    if (currentWorld.mcpConfig) {
+      logger.debug(`World ${worldId} has MCP config - servers will start on-demand`);
+    }
+
     // Use startWorld function to create the subscription
-    return await startWorld(currentWorld, client);
+    const subscription = await startWorld(currentWorld, client);
+
+    // MCP servers use connection pooling and will be cleaned up automatically
+    // when the Express app shuts down
+
+    return subscription;
   } catch (error) {
     logger.error('World subscription failed', {
       worldIdentifier,

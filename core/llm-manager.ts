@@ -1,5 +1,5 @@
 /**
- * LLM Manager Module - Browser-Safe LLM Integration with Configuration Injection
+ * LLM Manager Module - Browser-Safe LLM Integration with Configuration Injection and MCP Tools
  *
  * Features:
  * - Browser-safe LLM integration using AI SDK with configuration injection
@@ -11,6 +11,7 @@
  * - Conversation history support with message preparation and context management
  * - Global LLM call queue to ensure serialized execution (one LLM call at a time)
  * - Configuration injection from external sources (CLI/server) for browser compatibility
+ * - Automatic MCP tool integration for worlds with mcpConfig
  *
  * Core Functions:
  * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter (queued)
@@ -63,15 +64,20 @@
  * - Enhanced error handling for missing provider configuration
  * - Maintained all existing functionality while making module browser-safe
  * - Updated comment block to reflect browser-safe implementation
+ * - Integrated MCP tools: Automatically includes available MCP tools from world's mcpConfig
+ * - Enhanced both streaming and non-streaming LLM calls with MCP tool support
+ * - Added debug logging for MCP tool inclusion and usage tracking
+ * - Updated to ollama-ai-provider-v2 for AI SDK v5 compatibility and specification v2 support
  */
 
 import { generateText, streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOllama } from 'ollama-ai-provider';
+import { createOllama } from 'ollama-ai-provider-v2';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
+import { getMCPToolsForWorld } from './mcp-server-registry.js';
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
@@ -259,6 +265,14 @@ async function executeStreamAgentResponse(
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
 
+    // Get MCP tools for this world
+    const mcpTools = await getMCPToolsForWorld(world.id);
+    const hasMCPTools = Object.keys(mcpTools).length > 0;
+
+    if (hasMCPTools) {
+      logger.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+    }
+
     // Stream response with timeout handling
     const timeoutMs = 30000; // 30 second timeout
 
@@ -266,7 +280,8 @@ async function executeStreamAgentResponse(
       model,
       messages: llmMessages,
       temperature: agent.temperature,
-      maxOutputTokens: agent.maxTokens
+      maxOutputTokens: agent.maxTokens,
+      ...(hasMCPTools && { tools: mcpTools })
     });
 
     // Add timeout wrapper
@@ -348,13 +363,23 @@ async function executeGenerateAgentResponse(
   const llmMessages = stripCustomFieldsFromMessages(messages);
   const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
   llmMessages.unshift({ role: 'system', content: systemPrompt });
+
+  // Get MCP tools for this world
+  const mcpTools = await getMCPToolsForWorld(world.id);
+  const hasMCPTools = Object.keys(mcpTools).length > 0;
+
+  if (hasMCPTools) {
+    logger.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+  }
+
   logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
   try {
     const { text } = await generateText({
       model,
       messages: llmMessages,
       temperature: agent.temperature,
-      maxOutputTokens: agent.maxTokens
+      maxOutputTokens: agent.maxTokens,
+      ...(hasMCPTools && { tools: mcpTools })
     });
 
     // Update agent activity and LLM call count

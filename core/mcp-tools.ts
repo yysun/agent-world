@@ -16,29 +16,88 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 export type MCPConfig = {
-  servers: Array<
-    | { name: string; transport: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
-    | { name: string; transport: 'sse' | 'streamable-http'; url: string; headers?: Record<string, string> }
-  >;
+  servers: Record<string, {
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    transport?: 'stdio'; // Default to stdio, could extend for other transports
+  } | {
+    url: string;
+    headers?: Record<string, string>;
+    transport: 'sse' | 'streamable-http';
+  } | {
+    type: 'http' | 'sse' | 'streamable-http';
+    url: string;
+    headers?: Record<string, string>;
+  }>;
+};
+
+export type MCPServerConfig = {
+  name: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 };
 
 const sanitize = (s: string) => s.replace(/[^\w\-]/g, '-'); // keep simple; colon inserted by us
 const nsName = (server: string, tool: string) => `${sanitize(server)}:${tool}`;
 
 /**
+ * Convert MCP config JSON format to normalized server configs
+ */
+export function parseServersFromConfig(config: MCPConfig): MCPServerConfig[] {
+  const servers: MCPServerConfig[] = [];
+
+  for (const [name, serverDef] of Object.entries(config.servers)) {
+    if ('command' in serverDef) {
+      // Stdio transport (default)
+      servers.push({
+        name,
+        transport: serverDef.transport || 'stdio',
+        command: serverDef.command,
+        args: serverDef.args,
+        env: serverDef.env
+      });
+    } else if ('url' in serverDef) {
+      // HTTP/SSE transport - handle both 'transport' and 'type' fields
+      const transportType = ('transport' in serverDef)
+        ? serverDef.transport
+        : ('type' in serverDef)
+          ? (serverDef.type === 'http' ? 'streamable-http' : serverDef.type)
+          : 'streamable-http'; // default to streamable-http for URL-based configs
+
+      servers.push({
+        name,
+        transport: transportType,
+        url: serverDef.url,
+        headers: serverDef.headers
+      });
+    }
+  }
+
+  return servers;
+}
+
+/**
  * Connect to an MCP server using the specified configuration
  */
-export async function connectMCPServer(server: MCPConfig['servers'][0]): Promise<Client> {
-  const transport =
-    server.transport === 'stdio'
-      ? new StdioClientTransport({ command: server.command, args: server.args ?? [], env: server.env })
-      : server.transport === 'sse'
-      ? new SSEClientTransport(new URL(server.url), { 
-          requestInit: { headers: server.headers } 
-        })
-      : new StreamableHTTPClientTransport(new URL(server.url), { 
-          requestInit: { headers: server.headers } 
-        });
+export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client> {
+  const transport = serverConfig.transport === 'stdio' || !serverConfig.transport
+    ? new StdioClientTransport({
+      command: serverConfig.command!,
+      args: serverConfig.args ?? [],
+      env: serverConfig.env
+    })
+    : serverConfig.transport === 'sse'
+      ? new SSEClientTransport(new URL(serverConfig.url!), {
+        requestInit: { headers: serverConfig.headers }
+      })
+      : new StreamableHTTPClientTransport(new URL(serverConfig.url!), {
+        requestInit: { headers: serverConfig.headers }
+      });
 
   const client = new Client({ name: 'my-app', version: '1.0.0' }, { capabilities: {} });
   await client.connect(transport);
@@ -50,8 +109,17 @@ export async function connectMCPServer(server: MCPConfig['servers'][0]): Promise
  * Convert MCP tools to AI-compatible tool format
  */
 export async function mcpToolsToAiTools(client: Client, serverName: string) {
-  const { tools } = await client.listTools();
+  // Add timeout to prevent hanging
+  const listToolsPromise = client.listTools();
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
+  });
+
+  const { tools } = await Promise.race([listToolsPromise, timeoutPromise]);
   const aiTools: Record<string, any> = {};
+
+  // Convert tools to AI format without logging individual tool names
+  // Only log total count to avoid verbose output
 
   for (const t of tools as Tool[]) {
     const key = nsName(serverName, t.name);
