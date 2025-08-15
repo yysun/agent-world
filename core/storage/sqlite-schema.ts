@@ -133,6 +133,7 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       chat_llm_provider TEXT,
       chat_llm_model TEXT,
       current_chat_id TEXT,
+      mcp_config TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -358,7 +359,7 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       if (!tableCheck) {
         // Fresh database - create all tables with current schema
         await initializeSchema(ctx);
-        await setSchemaVersion(ctx, 4);
+        await setSchemaVersion(ctx, 5);
       } else {
         // Existing database with version 0 - check if chat_id column exists
         try {
@@ -449,6 +450,25 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       await setSchemaVersion(ctx, 4);
     }
   }
+
+  // Migration to version 5: Add mcpConfig column to worlds table
+  if (currentVersion < 5) {
+    try {
+      const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
+      const hasMcpConfig = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'mcp_config');
+
+      if (!hasMcpConfig) {
+        await run(`ALTER TABLE worlds ADD COLUMN mcp_config TEXT`);
+      }
+
+      await setSchemaVersion(ctx, 5);
+    } catch (error) {
+      console.warn('[sqlite-schema] Migration warning for mcp_config column:', error);
+      // Try to continue anyway
+      await setSchemaVersion(ctx, 5);
+    }
+  }
+
   // Future migrations would go here
 } export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
   const get = promisify(ctx.db.get.bind(ctx.db));
