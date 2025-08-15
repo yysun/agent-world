@@ -266,7 +266,7 @@ async function executeStreamAgentResponse(
       model,
       messages: llmMessages,
       temperature: agent.temperature,
-      maxTokens: agent.maxTokens
+      maxOutputTokens: agent.maxTokens
     });
 
     // Add timeout wrapper
@@ -354,7 +354,7 @@ async function executeGenerateAgentResponse(
       model,
       messages: llmMessages,
       temperature: agent.temperature,
-      maxTokens: agent.maxTokens
+      maxOutputTokens: agent.maxTokens
     });
 
     // Update agent activity and LLM call count
