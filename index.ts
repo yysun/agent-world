@@ -17,6 +17,6 @@ export * from './core/index';
 // Package information
 export const PACKAGE_INFO = {
   name: 'agent-world',
-  version: '0.3.0',
+  version: '0.5.0',
   description: 'A agent management system for building AI agent teams with just words.',
 } as const;

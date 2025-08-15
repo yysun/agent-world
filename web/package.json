@@ -1,7 +1,7 @@
 {
-  "name": "web",
+  "name": "@agent-world/web",
   "version": "1.0.0",
-  "description": "* Use _npm dev_ to start the dev server * Use _npm test_ to run unit tests * Use _npm run build_ to build for production",
+  "description": "Web frontend for Agent World - built with AppRun and Vite",
   "main": "index.js",
   "type": "module",
   "scripts": {

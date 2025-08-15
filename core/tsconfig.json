@@ -5,9 +5,13 @@
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "allowJs": true,
+    "allowJs": false,
     "noEmit": false,
     "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "../dist/core",
+    "rootDir": ".",
     "strict": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -23,25 +27,15 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false,
     "types": [
-      "node",
-      "jest"
-    ],
-    "outDir": "./dist",
+      "node"
+    ]
   },
   "include": [
-    "index.ts",
-    "cli/**/*",
-    "server/**/*",
-    "core/**/*",
-    "tests/**/*"
+    "**/*.ts",
+    "**/*.d.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "coverage",
-    "bin/**/*",
-    "tests/**/*",
-    "next/.next",
-    "web/dist"
+    "../dist"
   ]
 }
