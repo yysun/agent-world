@@ -33,7 +33,7 @@
     "test": "jest --config jest.config.js",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "check": "tsc --noEmit",
-    "build": "tsc && npm run build --workspace=web",
+    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "pkill": "pkill -f tsx",
     "dev-next": "cd next && npm run dev"
   },

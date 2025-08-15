@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist"
+  },
+  "include": [
+    "index.ts",
+    "cli/**/*",
+    "server/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "bin/**/*",
+    "tests/**/*",
+    "core/**/*",
+    "next/.next",
+    "web/dist"
+  ]
+}
