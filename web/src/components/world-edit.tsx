@@ -1,11 +1,18 @@
 /**
  * World Edit Component - Modal CRUD operations for world management
- * 
+ *
  * Features:
  * - Self-contained AppRun class component with create/edit/delete modes
  * - Modal overlay with backdrop click to close and form validation
- * - Success messaging with auto-close and parent component integration  
+ * - Success messaging with auto-close and parent component integration
  * - Module-level functions for better testability and organization
+ * - Added chat LLM provider/model fields (parity with Agent Edit)
+ * - Standardized modal sizing via shared 'edit-modal' class
+ *
+ * Changes:
+ * - New fields: world.chatLLMProvider, world.chatLLMModel (with sensible defaults)
+ * - Merge defaults with incoming props to ensure fields are present in edit mode
+ * - Use common modal class to match Agent Edit popup size
  */
 
 import { app, Component } from 'apprun';
@@ -17,7 +24,8 @@ import type { ValidationError } from '../utils/error-formatting';
 // Initialize component state from props
 const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
   mode: props.mode || 'create',
-  world: props.world || getDefaultWorldData(),
+  // Merge defaults to ensure provider/model exist even in edit mode where props.world may omit them
+  world: { ...getDefaultWorldData(), ...(props.world || {}) },
   parentComponent: props.parentComponent,
   loading: false,
   error: null,
@@ -28,7 +36,10 @@ const getStateFromProps = (props: WorldEditProps): WorldEditState => ({
 const getDefaultWorldData = (): Partial<World> => ({
   name: '',
   description: '',
-  turnLimit: 5
+  turnLimit: 5,
+  // Defaults aligned with Agent Edit
+  chatLLMProvider: 'ollama',
+  chatLLMModel: 'llama3.2:3b'
 });
 
 // Save world function (handles both create and update)
@@ -138,7 +149,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     if (state.successMessage) {
       return (
         <div className="modal-backdrop" $onclick={closeModal}>
-          <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+          <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Success!</h2>
               <button
@@ -173,7 +184,7 @@ export default class WorldEdit extends Component<WorldEditState> {
 
     return (
       <div className="modal-backdrop" $onclick={closeModal}>
-        <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+        <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
@@ -240,6 +251,40 @@ export default class WorldEdit extends Component<WorldEditState> {
                       $bind="world.description"
                       disabled={state.loading}
                     />
+                  </div>
+
+                  {/* Chat LLM Settings - provider and model (parity with Agent Edit) */}
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label htmlFor="world-chat-provider">Chat LLM Provider</label>
+                      <select
+                        id="world-chat-provider"
+                        className="form-select"
+                        value={state.world.chatLLMProvider}
+                        $bind="world.chatLLMProvider"
+                        disabled={state.loading}
+                      >
+                        <option value="" selected={!state.world.chatLLMProvider}>Select provider</option>
+                        <option value="openai" selected={state.world.chatLLMProvider === 'openai'}>OpenAI</option>
+                        <option value="anthropic" selected={state.world.chatLLMProvider === 'anthropic'}>Anthropic</option>
+                        <option value="google" selected={state.world.chatLLMProvider === 'google'}>Google</option>
+                        <option value="azure" selected={state.world.chatLLMProvider === 'azure'}>Azure</option>
+                        <option value="ollama" selected={state.world.chatLLMProvider === 'ollama'}>Ollama</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="world-chat-model">Chat LLM Model</label>
+                      <input
+                        id="world-chat-model"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. gpt-4, claude-3-sonnet, llama3.2:3b"
+                        value={state.world.chatLLMModel}
+                        $bind="world.chatLLMModel"
+                        disabled={state.loading}
+                      />
+                    </div>
                   </div>
 
                   <div className="form-group">

@@ -1793,6 +1793,11 @@ legend {
     max-height: 95vh;
   }
 
+  /* Make edit modals consistently tall on tablets/phones */
+  .modal-content.edit-modal {
+    height: 100vh;
+  }
+
   .modal-header,
   .modal-body,
   .modal-footer {
@@ -1848,6 +1853,11 @@ legend {
 
   .section-title {
     font-size: 1.1rem;
+  }
+
+  /* Maximize available height on small phones */
+  .modal-content.edit-modal {
+    height: 90vh;
   }
 }
 
@@ -2049,21 +2059,13 @@ legend {
   color: var(--text-primary);
 }
 
-.form-group input,
-.form-group textarea {
-  padding: 0.5rem;
-  border: 1px solid var(--border-primary);
-  border-radius: 0.25rem;
-  font-family: inherit;
-  font-size: 1rem;
-}
 
-.form-group input:focus,
+/* .form-group input:focus,
 .form-group textarea:focus {
   outline: none;
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-primary-light);
-}
+} */
 
 .form-group textarea {
   min-height: 80px;

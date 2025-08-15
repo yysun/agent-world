@@ -1,11 +1,12 @@
 /**
  * Agent Edit Component - Modal CRUD operations for agent management
- * 
+ *
  * Features:
  * - Self-contained AppRun class component with create/edit/delete modes
  * - Modal overlay with backdrop click to close and form validation
  * - Success messaging with auto-close and parent component integration
  * - Global event publishing for coordinated modal management
+ * - Standardized modal sizing via shared 'edit-modal' class (parity with World Edit)
  */
 
 import { app, Component } from 'apprun';
@@ -135,7 +136,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     if (state.loading) {
       return (
         <div className="modal-backdrop">
-          <div className="modal-content">
+          <div className="modal-content edit-modal">
             <div className="modal-body">
               <div className="loading-spinner">
                 {state.mode === 'create' ? 'Creating agent...' :
@@ -151,7 +152,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     if (state.successMessage) {
       return (
         <div className="modal-backdrop" $onclick={closeModal}>
-          <div className="modal-content" onclick={(e) => e.stopPropagation()}>
+          <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Success!</h2>
               <button
@@ -186,7 +187,7 @@ export default class AgentEdit extends Component<AgentEditState> {
 
     return (
       <div className="modal-backdrop" $onclick={closeModal}>
-        <div className="modal-content agent-edit-modal" onclick={(e) => e.stopPropagation()}>
+        <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
             <button
