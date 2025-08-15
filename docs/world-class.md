@@ -22,7 +22,8 @@ import { WorldClass, createWorld } from './core/index.js';
 // First create a world using the functional API
 const world = await createWorld({
   name: 'My World',
-  description: 'A world for my agents'
+  description: 'A world for my agents',
+  mcpConfig: '{"servers":[{"name":"filesystem","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}]}'
 });
 
 // Then wrap it with WorldClass for OOP operations
@@ -34,7 +35,10 @@ const worldClass = new WorldClass(world.id);
 ```typescript
 // World operations
 await worldClass.delete();                    // deleteWorld(worldId)
-await worldClass.update({ turnLimit: 10 });  // updateWorld(worldId, updates)
+await worldClass.update({ 
+  turnLimit: 10,
+  mcpConfig: '{"servers":[{"name":"git","command":"mcp-server-git"}]}'
+});  // updateWorld(worldId, updates)
 await worldClass.reload();                    // getWorld(worldId)
 await worldClass.exportToMarkdown();          // exportWorldToMarkdown(worldId)
 
@@ -76,6 +80,52 @@ await worldClass.deleteChat('chat-id');              // Delete chat
 await worldClass.newChat(false);                     // Create new chat without setting as current
 await worldClass.restoreChat('chat-id', false);      // Load chat without setting as current
 ```
+
+### MCP Configuration
+
+The `mcpConfig` field allows you to configure Model Context Protocol (MCP) servers for enhanced agent capabilities:
+
+```typescript
+// Create world with MCP configuration
+const world = await createWorld({
+  name: 'MCP World',
+  description: 'A world with MCP servers',
+  mcpConfig: JSON.stringify({
+    servers: [
+      {
+        name: 'filesystem',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp']
+      },
+      {
+        name: 'memory',
+        command: 'npx', 
+        args: ['-y', '@modelcontextprotocol/server-memory']
+      }
+    ]
+  })
+});
+
+// Update MCP configuration
+const worldClass = new WorldClass(world.id);
+await worldClass.update({
+  mcpConfig: JSON.stringify({
+    servers: [
+      {
+        name: 'git',
+        command: 'mcp-server-git',
+        args: ['--repository', '/path/to/repo']
+      }
+    ]
+  })
+});
+```
+
+**Important Notes:**
+- `mcpConfig` must be a valid JSON string or `null`
+- Invalid JSON will be rejected with a validation error
+- The configuration follows the MCP server specification format
+- Each server requires `name`, `command`, and optionally `args`
 
 ## API Reference
 
