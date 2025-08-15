@@ -192,6 +192,7 @@ export interface CreateWorldParams {
   turnLimit?: number;
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
+  mcpConfig?: string | null; // MCP configuration JSON string
 }
 
 /**
@@ -212,6 +213,7 @@ export interface World {
   chatLLMProvider?: string; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   currentChatId?: string | null; // Track active chat session
+  mcpConfig?: string | null; // MCP configuration JSON string
   createdAt: Date;
   lastUpdated: Date;
   totalAgents: number;

@@ -195,8 +195,8 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Pr
   await ensureInitialized(ctx);
   // Use INSERT with ON CONFLICT UPDATE instead of INSERT OR REPLACE to avoid foreign key cascade issues
   await run(ctx, `
-    INSERT INTO worlds (id, name, description, turn_limit, chat_llm_provider, chat_llm_model, current_chat_id, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO worlds (id, name, description, turn_limit, chat_llm_provider, chat_llm_model, current_chat_id, mcp_config, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       description = excluded.description,
@@ -204,9 +204,10 @@ export async function saveWorld(ctx: SQLiteStorageContext, worldData: World): Pr
       chat_llm_provider = excluded.chat_llm_provider,
       chat_llm_model = excluded.chat_llm_model,
       current_chat_id = excluded.current_chat_id,
+      mcp_config = excluded.mcp_config,
       updated_at = CURRENT_TIMESTAMP
   `, worldData.id, worldData.name, worldData.description, worldData.turnLimit,
-    worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId);
+    worldData.chatLLMProvider, worldData.chatLLMModel, worldData.currentChatId, worldData.mcpConfig);
 }
 
 export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Promise<World | null> {
@@ -214,7 +215,7 @@ export async function loadWorld(ctx: SQLiteStorageContext, worldId: string): Pro
   const result = await get(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
-           current_chat_id as currentChatId
+           current_chat_id as currentChatId, mcp_config as mcpConfig
     FROM worlds WHERE id = ?
   `, worldId) as World | undefined;
   return result || null;
@@ -235,7 +236,7 @@ export async function listWorlds(ctx: SQLiteStorageContext): Promise<World[]> {
   const results = await all(ctx, `
     SELECT id, name, description, turn_limit as turnLimit,
            chat_llm_provider as chatLLMProvider, chat_llm_model as chatLLMModel,
-           current_chat_id as currentChatId
+           current_chat_id as currentChatId, mcp_config as mcpConfig
     FROM worlds
     ORDER BY name
   `) as World[];

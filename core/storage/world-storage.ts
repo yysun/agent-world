@@ -98,8 +98,32 @@ export async function saveWorld(root: string, worldData: World): Promise<void> {
 
   const worldDir = getWorldDir(root, worldData.id);
   const configPath = path.join(worldDir, 'config.json');
+  const mcpConfigPath = path.join(worldDir, 'mcp.json');
 
-  await writeJsonFile(configPath, worldData);
+  // Create a copy of worldData without mcpConfig for config.json
+  const { mcpConfig, ...configData } = worldData;
+  
+  // Save main config without mcpConfig
+  await writeJsonFile(configPath, configData);
+  
+  // Save mcpConfig to separate file if it exists
+  if (mcpConfig !== undefined && mcpConfig !== null) {
+    try {
+      // Validate that mcpConfig is valid JSON
+      const parsedConfig = JSON.parse(mcpConfig);
+      await writeJsonFile(mcpConfigPath, parsedConfig);
+    } catch (error) {
+      // If mcpConfig is not valid JSON, save it as-is (could be a string)
+      await writeJsonFile(mcpConfigPath, { config: mcpConfig });
+    }
+  } else {
+    // Remove mcp.json if mcpConfig is null/undefined
+    try {
+      await fs.unlink(mcpConfigPath);
+    } catch {
+      // File might not exist, ignore error
+    }
+  }
 }
 
 /**
@@ -109,12 +133,28 @@ export async function loadWorld(root: string, worldId: string): Promise<World | 
   try {
     const worldDir = getWorldDir(root, worldId);
     const configPath = path.join(worldDir, 'config.json');
+    const mcpConfigPath = path.join(worldDir, 'mcp.json');
 
     const worldData = await readJsonFile<World>(configPath);
 
     // Reconstruct Date objects
     if (worldData.createdAt) worldData.createdAt = new Date(worldData.createdAt);
     if (worldData.lastUpdated) worldData.lastUpdated = new Date(worldData.lastUpdated);
+
+    // Load mcpConfig from separate file if it exists
+    try {
+      const mcpData = await readJsonFile<any>(mcpConfigPath);
+      // If mcpData has a 'config' field, it was stored as a wrapped string
+      if (mcpData && typeof mcpData === 'object' && 'config' in mcpData) {
+        worldData.mcpConfig = mcpData.config;
+      } else {
+        // Otherwise, stringify the JSON object
+        worldData.mcpConfig = JSON.stringify(mcpData);
+      }
+    } catch {
+      // mcp.json doesn't exist or can't be read, set to null for backward compatibility
+      worldData.mcpConfig = null;
+    }
 
     return worldData;
   } catch {

@@ -62,6 +62,7 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
     turnLimit: params.turnLimit || 5,
     chatLLMProvider: params.chatLLMProvider,
     chatLLMModel: params.chatLLMModel,
+    mcpConfig: params.mcpConfig,
     createdAt: new Date(),
     lastUpdated: new Date(),
     totalAgents: 0,
