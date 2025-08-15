@@ -301,6 +301,21 @@ export default class WorldEdit extends Component<WorldEditState> {
                       disabled={state.loading}
                     />
                   </div>
+
+                  <div className="form-section">
+                    <div className="form-group">
+                      <label htmlFor="world-mcp">MCP Servers</label>
+                      <textarea
+                        id="world-mcp"
+                        className="form-textarea world-mcp-textarea"
+                        placeholder="Enter MCP servers..."
+                        rows={12}
+                        value="{}"
+                        // $bind="world.mcp"
+                        disabled={state.loading}
+                      />
+                    </div>
+                  </div>
                 </div>
               </form>
             )}
