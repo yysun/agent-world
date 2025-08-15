@@ -18,6 +18,7 @@
     "server": "npx tsx server/index.ts",
     "dev": "concurrently \"npm run server\" \"cd web && npm run dev\"",
     "test": "jest --config jest.config.js",
+    "test:db": "npx tsx tests/db/migration-tests.ts",
     "check": "tsc --noEmit",
     "build": "tsc && cd web && npm run build",
     "pkill": "pkill -f tsx",

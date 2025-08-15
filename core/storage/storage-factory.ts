@@ -576,7 +576,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       throw new Error('SQLite storage not available in browser environment');
     }
     const sqliteConfig: SQLiteConfig = {
-      database: config.sqlite?.database || path.join(config.rootPath, 'agent-world.db'),
+      database: config.sqlite?.database || path.join(config.rootPath, 'database.db'),
       enableWAL: config.sqlite?.enableWAL !== false,
       busyTimeout: config.sqlite?.busyTimeout || 30000,
       cacheSize: config.sqlite?.cacheSize || -64000,
@@ -615,7 +615,13 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
-    await initializeWithDefaults(ctx);
+    // Only initialize with defaults if this is a fresh database
+    try {
+      await initializeWithDefaults(ctx);
+    } catch (error) {
+      // If initialization fails (e.g., default world already exists), continue anyway
+      console.warn('[storage-factory] Warning during default initialization:', error instanceof Error ? error.message : error);
+    }
     storage = {
       saveWorld: (worldData: any) => saveWorld(ctx, worldData),
       loadWorld: (worldId: string) => loadWorld(ctx, worldId),

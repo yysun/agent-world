@@ -319,7 +319,7 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
 
 export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
   const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 4; // Increment version for currentChatId field
+  const targetVersion = 5; // Latest version includes mcp_config field
   return currentVersion < targetVersion;
 }
 
