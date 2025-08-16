@@ -12,7 +12,7 @@
  * - OpenAI: API key configuration
  * - Anthropic: API key configuration
  * - Google: API key configuration
- * - Azure: API key, endpoint, and deployment configuration
+ * - Azure: API key, resource name, and deployment configuration (API version optional)
  * - XAI: API key configuration
  * - OpenAI-Compatible: API key and base URL configuration
  * - Ollama: Base URL configuration
@@ -70,10 +70,12 @@ export type AnthropicConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
 export type GoogleConfig = Required<Pick<BaseLLMConfig, 'apiKey'>>;
 
 /**
- * Azure configuration - requires API key, endpoint, and deployment
+ * Azure configuration - requires API key, resource name, and deployment; optionally API version
  */
-export type AzureConfig = Required<Pick<BaseLLMConfig, 'apiKey' | 'endpoint' | 'deployment'>> &
-  Partial<Pick<BaseLLMConfig, 'apiVersion'>>;
+export type AzureConfig = Required<Pick<BaseLLMConfig, 'apiKey' | 'deployment'>> & {
+  resourceName: string;
+  apiVersion?: string;
+};
 
 /**
  * XAI configuration - requires only API key
@@ -196,8 +198,8 @@ export function validateProviderConfig(provider: LLMProvider, config: any): void
       if (!config.apiKey || typeof config.apiKey !== 'string') {
         throw new Error('Azure provider requires apiKey (string)');
       }
-      if (!config.endpoint || typeof config.endpoint !== 'string') {
-        throw new Error('Azure provider requires endpoint (string)');
+      if (!config.resourceName || typeof config.resourceName !== 'string') {
+        throw new Error('Azure provider requires resourceName (string)');
       }
       if (!config.deployment || typeof config.deployment !== 'string') {
         throw new Error('Azure provider requires deployment (string)');

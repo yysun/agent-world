@@ -58,12 +58,12 @@ function configureLLMProvidersFromEnv(): void {
   });
 
   // Azure (requires multiple env vars)
-  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_ENDPOINT && process.env.AZURE_DEPLOYMENT) {
+  if (process.env.AZURE_OPENAI_API_KEY && process.env.AZURE_RESOURCE_NAME && process.env.AZURE_DEPLOYMENT) {
     configureLLMProvider(LLMProvider.AZURE, {
       apiKey: process.env.AZURE_OPENAI_API_KEY,
-      endpoint: process.env.AZURE_ENDPOINT,
+      resourceName: process.env.AZURE_RESOURCE_NAME,
       deployment: process.env.AZURE_DEPLOYMENT,
-      apiVersion: process.env.AZURE_API_VERSION || '2023-12-01-preview'
+      apiVersion: process.env.AZURE_API_VERSION || '2024-10-21-preview'
     });
     serverLogger.debug('Configured Azure provider from environment');
   }

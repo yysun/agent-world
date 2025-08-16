@@ -11,3 +11,6 @@
 - use `npm run check` to check syntax and linting
 - use `npm run server` to start the server
 - use `npm run dev` to start the frontend development
+
+
+DO NOT run `npm run server` and then test it in same terminal. Always ask me to start server before testing.

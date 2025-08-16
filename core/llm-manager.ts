@@ -24,7 +24,7 @@
  * - OpenAI: GPT models with streaming and function calling support
  * - Anthropic: Claude models with conversation context and streaming
  * - Google: Gemini models with proper API key management
- * - Azure: OpenAI-compatible Azure endpoints with deployment management
+ * - Azure: Azure OpenAI endpoints using resourceName and deployment with useDeploymentBasedUrls=true
  * - XAI: Grok models through OpenAI-compatible interface
  * - OpenAI-Compatible: Custom providers following OpenAI API standards
  * - Ollama: Local model support with custom base URL configuration
@@ -68,6 +68,8 @@
  * - Enhanced both streaming and non-streaming LLM calls with MCP tool support
  * - Added debug logging for MCP tool inclusion and usage tracking
  * - Updated to ollama-ai-provider-v2 for AI SDK v5 compatibility and specification v2 support
+ * - Fixed Azure implementation to use proper @ai-sdk/azure with resourceName configuration
+ * - Added useDeploymentBasedUrls=true to generate correct Azure OpenAI deployment URLs
  */
 
 import { generateText, streamText } from 'ai';
@@ -76,8 +78,10 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider-v2';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createAzure } from '@ai-sdk/azure';
 import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
+import { patchAzureProvider, initializeAISDKPatch } from './ai-sdk-patch.js';
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
@@ -85,6 +89,9 @@ const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config.js';
 
 // LLM Integration Utilities
+
+// Initialize AI SDK patch to fix schema corruption bug at runtime
+initializeAISDKPatch();
 
 function stripCustomFields(message: AgentMessage): ChatMessage {
   const { sender, chatId, ...llmMessage } = message;
@@ -218,9 +225,6 @@ export interface LLMConfig {
   maxTokens?: number;
   // Provider-specific options
   ollamaBaseUrl?: string;
-  azureEndpoint?: string;
-  azureApiVersion?: string;
-  azureDeployment?: string;
 }
 
 /**
@@ -373,6 +377,7 @@ async function executeGenerateAgentResponse(
   }
 
   logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
+
   try {
     const { text } = await generateText({
       model,
@@ -437,10 +442,17 @@ function loadLLMProvider(agent: Agent): any {
 
     case LLMProvider.AZURE: {
       const config = getLLMProviderConfig(LLMProvider.AZURE);
-      return createOpenAI({
+      const azureProvider = createAzure({
+        resourceName: config.resourceName,
         apiKey: config.apiKey,
-        baseURL: `${config.endpoint}/openai/deployments/${config.deployment}`
-      })(agent.model);
+        apiVersion: config.apiVersion || '2024-10-21-preview',
+        useDeploymentBasedUrls: true  // Use Azure OpenAI deployment-based URLs
+      });
+
+      // Apply schema corruption fix wrapper
+      const patchedAzureProvider = patchAzureProvider(azureProvider);
+
+      return patchedAzureProvider(config.deployment);
     }
 
     case LLMProvider.GOOGLE: {
