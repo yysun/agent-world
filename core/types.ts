@@ -12,9 +12,19 @@
 import { type EventEmitter } from 'events';
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   createdAt?: Date;
+  // Tool call support for function calling
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  tool_call_id?: string; // For tool response messages
 }
 
 export interface AgentMessage extends ChatMessage {

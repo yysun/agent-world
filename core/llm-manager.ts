@@ -2,7 +2,7 @@
  * LLM Manager Module - Browser-Safe LLM Integration with Configuration Injection and MCP Tools
  *
  * Features:
- * - Browser-safe LLM integration using AI SDK with configuration injection
+ * - Browser-safe LLM integration using direct OpenAI package and AI SDK for other providers
  * - Streaming responses with SSE events via World.eventEmitter specifically
  * - Support for all major LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
  * - Agent activity tracking and token usage monitoring with automatic state persistence
@@ -12,6 +12,7 @@
  * - Global LLM call queue to ensure serialized execution (one LLM call at a time)
  * - Configuration injection from external sources (CLI/server) for browser compatibility
  * - Automatic MCP tool integration for worlds with mcpConfig
+ * - Direct OpenAI package integration for OpenAI providers to bypass AI SDK schema bug
  *
  * Core Functions:
  * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter (queued)
@@ -21,13 +22,13 @@
  * - clearLLMQueue: Emergency queue clearing for administrative purposes
  *
  * Provider Support:
- * - OpenAI: GPT models with streaming and function calling support
- * - Anthropic: Claude models with conversation context and streaming
- * - Google: Gemini models with proper API key management
- * - Azure: Azure OpenAI endpoints using resourceName and deployment with useDeploymentBasedUrls=true
- * - XAI: Grok models through OpenAI-compatible interface
- * - OpenAI-Compatible: Custom providers following OpenAI API standards
- * - Ollama: Local model support with custom base URL configuration
+ * - OpenAI: Direct OpenAI package integration (bypasses AI SDK bug)
+ * - Azure: Direct OpenAI package integration with Azure endpoints (bypasses AI SDK bug)
+ * - OpenAI-Compatible: Direct OpenAI package integration (bypasses AI SDK bug)
+ * - XAI: Direct OpenAI package integration with XAI endpoints (bypasses AI SDK bug)
+ * - Anthropic: AI SDK integration (Claude models with conversation context and streaming)
+ * - Google: AI SDK integration (Gemini models with proper API key management)
+ * - Ollama: AI SDK integration (Local model support with custom base URL configuration)
  *
  * LLM Queue Implementation:
  * - Global singleton queue prevents concurrent LLM calls across all agents and worlds
@@ -47,7 +48,8 @@
  * - Clear error messages when configuration is missing
  *
  * Implementation Details:
- * - Uses AI SDK for LLM integration with consistent interfaces across providers
+ * - Uses direct OpenAI package for OpenAI providers to avoid AI SDK schema corruption bug
+ * - Uses AI SDK for non-OpenAI providers (Anthropic, Google, Ollama)
  * - Publishes SSE events via world.eventEmitter.emit('sse', event) for proper isolation
  * - Updates agent activity metrics and LLM call counts automatically
  * - Zero dependencies on Node.js environment variables or legacy event systems
@@ -68,20 +70,21 @@
  * - Enhanced both streaming and non-streaming LLM calls with MCP tool support
  * - Added debug logging for MCP tool inclusion and usage tracking
  * - Updated to ollama-ai-provider-v2 for AI SDK v5 compatibility and specification v2 support
- * - Fixed Azure implementation to use proper @ai-sdk/azure with resourceName configuration
- * - Added useDeploymentBasedUrls=true to generate correct Azure OpenAI deployment URLs
+ * - Replaced AI SDK providers with direct OpenAI package for OpenAI, Azure, XAI, and OpenAI-Compatible
+ * - Added direct OpenAI integration to bypass AI SDK v5.0.15 schema corruption bug
  */
 
 import { generateText, streamText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider-v2';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { createAzure } from '@ai-sdk/azure';
 import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
-import { patchAzureProvider, initializeAISDKPatch } from './ai-sdk-patch.js';
+import { 
+  createClientForProvider, 
+  streamOpenAIResponse, 
+  generateOpenAIResponse 
+} from './openai-direct.js';
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
@@ -89,9 +92,6 @@ const logger = createCategoryLogger('llm');
 import { getLLMProviderConfig } from './llm-config.js';
 
 // LLM Integration Utilities
-
-// Initialize AI SDK patch to fix schema corruption bug at runtime
-initializeAISDKPatch();
 
 function stripCustomFields(message: AgentMessage): ChatMessage {
   const { sender, chatId, ...llmMessage } = message;
@@ -263,9 +263,6 @@ async function executeStreamAgentResponse(
 
     logger.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
-    // Load LLM provider
-    const model = loadLLMProvider(agent);
-
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
 
@@ -277,12 +274,30 @@ async function executeStreamAgentResponse(
       logger.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
     }
 
+    // Use direct OpenAI integration for OpenAI providers
+    if (isOpenAIProvider(agent.provider)) {
+      const client = createOpenAIClientForAgent(agent);
+      return await streamOpenAIResponse(
+        client,
+        agent.model,
+        llmMessages,
+        agent,
+        mcpTools,
+        world,
+        publishSSE,
+        messageId
+      );
+    }
+
+    // Use AI SDK for other providers
+    const model = loadAISDKProvider(agent);
+
     // Stream response with timeout handling
     const timeoutMs = 30000; // 30 second timeout
 
     const streamPromise = streamText({
       model,
-      messages: llmMessages,
+      messages: llmMessages as any, // Cast to bypass type mismatch for non-OpenAI providers
       temperature: agent.temperature,
       maxOutputTokens: agent.maxTokens,
       ...(hasMCPTools && { tools: mcpTools })
@@ -363,7 +378,6 @@ async function executeGenerateAgentResponse(
   agent: Agent,
   messages: AgentMessage[]
 ): Promise<string> {
-  const model = loadLLMProvider(agent);
   const llmMessages = stripCustomFieldsFromMessages(messages);
   const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
   llmMessages.unshift({ role: 'system', content: systemPrompt });
@@ -379,9 +393,26 @@ async function executeGenerateAgentResponse(
   logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
 
   try {
+    // Use direct OpenAI integration for OpenAI providers
+    if (isOpenAIProvider(agent.provider)) {
+      const client = createOpenAIClientForAgent(agent);
+      const response = await generateOpenAIResponse(client, agent.model, llmMessages, agent, mcpTools);
+      
+      // Update agent activity and LLM call count
+      agent.lastActive = new Date();
+      agent.llmCallCount++;
+      agent.lastLLMCall = new Date();
+
+      logger.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+      return response;
+    }
+
+    // Use AI SDK for other providers
+    const model = loadAISDKProvider(agent);
+    
     const { text } = await generateText({
       model,
-      messages: llmMessages,
+      messages: llmMessages as any, // Cast to bypass type mismatch for non-OpenAI providers
       temperature: agent.temperature,
       maxOutputTokens: agent.maxTokens,
       ...(hasMCPTools && { tools: mcpTools })
@@ -422,17 +453,42 @@ export function clearLLMQueue(): number {
 }
 
 /**
- * LLM provider loading with configuration injection (browser-safe)
+ * Check if provider uses OpenAI package (direct integration)
  */
-function loadLLMProvider(agent: Agent): any {
-  switch (agent.provider) {
-    case LLMProvider.OPENAI: {
-      const config = getLLMProviderConfig(LLMProvider.OPENAI);
-      return createOpenAI({
-        apiKey: config.apiKey
-      })(agent.model);
-    }
+function isOpenAIProvider(provider: LLMProvider): boolean {
+  return [
+    LLMProvider.OPENAI,
+    LLMProvider.AZURE,
+    LLMProvider.OPENAI_COMPATIBLE,
+    LLMProvider.XAI
+  ].includes(provider);
+}
 
+/**
+ * Create OpenAI client for agent based on provider type
+ */
+function createOpenAIClientForAgent(agent: Agent) {
+  const config = getLLMProviderConfig(agent.provider);
+  
+  switch (agent.provider) {
+    case LLMProvider.OPENAI:
+      return createClientForProvider('openai', config);
+    case LLMProvider.AZURE:
+      return createClientForProvider('azure', config);
+    case LLMProvider.OPENAI_COMPATIBLE:
+      return createClientForProvider('openai-compatible', config);
+    case LLMProvider.XAI:
+      return createClientForProvider('xai', config);
+    default:
+      throw new Error(`Unsupported OpenAI provider: ${agent.provider}`);
+  }
+}
+
+/**
+ * AI SDK provider loading for non-OpenAI providers (browser-safe)
+ */
+function loadAISDKProvider(agent: Agent): any {
+  switch (agent.provider) {
     case LLMProvider.ANTHROPIC: {
       const config = getLLMProviderConfig(LLMProvider.ANTHROPIC);
       return createAnthropic({
@@ -440,42 +496,10 @@ function loadLLMProvider(agent: Agent): any {
       })(agent.model);
     }
 
-    case LLMProvider.AZURE: {
-      const config = getLLMProviderConfig(LLMProvider.AZURE);
-      const azureProvider = createAzure({
-        resourceName: config.resourceName,
-        apiKey: config.apiKey,
-        apiVersion: config.apiVersion || '2024-10-21-preview',
-        useDeploymentBasedUrls: true  // Use Azure OpenAI deployment-based URLs
-      });
-
-      // Apply schema corruption fix wrapper
-      const patchedAzureProvider = patchAzureProvider(azureProvider);
-
-      return patchedAzureProvider(config.deployment);
-    }
-
     case LLMProvider.GOOGLE: {
       const config = getLLMProviderConfig(LLMProvider.GOOGLE);
       return createGoogleGenerativeAI({
         apiKey: config.apiKey
-      })(agent.model);
-    }
-
-    case LLMProvider.XAI: {
-      const config = getLLMProviderConfig(LLMProvider.XAI);
-      return createOpenAI({
-        apiKey: config.apiKey,
-        baseURL: 'https://api.x.ai/v1'
-      })(agent.model);
-    }
-
-    case LLMProvider.OPENAI_COMPATIBLE: {
-      const config = getLLMProviderConfig(LLMProvider.OPENAI_COMPATIBLE);
-      return createOpenAICompatible({
-        name: 'custom-provider',
-        apiKey: config.apiKey,
-        baseURL: config.baseUrl
       })(agent.model);
     }
 
@@ -487,7 +511,7 @@ function loadLLMProvider(agent: Agent): any {
     }
 
     default:
-      logger.error(`Unsupported LLM provider: ${agent.provider}`);
-      throw new Error(`Unsupported LLM provider: ${agent.provider}`);
+      logger.error(`Unsupported AI SDK provider: ${agent.provider}`);
+      throw new Error(`Unsupported AI SDK provider: ${agent.provider}`);
   }
 }
