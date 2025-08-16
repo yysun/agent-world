@@ -1,13 +1,15 @@
 /**
- * Simple Logger Module - Zero-Dependency Cross-Platform Logging
+ * Logger Module - High-Performance Cross-Platform Logging with Pino
  *
  * Features:
- * - Pure console-based logging (Node.js/browser compatible)
+ * - High-performance structured logging powered by Pino
+ * - Pretty-printing in development with pino-pretty
+ * - JSON structured output in production for log aggregation
  * - Category-specific loggers with independent levels
  * - Auto-initialization with environment variables on module load
  * - Configuration-driven setup with level filtering
- * - Zero external dependencies
  * - Environment variable support for per-category log levels (e.g., LOG_EVENTS=debug)
+ * - Backward compatible API with previous console-based logger
  *
  * Categories: ws, cli, core, storage, llm, events, api, server
  * Usage: Auto-initialized on import → createCategoryLogger(category)
@@ -24,11 +26,14 @@
  *   - No manual initialization required for basic usage
  *   - initializeLogger() can still be used to override settings
  *
- * Implementation: Console methods with structured output formatting
+ * Implementation: Pino-based structured logging with performance optimizations
+ * - Development: Pretty-printed colored output via pino-pretty
+ * - Production: JSON structured logs for log aggregation systems
  */
 
 // Load environment variables from .env file
 import dotenv from 'dotenv';
+import pino from 'pino';
 dotenv.config();
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
@@ -41,6 +46,29 @@ function shouldLog(messageLevel: LogLevel, currentLevel: LogLevel): boolean {
   return LOG_LEVELS[messageLevel] >= LOG_LEVELS[currentLevel];
 }
 
+// Pino logger configuration
+const pinoOptions: pino.LoggerOptions = {
+  level: 'trace', // Set to trace to let our wrapper handle filtering
+  formatters: {
+    level: (label) => {
+      return { level: label.toUpperCase() };
+    },
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+  ...(typeof process !== 'undefined' && process.env.NODE_ENV !== 'production' ? {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        ignore: 'pid,hostname',
+        translateTime: 'SYS:standard',
+      },
+    },
+  } : {}),
+};
+
+const pinoLogger = pino(pinoOptions);
+
 // Logger interface
 export interface Logger {
   trace: (msg: any, ...args: any[]) => void;
@@ -51,34 +79,54 @@ export interface Logger {
   level: LogLevel;
 }
 
-// Simple logger implementation
+// Pino-based logger implementation
 function createSimpleLogger(category?: string, level: LogLevel = 'error'): Logger {
-  const prefix = category ? `[${category.toUpperCase()}]` : '[LOG]';
+  const childLogger = category ? pinoLogger.child({ category: category.toUpperCase() }) : pinoLogger;
 
   return {
     trace: (msg: any, ...args: any[]) => {
       if (shouldLog('trace', level)) {
-        console.log(`${prefix}[TRACE]`, msg, ...args);
+        if (args.length > 0) {
+          childLogger.trace({ args }, msg);
+        } else {
+          childLogger.trace(msg);
+        }
       }
     },
     debug: (msg: any, ...args: any[]) => {
       if (shouldLog('debug', level)) {
-        console.log(`${prefix}[DEBUG]`, msg, ...args);
+        if (args.length > 0) {
+          childLogger.debug({ args }, msg);
+        } else {
+          childLogger.debug(msg);
+        }
       }
     },
     info: (msg: any, ...args: any[]) => {
       if (shouldLog('info', level)) {
-        console.info(`${prefix}[INFO]`, msg, ...args);
+        if (args.length > 0) {
+          childLogger.info({ args }, msg);
+        } else {
+          childLogger.info(msg);
+        }
       }
     },
     warn: (msg: any, ...args: any[]) => {
       if (shouldLog('warn', level)) {
-        console.warn(`${prefix}[WARN]`, msg, ...args);
+        if (args.length > 0) {
+          childLogger.warn({ args }, msg);
+        } else {
+          childLogger.warn(msg);
+        }
       }
     },
     error: (msg: any, ...args: any[]) => {
       if (shouldLog('error', level)) {
-        console.error(`${prefix}[ERROR]`, msg, ...args);
+        if (args.length > 0) {
+          childLogger.error({ args }, msg);
+        } else {
+          childLogger.error(msg);
+        }
       }
     },
     level
