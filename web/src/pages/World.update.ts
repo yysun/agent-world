@@ -24,6 +24,7 @@ import {
   handleStreamChunk,
   handleStreamEnd,
   handleStreamError,
+  handleLogEvent,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
@@ -75,8 +76,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
     const agents: Agent[] = Array.from(world.agents.values());
     for (const agent of agents) {
-      agent.spriteIndex = agents.indexOf(agent) % 9; 
-      agent.messageCount = 0; 
+      agent.spriteIndex = agents.indexOf(agent) % 9;
+      agent.messageCount = 0;
       for (const memoryItem of agent.memory || []) {
         if (memoryItem.chatId === chatId) {
           agent.messageCount++;
@@ -232,6 +233,7 @@ export const worldUpdateHandlers = {
   handleStreamChunk,
   handleStreamEnd,
   handleStreamError,
+  handleLogEvent,
   handleMessageEvent,
   handleSystemEvent,
   handleError,

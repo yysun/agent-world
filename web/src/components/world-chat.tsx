@@ -11,7 +11,7 @@
 import { app, safeHTML } from 'apprun';
 import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
-import { SenderType,  getSenderType } from '../utils/sender-type.js';
+import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 
 const debug = false;
@@ -52,6 +52,20 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             messages.filter(message => message.sender !== 'system')
               .map((message, index) => {
+
+                // Handle log messages with special styling
+                if (message.logEvent) {
+                  console.log('Rendering log message:', message);
+                  return (
+                    <div key={message.id || 'log-' + index} className="message log-message">
+                      <div className="message-content">
+                        <span className={`log-dot ${message.logEvent.level}`}></span>
+                        <span className="log-category">{message.logEvent.category}:</span>
+                        <span className="log-content">{message.logEvent.message}</span>
+                      </div>
+                    </div>
+                  );
+                }
 
                 const senderType = getSenderType(message.sender);
                 const isCrossAgentMessage = hasSenderAgentMismatch(message);

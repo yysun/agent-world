@@ -38,14 +38,6 @@ dotenv.config();
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
-// Log streaming configuration interface
-export interface LogStreamingConfig {
-  enabled: boolean;
-  level: LogLevel;
-  categories: string[];
-  categoryOverrides: Map<string, LogLevel>;
-}
-
 const LOG_LEVELS: Record<LogLevel, number> = {
   trace: 10, debug: 20, info: 30, warn: 40, error: 50
 };
@@ -191,35 +183,6 @@ function autoInitializeLogger(): void {
 // Auto-initialize when module loads
 autoInitializeLogger();
 
-// Parse log streaming configuration from environment variables
-export function parseLogStreamingConfig(): LogStreamingConfig {
-  const enabled = process.env.LOG_STREAM_ENABLED === 'true';
-  const level = (LOG_LEVELS[process.env.LOG_STREAM_LEVEL as LogLevel])
-    ? process.env.LOG_STREAM_LEVEL as LogLevel
-    : 'info';
-  const categories = process.env.LOG_STREAM_CATEGORIES?.split(',').map(c => c.trim()) || [];
-
-  // Parse category-specific overrides: LOG_STREAM_API_CHAT=debug -> api.chat: debug
-  const categoryOverrides = new Map<string, LogLevel>();
-  Object.entries(process.env).forEach(([key, value]) => {
-    if (key.startsWith('LOG_STREAM_') &&
-      key !== 'LOG_STREAM_ENABLED' &&
-      key !== 'LOG_STREAM_LEVEL' &&
-      key !== 'LOG_STREAM_CATEGORIES') {
-      // Convert LOG_STREAM_API_CHAT -> api.chat
-      const category = key.replace('LOG_STREAM_', '').toLowerCase().replace(/_/g, '.');
-      if (value && LOG_LEVELS[value.toLowerCase() as LogLevel]) {
-        categoryOverrides.set(category, value.toLowerCase() as LogLevel);
-      }
-    }
-  });
-
-  return { enabled, level, categories, categoryOverrides };
-}
-
-// Global log streaming configuration
-let streamingConfig: LogStreamingConfig = parseLogStreamingConfig();
-
 // Log streaming callback management
 const logStreamCallbacks = new Set<(logEvent: import('./subscription.js').LogStreamEvent) => void>();
 
@@ -230,18 +193,8 @@ export function addLogStreamCallback(callback: (logEvent: import('./subscription
 
 // Check if a log event should be streamed based on configuration
 function shouldStreamLogEvent(level: LogLevel, category: string): boolean {
-  if (!streamingConfig.enabled || logStreamCallbacks.size === 0) {
-    return false;
-  }
-
-  // If specific categories are configured, check if this category is included
-  if (streamingConfig.categories.length > 0 && !streamingConfig.categories.includes(category)) {
-    return false;
-  }
-
-  // Check category-specific level override first, then global level
-  const effectiveLevel = streamingConfig.categoryOverrides.get(category) || streamingConfig.level;
-  return shouldLog(level, effectiveLevel);
+  // Always stream all logs when there are callbacks - no configuration checks
+  return logStreamCallbacks.size > 0;
 }
 
 // Emit log event to all registered callbacks

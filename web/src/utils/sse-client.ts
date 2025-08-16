@@ -192,6 +192,16 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
       streamingState.activeMessages.delete(messageId);
       break;
+
+    case 'log':
+      // Handle log events from the server
+      console.log('SSE Client: Received log event', eventData);
+      publishEvent('handleLogEvent', {
+        messageId: eventData.messageId,
+        logEvent: eventData.logEvent,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
   }
 };
 
@@ -375,5 +385,28 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
   return {
     ...state,
     messages
+  };
+};
+
+// Handle log events from server
+export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any): T => {
+  console.log('handleLogEvent called with:', data);
+  const { logEvent } = data;
+  if (!logEvent) return state;
+
+  const logMessage = {
+    id: `log-${logEvent.messageId}`,
+    sender: 'system',
+    text: logEvent.message,
+    createdAt: new Date(logEvent.timestamp),
+    type: 'log',
+    logEvent: logEvent
+  } as any;
+
+  console.log('Adding log message to state:', logMessage);
+
+  return {
+    ...state,
+    messages: [...(state.messages || []), logMessage]
   };
 };
