@@ -10,7 +10,17 @@
  * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
  * - Enhanced handleStreamingChat with intelligent timeout management:
  *   - Tracks active agents and pending events to prevent premature stream closure
- *   - Implements adaptive timeout logic (8s normal, 3s check intervals, 15s max without events)
+ *   - Implements adaptive timeout logi  } catch (error) {
+      } catch (error) {
+    loggerChat.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to delete chat', 'CHAT_DELETE_ERROR');
+    }
+  }Chat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to process chat message', 'CHAT_ERROR');
+    }
+  }normal, 3s check intervals, 15s max without events)
  *   - Better error handling that doesn't immediately close streams on non-critical errors
  *   - Agent activity tracking via SSE start/end events for accurate completion detection
  *   - Detailed logging for debugging streaming issues
@@ -55,7 +65,14 @@ import {
   MCPServerInstance
 } from '../core/mcp-server-registry.js';
 
-const logger = createCategoryLogger('api');
+// Function-specific loggers for granular debugging control
+const loggerWorld = createCategoryLogger('api.world');
+const loggerAgent = createCategoryLogger('api.agent');
+const loggerChat = createCategoryLogger('api.chat');
+const loggerStream = createCategoryLogger('api.stream');
+const loggerValidation = createCategoryLogger('api.validation');
+const loggerMcp = createCategoryLogger('api.mcp');
+const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
 type WorldContext = {
   id: string;
@@ -244,7 +261,7 @@ router.get('/worlds', async (req, res) => {
       })));
     }
   } catch (error) {
-    logger.error('Error listing worlds', { error: error instanceof Error ? error.message : error });
+    loggerWorld.error('Error listing worlds', { error: error instanceof Error ? error.message : error });
     sendError(res, 500, 'Failed to list worlds', 'WORLD_LIST_ERROR');
   }
 });
@@ -255,7 +272,7 @@ router.get('/worlds/:worldName', validateWorld, async (req: Request, res: Respon
     const world = (req as any).world;
     res.json(serializeWorld(world));
   } catch (error) {
-    logger.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerWorld.error('Error getting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Internal server error', 'INTERNAL_ERROR');
   }
 });
@@ -288,7 +305,7 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       sendError(res, 409, 'World with this name already exists', 'WORLD_EXISTS');
       return;
     }
-    logger.error('Error creating world', { error: errorMessage });
+    loggerWorld.error('Error creating world', { error: errorMessage });
     sendError(res, 500, 'Failed to create world', 'WORLD_CREATE_ERROR');
   }
 });
@@ -323,7 +340,7 @@ router.patch('/worlds/:worldName', validateWorld, async (req: Request, res: Resp
 
     res.json(serializeWorld(updatedWorld));
   } catch (error) {
-    logger.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerWorld.error('Error updating world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to update world', 'WORLD_UPDATE_ERROR');
   }
 });
@@ -344,7 +361,7 @@ router.delete('/worlds/:worldName', validateWorld, async (req: Request, res: Res
     }
     res.status(204).send();
   } catch (error) {
-    logger.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerWorld.error('Error deleting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to delete world', 'WORLD_DELETE_ERROR');
   }
 });
@@ -374,7 +391,7 @@ router.post('/worlds/:worldName/agents', validateWorld, async (req: Request, res
     }
     res.status(201).json(serializeAgent(createdAgent));
   } catch (error) {
-    logger.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerAgent.error('Error creating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to create agent', 'AGENT_CREATE_ERROR');
   }
 });
@@ -390,7 +407,7 @@ router.get('/worlds/:worldName/agents', validateWorld, async (req: Request, res:
     }
     res.json(Array.from(world.agents.values()).map(serializeAgent));
   } catch (error) {
-    logger.error('Error listing agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerAgent.error('Error listing agents', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to list agents', 'AGENT_LIST_ERROR');
   }
 });
@@ -407,7 +424,7 @@ router.get('/worlds/:worldName/agents/:agentName', validateWorld, async (req: Re
     }
     res.json(serializeAgent(agent));
   } catch (error) {
-    logger.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    loggerAgent.error('Error getting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to get agent', 'AGENT_GET_ERROR');
   }
 });
@@ -427,7 +444,7 @@ router.get('/worlds/:worldName/export', validateWorld, async (req: Request, res:
     res.setHeader('Content-Length', Buffer.byteLength(markdown, 'utf8'));
     res.send(markdown);
   } catch (error) {
-    logger.error('Error exporting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerExport.error('Error exporting world', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to export world', 'WORLD_EXPORT_ERROR');
   }
 });
@@ -481,7 +498,7 @@ router.patch('/worlds/:worldName/agents/:agentName', validateWorld, async (req: 
 
     res.json(serializeAgent(updatedAgent));
   } catch (error) {
-    logger.error('Error updating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    loggerAgent.error('Error updating agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to update agent', 'AGENT_UPDATE_ERROR');
   }
 });
@@ -505,7 +522,7 @@ router.delete('/worlds/:worldName/agents/:agentName', validateWorld, async (req:
     }
     res.status(204).send();
   } catch (error) {
-    logger.error('Error deleting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    loggerAgent.error('Error deleting agent', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to delete agent', 'AGENT_DELETE_ERROR');
   }
 });
@@ -529,7 +546,7 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
     }
     res.status(204).send();
   } catch (error) {
-    logger.error('Error clearing agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
+    loggerAgent.error('Error clearing agent memory', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, agentName: req.params.agentName });
     sendError(res, 500, 'Failed to clear agent memory', 'MEMORY_CLEAR_ERROR');
   }
 });
@@ -622,15 +639,15 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
         const timeSinceLastEvent = Date.now() - lastEventTime;
         const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0;
 
-        logger.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}`);
+        loggerStream.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}`);
 
         // Only end if we've had events and no recent activity
         if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
-          logger.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
+          loggerStream.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
           endResponse();
         } else if (!hasReceivedEvents && timeSinceLastEvent >= 15000) {
           // Fallback: if no events received at all after 15 seconds
-          logger.debug('Ending stream: no events received within 15 seconds');
+          loggerStream.debug('Ending stream: no events received within 15 seconds');
           endResponse();
         } else {
           // Continue waiting - reset timer for shorter interval
@@ -649,14 +666,14 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       timer = undefined;
     }
 
-    logger.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}`);
+    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}`);
 
     try {
       if (!res.destroyed) {
         res.end();
       }
     } catch (error) {
-      logger.debug('Error ending response (likely already closed):', error);
+      loggerStream.debug('Error ending response (likely already closed):', error);
     }
   };
 
@@ -670,7 +687,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       // Reset the timer on each event to allow for continued activity
       resetTimer(8000);
     } catch (error) {
-      logger.debug('Error writing SSE data:', error);
+      loggerStream.debug('Error writing SSE data:', error);
       endResponse();
     }
   };
@@ -685,11 +702,11 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
           if (eventData.type === 'start') {
             activeAgents.add(agentName);
             pendingEvents++;
-            logger.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+            loggerStream.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
           } else if (eventData.type === 'end' || eventData.type === 'error') {
             activeAgents.delete(agentName);
             pendingEvents = Math.max(0, pendingEvents - 1);
-            logger.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+            loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
           }
         }
       }
@@ -697,7 +714,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
     onError: (error: string) => {
-      logger.error(`World error: ${error}`);
+      loggerStream.error(`World error: ${error}`);
       sendSSE(JSON.stringify({ type: 'error', message: error }));
       // Don't immediately end on error - let natural timeout handle it
       // unless it's a critical error
@@ -709,7 +726,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
   const subscription = await subscribeWorld(worldName, client);
   if (!subscription) {
-    logger.error('Unexpected: subscription is null after world existence check');
+    loggerStream.error('Unexpected: subscription is null after world existence check');
     sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
     endResponse();
     return;
@@ -730,7 +747,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   }
 
   req.on('close', () => {
-    logger.debug('Chat client disconnected, cleaning up');
+    loggerStream.debug('Chat client disconnected, cleaning up');
     endResponse();
     subscription?.unsubscribe();
   });
@@ -753,7 +770,7 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
       await handleStreamingChat(req, res, worldCtx.id, message, sender);
     }
   } catch (error) {
-    logger.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerChat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to process chat request', 'CHAT_ERROR');
     }
@@ -772,7 +789,7 @@ router.delete('/worlds/:worldName/chats/:chatId', validateWorld, async (req: Req
     }
     res.json({ message: 'Chat deleted successfully' });
   } catch (error) {
-    logger.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    loggerChat.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to delete chat', 'DELETE_CHAT_ERROR');
     }
@@ -786,7 +803,7 @@ router.get('/worlds/:worldName/chats', validateWorld, async (req: Request, res: 
     const chats = await worldCtx.listChats();
     res.json(chats.map(serializeChat));
   } catch (error) {
-    logger.error('Error listing chats', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerChat.error('Error listing chats', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to list chats', 'CHAT_LIST_ERROR');
   }
 });
@@ -840,7 +857,7 @@ router.post('/worlds/:worldName/chats', validateWorld, async (req: Request, res:
       success: true
     });
   } catch (error) {
-    logger.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
+    loggerChat.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
   }
 });
@@ -871,7 +888,7 @@ router.post('/worlds/:worldName/setChat/:chatId', validateWorld, async (req: Req
       success: true
     });
   } catch (error) {
-    logger.error('Error loading chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
+    loggerChat.error('Error loading chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to load chat', 'LOAD_CHAT_ERROR');
     }
@@ -901,7 +918,7 @@ router.get('/mcp/servers', async (req: Request, res: Response): Promise<void> =>
       stats
     });
   } catch (error) {
-    logger.error('Error listing MCP servers', { error: error instanceof Error ? error.message : error });
+    loggerMcp.error('Error listing MCP servers', { error: error instanceof Error ? error.message : error });
     sendError(res, 500, 'Failed to list MCP servers', 'MCP_LIST_ERROR');
   }
 });
@@ -931,7 +948,7 @@ router.post('/mcp/servers/:serverId/restart', async (req: Request, res: Response
       sendError(res, 500, 'Failed to restart MCP server', 'MCP_RESTART_ERROR');
     }
   } catch (error) {
-    logger.error('Error restarting MCP server', {
+    loggerMcp.error('Error restarting MCP server', {
       error: error instanceof Error ? error.message : error,
       serverId: req.params.serverId
     });
@@ -950,7 +967,7 @@ router.get('/mcp/health', async (req: Request, res: Response): Promise<void> => 
       registry: stats
     });
   } catch (error) {
-    logger.error('Error getting MCP health', { error: error instanceof Error ? error.message : error });
+    loggerMcp.error('Error getting MCP health', { error: error instanceof Error ? error.message : error });
     res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
