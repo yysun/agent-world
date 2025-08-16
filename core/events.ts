@@ -33,7 +33,15 @@ import { generateAgentResponse } from './llm-manager.js';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
 import { createCategoryLogger } from './logger.js';
-const logger = createCategoryLogger('events');
+
+// Function-specific loggers for granular debugging control
+const loggerPublish = createCategoryLogger('core.events.publish');
+const loggerAgent = createCategoryLogger('core.events.agent');
+const loggerResponse = createCategoryLogger('core.events.response');
+const loggerMemory = createCategoryLogger('core.events.memory');
+const loggerAutoMention = createCategoryLogger('core.events.automention');
+const loggerTurnLimit = createCategoryLogger('core.events.turnlimit');
+const loggerChatTitle = createCategoryLogger('core.events.chattitle');
 
 // Global streaming control
 let globalStreamingEnabled = true;
@@ -100,7 +108,9 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
 // Check if response has any mention at paragraph beginning (prevents auto-mention loops)
 export function hasAnyMentionAtBeginning(response: string): boolean {
   if (!response?.trim()) return false;
-  return extractParagraphBeginningMentions(response).length > 0;
+  const result = extractParagraphBeginningMentions(response).length > 0;
+  loggerAutoMention.debug('Checking for mentions at beginning', { response: response.substring(0, 100), hasMentions: result });
+  return result;
 }
 
 // Remove all mentions from paragraph beginnings (including commas and spaces)
@@ -148,6 +158,8 @@ export function addAutoMention(response: string, sender: string): string {
     return response;
   }
 
+  loggerAutoMention.debug('Processing auto-mention', { sender, responseStart: response.substring(0, 100) });
+
   // Consolidated regex patterns for world tags (case insensitive)
   const worldTagPattern = /<world>(STOP|DONE|PASS|TO:\s*([^<]*))<\/world>/gi;
   let match;
@@ -155,6 +167,7 @@ export function addAutoMention(response: string, sender: string): string {
 
   while ((match = worldTagPattern.exec(response)) !== null) {
     const [fullMatch, action, toRecipients] = match;
+    loggerAutoMention.debug('Found world tag', { action, toRecipients, fullMatch });
 
     // Remove the world tag from response
     processedResponse = processedResponse.replace(fullMatch, '');
@@ -162,20 +175,25 @@ export function addAutoMention(response: string, sender: string): string {
     const upperAction = action.toUpperCase();
     if (upperAction === 'STOP' || upperAction === 'DONE' || upperAction === 'PASS') {
       // Stop tags prevent auto-mention and remove ALL mentions at beginning of paragraphs
+      loggerAutoMention.debug('Processing STOP/DONE/PASS tag - removing mentions');
       const cleanResponse = processedResponse.trim();
       return removeMentionsFromParagraphBeginnings(cleanResponse).trim();
     } else if (upperAction.startsWith('TO:')) {
       // TO tag with recipients - also remove existing mentions
       const recipients = toRecipients?.split(',').map(name => name.trim()).filter(name => name) || [];
+      loggerAutoMention.debug('Processing TO tag', { recipients });
 
       // Remove existing mentions from the response
       const cleanResponse = removeMentionsFromParagraphBeginnings(processedResponse.trim()).trim();
 
       if (recipients.length > 0) {
         const mentions = recipients.map(recipient => `@${recipient}`).join('\n');
-        return `${mentions}\n\n${cleanResponse}`;
+        const result = `${mentions}\n\n${cleanResponse}`;
+        loggerAutoMention.debug('Added TO tag mentions', { mentions, result: result.substring(0, 100) });
+        return result;
       } else {
         // Empty TO tag - fall back to normal auto-mention behavior
+        loggerAutoMention.debug('Empty TO tag - falling back to normal auto-mention');
         if (hasAnyMentionAtBeginning(cleanResponse)) {
           return cleanResponse;
         }
@@ -184,9 +202,13 @@ export function addAutoMention(response: string, sender: string): string {
     }
   }  // Existing logic: add auto-mention if no existing mentions at beginning
   if (hasAnyMentionAtBeginning(processedResponse)) {
+    loggerAutoMention.debug('Response already has mentions at beginning - no auto-mention needed');
     return processedResponse;
   }
-  return `@${sender} ${processedResponse.trim()}`;
+
+  const result = `@${sender} ${processedResponse.trim()}`;
+  loggerAutoMention.debug('Added auto-mention', { sender, result: result.substring(0, 100) });
+  return result;
 }
 
 // Get valid mentions excluding self-mentions (case-insensitive)
@@ -211,8 +233,17 @@ export function removeSelfMentions(response: string, agentId: string): string {
   const trimmedResponse = response.trim();
   if (!trimmedResponse) return response;
 
+  loggerAutoMention.debug('Removing self-mentions', { agentId, responseStart: response.substring(0, 100) });
+
   // Use the helper function to remove self-mentions
   const result = removeMentionsFromParagraphBeginnings(trimmedResponse, agentId);
+
+  loggerAutoMention.debug('Self-mention removal result', {
+    agentId,
+    before: trimmedResponse.substring(0, 100),
+    after: result.substring(0, 100),
+    changed: trimmedResponse !== result
+  });
 
   // Preserve original leading whitespace
   const originalMatch = response.match(/^(\s*)/);
@@ -222,10 +253,10 @@ export function removeSelfMentions(response: string, agentId: string): string {
  * Agent subscription with automatic message processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
-  logger.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
+  loggerAgent.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
 
   const handler = async (messageEvent: WorldMessageEvent) => {
-    logger.debug('Agent received message event', {
+    loggerAgent.debug('Agent received message event', {
       agentId: agent.id,
       sender: messageEvent.sender,
       content: messageEvent.content,
@@ -234,7 +265,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
 
     // Skip messages from this agent itself
     if (messageEvent.sender === agent.id) {
-      logger.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
+      loggerAgent.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
       return;
     }
 
@@ -242,12 +273,12 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     await resetLLMCallCountIfNeeded(world, agent, messageEvent);
 
     // Process message if agent should respond
-    logger.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
+    loggerResponse.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
     if (await shouldAgentRespond(world, agent, messageEvent)) {
-      logger.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
+      loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
       await processAgentMessage(world, agent, messageEvent);
     } else {
-      logger.debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
+      loggerAgent.debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
     }
   };
 
@@ -283,10 +314,10 @@ export async function saveIncomingMessageToMemory(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   } catch (error) {
-    logger.warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    loggerMemory.warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
   }
 }
 
@@ -309,7 +340,7 @@ export async function processAgentMessage(
     try {
       conversationHistory = agent.memory.slice(-10);
     } catch (error) {
-      logger.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Prepare messages for LLM with chat ID filtering
@@ -330,7 +361,7 @@ export async function processAgentMessage(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerAgent.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Generate LLM response (streaming or non-streaming)
@@ -344,7 +375,7 @@ export async function processAgentMessage(
     }
 
     if (!response) {
-      logger.error('LLM response is empty', { agentId: agent.id });
+      loggerAgent.error('LLM response is empty', { agentId: agent.id });
       publishEvent(world, 'system', { message: `[Error] LLM response is empty`, type: 'error' });
       return;
     }
@@ -369,7 +400,7 @@ export async function processAgentMessage(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Publish final response
@@ -378,7 +409,7 @@ export async function processAgentMessage(
     }
 
   } catch (error) {
-    logger.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    loggerAgent.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     publishEvent(world, 'system', { message: `[Error] ${(error as Error).message}`, type: 'error' });
   }
 }
@@ -394,14 +425,14 @@ export async function resetLLMCallCountIfNeeded(
   const senderType = determineSenderType(messageEvent.sender);
 
   if ((senderType === SenderType.HUMAN || senderType === SenderType.WORLD) && agent.llmCallCount > 0) {
-    logger.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
+    loggerTurnLimit.debug('Resetting LLM call count', { agentId: agent.id, oldCount: agent.llmCallCount });
     agent.llmCallCount = 0;
 
     try {
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      logger.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerTurnLimit.warn('Failed to auto-save agent after turn limit reset', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   }
 }
@@ -412,7 +443,7 @@ export async function resetLLMCallCountIfNeeded(
 export async function shouldAgentRespond(world: World, agent: Agent, messageEvent: WorldMessageEvent): Promise<boolean> {
   // Never respond to own messages
   if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
-    logger.debug('Skipping own message', { agentId: agent.id, sender: messageEvent.sender });
+    loggerResponse.debug('Skipping own message', { agentId: agent.id, sender: messageEvent.sender });
     return false;
   }
 
@@ -420,16 +451,16 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Never respond to turn limit messages (prevents endless loops)
   if (content.includes('Turn limit reached')) {
-    logger.debug('Skipping turn limit message', { agentId: agent.id });
+    loggerTurnLimit.debug('Skipping turn limit message', { agentId: agent.id });
     return false;
   }
 
   // Check turn limit based on LLM call count
   const worldTurnLimit = getWorldTurnLimit(world);
-  logger.debug('Checking turn limit', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
+  loggerTurnLimit.debug('Checking turn limit', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
 
   if (agent.llmCallCount >= worldTurnLimit) {
-    logger.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
+    loggerTurnLimit.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
     publishMessage(world, turnLimitMessage, agent.id);
     return false;
@@ -437,47 +468,47 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   // Determine sender type for message handling logic
   const senderType = determineSenderType(messageEvent.sender);
-  logger.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
+  loggerResponse.debug('Determined sender type', { agentId: agent.id, sender: messageEvent.sender, senderType });
 
   // Never respond to system messages
   if (messageEvent.sender === 'system') {
-    logger.debug('Skipping system message', { agentId: agent.id });
+    loggerResponse.debug('Skipping system message', { agentId: agent.id });
     return false;
   }
 
   // Always respond to world messages
   if (messageEvent.sender === 'world') {
-    logger.debug('Responding to world message', { agentId: agent.id });
+    loggerResponse.debug('Responding to world message', { agentId: agent.id });
     return true;
   }
 
   const anyMentions = extractMentions(messageEvent.content);
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
-  logger.debug('Extracted paragraph beginning mentions', { mentions, anyMentions });
+  loggerResponse.debug('Extracted paragraph beginning mentions', { mentions, anyMentions });
 
   // For HUMAN messages
   if (senderType === SenderType.HUMAN) {
-    logger.debug('Processing HUMAN message logic', { agentId: agent.id });
+    loggerResponse.debug('Processing HUMAN message logic', { agentId: agent.id });
     if (mentions.length === 0) {
       // If there are ANY mentions anywhere but none at paragraph beginnings, don't respond
       if (anyMentions.length > 0) {
-        logger.debug('Has mentions but not at paragraph beginning - not responding', { agentId: agent.id, anyMentions });
+        loggerResponse.debug('Has mentions but not at paragraph beginning - not responding', { agentId: agent.id, anyMentions });
         return false;
       } else {
-        logger.debug('No agent mentions anywhere - responding as public message', { agentId: agent.id });
+        loggerResponse.debug('No agent mentions anywhere - responding as public message', { agentId: agent.id });
         return true;
       }
     } else {
       const shouldRespond = mentions.includes(agent.id.toLowerCase());
-      logger.debug('Agent mentioned at paragraph beginning - responding to message', { agentId: agent.id, mentions, shouldRespond });
+      loggerResponse.debug('Agent mentioned at paragraph beginning - responding to message', { agentId: agent.id, mentions, shouldRespond });
       return shouldRespond;
     }
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  logger.debug('Processing AGENT message logic', { agentId: agent.id });
+  loggerResponse.debug('Processing AGENT message logic', { agentId: agent.id });
   const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  logger.debug('AGENT message - should respond: ' + shouldRespond);
+  loggerResponse.debug('AGENT message - should respond: ' + shouldRespond);
   return shouldRespond;
 }
 
@@ -509,6 +540,7 @@ export function subscribeWorldToMessages(world: World): () => void {
  * Generate chat title from message content with LLM support and fallback
  */
 async function generateChatTitleFromMessages(world: World, content: string): Promise<string> {
+  loggerChatTitle.debug('Generating chat title', { worldId: world.id, contentStart: content.substring(0, 50) });
 
   let title = '';
 
@@ -520,6 +552,12 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
     const storage = await getStorageWrappers();
     const messages = await storage.getMemory(world.id);
     messages.push({ role: 'user', content });
+
+    loggerChatTitle.debug('Calling LLM for title generation', {
+      messageCount: messages.length,
+      provider: world.chatLLMProvider || firstAgent?.provider,
+      model: world.chatLLMModel || firstAgent?.model
+    });
 
     const tempAgent: any = {
       provider: world.chatLLMProvider || firstAgent.provider,
@@ -538,9 +576,10 @@ ${messages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
     };
 
     title = await generateAgentResponse(world, tempAgent, [userPrompt]);
+    loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 
   } catch (error) {
-    logger.warn('Failed to generate LLM title, using fallback', {
+    loggerChatTitle.warn('Failed to generate LLM title, using fallback', {
       error: error instanceof Error ? error.message : error
     });
   }
@@ -555,6 +594,8 @@ ${messages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
   if (title.length > maxLength) {
     title = title.substring(0, maxLength - 3) + '...';
   }
+
+  loggerChatTitle.debug('Final processed title', { title, originalLength: title.length });
 
   return title;
 }
