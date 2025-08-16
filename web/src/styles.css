@@ -2204,3 +2204,73 @@ legend {
   margin-left: 0.25rem;
   font-size: 0.8em;
 }
+
+/* Log message styling - aligned right with colored dots */
+.log-message {
+  align-self: flex-end !important;
+  background: none !important;
+  border: none !important;
+  padding: 0.3rem 0.5rem !important;
+  margin: 0.2rem 0 !important;
+  max-width: 80% !important;
+  font-size: 0.75rem !important;
+  color: var(--text-tertiary) !important;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
+}
+
+.log-message .message-sender {
+  display: none !important;
+}
+
+.log-message .message-timestamp {
+  display: none !important;
+}
+
+.log-message .message-content {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem !important;
+  line-height: 1.2 !important;
+}
+
+.log-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.log-dot.trace {
+  background-color: #9ca3af;
+  /* Gray for trace */
+}
+
+.log-dot.debug {
+  background-color: #06b6d4;
+  /* Cyan for debug */
+}
+
+.log-dot.info {
+  background-color: #10b981;
+  /* Green for info */
+}
+
+.log-dot.warn {
+  background-color: #f59e0b;
+  /* Amber for warn */
+}
+
+.log-dot.error {
+  background-color: #ef4444;
+  /* Red for error */
+}
+
+.log-category {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.log-content {
+  color: var(--text-tertiary);
+}

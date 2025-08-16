@@ -308,7 +308,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log';
   content?: string;
   error?: string;
   messageId: string;
@@ -316,6 +316,13 @@ export interface WorldSSEEvent {
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
+  };
+  logEvent?: {
+    level: string;
+    category: string;
+    message: string;
+    timestamp: string;
+    data?: any;
   };
 }
 

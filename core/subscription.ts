@@ -28,7 +28,7 @@
 
 import { World } from './types.js';
 import { getWorld } from './managers.js';
-import { createCategoryLogger } from './logger.js';
+import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
 import { subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
 
 function toKebabCase(name: string): string {
@@ -38,11 +38,22 @@ function toKebabCase(name: string): string {
 // Create subscription category logger (part of core functionality)
 const logger = createCategoryLogger('core');
 
+// Log streaming event data structure
+export interface LogStreamEvent {
+  level: LogLevel;
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: any;
+  messageId: string;
+}
+
 // Client connection interface for transport abstraction
 export interface ClientConnection {
   isOpen: boolean;
   onWorldEvent?: (eventType: string, eventData: any) => void;
   onError?: (error: string) => void;
+  onLog?: (logEvent: LogStreamEvent) => void;
 }
 
 // World subscription management
@@ -212,6 +223,14 @@ export function setupWorldEventListeners(world: World, client: ClientConnection)
   };
   world.eventEmitter.on('sse', sseListener);
   listeners.set('sse', sseListener);
+
+  // Log streaming - set up if client has onLog callback
+  if (client.onLog) {
+    const logUnsubscribe = addLogStreamCallback((logEvent) => {
+      client.onLog!(logEvent);
+    });
+    listeners.set('logStream', logUnsubscribe);
+  }
 
   return listeners;
 }

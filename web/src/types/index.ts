@@ -29,6 +29,16 @@ export type { EventType, SenderType, AgentMessage, LLMProvider };
 // UI DATA INTERFACES
 // ========================================
 
+// Log Event Interface - for streaming log messages
+export interface LogEvent {
+  level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: any;
+  messageId: string;
+}
+
 // Web UI Message Interface - extends core with streaming states
 export interface Message {
   id: string;
@@ -44,6 +54,7 @@ export interface Message {
   messageId?: string;
   userEntered?: boolean;
   fromAgentId?: string;
+  logEvent?: LogEvent; // For log message types
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions

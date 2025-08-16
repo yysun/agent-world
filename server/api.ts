@@ -713,6 +713,24 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
       sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
+    onLog: (logEvent) => {
+      // Stream log events as SSE data with 'sse' type and 'log' subtype
+      sendSSE(JSON.stringify({
+        type: 'sse',
+        data: {
+          type: 'log',
+          agentName: 'system',
+          messageId: logEvent.messageId,
+          logEvent: {
+            level: logEvent.level,
+            category: logEvent.category,
+            message: logEvent.message,
+            timestamp: logEvent.timestamp,
+            data: logEvent.data
+          }
+        }
+      }));
+    },
     onError: (error: string) => {
       loggerStream.error(`World error: ${error}`);
       sendSSE(JSON.stringify({ type: 'error', message: error }));
