@@ -81,8 +81,5 @@ export { type LoggerConfig, type LogLevel, logger, createCategoryLogger } from '
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';
 
-// === WORLD CLASS WRAPPER ===
-export { WorldClass } from './world-class.js';
-
 export { getDefaultRootPath } from './storage/storage-factory.js';
 export const VERSION = '0.5.0';
