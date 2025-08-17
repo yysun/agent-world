@@ -77,10 +77,10 @@ function configureLLMProvidersFromEnv(): void {
     serverLogger.debug('Configured OpenAI-Compatible provider from environment');
   }
 
-  // Ollama
-  const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api';
+  // Ollama (OpenAI-compatible endpoint)
+  const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
   configureLLMProvider(LLMProvider.OLLAMA, { baseUrl: ollamaUrl });
-  serverLogger.debug('Configured Ollama provider', { baseUrl: ollamaUrl });
+  serverLogger.debug('Configured Ollama provider (OpenAI-compatible)', { baseUrl: ollamaUrl });
 }
 
 // Express app setup

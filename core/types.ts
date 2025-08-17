@@ -308,7 +308,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'log';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
   content?: string;
   error?: string;
   messageId: string;
@@ -323,6 +323,24 @@ export interface WorldSSEEvent {
     message: string;
     timestamp: string;
     data?: any;
+  };
+  // Enhanced tool execution metadata for Phase 2.2
+  toolExecution?: {
+    toolName: string;
+    toolCallId: string;
+    sequenceId?: string;
+    phase: 'starting' | 'executing' | 'completed' | 'failed';
+    duration?: number;
+    input?: any;
+    result?: any;
+    resultType?: 'string' | 'object' | 'array' | 'null';
+    resultSize?: number;
+    error?: string;
+    metadata?: {
+      serverName?: string;
+      transport?: string;
+      isStreaming?: boolean;
+    };
   };
 }
 

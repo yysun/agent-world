@@ -15,6 +15,7 @@
  * - Azure OpenAI: Direct integration with Azure OpenAI endpoints
  * - OpenAI-Compatible: Direct integration with custom OpenAI-compatible APIs
  * - XAI: Direct integration using OpenAI package with custom base URL
+ * - Ollama: Direct integration using OpenAI package with Ollama's OpenAI-compatible endpoint
  *
  * Implementation Details:
  * - Uses official OpenAI package for reliable API access
@@ -40,7 +41,7 @@
 
 import OpenAI from 'openai';
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
-import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig } from './llm-config.js';
+import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
@@ -94,8 +95,14 @@ export function createXAIClient(config: XAIConfig): OpenAI {
 }
 
 /**
- * Convert AI SDK message format to OpenAI format
+ * OpenAI client factory for Ollama (OpenAI-compatible endpoint)
  */
+export function createOllamaClient(config: OllamaConfig): OpenAI {
+  return new OpenAI({
+    apiKey: 'ollama', // Required but unused for local Ollama
+    baseURL: config.baseUrl,
+  });
+}
 function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   return messages.map(message => {
     switch (message.role) {
@@ -308,7 +315,7 @@ export async function streamOpenAIResponse(
       // If we have tool results, make another request to get the final response
       if (toolResults.length > 0) {
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        
+
         // Use streaming for the follow-up response to ensure it gets displayed
         const followUpResponse = await streamOpenAIResponse(
           client,
@@ -489,6 +496,8 @@ export function createClientForProvider(providerType: string, config: any): Open
       return createOpenAICompatibleClient(config);
     case 'xai':
       return createXAIClient(config);
+    case 'ollama':
+      return createOllamaClient(config);
     default:
       throw new Error(`Unsupported OpenAI provider type: ${providerType}`);
   }

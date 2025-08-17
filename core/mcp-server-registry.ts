@@ -63,7 +63,196 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 
+
+/**
+ * OLLAMA BUG FIX: Translate "$" parameter to proper parameter names
+ * 
+ * Problem: Ollama (Llama 3.2) has a bug where it sends {"$": "value"} 
+ * instead of proper parameter names like {"query": "value"}
+ * 
+ * Solution: Detect single "$" argument and map it to the first required parameter
+ * 
+ * Reference: https://github.com/ollama/ollama/issues/7860
+ */
+function translateOllamaArguments(args: any, toolSchema: any): any {
+  // If args is not an object or doesn't have the "$" bug, return as-is
+  if (!args || typeof args !== 'object' || !args.hasOwnProperty('$')) {
+    return args;
+  }
+
+  // If there are multiple parameters, don't translate (ambiguous)
+  const argKeys = Object.keys(args);
+  if (argKeys.length !== 1 || argKeys[0] !== '$') {
+    return args;
+  }
+
+  // Get the schema's required parameters
+  const required = toolSchema?.required;
+  if (!Array.isArray(required) || required.length === 0) {
+    // No required parameters defined, try first property
+    const properties = toolSchema?.properties;
+    if (properties && typeof properties === 'object') {
+      const firstProp = Object.keys(properties)[0];
+      if (firstProp) {
+        return { [firstProp]: args['$'] };
+      }
+    }
+    return args;
+  }
+
+  // Map "$" to the first required parameter
+  const firstRequired = required[0];
+  return { [firstRequired]: args['$'] };
+}
+
 const logger = createCategoryLogger('llm.mcp');
+
+// === CUSTOM HTTP TRANSPORT FOR NON-STREAMING MCP ===
+
+/**
+ * Simple HTTP-based MCP client transport using regular POST requests
+ * This replaces StreamableHTTPClientTransport for reliable, non-streaming tool calls
+ */
+class SimpleHTTPMCPClient {
+  private baseUrl: string;
+  private headers: Record<string, string>;
+
+  constructor(url: string, headers: Record<string, string> = {}) {
+    this.baseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+    this.headers = {
+      'Content-Type': 'application/json',
+      ...headers
+    };
+  }
+
+  async callTool(request: { name: string; arguments?: any }): Promise<any> {
+    const startTime = performance.now();
+    const requestId = `http-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    logger.debug(`HTTP MCP request starting`, {
+      requestId,
+      url: this.baseUrl,
+      toolName: request.name,
+      argsPresent: !!request.arguments,
+      argsKeys: request.arguments ? Object.keys(request.arguments) : []
+    });
+
+    try {
+      // Create JSON-RPC 2.0 request
+      const jsonRpcRequest = {
+        jsonrpc: '2.0',
+        id: requestId,
+        method: 'tools/call',
+        params: {
+          name: request.name,
+          arguments: request.arguments || {}
+        }
+      };
+
+      logger.debug(`HTTP MCP request payload`, {
+        requestId,
+        payload: JSON.stringify(jsonRpcRequest, null, 2)
+      });
+
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(jsonRpcRequest)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const duration = performance.now() - startTime;
+
+      logger.debug(`HTTP MCP response received`, {
+        requestId,
+        duration: Math.round(duration * 100) / 100,
+        responsePayload: JSON.stringify(result, null, 2),
+        hasError: !!result.error,
+        hasResult: !!result.result
+      });
+
+      if (result.error) {
+        throw new Error(`MCP Server Error: ${result.error.message || JSON.stringify(result.error)}`);
+      }
+
+      return result.result;
+    } catch (error) {
+      const duration = performance.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      logger.error(`HTTP MCP request failed: ${errorMessage}`, {
+        requestId,
+        duration: Math.round(duration * 100) / 100,
+        url: this.baseUrl,
+        toolName: request.name,
+        error: errorMessage
+      });
+
+      throw error;
+    }
+  }
+
+  async listTools(): Promise<{ tools: Tool[] }> {
+    const startTime = performance.now();
+    const requestId = `list-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    logger.debug(`HTTP MCP list tools starting`, {
+      requestId,
+      url: this.baseUrl
+    });
+
+    try {
+      const jsonRpcRequest = {
+        jsonrpc: '2.0',
+        id: requestId,
+        method: 'tools/list',
+        params: {}
+      };
+
+      const response = await fetch(this.baseUrl, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(jsonRpcRequest)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const duration = performance.now() - startTime;
+
+      logger.debug(`HTTP MCP list tools response`, {
+        requestId,
+        duration: Math.round(duration * 100) / 100,
+        toolCount: result.result?.tools?.length || 0,
+        toolNames: result.result?.tools?.map((t: Tool) => t.name) || []
+      });
+
+      if (result.error) {
+        throw new Error(`MCP Server Error: ${result.error.message || JSON.stringify(result.error)}`);
+      }
+
+      return result.result || { tools: [] };
+    } catch (error) {
+      const duration = performance.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      logger.error(`HTTP MCP list tools failed: ${errorMessage}`, {
+        requestId,
+        duration: Math.round(duration * 100) / 100,
+        url: this.baseUrl,
+        error: errorMessage
+      });
+
+      throw error;
+    }
+  }
+}
 
 // === TYPE DEFINITIONS ===
 
@@ -76,7 +265,7 @@ export type MCPConfig = {
   } | {
     url: string;
     headers?: Record<string, string>;
-    transport: 'sse' | 'streamable-http';
+    transport: 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
   } | {
     type: 'http' | 'sse' | 'streamable-http'; // Legacy 'type' field support
     url: string;
@@ -86,7 +275,7 @@ export type MCPConfig = {
 
 export type MCPServerConfig = {
   name: string;
-  transport: 'stdio' | 'sse' | 'streamable-http';
+  transport: 'stdio' | 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -97,7 +286,8 @@ export type MCPServerConfig = {
 export interface MCPServerInstance {
   id: string; // Hash of configuration for sharing
   config: MCPServerConfig;
-  client: Client | null; // Null during startup/shutdown
+  client: Client | null; // Null during startup/shutdown (for stdio/sse/streamable-http)
+  httpClient: SimpleHTTPMCPClient | null; // For simple HTTP transport
   status: 'starting' | 'running' | 'stopping' | 'error';
   referenceCount: number;
   startedAt: Date;
@@ -220,7 +410,7 @@ export function parseServersFromConfig(config: MCPConfig): MCPServerConfig[] {
 /**
  * Connect to an MCP server using the specified configuration
  */
-export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client> {
+export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client | SimpleHTTPMCPClient> {
   // Debug log: Connection details being used
   logger.debug(`MCP server connection attempt`, {
     serverName: serverConfig.name,
@@ -235,6 +425,37 @@ export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<C
     }
   });
 
+  // Handle simple HTTP transport (non-streaming)
+  if (serverConfig.transport === 'http') {
+    logger.debug(`Using simple HTTP MCP client for non-streaming tool calls`, {
+      serverName: serverConfig.name,
+      url: serverConfig.url
+    });
+
+    const httpClient = new SimpleHTTPMCPClient(
+      serverConfig.url!,
+      serverConfig.headers || {}
+    );
+
+    // Test the connection by listing tools
+    try {
+      await httpClient.listTools();
+      logger.debug(`HTTP MCP client connection verified`, {
+        serverName: serverConfig.name,
+        url: serverConfig.url
+      });
+      return httpClient;
+    } catch (error) {
+      logger.error(`HTTP MCP client connection failed`, {
+        serverName: serverConfig.name,
+        url: serverConfig.url,
+        error: error instanceof Error ? error.message : error
+      });
+      throw error;
+    }
+  }
+
+  // Handle traditional MCP SDK transports (stdio, sse, streamable-http)
   const transport = serverConfig.transport === 'stdio' || !serverConfig.transport
     ? new StdioClientTransport({
       command: serverConfig.command!,
@@ -310,18 +531,29 @@ function bulletproofSchema(schema: any): any {
 /**
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
-export async function mcpToolsToAiTools(client: Client, serverName: string) {
+export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, serverName: string) {
   logger.debug(`MCP tools list request starting`, {
     serverName,
-    operation: 'listTools'
+    operation: 'listTools',
+    clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
   });
 
-  const listToolsPromise = client.listTools();
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
-  });
+  let toolsResponse: { tools: Tool[] };
 
-  const { tools } = await Promise.race([listToolsPromise, timeoutPromise]);
+  if (client instanceof SimpleHTTPMCPClient) {
+    // Use simple HTTP client
+    toolsResponse = await client.listTools();
+  } else {
+    // Use MCP SDK client with timeout
+    const listToolsPromise = client.listTools();
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
+    });
+
+    toolsResponse = await Promise.race([listToolsPromise, timeoutPromise]);
+  }
+
+  const { tools } = toolsResponse;
 
   // Debug log: Tools data received from MCP server
   logger.debug(`MCP server tools list response`, {
@@ -331,6 +563,7 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
     toolNames: tools.map((t: Tool) => t.name),
     toolsPayload: JSON.stringify(tools, null, 2)
   });
+
   const aiTools: Record<string, any> = {};
 
   for (const t of tools as Tool[]) {
@@ -357,11 +590,14 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
           sequenceId,
           parentToolCall,
           argsPresent: !!args,
-          argsKeys: args ? Object.keys(args) : []
+          argsKeys: args ? Object.keys(args) : [],
+          clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
         });
 
         // Debug log: Request data being sent to MCP server
-        const requestPayload = { name: t.name, arguments: args ?? {} };
+        // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
+        const translatedArgs = translateOllamaArguments(args ?? {}, t.inputSchema);
+        const requestPayload = { name: t.name, arguments: translatedArgs };
         logger.debug(`MCP server request payload`, {
           executionId,
           serverName,
@@ -370,7 +606,15 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
         });
 
         try {
-          const res = await client.callTool(requestPayload);
+          let res: any;
+
+          if (client instanceof SimpleHTTPMCPClient) {
+            // Use simple HTTP client
+            res = await client.callTool(requestPayload);
+          } else {
+            // Use MCP SDK client
+            res = await client.callTool(requestPayload);
+          }
 
           // Debug log: Raw response data received from MCP server
           logger.debug(`MCP server response payload`, {
@@ -382,6 +626,7 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
             hasContent: !!(res?.content),
             contentLength: Array.isArray(res?.content) ? res.content.length : 0
           });
+
           const duration = performance.now() - startTime;
 
           // Handle result content - prefer text > json > fallback
@@ -422,7 +667,8 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
             resultSize,
             resultPreview: typeof processedResult === 'string'
               ? processedResult.slice(0, 200) + (resultSize > 200 ? '...' : '')
-              : JSON.stringify(processedResult).slice(0, 200) + '...'
+              : JSON.stringify(processedResult).slice(0, 200) + '...',
+            clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
           });
 
           return processedResult;
@@ -440,7 +686,8 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
             status: 'error',
             duration: Math.round(duration * 100) / 100,
             error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
+            errorStack: error instanceof Error ? error.stack : undefined,
+            clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
           });
 
           throw error;
@@ -533,6 +780,7 @@ export async function registerMCPServer(
     id: serverId,
     config,
     client: null,
+    httpClient: null, // Initialize new field
     status: 'starting',
     referenceCount: 1,
     startedAt: new Date(),
@@ -676,13 +924,23 @@ export async function shutdownAllMCPServers(): Promise<void> {
 async function startServerAsync(serverInstance: MCPServerInstance): Promise<void> {
   try {
     const client = await connectMCPServer(serverInstance.config);
-    serverInstance.client = client;
+
+    // Assign client based on type
+    if (client instanceof SimpleHTTPMCPClient) {
+      serverInstance.httpClient = client;
+      serverInstance.client = null;
+    } else {
+      serverInstance.client = client;
+      serverInstance.httpClient = null;
+    }
+
     serverInstance.status = 'running';
     serverInstance.lastHealthCheck = new Date();
 
     logger.info(`MCP server started successfully: ${serverInstance.config.name}`, {
       serverId: serverInstance.id.slice(0, 8),
-      referenceCount: serverInstance.referenceCount
+      referenceCount: serverInstance.referenceCount,
+      transport: serverInstance.config.transport
     });
   } catch (error) {
     serverInstance.status = 'error';
@@ -959,7 +1217,9 @@ export async function executeMCPTool(
   });
 
   // Debug log: Request data being sent to MCP server
-  const requestPayload = { name: toolName, arguments: args || {} };
+  // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
+    const translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
+    const requestPayload = { name: toolName, arguments: translatedArgs };
   logger.debug(`MCP server direct request payload`, {
     executionId,
     serverId: serverId.slice(0, 8),

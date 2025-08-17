@@ -164,6 +164,43 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       }
       break;
 
+    // PHASE 2.2 ENHANCEMENT: Tool-specific event handlers
+    case 'tool-start':
+      publishEvent('handleToolStart', {
+        messageId,
+        sender: agentName,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
+
+    case 'tool-progress':
+      publishEvent('handleToolProgress', {
+        messageId,
+        sender: agentName,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
+
+    case 'tool-result':
+      publishEvent('handleToolResult', {
+        messageId,
+        sender: agentName,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
+
+    case 'tool-error':
+      publishEvent('handleToolError', {
+        messageId,
+        sender: agentName,
+        toolExecution: eventData.toolExecution,
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
+      break;
+
     case 'end':
       const endStream = streamingState.activeMessages.get(messageId);
       if (endStream) {
@@ -420,5 +457,129 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
     ...state,
     messages: [...(state.messages || []), logMessage],
     needScroll: true  // Auto-scroll to new log messages
+  };
+};
+
+// PHASE 2.2 ENHANCEMENT: Tool execution event handlers
+export const handleToolStart = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, sender, toolExecution } = data;
+
+  // Add tool start indicator message
+  const toolStartMessage = {
+    sender: sender,
+    text: `🔧 Starting ${toolExecution.toolName}...`,
+    isToolEvent: true,
+    toolEventType: 'start',
+    toolExecution: toolExecution,
+    messageId: `${messageId}-tool-${toolExecution.toolCallId}`,
+    createdAt: new Date(),
+    type: 'tool-start'
+  } as any;
+
+  return {
+    ...state,
+    messages: [...(state.messages || []), toolStartMessage],
+    needScroll: true
+  };
+};
+
+export const handleToolProgress = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, sender, toolExecution } = data;
+
+  // Update existing tool start message to show progress
+  const messages = [...(state.messages || [])];
+  const toolMessageIndex = messages.findIndex(msg =>
+    msg.messageId === `${messageId}-tool-${toolExecution.toolCallId}` && msg.toolEventType === 'start'
+  );
+
+  if (toolMessageIndex !== -1) {
+    messages[toolMessageIndex] = {
+      ...messages[toolMessageIndex],
+      text: `⚙️ Executing ${toolExecution.toolName}...`,
+      toolEventType: 'progress',
+      toolExecution: toolExecution
+    };
+  }
+
+  return {
+    ...state,
+    messages,
+    needScroll: true
+  };
+};
+
+export const handleToolResult = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, sender, toolExecution } = data;
+
+  // Update existing tool message to show completion
+  const messages = [...(state.messages || [])];
+  const toolMessageIndex = messages.findIndex(msg =>
+    msg.messageId === `${messageId}-tool-${toolExecution.toolCallId}` && msg.isToolEvent
+  );
+
+  if (toolMessageIndex !== -1) {
+    const resultPreview = typeof toolExecution.result === 'string'
+      ? toolExecution.result.slice(0, 100)
+      : JSON.stringify(toolExecution.result).slice(0, 100);
+
+    messages[toolMessageIndex] = {
+      ...messages[toolMessageIndex],
+      text: `✅ ${toolExecution.toolName} completed (${toolExecution.duration}ms)`,
+      toolEventType: 'result',
+      toolExecution: toolExecution,
+      expandable: true,
+      resultPreview: resultPreview.length < 100 ? resultPreview : resultPreview + '...'
+    };
+  }
+
+  return {
+    ...state,
+    messages,
+    needScroll: true
+  };
+};
+
+export const handleToolError = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, sender, toolExecution } = data;
+
+  // Update existing tool message to show error
+  const messages = [...(state.messages || [])];
+  const toolMessageIndex = messages.findIndex(msg =>
+    msg.messageId === `${messageId}-tool-${toolExecution.toolCallId}` && msg.isToolEvent
+  );
+
+  if (toolMessageIndex !== -1) {
+    messages[toolMessageIndex] = {
+      ...messages[toolMessageIndex],
+      text: `❌ ${toolExecution.toolName} failed: ${toolExecution.error}`,
+      toolEventType: 'error',
+      toolExecution: toolExecution,
+      hasError: true
+    };
+  } else {
+    // Create new error message if tool start message not found
+    const toolErrorMessage = {
+      sender: sender,
+      text: `❌ Tool ${toolExecution.toolName} failed: ${toolExecution.error}`,
+      isToolEvent: true,
+      toolEventType: 'error',
+      toolExecution: toolExecution,
+      messageId: `${messageId}-tool-error-${toolExecution.toolCallId}`,
+      createdAt: new Date(),
+      type: 'tool-error',
+      hasError: true
+    } as any;
+
+    return {
+      ...state,
+      messages: [...messages, toolErrorMessage],
+      needScroll: true
+    };
+  }
+
+  return {
+    ...state,
+    messages,
+    needScroll: true
   };
 };

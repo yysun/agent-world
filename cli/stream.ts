@@ -67,6 +67,33 @@ export function handleStreamingEvents(
     return;
   }
 
+  // PHASE 2.2 ENHANCEMENT: Handle tool execution events
+  if (eventData.type === 'tool-start' && eventData.toolExecution) {
+    const toolName = eventData.toolExecution.toolName;
+    console.log(`\n${gray('🔧')} ${boldGreen('Tool:')} ${toolName} ${gray('starting...')}`);
+    return;
+  }
+
+  if (eventData.type === 'tool-progress' && eventData.toolExecution) {
+    const toolName = eventData.toolExecution.toolName;
+    console.log(`${gray('⚙️  Tool:')} ${toolName} ${gray('executing...')}`);
+    return;
+  }
+
+  if (eventData.type === 'tool-result' && eventData.toolExecution) {
+    const { toolName, duration, resultSize } = eventData.toolExecution;
+    const durationText = duration ? `${Math.round(duration)}ms` : 'completed';
+    const sizeText = resultSize ? `, ${resultSize} chars` : '';
+    console.log(`${gray('✅ Tool:')} ${toolName} ${gray(`completed (${durationText}${sizeText})`)}`);
+    return;
+  }
+
+  if (eventData.type === 'tool-error' && eventData.toolExecution) {
+    const { toolName, error: toolError } = eventData.toolExecution;
+    console.log(`${error('❌ Tool:')} ${toolName} ${error(`failed: ${toolError}`)}`);
+    return;
+  }
+
   // Handle end events
   if (eventData.type === 'end' && streaming.isActive && streaming.messageId === eventData.messageId) {
     console.log('\n');

@@ -165,18 +165,18 @@ function configureLLMProvidersFromEnv(): void {
     logger.debug('Configured OpenAI-Compatible provider from environment');
   }
 
-  // Ollama
+  // Ollama (OpenAI-compatible endpoint)
   if (process.env.OLLAMA_BASE_URL) {
     configureLLMProvider(LLMProvider.OLLAMA, {
       baseUrl: process.env.OLLAMA_BASE_URL
     });
-    logger.debug('Configured Ollama provider from environment');
+    logger.debug('Configured Ollama provider (OpenAI-compatible) from environment');
   } else {
-    // Configure Ollama with default URL if not specified
+    // Configure Ollama with default OpenAI-compatible URL if not specified
     configureLLMProvider(LLMProvider.OLLAMA, {
-      baseUrl: 'http://localhost:11434/api'
+      baseUrl: 'http://localhost:11434/v1'
     });
-    logger.debug('Configured Ollama provider with default URL');
+    logger.debug('Configured Ollama provider (OpenAI-compatible) with default URL');
   }
 }
 

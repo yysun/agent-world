@@ -55,6 +55,29 @@ export interface Message {
   userEntered?: boolean;
   fromAgentId?: string;
   logEvent?: LogEvent; // For log message types
+
+  // Phase 2.2 Enhancement: Tool execution event properties
+  isToolEvent?: boolean;
+  toolEventType?: 'start' | 'progress' | 'result' | 'error';
+  toolExecution?: {
+    toolName: string;
+    toolCallId: string;
+    sequenceId?: string;
+    phase: 'starting' | 'executing' | 'completed' | 'failed';
+    duration?: number;
+    input?: any;
+    result?: any;
+    resultType?: 'string' | 'object' | 'array' | 'null';
+    resultSize?: number;
+    error?: string;
+    metadata?: {
+      serverName?: string;
+      transport?: string;
+      isStreaming?: boolean;
+    };
+  };
+  expandable?: boolean;
+  resultPreview?: string;
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
