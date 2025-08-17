@@ -8,6 +8,7 @@
  * - Transport support for stdio, SSE, and streamable HTTP connections
  * - Health monitoring, error handling, and graceful shutdown
  * - Thread-safe registry operations with world-server mapping
+ * - Consolidated logging under LOG_LLM_MCP for unified debugging
  *
  * Key Features:
  * - Azure OpenAI compatibility: Uses runtime AI SDK patch (core/ai-sdk-patch.ts) for schema corruption fix
@@ -16,6 +17,17 @@
  * - Automatic cleanup: Servers shut down when no longer referenced (30s delay)
  * - Error resilience: Comprehensive error handling with fallback mechanisms
  * - Schema validation: Creates well-formed, Azure-compatible schemas for all MCP tools
+ * - Performance tracking: Tool execution duration and result analysis
+ * - Sequence tracking: Tool call dependencies and execution relationships
+ *
+ * MCP Tool Execution Logging (LOG_LLM_MCP=debug):
+ * - Tool execution performance metrics with millisecond precision
+ * - Tool result content analysis including size and type identification
+ * - Tool call sequence tracking with unique sequence IDs
+ * - Success/failure status with detailed error information
+ * - Parent-child tool call relationship tracking
+ * - Argument validation and presence checking
+ * - Result preview for debugging without exposing full content
  *
  * Schema Approach:
  * - Uses simplified property types (string, number, boolean, array with string items)
@@ -37,7 +49,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 
-const logger = createCategoryLogger('mcp-registry');
+const logger = createCategoryLogger('llm.mcp');
 
 // === TYPE DEFINITIONS ===
 
@@ -279,19 +291,84 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
     aiTools[key] = {
       description: t.description ?? '',
       parameters: finalSchema,
-      execute: async (args: any) => {
-        const res = await client.callTool({ name: t.name, arguments: args ?? {} });
+      execute: async (args: any, sequenceId?: string, parentToolCall?: string) => {
+        const startTime = performance.now();
+        const executionId = `${serverName}-${t.name}-${Date.now()}`;
 
-        // Handle result content - prefer text > json > fallback
-        if (res?.content && Array.isArray(res.content)) {
-          const textPart = res.content.find((p: any) => p?.type === 'text');
-          if (textPart?.text) return textPart.text;
+        logger.debug(`MCP tool execution starting via AI conversion`, {
+          executionId,
+          serverName,
+          toolName: t.name,
+          toolKey: key,
+          sequenceId,
+          parentToolCall,
+          argsPresent: !!args,
+          argsKeys: args ? Object.keys(args) : []
+        });
 
-          const jsonPart = res.content.find((p: any) => p?.type === 'json');
-          if (jsonPart?.json) return jsonPart.json;
+        try {
+          const res = await client.callTool({ name: t.name, arguments: args ?? {} });
+          const duration = performance.now() - startTime;
+
+          // Handle result content - prefer text > json > fallback
+          let processedResult: any;
+          let resultType = 'unknown';
+
+          if (res?.content && Array.isArray(res.content)) {
+            const textPart = res.content.find((p: any) => p?.type === 'text');
+            if (textPart?.text) {
+              processedResult = textPart.text;
+              resultType = 'text';
+            } else {
+              const jsonPart = res.content.find((p: any) => p?.type === 'json');
+              if (jsonPart?.json) {
+                processedResult = jsonPart.json;
+                resultType = 'json';
+              }
+            }
+          }
+
+          if (!processedResult) {
+            processedResult = JSON.stringify(res);
+            resultType = 'serialized';
+          }
+
+          const resultSize = typeof processedResult === 'string' ? processedResult.length : JSON.stringify(processedResult).length;
+
+          logger.debug(`MCP tool execution completed via AI conversion`, {
+            executionId,
+            serverName,
+            toolName: t.name,
+            toolKey: key,
+            sequenceId,
+            parentToolCall,
+            status: 'success',
+            duration: Math.round(duration * 100) / 100,
+            resultType,
+            resultSize,
+            resultPreview: typeof processedResult === 'string'
+              ? processedResult.slice(0, 200) + (resultSize > 200 ? '...' : '')
+              : JSON.stringify(processedResult).slice(0, 200) + '...'
+          });
+
+          return processedResult;
+        } catch (error) {
+          const duration = performance.now() - startTime;
+
+          logger.error(`MCP tool execution failed via AI conversion`, {
+            executionId,
+            serverName,
+            toolName: t.name,
+            toolKey: key,
+            sequenceId,
+            parentToolCall,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: error instanceof Error ? error.message : error
+          });
+
+          throw error;
         }
-
-        return JSON.stringify(res);
       },
     };
   }
@@ -767,7 +844,13 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
 /**
  * Execute MCP tool by server ID and tool name
  */
-export async function executeMCPTool(serverId: string, toolName: string, args: any): Promise<any> {
+export async function executeMCPTool(
+  serverId: string,
+  toolName: string,
+  args: any,
+  sequenceId?: string,
+  parentToolCall?: string
+): Promise<any> {
   const serverInstance = serverRegistry.get(serverId);
   if (!serverInstance) {
     throw new Error(`MCP server not found: ${serverId.slice(0, 8)}`);
@@ -777,26 +860,62 @@ export async function executeMCPTool(serverId: string, toolName: string, args: a
     throw new Error(`MCP server not available: ${serverInstance.config.name} (status: ${serverInstance.status})`);
   }
 
+  const startTime = performance.now();
+  const executionId = `${serverId.slice(0, 8)}-${toolName}-${Date.now()}`;
+
+  logger.debug(`MCP tool execution starting`, {
+    executionId,
+    serverId: serverId.slice(0, 8),
+    toolName,
+    serverName: serverInstance.config.name,
+    sequenceId,
+    parentToolCall,
+    argsPresent: !!args,
+    argsKeys: args ? Object.keys(args) : []
+  });
+
   try {
     const result = await serverInstance.client.callTool({
       name: toolName,
       arguments: args || {}
     });
 
-    logger.debug(`MCP tool executed successfully`, {
+    const duration = performance.now() - startTime;
+    const hasContent = result?.content && Array.isArray(result.content) && result.content.length > 0;
+    const contentTypes = hasContent ? (result.content as any[]).map((c: any) => c?.type).filter(Boolean) : [];
+    const resultSize = hasContent ? JSON.stringify(result).length : 0;
+
+    logger.debug(`MCP tool execution completed`, {
+      executionId,
       serverId: serverId.slice(0, 8),
       toolName,
-      serverName: serverInstance.config.name
+      serverName: serverInstance.config.name,
+      sequenceId,
+      parentToolCall,
+      status: 'success',
+      duration: Math.round(duration * 100) / 100, // Round to 2 decimal places
+      hasContent,
+      contentTypes,
+      resultSize,
+      resultPreview: hasContent ? JSON.stringify(result).slice(0, 200) + (resultSize > 200 ? '...' : '') : null
     });
 
     return result;
   } catch (error) {
+    const duration = performance.now() - startTime;
+
     logger.error(`MCP tool execution failed`, {
+      executionId,
       serverId: serverId.slice(0, 8),
       toolName,
       serverName: serverInstance.config.name,
+      sequenceId,
+      parentToolCall,
+      status: 'error',
+      duration: Math.round(duration * 100) / 100,
       error: error instanceof Error ? error.message : error
     });
+
     throw error;
   }
 }

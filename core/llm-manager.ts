@@ -36,7 +36,7 @@
  * - llm.streaming: Streaming response operations (start, chunks, finish, errors)
  * - llm.generation: Non-streaming response operations (start, finish, errors)
  * - llm.provider: Provider loading, configuration, and validation
- * - llm.mcp: MCP tool integration and usage tracking
+ * - llm.mcp: Comprehensive MCP tool integration and execution tracking
  * - llm.util: Utility functions and helper operations
  * 
  * Environment Variable Control:
@@ -44,8 +44,21 @@
  * - LOG_LLM_STREAMING=debug: Enable streaming operation debugging
  * - LOG_LLM_GENERATION=debug: Enable generation operation debugging
  * - LOG_LLM_PROVIDER=debug: Enable provider operation debugging
- * - LOG_LLM_MCP=debug: Enable MCP tool integration debugging
+ * - LOG_LLM_MCP=debug: Enable comprehensive MCP tool debugging (consolidates all MCP logging)
  * - LOG_LLM_UTIL=debug: Enable utility function debugging
+ *
+ * MCP Tool Logging Features (LOG_LLM_MCP=debug):
+ * - Tool call sequence tracking with unique sequence IDs
+ * - Tool execution performance metrics (duration in milliseconds)
+ * - Tool result content analysis (size, type, preview)
+ * - Tool call success/failure status with detailed error information
+ * - Tool call dependencies and parent-child relationships
+ * - Tool argument validation and presence checking
+ * - Streaming vs non-streaming execution path differentiation
+ * - Complete tool call lifecycle from start to completion
+ * - Server-side tool execution via direct MCP server registry calls
+ * - AI SDK tool conversion execution tracking
+ * - Tool result processing and content type identification
  *
  * LLM Queue Implementation:
  * - Global singleton queue prevents concurrent LLM calls across all agents and worlds
@@ -90,6 +103,10 @@
  * - Replaced AI SDK providers with direct OpenAI package for OpenAI, Azure, XAI, and OpenAI-Compatible
  * - Added direct OpenAI integration to bypass AI SDK v5.0.15 schema corruption bug
  * - Implemented granular function-based logging for detailed debugging control
+ * - Consolidated all MCP-related logging under LOG_LLM_MCP category for unified debugging
+ * - Added comprehensive MCP tool execution tracking with performance metrics
+ * - Implemented tool call sequence tracking and dependency relationships
+ * - Enhanced MCP logging with result content analysis and execution status
  */
 
 import { generateText, streamText } from 'ai';

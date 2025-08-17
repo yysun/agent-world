@@ -31,6 +31,10 @@
  * - Implemented function calling support with MCP tools
  * - Added configuration injection for browser compatibility
  * - Created OpenAI client factory functions for all supported providers
+ * - Consolidated MCP tool logging under LOG_LLM_MCP category
+ * - Added comprehensive tool execution tracking with performance metrics
+ * - Implemented tool call sequence tracking and dependency relationships
+ * - Enhanced logging with result content analysis and execution status
  */
 
 import OpenAI from 'openai';
@@ -40,6 +44,7 @@ import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
 const logger = createCategoryLogger('openai-direct');
+const mcpLogger = createCategoryLogger('llm.mcp');
 
 /**
  * OpenAI client factory for standard OpenAI API
@@ -173,7 +178,7 @@ export async function streamOpenAIResponse(
   try {
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
-      
+
       if (delta?.content) {
         fullResponse += delta.content;
         publishSSE(world, {
@@ -195,7 +200,7 @@ export async function streamOpenAIResponse(
                 function: { name: toolCall.function?.name || '', arguments: '' },
               };
             }
-            
+
             if (toolCall.function?.arguments) {
               functionCalls[toolCall.index].function.arguments += toolCall.function.arguments;
             }
@@ -206,8 +211,15 @@ export async function streamOpenAIResponse(
 
     // Process function calls if any
     if (functionCalls.length > 0) {
-      logger.debug(`OpenAI Direct: Processing ${functionCalls.length} function calls for agent=${agent.id}`);
-      
+      const sequenceId = generateId();
+      mcpLogger.debug(`MCP tool call sequence starting (streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        messageId,
+        toolCount: functionCalls.length,
+        toolNames: functionCalls.map(fc => fc.function.name)
+      });
+
       // Add assistant message with tool calls
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -217,21 +229,62 @@ export async function streamOpenAIResponse(
 
       // Execute function calls and get results
       const toolResults: ChatMessage[] = [];
-      for (const toolCall of functionCalls) {
+      for (let i = 0; i < functionCalls.length; i++) {
+        const toolCall = functionCalls[i];
+        const startTime = performance.now();
+
         try {
           const tool = mcpTools[toolCall.function.name];
           if (tool && tool.execute) {
+            mcpLogger.debug(`MCP tool execution starting (streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              agentId: agent.id,
+              messageId,
+              argsPresent: !!toolCall.function.arguments
+            });
+
             const args = JSON.parse(toolCall.function.arguments);
-            const result = await tool.execute(args);
-            
+            const result = await tool.execute(args, sequenceId, `streaming-${messageId}`);
+            const duration = performance.now() - startTime;
+            const resultString = JSON.stringify(result);
+
+            mcpLogger.debug(`MCP tool execution completed (streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              agentId: agent.id,
+              messageId,
+              status: 'success',
+              duration: Math.round(duration * 100) / 100,
+              resultSize: resultString.length,
+              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+            });
+
             toolResults.push({
               role: 'tool',
-              content: JSON.stringify(result),
+              content: resultString,
               tool_call_id: toolCall.id,
             });
           }
         } catch (error) {
-          logger.error(`OpenAI Direct: Function call error for ${toolCall.function.name}:`, error);
+          const duration = performance.now() - startTime;
+
+          mcpLogger.error(`MCP tool execution failed (streaming)`, {
+            sequenceId,
+            toolIndex: i,
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            agentId: agent.id,
+            messageId,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: error instanceof Error ? error.message : error
+          });
+
           toolResults.push({
             role: 'tool',
             content: `Error: ${(error as Error).message}`,
@@ -239,6 +292,15 @@ export async function streamOpenAIResponse(
           });
         }
       }
+
+      mcpLogger.debug(`MCP tool call sequence completed (streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        messageId,
+        toolCount: functionCalls.length,
+        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
+        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      });
 
       // If we have tool results, make another request to get the final response
       if (toolResults.length > 0) {
@@ -296,25 +358,69 @@ export async function generateOpenAIResponse(
 
     // Handle function calls
     if (message.tool_calls && message.tool_calls.length > 0) {
-      logger.debug(`OpenAI Direct: Processing ${message.tool_calls.length} function calls for agent=${agent.id}`);
+      const sequenceId = generateId();
+      mcpLogger.debug(`MCP tool call sequence starting (non-streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        toolCount: message.tool_calls.length,
+        toolNames: message.tool_calls.map(tc => tc.function.name)
+      });
 
       // Execute function calls
       const toolResults: ChatMessage[] = [];
-      for (const toolCall of message.tool_calls) {
+      for (let i = 0; i < message.tool_calls.length; i++) {
+        const toolCall = message.tool_calls[i];
+        const startTime = performance.now();
+
         try {
           const tool = mcpTools[toolCall.function.name];
           if (tool && tool.execute) {
+            mcpLogger.debug(`MCP tool execution starting (non-streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              agentId: agent.id,
+              argsPresent: !!toolCall.function.arguments
+            });
+
             const args = JSON.parse(toolCall.function.arguments);
-            const result = await tool.execute(args);
-            
+            const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`);
+            const duration = performance.now() - startTime;
+            const resultString = JSON.stringify(result);
+
+            mcpLogger.debug(`MCP tool execution completed (non-streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              agentId: agent.id,
+              status: 'success',
+              duration: Math.round(duration * 100) / 100,
+              resultSize: resultString.length,
+              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+            });
+
             toolResults.push({
               role: 'tool',
-              content: JSON.stringify(result),
+              content: resultString,
               tool_call_id: toolCall.id,
             });
           }
         } catch (error) {
-          logger.error(`OpenAI Direct: Function call error for ${toolCall.function.name}:`, error);
+          const duration = performance.now() - startTime;
+
+          mcpLogger.error(`MCP tool execution failed (non-streaming)`, {
+            sequenceId,
+            toolIndex: i,
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            agentId: agent.id,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: error instanceof Error ? error.message : error
+          });
+
           toolResults.push({
             role: 'tool',
             content: `Error: ${(error as Error).message}`,
@@ -322,6 +428,14 @@ export async function generateOpenAIResponse(
           });
         }
       }
+
+      mcpLogger.debug(`MCP tool call sequence completed (non-streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        toolCount: message.tool_calls.length,
+        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
+        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      });
 
       // If we have tool results, make another request to get the final response
       if (toolResults.length > 0) {
