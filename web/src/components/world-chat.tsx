@@ -59,7 +59,6 @@ export default function WorldChat(props: WorldChatProps) {
 
                 // Handle log messages with special styling
                 if (message.logEvent) {
-                  console.log('Rendering log message:', message);
                   return (
                     <div key={message.id || 'log-' + index} className="message log-message">
                       <div className="message-content">

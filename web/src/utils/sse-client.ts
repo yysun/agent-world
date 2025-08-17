@@ -87,7 +87,6 @@ interface StreamingState {
 
 // Utility functions
 const publishEvent = (eventType: string, data?: any): void => {
-  console.log('publishEvent called:', eventType, data);
   if (app?.run) {
     app.run(eventType, data);
   } else {
@@ -196,7 +195,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
     case 'log':
       // Handle log events from the server - ensure they're always processed
-      console.log('SSE Client: Received log event', eventData);
       publishEvent('handleLogEvent', {
         messageId: eventData.messageId,
         logEvent: eventData.logEvent,
@@ -313,7 +311,6 @@ export async function sendChatMessage(
 
 // Initialize streaming message display
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
-  console.log('handleStreamStart called, current isWaiting:', state.isWaiting, 'setting to false');
   const { messageId, sender } = data;
   state.messages = state.messages.filter(msg => !msg.userEntered);
   state.messages.push({
@@ -323,7 +320,6 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
     messageId: messageId,
   } as any);
   const newState = { ...state, needScroll: true, isWaiting: false };
-  console.log('handleStreamStart returning state with isWaiting:', newState.isWaiting);
   return newState;
 };
 
@@ -394,7 +390,6 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
 
 // Handle log events from server
 export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any): T => {
-  console.log('handleLogEvent called with:', data);
   const { logEvent } = data;
   if (!logEvent) return state;
 
@@ -412,8 +407,6 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
     messageId: uniqueId,
     worldName: data.worldName || streamingState.currentWorldName
   } as any;
-
-  console.log('Adding log message to state:', logMessage);
 
   return {
     ...state,

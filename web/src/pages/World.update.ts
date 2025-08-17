@@ -107,8 +107,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
 // Event handlers for SSE and system events
 const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
-  console.log('Received system event:', data);
-  // console.log('Received message event:', data);
   if (data.content === 'chat-title-updated') {
     const updates = initWorld(state, state.worldName, data.chatId);
     for await (const update of updates) {
