@@ -35,6 +35,7 @@
  * - Added comprehensive tool execution tracking with performance metrics
  * - Implemented tool call sequence tracking and dependency relationships
  * - Enhanced logging with result content analysis and execution status
+ * - Fixed MCP tool result display: Follow-up responses now stream properly to UI
  */
 
 import OpenAI from 'openai';
@@ -272,8 +273,9 @@ export async function streamOpenAIResponse(
           }
         } catch (error) {
           const duration = performance.now() - startTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
 
-          mcpLogger.error(`MCP tool execution failed (streaming)`, {
+          mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
             toolName: toolCall.function.name,
@@ -282,7 +284,8 @@ export async function streamOpenAIResponse(
             messageId,
             status: 'error',
             duration: Math.round(duration * 100) / 100,
-            error: error instanceof Error ? error.message : error
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
           });
 
           toolResults.push({
@@ -305,7 +308,18 @@ export async function streamOpenAIResponse(
       // If we have tool results, make another request to get the final response
       if (toolResults.length > 0) {
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, {});
+        
+        // Use streaming for the follow-up response to ensure it gets displayed
+        const followUpResponse = await streamOpenAIResponse(
+          client,
+          model,
+          followUpMessages,
+          agent,
+          {}, // No tools for follow-up to prevent infinite recursion
+          world,
+          publishSSE,
+          messageId
+        );
         return followUpResponse;
       }
     }
@@ -409,8 +423,9 @@ export async function generateOpenAIResponse(
           }
         } catch (error) {
           const duration = performance.now() - startTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
 
-          mcpLogger.error(`MCP tool execution failed (non-streaming)`, {
+          mcpLogger.error(`MCP tool execution failed (non-streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
             toolName: toolCall.function.name,
@@ -418,7 +433,8 @@ export async function generateOpenAIResponse(
             agentId: agent.id,
             status: 'error',
             duration: Math.round(duration * 100) / 100,
-            error: error instanceof Error ? error.message : error
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
           });
 
           toolResults.push({

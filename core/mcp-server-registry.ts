@@ -428,8 +428,9 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
           return processedResult;
         } catch (error) {
           const duration = performance.now() - startTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
 
-          logger.error(`MCP tool execution failed via AI conversion`, {
+          logger.error(`MCP tool execution failed via AI conversion: ${errorMessage}`, {
             executionId,
             serverName,
             toolName: t.name,
@@ -438,7 +439,8 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
             parentToolCall,
             status: 'error',
             duration: Math.round(duration * 100) / 100,
-            error: error instanceof Error ? error.message : error
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
           });
 
           throw error;
@@ -1004,8 +1006,9 @@ export async function executeMCPTool(
     return result;
   } catch (error) {
     const duration = performance.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
 
-    logger.error(`MCP tool execution failed`, {
+    logger.error(`MCP tool execution failed: ${errorMessage}`, {
       executionId,
       serverId: serverId.slice(0, 8),
       toolName,
@@ -1014,7 +1017,8 @@ export async function executeMCPTool(
       parentToolCall,
       status: 'error',
       duration: Math.round(duration * 100) / 100,
-      error: error instanceof Error ? error.message : error
+      error: errorMessage,
+      errorStack: error instanceof Error ? error.stack : undefined
     });
 
     throw error;

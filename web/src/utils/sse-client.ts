@@ -393,6 +393,14 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   const { logEvent } = data;
   if (!logEvent) return state;
 
+  // Console.log all log messages from server for debugging
+  console.log(`[${logEvent.level.toUpperCase()}] ${logEvent.category}: ${logEvent.message}`, {
+    timestamp: logEvent.timestamp,
+    data: logEvent.data,
+    messageId: logEvent.messageId,
+    fullLogEvent: logEvent
+  });
+
   // Generate unique ID to avoid duplicates
   const uniqueId = `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 

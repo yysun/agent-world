@@ -351,21 +351,54 @@ async function executeStreamAgentResponse(
       setTimeout(() => reject(new Error('LLM streaming request timeout')), timeoutMs);
     });
 
-    const { textStream } = await Promise.race([streamPromise, timeoutPromise]);
+    const { textStream, toolCalls, toolResults, fullStream } = await Promise.race([streamPromise, timeoutPromise]);
 
     let fullResponse = '';
+    let hasToolCalls = false;
 
-    // Stream chunks and emit SSE events via world's eventEmitter
-    for await (const chunk of textStream) {
-      fullResponse += chunk;
+    // Use fullStream to handle both text and tool calls
+    for await (const delta of fullStream) {
+      if (delta.type === 'text-delta') {
+        fullResponse += delta.textDelta;
 
-      publishSSE(world, {
-        agentName: agent.id,
-        type: 'chunk',
-        content: chunk,
-        messageId
-      });
-      loggerStreaming.debug(`LLM: Streaming chunk for agent=${agent.id}, world=${world.id}, messageId=${messageId}, chunkLength=${chunk.length}`);
+        publishSSE(world, {
+          agentName: agent.id,
+          type: 'chunk',
+          content: delta.textDelta,
+          messageId
+        });
+        loggerStreaming.debug(`LLM: Streaming text chunk for agent=${agent.id}, world=${world.id}, messageId=${messageId}, chunkLength=${delta.textDelta.length}`);
+      } else if (delta.type === 'tool-call-delta') {
+        hasToolCalls = true;
+        loggerMCP.debug(`LLM: Tool call delta for agent=${agent.id}, world=${world.id}, messageId=${messageId}, toolName=${delta.toolCallId}`);
+      } else if (delta.type === 'tool-result') {
+        loggerMCP.debug(`LLM: Tool result received for agent=${agent.id}, world=${world.id}, messageId=${messageId}, toolCallId=${delta.toolCallId}`);
+      }
+    }
+
+    // If there were tool calls, we need to get the final response
+    if (hasToolCalls && hasMCPTools) {
+      loggerMCP.debug(`LLM: Processing tool results and generating final response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
+      
+      // Get the complete response with tool results
+      const finalResponse = await (await streamPromise).text;
+      
+      if (finalResponse && finalResponse !== fullResponse) {
+        // Stream the additional response content
+        const additionalContent = finalResponse.slice(fullResponse.length);
+        if (additionalContent.trim()) {
+          fullResponse = finalResponse;
+          
+          publishSSE(world, {
+            agentName: agent.id,
+            type: 'chunk',
+            content: additionalContent,
+            messageId
+          });
+          
+          loggerMCP.debug(`LLM: Streamed final tool response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, additionalLength=${additionalContent.length}`);
+        }
+      }
     }
 
     // Publish SSE end event via world's eventEmitter
