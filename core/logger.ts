@@ -16,7 +16,7 @@
  *
  * Environment Variable Support:
  *   - Set per-category log level with LOG_{CATEGORY} (e.g., LOG_EVENTS=debug)
- *   - Category name is case-insensitive, dashes and underscores are normalized (LOG_API, LOG_SERVER, LOG_my_custom)
+ *   - Category name normalization: dots, underscores, spaces, and other non-alphanumeric characters become dashes (LOG_MY.CAT, LOG_my_cat, LOG_MY-CAT all normalize to 'my-cat')
  *   - Any LOG_{CATEGORY} variable is supported dynamically (no fixed list)
  *   - These override global LOG_LEVEL and config.categoryLevels
  *   - LOG_LEVEL sets the global default if no category override is present
@@ -44,6 +44,17 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 
 function shouldLog(messageLevel: LogLevel, currentLevel: LogLevel): boolean {
   return LOG_LEVELS[messageLevel] >= LOG_LEVELS[currentLevel];
+}
+
+// Normalize category keys for consistent lookup across environment variables and function calls
+function normalizeCategoryKey(raw: string): string {
+  if (!raw) return '';
+  if (raw === 'default') return 'default';
+  
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')  // Replace any non-alphanumeric sequence with single dash
+    .replace(/^-+|-+$/g, '');     // Trim leading/trailing dashes
 }
 
 // Pino logger configuration
@@ -169,8 +180,8 @@ function autoInitializeLogger(): void {
     const env = process.env;
     Object.keys(env).forEach(key => {
       if (key.startsWith('LOG_') && key !== 'LOG_LEVEL') {
-        // Normalize: LOG_{CATEGORY} => category (lowercase, underscores/dashes to dashes)
-        const cat = key.slice(4).toLowerCase().replace(/[_]+/g, '-');
+        // Normalize: LOG_{CATEGORY} => category (robust normalization)
+        const cat = normalizeCategoryKey(key.slice(4));
         const val = env[key];
         if (val && LOG_LEVELS[val.toLowerCase() as LogLevel]) {
           categoryLevels[cat] = val.toLowerCase() as LogLevel;
@@ -182,6 +193,14 @@ function autoInitializeLogger(): void {
 
 // Auto-initialize when module loads
 autoInitializeLogger();
+
+// Add startup diagnostic logging (only when not in production)
+if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  console.info(`[LOGGER] Initialized with globalLevel: ${globalLevel}`);
+  if (Object.keys(categoryLevels).length > 0) {
+    console.info(`[LOGGER] Category levels:`, Object.keys(categoryLevels).sort());
+  }
+}
 
 // Log streaming callback management
 const logStreamCallbacks = new Set<(logEvent: import('./subscription.js').LogStreamEvent) => void>();
@@ -244,8 +263,8 @@ export function initializeLogger(config: LoggerConfig = {}): void {
     const env = process.env;
     Object.keys(env).forEach(key => {
       if (key.startsWith('LOG_') && key !== 'LOG_LEVEL') {
-        // Normalize: LOG_{CATEGORY} => category (lowercase, underscores/dashes to dashes)
-        const cat = key.slice(4).toLowerCase().replace(/[_]+/g, '-');
+        // Normalize: LOG_{CATEGORY} => category (robust normalization)
+        const cat = normalizeCategoryKey(key.slice(4));
         const val = env[key];
         if (val && LOG_LEVELS[val.toLowerCase() as LogLevel]) {
           categoryLevels[cat] = val.toLowerCase() as LogLevel;
@@ -253,6 +272,17 @@ export function initializeLogger(config: LoggerConfig = {}): void {
       }
     });
   }
+
+  // Migrate existing categoryLoggers to normalized keys
+  const existingLoggers = { ...categoryLoggers };
+  Object.keys(existingLoggers).forEach(oldKey => {
+    const normalizedKey = normalizeCategoryKey(oldKey);
+    if (normalizedKey !== oldKey && !categoryLoggers[normalizedKey]) {
+      // Move logger to normalized key
+      categoryLoggers[normalizedKey] = existingLoggers[oldKey];
+      delete categoryLoggers[oldKey];
+    }
+  });
 
   // Update existing category loggers
   Object.keys(categoryLoggers).forEach(category => {
@@ -263,18 +293,21 @@ export function initializeLogger(config: LoggerConfig = {}): void {
 
 // Category logger management
 export function createCategoryLogger(category: string): Logger {
-  if (categoryLoggers[category]) {
-    return categoryLoggers[category];
+  const normalizedCategory = normalizeCategoryKey(category);
+  
+  if (categoryLoggers[normalizedCategory]) {
+    return categoryLoggers[normalizedCategory];
   }
 
-  const level = categoryLevels[category] || globalLevel;
-  const logger = createSimpleLogger(category, level);
-  categoryLoggers[category] = logger;
+  const level = categoryLevels[normalizedCategory] || globalLevel;
+  const logger = createSimpleLogger(normalizedCategory, level);
+  categoryLoggers[normalizedCategory] = logger;
   return logger;
 }
 
 export function getCategoryLogLevel(category: string): LogLevel {
-  return categoryLevels[category] || globalLevel;
+  const normalizedCategory = normalizeCategoryKey(category);
+  return categoryLevels[normalizedCategory] || globalLevel;
 }
 
 export function shouldLogForCategory(messageLevel: LogLevel, category: string): boolean {
