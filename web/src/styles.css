@@ -2205,9 +2205,9 @@ legend {
   font-size: 0.8em;
 }
 
-/* Log message styling - aligned right with colored dots */
+/* Log message styling - aligned left with colored dots */
 .log-message {
-  align-self: flex-end !important;
+  align-self: flex-start !important;
   background: none !important;
   border: none !important;
   padding: 0.3rem 0.5rem !important;

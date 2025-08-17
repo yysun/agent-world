@@ -87,6 +87,7 @@ interface StreamingState {
 
 // Utility functions
 const publishEvent = (eventType: string, data?: any): void => {
+  console.log('publishEvent called:', eventType, data);
   if (app?.run) {
     app.run(eventType, data);
   } else {
@@ -194,7 +195,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'log':
-      // Handle log events from the server
+      // Handle log events from the server - ensure they're always processed
       console.log('SSE Client: Received log event', eventData);
       publishEvent('handleLogEvent', {
         messageId: eventData.messageId,
@@ -312,6 +313,7 @@ export async function sendChatMessage(
 
 // Initialize streaming message display
 export const handleStreamStart = <T extends SSEComponentState>(state: T, data: StreamStartData): T => {
+  console.log('handleStreamStart called, current isWaiting:', state.isWaiting, 'setting to false');
   const { messageId, sender } = data;
   state.messages = state.messages.filter(msg => !msg.userEntered);
   state.messages.push({
@@ -320,7 +322,9 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
     isStreaming: true,
     messageId: messageId,
   } as any);
-  return { ...state, needScroll: true, isWaiting: false };
+  const newState = { ...state, needScroll: true, isWaiting: false };
+  console.log('handleStreamStart returning state with isWaiting:', newState.isWaiting);
+  return newState;
 };
 
 // Update streaming message content
@@ -394,19 +398,26 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   const { logEvent } = data;
   if (!logEvent) return state;
 
+  // Generate unique ID to avoid duplicates
+  const uniqueId = `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
   const logMessage = {
-    id: `log-${logEvent.messageId}`,
+    id: uniqueId,
     sender: 'system',
     text: logEvent.message,
     createdAt: new Date(logEvent.timestamp),
     type: 'log',
-    logEvent: logEvent
+    logEvent: logEvent,
+    // Ensure log messages are always displayed
+    messageId: uniqueId,
+    worldName: data.worldName || streamingState.currentWorldName
   } as any;
 
   console.log('Adding log message to state:', logMessage);
 
   return {
     ...state,
-    messages: [...(state.messages || []), logMessage]
+    messages: [...(state.messages || []), logMessage],
+    needScroll: true  // Auto-scroll to new log messages
   };
 };

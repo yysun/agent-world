@@ -1,14 +1,14 @@
 import { app, Component } from 'apprun';
 
-export default class AboutComponent extends Component {
-  state = 'About';
+export default class extends Component {
+  override state = 'About';
 
-  view = state => <div>
+  override view = (state: any) => <div>
     <h1>{state}</h1>
   </div>;
 
-  update = {
-    '/About': state => state,
+  override update = {
+    '/About': (state: any) => state,
   };
 }
 

@@ -18,7 +18,7 @@ import { worldUpdateHandlers } from './World.update';
 
 export default class WorldComponent extends Component<WorldComponentState> {
 
-  state = {
+  override state = {
     worldName: 'World',
     world: null,
     messages: [],
@@ -43,7 +43,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
     currentChat: null
   };
 
-  view = (state: WorldComponentState) => {
+  override view = (state: WorldComponentState) => {
 
     // Guard clauses for loading and error states
     // if (state.loading) {
@@ -175,7 +175,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 </button>
                 <button
                   className="world-settings-btn"
-                  $onclick={['export-world-markdown', state.world.name]}
+                  $onclick={['export-world-markdown', state.world?.name]}
                   title="Export world to markdown file"
                   style={{ marginLeft: '8px' }}
                 >
@@ -183,7 +183,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 </button>
                 <button
                   className="world-settings-btn"
-                  $onclick={['view-world-markdown', state.world.name]}
+                  $onclick={['view-world-markdown', state.world?.name]}
                   title="View world markdown in new tab"
                   style={{ marginLeft: '4px' }}
                 >
@@ -252,9 +252,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
   };
 
   // we could select events to be global, but for simplicity we keep them local
-  is_global_event = () => true;
+  override is_global_event = () => true;
 
-  update = {
+  override update = {
     // Route handler and message handlers (merged)
     ...worldUpdateHandlers,
 

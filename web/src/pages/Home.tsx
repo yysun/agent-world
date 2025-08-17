@@ -42,7 +42,7 @@ interface HomeState {
 }
 
 export default class HomeComponent extends Component<HomeState> {
-  state = async () => {
+  override state = async () => {
     const worlds = await api.getWorlds();
     return {
       worlds,
@@ -56,7 +56,7 @@ export default class HomeComponent extends Component<HomeState> {
     } as HomeState;
   }
 
-  view = (state: HomeState) => {
+  override view = (state: HomeState) => {
     if (state.loading) {
       return (
         <div class="container">
@@ -205,7 +205,7 @@ export default class HomeComponent extends Component<HomeState> {
         </div>
 
         {/* World Edit Modal */}
-        {state.showWorldEdit && 
+        {state.showWorldEdit &&
           <WorldEdit
             world={state.selectedWorldForEdit}
             mode={state.worldEditMode}
@@ -216,7 +216,7 @@ export default class HomeComponent extends Component<HomeState> {
     );
   };
 
-  update = {
+  override update = {
     'prev-world': (state: HomeState): HomeState => ({
       ...state,
       currentIndex: state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1

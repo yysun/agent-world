@@ -39,7 +39,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     id: `msg-${Date.now() + Math.random()}`,
     sender,
     text: memoryItem.content || '',
-    createdAt: memoryItem.createdAt,
+    createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
     fromAgentId: agentName
   };
@@ -65,10 +65,10 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     }
 
     if (!chatId || !(chatId in world.chats)) {
-      chatId = world.currentChatId;
+      chatId = world.currentChatId || undefined;
     }
 
-    if (world.currentChatId !== chatId) {
+    if (world.currentChatId !== chatId && chatId) {
       await api.setChat(worldName, chatId);
     }
 
@@ -116,6 +116,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     }
     return state;
   }
+  return state;
 };
 
 const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
@@ -198,26 +199,18 @@ export const worldUpdateHandlers = {
     const messageText = state.userInput?.trim();
     if (!messageText) return state;
 
-    // const userMessage = {
-    //   id: `msg-${Date.now() + Math.random()}`,
-    //   type: 'user',
-    //   sender: 'HUMAN',
-    //   text: messageText,
-    //   createdAt: new Date(),
-    //   worldName: state.worldName,
-    //   userEntered: true
-    // };
-
     const newState = {
       ...state,
-      // messages: [...(state.messages || []), userMessage],
       userInput: '',
       isSending: true,
       isWaiting: true
     };
 
     try {
-      await sendChatMessage(state.worldName, messageText, 'HUMAN');
+      // Send the message via SSE stream
+      const cleanup = await sendChatMessage(state.worldName, messageText, 'HUMAN');
+
+      // Note: isWaiting will be set to false by handleStreamStart when the stream actually starts
       return { ...newState, isSending: false };
     } catch (error: any) {
       return {

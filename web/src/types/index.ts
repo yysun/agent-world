@@ -134,7 +134,7 @@ export interface WorldSettingsProps {
 // World Edit Component Props & State
 export interface WorldEditProps {
   mode: 'create' | 'edit' | 'delete';
-  world?: World | null;
+  world?: Partial<World> | null;
   onClose?: () => void;
   onSave?: (world: World) => void;
   parentComponent?: any;
@@ -153,7 +153,7 @@ export interface WorldEditState {
 // Agent Edit Component Props & State
 export interface AgentEditProps {
   mode: 'create' | 'edit' | 'delete';
-  agent?: Agent | null;
+  agent?: Partial<Agent> | null;
   worldName: string;
   onClose?: () => void;
   onSave?: (agent: Agent) => void;
@@ -189,6 +189,7 @@ export interface SSEComponentState {
   connectionStatus?: string;
   error?: string | null;
   needScroll?: boolean;
+  isWaiting?: boolean;
 }
 
 // Main World Component State - consolidated from multiple components

@@ -50,7 +50,11 @@ export default function WorldChat(props: WorldChatProps) {
           ) : messages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            messages.filter(message => message.sender !== 'system')
+            messages.filter(message =>
+              // Don't filter system messages if they have logEvent (log messages)
+              // Only filter pure system messages without logEvent
+              message.sender !== 'system' || message.logEvent
+            )
               .map((message, index) => {
 
                 // Handle log messages with special styling

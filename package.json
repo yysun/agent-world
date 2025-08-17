@@ -32,7 +32,7 @@
     "dev": "concurrently \"npm run server\" \"npm run dev --workspace=web\"",
     "test": "jest --config jest.config.js",
     "test:db": "npx tsx tests/db/migration-tests.ts",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && npm run check --workspace=web",
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "pkill": "pkill -f tsx",
     "dev-next": "cd next && npm run dev"
