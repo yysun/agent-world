@@ -50,66 +50,59 @@ export default function WorldChat(props: WorldChatProps) {
           ) : messages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            messages.filter(message =>
-              // Don't filter system messages if they have logEvent (log messages)
-              // Only filter pure system messages without logEvent
-              message.sender !== 'system' || message.logEvent
-            )
-              .map((message, index) => {
-
-                // Handle log messages with special styling
-                if (message.logEvent) {
-                  return (
-                    <div key={message.id || 'log-' + index} className="message log-message">
-                      <div className="message-content">
-                        <span className={`log-dot ${message.logEvent.level}`}></span>
-                        <span className="log-category">{message.logEvent.category}:</span>
-                        <span className="log-content">{message.logEvent.message}</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const senderType = getSenderType(message.sender);
-                const isCrossAgentMessage = hasSenderAgentMismatch(message);
-                const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
-                const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
-                const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
-                const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
-
+            messages.map((message, index) => {
+              if (message.logEvent) {
                 return (
-                  <div key={message.id || 'msg-' + index} className={messageClasses}>
-                    <div className="message-sender">
-                      {message.sender}
-                      {isCrossAgentMessage && message.fromAgentId && (
-                        <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
-                          → {message.fromAgentId}
-                        </span>
-                      )}
-                    </div>
+                  <div key={message.id || 'log-' + index} className="message log-message">
                     <div className="message-content">
-                      {safeHTML(renderMarkdown(message.text))}
+                      <span className={`log-dot ${message.logEvent.level}`}></span>
+                      <span className="log-category">{message.logEvent.category}:</span>
+                      <span className="log-content">{message.logEvent.message}</span>
                     </div>
-                    <div className="message-timestamp">
-                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                    </div>
-                    {message.isStreaming && (
-                      <div className="streaming-indicator">
-                        <div className="streaming-content">
-                          <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                          <span>responding ...</span>
-                        </div>
-                      </div>
-                    )}
-                    {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                    {debug && <div className="message-debug-info">{JSON.stringify({
-                      type: message.type,
-                      sender: message.sender,
-                      fromAgentId: message.fromAgentId,
-                    })}</div>}
                   </div>
                 );
-              })
+              }
+
+              const senderType = getSenderType(message.sender);
+              const isCrossAgentMessage = hasSenderAgentMismatch(message);
+              const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
+              const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
+              const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
+
+              return (
+                <div key={message.id || 'msg-' + index} className={messageClasses}>
+                  <div className="message-sender">
+                    {message.sender}
+                    {isCrossAgentMessage && message.fromAgentId && (
+                      <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
+                        → {message.fromAgentId}
+                      </span>
+                    )}
+                  </div>
+                  <div className="message-content">
+                    {safeHTML(renderMarkdown(message.text))}
+                  </div>
+                  <div className="message-timestamp">
+                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
+                  </div>
+                  {message.isStreaming && (
+                    <div className="streaming-indicator">
+                      <div className="streaming-content">
+                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                        <span>responding ...</span>
+                      </div>
+                    </div>
+                  )}
+                  {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                  {debug && <div className="message-debug-info">{JSON.stringify({
+                    type: message.type,
+                    sender: message.sender,
+                    fromAgentId: message.fromAgentId,
+                  })}</div>}
+                </div>
+              );
+            })
           )}
 
           {/* Waiting indicator - three dots when waiting for streaming to start */}

@@ -376,7 +376,7 @@ export async function processAgentMessage(
 
     if (!response) {
       loggerAgent.error('LLM response is empty', { agentId: agent.id });
-      publishEvent(world, 'system', { message: `[Error] LLM response is empty`, type: 'error' });
+      // publishEvent(world, 'system', { message: `[Error] LLM response is empty`, type: 'error' });
       return;
     }
 
