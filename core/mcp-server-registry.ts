@@ -9,6 +9,7 @@
  * - Health monitoring, error handling, and graceful shutdown
  * - Thread-safe registry operations with world-server mapping
  * - Consolidated logging under LOG_LLM_MCP for unified debugging
+ * - Enhanced debug logging for MCP communication data flows
  *
  * Key Features:
  * - Azure OpenAI compatibility: Uses runtime AI SDK patch (core/ai-sdk-patch.ts) for schema corruption fix
@@ -19,6 +20,17 @@
  * - Schema validation: Creates well-formed, Azure-compatible schemas for all MCP tools
  * - Performance tracking: Tool execution duration and result analysis
  * - Sequence tracking: Tool call dependencies and execution relationships
+ * - Data flow debugging: Complete request/response payload logging
+ *
+ * MCP Communication Debug Logging (LOG_LLM_MCP=debug):
+ * - Server connection attempts with transport and configuration details
+ * - Tool list requests and responses with full payload data
+ * - Tool execution requests with complete argument structures
+ * - Tool execution responses with full result content and metadata
+ * - Request/response data size and structure analysis
+ * - Raw JSON payloads for deep debugging of MCP communication
+ * - Connection establishment and transport creation logging
+ * - Server registration configuration details
  *
  * MCP Tool Execution Logging (LOG_LLM_MCP=debug):
  * - Tool execution performance metrics with millisecond precision
@@ -28,6 +40,7 @@
  * - Parent-child tool call relationship tracking
  * - Argument validation and presence checking
  * - Result preview for debugging without exposing full content
+ * - Complete request/response payload logging for troubleshooting
  *
  * Schema Approach:
  * - Uses simplified property types (string, number, boolean, array with string items)
@@ -38,6 +51,7 @@
  * Architecture: Function-based design with module-level state management
  * Consolidated from: mcp-server-registry.ts + mcp-tools.ts (August 2025)
  * Runtime patch integration: Works with ai-sdk-patch.ts for Azure compatibility (August 2025)
+ * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
  */
 
 import { createHash } from 'crypto';
@@ -207,6 +221,20 @@ export function parseServersFromConfig(config: MCPConfig): MCPServerConfig[] {
  * Connect to an MCP server using the specified configuration
  */
 export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client> {
+  // Debug log: Connection details being used
+  logger.debug(`MCP server connection attempt`, {
+    serverName: serverConfig.name,
+    transport: serverConfig.transport,
+    connectionConfig: serverConfig.transport === 'stdio' ? {
+      command: serverConfig.command,
+      args: serverConfig.args,
+      env: serverConfig.env ? Object.keys(serverConfig.env) : []
+    } : {
+      url: serverConfig.url,
+      headers: serverConfig.headers ? Object.keys(serverConfig.headers) : []
+    }
+  });
+
   const transport = serverConfig.transport === 'stdio' || !serverConfig.transport
     ? new StdioClientTransport({
       command: serverConfig.command!,
@@ -222,7 +250,19 @@ export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<C
       });
 
   const client = new Client({ name: 'my-app', version: '1.0.0' }, { capabilities: {} });
+
+  logger.debug(`MCP server transport created, initiating connection`, {
+    serverName: serverConfig.name,
+    transport: serverConfig.transport
+  });
+
   await client.connect(transport);
+
+  logger.debug(`MCP server connection established successfully`, {
+    serverName: serverConfig.name,
+    transport: serverConfig.transport
+  });
+
   return client;
 }
 
@@ -271,12 +311,26 @@ function bulletproofSchema(schema: any): any {
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
 export async function mcpToolsToAiTools(client: Client, serverName: string) {
+  logger.debug(`MCP tools list request starting`, {
+    serverName,
+    operation: 'listTools'
+  });
+
   const listToolsPromise = client.listTools();
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
   });
 
   const { tools } = await Promise.race([listToolsPromise, timeoutPromise]);
+
+  // Debug log: Tools data received from MCP server
+  logger.debug(`MCP server tools list response`, {
+    serverName,
+    operation: 'listTools',
+    toolsCount: tools.length,
+    toolNames: tools.map((t: Tool) => t.name),
+    toolsPayload: JSON.stringify(tools, null, 2)
+  });
   const aiTools: Record<string, any> = {};
 
   for (const t of tools as Tool[]) {
@@ -306,8 +360,28 @@ export async function mcpToolsToAiTools(client: Client, serverName: string) {
           argsKeys: args ? Object.keys(args) : []
         });
 
+        // Debug log: Request data being sent to MCP server
+        const requestPayload = { name: t.name, arguments: args ?? {} };
+        logger.debug(`MCP server request payload`, {
+          executionId,
+          serverName,
+          toolName: t.name,
+          requestPayload: JSON.stringify(requestPayload, null, 2)
+        });
+
         try {
-          const res = await client.callTool({ name: t.name, arguments: args ?? {} });
+          const res = await client.callTool(requestPayload);
+
+          // Debug log: Raw response data received from MCP server
+          logger.debug(`MCP server response payload`, {
+            executionId,
+            serverName,
+            toolName: t.name,
+            responsePayload: JSON.stringify(res, null, 2),
+            responseType: typeof res,
+            hasContent: !!(res?.content),
+            contentLength: Array.isArray(res?.content) ? res.content.length : 0
+          });
           const duration = performance.now() - startTime;
 
           // Handle result content - prefer text > json > fallback
@@ -474,6 +548,14 @@ export async function registerMCPServer(
     serverId: serverId.slice(0, 8),
     transport: config.transport,
     worldId
+  });
+
+  // Debug log: Full server configuration being used
+  logger.debug(`MCP server registration configuration`, {
+    serverId: serverId.slice(0, 8),
+    serverName: config.name,
+    worldId,
+    fullConfig: JSON.stringify(config, null, 2)
   });
 
   // Start server and wait for ready state
@@ -874,10 +956,29 @@ export async function executeMCPTool(
     argsKeys: args ? Object.keys(args) : []
   });
 
+  // Debug log: Request data being sent to MCP server
+  const requestPayload = { name: toolName, arguments: args || {} };
+  logger.debug(`MCP server direct request payload`, {
+    executionId,
+    serverId: serverId.slice(0, 8),
+    toolName,
+    serverName: serverInstance.config.name,
+    requestPayload: JSON.stringify(requestPayload, null, 2)
+  });
+
   try {
-    const result = await serverInstance.client.callTool({
-      name: toolName,
-      arguments: args || {}
+    const result = await serverInstance.client.callTool(requestPayload);
+
+    // Debug log: Raw response data received from MCP server
+    logger.debug(`MCP server direct response payload`, {
+      executionId,
+      serverId: serverId.slice(0, 8),
+      toolName,
+      serverName: serverInstance.config.name,
+      responsePayload: JSON.stringify(result, null, 2),
+      responseType: typeof result,
+      hasContent: !!(result?.content),
+      contentLength: Array.isArray(result?.content) ? result.content.length : 0
     });
 
     const duration = performance.now() - startTime;

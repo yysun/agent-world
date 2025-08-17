@@ -12,6 +12,7 @@
  * Agent Events: subscribeAgentToMessages, processAgentMessage, shouldAgentRespond
  * Auto-Mention: Enhanced loop prevention, self-mention removal, paragraph beginning detection
  * Storage: Automatic memory persistence and agent state saving with error handling
+ * Chat Title Generation: Smart title generation excluding tool messages from conversation context
  *
  * Consolidation Changes (CC):
  * - Condensed verbose header documentation from 60+ lines to 15 lines
@@ -22,6 +23,7 @@
  * - Simplified agent message processing with step-by-step flow comments
  * - Removed verbose inline comments while preserving essential logic documentation
  * - Maintained all functionality and test compatibility (168/168 tests passing)
+ * - Enhanced chat title generation to filter out tool messages for cleaner titles
  */
 
 import {
@@ -563,7 +565,6 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
       provider: world.chatLLMProvider || firstAgent.provider,
       model: world.chatLLMModel || firstAgent.model,
       systemPrompt: 'You are a helpful assistant that turns conversations into concise titles.',
-      temperature: 0.8,
       maxTokens: 20,
     };
 
@@ -571,7 +572,7 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
       role: 'user' as const,
       content: `Below is a conversation between a user and an assistant. Generate a short, punchy title (3–6 words) that captures its main topic.
 
-${messages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
+${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
       `
     };
 
