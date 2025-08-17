@@ -13,6 +13,7 @@
  * - Configuration injection from external sources (CLI/server) for browser compatibility
  * - Automatic MCP tool integration for worlds with mcpConfig
  * - Direct OpenAI package integration for OpenAI providers to bypass AI SDK schema bug
+ * - Granular function-based logging for detailed debugging control
  *
  * Core Functions:
  * - streamAgentResponse: Streaming LLM calls with SSE events via world.eventEmitter (queued)
@@ -29,6 +30,22 @@
  * - Anthropic: AI SDK integration (Claude models with conversation context and streaming)
  * - Google: AI SDK integration (Gemini models with proper API key management)
  * - Ollama: AI SDK integration (Local model support with custom base URL configuration)
+ *
+ * Granular Logging Categories:
+ * - llm.queue: Queue operations (add, process, complete, errors)
+ * - llm.streaming: Streaming response operations (start, chunks, finish, errors)
+ * - llm.generation: Non-streaming response operations (start, finish, errors)
+ * - llm.provider: Provider loading, configuration, and validation
+ * - llm.mcp: MCP tool integration and usage tracking
+ * - llm.util: Utility functions and helper operations
+ * 
+ * Environment Variable Control:
+ * - LOG_LLM_QUEUE=debug: Enable queue operation debugging
+ * - LOG_LLM_STREAMING=debug: Enable streaming operation debugging
+ * - LOG_LLM_GENERATION=debug: Enable generation operation debugging
+ * - LOG_LLM_PROVIDER=debug: Enable provider operation debugging
+ * - LOG_LLM_MCP=debug: Enable MCP tool integration debugging
+ * - LOG_LLM_UTIL=debug: Enable utility function debugging
  *
  * LLM Queue Implementation:
  * - Global singleton queue prevents concurrent LLM calls across all agents and worlds
@@ -72,6 +89,7 @@
  * - Updated to ollama-ai-provider-v2 for AI SDK v5 compatibility and specification v2 support
  * - Replaced AI SDK providers with direct OpenAI package for OpenAI, Azure, XAI, and OpenAI-Compatible
  * - Added direct OpenAI integration to bypass AI SDK v5.0.15 schema corruption bug
+ * - Implemented granular function-based logging for detailed debugging control
  */
 
 import { generateText, streamText } from 'ai';
@@ -80,25 +98,33 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOllama } from 'ollama-ai-provider-v2';
 import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
-import { 
-  createClientForProvider, 
-  streamOpenAIResponse, 
-  generateOpenAIResponse 
+import {
+  createClientForProvider,
+  streamOpenAIResponse,
+  generateOpenAIResponse
 } from './openai-direct.js';
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
-const logger = createCategoryLogger('llm');
+// Granular function-specific loggers for detailed debugging control
+const loggerQueue = createCategoryLogger('llm.queue');
+const loggerStreaming = createCategoryLogger('llm.streaming');
+const loggerGeneration = createCategoryLogger('llm.generation');
+const loggerProvider = createCategoryLogger('llm.provider');
+const loggerMCP = createCategoryLogger('llm.mcp');
+const loggerUtil = createCategoryLogger('llm.util');
 import { getLLMProviderConfig } from './llm-config.js';
 
 // LLM Integration Utilities
 
 function stripCustomFields(message: AgentMessage): ChatMessage {
   const { sender, chatId, ...llmMessage } = message;
+  loggerUtil.trace('Stripped custom fields from message', { originalFields: ['sender', 'chatId'], remainingKeys: Object.keys(llmMessage) });
   return llmMessage;
 }
 
 function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
+  loggerUtil.debug(`Stripping custom fields from ${messages.length} messages`);
   return messages.map(stripCustomFields);
 }
 
@@ -127,7 +153,7 @@ class LLMQueue {
       throw new Error(`LLM queue is full (${this.maxQueueSize} items). Please try again later.`);
     }
 
-    logger.debug(`LLMQueue: Adding task for agent=${agentId}, world=${worldId}. Queue length before add: ${this.queue.length}`);
+    loggerQueue.debug(`LLMQueue: Adding task for agent=${agentId}, world=${worldId}. Queue length before add: ${this.queue.length}`);
     return new Promise<T>((resolve, reject) => {
       const queueItem: QueuedLLMCall = {
         id: generateId(),
@@ -150,12 +176,12 @@ class LLMQueue {
 
     this.processing = true;
 
-    logger.debug(`LLMQueue: Starting queue processing. Queue length: ${this.queue.length}`);
+    loggerQueue.debug(`LLMQueue: Starting queue processing. Queue length: ${this.queue.length}`);
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
 
       try {
-        logger.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
+        loggerQueue.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
         // Add processing timeout to prevent stuck queue
         const processPromise = item.execute();
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -166,15 +192,15 @@ class LLMQueue {
 
         const result = await Promise.race([processPromise, timeoutPromise]);
         item.resolve(result);
-        logger.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
+        loggerQueue.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
       } catch (error) {
-        logger.error('LLM queue error', { agentId: item.agentId, error: error instanceof Error ? error.message : error });
+        loggerQueue.error('LLM queue error', { agentId: item.agentId, error: error instanceof Error ? error.message : error });
         item.reject(error);
       }
     }
 
     this.processing = false;
-    logger.debug('LLMQueue: Queue processing complete.');
+    loggerQueue.debug('LLMQueue: Queue processing complete.');
   }
 
   getQueueStatus(): {
@@ -261,7 +287,7 @@ async function executeStreamAgentResponse(
       messageId
     });
 
-    logger.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
+    loggerStreaming.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
@@ -271,7 +297,7 @@ async function executeStreamAgentResponse(
     const hasMCPTools = Object.keys(mcpTools).length > 0;
 
     if (hasMCPTools) {
-      logger.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+      loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
     }
 
     // Use direct OpenAI integration for OpenAI providers
@@ -322,7 +348,7 @@ async function executeStreamAgentResponse(
         content: chunk,
         messageId
       });
-      logger.debug(`LLM: Streaming chunk for agent=${agent.id}, world=${world.id}, messageId=${messageId}, chunkLength=${chunk.length}`);
+      loggerStreaming.debug(`LLM: Streaming chunk for agent=${agent.id}, world=${world.id}, messageId=${messageId}, chunkLength=${chunk.length}`);
     }
 
     // Publish SSE end event via world's eventEmitter
@@ -333,7 +359,7 @@ async function executeStreamAgentResponse(
       // Add usage information if available
     });
 
-    logger.debug(`LLM: Finished streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
+    loggerStreaming.debug(`LLM: Finished streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
     // Update agent activity
     agent.lastActive = new Date();
@@ -349,7 +375,7 @@ async function executeStreamAgentResponse(
       messageId
     });
 
-    logger.error(`LLM: Error during streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, error=${(error as Error).message}`);
+    loggerStreaming.error(`LLM: Error during streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}, error=${(error as Error).message}`);
 
     throw error;
   }
@@ -387,29 +413,29 @@ async function executeGenerateAgentResponse(
   const hasMCPTools = Object.keys(mcpTools).length > 0;
 
   if (hasMCPTools) {
-    logger.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+    loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
   }
 
-  logger.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
+  loggerGeneration.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
 
   try {
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
       const response = await generateOpenAIResponse(client, agent.model, llmMessages, agent, mcpTools);
-      
+
       // Update agent activity and LLM call count
       agent.lastActive = new Date();
       agent.llmCallCount++;
       agent.lastLLMCall = new Date();
 
-      logger.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+      loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
       return response;
     }
 
     // Use AI SDK for other providers
     const model = loadAISDKProvider(agent);
-    
+
     const { text } = await generateText({
       model,
       messages: llmMessages as any, // Cast to bypass type mismatch for non-OpenAI providers
@@ -423,10 +449,10 @@ async function executeGenerateAgentResponse(
     agent.llmCallCount++;
     agent.lastLLMCall = new Date();
 
-    logger.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+    loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
     return text;
   } catch (error) {
-    logger.error(`LLM: Error during non-streaming response for agent=${agent.id}, world=${world.id}, error=${(error as Error).message}`);
+    loggerGeneration.error(`LLM: Error during non-streaming response for agent=${agent.id}, world=${world.id}, error=${(error as Error).message}`);
     throw error;
   }
 }
@@ -469,7 +495,7 @@ function isOpenAIProvider(provider: LLMProvider): boolean {
  */
 function createOpenAIClientForAgent(agent: Agent) {
   const config = getLLMProviderConfig(agent.provider);
-  
+
   switch (agent.provider) {
     case LLMProvider.OPENAI:
       return createClientForProvider('openai', config);
@@ -511,7 +537,7 @@ function loadAISDKProvider(agent: Agent): any {
     }
 
     default:
-      logger.error(`Unsupported AI SDK provider: ${agent.provider}`);
+      loggerProvider.error(`Unsupported AI SDK provider: ${agent.provider}`);
       throw new Error(`Unsupported AI SDK provider: ${agent.provider}`);
   }
 }
