@@ -66,7 +66,7 @@ export default {
       tsconfig: {
         module: 'esnext',
         target: 'es2020',
-        lib: ['es2020'],
+        lib: ['es2022'],
         esModuleInterop: true,
         allowSyntheticDefaultImports: true,
         moduleResolution: 'node'

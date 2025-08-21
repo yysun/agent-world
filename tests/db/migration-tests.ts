@@ -6,6 +6,19 @@
  * Comprehensive tests for SQLite database management that can be run directly with tsx.
  * Tests cover fresh database creation, schema migrations, and data preservation.
  * 
+ * Features:
+ * - Safe cleanup utilities that check file/directory existence before removal
+ * - Uses modern fs.rm instead of deprecated fs.rmdir
+ * - Non-blocking test runner that doesn't prematurely terminate the process
+ * - Robust error handling for cleanup operations
+ * 
+ * Changes:
+ * - Added pathExists() helper utility for safe file/directory existence checks
+ * - Added safeRemoveFile() and safeRemoveDir() for graceful cleanup
+ * - Replaced deprecated fs.rmdir with fs.rm using force option
+ * - Modified TestRunner.summary() to avoid premature process.exit(1)
+ * - Enhanced cleanup to handle non-existent files/directories gracefully
+ * 
  * Usage: npx tsx tests/db/migration-tests.ts
  */
 
@@ -59,12 +72,38 @@ async function ensureTestDir(): Promise<void> {
   }
 }
 
-async function cleanupTestDb(dbPath: string): Promise<void> {
+// Helper utility for safe cleanup
+async function pathExists(path: string): Promise<boolean> {
   try {
-    await fs.unlink(dbPath);
-  } catch (error) {
-    // File might not exist
+    await fs.access(path);
+    return true;
+  } catch {
+    return false;
   }
+}
+
+async function safeRemoveFile(filePath: string): Promise<void> {
+  if (await pathExists(filePath)) {
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      // Ignore errors during cleanup
+    }
+  }
+}
+
+async function safeRemoveDir(dirPath: string): Promise<void> {
+  if (await pathExists(dirPath)) {
+    try {
+      await fs.rm(dirPath, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore errors during cleanup
+    }
+  }
+}
+
+async function cleanupTestDb(dbPath: string): Promise<void> {
+  await safeRemoveFile(dbPath);
 }
 
 // Simple assertion functions
@@ -105,6 +144,14 @@ class TestRunner {
   private failed = 0;
   private currentSuite = '';
 
+  get failedCount(): number {
+    return this.failed;
+  }
+
+  get passedCount(): number {
+    return this.passed;
+  }
+
   async suite(name: string, fn: () => Promise<void>): Promise<void> {
     this.currentSuite = name;
     console.log(`\n📁 ${name}`);
@@ -131,9 +178,8 @@ class TestRunner {
 
   summary(): void {
     console.log(`\n📊 Test Results: ${this.passed} passed, ${this.failed} failed`);
-    if (this.failed > 0) {
-      process.exit(1);
-    }
+    // Don't call process.exit(1) here as it prevents proper test runner reporting
+    // Let the calling code decide how to handle test failures
   }
 }
 
@@ -523,21 +569,30 @@ async function runAllTests(): Promise<void> {
 
         await closeSchema(schemaCtx);
 
-        // Cleanup
-        await fs.unlink(dbPath);
-        await fs.rmdir('/tmp/nonexistent/directory');
-        await fs.rmdir('/tmp/nonexistent');
-      } catch (error) {
-        // Some cleanup might fail, that's okay
+        // Safe cleanup of test directories
+        await safeRemoveFile(dbPath);
+        await safeRemoveDir('/tmp/nonexistent/directory');
+        await safeRemoveDir('/tmp/nonexistent');
+      } finally {
+        // Additional cleanup if needed
+        await safeRemoveFile(dbPath);
       }
     });
   });
 
   runner.summary();
 
+  // Return appropriate exit code based on test results instead of calling process.exit
+  const hasFailures = runner.failedCount > 0;
+
   // Restore original error handlers
   process.removeAllListeners('uncaughtException');
   originalListeners.forEach(listener => process.on('uncaughtException', listener));
+
+  // If running standalone, exit with appropriate code
+  if (hasFailures && import.meta.url === `file://${process.argv[1]}`) {
+    process.exit(1);
+  }
 }
 
 // Run tests if this file is executed directly
