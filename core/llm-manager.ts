@@ -356,6 +356,8 @@ async function executeStreamAgentResponse(
 
     let fullResponse = '';
     let toolCallsInProgress = new Map<string, any>(); // Track tool calls by ID
+    // Track toolCallIds we've executed to avoid double execution between 'tool-call' and 'tool-result'
+    const executedToolCallIds = new Map<string, boolean>();
 
     // Process the full stream - AI SDK v5.0.15 pattern
     for await (const chunk of fullStream) {
@@ -409,6 +411,12 @@ async function executeStreamAgentResponse(
           try {
             const tool = mcpTools[toolCall.toolName];
             if (tool && tool.execute) {
+              // Avoid double execution if we already handled this toolCallId
+              if (executedToolCallIds.get(toolCall.toolCallId)) {
+                loggerMCP.debug(`LLM: Skipping already-executed toolCallId for agent=${agent.id}, toolCallId=${toolCall.toolCallId}`);
+                break;
+              }
+              executedToolCallIds.set(toolCall.toolCallId, true);
               const sequenceId = generateId();
 
               // Send tool progress event (Phase 2.2 enhancement)
@@ -645,13 +653,13 @@ async function executeStreamAgentResponse(
         ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id })
       }));
 
-      // Make follow-up streaming request (without tools to prevent recursion)
+      // Make follow-up streaming request (include tools metadata for robustness but avoid infinite recursion by not executing tools again)
       const followUpPromise = streamText({
         model,
         messages: followUpLLMMessages as any,
         temperature: agent.temperature,
         maxOutputTokens: agent.maxTokens,
-        // Important: Do not include tools in follow-up to prevent infinite recursion
+        // Do NOT include tools in follow-up to prevent infinite recursion and tool re-execution
       });
 
       const followUpResult = await followUpPromise;

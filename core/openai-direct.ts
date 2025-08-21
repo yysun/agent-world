@@ -254,7 +254,29 @@ export async function streamOpenAIResponse(
               argsPresent: !!toolCall.function.arguments
             });
 
-            const args = JSON.parse(toolCall.function.arguments);
+            let args: any = {};
+            try {
+              args = toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {};
+            } catch (err) {
+              const parseErr = err instanceof Error ? err.message : String(err);
+              mcpLogger.error(`MCP tool arguments parse error (streaming): ${parseErr}`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                agentId: agent.id,
+                messageId
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: `Error: Tool arguments parse error: ${parseErr}`,
+                tool_call_id: toolCall.id,
+              });
+              // Skip executing this tool due to parse error
+              continue;
+            }
+
             const result = await tool.execute(args, sequenceId, `streaming-${messageId}`);
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
@@ -322,7 +344,7 @@ export async function streamOpenAIResponse(
           model,
           followUpMessages,
           agent,
-          {}, // No tools for follow-up to prevent infinite recursion
+          {}, // Do not include tools for follow-up to prevent infinite recursion
           world,
           publishSSE,
           messageId
@@ -405,7 +427,28 @@ export async function generateOpenAIResponse(
               argsPresent: !!toolCall.function.arguments
             });
 
-            const args = JSON.parse(toolCall.function.arguments);
+            let args: any = {};
+            try {
+              args = toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {};
+            } catch (err) {
+              const parseErr = err instanceof Error ? err.message : String(err);
+              mcpLogger.error(`MCP tool arguments parse error (non-streaming): ${parseErr}`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                agentId: agent.id
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: `Error: Tool arguments parse error: ${parseErr}`,
+                tool_call_id: toolCall.id,
+              });
+              // Skip executing this tool due to parse error
+              continue;
+            }
+
             const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`);
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
@@ -469,7 +512,7 @@ export async function generateOpenAIResponse(
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, {});
+        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, mcpTools);
         return followUpResponse;
       }
     }
