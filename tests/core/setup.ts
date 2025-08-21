@@ -122,11 +122,39 @@ jest.mock('../../core/storage/storage-factory', () => {
   };
 });
 
-// Mock LLM manager globally with default successful responses
+// Mock direct integration modules
+jest.mock('../../core/openai-direct', () => ({
+  createOpenAIClientForAgent: jest.fn<any>().mockReturnValue({}),
+  createClientForProvider: jest.fn<any>().mockReturnValue({}),
+  streamOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI streaming response'),
+  generateOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI response')
+}));
+
+jest.mock('../../core/anthropic-direct', () => ({
+  createAnthropicClientForAgent: jest.fn<any>().mockReturnValue({}),
+  streamAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic streaming response'),
+  generateAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic response')
+}));
+
+jest.mock('../../core/google-direct', () => ({
+  createGoogleClientForAgent: jest.fn<any>().mockReturnValue({}),
+  streamGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google streaming response'),
+  generateGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google response')
+}));
 jest.mock('../../core/llm-manager', () => ({
-  streamAgentResponse: jest.fn<any>().mockResolvedValue('Mock LLM response'),
-  generateAgentResponse: jest.fn<any>().mockResolvedValue('Mock LLM response'),
-  LLMConfig: jest.fn<any>()
+  streamAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration streaming response'),
+  generateAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration response'),
+  getLLMQueueStatus: jest.fn<any>().mockReturnValue({
+    queueSize: 0,
+    isProcessing: false,
+    completedCalls: 0,
+    failedCalls: 0
+  }),
+  clearLLMQueue: jest.fn<any>().mockResolvedValue(undefined),
+  // Provider helper functions for testing
+  isOpenAIProvider: jest.fn<any>().mockReturnValue(false),
+  isAnthropicProvider: jest.fn<any>().mockReturnValue(false),
+  isGoogleProvider: jest.fn<any>().mockReturnValue(false)
 }));
 
 // Mock path module with all necessary functions
@@ -151,13 +179,51 @@ jest.mock('path', () => ({
   })
 }));
 
-// Mock AI SDK for direct LLM testing
-jest.mock('ai', () => ({
-  generateText: jest.fn<any>().mockResolvedValue({ text: 'Mock AI response' }),
-  streamText: jest.fn<any>().mockResolvedValue({ textStream: async function* () { yield 'Mock'; yield ' response'; } }),
-  createOpenAI: jest.fn<any>().mockReturnValue({}),
-  createAnthropic: jest.fn<any>().mockReturnValue({}),
-  createGoogle: jest.fn<any>().mockReturnValue({})
+// Mock Direct SDK packages for LLM testing
+// Mock OpenAI SDK
+jest.mock('openai', () => ({
+  default: jest.fn<any>().mockImplementation(() => ({
+    chat: {
+      completions: {
+        create: jest.fn<any>().mockResolvedValue({
+          choices: [{ message: { content: 'Mock OpenAI response', tool_calls: [] } }]
+        })
+      }
+    }
+  }))
+}));
+
+// Mock Anthropic SDK
+jest.mock('@anthropic-ai/sdk', () => ({
+  default: jest.fn<any>().mockImplementation(() => ({
+    messages: {
+      create: jest.fn<any>().mockResolvedValue({
+        content: [{ type: 'text', text: 'Mock Anthropic response' }],
+        role: 'assistant'
+      }),
+      stream: jest.fn<any>().mockImplementation(async function* () {
+        yield { type: 'content_block_delta', delta: { text: 'Mock Anthropic streaming response' } };
+      })
+    }
+  }))
+}));
+
+// Mock Google Generative AI SDK
+jest.mock('@google/generative-ai', () => ({
+  GoogleGenerativeAI: jest.fn<any>().mockImplementation(() => ({
+    getGenerativeModel: jest.fn<any>().mockReturnValue({
+      generateContent: jest.fn<any>().mockResolvedValue({
+        response: {
+          text: jest.fn<any>().mockReturnValue('Mock Google response')
+        }
+      }),
+      generateContentStream: jest.fn<any>().mockResolvedValue({
+        stream: (async function* () {
+          yield { text: jest.fn<any>().mockReturnValue('Mock Google streaming response') };
+        })()
+      })
+    })
+  }))
 }));
 
 // Mock dotenv

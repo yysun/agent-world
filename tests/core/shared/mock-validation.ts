@@ -52,14 +52,32 @@ export function validateCompleteMockSetup(): {
       warnings.push(`Could not validate llm-manager mocks: ${importError}`);
     }
 
-    // Test External SDK Mocks
+    // Test External SDK Mocks (updated for direct integrations)
     try {
-      const ai = require('ai');
-      if (typeof ai.generateText !== 'function') {
-        warnings.push('AI SDK generateText is not properly mocked');
+      const openai = require('openai');
+      if (typeof openai.default !== 'function') {
+        warnings.push('OpenAI SDK is not properly mocked');
       }
     } catch (importError) {
-      // This is expected if AI SDK is not installed
+      // This is expected if OpenAI SDK is not installed
+    }
+
+    try {
+      const anthropic = require('@anthropic-ai/sdk');
+      if (typeof anthropic.default !== 'function') {
+        warnings.push('Anthropic SDK is not properly mocked');
+      }
+    } catch (importError) {
+      // This is expected if Anthropic SDK is not installed
+    }
+
+    try {
+      const google = require('@google/generative-ai');
+      if (typeof google.GoogleGenerativeAI !== 'function') {
+        warnings.push('Google Generative AI SDK is not properly mocked');
+      }
+    } catch (importError) {
+      // This is expected if Google SDK is not installed
     }
 
     // Test Environment Mocks
@@ -125,7 +143,7 @@ export async function testMockFunctionality(): Promise<{
       errors.push(`Agent storage save test failed: ${error}`);
     }
 
-    // Test LLM manager functions
+    // Test LLM manager functions (updated for direct integrations)
     try {
       const llmManager = require('../../core/llm-manager');
       const response = await llmManager.streamAgentResponse({}, {}, []);
@@ -133,6 +151,34 @@ export async function testMockFunctionality(): Promise<{
     } catch (error) {
       results['llmManager.stream'] = false;
       errors.push(`LLM manager stream test failed: ${error}`);
+    }
+
+    // Test direct integration modules
+    try {
+      const openaiDirect = require('../../core/openai-direct');
+      const client = openaiDirect.createOpenAIClientForAgent({ provider: 'openai', id: 'test' });
+      results['openaiDirect.createClient'] = typeof client === 'object';
+    } catch (error) {
+      results['openaiDirect.createClient'] = false;
+      errors.push(`OpenAI direct integration test failed: ${error}`);
+    }
+
+    try {
+      const anthropicDirect = require('../../core/anthropic-direct');
+      const response = await anthropicDirect.generateAnthropicResponse({}, 'claude-3-haiku', [], {}, {});
+      results['anthropicDirect.generate'] = typeof response === 'string';
+    } catch (error) {
+      results['anthropicDirect.generate'] = false;
+      errors.push(`Anthropic direct integration test failed: ${error}`);
+    }
+
+    try {
+      const googleDirect = require('../../core/google-direct');
+      const response = await googleDirect.generateGoogleResponse({}, 'gemini-pro', [], {}, {});
+      results['googleDirect.generate'] = typeof response === 'string';
+    } catch (error) {
+      results['googleDirect.generate'] = false;
+      errors.push(`Google direct integration test failed: ${error}`);
     }
 
     return {
@@ -237,12 +283,19 @@ export function generateMockCoverageReport(): {
     // Keep false
   }
 
-  // Check external SDKs
+  // Check external SDKs (updated for direct integrations)
   try {
-    const ai = require('ai');
-    report.externalSDKs = jest.isMockFunction(ai.generateText);
+    const openai = require('openai');
+    const anthropic = require('@anthropic-ai/sdk');
+    const google = require('@google/generative-ai');
+    // Consider covered if direct SDKs are mocked
+    report.externalSDKs = (
+      jest.isMockFunction(openai.default) ||
+      jest.isMockFunction(anthropic.default) ||
+      jest.isMockFunction(google.GoogleGenerativeAI)
+    );
   } catch (error) {
-    // External SDKs are optional
+    // Direct SDKs are optional in test environment
     report.externalSDKs = true; // Consider it covered if not present
   }
 

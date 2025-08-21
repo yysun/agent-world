@@ -4,6 +4,8 @@
  * Ensures all file I/O and LLM calls are properly mocked during test reorganization.
  * This file provides centralized mock configuration that will work across all 
  * reorganized test files regardless of their directory structure.
+ * 
+ * Updated to use direct SDK mocks (OpenAI, Anthropic, Google) instead of AI SDK.
  */
 
 import { jest } from '@jest/globals';
@@ -69,15 +71,29 @@ export function setupAgentStorageMocks(): void {
 
 /**
  * Global LLM Manager Mocking
- * Prevents actual LLM API calls during tests
+ * Prevents actual LLM API calls during tests and mocks direct integration routing
  */
 export function setupLLMManagerMocks(): void {
   const mockLLMFunctions = {
-    streamAgentResponse: jest.fn<any>().mockResolvedValue('Mock LLM response'),
-    generateAgentResponse: jest.fn<any>().mockResolvedValue('Mock LLM response'),
-    LLMConfig: jest.fn<any>(),
-    createLLMProvider: jest.fn<any>().mockReturnValue({}),
-    validateLLMConfig: jest.fn<any>().mockReturnValue(true)
+    streamAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration streaming response'),
+    generateAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration response'),
+    getLLMQueueStatus: jest.fn<any>().mockReturnValue({
+      queueSize: 0,
+      isProcessing: false,
+      completedCalls: 0,
+      failedCalls: 0
+    }),
+    clearLLMQueue: jest.fn<any>().mockResolvedValue(undefined),
+    // Provider helper functions for testing (updated for direct integrations)
+    isOpenAIProvider: jest.fn<any>().mockImplementation((provider: string) =>
+      ['openai', 'azure', 'xai', 'openai-compatible', 'ollama'].includes(provider?.toLowerCase())
+    ),
+    isAnthropicProvider: jest.fn<any>().mockImplementation((provider: string) =>
+      provider?.toLowerCase() === 'anthropic'
+    ),
+    isGoogleProvider: jest.fn<any>().mockImplementation((provider: string) =>
+      provider?.toLowerCase() === 'google'
+    )
   };
 
   // Mock all possible import paths for LLM manager
@@ -92,23 +108,54 @@ export function setupLLMManagerMocks(): void {
 }
 
 /**
- * External AI SDK Mocking
- * Mocks external AI libraries that might be used
+ * External Direct SDK Mocking
+ * Mocks direct SDK libraries (OpenAI, Anthropic, Google) that are now used instead of AI SDK
  */
-export function setupAISDKMocks(): void {
-  // Mock AI SDK
-  jest.doMock('ai', () => ({
-    generateText: jest.fn<any>().mockResolvedValue({ text: 'Mock AI response' }),
-    streamText: jest.fn<any>().mockResolvedValue({
-      textStream: async function* () {
-        yield 'Mock';
-        yield ' AI';
-        yield ' response';
+export function setupDirectSDKMocks(): void {
+  // Mock OpenAI SDK
+  jest.doMock('openai', () => ({
+    default: jest.fn<any>().mockImplementation(() => ({
+      chat: {
+        completions: {
+          create: jest.fn<any>().mockResolvedValue({
+            choices: [{ message: { content: 'Mock OpenAI response', tool_calls: [] } }]
+          })
+        }
       }
-    }),
-    createOpenAI: jest.fn<any>().mockReturnValue({}),
-    createAnthropic: jest.fn<any>().mockReturnValue({}),
-    createGoogle: jest.fn<any>().mockReturnValue({})
+    }))
+  }));
+
+  // Mock Anthropic SDK
+  jest.doMock('@anthropic-ai/sdk', () => ({
+    default: jest.fn<any>().mockImplementation(() => ({
+      messages: {
+        create: jest.fn<any>().mockResolvedValue({
+          content: [{ type: 'text', text: 'Mock Anthropic response' }],
+          role: 'assistant'
+        }),
+        stream: jest.fn<any>().mockImplementation(async function* () {
+          yield { type: 'content_block_delta', delta: { text: 'Mock Anthropic streaming response' } };
+        })
+      }
+    }))
+  }));
+
+  // Mock Google Generative AI SDK
+  jest.doMock('@google/generative-ai', () => ({
+    GoogleGenerativeAI: jest.fn<any>().mockImplementation(() => ({
+      getGenerativeModel: jest.fn<any>().mockReturnValue({
+        generateContent: jest.fn<any>().mockResolvedValue({
+          response: {
+            text: jest.fn<any>().mockReturnValue('Mock Google response')
+          }
+        }),
+        generateContentStream: jest.fn<any>().mockResolvedValue({
+          stream: (async function* () {
+            yield { text: jest.fn<any>().mockReturnValue('Mock Google streaming response') };
+          })()
+        })
+      })
+    }))
   }));
 }
 
@@ -186,6 +233,34 @@ export function setupUtilityMocks(): void {
 }
 
 /**
+ * Direct Integration Module Mocking
+ * Mocks the direct integration modules (openai-direct, anthropic-direct, google-direct)
+ */
+export function setupDirectIntegrationMocks(): void {
+  // Mock OpenAI direct integration
+  jest.doMock('../../../core/openai-direct', () => ({
+    createOpenAIClientForAgent: jest.fn<any>().mockReturnValue({}),
+    createClientForProvider: jest.fn<any>().mockReturnValue({}),
+    streamOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI streaming response'),
+    generateOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI response')
+  }));
+
+  // Mock Anthropic direct integration
+  jest.doMock('../../../core/anthropic-direct', () => ({
+    createAnthropicClientForAgent: jest.fn<any>().mockReturnValue({}),
+    streamAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic streaming response'),
+    generateAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic response')
+  }));
+
+  // Mock Google direct integration
+  jest.doMock('../../../core/google-direct', () => ({
+    createGoogleClientForAgent: jest.fn<any>().mockReturnValue({}),
+    streamGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google streaming response'),
+    generateGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google response')
+  }));
+}
+
+/**
  * Complete Mock Setup
  * Sets up all mocks needed for test reorganization
  */
@@ -193,7 +268,8 @@ export function setupAllMocks(): void {
   setupFileSystemMocks();
   setupAgentStorageMocks();
   setupLLMManagerMocks();
-  setupAISDKMocks();
+  setupDirectSDKMocks();
+  setupDirectIntegrationMocks();
   setupEnvironmentMocks();
   setupEventMocks();
   setupUtilityMocks();

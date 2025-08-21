@@ -1,0 +1,461 @@
+/**
+ * Anthropic Direct Integration Module - Direct Anthropic SDK Integration  
+ *
+ * Features:
+ * - Direct Anthropic API integration bypassing AI SDK tool calling issues
+ * - Streaming and non-streaming responses with SSE events
+ * - Function/tool calling support with MCP tool integration
+ * - Proper error handling and retry logic
+ * - Browser-safe configuration injection
+ * - World-aware event publishing using world.eventEmitter
+ *
+ * Implementation Details:
+ * - Uses official @anthropic-ai/sdk package for reliable API access
+ * - Converts AI SDK message format to Anthropic format
+ * - Handles tool calling with proper tool result processing
+ * - Streaming support with chunk-by-chunk processing
+ * - Error handling with descriptive messages
+ * - Configuration injection from llm-config module
+ * - World-scoped event emission for proper isolation
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
+import { createCategoryLogger } from './logger.js';
+import { generateId } from './utils.js';
+
+const logger = createCategoryLogger('anthropic-direct');
+const mcpLogger = createCategoryLogger('llm.mcp');
+
+/**
+ * Anthropic client factory
+ */
+export function createAnthropicClient(config: AnthropicConfig): Anthropic {
+  return new Anthropic({
+    apiKey: config.apiKey,
+  });
+}
+
+/**
+ * Convert AI SDK messages to Anthropic format
+ */
+function convertMessagesToAnthropic(messages: ChatMessage[]): Anthropic.Messages.MessageParam[] {
+  return messages
+    .filter(msg => msg.role !== 'system') // System prompt handled separately
+    .map(msg => {
+      if (msg.role === 'tool') {
+        return {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: msg.tool_call_id || '',
+              content: msg.content || '',
+            },
+          ],
+        };
+      }
+
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        const content: any[] = [];
+        
+        if (msg.content) {
+          content.push({
+            type: 'text',
+            text: msg.content,
+          });
+        }
+
+        msg.tool_calls.forEach(toolCall => {
+          content.push({
+            type: 'tool_use',
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: JSON.parse(toolCall.function.arguments || '{}'),
+          });
+        });
+
+        return {
+          role: 'assistant' as const,
+          content,
+        };
+      }
+
+      return {
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content || '',
+      };
+    });
+}
+
+/**
+ * Convert MCP tools to Anthropic format
+ */
+function convertMCPToolsToAnthropic(mcpTools: Record<string, any>): Anthropic.Messages.Tool[] {
+  return Object.entries(mcpTools).map(([name, tool]) => ({
+    name,
+    description: tool.description || '',
+    input_schema: tool.inputSchema || { type: 'object', properties: {} },
+  }));
+}
+
+/**
+ * Extract system prompt from messages
+ */
+function extractSystemPrompt(messages: ChatMessage[]): string {
+  const systemMessage = messages.find(msg => msg.role === 'system');
+  return systemMessage?.content || 'You are a helpful assistant.';
+}
+
+/**
+ * Streaming Anthropic response handler
+ */
+export async function streamAnthropicResponse(
+  client: Anthropic,
+  model: string,
+  messages: ChatMessage[],
+  agent: Agent,
+  mcpTools: Record<string, any>,
+  world: World,
+  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  messageId: string
+): Promise<string> {
+  const anthropicMessages = convertMessagesToAnthropic(messages);
+  const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
+  const systemPrompt = extractSystemPrompt(messages);
+
+  const requestParams: Anthropic.Messages.MessageCreateParamsStreaming = {
+    model,
+    messages: anthropicMessages,
+    system: systemPrompt,
+    stream: true,
+    temperature: agent.temperature,
+    max_tokens: agent.maxTokens || 4096,
+    ...(anthropicTools && { tools: anthropicTools }),
+  };
+
+  logger.debug(`Anthropic Direct: Starting streaming request for agent=${agent.id}, model=${model}`, {
+    messageCount: messages.length,
+    hasTools: !!anthropicTools,
+    toolCount: anthropicTools?.length || 0,
+  });
+
+  const stream = await client.messages.create(requestParams);
+  let fullResponse = '';
+  let toolUses: any[] = [];
+
+  try {
+    for await (const chunk of stream) {
+      if (chunk.type === 'content_block_delta') {
+        if (chunk.delta.type === 'text_delta') {
+          const textDelta = chunk.delta.text;
+          fullResponse += textDelta;
+          publishSSE(world, {
+            agentName: agent.id,
+            type: 'chunk',
+            content: textDelta,
+            messageId,
+          });
+        }
+      } else if (chunk.type === 'content_block_start') {
+        if (chunk.content_block.type === 'tool_use') {
+          toolUses.push(chunk.content_block);
+        }
+      }
+    }
+
+    // Process tool calls if any
+    if (toolUses.length > 0) {
+      const sequenceId = generateId();
+      mcpLogger.debug(`MCP tool call sequence starting (Anthropic streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        messageId,
+        toolCount: toolUses.length,
+        toolNames: toolUses.map(tu => tu.name)
+      });
+
+      // Add assistant message with tool uses
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: fullResponse || '',
+        tool_calls: toolUses.map(toolUse => ({
+          id: toolUse.id,
+          type: 'function',
+          function: {
+            name: toolUse.name,
+            arguments: JSON.stringify(toolUse.input),
+          },
+        })),
+      };
+
+      // Execute tool calls and get results
+      const toolResults: ChatMessage[] = [];
+      
+      for (let i = 0; i < toolUses.length; i++) {
+        const toolUse = toolUses[i];
+        const startTime = performance.now();
+
+        try {
+          const tool = mcpTools[toolUse.name];
+          if (tool && tool.execute) {
+            mcpLogger.debug(`MCP tool execution starting (Anthropic streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              agentId: agent.id,
+              messageId,
+              argsPresent: !!toolUse.input
+            });
+
+            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`);
+            const duration = performance.now() - startTime;
+            const resultString = JSON.stringify(result);
+
+            mcpLogger.debug(`MCP tool execution completed (Anthropic streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              agentId: agent.id,
+              messageId,
+              status: 'success',
+              duration: Math.round(duration * 100) / 100,
+              resultSize: resultString.length,
+              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+            });
+
+            toolResults.push({
+              role: 'tool',
+              content: resultString,
+              tool_call_id: toolUse.id,
+            });
+          }
+        } catch (error) {
+          const duration = performance.now() - startTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          mcpLogger.error(`MCP tool execution failed (Anthropic streaming): ${errorMessage}`, {
+            sequenceId,
+            toolIndex: i,
+            toolName: toolUse.name,
+            toolUseId: toolUse.id,
+            agentId: agent.id,
+            messageId,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
+          });
+
+          toolResults.push({
+            role: 'tool',
+            content: `Error: ${errorMessage}`,
+            tool_call_id: toolUse.id,
+          });
+        }
+      }
+
+      mcpLogger.debug(`MCP tool call sequence completed (Anthropic streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        messageId,
+        toolCount: toolUses.length,
+        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
+        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      });
+
+      // If we have tool results, make another request to get the final response
+      if (toolResults.length > 0) {
+        const followUpMessages = [...messages, assistantMessage, ...toolResults];
+
+        // Use streaming for the follow-up response to ensure it gets displayed
+        const followUpResponse = await streamAnthropicResponse(
+          client,
+          model,
+          followUpMessages,
+          agent,
+          {}, // Do not include tools for follow-up to prevent infinite recursion
+          world,
+          publishSSE,
+          messageId
+        );
+        return followUpResponse;
+      }
+    }
+
+    logger.debug(`Anthropic Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
+    return fullResponse;
+
+  } catch (error) {
+    logger.error(`Anthropic Direct: Streaming error for agent=${agent.id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Non-streaming Anthropic response handler
+ */
+export async function generateAnthropicResponse(
+  client: Anthropic,
+  model: string,
+  messages: ChatMessage[],
+  agent: Agent,
+  mcpTools: Record<string, any>
+): Promise<string> {
+  const anthropicMessages = convertMessagesToAnthropic(messages);
+  const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
+  const systemPrompt = extractSystemPrompt(messages);
+
+  const requestParams: Anthropic.Messages.MessageCreateParamsNonStreaming = {
+    model,
+    messages: anthropicMessages,
+    system: systemPrompt,
+    temperature: agent.temperature,
+    max_tokens: agent.maxTokens || 4096,
+    ...(anthropicTools && { tools: anthropicTools }),
+  };
+
+  logger.debug(`Anthropic Direct: Starting non-streaming request for agent=${agent.id}, model=${model}`, {
+    messageCount: messages.length,
+    hasTools: !!anthropicTools,
+    toolCount: anthropicTools?.length || 0,
+  });
+
+  try {
+    const response = await client.messages.create(requestParams);
+
+    let content = '';
+    let toolUses: any[] = [];
+
+    // Extract content and tool uses from response
+    response.content.forEach(block => {
+      if (block.type === 'text') {
+        content += block.text;
+      } else if (block.type === 'tool_use') {
+        toolUses.push(block);
+      }
+    });
+
+    // Handle tool calls if any
+    if (toolUses.length > 0) {
+      const sequenceId = generateId();
+      mcpLogger.debug(`MCP tool call sequence starting (Anthropic non-streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        toolCount: toolUses.length,
+        toolNames: toolUses.map(tu => tu.name)
+      });
+
+      // Execute tool calls
+      const toolResults: ChatMessage[] = [];
+      
+      for (let i = 0; i < toolUses.length; i++) {
+        const toolUse = toolUses[i];
+        const startTime = performance.now();
+
+        try {
+          const tool = mcpTools[toolUse.name];
+          if (tool && tool.execute) {
+            mcpLogger.debug(`MCP tool execution starting (Anthropic non-streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              agentId: agent.id,
+              argsPresent: !!toolUse.input
+            });
+
+            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-non-streaming-${agent.id}`);
+            const duration = performance.now() - startTime;
+            const resultString = JSON.stringify(result);
+
+            mcpLogger.debug(`MCP tool execution completed (Anthropic non-streaming)`, {
+              sequenceId,
+              toolIndex: i,
+              toolName: toolUse.name,
+              toolUseId: toolUse.id,
+              agentId: agent.id,
+              status: 'success',
+              duration: Math.round(duration * 100) / 100,
+              resultSize: resultString.length,
+              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+            });
+
+            toolResults.push({
+              role: 'tool',
+              content: resultString,
+              tool_call_id: toolUse.id,
+            });
+          }
+        } catch (error) {
+          const duration = performance.now() - startTime;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          mcpLogger.error(`MCP tool execution failed (Anthropic non-streaming): ${errorMessage}`, {
+            sequenceId,
+            toolIndex: i,
+            toolName: toolUse.name,
+            toolUseId: toolUse.id,
+            agentId: agent.id,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
+          });
+
+          toolResults.push({
+            role: 'tool',
+            content: `Error: ${errorMessage}`,
+            tool_call_id: toolUse.id,
+          });
+        }
+      }
+
+      mcpLogger.debug(`MCP tool call sequence completed (Anthropic non-streaming)`, {
+        sequenceId,
+        agentId: agent.id,
+        toolCount: toolUses.length,
+        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
+        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      });
+
+      // If we have tool results, make another request to get the final response
+      if (toolResults.length > 0) {
+        const assistantMessage: ChatMessage = {
+          role: 'assistant',
+          content: content,
+          tool_calls: toolUses.map(toolUse => ({
+            id: toolUse.id,
+            type: 'function',
+            function: {
+              name: toolUse.name,
+              arguments: JSON.stringify(toolUse.input),
+            },
+          })),
+        };
+
+        const followUpMessages = [...messages, assistantMessage, ...toolResults];
+        const followUpResponse = await generateAnthropicResponse(client, model, followUpMessages, agent, mcpTools);
+        return followUpResponse;
+      }
+    }
+
+    logger.debug(`Anthropic Direct: Completed non-streaming request for agent=${agent.id}, responseLength=${content.length}`);
+    return content;
+
+  } catch (error) {
+    logger.error(`Anthropic Direct: Generation error for agent=${agent.id}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Factory function to create Anthropic client for agent
+ */
+export function createAnthropicClientForAgent(agent: Agent): Anthropic {
+  const config = getLLMProviderConfig(agent.provider) as AnthropicConfig;
+  return createAnthropicClient(config);
+}
