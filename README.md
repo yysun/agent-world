@@ -82,13 +82,14 @@ Each Agent World has a collection of agents that can communicate through a share
 | **Direct mention** | `@alice Can you help?` | Only @alice |
 | **Paragraph mention** | `Please review this:\n@alice` | Only @alice |
 | **Mid-text mention** | `I think @alice should help` | Nobody (saved to memory) |
+| **Stop World** | `<world>pass</world>` | No agents |
 
 ### Agent Behavior
 
 **Agents always respond to:**
 - Human messages (unless mentioned agents exist)
 - Direct @mentions at paragraph start
-- System messages
+- World messages
 
 **Agents never respond to:**
 - Their own messages
@@ -172,11 +173,30 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 
 
+## Experimental Features
+
+- **MCP Support** - *Currently in experiment* - Model Context Protocol integration for tools like search and code execution. e.g.,
+
+```json
+{
+	"servers": {
+		"playwright": {
+			"command": "npx",
+			"args": [
+				"@playwright/mcp@latest"
+			]
+		}
+	}
+}
+```
+
+It supports transport types `stdio` and `http`.
+
+
 ## Future Plans
 
 - **Long Run Worlds** - Worlds can run for days or weeks, with agents evolving over time
 - **Dynamic Worlds** - Worlds can provide real-time data to agents, e.g. date and time
-- **Tools / MCP Support** - Worlds can have tools for agents to use, like search or code execution
 - **Agent Learning** - Agents will evolve based on interactions
 - **Agent Replication** - Agents can create new agents
 
