@@ -162,7 +162,7 @@ export async function streamGoogleResponse(
   let functionCalls: any[] = [];
 
   try {
-    const result = await generativeModel.generateContentStream(googleMessages);
+    const result = await generativeModel.generateContentStream({ contents: googleMessages });
 
     for await (const chunk of result.stream) {
       const chunkText = chunk.text();
@@ -347,7 +347,7 @@ export async function generateGoogleResponse(
   });
 
   try {
-    const result = await generativeModel.generateContent(googleMessages);
+    const result = await generativeModel.generateContent({ contents: googleMessages });
     const response = result.response;
 
     let content = response.text() || '';
