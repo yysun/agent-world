@@ -296,11 +296,94 @@ export interface MCPServerInstance {
   associatedWorlds: Set<string>; // Track which worlds use this server
 }
 
+/**
+ * Tool cache entry for registry-level caching
+ * Caches tools at server level to avoid repeated fetching during ephemeral connections
+ */
+export interface ToolCacheEntry {
+  tools: Record<string, any>;      // AI-compatible tools from mcpToolsToAiTools()
+  cachedAt: Date;                  // When tools were cached
+  serverConfigHash: string;        // Hash of server config to detect changes
+  serverName: string;              // Server name for debugging
+  ttl?: number;                    // Optional TTL in milliseconds
+}
+
 // === UTILITY FUNCTIONS ===
 
 // Azure OpenAI requires function names: ^[a-zA-Z0-9_\.-]+$
 const sanitize = (s: string) => s.replace(/[^\w\-\.]/g, '_');
 const nsName = (server: string, tool: string) => `${sanitize(server)}_${sanitize(tool)}`;
+
+// === TOOL CACHE KEY FUNCTIONS ===
+
+/**
+ * Generate cache key for server-level tool caching
+ * Uses server name as the primary cache key
+ */
+function getToolCacheKey(serverName: string): string {
+  return sanitize(serverName);
+}
+
+/**
+ * Generate cache key for individual tool (if needed in future)
+ * Format: serverName:toolName
+ */
+function getIndividualToolKey(serverName: string, toolName: string): string {
+  return `${sanitize(serverName)}:${sanitize(toolName)}`;
+}
+
+// === TOOL CACHE VALIDATION ===
+
+/**
+ * Check if cached tools are still valid
+ * Validates against config changes and TTL expiration
+ */
+function isCacheValid(cached: ToolCacheEntry, currentConfig: MCPServerConfig): boolean {
+  // Check if server config changed
+  const currentHash = generateServerId(currentConfig);
+  if (cached.serverConfigHash !== currentHash) {
+    logger.debug(`Tools cache invalid: config changed for ${cached.serverName}`, {
+      serverName: cached.serverName,
+      cachedHash: cached.serverConfigHash.slice(0, 8),
+      currentHash: currentHash.slice(0, 8)
+    });
+    return false;
+  }
+
+  // Check TTL expiration
+  const ttl = cached.ttl || DEFAULT_TTL;
+  if (ttl > 0 && Date.now() - cached.cachedAt.getTime() > ttl) {
+    logger.debug(`Tools cache invalid: TTL expired for ${cached.serverName}`, {
+      serverName: cached.serverName,
+      cachedAt: cached.cachedAt.toISOString(),
+      ttl: ttl,
+      age: Date.now() - cached.cachedAt.getTime()
+    });
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Evict oldest cache entries when cache size exceeds limit
+ */
+function evictOldestCacheEntries(): void {
+  if (toolsCache.size <= MAX_CACHE_ENTRIES) return;
+
+  const entries = Array.from(toolsCache.entries())
+    .sort(([, a], [, b]) => a.cachedAt.getTime() - b.cachedAt.getTime());
+
+  const toEvict = entries.slice(0, entries.length - MAX_CACHE_ENTRIES);
+  toEvict.forEach(([key, entry]) => {
+    toolsCache.delete(key);
+    logger.debug(`Evicted old tools cache entry: ${entry.serverName}`, {
+      serverName: entry.serverName,
+      cachedAt: entry.cachedAt.toISOString(),
+      age: Date.now() - entry.cachedAt.getTime()
+    });
+  });
+}
 
 // === AZURE OPENAI COMPATIBILITY ===
 
@@ -528,6 +611,69 @@ function bulletproofSchema(schema: any): any {
   return normalized;
 }
 
+// === TOOL CACHE OPERATIONS ===
+
+/**
+ * Fetch tools from MCP server using ephemeral connection and cache results
+ * Handles connection lifecycle and error recovery
+ */
+async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record<string, any>> {
+  const startTime = performance.now();
+  const cacheKey = getToolCacheKey(serverConfig.name);
+
+  logger.debug(`Fetching and caching tools for server: ${serverConfig.name}`, {
+    serverName: serverConfig.name,
+    cacheKey,
+    transport: serverConfig.transport
+  });
+
+  try {
+    // Create ephemeral connection
+    const client = await connectMCPServer(serverConfig);
+
+    // Fetch and convert tools
+    const tools = await mcpToolsToAiTools(client, serverConfig.name);
+
+    // Cache the results
+    const cacheEntry: ToolCacheEntry = {
+      tools,
+      cachedAt: new Date(),
+      serverConfigHash: generateServerId(serverConfig),
+      serverName: serverConfig.name,
+      ttl: DEFAULT_TTL
+    };
+
+    toolsCache.set(cacheKey, cacheEntry);
+
+    // Evict old entries if needed
+    evictOldestCacheEntries();
+
+    const duration = performance.now() - startTime;
+    const toolCount = Object.keys(tools).length;
+
+    logger.debug(`Successfully cached tools for server: ${serverConfig.name}`, {
+      serverName: serverConfig.name,
+      toolCount,
+      duration: Math.round(duration * 100) / 100,
+      cacheSize: toolsCache.size
+    });
+
+    return tools;
+  } catch (error) {
+    const duration = performance.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logger.warn(`Failed to fetch and cache tools for server: ${serverConfig.name}`, {
+      serverName: serverConfig.name,
+      error: errorMessage,
+      duration: Math.round(duration * 100) / 100
+    });
+
+    // Return empty tools object on failure - don't break entire tool fetch
+    return {};
+  }
+}
+
 /**
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
@@ -704,6 +850,12 @@ export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, se
 // Module-level server registry state
 const serverRegistry = new Map<string, MCPServerInstance>();
 const worldServerMapping = new Map<string, Set<string>>(); // worldId -> Set of serverIds
+
+// Module-level tool cache state
+const toolsCache = new Map<string, ToolCacheEntry>(); // serverName -> cached tools
+const DEFAULT_TTL = 60 * 60 * 1000; // 1 hour default TTL
+const MAX_CACHE_ENTRIES = 100; // Maximum cached servers
+
 let isInitialized = false;
 let shutdownInProgress = false;
 
@@ -912,10 +1064,17 @@ export async function shutdownAllMCPServers(): Promise<void> {
 
   serverRegistry.clear();
   worldServerMapping.clear();
+
+  // Clear tools cache during shutdown
+  const cacheEntriesCleared = toolsCache.size;
+  toolsCache.clear();
+
   isInitialized = false;
   shutdownInProgress = false;
 
-  logger.info('All MCP servers shut down');
+  logger.info('All MCP servers shut down', {
+    cacheEntriesCleared
+  });
 }
 
 // === INTERNAL HELPER FUNCTIONS ===
@@ -1135,7 +1294,13 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 /**
  * Get MCP tools available for a world with on-demand server startup
  */
+/**
+ * Get MCP tools available for a world with registry-level caching
+ * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
+ */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
+  const startTime = performance.now();
+
   const world = await getWorld(worldId);
   if (!world?.mcpConfig) {
     logger.debug(`No MCP config for world: ${worldId}`);
@@ -1152,18 +1317,44 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   const allTools: Record<string, any> = {};
   const serverPromises: Promise<void>[] = [];
 
+  let cacheHits = 0;
+  let cacheMisses = 0;
+
   for (const serverConfig of serverConfigs) {
     const serverPromise = (async () => {
       try {
-        const serverId = await registerMCPServer(serverConfig, worldId);
-        const serverInstance = serverRegistry.get(serverId);
+        const cacheKey = getToolCacheKey(serverConfig.name);
+        const cached = toolsCache.get(cacheKey);
 
-        if (!serverInstance || serverInstance.status !== 'running' || !serverInstance.client) {
-          logger.warn(`Server not ready: ${serverConfig.name}`);
+        // Check cache first
+        if (cached && isCacheValid(cached, serverConfig)) {
+          // Cache hit
+          cacheHits++;
+          Object.assign(allTools, cached.tools);
+
+          logger.debug(`Tools cache hit for server: ${serverConfig.name}`, {
+            serverName: serverConfig.name,
+            toolCount: Object.keys(cached.tools).length,
+            age: Date.now() - cached.cachedAt.getTime()
+          });
           return;
         }
 
-        const serverTools = await mcpToolsToAiTools(serverInstance.client, serverInstance.config.name);
+        // Cache miss - fetch and cache tools
+        cacheMisses++;
+
+        if (cached) {
+          logger.debug(`Tools cache miss (invalid) for server: ${serverConfig.name}`, {
+            serverName: serverConfig.name,
+            reason: isCacheValid(cached, serverConfig) ? 'unknown' : 'invalid'
+          });
+        } else {
+          logger.debug(`Tools cache miss (not found) for server: ${serverConfig.name}`, {
+            serverName: serverConfig.name
+          });
+        }
+
+        const serverTools = await fetchAndCacheTools(serverConfig);
         Object.assign(allTools, serverTools);
       } catch (error) {
         logger.error(`Failed to get tools from MCP server: ${serverConfig.name}`, {
@@ -1179,7 +1370,18 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   await Promise.allSettled(serverPromises);
 
   const totalTools = Object.keys(allTools).length;
-  logger.info(`Retrieved ${totalTools} total MCP tools for world: ${worldId}`);
+  const duration = performance.now() - startTime;
+
+  logger.info(`Retrieved ${totalTools} total MCP tools for world: ${worldId}`, {
+    worldId,
+    totalTools,
+    cacheHits,
+    cacheMisses,
+    cacheHitRate: cacheHits + cacheMisses > 0 ? Math.round((cacheHits / (cacheHits + cacheMisses)) * 100) : 0,
+    duration: Math.round(duration * 100) / 100,
+    cacheSize: toolsCache.size
+  });
+
   return allTools;
 }
 
@@ -1218,8 +1420,8 @@ export async function executeMCPTool(
 
   // Debug log: Request data being sent to MCP server
   // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
-    const translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
-    const requestPayload = { name: toolName, arguments: translatedArgs };
+  const translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
+  const requestPayload = { name: toolName, arguments: translatedArgs };
   logger.debug(`MCP server direct request payload`, {
     executionId,
     serverId: serverId.slice(0, 8),
@@ -1310,6 +1512,103 @@ export async function restartMCPServer(serverId: string): Promise<boolean> {
     serverInstance.error = error instanceof Error ? error : new Error(String(error));
     return false;
   }
+}
+
+// === TOOL CACHE MANAGEMENT ===
+
+/**
+ * Clear cached tools for specific server or all servers
+ * Useful for forcing cache refresh when server tools change
+ */
+export function clearToolsCache(serverName?: string): void {
+  if (serverName) {
+    const cacheKey = getToolCacheKey(serverName);
+    const deleted = toolsCache.delete(cacheKey);
+
+    logger.info(`Cleared tools cache for server: ${serverName}`, {
+      serverName,
+      found: deleted,
+      remainingEntries: toolsCache.size
+    });
+  } else {
+    const entriesCleared = toolsCache.size;
+    toolsCache.clear();
+
+    logger.info(`Cleared all tools cache entries`, {
+      entriesCleared
+    });
+  }
+}
+
+/**
+ * Get tools cache statistics for monitoring and debugging
+ */
+export function getToolsCacheStats(): {
+  totalEntries: number;
+  totalTools: number;
+  cacheSize: number;
+  oldestEntry?: { serverName: string; cachedAt: Date };
+  newestEntry?: { serverName: string; cachedAt: Date };
+  memoryUsage: { approximate: string };
+} {
+  const entries = Array.from(toolsCache.values());
+
+  if (entries.length === 0) {
+    return {
+      totalEntries: 0,
+      totalTools: 0,
+      cacheSize: 0,
+      memoryUsage: { approximate: '0 B' }
+    };
+  }
+
+  const sortedByDate = entries.sort((a, b) => a.cachedAt.getTime() - b.cachedAt.getTime());
+  const totalTools = entries.reduce((sum, entry) => sum + Object.keys(entry.tools).length, 0);
+
+  // Rough memory usage estimate
+  const approximateSize = JSON.stringify(Array.from(toolsCache.values())).length;
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${Math.round(bytes / (1024 * 1024) * 100) / 100} MB`;
+  };
+
+  return {
+    totalEntries: entries.length,
+    totalTools,
+    cacheSize: toolsCache.size,
+    oldestEntry: sortedByDate.length > 0 ? {
+      serverName: sortedByDate[0].serverName,
+      cachedAt: sortedByDate[0].cachedAt
+    } : undefined,
+    newestEntry: sortedByDate.length > 0 ? {
+      serverName: sortedByDate[sortedByDate.length - 1].serverName,
+      cachedAt: sortedByDate[sortedByDate.length - 1].cachedAt
+    } : undefined,
+    memoryUsage: { approximate: formatSize(approximateSize) }
+  };
+}
+
+/**
+ * Refresh cached tools for a specific server (force cache miss on next access)
+ */
+export function refreshServerToolsCache(serverName: string): boolean {
+  const cacheKey = getToolCacheKey(serverName);
+  const found = toolsCache.has(cacheKey);
+
+  if (found) {
+    toolsCache.delete(cacheKey);
+    logger.info(`Marked tools cache for refresh: ${serverName}`, {
+      serverName,
+      remainingEntries: toolsCache.size
+    });
+  } else {
+    logger.debug(`Tools cache not found for server: ${serverName}`, {
+      serverName
+    });
+  }
+
+  return found;
 }
 
 /** Get MCP system health status */
