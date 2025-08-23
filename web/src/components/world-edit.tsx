@@ -3,7 +3,7 @@
  *
  * Features:
  * - Self-contained AppRun class component with create/edit/delete modes
- * - Modal overlay with backdrop click to close and form validation
+ * - Modal overlay with form validation (no backdrop click to close)
  * - Success messaging with auto-close and parent component integration
  * - Module-level functions for better testability and organization
  * - Added chat LLM provider/model fields (parity with Agent Edit)
@@ -159,7 +159,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     // Success message view
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={closeModal}>
+        <div className="modal-backdrop">
           <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Success!</h2>
@@ -194,7 +194,7 @@ export default class WorldEdit extends Component<WorldEditState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={closeModal}>
+      <div className="modal-backdrop">
         <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>

@@ -174,7 +174,7 @@ export default class ModalComponent extends Component<ModalState> {
     // Success message auto-closes
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={closeModal}>
+        <div className="modal-backdrop">
           <div className="modal-content" onclick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Success!</h2>
@@ -190,7 +190,7 @@ export default class ModalComponent extends Component<ModalState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={closeModal}>
+      <div className="modal-backdrop">
         <div className="modal-content" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2>{state.title}</h2>
@@ -404,7 +404,7 @@ interface ComponentState {
 ### Popup Component Checklist
 
 **✅ REQUIRED FEATURES:**
-- [ ] Backdrop click to close: `<div className="backdrop" $onclick={close}>`
+- [ ] Close button in header: `<button className="modal-close-btn" $onclick={close}>×</button>`
 - [ ] Content click prevention: `onclick={(e) => e.stopPropagation()}`
 - [ ] Position calculation with viewport bounds
 - [ ] Parent component coordination via global events
@@ -432,7 +432,7 @@ interface ComponentState {
 
 ### Creating a Modal
 1. Use Pattern B (Modal template)
-2. Include backdrop click handling
+2. Include close button in header for dismissal
 3. Support success message auto-close
 4. Coordinate with parent via global events
 5. Position with viewport boundary checks

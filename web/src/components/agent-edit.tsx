@@ -3,7 +3,7 @@
  *
  * Features:
  * - Self-contained AppRun class component with create/edit/delete modes
- * - Modal overlay with backdrop click to close and form validation
+ * - Modal overlay with form validation (no backdrop click to close)
  * - Success messaging with auto-close and parent component integration
  * - Global event publishing for coordinated modal management
  * - Standardized modal sizing via shared 'edit-modal' class (parity with World Edit)
@@ -151,7 +151,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     // Success message view
     if (state.successMessage) {
       return (
-        <div className="modal-backdrop" $onclick={closeModal}>
+        <div className="modal-backdrop">
           <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Success!</h2>
@@ -186,7 +186,7 @@ export default class AgentEdit extends Component<AgentEditState> {
     }
 
     return (
-      <div className="modal-backdrop" $onclick={closeModal}>
+      <div className="modal-backdrop">
         <div className="modal-content edit-modal" onclick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
