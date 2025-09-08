@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent World - OAuth2 Demo</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            background: #f8f9fa;
+        }
+        
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .provider-card {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .provider-card h3 {
+            margin-top: 0;
+            color: #34495e;
+        }
+        
+        .oauth-button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin: 0.5rem;
+            transition: background 0.2s;
+        }
+        
+        .oauth-button:hover {
+            background: #2980b9;
+        }
+        
+        .oauth-button.github {
+            background: #333;
+        }
+        
+        .oauth-button.github:hover {
+            background: #24292e;
+        }
+        
+        .oauth-button.google {
+            background: #4285f4;
+        }
+        
+        .oauth-button.google:hover {
+            background: #3367d6;
+        }
+        
+        .oauth-button.microsoft {
+            background: #00a1f1;
+        }
+        
+        .oauth-button.microsoft:hover {
+            background: #106ebe;
+        }
+        
+        .oauth-button.discord {
+            background: #5865f2;
+        }
+        
+        .oauth-button.discord:hover {
+            background: #4752c4;
+        }
+        
+        .config-section {
+            margin: 2rem 0;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .config-input {
+            width: 100%;
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        
+        .discovery-result {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        
+        .error {
+            background: #ffe8e8;
+            border-color: #f44336;
+            color: #d32f2f;
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 4px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .info-box h4 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌍 Agent World - OAuth2 Demo</h1>
+        
+        <div class="info-box">
+            <h4>OAuth2 Authorization Code Flow with OpenID Connect Discovery</h4>
+            <p>This demo showcases the OAuth2 implementation with automatic endpoint discovery. 
+            Configure your OAuth2 client credentials below and test the flow with various providers.</p>
+        </div>
+
+        <div class="config-section">
+            <h3>Configuration</h3>
+            <label>Client ID:</label>
+            <input type="text" id="clientId" class="config-input" placeholder="your-oauth2-client-id">
+            
+            <label>Redirect URI:</label>
+            <input type="text" id="redirectUri" class="config-input" value="">
+            
+            <label>Custom Scope (optional):</label>
+            <input type="text" id="customScope" class="config-input" placeholder="openid profile email">
+        </div>
+
+        <div class="provider-grid">
+            <div class="provider-card">
+                <h3>Google</h3>
+                <p>OpenID Connect Discovery</p>
+                <button class="oauth-button google" onclick="startOAuth2Flow('google')">
+                    Login with Google
+                </button>
+                <button class="oauth-button" onclick="testDiscovery('google')">
+                    Test Discovery
+                </button>
+            </div>
+            
+            <div class="provider-card">
+                <h3>GitHub</h3>
+                <p>Fallback Endpoints</p>
+                <button class="oauth-button github" onclick="startOAuth2Flow('github')">
+                    Login with GitHub
+                </button>
+                <button class="oauth-button" onclick="testDiscovery('github')">
+                    Test Discovery
+                </button>
+            </div>
+            
+            <div class="provider-card">
+                <h3>Microsoft</h3>
+                <p>OpenID Connect Discovery</p>
+                <button class="oauth-button microsoft" onclick="startOAuth2Flow('microsoft')">
+                    Login with Microsoft
+                </button>
+                <button class="oauth-button" onclick="testDiscovery('microsoft')">
+                    Test Discovery
+                </button>
+            </div>
+            
+            <div class="provider-card">
+                <h3>Discord</h3>
+                <p>Fallback Endpoints</p>
+                <button class="oauth-button discord" onclick="startOAuth2Flow('discord')">
+                    Login with Discord
+                </button>
+                <button class="oauth-button" onclick="testDiscovery('discord')">
+                    Test Discovery
+                </button>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h3>Discovery Test</h3>
+            <button class="oauth-button" onclick="testDiscovery('list')">
+                List All Providers
+            </button>
+            <div id="discoveryResult"></div>
+        </div>
+
+        <div class="info-box">
+            <h4>Setup Instructions</h4>
+            <p>To test OAuth2 flows:</p>
+            <ol>
+                <li>Set environment variable: <code>OAUTH2_CLIENT_ID=your-client-id</code></li>
+                <li>Set environment variable: <code>OAUTH2_CLIENT_SECRET=your-client-secret</code> (optional for PKCE)</li>
+                <li>Configure OAuth2 provider with redirect URI: <code id="currentRedirectUri"></code></li>
+                <li>Enter your client ID above and click a provider button</li>
+            </ol>
+        </div>
+
+        <div class="info-box">
+            <h4>API Endpoints</h4>
+            <ul>
+                <li><code>GET /api/oauth2/authorize</code> - Start authorization flow</li>
+                <li><code>GET /api/oauth2/callback</code> - Handle authorization callback</li>
+                <li><code>GET /api/oauth2/discovery</code> - Provider discovery information</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Set default redirect URI to current origin + callback path
+        document.addEventListener('DOMContentLoaded', function() {
+            const redirectUri = window.location.origin + '/api/oauth2/callback';
+            document.getElementById('redirectUri').value = redirectUri;
+            document.getElementById('currentRedirectUri').textContent = redirectUri;
+        });
+
+        function startOAuth2Flow(provider) {
+            const clientId = document.getElementById('clientId').value;
+            const redirectUri = document.getElementById('redirectUri').value;
+            const customScope = document.getElementById('customScope').value;
+            
+            if (!clientId) {
+                alert('Please enter your OAuth2 Client ID');
+                return;
+            }
+            
+            const params = new URLSearchParams({
+                provider: provider,
+                client_id: clientId,
+                redirect_uri: redirectUri
+            });
+            
+            if (customScope) {
+                params.set('scope', customScope);
+            }
+            
+            // Redirect to authorization endpoint
+            window.location.href = `/api/oauth2/authorize?${params.toString()}`;
+        }
+
+        async function testDiscovery(provider) {
+            const resultDiv = document.getElementById('discoveryResult');
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(`/api/oauth2/discovery?provider=${provider}`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'discovery-result';
+                    resultDiv.textContent = JSON.stringify(data, null, 2);
+                } else {
+                    resultDiv.className = 'discovery-result error';
+                    resultDiv.textContent = `Error: ${data.error}\n${data.details || ''}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'discovery-result error';
+                resultDiv.textContent = `Network Error: ${error.message}`;
+            }
+        }
+
+        // Handle OAuth2 callback in URL parameters
+        function handleOAuth2Callback() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const state = urlParams.get('state');
+            const error = urlParams.get('error');
+            
+            if (error) {
+                alert(`OAuth2 Error: ${error}\n${urlParams.get('error_description') || ''}`);
+                return;
+            }
+            
+            if (code && state) {
+                alert(`OAuth2 Success!\nCode: ${code.substring(0, 20)}...\nState: ${state}`);
+                // In a real app, you would send this to your backend
+            }
+        }
+
+        // Check for OAuth2 callback on page load
+        if (window.location.search.includes('code=') || window.location.search.includes('error=')) {
+            handleOAuth2Callback();
+        }
+    </script>
+</body>
+</html>
