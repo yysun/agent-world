@@ -12,6 +12,7 @@
  * - Agent/world memory management and UI controls
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
+ * - Smooth streaming indicator management (removed after final message displayed)
  *
  * Updated: 2025-08-09 - Removed selectedSettingsTarget localStorage persistence
  */
@@ -144,7 +145,8 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     fromAgentId
   };
 
-  state.messages = state.messages.filter(msg => !msg.userEntered);
+  // Filter out temporary streaming messages and user-entered messages
+  state.messages = state.messages.filter(msg => !msg.userEntered && !msg.isStreaming);
   state.messages.push(newMessage);
 
   return {
