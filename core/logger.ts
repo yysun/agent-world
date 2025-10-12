@@ -34,7 +34,7 @@
 // Load environment variables from .env file
 import dotenv from 'dotenv';
 import pino from 'pino';
-dotenv.config();
+dotenv.config({ quiet: true });
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
@@ -50,7 +50,7 @@ function shouldLog(messageLevel: LogLevel, currentLevel: LogLevel): boolean {
 function normalizeCategoryKey(raw: string): string {
   if (!raw) return '';
   if (raw === 'default') return 'default';
-  
+
   return raw
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')  // Replace any non-alphanumeric sequence with single dash
@@ -294,7 +294,7 @@ export function initializeLogger(config: LoggerConfig = {}): void {
 // Category logger management
 export function createCategoryLogger(category: string): Logger {
   const normalizedCategory = normalizeCategoryKey(category);
-  
+
   if (categoryLoggers[normalizedCategory]) {
     return categoryLoggers[normalizedCategory];
   }

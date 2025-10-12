@@ -15,7 +15,7 @@
 
 // Load environment variables from .env file
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 
 import open from 'open';
 import { createCategoryLogger, LLMProvider, LogLevel } from '../core/index.js';
