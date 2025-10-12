@@ -50,13 +50,20 @@ export function handleStreamingEvents(
       streaming.content = '';
       streaming.sender = eventData.agentName || eventData.sender;
       streaming.messageId = eventData.messageId;
-      console.log(`\n${boldGreen(`● ${streaming.sender}`)} ${gray('is responding...')}`);
+      process.stdout.write(`\n${boldGreen(`● ${streaming.sender}`)} ${gray('is responding...')}`);
       if (streaming.stopWait) {
         streaming.stopWait();
       }
     }
 
     if (streaming.messageId === eventData.messageId) {
+      // Clear the "is responding..." line on first content
+      if (streaming.content === '') {
+        // Move cursor to beginning of line and clear it
+        process.stdout.write('\r\x1b[K');
+        process.stdout.write(`${boldGreen(`● ${streaming.sender}:`)} `);
+      }
+
       streaming.content += eventData.content;
       process.stdout.write(eventData.content);
 
