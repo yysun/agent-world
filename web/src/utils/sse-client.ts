@@ -364,10 +364,11 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
 export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: StreamChunkData): T => {
   const { messageId, sender, content } = data;
   const messages = [...(state.messages || [])];
+  const activeStreamMessageId = (state as any).activeStreamMessageId ?? messageId;
 
   // Find and update the streaming message
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].isStreaming && messages[i].messageId === messageId) {
+    if (messages[i].isStreaming && (messages[i].messageId === messageId || messages[i].messageId === activeStreamMessageId)) {
       messages[i] = {
         ...messages[i],
         text: content || '',
@@ -377,6 +378,7 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       return {
         ...state,
         messages,
+        activeStreamMessageId,
         needScroll: true
       };
     }
@@ -389,26 +391,32 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       sender: sender,
       text: content || '',
       isStreaming: true,
-      messageId: messageId
+      messageId: activeStreamMessageId
     }],
+    activeStreamMessageId,
     needScroll: true
   };
 };
 
 // Finalize streaming message
 export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: StreamEndData): T => {
-  state.messages = state.messages.filter(msg => msg.messageId !== data.messageId);
-  return { ...state, needScroll: false };
+  const activeStreamMessageId = (state as any).activeStreamMessageId;
+  const targetId = activeStreamMessageId ?? data.messageId;
+
+  state.messages = state.messages.filter(msg => msg.messageId !== targetId);
+  return { ...state, activeStreamMessageId: undefined, needScroll: false };
 };
 
 // Handle streaming errors
 export const handleStreamError = <T extends SSEComponentState>(state: T, data: StreamErrorData): T => {
   const { messageId, sender, error } = data;
+  const activeStreamMessageId = (state as any).activeStreamMessageId;
+  const targetMessageId = activeStreamMessageId ?? messageId;
 
   let foundMatch = false;
   const messages = (state.messages || []).map(msg => {
     if (msg.isStreaming &&
-      (msg.messageId === messageId ||
+      (msg.messageId === targetMessageId ||
         (!messageId && msg.sender === sender && msg.type === 'agent-stream'))) {
       foundMatch = true;
       return {
@@ -430,7 +438,7 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
       isStreaming: false,
       hasError: true,
       errorMessage: error,
-      messageId,
+      messageId: targetMessageId,
       type: 'error'
     } as any
   ];
@@ -438,6 +446,7 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
   return {
     ...state,
     messages: nextMessages,
+    activeStreamMessageId: undefined,
     isWaiting: false
   };
 };
@@ -497,6 +506,7 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
   return {
     ...state,
     messages: [...(state.messages || []), toolStartMessage],
+    activeStreamMessageId: messageId,
     needScroll: true,
     isWaiting: false
   };
@@ -523,6 +533,7 @@ export const handleToolProgress = <T extends SSEComponentState>(state: T, data: 
   return {
     ...state,
     messages,
+    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true,
     isWaiting: false
   };
@@ -555,6 +566,7 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
   return {
     ...state,
     messages,
+    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true,
     isWaiting: false
   };
@@ -594,6 +606,7 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
     return {
       ...state,
       messages: [...messages, toolErrorMessage],
+      activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
       needScroll: true,
       isWaiting: false
     };
@@ -602,6 +615,7 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
   return {
     ...state,
     messages,
+    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true,
     isWaiting: false
   };
