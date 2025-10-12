@@ -4,6 +4,7 @@
  * Comprehensive MCP (Model Context Protocol) management system providing:
  * - Server lifecycle management with reference counting and connection pooling
  * - Configuration-based server identification and sharing across worlds
+ * - Flexible configuration: Supports both 'servers' and 'mcpServers' field names
  * - AI-compatible tool conversion with schema validation
  * - Transport support for stdio, SSE, and streamable HTTP connections
  * - Health monitoring, error handling, and graceful shutdown
@@ -256,21 +257,24 @@ class SimpleHTTPMCPClient {
 
 // === TYPE DEFINITIONS ===
 
+type MCPServerDefinition = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  transport?: 'stdio';
+} | {
+  url: string;
+  headers?: Record<string, string>;
+  transport: 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
+} | {
+  type: 'http' | 'sse' | 'streamable-http'; // Legacy 'type' field support
+  url: string;
+  headers?: Record<string, string>;
+};
+
 export type MCPConfig = {
-  servers: Record<string, {
-    command: string;
-    args?: string[];
-    env?: Record<string, string>;
-    transport?: 'stdio';
-  } | {
-    url: string;
-    headers?: Record<string, string>;
-    transport: 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
-  } | {
-    type: 'http' | 'sse' | 'streamable-http'; // Legacy 'type' field support
-    url: string;
-    headers?: Record<string, string>;
-  }>;
+  servers?: Record<string, MCPServerDefinition>;
+  mcpServers?: Record<string, MCPServerDefinition>;
 };
 
 export type MCPServerConfig = {
@@ -454,11 +458,19 @@ export function validateToolSchema(schema: any): any {
 
 /**
  * Convert MCP config JSON format to normalized server configs
+ * Supports both 'servers' and 'mcpServers' field names
  */
 export function parseServersFromConfig(config: MCPConfig): MCPServerConfig[] {
   const servers: MCPServerConfig[] = [];
 
-  for (const [name, serverDef] of Object.entries(config.servers)) {
+  // Support both 'servers' and 'mcpServers' fields
+  const serverDefs = config.servers || config.mcpServers;
+
+  if (!serverDefs) {
+    return servers;
+  }
+
+  for (const [name, serverDef] of Object.entries(serverDefs)) {
     if ('command' in serverDef) {
       // Stdio transport (default)
       servers.push({
@@ -1166,9 +1178,13 @@ export function getMCPRegistryStats(): {
 /** Validate MCP configuration format and content */
 export function validateMCPConfig(config: any): config is MCPConfig {
   try {
-    if (!config?.servers || typeof config.servers !== 'object') return false;
+    // Must have either 'servers' or 'mcpServers' field
+    if (!config?.servers && !config?.mcpServers) return false;
 
-    for (const [serverName, server] of Object.entries(config.servers)) {
+    const serverDefs = config.servers || config.mcpServers;
+    if (typeof serverDefs !== 'object') return false;
+
+    for (const [serverName, server] of Object.entries(serverDefs)) {
       if (!serverName || !server || typeof server !== 'object') return false;
 
       const serverConfig = server as any;
@@ -1176,7 +1192,7 @@ export function validateMCPConfig(config: any): config is MCPConfig {
         (serverConfig.type === 'http' ? 'streamable-http' : serverConfig.type) ||
         'stdio';
 
-      if (!['stdio', 'sse', 'streamable-http'].includes(transport)) return false;
+      if (!['stdio', 'sse', 'streamable-http', 'http'].includes(transport)) return false;
 
       if (transport === 'stdio') {
         if (!serverConfig.command || typeof serverConfig.command !== 'string') return false;
