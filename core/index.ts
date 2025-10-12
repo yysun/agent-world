@@ -57,6 +57,11 @@ export {
   clearAgentMemory,
 } from './managers.js';
 
+// === MCP MANAGEMENT ===
+export {
+  clearToolsCache
+} from './mcp-server-registry.js';
+
 // === CHAT MANAGEMENT ===
 export {
   newChat,

@@ -545,14 +545,35 @@ export async function mcpToolsToAiTools(client: Client, serverName: string, tran
   for (const t of tools as Tool[]) {
     const key = nsName(serverName, t.name);
 
+    // Debug: Log original tool definition from MCP server
+    logger.debug(`MCP original tool definition from server: ${serverName}`, {
+      toolName: t.name,
+      originalDescription: t.description,
+      inputSchema: JSON.stringify(t.inputSchema, null, 2)
+    });
+
     // Apply bulletproof schema normalization - this is our surgical fix
     const bulletproofedSchema = bulletproofSchema(t.inputSchema);
 
     // Validate and simplify further for Azure compatibility
     const finalSchema = validateToolSchema(bulletproofedSchema);
 
+    // Enhance tool description with explicit usage guidance for execute_command
+    let enhancedDescription = t.description ?? '';
+    if (t.name === 'execute_command') {
+      const originalDesc = t.description ?? '';
+      enhancedDescription = 'Execute a shell command ONLY when explicitly requested by keywords like: "run", "execute", "list files", "check directory", "show files", "ls", "cat file". DO NOT use for: greetings (hi, hello), questions (how are you, what is), or general conversation. User must explicitly indicate they want to run a shell command.';
+
+      logger.debug(`Enhanced tool description for execute_command`, {
+        toolName: t.name,
+        originalDescription: originalDesc,
+        enhancedDescription: enhancedDescription,
+        descriptionChanged: originalDesc !== enhancedDescription
+      });
+    }
+
     aiTools[key] = {
-      description: t.description ?? '',
+      description: enhancedDescription,
       parameters: finalSchema,
       execute: async (args: any, sequenceId?: string, parentToolCall?: string) => {
         const startTime = performance.now();

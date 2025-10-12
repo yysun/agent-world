@@ -324,6 +324,16 @@ async function executeStreamAgentResponse(
 
     if (hasMCPTools) {
       loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+
+      // Debug: Log complete tool definitions being sent to LLM
+      for (const [toolKey, toolDef] of Object.entries(mcpTools)) {
+        loggerMCP.debug(`LLM: Tool definition for ${toolKey}`, {
+          toolName: toolKey,
+          description: toolDef.description,
+          parameters: JSON.stringify(toolDef.parameters, null, 2),
+          hasExecuteFunction: typeof toolDef.execute === 'function'
+        });
+      }
     }
 
     // Use direct OpenAI integration for OpenAI providers
@@ -422,6 +432,16 @@ async function executeGenerateAgentResponse(
 
   if (hasMCPTools) {
     loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
+
+    // Debug: Log complete tool definitions being sent to LLM
+    for (const [toolKey, toolDef] of Object.entries(mcpTools)) {
+      loggerMCP.debug(`LLM: Tool definition for ${toolKey}`, {
+        toolName: toolKey,
+        description: toolDef.description,
+        parameters: JSON.stringify(toolDef.parameters, null, 2),
+        hasExecuteFunction: typeof toolDef.execute === 'function'
+      });
+    }
   }
 
   loggerGeneration.debug(`LLM: Starting non-streaming response for agent=${agent.id}, world=${world.id}`);
