@@ -24,6 +24,7 @@ export default function WorldChat(props: WorldChatProps) {
     messagesLoading,
     isSending,
     isWaiting,
+    needScroll = false,
     activeAgent,
     currentChat
   } = props;
@@ -44,7 +45,18 @@ export default function WorldChat(props: WorldChatProps) {
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
-        <div className="conversation-area" ref={e => e.scrollTop = e.scrollHeight}>
+        <div
+          className="conversation-area"
+          ref={el => {
+            if (!el) return;
+            if (needScroll) {
+              requestAnimationFrame(() => {
+                el.scrollTop = el.scrollHeight;
+                app.run('ack-scroll');
+              });
+            }
+          }}
+        >
           {messagesLoading ? (
             <div className="loading-messages">Loading messages...</div>
           ) : messages.length === 0 ? (
@@ -52,13 +64,36 @@ export default function WorldChat(props: WorldChatProps) {
           ) : (
             messages.map((message, index) => {
               if (message.logEvent) {
+                const isExpanded = !!message.isLogExpanded;
+                let formattedArgs: string | null = null;
+                if (message.logEvent.data !== undefined) {
+                  try {
+                    formattedArgs = JSON.stringify(message.logEvent.data, null, 2);
+                  } catch (error) {
+                    formattedArgs = String(message.logEvent.data);
+                  }
+                }
+
                 return (
                   <div key={message.id || 'log-' + index} className="message log-message">
-                    <div className="message-content">
+                    <button
+                      type="button"
+                      className="log-header"
+                      aria-expanded={isExpanded}
+                      $onclick={['toggle-log-details', message.id || `log-${index}`]}
+                    >
                       <span className={`log-dot ${message.logEvent.level}`}></span>
-                      <span className="log-category">{message.logEvent.category}:</span>
+                      <span className="log-category">{message.logEvent.category}</span>
                       <span className="log-content">{message.logEvent.message}</span>
-                    </div>
+                      <span className="log-toggle-icon" aria-hidden="true">
+                        {isExpanded ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {isExpanded && (
+                      <pre className="log-details">
+                        {formattedArgs ?? 'No additional details'}
+                      </pre>
+                    )}
                   </div>
                 );
               }

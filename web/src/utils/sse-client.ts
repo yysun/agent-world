@@ -465,6 +465,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
     createdAt: new Date(logEvent.timestamp),
     type: 'log',
     logEvent: logEvent,
+    isLogExpanded: false,
     // Ensure log messages are always displayed
     messageId: uniqueId,
     worldName: data.worldName || streamingState.currentWorldName

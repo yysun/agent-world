@@ -149,6 +149,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               messagesLoading={state.messagesLoading}
               isSending={state.isSending}
               isWaiting={state.isWaiting}
+              needScroll={state.needScroll}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
@@ -313,4 +314,3 @@ export default class WorldComponent extends Component<WorldComponentState> {
 
   };
 }
-

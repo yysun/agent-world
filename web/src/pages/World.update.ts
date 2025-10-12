@@ -94,6 +94,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       currentChat: world.chats.find(c => c.id === chatId) || null,
       messages,
       loading: false,
+      needScroll: true,
     };
 
   } catch (error: any) {
@@ -101,6 +102,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       ...state,
       error: error.message || 'Failed to load world data',
       loading: false,
+      needScroll: false,
     };
   }
 }
@@ -235,11 +237,23 @@ export const worldUpdateHandlers = {
     const messageText = state.userInput?.trim();
     if (!messageText) return state;
 
+    const userMessage = {
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      sender: 'human',
+      text: messageText,
+      createdAt: new Date(),
+      type: 'user',
+      userEntered: true,
+      worldName: state.worldName
+    };
+
     const newState = {
       ...state,
+      messages: [...(state.messages || []), userMessage],
       userInput: '',
       isSending: true,
-      isWaiting: true
+      isWaiting: true,
+      needScroll: true
     };
 
     try {
@@ -266,6 +280,33 @@ export const worldUpdateHandlers = {
   handleMessageEvent,
   handleSystemEvent,
   handleError,
+
+  'toggle-log-details': (state: WorldComponentState, messageId: string | number): WorldComponentState => {
+    if (!messageId || !state.messages) {
+      return state;
+    }
+
+    const messages = state.messages.map(msg => {
+      if (String(msg.id) === String(messageId)) {
+        return {
+          ...msg,
+          isLogExpanded: !msg.isLogExpanded
+        };
+      }
+      return msg;
+    });
+
+    return {
+      ...state,
+      messages,
+      needScroll: false
+    };
+  },
+
+  'ack-scroll': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    needScroll: false
+  }),
 
   // Memory management handlers
   'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {

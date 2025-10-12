@@ -58,6 +58,7 @@ export interface Message {
 
   // Phase 2.2 Enhancement: Tool execution event properties
   isToolEvent?: boolean;
+  isLogExpanded?: boolean;
   toolEventType?: 'start' | 'progress' | 'result' | 'error';
   toolExecution?: {
     toolName: string;
@@ -140,6 +141,7 @@ export interface WorldChatProps {
   messagesLoading: boolean;
   isSending: boolean;
   isWaiting: boolean;
+  needScroll?: boolean;
   activeAgent?: { spriteIndex: number; name: string } | null;
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
@@ -290,4 +292,3 @@ export interface ApiRequestOptions {
   body?: string;
   [key: string]: any;
 }
-
