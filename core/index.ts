@@ -45,6 +45,7 @@ export {
 
 export {
   exportWorldToMarkdown,
+  exportChatToMarkdown,
 } from './export.js';
 
 // === AGENT MANAGEMENT ===
@@ -66,6 +67,7 @@ export {
 export {
   newChat,
   listChats,
+  updateChat,
   deleteChat,
   restoreChat
 } from './managers.js';

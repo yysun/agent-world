@@ -536,14 +536,14 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     }
 
     // Show usage tips
-    console.log(`\n${gray('Tips:')}`);
-    console.log(`  ${bullet(gray('Short commands:'))} ${cyan('/list')}, ${cyan('/show agent1')}, ${cyan('/edit agent1')}, ${cyan('/del agent1')}`);
-    console.log(`  ${bullet(gray('Context-sensitive:'))} ${cyan('/list')} ${gray('shows agents if world selected, worlds otherwise')}`);
-    console.log(`  ${bullet(gray('Legacy commands:'))} ${cyan('/clear agent1')}, ${cyan('/clear all')}, ${cyan('/add MyAgent')}`);
-    console.log(`  ${bullet(gray('Use'))} ${cyan('/select')} ${gray('to choose a different world')}`);
-    console.log(`  ${bullet(gray('Type messages to send to agents'))}`);
-    console.log(`  ${bullet(gray('Use'))} ${cyan('/quit')} ${gray('or')} ${cyan('/exit')} ${gray('to exit, or press')} ${boldYellow('Ctrl+C')}`);
-    console.log(`  ${bullet(gray('Use'))} ${cyan('--logLevel debug')} ${gray('to see detailed debug messages')}`);
+    console.log(`\n${gray('Quick Start:')}`);
+    console.log(`  ${bullet(gray('World commands:'))} ${cyan('/world list')}, ${cyan('/world create')}, ${cyan('/world select')}`);
+    console.log(`  ${bullet(gray('Agent commands:'))} ${cyan('/agent list')}, ${cyan('/agent create Ava')}, ${cyan('/agent update Ava')}`);
+    console.log(`  ${bullet(gray('Chat commands:'))} ${cyan('/chat list --active')}, ${cyan('/chat create')}, ${cyan('/chat export')}`);
+    console.log(`  ${bullet(gray('Need help?'))} ${cyan('/help world')}, ${cyan('/help agent')}, ${cyan('/help chat')}`);
+    console.log(`  ${bullet(gray('Type messages to talk with the world'))}`);
+    console.log(`  ${bullet(gray('Exit with'))} ${cyan('/quit')} ${gray('or')} ${cyan('/exit')} ${gray('or press')} ${boldYellow('Ctrl+C')}`);
+    console.log(`  ${bullet(gray('Enable debug logs via'))} ${cyan('--logLevel debug')}`);
     console.log('');
 
     rl.prompt();

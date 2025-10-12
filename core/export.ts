@@ -52,33 +52,41 @@ async function initializeModules() {
 
 const moduleInitialization = initializeModules();
 
+async function buildAgentMap(worldId: string, agentSummaries?: Agent[]): Promise<Map<string, Agent>> {
+  const summaries = agentSummaries ?? await listAgents(worldId);
+  const agentsMap = new Map<string, Agent>();
+  for (const agentInfo of summaries) {
+    const fullAgent = await getAgent(worldId, agentInfo.id);
+    if (fullAgent) {
+      agentsMap.set(fullAgent.id, fullAgent);
+    }
+  }
+  return agentsMap;
+}
+
+function formatSenderLabel(message: AgentMessage, agentsMap: Map<string, Agent>): string | undefined {
+  const raw = message.sender;
+  const agent = message.agentId ? agentsMap.get(message.agentId) : null;
+  const agentName = agent ? agent.name : message.agentId;
+
+  if (message.role === 'user' || message.role === 'assistant') {
+    if (raw) {
+      const senderLabel = raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
+      return agentName ? `${senderLabel} → ${agentName}` : senderLabel;
+    }
+    return agentName || undefined;
+  }
+
+  if (raw) {
+    return raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
+  }
+  return undefined;
+}
+
 /**
  * Export world configuration, agents, and chats to Markdown format
  */
 export async function exportWorldToMarkdown(worldName: string): Promise<string> {
-
-  function formatSenderLabel(message: AgentMessage, agentsMap: Map<string, Agent>): string | undefined {
-    const raw = message.sender;
-    const agent = message.agentId ? agentsMap.get(message.agentId) : null;
-    const agentName = agent ? agent.name : message.agentId;
-
-    if (message.role === 'user' || message.role === 'assistant') {
-      if (raw) {
-        // If there is a sender, show "sender → agent name"
-        const senderLabel = raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
-        return agentName ? `${senderLabel} → ${agentName}` : senderLabel;
-      } else {
-        // Otherwise, show just the agent name
-        return agentName || undefined;
-      }
-    }
-
-    // For system messages or other roles, keep original behavior
-    if (raw) {
-      return raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
-    }
-    return undefined;
-  }
   await moduleInitialization;
 
   // Load world configuration
@@ -88,15 +96,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
   }
 
   const agents = await listAgents(worldData.id);
-
-  // Create agents map for quick lookup
-  const agentsMap = new Map<string, Agent>();
-  for (const agentInfo of agents) {
-    const fullAgent = await getAgent(worldData.id, agentInfo.id);
-    if (fullAgent) {
-      agentsMap.set(fullAgent.id, fullAgent);
-    }
-  }
+  const agentsMap = await buildAgentMap(worldData.id, agents);
 
   // Get the current chat directly from the world, if any
   const currentChat = worldData.currentChatId ? worldData.chats.get(worldData.currentChatId) : null;
@@ -288,6 +288,71 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
   markdown += `- **Agent World Version:** ${process.env.npm_package_version || 'Unknown'}\n`;
   markdown += `- **Total Export Size:** ${markdown.length} characters\n`;
   markdown += `- **Sections:** World Configuration, Agents (${agents.length}), Current Chat (${hasCurrentChat ? 1 : 0})\n`;
+
+  return markdown;
+}
+
+export async function exportChatToMarkdown(worldId: string, chatId: string): Promise<string> {
+  await moduleInitialization;
+
+  const worldData = await getWorld(worldId);
+  if (!worldData) {
+    throw new Error(`World '${worldId}' not found`);
+  }
+
+  const chat = worldData.chats.get(chatId);
+  if (!chat) {
+    throw new Error(`Chat '${chatId}' not found in world '${worldData.name}'`);
+  }
+
+  const agentsMap = await buildAgentMap(worldData.id);
+  const chatMessages = await getMemory(worldData.id, chatId);
+  const messages = Array.isArray(chatMessages) ? [...chatMessages] : [];
+
+  const createdAt = chat.createdAt instanceof Date ? chat.createdAt : new Date(chat.createdAt);
+  const updatedAt = chat.updatedAt instanceof Date ? chat.updatedAt : new Date(chat.updatedAt);
+
+  let markdown = `# Chat Export: ${chat.name}\n\n`;
+  markdown += `**World:** ${worldData.name} (${worldData.id})\n`;
+  markdown += `**Chat ID:** ${chat.id}\n`;
+  markdown += `**Created:** ${createdAt.toISOString()}\n`;
+  markdown += `**Updated:** ${updatedAt.toISOString()}\n`;
+  markdown += `**Recorded Messages:** ${chat.messageCount}\n`;
+  markdown += `**Exported Messages:** ${messages.length}\n`;
+  if (chat.description) {
+    markdown += `**Description:** ${chat.description}\n`;
+  }
+  markdown += `\n`;
+
+  if (messages.length === 0) {
+    markdown += '## Messages\n\nNo messages found for this chat.\n';
+    return markdown;
+  }
+
+  const sortedMessages = messages.sort((a, b) => {
+    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return dateA - dateB;
+  });
+
+  markdown += `## Messages (${sortedMessages.length})\n\n`;
+
+  sortedMessages.forEach((message, index) => {
+    const senderLabel = formatSenderLabel(message, agentsMap) || message.role.toUpperCase();
+    const timestamp = message.createdAt ? new Date(message.createdAt).toISOString() : 'Unknown';
+    const agentName = message.agentId ? agentsMap.get(message.agentId)?.name || message.agentId : undefined;
+
+    markdown += `### ${index + 1}. ${senderLabel}\n`;
+    markdown += `- **Role:** ${message.role}\n`;
+    markdown += `- **Timestamp:** ${timestamp}\n`;
+    if (agentName) {
+      markdown += `- **Agent:** ${agentName}\n`;
+    }
+    if (message.chatId && message.chatId !== chatId) {
+      markdown += `- **Chat ID:** ${message.chatId}\n`;
+    }
+    markdown += `\n${message.content}\n\n`;
+  });
 
   return markdown;
 }

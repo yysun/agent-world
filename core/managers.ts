@@ -401,6 +401,28 @@ export async function listChats(worldId: string): Promise<Chat[]> {
   return await storageWrappers!.listChats(worldId);
 }
 
+export async function updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
+  await moduleInitialization;
+
+  const normalizedWorldId = utils.toKebabCase(worldId);
+  const chat = await storageWrappers!.updateChatData(normalizedWorldId, chatId, updates);
+
+  if (!chat) {
+    return null;
+  }
+
+  // When a chat is updated we refresh the cached world representation
+  const world = await getWorld(normalizedWorldId);
+  if (world && world.chats.has(chatId)) {
+    world.chats.set(chatId, {
+      ...world.chats.get(chatId)!,
+      ...chat
+    });
+  }
+
+  return chat;
+}
+
 export async function deleteChat(worldId: string, chatId: string): Promise<boolean> {
   await moduleInitialization;
 
