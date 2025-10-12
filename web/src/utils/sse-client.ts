@@ -479,7 +479,8 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
   return {
     ...state,
     messages: [...(state.messages || []), toolStartMessage],
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
 
@@ -504,7 +505,8 @@ export const handleToolProgress = <T extends SSEComponentState>(state: T, data: 
   return {
     ...state,
     messages,
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
 
@@ -535,7 +537,8 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
   return {
     ...state,
     messages,
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
 
@@ -573,13 +576,15 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
     return {
       ...state,
       messages: [...messages, toolErrorMessage],
-      needScroll: true
+      needScroll: true,
+      isWaiting: false
     };
   }
 
   return {
     ...state,
     messages,
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
