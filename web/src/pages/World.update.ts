@@ -142,11 +142,47 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     sender: senderName,
     text: messageData.content || messageData.message || '',
     createdAt: messageData.createdAt || new Date().toISOString(),
-    fromAgentId
+    fromAgentId,
+    messageId: messageData.messageId
   };
 
-  // Filter out temporary streaming messages and user-entered messages
-  state.messages = state.messages.filter(msg => !msg.userEntered && !msg.isStreaming);
+  const existingMessages = state.messages || [];
+  const normalizedSender = (senderName || '').toLowerCase();
+
+  // If a streaming placeholder exists for this sender, convert it to the final message
+  const streamingIndex = existingMessages.findIndex(
+    msg => msg?.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender
+  );
+
+  if (streamingIndex !== -1) {
+    const updatedMessages = existingMessages
+      .map((msg, index) => {
+        if (index !== streamingIndex) {
+          return msg;
+        }
+
+        return {
+          ...msg,
+          ...newMessage,
+          id: newMessage.id,
+          isStreaming: false,
+          messageId: newMessage.messageId ?? msg.messageId
+        };
+      })
+      .filter(msg => !!msg && !msg.userEntered);
+
+    return {
+      ...state,
+      messages: updatedMessages,
+      needScroll: true
+    };
+  }
+
+  // Filter out temporary placeholders and user-entered messages before adding the new one
+  state.messages = existingMessages.filter(msg =>
+    !msg.userEntered &&
+    !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
+  );
   state.messages.push(newMessage);
 
   return {
