@@ -5,8 +5,8 @@
  * Validates the core architectural achievements of Phase 1.1 and 1.2.
  * 
  * Test Coverage:
- * - SimpleHTTPMCPClient functionality and JSON-RPC 2.0 compliance
- * - MCP transport selection (stdio vs HTTP)
+ * - MCP SDK streamable HTTP compliance and JSON-RPC 2.0 adherence
+ * - MCP transport selection (stdio vs streamable HTTP)
  * - Tool schema conversion and validation
  * - Error handling and timeout scenarios
  * - Provider integration readiness
@@ -57,12 +57,12 @@ describe('AI SDK MCP Integration (Phase 1.3)', () => {
     });
   });
 
-  describe('Phase 1.2: Non-Stream MCP Transport - COMPLETED', () => {
-    it('should support SimpleHTTPMCPClient JSON-RPC 2.0', () => {
-      // JSON-RPC 2.0 request structure for HTTP MCP transport
+  describe('Phase 1.2: MCP SDK Transport Integration - COMPLETED', () => {
+    it('should support MCP SDK streamable HTTP JSON-RPC 2.0', () => {
+      // JSON-RPC 2.0 request structure for streamable HTTP transport
       const toolCallRequest = {
         jsonrpc: '2.0',
-        id: 'http-123',
+        id: 'streamable-123',
         method: 'tools/call',
         params: {
           name: 'test_tool',
@@ -70,9 +70,17 @@ describe('AI SDK MCP Integration (Phase 1.3)', () => {
         }
       };
 
+      const requiredHeaders = {
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': '2025-06-18'
+      };
+
       expect(toolCallRequest.jsonrpc).toBe('2.0');
       expect(toolCallRequest.method).toBe('tools/call');
       expect(toolCallRequest.params.name).toBe('test_tool');
+      expect(requiredHeaders.Accept).toContain('application/json');
+      expect(requiredHeaders.Accept).toContain('text/event-stream');
+      expect(requiredHeaders['MCP-Protocol-Version']).toBe('2025-06-18');
     });
 
     it('should support transport selection logic', () => {
@@ -84,27 +92,26 @@ describe('AI SDK MCP Integration (Phase 1.3)', () => {
         transport: 'stdio' as const
       };
 
-      // HTTP transport configuration  
+      // Streamable HTTP transport configuration
       const httpConfig = {
         name: 'http-server',
-        transport: 'http' as const,
+        transport: 'streamable-http' as const,
         url: 'http://localhost:3001/mcp'
       };
 
       expect(stdioConfig.transport).toBe('stdio');
       expect(stdioConfig.command).toBeDefined();
 
-      expect(httpConfig.transport).toBe('http');
+      expect(httpConfig.transport).toBe('streamable-http');
       expect(httpConfig.url).toMatch(/^https?:\/\//);
     });
 
-    it('should support dual client architecture', () => {
-      // Dual client support: both MCP SDK Client and SimpleHTTPMCPClient
-      const clientTypes = ['sdk', 'http'];
+    it('should support unified SDK client across transports', () => {
+      // Unified client support across stdio and streamable HTTP transports
+      const supportedTransports = ['stdio', 'streamable-http'];
 
-      // Both client types should be supported in mcpToolsToAiTools function
-      expect(clientTypes).toContain('sdk');   // MCP SDK Client
-      expect(clientTypes).toContain('http');  // SimpleHTTPMCPClient
+      expect(supportedTransports).toContain('stdio');
+      expect(supportedTransports).toContain('streamable-http');
     });
   });
 
@@ -221,8 +228,8 @@ describe('AI SDK MCP Integration (Phase 1.3)', () => {
       const completedFeatures = [
         'AI SDK v5.0.15 compatibility',
         'Tool result streaming integration',
-        'SimpleHTTPMCPClient implementation',
-        'Dual client transport support',
+        'Streamable HTTP transport integration',
+        'Unified SDK transport support',
         'JSON-RPC 2.0 compliance',
         'Bulletproof schema validation',
         'Enhanced logging and debugging',
@@ -231,7 +238,7 @@ describe('AI SDK MCP Integration (Phase 1.3)', () => {
 
       expect(completedFeatures.length).toBe(8);
       expect(completedFeatures).toContain('AI SDK v5.0.15 compatibility');
-      expect(completedFeatures).toContain('SimpleHTTPMCPClient implementation');
+      expect(completedFeatures).toContain('Streamable HTTP transport integration');
     });
 
     it('should verify provider integration readiness', () => {

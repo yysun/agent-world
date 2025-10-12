@@ -108,153 +108,6 @@ function translateOllamaArguments(args: any, toolSchema: any): any {
 
 const logger = createCategoryLogger('llm.mcp');
 
-// === CUSTOM HTTP TRANSPORT FOR NON-STREAMING MCP ===
-
-/**
- * Simple HTTP-based MCP client transport using regular POST requests
- * This replaces StreamableHTTPClientTransport for reliable, non-streaming tool calls
- */
-class SimpleHTTPMCPClient {
-  private baseUrl: string;
-  private headers: Record<string, string>;
-
-  constructor(url: string, headers: Record<string, string> = {}) {
-    this.baseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-    this.headers = {
-      'Content-Type': 'application/json',
-      ...headers
-    };
-  }
-
-  async callTool(request: { name: string; arguments?: any }): Promise<any> {
-    const startTime = performance.now();
-    const requestId = `http-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    logger.debug(`HTTP MCP request starting`, {
-      requestId,
-      url: this.baseUrl,
-      toolName: request.name,
-      argsPresent: !!request.arguments,
-      argsKeys: request.arguments ? Object.keys(request.arguments) : []
-    });
-
-    try {
-      // Create JSON-RPC 2.0 request
-      const jsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: requestId,
-        method: 'tools/call',
-        params: {
-          name: request.name,
-          arguments: request.arguments || {}
-        }
-      };
-
-      logger.debug(`HTTP MCP request payload`, {
-        requestId,
-        payload: JSON.stringify(jsonRpcRequest, null, 2)
-      });
-
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(jsonRpcRequest)
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      const duration = performance.now() - startTime;
-
-      logger.debug(`HTTP MCP response received`, {
-        requestId,
-        duration: Math.round(duration * 100) / 100,
-        responsePayload: JSON.stringify(result, null, 2),
-        hasError: !!result.error,
-        hasResult: !!result.result
-      });
-
-      if (result.error) {
-        throw new Error(`MCP Server Error: ${result.error.message || JSON.stringify(result.error)}`);
-      }
-
-      return result.result;
-    } catch (error) {
-      const duration = performance.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      logger.error(`HTTP MCP request failed: ${errorMessage}`, {
-        requestId,
-        duration: Math.round(duration * 100) / 100,
-        url: this.baseUrl,
-        toolName: request.name,
-        error: errorMessage
-      });
-
-      throw error;
-    }
-  }
-
-  async listTools(): Promise<{ tools: Tool[] }> {
-    const startTime = performance.now();
-    const requestId = `list-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    logger.debug(`HTTP MCP list tools starting`, {
-      requestId,
-      url: this.baseUrl
-    });
-
-    try {
-      const jsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: requestId,
-        method: 'tools/list',
-        params: {}
-      };
-
-      const response = await fetch(this.baseUrl, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify(jsonRpcRequest)
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      const duration = performance.now() - startTime;
-
-      logger.debug(`HTTP MCP list tools response`, {
-        requestId,
-        duration: Math.round(duration * 100) / 100,
-        toolCount: result.result?.tools?.length || 0,
-        toolNames: result.result?.tools?.map((t: Tool) => t.name) || []
-      });
-
-      if (result.error) {
-        throw new Error(`MCP Server Error: ${result.error.message || JSON.stringify(result.error)}`);
-      }
-
-      return result.result || { tools: [] };
-    } catch (error) {
-      const duration = performance.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      logger.error(`HTTP MCP list tools failed: ${errorMessage}`, {
-        requestId,
-        duration: Math.round(duration * 100) / 100,
-        url: this.baseUrl,
-        error: errorMessage
-      });
-
-      throw error;
-    }
-  }
-}
-
 // === TYPE DEFINITIONS ===
 
 type MCPServerDefinition = {
@@ -265,7 +118,7 @@ type MCPServerDefinition = {
 } | {
   url: string;
   headers?: Record<string, string>;
-  transport: 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
+  transport: 'sse' | 'streamable-http' | 'http';  // 'http' is treated as streamable-http
 } | {
   type: 'http' | 'sse' | 'streamable-http'; // Legacy 'type' field support
   url: string;
@@ -279,7 +132,7 @@ export type MCPConfig = {
 
 export type MCPServerConfig = {
   name: string;
-  transport: 'stdio' | 'sse' | 'streamable-http' | 'http';  // Added 'http' for non-streaming
+  transport: 'stdio' | 'sse' | 'streamable-http' | 'http';  // 'http' is treated as streamable-http
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -290,8 +143,7 @@ export type MCPServerConfig = {
 export interface MCPServerInstance {
   id: string; // Hash of configuration for sharing
   config: MCPServerConfig;
-  client: Client | null; // Null during startup/shutdown (for stdio/sse/streamable-http)
-  httpClient: SimpleHTTPMCPClient | null; // For simple HTTP transport
+  client: Client | null; // Null during startup/shutdown
   status: 'starting' | 'running' | 'stopping' | 'error';
   referenceCount: number;
   startedAt: Date;
@@ -505,7 +357,7 @@ export function parseServersFromConfig(config: MCPConfig): MCPServerConfig[] {
 /**
  * Connect to an MCP server using the specified configuration
  */
-export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client | SimpleHTTPMCPClient> {
+export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<Client> {
   // Debug log: Connection details being used
   logger.debug(`MCP server connection attempt`, {
     serverName: serverConfig.name,
@@ -520,44 +372,15 @@ export async function connectMCPServer(serverConfig: MCPServerConfig): Promise<C
     }
   });
 
-  // Handle simple HTTP transport (non-streaming)
-  if (serverConfig.transport === 'http') {
-    logger.debug(`Using simple HTTP MCP client for non-streaming tool calls`, {
-      serverName: serverConfig.name,
-      url: serverConfig.url
-    });
-
-    const httpClient = new SimpleHTTPMCPClient(
-      serverConfig.url!,
-      serverConfig.headers || {}
-    );
-
-    // Test the connection by listing tools
-    try {
-      await httpClient.listTools();
-      logger.debug(`HTTP MCP client connection verified`, {
-        serverName: serverConfig.name,
-        url: serverConfig.url
-      });
-      return httpClient;
-    } catch (error) {
-      logger.error(`HTTP MCP client connection failed`, {
-        serverName: serverConfig.name,
-        url: serverConfig.url,
-        error: error instanceof Error ? error.message : error
-      });
-      throw error;
-    }
-  }
-
   // Handle traditional MCP SDK transports (stdio, sse, streamable-http)
-  const transport = serverConfig.transport === 'stdio' || !serverConfig.transport
+  const transportType = serverConfig.transport || 'stdio';
+  const transport = transportType === 'stdio'
     ? new StdioClientTransport({
       command: serverConfig.command!,
       args: serverConfig.args ?? [],
       env: serverConfig.env
     })
-    : serverConfig.transport === 'sse'
+    : transportType === 'sse'
       ? new SSEClientTransport(new URL(serverConfig.url!), {
         requestInit: { headers: serverConfig.headers }
       })
@@ -644,7 +467,7 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
     const client = await connectMCPServer(serverConfig);
 
     // Fetch and convert tools
-    const tools = await mcpToolsToAiTools(client, serverConfig.name);
+    const tools = await mcpToolsToAiTools(client, serverConfig.name, serverConfig.transport || 'stdio');
 
     // Cache the results
     const cacheEntry: ToolCacheEntry = {
@@ -689,27 +512,22 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
 /**
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
-export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, serverName: string) {
+export async function mcpToolsToAiTools(client: Client, serverName: string, transport: string = 'sdk') {
   logger.debug(`MCP tools list request starting`, {
     serverName,
     operation: 'listTools',
-    clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
+    transport
   });
 
   let toolsResponse: { tools: Tool[] };
 
-  if (client instanceof SimpleHTTPMCPClient) {
-    // Use simple HTTP client
-    toolsResponse = await client.listTools();
-  } else {
-    // Use MCP SDK client with timeout
-    const listToolsPromise = client.listTools();
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
-    });
+  // Use MCP SDK client with timeout
+  const listToolsPromise = client.listTools();
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
+  });
 
-    toolsResponse = await Promise.race([listToolsPromise, timeoutPromise]);
-  }
+  toolsResponse = await Promise.race([listToolsPromise, timeoutPromise]);
 
   const { tools } = toolsResponse;
 
@@ -749,7 +567,7 @@ export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, se
           parentToolCall,
           argsPresent: !!args,
           argsKeys: args ? Object.keys(args) : [],
-          clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
+          transport
         });
 
         // Debug log: Request data being sent to MCP server
@@ -764,15 +582,7 @@ export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, se
         });
 
         try {
-          let res: any;
-
-          if (client instanceof SimpleHTTPMCPClient) {
-            // Use simple HTTP client
-            res = await client.callTool(requestPayload);
-          } else {
-            // Use MCP SDK client
-            res = await client.callTool(requestPayload);
-          }
+          const res = await client.callTool(requestPayload);
 
           // Debug log: Raw response data received from MCP server
           logger.debug(`MCP server response payload`, {
@@ -826,7 +636,7 @@ export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, se
             resultPreview: typeof processedResult === 'string'
               ? processedResult.slice(0, 200) + (resultSize > 200 ? '...' : '')
               : JSON.stringify(processedResult).slice(0, 200) + '...',
-            clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
+            transport
           });
 
           return processedResult;
@@ -845,7 +655,7 @@ export async function mcpToolsToAiTools(client: Client | SimpleHTTPMCPClient, se
             duration: Math.round(duration * 100) / 100,
             error: errorMessage,
             errorStack: error instanceof Error ? error.stack : undefined,
-            clientType: client instanceof SimpleHTTPMCPClient ? 'http' : 'sdk'
+            transport
           });
 
           throw error;
@@ -944,7 +754,6 @@ export async function registerMCPServer(
     id: serverId,
     config,
     client: null,
-    httpClient: null, // Initialize new field
     status: 'starting',
     referenceCount: 1,
     startedAt: new Date(),
@@ -1095,15 +904,7 @@ export async function shutdownAllMCPServers(): Promise<void> {
 async function startServerAsync(serverInstance: MCPServerInstance): Promise<void> {
   try {
     const client = await connectMCPServer(serverInstance.config);
-
-    // Assign client based on type
-    if (client instanceof SimpleHTTPMCPClient) {
-      serverInstance.httpClient = client;
-      serverInstance.client = null;
-    } else {
-      serverInstance.client = client;
-      serverInstance.httpClient = null;
-    }
+    serverInstance.client = client;
 
     serverInstance.status = 'running';
     serverInstance.lastHealthCheck = new Date();
