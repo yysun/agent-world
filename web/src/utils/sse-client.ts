@@ -405,10 +405,12 @@ export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: Str
 export const handleStreamError = <T extends SSEComponentState>(state: T, data: StreamErrorData): T => {
   const { messageId, sender, error } = data;
 
+  let foundMatch = false;
   const messages = (state.messages || []).map(msg => {
     if (msg.isStreaming &&
       (msg.messageId === messageId ||
         (!messageId && msg.sender === sender && msg.type === 'agent-stream'))) {
+      foundMatch = true;
       return {
         ...msg,
         isStreaming: false,
@@ -419,9 +421,24 @@ export const handleStreamError = <T extends SSEComponentState>(state: T, data: S
     return msg;
   });
 
+  const nextMessages = foundMatch ? messages : [
+    ...(state.messages || []),
+    {
+      id: `stream-error-${Date.now()}`,
+      sender: sender || 'System',
+      text: '',
+      isStreaming: false,
+      hasError: true,
+      errorMessage: error,
+      messageId,
+      type: 'error'
+    } as any
+  ];
+
   return {
     ...state,
-    messages
+    messages: nextMessages,
+    isWaiting: false
   };
 };
 
