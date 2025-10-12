@@ -37,6 +37,7 @@
  * - Implemented tool call sequence tracking and dependency relationships
  * - Enhanced logging with result content analysis and execution status
  * - Fixed MCP tool result display: Follow-up responses now stream properly to UI
+ * - Added 'end' event emission after streaming completion to signal CLI properly
  */
 
 import OpenAI from 'openai';
@@ -216,6 +217,13 @@ export async function streamOpenAIResponse(
         }
       }
     }
+
+    // Emit 'end' event to signal streaming completion
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'end',
+      messageId,
+    });
 
     // Process function calls if any
     if (functionCalls.length > 0) {

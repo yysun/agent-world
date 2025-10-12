@@ -17,6 +17,9 @@
  * - Error handling with descriptive messages
  * - Configuration injection from llm-config module
  * - World-scoped event emission for proper isolation
+ *
+ * Recent Changes:
+ * - Added 'end' event emission after streaming completion to signal CLI properly
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -59,7 +62,7 @@ function convertMessagesToAnthropic(messages: ChatMessage[]): Anthropic.Messages
 
       if (msg.role === 'assistant' && msg.tool_calls) {
         const content: any[] = [];
-        
+
         if (msg.content) {
           content.push({
             type: 'text',
@@ -165,6 +168,13 @@ export async function streamAnthropicResponse(
       }
     }
 
+    // Emit 'end' event to signal streaming completion
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'end',
+      messageId,
+    });
+
     // Process tool calls if any
     if (toolUses.length > 0) {
       const sequenceId = generateId();
@@ -192,7 +202,7 @@ export async function streamAnthropicResponse(
 
       // Execute tool calls and get results
       const toolResults: ChatMessage[] = [];
-      
+
       for (let i = 0; i < toolUses.length; i++) {
         const toolUse = toolUses[i];
         const startTime = performance.now();
@@ -351,7 +361,7 @@ export async function generateAnthropicResponse(
 
       // Execute tool calls
       const toolResults: ChatMessage[] = [];
-      
+
       for (let i = 0; i < toolUses.length; i++) {
         const toolUse = toolUses[i];
         const startTime = performance.now();

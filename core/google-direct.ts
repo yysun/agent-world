@@ -28,6 +28,7 @@
  * - Added comprehensive tool execution tracking with performance metrics
  * - Implemented tool call sequence tracking and dependency relationships
  * - Enhanced logging with result content analysis and execution status
+ * - Added 'end' event emission after streaming completion to signal CLI properly
  */
 
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
@@ -192,6 +193,13 @@ export async function streamGoogleResponse(
         }
       }
     }
+
+    // Emit 'end' event to signal streaming completion
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'end',
+      messageId,
+    });
 
     // Process function calls if any
     if (functionCalls.length > 0) {
