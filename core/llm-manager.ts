@@ -322,6 +322,11 @@ async function executeStreamAgentResponse(
     const mcpTools = await getMCPToolsForWorld(world.id);
     const hasMCPTools = Object.keys(mcpTools).length > 0;
 
+    // Add tool usage instructions to system prompt when tools are available
+    if (hasMCPTools && llmMessages.length > 0 && llmMessages[0].role === 'system') {
+      llmMessages[0].content += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.';
+    }
+
     if (hasMCPTools) {
       loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
 
@@ -406,11 +411,12 @@ export async function generateAgentResponse(
   world: World,
   agent: Agent,
   messages: AgentMessage[],
-  _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void
+  _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
+  skipTools?: boolean
 ): Promise<string> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
-    return await executeGenerateAgentResponse(world, agent, messages);
+    return await executeGenerateAgentResponse(world, agent, messages, skipTools);
   });
 }
 
@@ -420,15 +426,22 @@ export async function generateAgentResponse(
 async function executeGenerateAgentResponse(
   world: World,
   agent: Agent,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  skipTools?: boolean
 ): Promise<string> {
   const llmMessages = stripCustomFieldsFromMessages(messages);
-  const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
-  llmMessages.unshift({ role: 'system', content: systemPrompt });
+  let systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
 
-  // Get MCP tools for this world
-  const mcpTools = await getMCPToolsForWorld(world.id);
+  // Get MCP tools for this world (skip if requested, e.g., for title generation)
+  const mcpTools = skipTools ? {} : await getMCPToolsForWorld(world.id);
   const hasMCPTools = Object.keys(mcpTools).length > 0;
+
+  // Add tool usage instructions to system prompt when tools are available
+  if (hasMCPTools) {
+    systemPrompt += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.';
+  }
+
+  llmMessages.unshift({ role: 'system', content: systemPrompt });
 
   if (hasMCPTools) {
     loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);

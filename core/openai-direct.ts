@@ -414,13 +414,17 @@ export async function generateOpenAIResponse(
         sequenceId,
         agentId: agent.id,
         toolCount: message.tool_calls.length,
-        toolNames: message.tool_calls.map(tc => tc.function.name)
+        toolNames: message.tool_calls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
       });
 
       // Execute function calls
       const toolResults: ChatMessage[] = [];
       for (let i = 0; i < message.tool_calls.length; i++) {
         const toolCall = message.tool_calls[i];
+
+        // Skip non-function tool calls
+        if (toolCall.type !== 'function') continue;
+
         const startTime = performance.now();
 
         try {
@@ -516,7 +520,7 @@ export async function generateOpenAIResponse(
         const assistantMessage: ChatMessage = {
           role: 'assistant',
           content: content,
-          tool_calls: message.tool_calls,
+          tool_calls: message.tool_calls.filter(tc => tc.type === 'function') as any,
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];

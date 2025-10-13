@@ -385,8 +385,13 @@ export async function newChat(worldId: string): Promise<World | null> {
   const chats = await listChats(worldId);
   const existingChat = chats.find(chat => chat.name === NEW_CHAT_CONFIG.REUSABLE_CHAT_TITLE);
 
+  // Only reuse existing "New Chat" if it's empty (has no messages)
   if (existingChat) {
-    return await updateWorld(worldId, { currentChatId: existingChat.id });
+    const messages = await storageWrappers!.getMemory(worldId, existingChat.id);
+    if (messages.length === 0) {
+      return await updateWorld(worldId, { currentChatId: existingChat.id });
+    }
+    // If chat has messages, fall through to create a new one
   }
 
   const chatData = await createChat(worldId, {

@@ -334,18 +334,18 @@ export async function processAgentMessage(
   const messageId = generateId();
 
   try {
-    // Always save incoming message to memory
-    await saveIncomingMessageToMemory(world, agent, messageEvent);
-
-    // Load conversation history (last 10 messages)
+    // Load conversation history from storage for current chat (last 10 messages)
+    // NOTE: Don't save incoming message yet to avoid duplication in prepareMessagesForLLM
     let conversationHistory: AgentMessage[] = [];
     try {
-      conversationHistory = agent.memory.slice(-10);
+      const storage = await getStorageWrappers();
+      const allMessages = await storage.getMemory(world.id, world.currentChatId);
+      conversationHistory = allMessages.slice(-10); // Get last 10 messages for current chat
     } catch (error) {
-      loggerMemory.warn('Could not load conversation history', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.warn('Could not load conversation history from storage', { agentId: agent.id, chatId: world.currentChatId, error: error instanceof Error ? error.message : error });
     }
 
-    // Prepare messages for LLM with chat ID filtering
+    // Prepare messages for LLM with history + current message
     const messageData: MessageData = {
       id: messageId,
       name: 'message',
@@ -353,7 +353,10 @@ export async function processAgentMessage(
       content: messageEvent.content,
       payload: {}
     };
-    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory, world.currentChatId);
+    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
+
+    // Now save the incoming message to memory before generating response
+    await saveIncomingMessageToMemory(world, agent, messageEvent);
 
     // Increment LLM call count and save agent state
     agent.llmCallCount++;
@@ -552,7 +555,8 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
     const firstAgent = Array.from(world.agents.values())[0];
 
     const storage = await getStorageWrappers();
-    const messages = await storage.getMemory(world.id);
+    // Load messages for current chat only, not all messages
+    const messages = await storage.getMemory(world.id, world.currentChatId);
     messages.push({ role: 'user', content });
 
     loggerChatTitle.debug('Calling LLM for title generation', {
@@ -576,7 +580,7 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
       `
     };
 
-    title = await generateAgentResponse(world, tempAgent, [userPrompt]);
+    title = await generateAgentResponse(world, tempAgent, [userPrompt], undefined, true); // skipTools = true for title generation
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 
   } catch (error) {
