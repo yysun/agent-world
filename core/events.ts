@@ -50,6 +50,8 @@ let globalStreamingEnabled = true;
 export function enableStreaming(): void { globalStreamingEnabled = true; }
 export function disableStreaming(): void { globalStreamingEnabled = false; }
 
+
+
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
 async function getStorageWrappers(): Promise<StorageAPI> {
@@ -105,6 +107,40 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     usage: data.usage
   };
   world.eventEmitter.emit('sse', sseEvent);
+
+  // Post-stream title update: when we get an 'end' SSE for a streaming response
+  if (sseEvent.type === 'end') {
+    queueMicrotask(async () => {
+      try {
+        if (!world.currentChatId) return;
+        const chat = world.chats.get(world.currentChatId);
+        if (!chat) return;
+        // Only update if still default title
+        if (chat.name === 'New Chat') {
+          const title = await generateChatTitleFromMessages(world, '');
+          if (title) {
+            chat.name = title;
+            const storage = await getStorageWrappers();
+            await storage.updateChatData(world.id, world.currentChatId, { name: title });
+            publishEvent(world, 'system', `chat-title-updated`);
+          }
+        }
+      } catch (err) {
+        loggerChatTitle.warn('Post-stream title update failed', { error: err instanceof Error ? err.message : err });
+      }
+    });
+  }
+}
+
+/**
+ * SSE subscription using World.eventEmitter
+ */
+export function subscribeToSSE(
+  world: World,
+  handler: (event: WorldSSEEvent) => void
+): () => void {
+  world.eventEmitter.on('sse', handler);
+  return () => world.eventEmitter.off('sse', handler);
 }
 
 // Check if response has any mention at paragraph beginning (prevents auto-mention loops)
@@ -521,23 +557,9 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
  * Subscribe world to messages with cleanup function
  */
 export function subscribeWorldToMessages(world: World): () => void {
-  return subscribeToMessages(world, async (event: WorldMessageEvent) => {
-
-    // if (event.sender.toLowerCase() === 'human' && world.currentChatId) {
-    if (world.currentChatId) {
-      const chat = world.chats.get(world.currentChatId || '') || null;
-      if (chat && chat.name === 'New Chat') {
-        const title = await generateChatTitleFromMessages(world, event.content);
-        if (title) {
-          chat.name = title;
-          const storage = await getStorageWrappers();
-          await storage.updateChatData(world.id, world.currentChatId, {
-            name: title
-          });
-          publishEvent(world, 'system', `chat-title-updated`);
-        }
-      }
-    }
+  return subscribeToMessages(world, async (_event: WorldMessageEvent) => {
+    // No-op for pre-stream title updates to avoid mid-stream refresh race conditions.
+    // Title updates will be handled post-stream on SSE 'end'.
   });
 }
 
@@ -548,6 +570,7 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
   loggerChatTitle.debug('Generating chat title', { worldId: world.id, contentStart: content.substring(0, 50) });
 
   let title = '';
+  let messages: any[] = [];
 
   const maxLength = 100; // Max title length
 
@@ -556,8 +579,8 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
 
     const storage = await getStorageWrappers();
     // Load messages for current chat only, not all messages
-    const messages = await storage.getMemory(world.id, world.currentChatId);
-    messages.push({ role: 'user', content });
+    messages = await storage.getMemory(world.id, world.currentChatId);
+    if (content) messages.push({ role: 'user', content });
 
     loggerChatTitle.debug('Calling LLM for title generation', {
       messageCount: messages.length,
@@ -566,8 +589,8 @@ async function generateChatTitleFromMessages(world: World, content: string): Pro
     });
 
     const tempAgent: any = {
-      provider: world.chatLLMProvider || firstAgent.provider,
-      model: world.chatLLMModel || firstAgent.model,
+      provider: world.chatLLMProvider || firstAgent?.provider || 'openai',
+      model: world.chatLLMModel || firstAgent?.model || 'gpt-4',
       systemPrompt: 'You are a helpful assistant that turns conversations into concise titles.',
       maxTokens: 20,
     };
@@ -589,7 +612,15 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
     });
   }
 
-  if (!title) title = content.trim();
+  if (!title) {
+    // Fallback: use content if provided, otherwise extract from first user message
+    title = content.trim();
+    if (!title && messages?.length > 0) {
+      const firstUserMsg = messages.find((msg: any) => msg.role === 'user');
+      title = firstUserMsg?.content?.substring(0, 50) || 'Chat';
+    }
+    if (!title) title = 'Chat';
+  }
 
   title = title.trim().replace(/^["']|["']$/g, ''); // Remove quotes
   title = title.replace(/[\n\r\*]+/g, ' '); // Replace newlines with spaces
