@@ -69,6 +69,7 @@
  * - Emergency clear function allows administrative queue reset when needed
  * - Proper error handling with promise rejection for failed calls
  * - Automatic queue processing with safety measures for edge cases
+ * - Timeout cleanup on promise resolution prevents resource leaks and Jest hanging
  *
  * Browser Safety Implementation:
  * - Zero process.env dependencies for browser compatibility
@@ -210,13 +211,20 @@ class LLMQueue {
         loggerQueue.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
         // Add processing timeout to prevent stuck queue
         const processPromise = item.execute();
+
+        // Store timeout ID so we can cancel it if process completes first
+        let timeoutId: NodeJS.Timeout;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
+          timeoutId = setTimeout(() => {
             reject(new Error(`LLM call timeout after ${this.processingTimeoutMs}ms for agent ${item.agentId}`));
           }, this.processingTimeoutMs);
         });
 
         const result = await Promise.race([processPromise, timeoutPromise]);
+
+        // Clear the timeout to prevent Jest from hanging
+        clearTimeout(timeoutId!);
+
         item.resolve(result);
         loggerQueue.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
       } catch (error) {

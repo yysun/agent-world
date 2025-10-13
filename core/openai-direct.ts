@@ -218,14 +218,8 @@ export async function streamOpenAIResponse(
       }
     }
 
-    // Emit 'end' event to signal streaming completion
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'end',
-      messageId,
-    });
-
     // Process function calls if any
+    // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
     if (functionCalls.length > 0) {
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (streaming)`, {
@@ -415,6 +409,13 @@ export async function streamOpenAIResponse(
         return followUpResponse;
       }
     }
+
+    // Emit 'end' event only when there are no tool calls (if there are tool calls, the recursive call will emit the 'end' event)
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'end',
+      messageId,
+    });
 
     logger.debug(`OpenAI Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
     return fullResponse;
