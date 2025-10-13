@@ -483,7 +483,8 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   return {
     ...state,
     messages: [...(state.messages || []), logMessage],
-    needScroll: true  // Auto-scroll to new log messages
+    needScroll: true,  // Auto-scroll to new log messages
+    isWaiting: false   // Hide three dots when server logs arrive
   };
 };
 
