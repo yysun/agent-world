@@ -166,6 +166,10 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 
     // PHASE 2.2 ENHANCEMENT: Tool-specific event handlers
     case 'tool-start':
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-start event missing toolExecution:', { eventData, messageId, agentName });
+      }
       publishEvent('handleToolStart', {
         messageId,
         sender: agentName,
@@ -184,6 +188,10 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'tool-result':
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-result event missing toolExecution:', { eventData, messageId, agentName });
+      }
       publishEvent('handleToolResult', {
         messageId,
         sender: agentName,
@@ -193,6 +201,10 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
 
     case 'tool-error':
+      // Debug: Check if toolExecution is missing
+      if (!eventData.toolExecution) {
+        console.warn('tool-error event missing toolExecution:', { eventData, messageId, agentName });
+      }
       publishEvent('handleToolError', {
         messageId,
         sender: agentName,
@@ -491,6 +503,12 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
 export const handleToolStart = <T extends SSEComponentState>(state: T, data: any): T => {
   const { messageId, sender, toolExecution } = data;
 
+  // Validate toolExecution data
+  if (!toolExecution || !toolExecution.toolName) {
+    console.warn('handleToolStart: Missing or invalid toolExecution data', { data, toolExecution });
+    return state;
+  }
+
   // Add tool start indicator message
   const toolStartMessage = {
     sender: sender,
@@ -514,6 +532,12 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
 
 export const handleToolProgress = <T extends SSEComponentState>(state: T, data: any): T => {
   const { messageId, sender, toolExecution } = data;
+
+  // Validate toolExecution data
+  if (!toolExecution || !toolExecution.toolName) {
+    console.warn('handleToolProgress: Missing or invalid toolExecution data', { data, toolExecution });
+    return state;
+  }
 
   // Update existing tool start message to show progress
   const messages = [...(state.messages || [])];
@@ -541,6 +565,12 @@ export const handleToolProgress = <T extends SSEComponentState>(state: T, data: 
 
 export const handleToolResult = <T extends SSEComponentState>(state: T, data: any): T => {
   const { messageId, sender, toolExecution } = data;
+
+  // Validate toolExecution data
+  if (!toolExecution || !toolExecution.toolName) {
+    console.warn('handleToolResult: Missing or invalid toolExecution data', { data, toolExecution });
+    return state;
+  }
 
   // Update existing tool message to show completion
   const messages = [...(state.messages || [])];
@@ -574,6 +604,12 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
 
 export const handleToolError = <T extends SSEComponentState>(state: T, data: any): T => {
   const { messageId, sender, toolExecution } = data;
+
+  // Validate toolExecution data
+  if (!toolExecution || !toolExecution.toolName) {
+    console.warn('handleToolError: Missing or invalid toolExecution data', { data, toolExecution });
+    return state;
+  }
 
   // Update existing tool message to show error
   const messages = [...(state.messages || [])];

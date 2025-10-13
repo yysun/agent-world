@@ -210,6 +210,18 @@ export async function streamAnthropicResponse(
         try {
           const tool = mcpTools[toolUse.name];
           if (tool && tool.execute) {
+            // Publish tool start event to frontend
+            publishSSE(world, {
+              agentName: agent.id,
+              type: 'tool-start',
+              messageId,
+              toolExecution: {
+                toolName: toolUse.name,
+                toolCallId: toolUse.id,
+                phase: 'starting'
+              }
+            });
+
             mcpLogger.debug(`MCP tool execution starting (Anthropic streaming)`, {
               sequenceId,
               toolIndex: i,
@@ -237,6 +249,21 @@ export async function streamAnthropicResponse(
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
             });
 
+            // Publish tool result event to frontend
+            publishSSE(world, {
+              agentName: agent.id,
+              type: 'tool-result',
+              messageId,
+              toolExecution: {
+                toolName: toolUse.name,
+                toolCallId: toolUse.id,
+                phase: 'completed',
+                duration: Math.round(duration * 100) / 100,
+                result: result,
+                resultSize: resultString.length
+              }
+            });
+
             toolResults.push({
               role: 'tool',
               content: resultString,
@@ -258,6 +285,20 @@ export async function streamAnthropicResponse(
             duration: Math.round(duration * 100) / 100,
             error: errorMessage,
             errorStack: error instanceof Error ? error.stack : undefined
+          });
+
+          // Publish tool error event to frontend
+          publishSSE(world, {
+            agentName: agent.id,
+            type: 'tool-error',
+            messageId,
+            toolExecution: {
+              toolName: toolUse.name,
+              toolCallId: toolUse.id,
+              error: errorMessage,
+              duration: Math.round(duration * 100) / 100,
+              phase: 'failed'
+            }
           });
 
           toolResults.push({

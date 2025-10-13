@@ -26,6 +26,9 @@ import {
   handleStreamEnd,
   handleStreamError,
   handleLogEvent,
+  handleToolError,
+  handleToolStart,
+  handleToolResult,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
@@ -281,6 +284,9 @@ export const worldUpdateHandlers = {
   handleMessageEvent,
   handleSystemEvent,
   handleError,
+  handleToolError,
+  handleToolStart,
+  handleToolResult,
 
   'toggle-log-details': (state: WorldComponentState, messageId: string | number): WorldComponentState => {
     if (!messageId || !state.messages) {

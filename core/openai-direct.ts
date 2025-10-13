@@ -252,6 +252,18 @@ export async function streamOpenAIResponse(
         try {
           const tool = mcpTools[toolCall.function.name];
           if (tool && tool.execute) {
+            // Publish tool start event to frontend
+            publishSSE(world, {
+              agentName: agent.id,
+              type: 'tool-start',
+              messageId,
+              toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                phase: 'starting'
+              }
+            });
+
             mcpLogger.debug(`MCP tool execution starting (streaming)`, {
               sequenceId,
               toolIndex: i,
@@ -274,6 +286,20 @@ export async function streamOpenAIResponse(
                 toolCallId: toolCall.id,
                 agentId: agent.id,
                 messageId
+              });
+
+              // Publish tool error event for argument parsing errors
+              publishSSE(world, {
+                agentName: agent.id,
+                type: 'tool-error',
+                messageId,
+                toolExecution: {
+                  toolName: toolCall.function.name,
+                  toolCallId: toolCall.id,
+                  error: `Tool arguments parse error: ${parseErr}`,
+                  duration: 0,
+                  phase: 'failed'
+                }
               });
 
               toolResults.push({
@@ -302,6 +328,21 @@ export async function streamOpenAIResponse(
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
             });
 
+            // Publish tool result event to frontend
+            publishSSE(world, {
+              agentName: agent.id,
+              type: 'tool-result',
+              messageId,
+              toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                phase: 'completed',
+                duration: Math.round(duration * 100) / 100,
+                result: result,
+                resultSize: resultString.length
+              }
+            });
+
             toolResults.push({
               role: 'tool',
               content: resultString,
@@ -323,6 +364,20 @@ export async function streamOpenAIResponse(
             duration: Math.round(duration * 100) / 100,
             error: errorMessage,
             errorStack: error instanceof Error ? error.stack : undefined
+          });
+
+          // Publish tool error event to frontend
+          publishSSE(world, {
+            agentName: agent.id,
+            type: 'tool-error',
+            messageId,
+            toolExecution: {
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              error: errorMessage,
+              duration: Math.round(duration * 100) / 100,
+              phase: 'failed'
+            }
           });
 
           toolResults.push({
