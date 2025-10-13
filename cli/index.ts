@@ -635,22 +635,22 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           console.log(success(result.message));
         }
 
-        if (result.data && !(result.data.sender === 'HUMAN')) {
-          // Print a concise summary of result.data if present and not already in message
-          if (result.data) {
-            if (typeof result.data === 'string') {
-              console.log(`${boldMagenta('Data:')} ${result.data}`);
-            } else if (result.data.name) {
-              // If it's an agent or world object
-              console.log(`${boldMagenta('Data:')} ${result.data.name}`);
-            } else if (Array.isArray(result.data)) {
-              console.log(`${boldMagenta('Data:')} ${result.data.length} items`);
-            } else {
-              // Fallback: print keys
-              console.log(`${boldMagenta('Data:')} ${Object.keys(result.data).join(', ')}`);
-            }
-          }
-        }
+        // if (result.data && !(result.data.sender === 'HUMAN')) {
+        //   // Print a concise summary of result.data if present and not already in message
+        //   if (result.data) {
+        //     if (typeof result.data === 'string') {
+        //       console.log(`${boldMagenta('Data:')} ${result.data}`);
+        //     } else if (result.data.name) {
+        //       // If it's an agent or world object
+        //       console.log(`${boldMagenta('Data:')} ${result.data.name}`);
+        //     } else if (Array.isArray(result.data)) {
+        //       console.log(`${boldMagenta('Data:')} ${result.data.length} items`);
+        //     } else {
+        //       // Fallback: print keys
+        //       console.log(`${boldMagenta('Data:')} ${Object.keys(result.data).join(', ')}`);
+        //     }
+        //   }
+        // }
 
         // Refresh world if needed
         if (result.refreshWorld && currentWorldName && worldState) {
