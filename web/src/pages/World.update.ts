@@ -210,7 +210,8 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
     ...state,
     error: errorMessage,
     messages: [...(state.messages || []), errorMsg],
-    needScroll: true
+    needScroll: true,
+    isWaiting: false
   };
 };
 
@@ -260,7 +261,7 @@ export const worldUpdateHandlers = {
       // Send the message via SSE stream
       const cleanup = await sendChatMessage(state.worldName, messageText, 'HUMAN');
 
-      // Note: isWaiting will be set to false by handleStreamStart when the stream actually starts
+      // Note: isWaiting will be set to false by handleStreamEnd when the stream completes or by handleStreamError/handleError on errors
       return { ...newState, isSending: false };
     } catch (error: any) {
       return {

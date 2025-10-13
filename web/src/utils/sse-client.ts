@@ -356,7 +356,7 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
     isStreaming: true,
     messageId: messageId,
   } as any);
-  const newState = { ...state, needScroll: true, isWaiting: false };
+  const newState = { ...state, needScroll: true };
   return newState;
 };
 
@@ -404,7 +404,7 @@ export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: Str
   const targetId = activeStreamMessageId ?? data.messageId;
 
   state.messages = state.messages.filter(msg => msg.messageId !== targetId);
-  return { ...state, activeStreamMessageId: undefined, needScroll: false };
+  return { ...state, activeStreamMessageId: undefined, needScroll: false, isWaiting: false };
 };
 
 // Handle streaming errors
@@ -483,8 +483,7 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   return {
     ...state,
     messages: [...(state.messages || []), logMessage],
-    needScroll: true,  // Auto-scroll to new log messages
-    isWaiting: false   // Hide three dots when server logs arrive
+    needScroll: true  // Auto-scroll to new log messages
   };
 };
 
