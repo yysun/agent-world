@@ -10,19 +10,10 @@
  * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
  * - Enhanced handleStreamingChat with intelligent timeout management:
  *   - Tracks active agents and pending events to prevent premature stream closure
- *   - Implements adaptive timeout logi  } catch (error) {
-      } catch (error) {
-    loggerChat.error('Error deleting chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName, chatId: req.params.chatId });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to delete chat', 'CHAT_DELETE_ERROR');
-    }
-  }Chat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
-    if (!res.headersSent) {
-      sendError(res, 500, 'Failed to process chat message', 'CHAT_ERROR');
-    }
-  }normal, 3s check intervals, 15s max without events)
+ *   - Implements adaptive timeout logic (12s initial, 3s check intervals, 15s max without events)
  *   - Better error handling that doesn't immediately close streams on non-critical errors
  *   - Agent activity tracking via SSE start/end events for accurate completion detection
+ *   - **MCP tool execution tracking via tool-start/tool-result/tool-error events to prevent timeout during long-running tool calls**
  *   - Detailed logging for debugging streaming issues
  *   - Graceful handling of race conditions between timers and event processing
  */
@@ -629,6 +620,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   let lastEventTime = Date.now();
   let activeAgents = new Set<string>();
   let pendingEvents = 0;
+  let activeToolCalls = new Set<string>(); // Track active MCP tool executions
 
   const resetTimer = (delay: number = 8000): void => {
     if (timer) clearTimeout(timer);
@@ -637,9 +629,9 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     timer = setTimeout(() => {
       if (!isResponseEnded) {
         const timeSinceLastEvent = Date.now() - lastEventTime;
-        const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0;
+        const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0 || activeToolCalls.size > 0;
 
-        loggerStream.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}`);
+        loggerStream.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}, activeToolCalls=${activeToolCalls.size}`);
 
         // Only end if we've had events and no recent activity
         if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
@@ -666,7 +658,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       timer = undefined;
     }
 
-    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}`);
+    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}, activeToolCalls=${activeToolCalls.size}`);
 
     try {
       if (!res.destroyed) {
@@ -707,6 +699,18 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
             activeAgents.delete(agentName);
             pendingEvents = Math.max(0, pendingEvents - 1);
             loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+          }
+          // Track MCP tool executions to prevent premature stream closure
+          else if (eventData.type === 'tool-start') {
+            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
+            activeToolCalls.add(toolKey);
+            pendingEvents++;
+            loggerStream.debug(`Tool start: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
+          } else if (eventData.type === 'tool-result' || eventData.type === 'tool-error') {
+            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
+            activeToolCalls.delete(toolKey);
+            pendingEvents = Math.max(0, pendingEvents - 1);
+            loggerStream.debug(`Tool ${eventData.type === 'tool-error' ? 'error' : 'complete'}: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
           }
         }
       }
