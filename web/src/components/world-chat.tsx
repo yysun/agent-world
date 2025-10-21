@@ -5,7 +5,11 @@
  * - Real-time message streaming with agent selection filtering
  * - Cross-agent message detection and system message display
  * - User input handling with send functionality and loading states
+ * - Message editing with backend integration (edit button shows only when messageId is available)
  * - AppRun JSX with props-based state management
+ *
+ * Changes:
+ * - 2025-10-21: Edit button only shown for saved messages (messageId present, not userEntered)
  */
 
 import { app, safeHTML } from 'apprun';
@@ -149,7 +153,7 @@ export default function WorldChat(props: WorldChatProps) {
                       <div className="message-content">
                         {safeHTML(renderMarkdown(message.text))}
                       </div>
-                      {isUserMessage && !message.isStreaming && (
+                      {isUserMessage && !message.isStreaming && !message.userEntered && message.messageId && (
                         <button
                           className="message-edit-btn"
                           $onclick={['start-edit-message', message.id, message.text]}

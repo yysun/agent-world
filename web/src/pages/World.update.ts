@@ -13,8 +13,22 @@
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
  * - Smooth streaming indicator management (removed after final message displayed)
+ * - Message editing with backend API integration (remove + resubmit)
  *
- * Updated: 2025-08-09 - Removed selectedSettingsTarget localStorage persistence
+ * Message Edit Feature:
+ * - Uses backend messageId (server-generated) for message identification
+ * - Calls DELETE /worlds/:worldName/messages/:messageId endpoint
+ * - Validates session mode and chat context before editing
+ * - Optimistic UI updates with error rollback
+ * - Comprehensive error handling (423 Locked, 404 Not Found, 400 Bad Request)
+ * - Handles partial failures and session mode OFF scenarios
+ * - Updates userEntered placeholders with messageId when backend confirms message
+ * - Edit button only shown after message is saved (messageId present)
+ *
+ * Changes:
+ * - 2025-10-21: Fixed userEntered message handling - preserve and update with messageId from backend
+ * - 2025-10-21: Integrated message edit with backend API (remove-and-resubmit approach)
+ * - 2025-08-09: Removed selectedSettingsTarget localStorage persistence
  */
 
 import { app } from 'apprun';
@@ -183,9 +197,36 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     };
   }
 
-  // Filter out temporary placeholders and user-entered messages before adding the new one
+  // Check if this is a user message that matches a userEntered placeholder
+  const userEnteredIndex = existingMessages.findIndex(
+    msg => msg.userEntered &&
+      (msg.sender || '').toLowerCase() === 'human' &&
+      (senderName || '').toLowerCase() === 'human'
+  );
+
+  if (userEnteredIndex !== -1) {
+    // Update the existing userEntered message with backend data (especially messageId)
+    const updatedMessages = existingMessages.map((msg, index) => {
+      if (index !== userEnteredIndex) {
+        return msg;
+      }
+      return {
+        ...msg,
+        ...newMessage,
+        userEntered: false, // No longer a placeholder
+        messageId: newMessage.messageId // Critical: preserve backend messageId
+      };
+    });
+
+    return {
+      ...state,
+      messages: updatedMessages,
+      needScroll: true
+    };
+  }
+
+  // Filter out temporary placeholders (but keep userEntered for now) before adding the new one
   state.messages = existingMessages.filter(msg =>
-    !msg.userEntered &&
     !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
   );
   state.messages.push(newMessage);
@@ -337,19 +378,42 @@ export const worldUpdateHandlers = {
     const editedText = state.editingText?.trim();
     if (!editedText) return state;
 
-    // Find the index of the edited message
+    // Find the message by frontend ID
+    const message = state.messages.find(msg => msg.id === messageId);
+    if (!message) {
+      return {
+        ...state,
+        error: 'Message not found',
+        editingMessageId: null,
+        editingText: ''
+      };
+    }
+
+    // Check if message has backend messageId
+    if (!message.messageId) {
+      return {
+        ...state,
+        error: 'Cannot edit message: missing message ID. Message may not be saved yet.',
+        editingMessageId: null,
+        editingText: ''
+      };
+    }
+
+    // Check if we have a current chat
+    if (!state.currentChat?.id) {
+      return {
+        ...state,
+        error: 'Cannot edit message: no active chat session',
+        editingMessageId: null,
+        editingText: ''
+      };
+    }
+
+    // Optimistically update UI: remove messages from edited message onwards
     const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
-    if (editedIndex === -1) return state;
+    const updatedMessages = editedIndex >= 0 ? state.messages.slice(0, editedIndex) : state.messages;
 
-    // Update the message text in place, mark as userEntered, and remove all messages after it
-    const updatedMessages = state.messages.slice(0, editedIndex + 1).map((msg, idx) =>
-      idx === editedIndex
-        ? { ...msg, text: editedText, createdAt: new Date(), userEntered: true }
-        : msg
-    );
-
-    // Clear editing state and prepare for resubmission
-    const newState = {
+    const optimisticState = {
       ...state,
       messages: updatedMessages,
       editingMessageId: null,
@@ -360,15 +424,73 @@ export const worldUpdateHandlers = {
     };
 
     try {
-      // Resubmit the edited message
-      const cleanup = await sendChatMessage(state.worldName, editedText, 'HUMAN');
-      return { ...newState, isSending: false };
-    } catch (error: any) {
+      // Call backend API to edit message (remove + resubmit)
+      const result = await api.editMessage(
+        state.worldName,
+        message.messageId,
+        state.currentChat.id,
+        editedText
+      );
+
+      // Check for various response statuses
+      if (!result.success) {
+        // Partial failure - some agents failed
+        const failedAgentNames = result.failedAgents?.map((f: any) => f.agentId).join(', ');
+        return {
+          ...state,
+          isSending: false,
+          isWaiting: false,
+          error: `Message edit partially failed for agents: ${failedAgentNames}. ${result.messagesRemovedTotal} messages removed.`
+        };
+      }
+
+      // Check resubmission status
+      if (result.resubmissionStatus === 'failed') {
+        return {
+          ...state,
+          isSending: false,
+          isWaiting: false,
+          error: `Messages removed successfully, but resubmission failed: ${result.resubmissionError || 'Unknown error'}`
+        };
+      }
+
+      if (result.resubmissionStatus === 'skipped') {
+        // Session mode is OFF - removal succeeded but no resubmission
+        return {
+          ...state,
+          isSending: false,
+          isWaiting: false,
+          error: 'Message removed, but resubmission skipped (session mode is OFF). Please enable session mode to resubmit.'
+        };
+      }
+
+      // Success - message will arrive via SSE, so just clear sending state
       return {
-        ...newState,
+        ...optimisticState,
+        isSending: false
+        // Keep isWaiting: true until SSE events complete
+      };
+
+    } catch (error: any) {
+      // Handle specific error cases
+      let errorMessage = error.message || 'Failed to edit message';
+
+      if (error.message?.includes('423')) {
+        errorMessage = 'Cannot edit message: world is currently processing. Please try again in a moment.';
+      } else if (error.message?.includes('404')) {
+        errorMessage = 'Message not found in agent memories. It may have been already deleted.';
+      } else if (error.message?.includes('400')) {
+        errorMessage = 'Invalid message: only user messages can be edited.';
+      }
+
+      // Restore original messages on error
+      return {
+        ...state,
         isSending: false,
         isWaiting: false,
-        error: error.message || 'Failed to send edited message'
+        editingMessageId: null,
+        editingText: '',
+        error: errorMessage
       };
     }
   },

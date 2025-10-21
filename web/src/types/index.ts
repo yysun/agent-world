@@ -6,15 +6,17 @@
  * - Consolidates duplicate interfaces across web components
  * - Single source of truth for UI state management and server communication
  * - Type-safe SSE event handling and component state management
+ * - Message edit types (RemovalResult) for backend API integration
  * 
  * Implementation:
- * - Re-exports essential core types for consistency
+ * - Re-exports essential core types for consistency (AgentMessage, RemovalResult, etc.)
  * - UI-specific Message interface for streaming and error states  
  * - Agent/World interfaces matching server serialization format
  * - Consolidated AppRun component state interfaces
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2025-10-21: Added RemovalResult export for message edit API integration
  * - Consolidated comment blocks - removed redundant feature descriptions
  * - Streamlined type imports - only essential core type dependencies
  * - Eliminated duplicate interface documentation
@@ -22,8 +24,8 @@
  */
 
 // Essential core type imports
-import type { AgentMessage, LLMProvider, EventType, SenderType } from '../../../core/types';
-export type { EventType, SenderType, AgentMessage, LLMProvider };
+import type { AgentMessage, LLMProvider, EventType, SenderType, RemovalResult } from '../../../core/types';
+export type { EventType, SenderType, AgentMessage, LLMProvider, RemovalResult };
 
 // ========================================
 // UI DATA INTERFACES

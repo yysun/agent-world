@@ -5,6 +5,7 @@
  * - World management (CRUD operations, export)
  * - Agent operations (CRUD, memory management)
  * - Chat history management (create, load, restore state)
+ * - Message editing (remove + resubmit with backend memory update)
  * - Error handling with structured responses
  * - TypeScript support with consolidated types
  * 
@@ -15,6 +16,10 @@
  * - Agent memory available via world.agents[].memory instead of separate endpoint
  * - Clear agent memory uses existing DELETE endpoint with clearMemory flag
  * - Chat summarization handled by core, no separate API needed
+ * - Message editing uses DELETE /worlds/:worldName/messages/:messageId endpoint
+ *
+ * Changes:
+ * - 2025-10-21: Added editMessage() function for message edit backend integration
  */
 
 import type {
@@ -307,6 +312,29 @@ async function newChat(worldName: string): Promise<{
   return await response.json();
 }
 
+/**
+ * Edit a message by removing it and subsequent messages, then resubmitting with new content
+ */
+async function editMessage(
+  worldName: string,
+  messageId: string,
+  chatId: string,
+  newContent: string
+): Promise<any> {
+  if (!worldName || !messageId || !chatId || !newContent) {
+    throw new Error('World name, message ID, chat ID, and new content are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ chatId, newContent }),
+    }
+  );
+  return response.json();
+}
+
 // Export the API functions
 export default {
   // Core API function
@@ -333,6 +361,9 @@ export default {
   setChat,
   deleteChat,
   newChat,
+
+  // Message management
+  editMessage,
 };
 
 
