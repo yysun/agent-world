@@ -16,6 +16,13 @@
  *   - **MCP tool execution tracking via tool-start/tool-result/tool-error events to prevent timeout during long-running tool calls**
  *   - Detailed logging for debugging streaming issues
  *   - Graceful handling of race conditions between timers and event processing
+ * - 2025-10-21: Added user message edit endpoint (DELETE /worlds/:worldName/messages/:messageId)
+ *   - Validates request body (chatId, newContent)
+ *   - Checks world.isProcessing flag (returns 423 Locked if true)
+ *   - Verifies message exists and is user message (404/400 errors)
+ *   - Calls editUserMessage() core function for removal + resubmission
+ *   - Returns comprehensive RemovalResult with appropriate status codes
+ *   - Handles session mode OFF gracefully (removal succeeds, resubmission skipped)
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';

@@ -10,10 +10,11 @@
  * - Agent message management with automatic agentId assignment
  * - Message ID migration for user message edit feature
  * - User message editing with removal and resubmission
+ * - Error logging for message edit operations
  *
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
  * Chat (newChat/listChats/deleteChat/restoreChat), Migration (migrateMessageIds), 
- * MessageEdit (removeMessagesFrom/resubmitMessageToWorld/editUserMessage)
+ * MessageEdit (removeMessagesFrom/resubmitMessageToWorld/editUserMessage/logEditError/getEditErrors)
  *
  * Implementation Details:
  * - Ensures all agent messages include agentId for proper export functionality
@@ -22,6 +23,15 @@
  * - Idempotent message ID migration supporting both file and SQL storage
  * - Session mode validation for message resubmission
  * - Comprehensive error tracking for partial failures
+ * - Error log persistence with 100-entry retention policy
+ *
+ * Changes:
+ * - 2025-10-21: Added message ID migration and user message edit feature (Phases 1 & 2)
+ *   - migrateMessageIds: Auto-assign IDs to existing messages (idempotent)
+ *   - removeMessagesFrom: Remove target + subsequent messages by timestamp
+ *   - resubmitMessageToWorld: Resubmit with session mode validation
+ *   - editUserMessage: Combined removal + resubmission operation
+ *   - logEditError/getEditErrors: Error persistence in edit-errors.json
  *
  * Note: Export functionality has been moved to core/export.ts
  */// Core module imports
