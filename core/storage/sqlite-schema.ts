@@ -7,11 +7,12 @@
  * - Optimized indexes for performance
  * - Rich archive metadata with search capabilities
  * - Migration support from file-based storage
+ * - Message identification for user message edit feature
  *
  * Schema Design:
  * - worlds: Core world configuration and metadata
  * - agents: Agent configuration with LLM settings
- * - agent_memory: Current active conversation memory
+ * - agent_memory: Current active conversation memory (includes message_id)
  * - memory_archives: Archive session metadata with rich information
  * - archived_messages: Historical conversation content linked to archives
  * - archive_statistics: Usage analytics and management data
@@ -24,6 +25,7 @@
  * - Prepared statements for security and performance
  * - 2025-07-27: Ensures parent directory for SQLite database exists before opening (prevents SQLITE_CANTOPEN)
  * - 2025-08-06: Fixed migration logic to properly handle existing databases missing chat_id column
+ * - 2025-10-21: Added message_id column to agent_memory table for user message edit feature (version 6 migration)
  */
 
 // Types only import - will be stripped at runtime
@@ -163,6 +165,7 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       agent_id TEXT NOT NULL,
       world_id TEXT NOT NULL,
+      message_id TEXT,
       role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
       content TEXT NOT NULL,
       sender TEXT,
@@ -255,6 +258,7 @@ export async function createIndexes(ctx: SQLiteSchemaContext): Promise<void> {
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_created_at ON agent_memory(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_sender ON agent_memory(sender)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
+  await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_message_id ON agent_memory(message_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_world_id ON world_chats(world_id)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_created_at ON world_chats(created_at)`);
   await run(`CREATE INDEX IF NOT EXISTS idx_world_chats_updated_at ON world_chats(updated_at)`);
@@ -319,7 +323,7 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
 
 export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
   const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 5; // Latest version includes mcp_config field
+  const targetVersion = 6; // Latest version includes message_id field for user message edit
   return currentVersion < targetVersion;
 }
 
@@ -359,7 +363,7 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       if (!tableCheck) {
         // Fresh database - create all tables with current schema
         await initializeSchema(ctx);
-        await setSchemaVersion(ctx, 5);
+        await setSchemaVersion(ctx, 6);
       } else {
         // Existing database with version 0 - check if chat_id column exists
         try {
@@ -466,6 +470,25 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       console.warn('[sqlite-schema] Migration warning for mcp_config column:', error);
       // Try to continue anyway
       await setSchemaVersion(ctx, 5);
+    }
+  }
+
+  // Migration to version 6: Add message_id column to agent_memory table for user message edit feature
+  if (currentVersion < 6) {
+    try {
+      const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
+      const hasMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'message_id');
+
+      if (!hasMessageId) {
+        await run(`ALTER TABLE agent_memory ADD COLUMN message_id TEXT`);
+        await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_message_id ON agent_memory(message_id)`);
+      }
+
+      await setSchemaVersion(ctx, 6);
+    } catch (error) {
+      console.warn('[sqlite-schema] Migration warning for message_id column:', error);
+      // Try to continue anyway
+      await setSchemaVersion(ctx, 6);
     }
   }
 

@@ -40,7 +40,11 @@ export {
   updateWorld,
   deleteWorld,
   listWorlds,
-  getMemory
+  getMemory,
+  migrateMessageIds,
+  removeMessagesFrom,
+  resubmitMessageToWorld,
+  editUserMessage
 } from './managers.js';
 
 export {
@@ -80,7 +84,7 @@ export {
 } from './events.js';
 
 // LLM Provider enum (needed for agent configuration)
-export { type World, type Agent, type Chat, type AgentMessage, LLMProvider } from './types.js';
+export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider } from './types.js';
 
 // === LOGGER ===
 export { type LoggerConfig, type LogLevel, logger, createCategoryLogger } from './logger.js';

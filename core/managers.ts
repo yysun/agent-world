@@ -8,14 +8,20 @@
  * - Automatic ID normalization to kebab-case for consistency
  * - Environment-aware storage operations through storage-factory
  * - Agent message management with automatic agentId assignment
+ * - Message ID migration for user message edit feature
+ * - User message editing with removal and resubmission
  *
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
- * Chat (newChat/listChats/deleteChat/restoreChat)
+ * Chat (newChat/listChats/deleteChat/restoreChat), Migration (migrateMessageIds), 
+ * MessageEdit (removeMessagesFrom/resubmitMessageToWorld/editUserMessage)
  *
  * Implementation Details:
  * - Ensures all agent messages include agentId for proper export functionality
  * - Compatible with both SQLite and memory storage backends
  * - Automatic agent identification for message source tracking
+ * - Idempotent message ID migration supporting both file and SQL storage
+ * - Session mode validation for message resubmission
+ * - Comprehensive error tracking for partial failures
  *
  * Note: Export functionality has been moved to core/export.ts
  */// Core module imports
@@ -23,11 +29,12 @@ import { createCategoryLogger, initializeLogger } from './logger.js';
 import { EventEmitter } from 'events';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import * as utils from './utils.js';
+import { nanoid } from 'nanoid';
 
 // Type imports
 import type {
   World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams,
-  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider
+  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider, RemovalResult
 } from './types.js';
 
 // Initialize logger and storage
@@ -492,4 +499,313 @@ export async function getMemory(worldId: string, chatId?: string | null): Promis
   }
 
   return await storageWrappers!.getMemory(worldId, chatId || world.currentChatId);
+}
+
+/**
+ * Migrate messages to include messageId for user message edit feature
+ * Automatically detects storage type and handles both file and SQL storage
+ * Idempotent - safe to run multiple times
+ * 
+ * @param worldId - World ID to migrate messages for
+ * @returns Number of messages migrated
+ */
+export async function migrateMessageIds(worldId: string): Promise<number> {
+  await moduleInitialization;
+
+  let totalMigrated = 0;
+  const world = await getWorld(worldId);
+  
+  if (!world) {
+    throw new Error(`World '${worldId}' not found`);
+  }
+
+  // Get all agents in the world
+  const agents = await listAgents(worldId);
+  
+  // Get all chats for the world
+  const chats = await storageWrappers!.listChats(worldId);
+  
+  // Migrate messages for each chat
+  for (const chat of chats) {
+    const chatId = chat.id;
+    
+    // Get all memory for this chat
+    const memory = await storageWrappers!.getMemory(worldId, chatId);
+    
+    if (!memory || memory.length === 0) {
+      continue;
+    }
+    
+    // Check which messages need messageId
+    let needsMigration = false;
+    const updatedMemory: AgentMessage[] = [];
+    
+    for (const message of memory) {
+      if (!message.messageId) {
+        needsMigration = true;
+        updatedMemory.push({
+          ...message,
+          messageId: nanoid(10)
+        });
+        totalMigrated++;
+      } else {
+        updatedMemory.push(message);
+      }
+    }
+    
+    // If any messages were updated, save the entire memory back
+    if (needsMigration) {
+      // For each agent, update their memory with the migrated messages
+      for (const agent of agents) {
+        const agentMessages = updatedMemory.filter(m => m.agentId === agent.id);
+        if (agentMessages.length > 0) {
+          await storageWrappers!.saveAgentMemory(worldId, agent.id, agentMessages);
+        }
+      }
+    }
+  }
+  
+  logger.info(`Migrated ${totalMigrated} messages with messageId for world '${worldId}'`);
+  return totalMigrated;
+}
+
+/**
+ * Remove a message and all subsequent messages from all agents in a world
+ * Used for user message editing feature
+ * 
+ * @param worldId - World ID
+ * @param messageId - ID of the message to remove (and all after it)
+ * @param chatId - Chat ID to filter messages
+ * @returns RemovalResult with per-agent removal details
+ */
+export async function removeMessagesFrom(
+  worldId: string,
+  messageId: string,
+  chatId: string
+): Promise<RemovalResult> {
+  await moduleInitialization;
+
+  const world = await getWorld(worldId);
+  if (!world) {
+    throw new Error(`World '${worldId}' not found`);
+  }
+
+  // Get all agents
+  const agents = await listAgents(worldId);
+  
+  // Get all memory for this chat to find the target message and its timestamp
+  const memory = await storageWrappers!.getMemory(worldId, chatId);
+  
+  if (!memory || memory.length === 0) {
+    return {
+      success: false,
+      messageId,
+      totalAgents: agents.length,
+      processedAgents: [],
+      failedAgents: agents.map(a => ({ agentId: a.id, error: 'No messages found in chat' })),
+      messagesRemovedTotal: 0,
+      requiresRetry: false,
+      resubmissionStatus: 'skipped',
+      newMessageId: undefined
+    };
+  }
+
+  // Find the target message to get its timestamp
+  const targetMessage = memory.find(m => m.messageId === messageId);
+  if (!targetMessage) {
+    return {
+      success: false,
+      messageId,
+      totalAgents: agents.length,
+      processedAgents: [],
+      failedAgents: agents.map(a => ({ agentId: a.id, error: `Message with ID '${messageId}' not found` })),
+      messagesRemovedTotal: 0,
+      requiresRetry: false,
+      resubmissionStatus: 'skipped',
+      newMessageId: undefined
+    };
+  }
+
+  // Handle optional createdAt field with fallback to current time
+  const targetTimestamp = targetMessage.createdAt 
+    ? new Date(targetMessage.createdAt).getTime() 
+    : Date.now();
+  
+  // Track results per agent
+  const processedAgents: string[] = [];
+  const failedAgents: Array<{ agentId: string; error: string }> = [];
+  let messagesRemovedTotal = 0;
+
+  // Process each agent
+  for (const agent of agents) {
+    try {
+      // Get agent's memory for this chat
+      const agentMemory = memory.filter(m => m.agentId === agent.id);
+      
+      // Find messages to remove (target and all subsequent)
+      const messagesToRemove = agentMemory.filter(m => {
+        const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
+        return msgTime >= targetTimestamp;
+      });
+      
+      // Keep messages before the target
+      const messagesToKeep = agentMemory.filter(m => {
+        const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
+        return msgTime < targetTimestamp;
+      });
+      
+      // Save updated memory
+      await storageWrappers!.saveAgentMemory(worldId, agent.id, messagesToKeep);
+      
+      messagesRemovedTotal += messagesToRemove.length;
+      processedAgents.push(agent.id);
+      
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      failedAgents.push({
+        agentId: agent.id,
+        error: errorMsg
+      });
+    }
+  }
+
+  return {
+    success: failedAgents.length === 0,
+    messageId,
+    totalAgents: agents.length,
+    processedAgents,
+    failedAgents,
+    messagesRemovedTotal,
+    requiresRetry: failedAgents.length > 0,
+    resubmissionStatus: 'skipped', // Will be updated by editUserMessage
+    newMessageId: undefined
+  };
+}
+
+/**
+ * Resubmit a message to the world after editing
+ * Validates session mode is ON before resubmission
+ * 
+ * @param worldId - World ID
+ * @param content - New message content
+ * @param sender - Message sender (typically 'human')
+ * @param chatId - Chat ID for the message
+ * @returns Object with success status, new messageId, and optional error
+ */
+export async function resubmitMessageToWorld(
+  worldId: string,
+  content: string,
+  sender: string,
+  chatId: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  await moduleInitialization;
+
+  try {
+    const world = await getWorld(worldId);
+    if (!world) {
+      return {
+        success: false,
+        error: `World '${worldId}' not found`
+      };
+    }
+
+    // Validate session mode is ON
+    if (!world.currentChatId) {
+      return {
+        success: false,
+        error: 'Cannot resubmit: session mode is OFF (currentChatId is not set)'
+      };
+    }
+
+    // Verify the chatId matches the current chat
+    if (world.currentChatId !== chatId) {
+      return {
+        success: false,
+        error: `Cannot resubmit: message belongs to chat '${chatId}' but current chat is '${world.currentChatId}'`
+      };
+    }
+
+    // Import publishMessage from events (need to add import at top of file)
+    const { publishMessage } = await import('./events.js');
+    
+    // Generate new messageId
+    const newMessageId = nanoid(10);
+    
+    // Publish the message to the world (this will trigger agent responses)
+    publishMessage(world, content, sender);
+    
+    logger.info(`Resubmitted message to world '${worldId}' with new messageId '${newMessageId}'`);
+    
+    return {
+      success: true,
+      messageId: newMessageId
+    };
+    
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to resubmit message to world '${worldId}': ${errorMsg}`);
+    return {
+      success: false,
+      error: errorMsg
+    };
+  }
+}
+
+/**
+ * Edit a user message by removing it and all subsequent messages, then resubmitting with new content
+ * Combines removal and resubmission in a single operation with comprehensive error tracking
+ * 
+ * @param worldId - World ID
+ * @param messageId - ID of the message to edit
+ * @param newContent - New message content
+ * @param chatId - Chat ID for the message
+ * @returns RemovalResult with removal and resubmission details
+ */
+export async function editUserMessage(
+  worldId: string,
+  messageId: string,
+  newContent: string,
+  chatId: string
+): Promise<RemovalResult> {
+  await moduleInitialization;
+
+  // Check if world.isProcessing is true
+  const world = await getWorld(worldId);
+  if (!world) {
+    throw new Error(`World '${worldId}' not found`);
+  }
+
+  if (world.isProcessing) {
+    throw new Error('Cannot edit message: world is currently processing another message');
+  }
+
+  // Step 1: Remove the message and all subsequent messages
+  const removalResult = await removeMessagesFrom(worldId, messageId, chatId);
+
+  // Step 2: Verify session mode is ON before attempting resubmission
+  if (!world.currentChatId) {
+    return {
+      ...removalResult,
+      resubmissionStatus: 'skipped',
+      resubmissionError: 'Session mode is OFF (currentChatId not set)'
+    };
+  }
+
+  // Step 3: Attempt resubmission
+  const resubmitResult = await resubmitMessageToWorld(worldId, newContent, 'human', chatId);
+
+  // Step 4: Update RemovalResult with resubmission status
+  if (resubmitResult.success) {
+    return {
+      ...removalResult,
+      resubmissionStatus: 'success',
+      newMessageId: resubmitResult.messageId
+    };
+  } else {
+    return {
+      ...removalResult,
+      resubmissionStatus: 'failed',
+      resubmissionError: resubmitResult.error
+    };
+  }
 }

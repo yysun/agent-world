@@ -28,6 +28,7 @@ export interface ChatMessage {
 }
 
 export interface AgentMessage extends ChatMessage {
+  messageId?: string; // Unique identifier for message (required after migration)
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
   agentId?: string; // Agent ID for identifying message source
@@ -187,6 +188,36 @@ export interface UpdateChatParams extends Partial<Omit<CreateChatParams, 'captur
 }
 
 /**
+ * Message edit result tracking
+ */
+export interface RemovalResult {
+  success: boolean;
+  messageId: string; // Original messageId that was removed
+  totalAgents: number;
+  processedAgents: string[];
+  failedAgents: Array<{ agentId: string; error: string }>;
+  messagesRemovedTotal: number;
+  requiresRetry: boolean;
+  // Resubmission status
+  resubmissionStatus: 'success' | 'failed' | 'skipped';
+  resubmissionError?: string;
+  newMessageId?: string; // messageId of resubmitted message
+}
+
+/**
+ * Edit error log for troubleshooting
+ */
+export interface EditErrorLog {
+  worldId: string;
+  messageId: string;
+  chatId: string;
+  timestamp: Date;
+  operation: 'removal' | 'resubmission';
+  failedAgents: Array<{ agentId: string; error: string }>;
+  retryCount: number;
+}
+
+/**
  * Chat list info for efficient display
  */
 // ...existing code...
@@ -224,6 +255,7 @@ export interface World {
   chatLLMModel?: string; // For chat summarization
   currentChatId?: string | null; // Track active chat session
   mcpConfig?: string | null; // MCP configuration JSON string
+  isProcessing?: boolean; // Flag to prevent edits during agent processing
   createdAt: Date;
   lastUpdated: Date;
   totalAgents: number;
