@@ -315,6 +315,64 @@ export const worldUpdateHandlers = {
     needScroll: false
   }),
 
+  // Message editing handlers
+  'start-edit-message': (state: WorldComponentState, messageId: string, messageText: string): WorldComponentState => ({
+    ...state,
+    editingMessageId: messageId,
+    editingText: messageText
+  }),
+
+  'cancel-edit-message': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    editingMessageId: null,
+    editingText: ''
+  }),
+
+  'update-edit-text': (state: WorldComponentState, e: any): WorldComponentState => ({
+    ...state,
+    editingText: e.target.value
+  }),
+
+  'save-edit-message': async (state: WorldComponentState, messageId: string): Promise<WorldComponentState> => {
+    const editedText = state.editingText?.trim();
+    if (!editedText) return state;
+
+    // Find the index of the edited message
+    const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
+    if (editedIndex === -1) return state;
+
+    // Update the message text in place, mark as userEntered, and remove all messages after it
+    const updatedMessages = state.messages.slice(0, editedIndex + 1).map((msg, idx) =>
+      idx === editedIndex
+        ? { ...msg, text: editedText, createdAt: new Date(), userEntered: true }
+        : msg
+    );
+
+    // Clear editing state and prepare for resubmission
+    const newState = {
+      ...state,
+      messages: updatedMessages,
+      editingMessageId: null,
+      editingText: '',
+      isSending: true,
+      isWaiting: true,
+      needScroll: true
+    };
+
+    try {
+      // Resubmit the edited message
+      const cleanup = await sendChatMessage(state.worldName, editedText, 'HUMAN');
+      return { ...newState, isSending: false };
+    } catch (error: any) {
+      return {
+        ...newState,
+        isSending: false,
+        isWaiting: false,
+        error: error.message || 'Failed to send edited message'
+      };
+    }
+  },
+
   // Memory management handlers
   'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
     try {

@@ -849,7 +849,8 @@ legend {
   background: none;
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
-  width: auto;
+  width: calc(98% - 3rem);
+  max-width: calc(100% - 3rem);
 }
 
 .agent-message {
@@ -1018,6 +1019,116 @@ legend {
   font-size: 0.8rem;
   opacity: 0.6;
   text-align: right;
+}
+
+/* Message Edit Button */
+.user-message {
+  position: relative;
+}
+
+/* Extend hover area to include the edit button region */
+.user-message::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -3rem;
+  bottom: 0;
+  width: 3rem;
+  pointer-events: auto;
+}
+
+.message-edit-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: -2.5rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none !important;
+  outline: none !important;
+  padding: 0.25rem 0.5rem;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-message:hover .message-edit-btn,
+.message-edit-btn:hover {
+  opacity: 0.7;
+  pointer-events: auto;
+}
+
+.message-edit-btn:hover {
+  opacity: 1;
+  color: var(--accent-primary);
+  transform: scale(1.2);
+}
+
+/* Message Edit Container */
+.message-edit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.message-edit-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 2px solid var(--accent-primary);
+  border-radius: 4px;
+  font-family: 'Short Stack', cursive;
+  font-size: 0.9rem;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  resize: vertical;
+  min-height: 80px;
+}
+
+.message-edit-input:focus {
+  outline: none;
+  border-color: var(--accent-secondary);
+}
+
+.message-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.message-edit-actions .btn-primary,
+.message-edit-actions .btn-secondary {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 4px;
+  font-family: 'Short Stack', cursive;
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.message-edit-actions .btn-primary {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.message-edit-actions .btn-primary:hover {
+  background-color: var(--accent-secondary);
+  transform: translateY(-1px);
+}
+
+.message-edit-actions .btn-secondary {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+}
+
+.message-edit-actions .btn-secondary:hover {
+  background-color: var(--bg-accent);
+  transform: translateY(-1px);
 }
 
 /* User Input Area */

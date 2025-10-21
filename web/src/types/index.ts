@@ -145,6 +145,8 @@ export interface WorldChatProps {
   activeAgent?: { spriteIndex: number; name: string } | null;
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
+  editingMessageId?: string | null;
+  editingText?: string;
 }
 
 // World Settings Component Props
@@ -244,6 +246,10 @@ export interface WorldComponentState extends SSEComponentState {
   // Chat management state
   currentChat: Chat | null;
   chatToDelete: Chat | null;
+
+  // Message edit state
+  editingMessageId: string | null;
+  editingText: string;
 
   // SSE state (required overrides)
   connectionStatus: string;

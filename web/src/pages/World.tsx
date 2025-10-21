@@ -40,7 +40,9 @@ export default class WorldComponent extends Component<WorldComponentState> {
     chatToDelete: null,
     connectionStatus: 'disconnected',
     needScroll: false,
-    currentChat: null
+    currentChat: null,
+    editingMessageId: null,
+    editingText: ''
   };
 
   override view = (state: WorldComponentState) => {
@@ -153,6 +155,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
+              editingMessageId={state.editingMessageId}
+              editingText={state.editingText}
             />
           </div>
 

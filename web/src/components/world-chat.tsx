@@ -26,7 +26,9 @@ export default function WorldChat(props: WorldChatProps) {
     isWaiting,
     needScroll = false,
     activeAgent,
-    currentChat
+    currentChat,
+    editingMessageId = null,
+    editingText = ''
   } = props;
 
   // Helper function to determine if a message has sender/agent mismatch
@@ -105,6 +107,9 @@ export default function WorldChat(props: WorldChatProps) {
               const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
               const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
 
+              const isUserMessage = senderType === SenderType.HUMAN;
+              const isEditing = editingMessageId === message.id;
+
               return (
                 <div key={message.id || 'msg-' + index} className={messageClasses}>
                   <div className="message-sender">
@@ -115,9 +120,46 @@ export default function WorldChat(props: WorldChatProps) {
                       </span>
                     )}
                   </div>
-                  <div className="message-content">
-                    {safeHTML(renderMarkdown(message.text))}
-                  </div>
+                  {isEditing ? (
+                    <div className="message-edit-container">
+                      <textarea
+                        className="message-edit-input"
+                        value={editingText}
+                        $oninput='update-edit-text'
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="message-edit-actions">
+                        <button
+                          className="btn-primary"
+                          $onclick={['save-edit-message', message.id]}
+                        >
+                          Update
+                        </button>
+                        <button
+                          className="btn-secondary"
+                          $onclick='cancel-edit-message'
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="message-content">
+                        {safeHTML(renderMarkdown(message.text))}
+                      </div>
+                      {isUserMessage && !message.isStreaming && (
+                        <button
+                          className="message-edit-btn"
+                          $onclick={['start-edit-message', message.id, message.text]}
+                          title="Edit message"
+                        >
+                          ✎
+                        </button>
+                      )}
+                    </>
+                  )}
                   <div className="message-timestamp">
                     {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                   </div>
