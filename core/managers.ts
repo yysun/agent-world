@@ -30,11 +30,15 @@ import { EventEmitter } from 'events';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import * as utils from './utils.js';
 import { nanoid } from 'nanoid';
+import * as fs from 'fs';
+import * as path from 'path';
+import { getWorldDir } from './storage/world-storage.js';
+import { getDefaultRootPath } from './storage/storage-factory.js';
 
 // Type imports
 import type {
   World, CreateWorldParams, UpdateWorldParams, Agent, CreateAgentParams, UpdateAgentParams,
-  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider, RemovalResult
+  AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat, LLMProvider, RemovalResult, EditErrorLog
 } from './types.js';
 
 // Initialize logger and storage
@@ -514,32 +518,32 @@ export async function migrateMessageIds(worldId: string): Promise<number> {
 
   let totalMigrated = 0;
   const world = await getWorld(worldId);
-  
+
   if (!world) {
     throw new Error(`World '${worldId}' not found`);
   }
 
   // Get all agents in the world
   const agents = await listAgents(worldId);
-  
+
   // Get all chats for the world
   const chats = await storageWrappers!.listChats(worldId);
-  
+
   // Migrate messages for each chat
   for (const chat of chats) {
     const chatId = chat.id;
-    
+
     // Get all memory for this chat
     const memory = await storageWrappers!.getMemory(worldId, chatId);
-    
+
     if (!memory || memory.length === 0) {
       continue;
     }
-    
+
     // Check which messages need messageId
     let needsMigration = false;
     const updatedMemory: AgentMessage[] = [];
-    
+
     for (const message of memory) {
       if (!message.messageId) {
         needsMigration = true;
@@ -552,7 +556,7 @@ export async function migrateMessageIds(worldId: string): Promise<number> {
         updatedMemory.push(message);
       }
     }
-    
+
     // If any messages were updated, save the entire memory back
     if (needsMigration) {
       // For each agent, update their memory with the migrated messages
@@ -564,7 +568,7 @@ export async function migrateMessageIds(worldId: string): Promise<number> {
       }
     }
   }
-  
+
   logger.info(`Migrated ${totalMigrated} messages with messageId for world '${worldId}'`);
   return totalMigrated;
 }
@@ -592,10 +596,10 @@ export async function removeMessagesFrom(
 
   // Get all agents
   const agents = await listAgents(worldId);
-  
+
   // Get all memory for this chat to find the target message and its timestamp
   const memory = await storageWrappers!.getMemory(worldId, chatId);
-  
+
   if (!memory || memory.length === 0) {
     return {
       success: false,
@@ -627,10 +631,10 @@ export async function removeMessagesFrom(
   }
 
   // Handle optional createdAt field with fallback to current time
-  const targetTimestamp = targetMessage.createdAt 
-    ? new Date(targetMessage.createdAt).getTime() 
+  const targetTimestamp = targetMessage.createdAt
+    ? new Date(targetMessage.createdAt).getTime()
     : Date.now();
-  
+
   // Track results per agent
   const processedAgents: string[] = [];
   const failedAgents: Array<{ agentId: string; error: string }> = [];
@@ -641,25 +645,25 @@ export async function removeMessagesFrom(
     try {
       // Get agent's memory for this chat
       const agentMemory = memory.filter(m => m.agentId === agent.id);
-      
+
       // Find messages to remove (target and all subsequent)
       const messagesToRemove = agentMemory.filter(m => {
         const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
         return msgTime >= targetTimestamp;
       });
-      
+
       // Keep messages before the target
       const messagesToKeep = agentMemory.filter(m => {
         const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
         return msgTime < targetTimestamp;
       });
-      
+
       // Save updated memory
       await storageWrappers!.saveAgentMemory(worldId, agent.id, messagesToKeep);
-      
+
       messagesRemovedTotal += messagesToRemove.length;
       processedAgents.push(agent.id);
-      
+
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       failedAgents.push({
@@ -727,20 +731,20 @@ export async function resubmitMessageToWorld(
 
     // Import publishMessage from events (need to add import at top of file)
     const { publishMessage } = await import('./events.js');
-    
+
     // Generate new messageId
     const newMessageId = nanoid(10);
-    
+
     // Publish the message to the world (this will trigger agent responses)
     publishMessage(world, content, sender);
-    
+
     logger.info(`Resubmitted message to world '${worldId}' with new messageId '${newMessageId}'`);
-    
+
     return {
       success: true,
       messageId: newMessageId
     };
-    
+
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error(`Failed to resubmit message to world '${worldId}': ${errorMsg}`);
@@ -807,5 +811,70 @@ export async function editUserMessage(
       resubmissionStatus: 'failed',
       resubmissionError: resubmitResult.error
     };
+  }
+}
+
+/**
+ * Log an error from a message edit operation for troubleshooting and retry
+ * Stores errors in data/worlds/{worldName}/edit-errors.json
+ * Keeps only the last 100 errors
+ * 
+ * @param worldId - World ID
+ * @param errorLog - EditErrorLog to persist
+ */
+export async function logEditError(worldId: string, errorLog: EditErrorLog): Promise<void> {
+  await moduleInitialization;
+
+  const rootPath = getDefaultRootPath();
+  const worldDir = getWorldDir(rootPath, worldId);
+  const errorsFile = path.join(worldDir, 'edit-errors.json');
+
+  try {
+    // Read existing errors
+    let errors: EditErrorLog[] = [];
+    if (fs.existsSync(errorsFile)) {
+      const data = fs.readFileSync(errorsFile, 'utf-8');
+      errors = JSON.parse(data);
+    }
+
+    // Add new error
+    errors.push(errorLog);
+
+    // Keep only last 100 errors
+    if (errors.length > 100) {
+      errors = errors.slice(-100);
+    }
+
+    // Write back to file
+    fs.writeFileSync(errorsFile, JSON.stringify(errors, null, 2), 'utf-8');
+    logger.debug(`Logged edit error for world '${worldId}'`);
+  } catch (error) {
+    logger.error(`Failed to log edit error for world '${worldId}': ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+/**
+ * Get edit error logs for a world
+ * 
+ * @param worldId - World ID
+ * @returns Array of EditErrorLog entries
+ */
+export async function getEditErrors(worldId: string): Promise<EditErrorLog[]> {
+  await moduleInitialization;
+
+  const rootPath = getDefaultRootPath();
+  const worldDir = getWorldDir(rootPath, worldId);
+  const errorsFile = path.join(worldDir, 'edit-errors.json');
+
+  try {
+    if (!fs.existsSync(errorsFile)) {
+      return [];
+    }
+
+    const data = fs.readFileSync(errorsFile, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    logger.error(`Failed to read edit errors for world '${worldId}': ${error instanceof Error ? error.message : error}`);
+    return [];
   }
 }

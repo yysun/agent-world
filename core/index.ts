@@ -44,7 +44,9 @@ export {
   migrateMessageIds,
   removeMessagesFrom,
   resubmitMessageToWorld,
-  editUserMessage
+  editUserMessage,
+  logEditError,
+  getEditErrors
 } from './managers.js';
 
 export {

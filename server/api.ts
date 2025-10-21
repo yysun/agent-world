@@ -42,6 +42,7 @@ import {
   listAgents as listAgentsCore,
   getMemory as coreGetMemory,
   exportWorldToMarkdown,
+  editUserMessage,
   type World,
   type Agent,
   type Chat,
@@ -795,6 +796,88 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
     loggerChat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to process chat request', 'CHAT_ERROR');
+    }
+  }
+});
+
+router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { messageId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const world = (req as any).world as World;
+
+    // Validate request body
+    const validation = z.object({
+      chatId: z.string(),
+      newContent: z.string()
+    }).safeParse(req.body);
+
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { chatId, newContent } = validation.data;
+
+    // Check if world is processing
+    if (world.isProcessing) {
+      sendError(res, 423, 'World is currently processing another message', 'WORLD_LOCKED');
+      return;
+    }
+
+    // Verify message exists and get its details
+    const memory = await coreGetMemory(worldCtx.id, chatId);
+    if (!memory) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+
+    const targetMessage = memory.find(m => m.messageId === messageId);
+    if (!targetMessage) {
+      sendError(res, 404, 'Message not found', 'MESSAGE_NOT_FOUND');
+      return;
+    }
+
+    // Verify it's a user message
+    if (targetMessage.sender !== 'human') {
+      sendError(res, 400, 'Can only edit user messages', 'INVALID_MESSAGE_TYPE');
+      return;
+    }
+
+    // Perform the edit
+    const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId);
+
+    // Return result with appropriate status
+    if (!result.success) {
+      sendError(res, 500, 'Failed to edit message', 'EDIT_ERROR', result.failedAgents);
+      return;
+    }
+
+    if (result.resubmissionStatus === 'skipped') {
+      res.json({
+        ...result,
+        message: 'Message removed but not resubmitted (session mode OFF)'
+      });
+    } else if (result.resubmissionStatus === 'failed') {
+      res.json({
+        ...result,
+        message: 'Message removed but resubmission failed',
+        warning: result.resubmissionError
+      });
+    } else {
+      res.json({
+        ...result,
+        message: 'Message edited successfully'
+      });
+    }
+  } catch (error) {
+    loggerChat.error('Error editing message', {
+      error: error instanceof Error ? error.message : error,
+      worldName: req.params.worldName,
+      messageId: req.params.messageId
+    });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to edit message', 'MESSAGE_EDIT_ERROR');
     }
   }
 });
