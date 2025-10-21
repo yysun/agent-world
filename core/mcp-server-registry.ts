@@ -49,6 +49,17 @@
  * - Maintains required fields but simplifies complex nested structures
  * - Works with runtime AI SDK patch to prevent schema corruption in Azure OpenAI calls
  *
+ * LLM Argument Type Correction:
+ * - Automatically fixes common LLM type errors in tool arguments
+ * - String to array conversion: "value" -> ["value"]
+ * - String to number conversion: "5" -> 5
+ * - Empty/invalid enum omission: "" -> (omitted, uses schema default)
+ * - Case-insensitive enum matching: "RELEVANCE" -> "relevance"
+ * - Null/undefined omission for optional params: null -> (omitted when not required)
+ * - Applied transparently during tool execution to prevent MCP validation errors
+ * - Logs all corrections for debugging and monitoring
+ * - Schema preservation: bulletproofSchema preserves enum, items, min/max, required for validation
+ *
  * Architecture: Function-based design with module-level state management
  * Consolidated from: mcp-server-registry.ts + mcp-tools.ts (August 2025)
  * Runtime patch integration: Works with ai-sdk-patch.ts for Azure compatibility (August 2025)
@@ -104,6 +115,110 @@ function translateOllamaArguments(args: any, toolSchema: any): any {
   // Map "$" to the first required parameter
   const firstRequired = required[0];
   return { [firstRequired]: args['$'] };
+}
+
+/**
+ * Validate and correct tool argument types to match schema requirements
+ * 
+ * Problem: LLMs often generate incorrect types for tool arguments:
+ * - Strings instead of arrays: "Cantonese" instead of ["Cantonese"]
+ * - Strings instead of numbers: "5" instead of 5
+ * - Invalid enum values or empty strings
+ * 
+ * Solution: Automatically correct common type mismatches based on schema
+ */
+function validateAndCorrectToolArgs(args: any, toolSchema: any): any {
+  if (!args || typeof args !== 'object' || !toolSchema?.properties) {
+    logger.debug(`Skipping type correction - invalid input`, {
+      hasArgs: !!args,
+      argsType: typeof args,
+      hasSchema: !!toolSchema,
+      hasProperties: !!toolSchema?.properties,
+      schemaKeys: toolSchema ? Object.keys(toolSchema) : []
+    });
+    return args;
+  }
+
+  const corrected: any = {};
+  const corrections: string[] = [];
+
+  logger.debug(`Starting type correction`, {
+    argKeys: Object.keys(args),
+    schemaProps: Object.keys(toolSchema.properties),
+    schemaPropsDetail: JSON.stringify(toolSchema.properties, null, 2)
+  });
+
+  const requiredParams = toolSchema.required || [];
+
+  for (const [key, value] of Object.entries(args)) {
+    const propSchema = toolSchema.properties[key];
+    if (!propSchema) {
+      // Property not in schema - pass through as-is
+      corrected[key] = value;
+      continue;
+    }
+
+    // CRITICAL: Omit null/undefined values for optional parameters
+    // MCP servers often reject null for optional params, expecting them to be omitted
+    if ((value === null || value === undefined) && !requiredParams.includes(key)) {
+      corrections.push(`${key}: null/undefined omitted (optional parameter)`);
+      continue;
+    }
+
+    // Type correction: string to array
+    if (propSchema.type === 'array' && typeof value === 'string' && value !== '') {
+      corrected[key] = [value];
+      corrections.push(`${key}: string -> array`);
+      continue;
+    }
+
+    // Type correction: string to number
+    if (propSchema.type === 'number' && typeof value === 'string') {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        corrected[key] = numValue;
+        corrections.push(`${key}: "${value}" -> ${numValue}`);
+        continue;
+      }
+    }
+
+    // Type correction: invalid or empty enum value
+    if (propSchema.enum && Array.isArray(propSchema.enum)) {
+      if (value === '' || value === null || value === undefined) {
+        // Omit empty/null/undefined enum values - let schema defaults apply
+        corrections.push(`${key}: empty value omitted (will use default)`);
+        continue;
+      }
+      if (!propSchema.enum.includes(value)) {
+        // Invalid enum value - try case-insensitive match first
+        const lowerValue = typeof value === 'string' ? value.toLowerCase() : value;
+        const match = propSchema.enum.find((e: any) =>
+          typeof e === 'string' && e.toLowerCase() === lowerValue
+        );
+        if (match) {
+          corrected[key] = match;
+          corrections.push(`${key}: "${value}" -> "${match}" (case correction)`);
+        } else {
+          // No match - omit invalid value to use schema default
+          corrections.push(`${key}: invalid "${value}" omitted (expected: ${propSchema.enum.join('|')})`);
+        }
+        continue;
+      }
+    }
+
+    // No correction needed - pass through
+    corrected[key] = value;
+  }
+
+  if (corrections.length > 0) {
+    logger.debug(`Tool argument type corrections applied`, {
+      corrections,
+      originalArgs: JSON.stringify(args),
+      correctedArgs: JSON.stringify(corrected)
+    });
+  }
+
+  return corrected;
 }
 
 const logger = createCategoryLogger('llm.mcp');
@@ -427,13 +542,20 @@ function bulletproofSchema(schema: any): any {
     additionalProperties: false
   };
 
-  // Copy properties safely
+  // Copy properties safely - preserve critical schema information for validation
   if (schema.properties && typeof schema.properties === 'object') {
     for (const [key, value] of Object.entries(schema.properties)) {
       const prop = value as any;
       normalized.properties[key] = {
         type: prop?.type || 'string',
-        ...(prop?.description && { description: prop.description })
+        ...(prop?.description && { description: prop.description }),
+        // Preserve enum values for validation
+        ...(prop?.enum && Array.isArray(prop.enum) && { enum: prop.enum }),
+        // Preserve array item schema
+        ...(prop?.items && { items: prop.items }),
+        // Preserve numeric constraints
+        ...(prop?.minimum !== undefined && { minimum: prop.minimum }),
+        ...(prop?.maximum !== undefined && { maximum: prop.maximum })
       };
     }
   }
@@ -593,7 +715,9 @@ export async function mcpToolsToAiTools(client: Client, serverName: string, tran
 
         // Debug log: Request data being sent to MCP server
         // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
-        const translatedArgs = translateOllamaArguments(args ?? {}, t.inputSchema);
+        let translatedArgs = translateOllamaArguments(args ?? {}, t.inputSchema);
+        // TYPE CORRECTION: Validate and fix argument types to match schema
+        translatedArgs = validateAndCorrectToolArgs(translatedArgs, t.inputSchema);
         const requestPayload = { name: t.name, arguments: translatedArgs };
         logger.debug(`MCP server request payload`, {
           executionId,
@@ -1258,7 +1382,9 @@ export async function executeMCPTool(
 
   // Debug log: Request data being sent to MCP server
   // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
-  const translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
+  let translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
+  // Note: Full type correction requires schema, which isn't available in direct execution
+  // Type corrections are primarily applied in mcpToolsToAiTools execute wrapper
   const requestPayload = { name: toolName, arguments: translatedArgs };
   logger.debug(`MCP server direct request payload`, {
     executionId,
