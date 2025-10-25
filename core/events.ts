@@ -369,7 +369,16 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
       await processAgentMessage(world, agent, messageEvent);
     } else {
-      loggerAgent.debug('Agent will NOT respond', { agentId: agent.id, sender: messageEvent.sender });
+      loggerAgent.debug('Agent will NOT respond - publishing memory-only SSE', { agentId: agent.id, sender: messageEvent.sender });
+
+      // Publish SSE event for memory-only message (saved but no response)
+      // This allows the frontend to display agent→agent messages that were saved to memory
+      publishSSE(world, {
+        agentName: agent.id,
+        type: 'memory-only',
+        content: messageEvent.content,
+        messageId: messageEvent.messageId
+      });
     }
   };
 

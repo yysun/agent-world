@@ -340,7 +340,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress' | 'memory-only';
   content?: string;
   error?: string;
   messageId: string;

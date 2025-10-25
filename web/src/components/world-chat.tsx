@@ -4,6 +4,7 @@
  * Features:
  * - Real-time message streaming with agent selection filtering
  * - Cross-agent message detection and system message display
+ * - Memory-only message styling (agent messages saved to other agents' memory)
  * - User input handling with send functionality and loading states
  * - Message editing with frontend-driven DELETE → POST flow
  * - Message deduplication by messageId for multi-agent scenarios
@@ -11,6 +12,7 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-10-25: Added memory-only message styling with gray left border for agent→agent messages
  * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
  * - 2025-10-25: Edit button disabled until messageId confirmed from backend
  * - 2025-10-21: Integrated message edit functionality with remove-and-resubmit flow
@@ -110,10 +112,17 @@ export default function WorldChat(props: WorldChatProps) {
 
               const senderType = getSenderType(message.sender);
               const isCrossAgentMessage = hasSenderAgentMismatch(message);
+              // Memory-only message: agent message saved to another agent's memory without response
+              // This is when an agent sends a message that gets saved to another agent's memory
+              // Identified by: agent sender + sender/agentId mismatch (cross-agent) + saved to memory
+              const isMemoryOnlyMessage = senderType === SenderType.AGENT &&
+                isCrossAgentMessage &&
+                !message.isStreaming;
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
-              const crossAgentClass = isCrossAgentMessage ? 'cross-agent-message' : '';
-              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass}`.trim();
+              const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
+              const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass}`.trim();
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
@@ -124,6 +133,10 @@ export default function WorldChat(props: WorldChatProps) {
                     {message.sender}
                     {isUserMessage && message.seenByAgents && message.seenByAgents.length > 0 ? (
                       <span className="source-agent-indicator" title="Agents that received this message">
+                        → {message.seenByAgents.join(', ')}
+                      </span>
+                    ) : isMemoryOnlyMessage && message.seenByAgents ? (
+                      <span className="source-agent-indicator" title="Saved to agent memory">
                         → {message.seenByAgents.join(', ')}
                       </span>
                     ) : isCrossAgentMessage && message.fromAgentId ? (

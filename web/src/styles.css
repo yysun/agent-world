@@ -6,6 +6,7 @@
  * - Animated world graphics (Neon City, Mystic Forest, Cyber Ocean)
  * - Responsive design with mobile-first approach
  * - Interactive controls and navigation indicators
+ * - Memory-only message styling (gray border for agent→agent messages)
  * 
  * Implementation:
  * - CSS Grid and Flexbox for layout
@@ -14,6 +15,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Added .memory-only-message class for agent messages saved to other agents' memory (gray border)
  * - Removed @import for Google Fonts to prevent flickering during route changes
  * - Font is now preloaded in HTML head for better performance
  * - Removed text-shadow from banner title to reduce blur
@@ -865,6 +867,15 @@ legend {
 .cross-agent-message {
   align-self: flex-start;
   border-left: 3px solid #ff9800 !important;
+}
+
+/* Memory-only message styling: agent message saved to another agent's memory without response */
+.memory-only-message {
+  align-self: flex-end;
+  background-color: var(--bg-accent);
+  border: 1px solid var(--border-secondary);
+  border-left: 3px solid #9e9e9e !important;
+  color: var(--text-primary);
 }
 
 .message-debug-info {

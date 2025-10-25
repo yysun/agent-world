@@ -14,6 +14,7 @@
  * - Markdown export functionality with HTML rendering
  * - Smooth streaming indicator management (removed after final message displayed)
  * - Message editing with backend API integration (remove + resubmit)
+ * - Memory-only message streaming for agent→agent messages saved without response
  *
  * Message Edit Feature (Frontend-Driven):
  * - Uses backend messageId (server-generated) for message identification
@@ -65,6 +66,7 @@ import {
   handleToolError,
   handleToolStart,
   handleToolResult,
+  handleMemoryOnlyMessage,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
@@ -446,6 +448,7 @@ export const worldUpdateHandlers = {
   handleToolError,
   handleToolStart,
   handleToolResult,
+  handleMemoryOnlyMessage,
 
   'toggle-log-details': (state: WorldComponentState, messageId: string | number): WorldComponentState => {
     if (!messageId || !state.messages) {

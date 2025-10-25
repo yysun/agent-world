@@ -1,10 +1,13 @@
 /**
- * SSE Client - Server-Sent Events handler for real-time chat streaming
+ * SSE Client - Server-Sent Events with AppRun Integration
  * 
  * Features:
  * - Complete SSE streaming with message accumulation and error handling
- * - Direct AppRun event publishing for real-time UI updates
- * - Type-safe interfaces with consolidated streaming state management
+ * - Automatic reconnection with exponential backoff
+ * - Event-driven state management via AppRun
+ * - Proper cleanup and connection lifecycle management
+ * - Phase 2.2 Enhancement: MCP tool execution event streaming
+ * - Memory-only message streaming for agent→agent messages saved without response
  */
 
 import app from 'apprun';
@@ -241,6 +244,16 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       });
 
       streamingState.activeMessages.delete(messageId);
+      break;
+
+    case 'memory-only':
+      // Handle memory-only messages (agent messages saved to another agent's memory without response)
+      publishEvent('handleMemoryOnlyMessage', {
+        messageId,
+        sender: agentName,
+        content: eventData.content || '',
+        worldName: eventData.worldName || streamingState.currentWorldName
+      });
       break;
 
     case 'log':
@@ -653,6 +666,47 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
     ...state,
     messages,
     activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
+    needScroll: true,
+    isWaiting: false
+  };
+};
+
+/**
+ * Handle memory-only message events - agent messages saved to another agent's memory without response
+ * 
+ * These events occur when:
+ * - An agent receives a message (saved to memory)
+ * - The agent doesn't respond (no mention, turn limit reached, etc.)
+ * - Provides visibility into agent→agent messages without responses
+ * 
+ * @param state - Current component state
+ * @param data - Memory-only event data with messageId, sender (original message sender), and agentName (recipient agent)
+ * @returns Updated state with memory-only message added
+ */
+export const handleMemoryOnlyMessage = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, sender, content, agentName } = data;
+
+  // Create a memory-only message (agent message saved to another agent's memory)
+  // CRITICAL: sender vs agentName semantics for correct UI detection
+  // - sender: Original message sender (e.g., "a1") - displays as message author
+  // - agentName: Recipient agent who saved to memory (e.g., "o1")
+  // - fromAgentId: MUST be agentName (recipient) to create sender≠fromAgentId mismatch for gray border styling
+  // - seenByAgents: Required for "→ o1" indicator display in world-chat.tsx
+  const memoryOnlyMessage = {
+    id: `memory-only-${messageId}`,
+    messageId: messageId,
+    type: 'agent',
+    sender: sender,  // Message author (e.g., "a1")
+    text: content || '',
+    createdAt: new Date(),
+    fromAgentId: agentName, // ✅ Recipient agent - creates a1≠o1 mismatch for gray border
+    seenByAgents: [agentName], // ✅ Enables "a1 → o1" indicator in UI
+    isStreaming: false
+  } as any;
+
+  return {
+    ...state,
+    messages: [...(state.messages || []), memoryOnlyMessage],
     needScroll: true,
     isWaiting: false
   };
