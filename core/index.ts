@@ -83,6 +83,7 @@ export {
   enableStreaming,
   disableStreaming,
   publishMessage,
+  publishMessageWithId,
 } from './events.js';
 
 // LLM Provider enum (needed for agent configuration)

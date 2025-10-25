@@ -26,9 +26,13 @@
  * - 2025-07-27: Changed default storage type to SQLite
  */
 import type { StorageAPI, Chat, UpdateChatParams, WorldChat, Agent, AgentMessage, World } from '../types.js';
+import { validateAgentMessageIds } from './validation.js';
+import { createCategoryLogger } from '../logger.js';
 import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from '../utils.js';
 import * as path from 'path';
+
+const loggerFactory = createCategoryLogger('core.storage.factory');
 import * as fs from 'fs';
 
 // Re-export StorageAPI type for external use
@@ -349,6 +353,17 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
     },
     async saveAgent(worldId: string, agent: Agent): Promise<void> {
       await ensureModulesLoaded();
+
+      // Auto-migrate legacy messages without messageId
+      const migrated = validateAgentMessageIds(agent);
+      if (migrated) {
+        loggerFactory.info('Auto-migrated agent messages with missing messageIds', {
+          agentId: agent.id,
+          worldId,
+          messageCount: agent.memory.length
+        });
+      }
+
       if (agentStorage?.saveAgent) {
         return agentStorage.saveAgent(rootPath, worldId, agent);
       }
@@ -356,7 +371,23 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
     async loadAgent(worldId: string, agentId: string): Promise<Agent | null> {
       await ensureModulesLoaded();
       if (agentStorage?.loadAgent) {
-        return agentStorage.loadAgent(rootPath, worldId, agentId);
+        const agent = await agentStorage.loadAgent(rootPath, worldId, agentId);
+        if (agent) {
+          // Auto-migrate on load if needed
+          const migrated = validateAgentMessageIds(agent);
+          if (migrated) {
+            loggerFactory.info('Auto-migrated agent messages on load', {
+              agentId,
+              worldId,
+              messageCount: agent.memory.length
+            });
+            // Save back the migrated agent
+            if (agentStorage?.saveAgent) {
+              await agentStorage.saveAgent(rootPath, worldId, agent);
+            }
+          }
+        }
+        return agent;
       }
       return null;
     },

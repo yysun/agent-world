@@ -3,9 +3,11 @@
  * 
  * Tests for the getMemory functionality across different storage backends.
  */
-import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
-import type { StorageAPI, World, Agent } from '../../../core/types.js';
-import { LLMProvider } from '../../../core/types.js';
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { createMemoryStorage } from '../../../core/storage/memory-storage';
+import type { Agent, AgentMessage, StorageAPI, World } from '../../../core/types';
+import { LLMProvider } from '../../../core/types';
+import { ensureAgentMessageIds } from '../shared/test-data-builders';
 import { EventEmitter } from 'events';
 
 describe('getMemory Integration', () => {
@@ -40,7 +42,7 @@ describe('getMemory Integration', () => {
     await storage.saveWorld(testWorld);
 
     // Create agents with memory
-    const agent1: Agent = {
+    const agent1: Agent = ensureAgentMessageIds({
       id: 'agent-1',
       name: 'Agent 1',
       type: 'assistant',
@@ -66,9 +68,9 @@ describe('getMemory Integration', () => {
       llmCallCount: 0,
       createdAt: new Date(),
       lastActive: new Date()
-    };
+    });
 
-    const agent2: Agent = {
+    const agent2: Agent = ensureAgentMessageIds({
       id: 'agent-2',
       name: 'Agent 2',
       type: 'assistant',
@@ -94,7 +96,7 @@ describe('getMemory Integration', () => {
       llmCallCount: 0,
       createdAt: new Date(),
       lastActive: new Date()
-    };
+    });
 
     await storage.saveAgent('test-world', agent1);
     await storage.saveAgent('test-world', agent2);

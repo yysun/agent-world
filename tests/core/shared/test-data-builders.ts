@@ -7,6 +7,8 @@
  * Note: This file has been updated to align with the consolidated StorageAPI interface
  * and the current Agent type definition. Removed deprecated methods that no longer exist
  * in the actual interfaces (generateResponse, streamResponse, etc.).
+ * 
+ * 2025-10-25: Added ensureMessageIds helper to automatically add messageIds to test messages
  */
 
 import type {
@@ -20,6 +22,28 @@ import type {
   StorageAPI,
 } from '../../../core/types';
 import { EventEmitter } from 'events';
+
+/**
+ * Ensure all messages in memory have messageId set
+ * This is required after implementing Priority 2 validation
+ */
+export function ensureMessageIds(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((msg, index) => ({
+    ...msg,
+    messageId: msg.messageId || `test-msg-${Date.now()}-${index}`,
+    agentId: msg.agentId || 'test-agent'
+  }));
+}
+
+/**
+ * Ensure an agent's memory has all messageIds set
+ */
+export function ensureAgentMessageIds(agent: Agent): Agent {
+  return {
+    ...agent,
+    memory: ensureMessageIds(agent.memory)
+  };
+}
 
 // Basic test data defaults
 export const DEFAULT_AGENT_ID = 'test-agent-123';

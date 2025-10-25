@@ -28,7 +28,7 @@ export interface ChatMessage {
 }
 
 export interface AgentMessage extends ChatMessage {
-  messageId?: string; // Unique identifier for message (required after migration)
+  messageId?: string; // Unique identifier - REQUIRED for all new messages (optional only for legacy data pre-migration)
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
   agentId?: string; // Agent ID for identifying message source

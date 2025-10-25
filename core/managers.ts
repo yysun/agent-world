@@ -26,6 +26,10 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Changes:
+ * - 2025-10-25: Fixed messageId bug in resubmitMessageToWorld
+ *   - Bug: Generated unused messageId instead of capturing actual from publishMessage
+ *   - Fix: Use messageEvent.messageId from publishMessage return value
+ *   - Impact: Prevents "undefined" string serialization in JSON responses
  * - 2025-10-21: Added message ID migration and user message edit feature (Phases 1 & 2)
  *   - migrateMessageIds: Auto-assign IDs to existing messages (idempotent)
  *   - removeMessagesFrom: Remove target + subsequent messages by timestamp
@@ -742,17 +746,15 @@ export async function resubmitMessageToWorld(
     // Import publishMessage from events (need to add import at top of file)
     const { publishMessage } = await import('./events.js');
 
-    // Generate new messageId
-    const newMessageId = nanoid(10);
-
     // Publish the message to the world (this will trigger agent responses)
-    publishMessage(world, content, sender);
+    // publishMessage returns WorldMessageEvent with the generated messageId
+    const messageEvent = publishMessage(world, content, sender);
 
-    logger.info(`Resubmitted message to world '${worldId}' with new messageId '${newMessageId}'`);
+    logger.info(`Resubmitted message to world '${worldId}' with new messageId '${messageEvent.messageId}'`);
 
     return {
       success: true,
-      messageId: newMessageId
+      messageId: messageEvent.messageId
     };
 
   } catch (error) {

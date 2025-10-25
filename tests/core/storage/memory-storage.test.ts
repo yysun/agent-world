@@ -7,6 +7,7 @@ import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
 import type { StorageAPI, World, Agent, Chat, WorldChat } from '../../../core/types.js';
 import { LLMProvider } from '../../../core/types.js';
 import { EventEmitter } from 'events';
+import { ensureAgentMessageIds } from '../shared/test-data-builders.js';
 
 describe('Memory Storage', () => {
   let storage: StorageAPI;
@@ -116,7 +117,9 @@ describe('Memory Storage', () => {
           content: 'Hello',
           sender: 'human',
           createdAt: new Date(),
-          chatId: 'chat-1'
+          chatId: 'chat-1',
+          messageId: 'test-msg-1',
+          agentId: 'test-agent'
         }
       ],
       llmCallCount: 0,
@@ -146,9 +149,11 @@ describe('Memory Storage', () => {
         {
           role: 'assistant' as const,
           content: 'Updated memory',
-          sender: 'agent' as const,
+          sender: 'agent',
           createdAt: new Date(),
-          chatId: 'chat-1'
+          chatId: 'chat-1',
+          messageId: 'test-msg-updated',
+          agentId: 'test-agent'
         }
       ];
 
@@ -170,7 +175,7 @@ describe('Memory Storage', () => {
 
     test('should get aggregated memory across agents', async () => {
       // Create multiple agents with different memory
-      const agent1: Agent = {
+      const agent1: Agent = ensureAgentMessageIds({
         ...testAgent,
         id: 'agent-1',
         memory: [
@@ -189,9 +194,9 @@ describe('Memory Storage', () => {
             chatId: 'chat-1'
           }
         ]
-      };
+      });
 
-      const agent2: Agent = {
+      const agent2: Agent = ensureAgentMessageIds({
         ...testAgent,
         id: 'agent-2',
         memory: [
@@ -210,7 +215,7 @@ describe('Memory Storage', () => {
             chatId: 'chat-2'
           }
         ]
-      };
+      });
 
       await storage.saveAgent('test-world', agent1);
       await storage.saveAgent('test-world', agent2);
@@ -238,8 +243,8 @@ describe('Memory Storage', () => {
 
     test('should handle batch operations', async () => {
       const agents = [
-        { ...testAgent, id: 'agent-1' },
-        { ...testAgent, id: 'agent-2' }
+        ensureAgentMessageIds({ ...testAgent, id: 'agent-1' }),
+        ensureAgentMessageIds({ ...testAgent, id: 'agent-2' })
       ];
 
       await storage.saveAgentsBatch('test-world', agents);

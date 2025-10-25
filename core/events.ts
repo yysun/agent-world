@@ -13,6 +13,7 @@
  * Auto-Mention: Enhanced loop prevention, self-mention removal, paragraph beginning detection
  * Storage: Automatic memory persistence and agent state saving with error handling
  * Chat Title Generation: Smart title generation excluding tool messages from conversation context
+ * Message ID Tracking: All messages (user and assistant) include messageId and agentId for edit feature
  *
  * Consolidation Changes (CC):
  * - Condensed verbose header documentation from 60+ lines to 15 lines
@@ -24,6 +25,17 @@
  * - Removed verbose inline comments while preserving essential logic documentation
  * - Maintained all functionality and test compatibility (168/168 tests passing)
  * - Enhanced chat title generation to filter out tool messages for cleaner titles
+ *
+ * Architecture Improvements (2025-10-25):
+ * - Priority 1: Pre-generate message IDs for agent responses (eliminates two-stage assignment)
+ * - Priority 2: Add validation layer to prevent saving agents with missing message IDs
+ * - Priority 3: Updated type documentation to clarify messageId requirement
+ * - Added publishMessageWithId() for pre-generated IDs
+ *
+ * Changes:
+ * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
+ * - 2025-10-25: Fixed agent message messageId - use messageId from publishMessage() return value
+ * - 2025-10-21: Added messageId and agentId to all messages saved to agent memory
  */
 
 import {
@@ -75,15 +87,42 @@ export function publishEvent(world: World, type: string, content: any): void {
 
 /**
  * Message publishing using World.eventEmitter with chat session management
+ * Returns the messageEvent so callers can access the generated messageId
  */
-export function publishMessage(world: World, content: string, sender: string): void {
+export function publishMessage(world: World, content: string, sender: string): WorldMessageEvent {
+  const messageId = generateId();
   const messageEvent: WorldMessageEvent = {
     content,
     sender,
     timestamp: new Date(),
-    messageId: generateId()
+    messageId
+  };
+
+  loggerMemory.debug('[publishMessage] Generated messageId', {
+    messageId,
+    sender,
+    worldId: world.id,
+    chatId: world.currentChatId,
+    contentPreview: content.substring(0, 50)
+  });
+
+  world.eventEmitter.emit('message', messageEvent);
+  return messageEvent;
+}
+
+/**
+ * Message publishing with pre-generated messageId
+ * Used when messageId needs to be known before publishing (e.g., for agent responses)
+ */
+export function publishMessageWithId(world: World, content: string, sender: string, messageId: string): WorldMessageEvent {
+  const messageEvent: WorldMessageEvent = {
+    content,
+    sender,
+    timestamp: new Date(),
+    messageId
   };
   world.eventEmitter.emit('message', messageEvent);
+  return messageEvent;
 }
 
 export function subscribeToMessages(
@@ -294,18 +333,32 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
   loggerAgent.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
 
   const handler = async (messageEvent: WorldMessageEvent) => {
-    loggerAgent.debug('Agent received message event', {
+    loggerAgent.debug('[subscribeAgentToMessages] Agent received message event', {
       agentId: agent.id,
       sender: messageEvent.sender,
-      content: messageEvent.content,
-      messageId: messageEvent.messageId
+      content: messageEvent.content?.substring(0, 50),
+      messageId: messageEvent.messageId,
+      hasMessageId: !!messageEvent.messageId,
+      timestamp: messageEvent.timestamp
     });
+
+    if (!messageEvent.messageId) {
+      loggerAgent.error('❌ [subscribeAgentToMessages] Received message WITHOUT messageId', {
+        agentId: agent.id,
+        sender: messageEvent.sender,
+        worldId: world.id,
+        currentChatId: world.currentChatId
+      });
+    }
 
     // Skip messages from this agent itself
     if (messageEvent.sender === agent.id) {
       loggerAgent.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
       return;
     }
+
+    // Always save incoming messages to agent memory (regardless of whether they respond)
+    await saveIncomingMessageToMemory(world, agent, messageEvent);
 
     // Reset LLM call count if needed (for human/system messages)
     await resetLLMCallCountIfNeeded(world, agent, messageEvent);
@@ -337,20 +390,67 @@ export async function saveIncomingMessageToMemory(
       return;
     }
 
+    // Warn if messageId is missing but don't throw
+    if (!messageEvent.messageId) {
+      loggerMemory.error('❌ [MISSING MESSAGEID] Message missing messageId - this should not happen', {
+        agentId: agent.id,
+        sender: messageEvent.sender,
+        content: messageEvent.content?.substring(0, 50),
+        worldId: world.id,
+        currentChatId: world.currentChatId,
+        timestamp: messageEvent.timestamp,
+        stackTrace: new Error().stack?.split('\n').slice(2, 6).join('\n')
+      });
+      // Continue anyway - message will be saved without messageId
+    } else {
+      loggerMemory.debug('[saveIncomingMessageToMemory] Saving message with messageId', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId,
+        sender: messageEvent.sender,
+        chatId: world.currentChatId
+      });
+    }
+
     const userMessage: AgentMessage = {
       role: 'user',
       content: messageEvent.content,
       sender: messageEvent.sender,
       createdAt: messageEvent.timestamp,
-      chatId: world.currentChatId || null
+      chatId: world.currentChatId || null,
+      messageId: messageEvent.messageId,
+      agentId: agent.id
     };
+
+    // Log if currentChatId is null
+    if (!world.currentChatId) {
+      loggerMemory.warn('Saving message without chatId', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId,
+        sender: messageEvent.sender,
+        worldId: world.id
+      });
+    }
 
     agent.memory.push(userMessage);
 
     // Auto-save memory using storage factory
     try {
       const storage = await getStorageWrappers();
+
+      loggerMemory.debug('[saveIncomingMessageToMemory] Saving agent to storage', {
+        agentId: agent.id,
+        worldId: world.id,
+        memoryCount: agent.memory.length,
+        lastMessageId: agent.memory[agent.memory.length - 1]?.messageId,
+        lastMessageSender: agent.memory[agent.memory.length - 1]?.sender
+      });
+
       await storage.saveAgent(world.id, agent);
+
+      loggerMemory.debug('[saveIncomingMessageToMemory] ✅ Agent saved successfully', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId
+      });
     } catch (error) {
       loggerMemory.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
@@ -367,8 +467,6 @@ export async function processAgentMessage(
   agent: Agent,
   messageEvent: WorldMessageEvent
 ): Promise<void> {
-  const messageId = generateId();
-
   try {
     // Load conversation history from storage for current chat (last 10 messages)
     // NOTE: Don't save incoming message yet to avoid duplication in prepareMessagesForLLM
@@ -383,7 +481,7 @@ export async function processAgentMessage(
 
     // Prepare messages for LLM with history + current message
     const messageData: MessageData = {
-      id: messageId,
+      id: messageEvent.messageId || generateId(),
       name: 'message',
       sender: messageEvent.sender,
       content: messageEvent.content,
@@ -391,8 +489,7 @@ export async function processAgentMessage(
     };
     const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
 
-    // Now save the incoming message to memory before generating response
-    await saveIncomingMessageToMemory(world, agent, messageEvent);
+    // Note: Incoming message already saved in subscribeAgentToMessages handler
 
     // Increment LLM call count and save agent state
     agent.llmCallCount++;
@@ -427,26 +524,39 @@ export async function processAgentMessage(
       finalResponse = addAutoMention(finalResponse, messageEvent.sender);
     }
 
-    // Save final response to memory
+    // Pre-generate message ID for agent response
+    const messageId = generateId();
+
+    loggerMemory.debug('[processAgentMessage] Generated messageId for agent response', {
+      agentId: agent.id,
+      messageId,
+      chatId: world.currentChatId,
+      responsePreview: finalResponse.substring(0, 50)
+    });
+
+    // Save final response to memory with pre-generated ID
     const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: finalResponse,
       createdAt: new Date(),
-      chatId: world.currentChatId || null
+      chatId: world.currentChatId || null,
+      messageId: messageId,
+      sender: agent.id, // Add sender field for consistency
+      agentId: agent.id
     };
     agent.memory.push(assistantMessage);
 
-    // Auto-save memory after adding response
+    // Publish final response with pre-generated messageId
+    if (finalResponse && typeof finalResponse === 'string') {
+      publishMessageWithId(world, finalResponse, agent.id, messageId);
+    }
+
+    // Auto-save memory after adding response (now with correct messageId)
     try {
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
       loggerMemory.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-    }
-
-    // Publish final response
-    if (finalResponse && typeof finalResponse === 'string') {
-      publishMessage(world, finalResponse, agent.id);
     }
 
   } catch (error) {

@@ -35,7 +35,11 @@ import type {
   WorldChat,
   AgentMessage
 } from '../types.js';
+import { validateAgentMessageIds } from './validation.js';
+import { createCategoryLogger } from '../logger.js';
 import { EventEmitter } from 'events';
+
+const loggerStorage = createCategoryLogger('core.storage.memory');
 
 /**
  * Deep clone utility for data isolation
@@ -168,6 +172,16 @@ export class MemoryStorage implements StorageAPI {
       throw new Error('Agent ID is required');
     }
 
+    // Auto-migrate legacy messages without messageId
+    const migrated = validateAgentMessageIds(agent);
+    if (migrated) {
+      loggerStorage.info('Auto-migrated agent messages with missing messageIds', {
+        agentId: agent.id,
+        worldId,
+        messageCount: agent.memory.length
+      });
+    }
+
     if (!this.agents.has(worldId)) {
       this.agents.set(worldId, new Map());
     }
@@ -181,7 +195,23 @@ export class MemoryStorage implements StorageAPI {
     if (!worldAgents) return null;
 
     const agent = worldAgents.get(agentId);
-    return agent ? deepClone(agent) : null;
+    if (!agent) return null;
+
+    const clonedAgent = deepClone(agent);
+
+    // Auto-migrate on load if needed
+    const migrated = validateAgentMessageIds(clonedAgent);
+    if (migrated) {
+      loggerStorage.info('Auto-migrated agent messages on load', {
+        agentId,
+        worldId,
+        messageCount: clonedAgent.memory.length
+      });
+      // Update the stored agent directly (avoid recursive saveAgent call)
+      worldAgents.set(agentId, deepClone(clonedAgent));
+    }
+
+    return clonedAgent;
   }
 
   async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {
