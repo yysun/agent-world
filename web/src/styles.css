@@ -1021,6 +1021,22 @@ legend {
   text-align: right;
 }
 
+/* Message Delivery Status */
+.message-delivery-status {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.message-delivery-status:hover {
+  opacity: 1;
+}
+
 /* Message Edit Button */
 .user-message {
   position: relative;
@@ -1049,15 +1065,9 @@ legend {
   font-size: 1.2rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.user-message:hover .message-edit-btn,
-.message-edit-btn:hover {
   opacity: 0.7;
   pointer-events: auto;
+  z-index: 1;
 }
 
 .message-edit-btn:hover {

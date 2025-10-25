@@ -7,6 +7,7 @@
  * - Single source of truth for UI state management and server communication
  * - Type-safe SSE event handling and component state management
  * - Message edit types (RemovalResult) for backend API integration
+ * - Message deduplication (seenByAgents) for multi-agent scenarios
  * 
  * Implementation:
  * - Re-exports essential core types for consistency (AgentMessage, RemovalResult, etc.)
@@ -16,6 +17,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2025-10-25: Added seenByAgents?: string[] to Message interface for multi-agent deduplication
  * - 2025-10-21: Added RemovalResult export for message edit API integration
  * - Consolidated comment blocks - removed redundant feature descriptions
  * - Streamlined type imports - only essential core type dependencies
@@ -56,6 +58,7 @@ export interface Message {
   messageId?: string;
   userEntered?: boolean;
   fromAgentId?: string;
+  seenByAgents?: string[]; // Track which agents have received this message (for deduplication)
   logEvent?: LogEvent; // For log message types
 
   // Phase 2.2 Enhancement: Tool execution event properties

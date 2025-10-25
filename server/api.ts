@@ -16,13 +16,15 @@
  *   - **MCP tool execution tracking via tool-start/tool-result/tool-error events to prevent timeout during long-running tool calls**
  *   - Detailed logging for debugging streaming issues
  *   - Graceful handling of race conditions between timers and event processing
- * - 2025-10-21: Added user message edit endpoint (DELETE /worlds/:worldName/messages/:messageId)
- *   - Validates request body (chatId, newContent)
- *   - Checks world.isProcessing flag (returns 423 Locked if true)
- *   - Verifies message exists and is user message (404/400 errors)
- *   - Calls editUserMessage() core function for removal + resubmission
- *   - Returns comprehensive RemovalResult with appropriate status codes
- *   - Handles session mode OFF gracefully (removal succeeds, resubmission skipped)
+ * - 2025-10-21: Refactored message edit to frontend-driven approach (DELETE removal only)
+ *   - DELETE endpoint simplified: only accepts { chatId } (no newContent)
+ *   - Calls removeMessagesFrom() directly (no resubmission)
+ *   - Returns RemovalResult without resubmission status
+ *   - Frontend handles resubmission via POST /messages (reuses SSE streaming)
+ *   - Benefits: RESTful design, simpler server logic, automatic SSE streaming for responses
+ * - 2025-10-21: Fixed message event streaming to include messageId for frontend edit feature
+ *   - Message events now streamed with complete data (sender, content, messageId, createdAt)
+ *   - Enables frontend to track and edit user messages by server-generated messageId
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -49,7 +51,7 @@ import {
   listAgents as listAgentsCore,
   getMemory as coreGetMemory,
   exportWorldToMarkdown,
-  editUserMessage,
+  removeMessagesFrom,
   type World,
   type Agent,
   type Chat,
@@ -722,6 +724,19 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
           }
         }
       }
+      // Convert message events to include complete data for frontend
+      else if (eventType === 'message') {
+        // Enhance message event data with structured format
+        const messageData = {
+          type: 'message',
+          sender: eventData.sender,
+          content: eventData.content,
+          messageId: eventData.messageId,
+          createdAt: eventData.timestamp || new Date().toISOString()
+        };
+        sendSSE(JSON.stringify({ type: 'message', data: messageData }));
+        return;
+      }
 
       sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
@@ -763,7 +778,11 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   }
 
   try {
-    publishMessage(subscription.world, message, sender);
+    const messageEvent = publishMessage(subscription.world, message, sender);
+
+    // Message is automatically sent via the event listener in subscription
+    // No need to send explicitly - would cause duplicate
+
     // Start the initial timer - give more time for the first event
     resetTimer(12000);
   }
@@ -813,10 +832,9 @@ router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (re
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
     const world = (req as any).world as World;
 
-    // Validate request body
+    // Validate request body - only chatId needed for removal
     const validation = z.object({
-      chatId: z.string(),
-      newContent: z.string()
+      chatId: z.string()
     }).safeParse(req.body);
 
     if (!validation.success) {
@@ -824,7 +842,7 @@ router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (re
       return;
     }
 
-    const { chatId, newContent } = validation.data;
+    const { chatId } = validation.data;
 
     // Check if world is processing
     if (world.isProcessing) {
@@ -845,38 +863,25 @@ router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (re
       return;
     }
 
-    // Verify it's a user message
-    if (targetMessage.sender !== 'human') {
+    // Verify it's a user message (check role, not sender)
+    if (targetMessage.role !== 'user') {
       sendError(res, 400, 'Can only edit user messages', 'INVALID_MESSAGE_TYPE');
       return;
     }
 
-    // Perform the edit
-    const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId);
+    // Perform removal only (frontend will handle resubmission)
+    const result = await removeMessagesFrom(worldCtx.id, messageId, chatId);
 
-    // Return result with appropriate status
+    // Return removal result
     if (!result.success) {
-      sendError(res, 500, 'Failed to edit message', 'EDIT_ERROR', result.failedAgents);
+      sendError(res, 500, 'Failed to remove messages', 'REMOVAL_ERROR', result.failedAgents);
       return;
     }
 
-    if (result.resubmissionStatus === 'skipped') {
-      res.json({
-        ...result,
-        message: 'Message removed but not resubmitted (session mode OFF)'
-      });
-    } else if (result.resubmissionStatus === 'failed') {
-      res.json({
-        ...result,
-        message: 'Message removed but resubmission failed',
-        warning: result.resubmissionError
-      });
-    } else {
-      res.json({
-        ...result,
-        message: 'Message edited successfully'
-      });
-    }
+    res.json({
+      ...result,
+      message: `Successfully removed ${result.messagesRemovedTotal} message(s) from ${result.processedAgents.length} agent(s)`
+    });
   } catch (error) {
     loggerChat.error('Error editing message', {
       error: error instanceof Error ? error.message : error,

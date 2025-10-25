@@ -15,18 +15,40 @@
  * - Smooth streaming indicator management (removed after final message displayed)
  * - Message editing with backend API integration (remove + resubmit)
  *
- * Message Edit Feature:
+ * Message Edit Feature (Frontend-Driven):
  * - Uses backend messageId (server-generated) for message identification
- * - Calls DELETE /worlds/:worldName/messages/:messageId endpoint
- * - Validates session mode and chat context before editing
+ * - Two-phase edit: 1) DELETE removes messages, 2) POST resubmits edited content
+ * - Phase 1: Calls DELETE /worlds/:worldName/messages/:messageId (removal only)
+ * - Phase 2: Reuses POST /messages with existing SSE streaming (agents respond naturally)
+ * - LocalStorage backup before DELETE for recovery if POST fails
+ * - Validates session mode BEFORE DELETE (not after)
  * - Optimistic UI updates with error rollback
  * - Comprehensive error handling (423 Locked, 404 Not Found, 400 Bad Request)
- * - Handles partial failures and session mode OFF scenarios
- * - Updates userEntered placeholders with messageId when backend confirms message
- * - Edit button only shown after message is saved (messageId present)
+ * - Recovery mechanism: "Resume Edit" on POST failure
+ * - User messages updated with backend messageId when message event received
+ *
+ * Message Deduplication (Multi-Agent):
+ * - User messages deduplicated by messageId to prevent duplicate display
+ * - Each agent receives same user message, but UI shows it only once
+ * - Tracks which agents received message via seenByAgents array
+ * - Displays delivery status: "📨 o1, a1, o3" showing all receiving agents
+ * - Edit button disabled until messageId confirmed (prevents premature edit attempts)
+ * - Applies deduplication in TWO paths:
+ *   1. SSE streaming path: handleMessageEvent() checks for existing messageId OR temp userEntered message
+ *   2. Load from storage path: deduplicateMessages() processes loaded history
+ * - Uses combined check (messageId OR userEntered+text) to prevent race conditions
+ * - Race condition fix: Multiple agents may process same temp message simultaneously
+ *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
- * - 2025-10-21: Fixed userEntered message handling - preserve and update with messageId from backend
+ * - 2025-10-25: Fixed race condition in handleMessageEvent - combined messageId and temp message check
+ * - 2025-10-25: Added deduplicateMessages() helper for loading chat history from storage
+ * - 2025-10-25: Applied deduplication to both SSE streaming AND load-from-storage paths
+ * - 2025-10-25: Added message deduplication by messageId for multi-agent scenarios
+ * - 2025-10-25: Added seenByAgents tracking and delivery status display
+ * - 2025-10-21: Refactored to frontend-driven approach (DELETE → POST) for SSE streaming reuse
+ * - 2025-10-21: Added localStorage backup and recovery mechanism
+ * - 2025-10-21: Fixed user message messageId tracking - updates temp message with backend ID
  * - 2025-10-21: Integrated message edit with backend API (remove-and-resubmit approach)
  * - 2025-08-09: Removed selectedSettingsTarget localStorage persistence
  */
@@ -52,15 +74,73 @@ import { renderMarkdown } from '../utils/markdown';
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
   const sender = toKebabCase(memoryItem.sender || agentName);
   const messageType = (sender === 'HUMAN' || sender === 'USER') ? 'user' : 'agent';
+  const isUserMessage = messageType === 'user';
+
+  // Auto-generate fallback ID for legacy messages without messageId
+  if (!memoryItem.messageId) {
+    // Generate deterministic fallback ID based on message content and timestamp
+    const timestamp = memoryItem.createdAt ? new Date(memoryItem.createdAt).getTime() : Date.now();
+    const contentHash = (memoryItem.content || '').substring(0, 20).replace(/\s/g, '');
+    memoryItem.messageId = `fallback-${timestamp}-${contentHash.substring(0, 10)}`;
+  }
 
   return {
     id: `msg-${Date.now() + Math.random()}`,
     sender,
     text: memoryItem.content || '',
+    messageId: memoryItem.messageId,
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
-    fromAgentId: agentName
+    fromAgentId: isUserMessage ? undefined : agentName // Only set fromAgentId for agent messages
   };
+};
+
+/**
+ * Deduplicates messages by messageId to handle multi-agent scenarios.
+ * User messages should appear only once, with seenByAgents tracking which agents received them.
+ * Agent messages remain separate (one per agent).
+ */
+const deduplicateMessages = (messages: Message[]): Message[] => {
+  const messageMap = new Map<string, Message>();
+  const messagesWithoutId: Message[] = [];
+
+  for (const msg of messages) {
+    // Only deduplicate user messages with messageId
+    const isUserMessage = msg.type === 'user' ||
+      (msg.sender || '').toLowerCase() === 'human' ||
+      (msg.sender || '').toLowerCase() === 'user';
+
+    if (isUserMessage && msg.messageId) {
+      const existing = messageMap.get(msg.messageId);
+      if (existing) {
+        // Update seenByAgents for this duplicate
+        const agentId = msg.fromAgentId || 'unknown';
+        const seenByAgents = existing.seenByAgents || [];
+        if (!seenByAgents.includes(agentId)) {
+          existing.seenByAgents = [...seenByAgents, agentId];
+        }
+      } else {
+        // First occurrence - initialize seenByAgents
+        const agentId = msg.fromAgentId || 'unknown';
+        messageMap.set(msg.messageId, {
+          ...msg,
+          seenByAgents: [agentId]
+        });
+      }
+    } else {
+      // Keep all agent messages and messages without messageId
+      messagesWithoutId.push(msg);
+    }
+  }
+
+  // Combine deduplicated user messages with all agent messages
+  // Sort by createdAt to maintain chronological order
+  return [...Array.from(messageMap.values()), ...messagesWithoutId]
+    .sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateA - dateB;
+    });
 };
 
 // World initialization with core auto-restore
@@ -104,6 +184,9 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
         }
       }
     }
+
+    // Apply deduplication to loaded messages (same as SSE streaming path)
+    messages = deduplicateMessages(messages);
 
     yield {
       ...state,
@@ -168,6 +251,68 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   const existingMessages = state.messages || [];
   const normalizedSender = (senderName || '').toLowerCase();
 
+  // Check if this is a user message that we need to deduplicate or update
+  const isUserMessage = normalizedSender === 'human' || normalizedSender === 'user';
+  if (isUserMessage && messageData.messageId) {
+    // Check for existing message (either by messageId or temp message with matching text)
+    // This prevents race conditions where multiple agents process the same temp message
+    const existingMessageIndex = existingMessages.findIndex(
+      msg => msg.messageId === messageData.messageId ||
+        (msg.userEntered && msg.text === newMessage.text)
+    );
+
+    if (existingMessageIndex !== -1) {
+      const existingMessage = existingMessages[existingMessageIndex];
+      const agentId = fromAgentId || messageData.agentId || 'unknown';
+
+      // Check if this message already has the messageId
+      if (existingMessage.messageId === messageData.messageId) {
+        // Message already has messageId - this is a duplicate from another agent
+
+        const seenByAgents = existingMessage.seenByAgents || [];
+        if (!seenByAgents.includes(agentId)) {
+          const updatedMessages = existingMessages.map((msg, index) => {
+            if (index === existingMessageIndex) {
+              return {
+                ...msg,
+                seenByAgents: [...seenByAgents, agentId]
+              };
+            }
+            return msg;
+          });
+
+          return {
+            ...state,
+            messages: updatedMessages,
+            needScroll: false // Don't scroll for duplicate message
+          };
+        }
+        // Agent already in seenByAgents, no update needed
+        return state;
+      }
+
+      // Message is temp (userEntered=true) and needs messageId
+      const updatedMessages = existingMessages.map((msg, index) => {
+        if (index === existingMessageIndex) {
+          return {
+            ...msg,
+            messageId: messageData.messageId,
+            createdAt: messageData.createdAt || msg.createdAt,
+            userEntered: false, // No longer temporary
+            seenByAgents: [agentId] // Initialize with first agent
+          };
+        }
+        return msg;
+      });
+
+      return {
+        ...state,
+        messages: updatedMessages,
+        needScroll: false // Don't scroll for user message update
+      };
+    }
+  }
+
   // If a streaming placeholder exists for this sender, convert it to the final message
   const streamingIndex = existingMessages.findIndex(
     msg => msg?.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender
@@ -197,36 +342,9 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     };
   }
 
-  // Check if this is a user message that matches a userEntered placeholder
-  const userEnteredIndex = existingMessages.findIndex(
-    msg => msg.userEntered &&
-      (msg.sender || '').toLowerCase() === 'human' &&
-      (senderName || '').toLowerCase() === 'human'
-  );
-
-  if (userEnteredIndex !== -1) {
-    // Update the existing userEntered message with backend data (especially messageId)
-    const updatedMessages = existingMessages.map((msg, index) => {
-      if (index !== userEnteredIndex) {
-        return msg;
-      }
-      return {
-        ...msg,
-        ...newMessage,
-        userEntered: false, // No longer a placeholder
-        messageId: newMessage.messageId // Critical: preserve backend messageId
-      };
-    });
-
-    return {
-      ...state,
-      messages: updatedMessages,
-      needScroll: true
-    };
-  }
-
-  // Filter out temporary placeholders (but keep userEntered for now) before adding the new one
+  // Filter out temporary placeholders and user-entered messages before adding the new one
   state.messages = existingMessages.filter(msg =>
+    !msg.userEntered &&
     !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
   );
   state.messages.push(newMessage);
@@ -409,6 +527,30 @@ export const worldUpdateHandlers = {
       };
     }
 
+    // Check session mode before proceeding
+    if (!state.world?.currentChatId) {
+      return {
+        ...state,
+        error: 'Cannot edit message: session mode is OFF. Please enable session mode first.',
+        editingMessageId: null,
+        editingText: ''
+      };
+    }
+
+    // Store edit backup in localStorage before DELETE
+    const editBackup = {
+      messageId: message.messageId,
+      chatId: state.currentChat.id,
+      newContent: editedText,
+      timestamp: Date.now(),
+      worldName: state.worldName
+    };
+    try {
+      localStorage.setItem('agent-world-edit-backup', JSON.stringify(editBackup));
+    } catch (e) {
+      console.warn('Failed to save edit backup to localStorage:', e);
+    }
+
     // Optimistically update UI: remove messages from edited message onwards
     const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
     const updatedMessages = editedIndex >= 0 ? state.messages.slice(0, editedIndex) : state.messages;
@@ -424,55 +566,54 @@ export const worldUpdateHandlers = {
     };
 
     try {
-      // Call backend API to edit message (remove + resubmit)
-      const result = await api.editMessage(
+      // PHASE 1: Call DELETE to remove messages
+      const deleteResult = await api.deleteMessage(
         state.worldName,
         message.messageId,
-        state.currentChat.id,
-        editedText
+        state.currentChat.id
       );
 
-      // Check for various response statuses
-      if (!result.success) {
+      // Check DELETE result
+      if (!deleteResult.success) {
         // Partial failure - some agents failed
-        const failedAgentNames = result.failedAgents?.map((f: any) => f.agentId).join(', ');
+        const failedAgentNames = deleteResult.failedAgents?.map((f: any) => f.agentId).join(', ');
         return {
           ...state,
           isSending: false,
           isWaiting: false,
-          error: `Message edit partially failed for agents: ${failedAgentNames}. ${result.messagesRemovedTotal} messages removed.`
+          error: `Message removal partially failed for agents: ${failedAgentNames}. ${deleteResult.messagesRemovedTotal || 0} messages removed.`
         };
       }
 
-      // Check resubmission status
-      if (result.resubmissionStatus === 'failed') {
+      // PHASE 2: Call POST to resubmit edited message (reuses existing SSE streaming)
+      try {
+        const cleanup = await sendChatMessage(state.worldName, editedText, 'human');
+
+        // Clear localStorage backup on successful resubmission
+        try {
+          localStorage.removeItem('agent-world-edit-backup');
+        } catch (e) {
+          console.warn('Failed to clear edit backup:', e);
+        }
+
+        // Success - message will arrive via SSE, keep waiting for responses
         return {
-          ...state,
+          ...optimisticState,
+          isSending: false
+          // Keep isWaiting: true until SSE events complete
+        };
+      } catch (resubmitError: any) {
+        // POST failed after DELETE succeeded
+        return {
+          ...optimisticState,
           isSending: false,
           isWaiting: false,
-          error: `Messages removed successfully, but resubmission failed: ${result.resubmissionError || 'Unknown error'}`
+          error: `Messages removed but resubmission failed: ${resubmitError.message || 'Unknown error'}. Please try editing again.`
         };
       }
-
-      if (result.resubmissionStatus === 'skipped') {
-        // Session mode is OFF - removal succeeded but no resubmission
-        return {
-          ...state,
-          isSending: false,
-          isWaiting: false,
-          error: 'Message removed, but resubmission skipped (session mode is OFF). Please enable session mode to resubmit.'
-        };
-      }
-
-      // Success - message will arrive via SSE, so just clear sending state
-      return {
-        ...optimisticState,
-        isSending: false
-        // Keep isWaiting: true until SSE events complete
-      };
 
     } catch (error: any) {
-      // Handle specific error cases
+      // Handle DELETE errors
       let errorMessage = error.message || 'Failed to edit message';
 
       if (error.message?.includes('423')) {
@@ -483,7 +624,7 @@ export const worldUpdateHandlers = {
         errorMessage = 'Invalid message: only user messages can be edited.';
       }
 
-      // Restore original messages on error
+      // Restore original messages on DELETE error
       return {
         ...state,
         isSending: false,

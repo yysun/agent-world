@@ -8,11 +8,20 @@
 ## Overview
 
 Users must be able to edit any user message in an active chat session. When a message is edited:
-1. All messages starting from that message (including the edited message itself) are **removed** from all agent memories
-2. The edited message is **resubmitted** to the world as a new message
-3. Agents respond through normal message routing
+1. **Frontend**: User edits message text in UI
+2. **Server**: All messages starting from that message (including the edited message itself) are **removed** from all agent memories
+3. **Frontend**: After successful removal, resubmits the edited message via POST /messages API
+4. **Server**: Processes new message through normal routing, agents respond
 
-This is a **remove-and-resubmit** operation, not an update operation.
+This is a **remove-and-resubmit** operation with clear separation:
+- **DELETE /messages/:messageId** - Server removes messages only (returns removal status)
+- **POST /messages** - Frontend resubmits edited content as new message
+
+**Architecture Decision - APPROVED**: 
+- Server handles removal only (DELETE /messages/:messageId)
+- Frontend handles resubmission (POST /messages)
+- **Primary Rationale**: Reuses existing SSE streaming mechanism for agent responses
+- Secondary Benefits: Better separation of concerns, RESTful design, simpler server logic
 
 ## Business Goals
 
@@ -115,28 +124,35 @@ This is a **remove-and-resubmit** operation, not an update operation.
 - No orphaned or partial messages remain
 
 ### FR-5: Message Resubmission
-**What**: After message removal completes, the edited message must be resubmitted to the world as a new message.
+**What**: After message removal completes, the frontend must resubmit the edited message to the world as a new message.
 
 **Requirements**:
-- Removal operation must complete successfully before resubmission
-- Resubmission must use the SAME chatId as the original message
-- Resubmission must generate a NEW messageId (server-assigned)
-- Resubmission must be triggered automatically by the API endpoint after removal
-- Resubmission must submit to the world (not directly to individual agents)
-- Resubmission requires world session mode to be ON (currentChatId set)
-- If session mode is OFF, return clear error: "Cannot resubmit: session mode is OFF"
+- **Frontend Pre-Check**: Verify session mode is ON BEFORE calling DELETE
+- **Frontend Backup**: Store edit data in localStorage BEFORE calling DELETE
+  - Data: `{ messageId, chatId, newContent, timestamp }`
+  - Purpose: Recovery if POST fails after DELETE succeeds
+- **Server DELETE Response**: Return RemovalResult indicating success/failure of removal operation
+- **Frontend Logic**: After successful DELETE response, call POST /messages with edited content
+- **Resubmission API**: Use existing POST /worlds/:worldName/messages endpoint with SSE streaming
+- **Streaming Reuse**: Agent responses arrive via existing SSE mechanism (no custom implementation needed)
+- Resubmission must use the SAME chatId as the original message (frontend manages)
+- Resubmission must generate a NEW messageId (server-assigned during POST)
+- Resubmission goes through normal message flow (publishMessage → agents respond)
 - Message must go through normal world message routing (agents decide whether to respond)
 - Resubmission must use the edited content, not the original content
+- **Frontend Cleanup**: Clear localStorage backup after successful POST
 
 **Success Criteria**:
-- Removal completes before resubmission is triggered
-- Resubmitted message appears in chat with new messageId
-- Resubmitted message maintains chat context (same chatId)
-- Session mode is verified before resubmission (error if OFF)
+- DELETE /messages/:messageId returns RemovalResult with success status
+- Frontend receives successful removal response before calling POST
+- POST /messages called with edited content and correct chatId
+- Resubmitted message appears in chat with new server-assigned messageId
+- Resubmitted message maintains chat context (same chatId passed by frontend)
 - Agents receive the edited message content through normal routing
 - Agents generate new responses based on edited message
-- New responses appear in chat interface incrementally
+- New responses appear in chat interface incrementally via SSE
 - Message flow matches normal chat behavior
+- Frontend handles errors from either DELETE or POST appropriately
 
 ### FR-6: Error Handling
 **What**: The system must handle partial failures gracefully without rollback.
@@ -211,6 +227,29 @@ This is a **remove-and-resubmit** operation, not an update operation.
 - Resubmitted message visible after server restart with new messageId
 - No partial removal states after restart (operation is atomic per agent)
 - All agent files reflect final state (removed messages gone, new responses present)
+
+### FR-10: Message Deduplication (Multi-Agent)
+**What**: Prevent duplicate display of user messages when multiple agents receive the same message.
+
+**Requirements**:
+- User messages must be deduplicated by messageId across all agents
+- Track which agents received each user message via seenByAgents array
+- Display delivery status showing all receiving agents (e.g., "→ o1, a1, o3")
+- Apply deduplication to both SSE streaming AND load-from-storage paths
+- Agent messages remain separate (one message per agent displayed)
+- Edit button disabled until messageId confirmed from backend
+- Use combined check (messageId OR userEntered+text) to prevent race conditions
+- Handle case where multiple agents process same temp message simultaneously
+
+**Success Criteria**:
+- User message appears only once in UI regardless of agent count
+- Delivery status badge shows all agents that received the message
+- No duplicate user messages in conversation history
+- Agent messages display separately (not deduplicated)
+- No race conditions when multiple agents process same message
+- Edit button becomes enabled only after messageId received from backend
+- Messages loaded from storage are deduplicated correctly
+- Deduplication works across page reloads
 
 ## Non-Functional Requirements
 
@@ -422,25 +461,44 @@ This is a **remove-and-resubmit** operation, not an update operation.
 ## Risks
 
 ### High Priority Risks
-1. **Data Inconsistency**: Partial failures leave agents in inconsistent state
-   - Mitigation: Track all failures, provide retry mechanism
+1. **Data Loss from Failed Resubmission**: DELETE succeeds but POST fails
+   - **Impact**: HIGH - User loses removed messages AND edited content permanently
+   - **Probability**: Medium (network issues, session mode OFF, server errors)
+   - **Mitigation**: 
+     - Store edited content in localStorage before DELETE
+     - Implement "Resume Edit" recovery feature
+     - Show persistent retry option on POST failure
+     - Add explicit session mode check BEFORE DELETE
+     - Consider soft delete for future version
    
 2. **Race Conditions**: Edit conflicts with agent processing
-   - Mitigation: Lock messages during processing, block edits
+   - **Impact**: HIGH - Data corruption or inconsistent agent memories
+   - **Probability**: Low (protected by world.isProcessing flag)
+   - **Mitigation**: Lock messages during processing, block edits, 30s timeout
 
-3. **Data Loss**: Subsequent messages permanently deleted
-   - Mitigation: Confirmation dialog, clear warning
+3. **Partial State Gap**: Time window between DELETE response and POST request
+   - **Impact**: MEDIUM - World temporarily has incomplete conversation history
+   - **Probability**: HIGH (unavoidable with two-step flow, typically <100ms)
+   - **Mitigation**: 
+     - Minimize time window (immediate POST after DELETE)
+     - Use optimistic UI to hide gap from user
+     - Block concurrent operations during edit
+     - Document as known architectural limitation
 
 ### Medium Priority Risks
-4. **Performance Issues**: Large worlds slow edit operations
-   - Mitigation: Batch processing, progress indicators, warnings
+4. **Duplicate Operations**: User double-clicks edit button
+   - **Impact**: MEDIUM - Could trigger DELETE → POST → DELETE → POST corruption
+   - **Mitigation**: Disable button during operation, track in-flight edits, debounce
 
-5. **Migration Problems**: Existing messages fail to receive IDs
-   - Mitigation: Graceful migration with error handling
+5. **Performance Issues**: Large worlds slow edit operations
+   - **Mitigation**: Batch processing, progress indicators, warnings
+
+6. **Migration Problems**: Existing messages fail to receive IDs
+   - **Mitigation**: Graceful migration with error handling
 
 ### Low Priority Risks
-6. **User Confusion**: Users don't understand edit behavior
-   - Mitigation: Clear UI, confirmation dialogs, documentation
+7. **User Confusion**: Users don't understand edit behavior
+   - **Mitigation**: Clear UI, confirmation dialogs, documentation
 
 ## Open Questions
 
@@ -479,13 +537,15 @@ The message edit feature is considered complete when:
 5. ✅ Resubmitted messages maintain chat context (same chatId)
 6. ✅ Session mode is verified before resubmission
 7. ✅ Race conditions are prevented (world.isProcessing flag)
-8. ✅ Errors are handled gracefully with retry option
+8. ✅ Errors are handled gracefully with clear error messages
 9. ✅ Performance meets benchmarks (removal only, excludes agent response time)
 10. ✅ Changes persist across restarts (removals permanent, resubmissions saved)
 11. ✅ Users receive clear feedback throughout (removal → resubmission → responses)
-12. ✅ Large-scale removals (>10) require enhanced confirmation
-13. ✅ First message edits show conversation restart warning
+12. ⏳ Large-scale removals (>10) require enhanced confirmation (FUTURE)
+13. ⏳ First message edits show conversation restart warning (FUTURE)
 14. ✅ Test coverage exceeds 90%
+15. ✅ User messages deduplicated by messageId (no duplicate display)
+16. ✅ Delivery status shows which agents received each message
 
 ## Approval
 

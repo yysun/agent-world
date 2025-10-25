@@ -49,6 +49,7 @@ interface SSEMessageData extends SSEBaseData {
     agentName?: string;
     content?: string;
     message?: string;
+    messageId?: string;
     createdAt?: string;
     worldName?: string;
   };

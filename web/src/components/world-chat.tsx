@@ -5,11 +5,15 @@
  * - Real-time message streaming with agent selection filtering
  * - Cross-agent message detection and system message display
  * - User input handling with send functionality and loading states
- * - Message editing with backend integration (edit button shows only when messageId is available)
+ * - Message editing with frontend-driven DELETE → POST flow
+ * - Message deduplication by messageId for multi-agent scenarios
+ * - Delivery status display showing which agents received each message
  * - AppRun JSX with props-based state management
  *
  * Changes:
- * - 2025-10-21: Edit button only shown for saved messages (messageId present, not userEntered)
+ * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
+ * - 2025-10-25: Edit button disabled until messageId confirmed from backend
+ * - 2025-10-21: Integrated message edit functionality with remove-and-resubmit flow
  */
 
 import { app, safeHTML } from 'apprun';
@@ -118,11 +122,15 @@ export default function WorldChat(props: WorldChatProps) {
                 <div key={message.id || 'msg-' + index} className={messageClasses}>
                   <div className="message-sender">
                     {message.sender}
-                    {isCrossAgentMessage && message.fromAgentId && (
+                    {isUserMessage && message.seenByAgents && message.seenByAgents.length > 0 ? (
+                      <span className="source-agent-indicator" title="Agents that received this message">
+                        → {message.seenByAgents.join(', ')}
+                      </span>
+                    ) : isCrossAgentMessage && message.fromAgentId ? (
                       <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
                         → {message.fromAgentId}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   {isEditing ? (
                     <div className="message-edit-container">
@@ -153,11 +161,12 @@ export default function WorldChat(props: WorldChatProps) {
                       <div className="message-content">
                         {safeHTML(renderMarkdown(message.text))}
                       </div>
-                      {isUserMessage && !message.isStreaming && !message.userEntered && message.messageId && (
+                      {isUserMessage && !message.isStreaming && (
                         <button
                           className="message-edit-btn"
                           $onclick={['start-edit-message', message.id, message.text]}
                           title="Edit message"
+                          disabled={!message.messageId || message.userEntered}
                         >
                           ✎
                         </button>
@@ -177,9 +186,12 @@ export default function WorldChat(props: WorldChatProps) {
                   )}
                   {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
                   {debug && <div className="message-debug-info">{JSON.stringify({
+                    id: message.id,
                     type: message.type,
                     sender: message.sender,
                     fromAgentId: message.fromAgentId,
+                    messageId: message.messageId || 'undefined',
+                    hasMessageId: !!message.messageId,
                   })}</div>}
                 </div>
               );

@@ -315,24 +315,41 @@ async function newChat(worldName: string): Promise<{
 /**
  * Edit a message by removing it and subsequent messages, then resubmitting with new content
  */
-async function editMessage(
+async function deleteMessage(
   worldName: string,
   messageId: string,
-  chatId: string,
-  newContent: string
+  chatId: string
 ): Promise<any> {
-  if (!worldName || !messageId || !chatId || !newContent) {
-    throw new Error('World name, message ID, chat ID, and new content are required');
+  if (!worldName || !messageId || !chatId) {
+    throw new Error('World name, message ID, and chat ID are required');
   }
 
   const response = await apiRequest(
     `/worlds/${encodeURIComponent(worldName)}/messages/${encodeURIComponent(messageId)}`,
     {
       method: 'DELETE',
-      body: JSON.stringify({ chatId, newContent }),
+      body: JSON.stringify({ chatId }),
     }
   );
   return response.json();
+}
+
+async function sendMessage(
+  worldName: string,
+  message: string,
+  sender: string = 'human'
+): Promise<Response> {
+  if (!worldName || !message?.trim()) {
+    throw new Error('World name and non-empty message are required');
+  }
+
+  return apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ message, sender }),
+    }
+  );
 }
 
 // Export the API functions
@@ -363,7 +380,8 @@ export default {
   newChat,
 
   // Message management
-  editMessage,
+  deleteMessage,
+  sendMessage,
 };
 
 
