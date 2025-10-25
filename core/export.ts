@@ -7,6 +7,7 @@
  * - Chat sessions with complete message histories
  * - Structured formatting with proper markdown syntax
  * - Timestamp formatting and content preservation
+ * - Message deduplication using messageId (consistent with frontend)
  *
  * Features:
  * - Complete world export with only the current chat
@@ -15,6 +16,7 @@
  * - Structured markdown with clear sections and navigation
  * - Uses getMemory() for efficient message retrieval
  * - Automatic sender labeling for assistant messages using agent names
+ * - O(n) messageId-based deduplication (replaces O(n²) content-based approach)
  *
  * Implementation:
  * - Uses managers module for data access
@@ -23,8 +25,19 @@
  * - Organizes export by logical sections (world → agents → current chat)
  * - Simplified chat loading using world.chats.get() and getMemory()
  * - Maps agentId to agent names for assistant messages without sender
+ * - Deduplicates user messages by messageId using Map for O(1) lookup
+ *
+ * Deduplication Strategy:
+ * - Only user messages with messageId are deduplicated
+ * - Uses exact messageId matching (no fuzzy content comparison)
+ * - Agent messages remain separate (one per agent)
+ * - Tracks which agents received each message via agentIds/agentNames arrays
+ * - Consistent with frontend deduplication logic for predictable behavior
  *
  * Changes:
+ * - 2025-10-25: Refactored deduplication to use messageId-based approach (O(n) vs O(n²))
+ * - 2025-10-25: Aligned with frontend deduplication strategy for consistency
+ * - 2025-10-25: Only deduplicate user messages (agent messages kept separate)
  * - 2025-08-07: Extracted from managers.ts and enhanced with chat export
  * - 2025-08-07: Added complete chat message history support
  * - 2025-08-07: Enhanced formatting and structure for better readability
@@ -168,55 +181,58 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           return dateA - dateB;
         });
 
-        // Consolidate duplicate messages (same content, role, and timestamp)
-        const consolidatedMessages = [] as Array<AgentMessage & { agentIds?: string[], agentNames?: string[] }>;
-        for (const message of sortedMessages) {
-          // Find if this message already exists (same content, role, and close timestamp)
-          const existingIndex = consolidatedMessages.findIndex(m => {
-            if (m.role !== message.role || m.content !== message.content) {
-              return false;
-            }
-            // Check if timestamps are within 1 second of each other
-            if (m.createdAt && message.createdAt) {
-              const timeDiff = Math.abs(
-                new Date(m.createdAt).getTime() - new Date(message.createdAt).getTime()
-              );
-              return timeDiff < 1000; // Within 1 second
-            }
-            return !m.createdAt && !message.createdAt; // Both have no timestamp
-          });
+        // Deduplicate messages using messageId (consistent with frontend approach)
+        // Uses O(n) Map-based lookup instead of O(n²) content comparison
+        type ConsolidatedMessage = AgentMessage & { agentIds?: string[], agentNames?: string[] };
+        const messageMap = new Map<string, ConsolidatedMessage>();
+        const messagesWithoutId: ConsolidatedMessage[] = [];
 
-          if (existingIndex >= 0) {
-            // Merge agent information
-            const existing = consolidatedMessages[existingIndex];
-            if (message.agentId) {
-              if (!existing.agentIds) {
-                existing.agentIds = existing.agentId ? [existing.agentId] : [];
-              }
-              if (!existing.agentIds.includes(message.agentId)) {
-                existing.agentIds.push(message.agentId);
-              }
-              // Also collect agent names for display
-              const agent = agentsMap.get(message.agentId);
-              if (agent) {
-                if (!existing.agentNames) {
-                  existing.agentNames = [];
-                  // Add the original agent's name if exists
-                  if (existing.agentId) {
-                    const originalAgent = agentsMap.get(existing.agentId);
-                    if (originalAgent && !existing.agentNames.includes(originalAgent.name)) {
-                      existing.agentNames.push(originalAgent.name);
+        for (const message of sortedMessages) {
+          // Only deduplicate user messages with messageId (same as frontend)
+          const isUserMessage = message.role === 'user';
+
+          if (isUserMessage && message.messageId) {
+            const existing = messageMap.get(message.messageId);
+            if (existing) {
+              // Merge agent information for duplicate message
+              if (message.agentId) {
+                if (!existing.agentIds) {
+                  existing.agentIds = existing.agentId ? [existing.agentId] : [];
+                }
+                if (!existing.agentIds.includes(message.agentId)) {
+                  existing.agentIds.push(message.agentId);
+                }
+                // Collect agent names for display
+                const agent = agentsMap.get(message.agentId);
+                if (agent) {
+                  if (!existing.agentNames) {
+                    existing.agentNames = [];
+                    // Add original agent's name if exists
+                    if (existing.agentId) {
+                      const originalAgent = agentsMap.get(existing.agentId);
+                      if (originalAgent && !existing.agentNames.includes(originalAgent.name)) {
+                        existing.agentNames.push(originalAgent.name);
+                      }
                     }
                   }
-                }
-                if (!existing.agentNames.includes(agent.name)) {
-                  existing.agentNames.push(agent.name);
+                  if (!existing.agentNames.includes(agent.name)) {
+                    existing.agentNames.push(agent.name);
+                  }
                 }
               }
+            } else {
+              // First occurrence - add to map
+              messageMap.set(message.messageId, {
+                ...message,
+                agentIds: message.agentId ? [message.agentId] : undefined,
+                agentNames: message.agentId && agentsMap.get(message.agentId)
+                  ? [agentsMap.get(message.agentId)!.name]
+                  : undefined
+              });
             }
           } else {
-            // Add as new message
-            consolidatedMessages.push({
+            // Keep all agent messages and messages without messageId separate
+            messagesWithoutId.push({
               ...message,
               agentIds: message.agentId ? [message.agentId] : undefined,
               agentNames: message.agentId && agentsMap.get(message.agentId)
@@ -225,6 +241,15 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             });
           }
         }
+
+        // Combine deduplicated user messages with all other messages
+        // Maintain chronological order
+        const consolidatedMessages = [...Array.from(messageMap.values()), ...messagesWithoutId]
+          .sort((a, b) => {
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateA - dateB;
+          });
 
         // Format consolidated messages
         consolidatedMessages.forEach((message, index) => {
@@ -268,7 +293,11 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           markdown += `${paddedContent}\n`;
           markdown += '   ```\n\n';
         });
-        markdown += `*Note: ${sortedMessages.length} original messages, ${consolidatedMessages.length} after consolidation*\n\n`;
+
+        const userMessageCount = sortedMessages.filter(m => m.role === 'user').length;
+        const deduplicatedUserCount = Array.from(messageMap.values()).length;
+        markdown += `*Note: ${sortedMessages.length} total messages (${userMessageCount} user, ${sortedMessages.length - userMessageCount} agent/system), `;
+        markdown += `${consolidatedMessages.length} after deduplication (${deduplicatedUserCount} unique user messages)*\n\n`;
       } else {
         markdown += `**Messages:** No messages found for this chat\n\n`;
       }
