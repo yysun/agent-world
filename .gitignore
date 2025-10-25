@@ -34,7 +34,7 @@ coverage/
 tmp/
 temp/
 
-.specstory
+.playwright-mcp/
 docs/plan/
 docs/requirements/
 docs/ideas/
