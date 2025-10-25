@@ -5,18 +5,43 @@
  * - World configuration and metadata
  * - Agent configurations and system prompts (memory excluded)
  * - Chat sessions with complete message histories
- * - Structured formatting with proper markdown syntax
+ * - Improved message labeling for better readability
+ * - In-memory message detection (messages received without reply)
  * - Timestamp formatting and content preservation
  * - Message deduplication using messageId (consistent with frontend)
  *
  * Features:
  * - Complete world export with only the current chat
  * - Agent configuration details (without memory)
- * - Current chat message history with proper formatting
+ * - Current chat message history with improved formatting:
+ *   - Human messages: "From: HUMAN / To: agent1, agent2"
+ *   - Agent incoming: "Agent: agentName (incoming from sender)"
+ *   - Agent reply: "Agent: agentName (reply)"
+ *   - In-memory detection: "[in-memory, no reply]" for received messages without response
  * - Structured markdown with clear sections and navigation
  * - Uses getMemory() for efficient message retrieval
- * - Automatic sender labeling for assistant messages using agent names
  * - O(n) messageId-based deduplication (replaces O(n²) content-based approach)
+ * - Tool call detection and summarization
+ *
+ * Message Format Examples:
+ * ```
+ * From: HUMAN
+ * To: o1, a1
+ * Time: 2025-10-25T21:24:51.218Z
+ * hi
+ *
+ * Agent: o1 (incoming from HUMAN)
+ * Time: 2025-10-25T21:24:57.105Z
+ * [2 tool calls: function1, function2]
+ *
+ * Agent: o1 (reply)
+ * Time: 2025-10-25T21:24:57.105Z
+ * [2 tool calls: function1, function2]
+ *
+ * Agent: a1 (incoming from o1) [in-memory, no reply]
+ * Time: 2025-10-25T21:24:58.395Z
+ * Hi — how can I help you today?
+ * ```
  *
  * Implementation:
  * - Uses managers module for data access
@@ -24,8 +49,9 @@
  * - Preserves message content with proper escaping
  * - Organizes export by logical sections (world → agents → current chat)
  * - Simplified chat loading using world.chats.get() and getMemory()
- * - Maps agentId to agent names for assistant messages without sender
+ * - Maps agentId to agent names for clear identification
  * - Deduplicates user messages by messageId using Map for O(1) lookup
+ * - Detects in-memory messages by checking for subsequent assistant replies
  *
  * Deduplication Strategy:
  * - Only user messages with messageId are deduplicated
@@ -35,6 +61,8 @@
  * - Consistent with frontend deduplication logic for predictable behavior
  *
  * Changes:
+ * - 2025-10-25: Improved message labeling - removed role/sender confusion, added in-memory detection
+ * - 2025-10-25: Added tool call detection and summarization
  * - 2025-10-25: Refactored deduplication to use messageId-based approach (O(n) vs O(n²))
  * - 2025-10-25: Aligned with frontend deduplication strategy for consistency
  * - 2025-10-25: Only deduplicate user messages (agent messages kept separate)
@@ -243,55 +271,159 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
         }
 
         // Combine deduplicated user messages with all other messages
-        // Maintain chronological order
+        // Maintain chronological order with logical flow: replies before incoming messages
         const consolidatedMessages = [...Array.from(messageMap.values()), ...messagesWithoutId]
           .sort((a, b) => {
             const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateA - dateB;
+
+            // Primary sort: by timestamp
+            if (dateA !== dateB) {
+              return dateA - dateB;
+            }
+
+            // Secondary sort: when timestamps are equal, assistant (reply) comes before user (incoming)
+            // This ensures logical flow: agent replies first, then that reply is saved to other agents' memories
+            const roleOrderA = a.role === 'assistant' ? 0 : a.role === 'user' ? 1 : 2;
+            const roleOrderB = b.role === 'assistant' ? 0 : b.role === 'user' ? 1 : 2;
+            return roleOrderA - roleOrderB;
           });
 
-        // Format consolidated messages
+        // Format consolidated messages with improved labeling
         consolidatedMessages.forEach((message, index) => {
-          let senderLabel: string | undefined;
-          if (message.role === 'user' || message.role === 'assistant') {
-            const raw = message.sender;
-            // Determine agent names to display
-            let agentNamesStr: string | undefined;
-            if (message.agentNames && message.agentNames.length > 0) {
-              agentNamesStr = message.agentNames.join(', ');
-            } else if (message.agentIds && message.agentIds.length > 0) {
-              agentNamesStr = message.agentIds.join(', ');
-            } else if (message.agentId) {
-              const agent = agentsMap.get(message.agentId);
-              agentNamesStr = agent ? agent.name : message.agentId;
-            }
-            if (raw) {
-              const senderName = raw.toLowerCase() === 'human' ? 'HUMAN' : raw;
-              senderLabel = agentNamesStr ? `${senderName} → ${agentNamesStr}` : senderName;
+          // Determine if this is a user message or agent message
+          const isUserMessage = message.role === 'user';
+          const isAssistantMessage = message.role === 'assistant';
+
+          // Get sender information
+          const rawSender = message.sender?.toLowerCase() === 'human' ? 'HUMAN' : message.sender;
+
+          // Get agent/recipient information
+          let agentNamesStr: string | undefined;
+          if (message.agentNames && message.agentNames.length > 0) {
+            agentNamesStr = message.agentNames.join(', ');
+          } else if (message.agentIds && message.agentIds.length > 0) {
+            agentNamesStr = message.agentIds.join(', ');
+          } else if (message.agentId) {
+            const agent = agentsMap.get(message.agentId);
+            agentNamesStr = agent ? agent.name : message.agentId;
+          }
+
+          // Build label based on message type
+          let label: string;
+          let messageType: string = '';
+
+          if (isUserMessage) {
+            // User messages show who sent and who received
+            if (rawSender) {
+              if (rawSender === 'HUMAN') {
+                label = `From: ${rawSender}`;
+                if (agentNamesStr) {
+                  label += `\nTo: ${agentNamesStr}`;
+                }
+              } else {
+                // Agent sent to another agent (incoming message)
+                label = `Agent: ${agentNamesStr || 'Unknown'} (incoming from ${rawSender})`;
+                // Check if this is in-memory only (no corresponding assistant message from same agent)
+                const hasReply = consolidatedMessages.some(m =>
+                  m.role === 'assistant' &&
+                  m.agentId === message.agentId &&
+                  m.createdAt && message.createdAt &&
+                  new Date(m.createdAt).getTime() > new Date(message.createdAt).getTime()
+                );
+                if (!hasReply) {
+                  messageType = ' [in-memory, no reply]';
+                }
+              }
             } else {
-              senderLabel = agentNamesStr;
+              label = agentNamesStr ? `Agent: ${agentNamesStr} (incoming)` : 'Unknown sender';
             }
+          } else if (isAssistantMessage) {
+            // Assistant messages show which agent replied
+            label = agentNamesStr ? `Agent: ${agentNamesStr} (reply)` : 'Unknown agent';
+          } else if (message.role === 'tool') {
+            // Tool result messages
+            label = agentNamesStr ? `Agent: ${agentNamesStr} (tool result)` : 'Tool result';
           } else {
-            // For system messages or other roles
-            if (message.sender) {
-              senderLabel = message.sender.toLowerCase() === 'human' ? 'HUMAN' : message.sender;
+            // System or other messages
+            label = rawSender || message.role.toUpperCase();
+          }
+
+          markdown += `${index + 1}. ${label}${messageType}\n`;
+          markdown += `Time: ${message.createdAt ? formatDate(message.createdAt) : 'Unknown'}\n`;
+
+          // Add content with proper formatting
+          let hasToolCalls = false;
+
+          // Check for tool_calls field first (proper AI SDK format)
+          if (message.tool_calls && message.tool_calls.length > 0) {
+            const toolNames = message.tool_calls
+              .map(tc => tc.function?.name || '')
+              .filter(name => name !== '');
+
+            if (toolNames.length > 0) {
+              markdown += `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n`;
+            } else {
+              markdown += `[${message.tool_calls.length} tool call${message.tool_calls.length > 1 ? 's' : ''}]\n`;
+            }
+            hasToolCalls = true;
+          }
+          // Handle tool role messages (tool results)
+          else if (message.role === 'tool') {
+            const toolCallId = (message as any).tool_call_id || 'unknown';
+            markdown += `[Tool result for: ${toolCallId}]\n`;
+            hasToolCalls = true;
+          }
+          // Fallback: check content string for tool call JSON objects
+          else if (typeof message.content === 'string') {
+            // Simple heuristic: if content is mostly JSON objects (starts with { and has multiple lines of {})
+            const lines = message.content.trim().split('\n');
+            const jsonLines = lines.filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
+
+            if (jsonLines.length > 0 && jsonLines.length === lines.length) {
+              // All lines are JSON objects - likely tool calls
+              const validToolCalls = jsonLines.filter(line => {
+                try {
+                  const parsed = JSON.parse(line.trim());
+                  return parsed.hasOwnProperty('name') || parsed.hasOwnProperty('parameters') ||
+                    parsed.hasOwnProperty('arguments') || parsed.hasOwnProperty('function');
+                } catch {
+                  return false;
+                }
+              });
+
+              if (validToolCalls.length > 0) {
+                const toolNames = validToolCalls
+                  .map(line => {
+                    try {
+                      const parsed = JSON.parse(line.trim());
+                      return parsed.function?.name || parsed.name || '';
+                    } catch {
+                      return '';
+                    }
+                  })
+                  .filter(name => name !== '');
+
+                if (toolNames.length > 0) {
+                  markdown += `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n`;
+                } else {
+                  // Tool calls exist but names are empty - show count
+                  markdown += `[${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]\n`;
+                }
+                hasToolCalls = true;
+              }
             }
           }
-          markdown += `${index + 1}. **${message.role}** ${senderLabel ? `(${senderLabel})` : ''}:\n`;
-          if (message.createdAt) {
-            markdown += `   *${formatDate(message.createdAt)}*\n`;
+
+          // Show regular content if no tool calls or if content is not empty
+          if (!hasToolCalls && typeof message.content === 'string' && message.content.trim()) {
+            markdown += `${message.content}\n`;
+          } else if (hasToolCalls && typeof message.content === 'string' && message.content.trim() && message.role === 'tool') {
+            // For tool messages, also show the content (the tool result)
+            markdown += `${message.content.substring(0, 200)}${message.content.length > 200 ? '...' : ''}\n`;
           }
-          markdown += '   ```markdown\n';
-          let paddedContent = '';
-          if (typeof message.content === 'string') {
-            paddedContent = message.content
-              .split(/(\n)/)
-              .map(part => part === '\n' ? '\n' : '    ' + part)
-              .join('');
-          }
-          markdown += `${paddedContent}\n`;
-          markdown += '   ```\n\n';
+
+          markdown += `\n`;
         });
 
         const userMessageCount = sortedMessages.filter(m => m.role === 'user').length;

@@ -422,12 +422,13 @@ describe('Export Module', () => {
 
       const result = await exportWorldToMarkdown('test-world');
 
-      // Verify that assistant message without sender uses agent name
-      expect(result).toContain('**assistant** (Test Assistant):');
-      // Verify that assistant message with explicit sender uses "sender → agent name" format
-      expect(result).toContain('**assistant** (Explicit Sender → Test Assistant):');
-      // Verify that human message gets "HUMAN → agent name" format
-      expect(result).toContain('**user** (HUMAN → Test Assistant):');
+      // Verify that assistant message without sender uses agent name with "reply" label
+      expect(result).toContain('Agent: Test Assistant (reply)');
+      // Verify that assistant message with explicit sender also shows as reply
+      expect(result).toContain('Agent: Test Assistant (reply)');
+      // Verify that human message gets "From: HUMAN / To: agent name" format
+      expect(result).toContain('From: HUMAN');
+      expect(result).toContain('To: Test Assistant');
     });
   });
 });
