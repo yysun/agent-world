@@ -48,6 +48,70 @@ export default function WorldChat(props: WorldChatProps) {
     return senderLower !== agentIdLower && !message.isStreaming;
   };
 
+  // Helper function to detect and format tool calls (3-tier detection matching export logic)
+  const formatMessageText = (message: Message): string => {
+    const text = message.text;
+
+    // Tier 1: Check for tool_calls array (AI SDK format)
+    if ((message as any).tool_calls && (message as any).tool_calls.length > 0) {
+      const toolCalls = (message as any).tool_calls;
+      const toolNames = toolCalls
+        .map((tc: any) => tc.function?.name || '')
+        .filter((name: string) => name !== '');
+
+      if (toolNames.length > 0) {
+        return `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]`;
+      } else {
+        return `[${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}]`;
+      }
+    }
+
+    // Tier 2: Check if this is a tool result message
+    if (message.type === 'tool') {
+      const toolCallId = (message as any).tool_call_id || 'unknown';
+      return `[Tool result for: ${toolCallId}]`;
+    }
+
+    // Tier 3: Fallback - check if message content is all JSON tool call objects
+    const lines = text.trim().split('\n');
+    const jsonLines = lines.filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
+
+    if (jsonLines.length > 0 && jsonLines.length === lines.length) {
+      // All lines are JSON objects - check if they're tool calls
+      const validToolCalls = jsonLines.filter(line => {
+        try {
+          const parsed = JSON.parse(line.trim());
+          return parsed.hasOwnProperty('name') || parsed.hasOwnProperty('parameters') ||
+            parsed.hasOwnProperty('arguments') || parsed.hasOwnProperty('function');
+        } catch {
+          return false;
+        }
+      });
+
+      if (validToolCalls.length > 0) {
+        // Extract tool names
+        const toolNames = validToolCalls
+          .map(line => {
+            try {
+              const parsed = JSON.parse(line.trim());
+              return parsed.function?.name || parsed.name || '';
+            } catch {
+              return '';
+            }
+          })
+          .filter(name => name !== '');
+
+        if (toolNames.length > 0) {
+          return `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]`;
+        } else {
+          return `[${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]`;
+        }
+      }
+    }
+
+    return text;
+  };
+
   return (
     <fieldset className="chat-fieldset">
       <legend>
@@ -112,10 +176,13 @@ export default function WorldChat(props: WorldChatProps) {
 
               const senderType = getSenderType(message.sender);
               const isCrossAgentMessage = hasSenderAgentMismatch(message);
-              // Memory-only message: agent message saved to another agent's memory without response
-              // This is when an agent sends a message that gets saved to another agent's memory
-              // Identified by: agent sender + sender/agentId mismatch (cross-agent) + saved to memory
-              const isMemoryOnlyMessage = senderType === SenderType.AGENT &&
+              // Memory-only message: INCOMING agent message (type=user/human) saved to another agent's memory without triggering response
+              // This is when an agent's reply gets saved to another agent's memory as an incoming message
+              // Identified by: type=user/human + agent sender + sender/agentId mismatch (cross-agent)
+              // Note: Agent replies have type='agent' or 'assistant', incoming messages have type='user' or 'human'
+              const isIncomingMessage = message.type === 'user' || message.type === 'human';
+              const isMemoryOnlyMessage = isIncomingMessage &&
+                senderType === SenderType.AGENT &&
                 isCrossAgentMessage &&
                 !message.isStreaming;
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
@@ -127,23 +194,36 @@ export default function WorldChat(props: WorldChatProps) {
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
 
+              // Build display label matching export format
+              let displayLabel = '';
+              if (isUserMessage) {
+                displayLabel = 'From: HUMAN';
+                if (message.seenByAgents && message.seenByAgents.length > 0) {
+                  displayLabel += `\nTo: ${message.seenByAgents.join(', ')}`;
+                }
+              } else if (senderType === SenderType.AGENT) {
+                // Check if this is an incoming message (cross-agent with type='user') or a reply (type='agent')
+                if (isCrossAgentMessage && isIncomingMessage) {
+                  // Incoming message to agent memory (sender sent to fromAgentId)
+                  displayLabel = `Agent: ${message.fromAgentId || message.sender} (incoming from ${message.sender})`;
+                  // Check if this is memory-only (no reply follows)
+                  if (isMemoryOnlyMessage) {
+                    displayLabel += ' [in-memory, no reply]';
+                  }
+                } else {
+                  // Agent reply (normal agent message)
+                  displayLabel = `Agent: ${message.sender} (reply)`;
+                }
+              } else if (senderType === SenderType.SYSTEM) {
+                displayLabel = message.sender;
+              } else {
+                displayLabel = message.sender;
+              }
+
               return (
                 <div key={message.id || 'msg-' + index} className={messageClasses}>
-                  <div className="message-sender">
-                    {message.sender}
-                    {isUserMessage && message.seenByAgents && message.seenByAgents.length > 0 ? (
-                      <span className="source-agent-indicator" title="Agents that received this message">
-                        → {message.seenByAgents.join(', ')}
-                      </span>
-                    ) : isMemoryOnlyMessage && message.seenByAgents ? (
-                      <span className="source-agent-indicator" title="Saved to agent memory">
-                        → {message.seenByAgents.join(', ')}
-                      </span>
-                    ) : isCrossAgentMessage && message.fromAgentId ? (
-                      <span className="source-agent-indicator" title={`From agent: ${message.fromAgentId}`}>
-                        → {message.fromAgentId}
-                      </span>
-                    ) : null}
+                  <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
+                    {displayLabel}
                   </div>
                   {isEditing ? (
                     <div className="message-edit-container">
@@ -172,7 +252,7 @@ export default function WorldChat(props: WorldChatProps) {
                   ) : (
                     <>
                       <div className="message-content">
-                        {safeHTML(renderMarkdown(message.text))}
+                        {safeHTML(renderMarkdown(formatMessageText(message)))}
                       </div>
                       {isUserMessage && !message.isStreaming && (
                         <button

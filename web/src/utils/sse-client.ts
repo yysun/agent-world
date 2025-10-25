@@ -690,12 +690,13 @@ export const handleMemoryOnlyMessage = <T extends SSEComponentState>(state: T, d
   // CRITICAL: sender vs agentName semantics for correct UI detection
   // - sender: Original message sender (e.g., "a1") - displays as message author
   // - agentName: Recipient agent who saved to memory (e.g., "o1")
+  // - type: MUST be 'user' for incoming messages to get correct sort priority (after replies)
   // - fromAgentId: MUST be agentName (recipient) to create sender≠fromAgentId mismatch for gray border styling
   // - seenByAgents: Required for "→ o1" indicator display in world-chat.tsx
   const memoryOnlyMessage = {
     id: `memory-only-${messageId}`,
     messageId: messageId,
-    type: 'agent',
+    type: 'user',  // ✅ Incoming message type - gets priority 1 (after 'agent' replies)
     sender: sender,  // Message author (e.g., "a1")
     text: content || '',
     createdAt: new Date(),

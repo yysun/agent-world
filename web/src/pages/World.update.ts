@@ -75,7 +75,25 @@ import { renderMarkdown } from '../utils/markdown';
 // Utility functions for message processing
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
   const sender = toKebabCase(memoryItem.sender || agentName);
-  const messageType = (sender === 'HUMAN' || sender === 'USER') ? 'user' : 'agent';
+
+  // Determine message type based on role field from backend
+  // role='user' → incoming message (type='user') - saved to agent memory
+  // role='assistant' → agent reply (type='agent') - agent's own response
+  // sender='HUMAN'/'USER' → human message (type='user')
+  let messageType: string;
+  if (sender === 'HUMAN' || sender === 'USER' || sender === 'human' || sender === 'user') {
+    messageType = 'user';
+  } else if (memoryItem.role === 'user') {
+    // Agent message saved to memory as incoming (not a reply)
+    messageType = 'user';
+  } else if (memoryItem.role === 'assistant') {
+    // Agent's own reply
+    messageType = 'agent';
+  } else {
+    // Fallback: if sender is an agent and role is not specified, assume it's a reply
+    messageType = 'agent';
+  }
+
   const isUserMessage = messageType === 'user';
 
   // Auto-generate fallback ID for legacy messages without messageId
@@ -93,7 +111,8 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     messageId: memoryItem.messageId,
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
-    fromAgentId: isUserMessage ? undefined : agentName // Only set fromAgentId for agent messages
+    fromAgentId: memoryItem.agentId || (isUserMessage ? undefined : agentName), // Use agentId from backend or fallback to agentName
+    role: memoryItem.role // Preserve role for sorting
   };
 };
 
@@ -136,12 +155,23 @@ const deduplicateMessages = (messages: Message[]): Message[] => {
   }
 
   // Combine deduplicated user messages with all agent messages
-  // Sort by createdAt to maintain chronological order
+  // Sort by createdAt with logical flow: replies before incoming messages when timestamps match
   return [...Array.from(messageMap.values()), ...messagesWithoutId]
     .sort((a, b) => {
       const dateA = new Date(a.createdAt || 0).getTime();
       const dateB = new Date(b.createdAt || 0).getTime();
-      return dateA - dateB;
+
+      // Primary sort: by timestamp
+      if (dateA !== dateB) {
+        return dateA - dateB;
+      }
+
+      // Secondary sort: when timestamps are equal, assistant/agent (reply) comes before user/human (incoming)
+      // This ensures logical flow: agent replies first, then that reply is saved to other agents' memories
+      // Note: Backend uses role='assistant'/'user', frontend API maps to type='agent'/'user'
+      const roleOrderA = (a.type === 'agent' || a.type === 'assistant') ? 0 : (a.type === 'user' || a.type === 'human') ? 1 : 2;
+      const roleOrderB = (b.type === 'agent' || b.type === 'assistant') ? 0 : (b.type === 'user' || b.type === 'human') ? 1 : 2;
+      return roleOrderA - roleOrderB;
     });
 };
 
