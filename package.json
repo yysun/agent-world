@@ -29,7 +29,9 @@
     "start": "node dist/server/index.js",
     "cli": "npx tsx cli/index.ts",
     "server": "npx tsx server/index.ts",
-    "dev": "concurrently \"npm run server\" \"npm run dev --workspace=web\"",
+    "dev": "npm run server:watch & npm run web:dev",
+    "server:watch": "npx tsx --watch server/index.ts",
+    "web:dev": "wait-on http://127.0.0.1:3000/health && npm run dev --workspace=web",
     "test": "jest --config jest.config.js",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "check": "tsc --noEmit && npm run check --workspace=web",
@@ -63,9 +65,9 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.3.0",
     "commander": "^14.0.0",
-    "concurrently": "^9.2.0",
     "jest": "^30.0.5",
-    "ts-jest": "^29.4.1"
+    "ts-jest": "^29.4.1",
+    "wait-on": "^9.0.1"
   },
   "engines": {
     "node": ">=20.0.0"
