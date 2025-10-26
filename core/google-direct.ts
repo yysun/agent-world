@@ -29,6 +29,7 @@
  * - Implemented tool call sequence tracking and dependency relationships
  * - Enhanced logging with result content analysis and execution status
  * - Added 'end' event emission after streaming completion to signal CLI properly
+ * - Added validation and handling for tool calls with empty or missing names
  */
 
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
@@ -36,6 +37,7 @@ import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('llm.adapter.google');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -197,16 +199,25 @@ export async function streamGoogleResponse(
     // Process function calls if any
     // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
     if (functionCalls.length > 0) {
+      // Filter and handle function calls with empty or missing names
+      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
+        functionCalls,
+        world,
+        agent,
+        publishSSE,
+        messageId
+      );
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (Google streaming)`, {
         sequenceId,
         agentId: agent.id,
         messageId,
-        toolCount: functionCalls.length,
-        toolNames: functionCalls.map(fc => fc.function.name)
+        toolCount: validCalls.length,
+        toolNames: validCalls.map(fc => fc.function!.name!)
       });
 
-      // Add assistant message with function calls
+      // Add assistant message with function calls (include all calls, even invalid ones)
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: fullResponse || '',
@@ -214,14 +225,14 @@ export async function streamGoogleResponse(
       };
 
       // Execute function calls and get results
-      const toolResults: ChatMessage[] = [];
+      const toolResults: ChatMessage[] = [...emptyNameToolResults];
 
-      for (let i = 0; i < functionCalls.length; i++) {
-        const functionCall = functionCalls[i];
+      for (let i = 0; i < validCalls.length; i++) {
+        const functionCall = validCalls[i];
         const startTime = performance.now();
 
         try {
-          const tool = mcpTools[functionCall.function.name];
+          const tool = mcpTools[functionCall.function!.name!];
           if (tool && tool.execute) {
             // Publish tool start event to frontend
             publishSSE(world, {
@@ -229,8 +240,8 @@ export async function streamGoogleResponse(
               type: 'tool-start',
               messageId,
               toolExecution: {
-                toolName: functionCall.function.name,
-                toolCallId: functionCall.id,
+                toolName: functionCall.function!.name!,
+                toolCallId: functionCall.id!,
                 phase: 'starting'
               }
             });
@@ -238,14 +249,14 @@ export async function streamGoogleResponse(
             mcpLogger.debug(`MCP tool execution starting (Google streaming)`, {
               sequenceId,
               toolIndex: i,
-              toolName: functionCall.function.name,
-              toolCallId: functionCall.id,
+              toolName: functionCall.function!.name!,
+              toolCallId: functionCall.id!,
               agentId: agent.id,
               messageId,
-              argsPresent: !!functionCall.function.arguments
+              argsPresent: !!functionCall.function!.arguments
             });
 
-            const args = JSON.parse(functionCall.function.arguments || '{}');
+            const args = JSON.parse(functionCall.function!.arguments || '{}');
             const result = await tool.execute(args, sequenceId, `google-streaming-${messageId}`);
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
@@ -253,8 +264,8 @@ export async function streamGoogleResponse(
             mcpLogger.debug(`MCP tool execution completed (Google streaming)`, {
               sequenceId,
               toolIndex: i,
-              toolName: functionCall.function.name,
-              toolCallId: functionCall.id,
+              toolName: functionCall.function!.name!,
+              toolCallId: functionCall.id!,
               agentId: agent.id,
               messageId,
               status: 'success',
@@ -269,8 +280,8 @@ export async function streamGoogleResponse(
               type: 'tool-result',
               messageId,
               toolExecution: {
-                toolName: functionCall.function.name,
-                toolCallId: functionCall.id,
+                toolName: functionCall.function!.name!,
+                toolCallId: functionCall.id!,
                 phase: 'completed',
                 duration: Math.round(duration * 100) / 100,
                 result: result,
@@ -281,7 +292,7 @@ export async function streamGoogleResponse(
             toolResults.push({
               role: 'tool',
               content: resultString,
-              tool_call_id: functionCall.id,
+              tool_call_id: functionCall.id!,
             });
           }
         } catch (error) {
@@ -291,8 +302,8 @@ export async function streamGoogleResponse(
           mcpLogger.error(`MCP tool execution failed (Google streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
-            toolName: functionCall.function.name,
-            toolCallId: functionCall.id,
+            toolName: functionCall.function!.name!,
+            toolCallId: functionCall.id!,
             agentId: agent.id,
             messageId,
             status: 'error',
@@ -307,8 +318,8 @@ export async function streamGoogleResponse(
             type: 'tool-error',
             messageId,
             toolExecution: {
-              toolName: functionCall.function.name,
-              toolCallId: functionCall.id,
+              toolName: functionCall.function!.name!,
+              toolCallId: functionCall.id!,
               error: errorMessage,
               duration: Math.round(duration * 100) / 100,
               phase: 'failed'
@@ -318,7 +329,7 @@ export async function streamGoogleResponse(
           toolResults.push({
             role: 'tool',
             content: `Error: ${errorMessage}`,
-            tool_call_id: functionCall.id,
+            tool_call_id: functionCall.id!,
           });
         }
       }
@@ -421,19 +432,34 @@ export async function generateGoogleResponse(
 
     // Handle function calls if any
     if (functionCalls.length > 0) {
+      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
+      const validFunctionCalls = functionCalls.filter(fc => fc.function?.name && fc.function.name.trim() !== '');
+      const invalidFunctionCalls = functionCalls.filter(fc => !fc.function?.name || fc.function.name.trim() === '');
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (Google non-streaming)`, {
         sequenceId,
         agentId: agent.id,
-        toolCount: functionCalls.length,
-        toolNames: functionCalls.map(fc => fc.function.name)
+        toolCount: validFunctionCalls.length,
+        invalidToolCount: invalidFunctionCalls.length,
+        toolNames: validFunctionCalls.map(fc => fc.function.name)
       });
 
       // Execute function calls
       const toolResults: ChatMessage[] = [];
 
-      for (let i = 0; i < functionCalls.length; i++) {
-        const functionCall = functionCalls[i];
+      // Add tool results for invalid calls (empty or missing names)
+      for (const invalidCall of invalidFunctionCalls) {
+        const toolCallId = invalidCall.id || generateFallbackId();
+        toolResults.push({
+          role: 'tool',
+          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
+          tool_call_id: toolCallId,
+        });
+      }
+
+      for (let i = 0; i < validFunctionCalls.length; i++) {
+        const functionCall = validFunctionCalls[i];
         const startTime = performance.now();
 
         try {

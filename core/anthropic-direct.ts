@@ -20,6 +20,7 @@
  *
  * Recent Changes:
  * - Added 'end' event emission after streaming completion to signal CLI properly
+ * - Added validation and handling for tool calls with empty or missing names
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -27,6 +28,7 @@ import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('llm.adapter.anthropic');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -171,34 +173,47 @@ export async function streamAnthropicResponse(
     // Process tool calls if any
     // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
     if (toolUses.length > 0) {
+      // Normalize toolUses to function call format for filtering
+      const functionCalls = toolUses.map(toolUse => ({
+        id: toolUse.id,
+        type: 'function' as const,
+        function: {
+          name: toolUse.name,
+          arguments: JSON.stringify(toolUse.input),
+        },
+      }));
+
+      // Filter and handle function calls with empty or missing names
+      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
+        functionCalls,
+        world,
+        agent,
+        publishSSE,
+        messageId
+      );
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (Anthropic streaming)`, {
         sequenceId,
         agentId: agent.id,
         messageId,
-        toolCount: toolUses.length,
-        toolNames: toolUses.map(tu => tu.name)
+        toolCount: validCalls.length,
+        toolNames: validCalls.map(fc => fc.function!.name!)
       });
 
-      // Add assistant message with tool uses
+      // Add assistant message with tool uses (include all calls, even invalid ones)
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: fullResponse || '',
-        tool_calls: toolUses.map(toolUse => ({
-          id: toolUse.id,
-          type: 'function',
-          function: {
-            name: toolUse.name,
-            arguments: JSON.stringify(toolUse.input),
-          },
-        })),
+        tool_calls: functionCalls,
       };
 
       // Execute tool calls and get results
-      const toolResults: ChatMessage[] = [];
+      const toolResults: ChatMessage[] = [...emptyNameToolResults];
 
-      for (let i = 0; i < toolUses.length; i++) {
-        const toolUse = toolUses[i];
+      for (let i = 0; i < validCalls.length; i++) {
+        const toolCall = validCalls[i];
+        const toolUse = { id: toolCall.id!, name: toolCall.function!.name!, input: JSON.parse(toolCall.function!.arguments || '{}') };
         const startTime = performance.now();
 
         try {
@@ -393,19 +408,45 @@ export async function generateAnthropicResponse(
 
     // Handle tool calls if any
     if (toolUses.length > 0) {
+      // Normalize toolUses to function call format for filtering
+      const functionCalls = toolUses.map(toolUse => ({
+        id: toolUse.id,
+        type: 'function' as const,
+        function: {
+          name: toolUse.name,
+          arguments: JSON.stringify(toolUse.input),
+        },
+      }));
+
+      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
+      const validFunctionCalls = functionCalls.filter(fc => fc.function?.name && fc.function.name.trim() !== '');
+      const invalidFunctionCalls = functionCalls.filter(fc => !fc.function?.name || fc.function.name.trim() === '');
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (Anthropic non-streaming)`, {
         sequenceId,
         agentId: agent.id,
-        toolCount: toolUses.length,
-        toolNames: toolUses.map(tu => tu.name)
+        toolCount: validFunctionCalls.length,
+        invalidToolCount: invalidFunctionCalls.length,
+        toolNames: validFunctionCalls.map(fc => fc.function.name)
       });
 
       // Execute tool calls
       const toolResults: ChatMessage[] = [];
 
-      for (let i = 0; i < toolUses.length; i++) {
-        const toolUse = toolUses[i];
+      // Add tool results for invalid calls (empty or missing names)
+      for (const invalidCall of invalidFunctionCalls) {
+        const toolCallId = invalidCall.id || generateFallbackId();
+        toolResults.push({
+          role: 'tool',
+          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
+          tool_call_id: toolCallId,
+        });
+      }
+
+      for (let i = 0; i < validFunctionCalls.length; i++) {
+        const toolCall = validFunctionCalls[i];
+        const toolUse = { id: toolCall.id, name: toolCall.function.name, input: JSON.parse(toolCall.function.arguments || '{}') };
         const startTime = performance.now();
 
         try {
@@ -469,7 +510,7 @@ export async function generateAnthropicResponse(
       mcpLogger.debug(`MCP tool call sequence completed (Anthropic non-streaming)`, {
         sequenceId,
         agentId: agent.id,
-        toolCount: toolUses.length,
+        toolCount: validFunctionCalls.length,
         successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
         errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
       });
@@ -479,14 +520,7 @@ export async function generateAnthropicResponse(
         const assistantMessage: ChatMessage = {
           role: 'assistant',
           content: content,
-          tool_calls: toolUses.map(toolUse => ({
-            id: toolUse.id,
-            type: 'function',
-            function: {
-              name: toolUse.name,
-              arguments: JSON.stringify(toolUse.input),
-            },
-          })),
+          tool_calls: functionCalls,
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
