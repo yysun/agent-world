@@ -4,31 +4,81 @@
  * Tests the removeMessagesFrom function which handles deletion of user messages
  * and all subsequent messages in a chat conversation.
  * 
- * Features Tested:
- * - Error handling for non-existent worlds
- * - Error handling for non-existent messages
- * - Error handling for empty chats
- * - Chat isolation (only affects specified chat)
- * - Timestamp-based deletion logic
- * - Multi-agent processing behavior
- * - Return structure validation
- * 
- * Implementation Details:
- * The function uses timestamp-based filtering to remove messages:
- * - Loads full agent memory (all chats)
- * - Finds target message by messageId within specified chatId
- * - Keeps messages from other chats untouched
- * - Keeps messages from same chat with timestamp < target timestamp
- * - Removes target message and all messages after it in the same chat
- * - Saves the filtered memory back to storage
+ * Uses in-memory storage for testing.
  */
 
-import { describe, it, expect } from '@jest/globals';
-import {
-  removeMessagesFrom
-} from '../../core/index.js';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Agent, AgentMessage, World } from '../../core/types.js';
+import { LLMProvider } from '../../core/types.js';
+import { createMemoryStorage } from '../../core/storage/memory-storage.js';
+import { EventEmitter } from 'events';
+
+// Create a shared storage instance that will be used by the mocked factory
+const memoryStorage = createMemoryStorage();
+
+// Mock the storage factory to return our in-memory storage
+jest.mock('../../core/storage/storage-factory.js', () => {
+  const { createStorageWrappers } = jest.requireActual('../../core/storage/storage-factory.js');
+  return {
+    createStorageWithWrappers: jest.fn().mockResolvedValue(createStorageWrappers(memoryStorage)),
+    createStorageWrappers,
+    getDefaultRootPath: jest.fn().mockReturnValue('/test/data')
+  };
+});
+
+// Import after mocks are set up
+import { removeMessagesFrom } from '../../core/index.js';
+
+// Helper to create a test world
+function createTestWorld(overrides: Partial<World> = {}): World {
+  return {
+    id: 'test-world',
+    name: 'Test World',
+    currentChatId: 'chat-1',
+    totalAgents: 1,
+    totalMessages: 0,
+    turnLimit: 5,
+    createdAt: new Date(),
+    lastUpdated: new Date(),
+    eventEmitter: new EventEmitter(),
+    agents: new Map(),
+    chats: new Map(),
+    ...overrides
+  } as World;
+}
+
+// Helper to create a test agent
+function createTestAgent(overrides: Partial<Agent> = {}): Agent {
+  return {
+    id: 'agent-1',
+    name: 'Test Agent',
+    type: 'assistant',
+    provider: LLMProvider.OPENAI,
+    model: 'gpt-4',
+    systemPrompt: 'Test',
+    memory: [],
+    llmCallCount: 0,
+    createdAt: new Date(),
+    lastActive: new Date(),
+    ...overrides
+  };
+}
 
 describe('Message Deletion Feature - Unit Tests', () => {
+  beforeEach(async () => {
+    // Clear all data from in-memory storage before each test
+    // Note: Memory storage doesn't have a clear method, so we'll work with fresh data each test
+  });
+
+  afterEach(async () => {
+    // Clean up by deleting test world if it exists
+    try {
+      await memoryStorage.deleteWorld('test-world');
+    } catch (e) {
+      // Ignore errors if world doesn't exist
+    }
+  });
+
   describe('Error Handling', () => {
     it('should throw error for non-existent world', async () => {
       await expect(
@@ -44,280 +94,415 @@ describe('Message Deletion Feature - Unit Tests', () => {
 
   describe('RemovalResult Structure', () => {
     it('should return correct result structure with required fields', async () => {
-      // Expected structure when successful:
-      // {
-      //   success: boolean,
-      //   messageId: string,
-      //   totalAgents: number,
-      //   processedAgents: string[],
-      //   failedAgents: Array<{ agentId: string, error: string }>,
-      //   messagesRemovedTotal: number,
-      //   requiresRetry: boolean,
-      //   resubmissionStatus: string,
-      //   newMessageId?: string
-      // }
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
+
+      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('messageId', 'msg-2');
+      expect(result).toHaveProperty('totalAgents', 1);
+      expect(result).toHaveProperty('processedAgents');
+      expect(result).toHaveProperty('failedAgents');
+      expect(result).toHaveProperty('messagesRemovedTotal');
+      expect(result).toHaveProperty('requiresRetry');
+      expect(result).toHaveProperty('resubmissionStatus');
+      expect(result.success).toBe(true);
+      expect(result.processedAgents).toEqual(['agent-1']);
+      expect(result.failedAgents).toHaveLength(0);
+      expect(result.messagesRemovedTotal).toBe(2); // msg-2 and msg-3 removed
     });
 
-    it('should include failure details when agents fail to process', () => {
-      // Expected structure for failures:
-      // {
-      //   success: false,
-      //   processedAgents: [],
-      //   failedAgents: [{ agentId: 'id', error: 'message' }],
-      //   requiresRetry: false
-      // }
+    it('should include failure details when agents fail to process', async () => {
+      const world = createTestWorld();
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      expect(result.success).toBe(false);
+      expect(result.failedAgents).toHaveLength(0); // No agents = no failures
+      expect(result.messagesRemovedTotal).toBe(0);
     });
   });
 
   describe('Function Signature', () => {
     it('should accept worldId, messageId, and chatId parameters', () => {
-      // Type checking test - if this compiles, the signature is correct
-      const params: [string, string, string] = ['world', 'msg', 'chat'];
       expect(typeof removeMessagesFrom).toBe('function');
       expect(removeMessagesFrom.length).toBe(3); // Takes 3 parameters
     });
   });
 
   describe('Timestamp-Based Removal Logic', () => {
-    it('should document timestamp-based removal approach', () => {
-      // The removeMessagesFrom function uses timestamp-based filtering:
-      // 1. Load full agent memory (all chats)
-      // 2. Find target message: fullAgent.memory.findIndex(m => m.messageId === messageId && m.chatId === chatId)
-      // 3. Get target timestamp from target message's createdAt field
-      // 4. Filter messages to keep:
-      //    - Keep if m.chatId !== chatId (different chat)
-      //    - Keep if m.chatId === chatId AND m.createdAt < targetTimestamp (before target in same chat)
-      // 5. Save filtered memory
-      // 
-      // This approach:
-      // - More reliable than index-based (handles async message insertion)
-      // - Works correctly for first message (timestamp comparison removes all >= target)
-      // - Works correctly for last message (keeps all messages before it)
-      // - Handles missing createdAt timestamps with fallback to Date.now()
-      // - Preserves chronological order
-      // - Preserves messages from other chats
+    it('should remove messages based on timestamp comparison', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg4', messageId: 'msg-4', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:03:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg5', messageId: 'msg-5', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:04:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 5, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      await removeMessagesFrom('test-world', 'msg-3', 'chat-1');
+
+      // Verify that only messages before msg-3 remain
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      expect(updatedAgent?.memory).toHaveLength(2);
+      expect(updatedAgent?.memory[0].messageId).toBe('msg-1');
+      expect(updatedAgent?.memory[1].messageId).toBe('msg-2');
     });
 
-    it('should handle messages without createdAt timestamps', () => {
-      // When message.createdAt is undefined or null:
-      // const msgTimestamp = m.createdAt instanceof Date
-      //   ? m.createdAt.getTime()
-      //   : m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
-      //
-      // Fallback to Date.now() ensures comparison always works
-      // This prevents NaN or type errors during timestamp comparison
+    it('should handle messages without createdAt timestamps', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', agentId: 'agent-1' } as AgentMessage // No createdAt
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      // Should not throw an error
+      expect(result.success).toBe(true);
+      expect(result.messagesRemovedTotal).toBeGreaterThanOrEqual(1);
     });
 
-    it('should handle Date objects and ISO strings', () => {
-      // Timestamp extraction supports both formats:
-      // - Date objects: m.createdAt.getTime()
-      // - ISO strings: new Date(m.createdAt).getTime()
-      // - Undefined/null: Date.now()
-      //
-      // This ensures compatibility with both in-memory and persisted messages
+    it('should handle Date objects and ISO strings', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: '2024-01-01T10:00:00Z' as any, agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      // Should handle both formats correctly
+      expect(result.success).toBe(true);
+      expect(result.messagesRemovedTotal).toBe(2);
     });
   });
 
   describe('Chat Isolation Behavior', () => {
-    it('should only affect messages in the specified chat', () => {
-      // The removeMessagesFrom function preserves cross-chat isolation:
-      // 
-      // const messagesToKeep = fullAgent.memory.filter(m => {
-      //   if (m.chatId !== chatId) {
-      //     return true; // Keep messages from other chats
-      //   }
-      //   // Filter logic for messages in target chat
-      // });
-      //
-      // This ensures:
-      // - Messages from chat-1 deletion doesn't affect chat-2
-      // - Agent memory from other conversations preserved
-      // - Each chat operates independently
+    it('should only affect messages in the specified chat', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          // Chat-1 messages
+          { role: 'user', content: 'chat1-msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'chat1-msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'chat1-msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' },
+          // Chat-2 messages (should be preserved)
+          { role: 'user', content: 'chat2-msg1', messageId: 'msg-4', chatId: 'chat-2', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'chat2-msg2', messageId: 'msg-5', chatId: 'chat-2', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'chat2-msg3', messageId: 'msg-6', chatId: 'chat-2', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat1 = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
+      const chat2 = { id: 'chat-2', name: 'Chat 2', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat1);
+      await memoryStorage.saveChatData('test-world', chat2);
+
+      await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
+
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const chat1Messages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-1');
+      const chat2Messages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-2');
+
+      // Chat-1: Only msg-1 should remain (msg-2 and msg-3 removed)
+      expect(chat1Messages).toHaveLength(1);
+      expect(chat1Messages?.[0].messageId).toBe('msg-1');
+
+      // Chat-2: All messages should be preserved
+      expect(chat2Messages).toHaveLength(3);
     });
 
-    it('should preserve all messages from other chats', () => {
-      // When filtering messages to keep:
-      // 1. Messages where chatId !== targetChatId are always kept
-      // 2. Only messages in the target chat are subject to timestamp filtering
-      // 3. Final memory includes: other chats (complete) + target chat (filtered)
-      //
-      // Example: Agent has 10 messages across 3 chats
-      // - Chat-A: 4 messages
-      // - Chat-B: 3 messages (target for deletion, message 2)
-      // - Chat-C: 3 messages
-      //
-      // After deletion from Chat-B message 2:
-      // - Chat-A: 4 messages (unchanged)
-      // - Chat-B: 1 message (only message 1 kept)
-      // - Chat-C: 3 messages (unchanged)
-      // Total: 8 messages kept
+    it('should preserve all messages from other chats', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          // Chat-A: 4 messages
+          { role: 'user', content: 'a1', messageId: 'a-1', chatId: 'chat-a', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'a2', messageId: 'a-2', chatId: 'chat-a', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'a3', messageId: 'a-3', chatId: 'chat-a', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'a4', messageId: 'a-4', chatId: 'chat-a', createdAt: new Date('2024-01-01T10:03:00Z'), agentId: 'agent-1' },
+          // Chat-B: 3 messages (target for deletion, message 2)
+          { role: 'user', content: 'b1', messageId: 'b-1', chatId: 'chat-b', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'b2', messageId: 'b-2', chatId: 'chat-b', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'b3', messageId: 'b-3', chatId: 'chat-b', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' },
+          // Chat-C: 3 messages
+          { role: 'user', content: 'c1', messageId: 'c-1', chatId: 'chat-c', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'c2', messageId: 'c-2', chatId: 'chat-c', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'c3', messageId: 'c-3', chatId: 'chat-c', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chatA = { id: 'chat-a', name: 'Chat A', worldId: 'test-world', messageCount: 4, createdAt: new Date(), updatedAt: new Date() };
+      const chatB = { id: 'chat-b', name: 'Chat B', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
+      const chatC = { id: 'chat-c', name: 'Chat C', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chatA);
+      await memoryStorage.saveChatData('test-world', chatB);
+      await memoryStorage.saveChatData('test-world', chatC);
+
+      await removeMessagesFrom('test-world', 'b-2', 'chat-b');
+
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const chatAMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-a');
+      const chatBMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-b');
+      const chatCMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-c');
+
+      // Chat-A: 4 messages (unchanged)
+      expect(chatAMessages).toHaveLength(4);
+
+      // Chat-B: 1 message (only b-1 kept)
+      expect(chatBMessages).toHaveLength(1);
+      expect(chatBMessages?.[0].messageId).toBe('b-1');
+
+      // Chat-C: 3 messages (unchanged)
+      expect(chatCMessages).toHaveLength(3);
+
+      // Total: 8 messages kept
+      expect(updatedAgent?.memory).toHaveLength(8);
     });
   });
 
   describe('Multi-Agent Behavior', () => {
-    it('should process all agents in the world', () => {
-      // The removeMessagesFrom function processes ALL agents:
-      // - Iterates through each agent in the world
-      // - Loads full memory for each agent (all chats)
-      // - Applies timestamp-based filtering per agent
-      // - Saves updated memory per agent
-      // - Tracks success/failure per agent
-      // - Returns aggregated results
-      //
-      // If an agent doesn't have the target message:
-      // - Agent is marked as processed (success)
-      // - No messages removed from that agent
-      // - Overall operation continues
+    it('should process all agents in the world', async () => {
+      const world = createTestWorld({ totalAgents: 2 });
+      const agent1 = createTestAgent({
+        id: 'agent-1',
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const agent2 = createTestAgent({
+        id: 'agent-2',
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-2' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-2' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-2' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 6, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent1);
+      await memoryStorage.saveAgent('test-world', agent2);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
+
+      expect(result.totalAgents).toBe(2);
+      expect(result.processedAgents).toHaveLength(2);
+      expect(result.processedAgents).toContain('agent-1');
+      expect(result.processedAgents).toContain('agent-2');
     });
 
-    it('should continue processing if one agent fails', () => {
-      // Error handling per agent:
-      // try {
-      //   // Process agent
-      //   processedAgents.push(agent.id);
-      // } catch (error) {
-      //   failedAgents.push({ agentId, error });
-      // }
-      //
-      // - Each agent processed in try-catch
-      // - Failure in one agent doesn't stop others
-      // - Failed agents tracked in failedAgents array
-      // - Overall success = (failedAgents.length === 0)
+    it('should continue processing if one agent fails', async () => {
+      const world = createTestWorld({ totalAgents: 2 });
+      const agent2 = createTestAgent({
+        id: 'agent-2',
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-2' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      // Don't save agent-1 - it will be in listAgents but loadAgent will fail
+      await memoryStorage.saveAgent('test-world', agent2);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      expect(result.processedAgents).toContain('agent-2');
+      expect(result.messagesRemovedTotal).toBeGreaterThanOrEqual(0);
     });
 
-    it('should aggregate removal counts across all agents', () => {
-      // Aggregation logic:
-      // let messagesRemovedTotal = 0;
-      // for (const agent of agents) {
-      //   const removedCount = fullAgent.memory.length - messagesToKeep.length;
-      //   messagesRemovedTotal += removedCount;
-      // }
-      //
-      // Return structure includes:
-      // - messagesRemovedTotal: Sum of all removed messages across agents
-      // - totalAgents: Total number of agents in world
-      // - processedAgents: Array of agent IDs successfully processed
-      // - failedAgents: Array of { agentId, error } for failures
+    it('should aggregate removal counts across all agents', async () => {
+      const world = createTestWorld({ totalAgents: 2 });
+      const agent1 = createTestAgent({
+        id: 'agent-1',
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const agent2 = createTestAgent({
+        id: 'agent-2',
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-2' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-2' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-2' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 6, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent1);
+      await memoryStorage.saveAgent('test-world', agent2);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
+
+      // Both agents had 2 messages removed (msg-2 and msg-3)
+      expect(result.messagesRemovedTotal).toBe(4); // 2 from agent-1 + 2 from agent-2
+      expect(result.totalAgents).toBe(2);
+      expect(result.processedAgents).toHaveLength(2);
     });
   });
 
   describe('Storage Persistence', () => {
-    it('should use direct saveAgentMemory call', () => {
-      // Storage persistence fix (2025-10-26):
-      // await storageWrappers!.saveAgentMemory(worldId, agent.id, messagesToKeep);
-      //
-      // Changed from load-modify-save pattern to direct call:
-      // - Previously: load full agent, modify memory, save full agent
-      // - Now: directly save memory array without reloading
-      // - Prevents cache-related persistence failures
-      // - Ensures atomic memory updates
-      //
-      // SQLite implementation:
-      // 1. DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?
-      // 2. INSERT INTO agent_memory ... for each message
-      // 3. Uses transactions for atomicity
+    it('should use direct saveAgentMemory call', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
-    });
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
 
-    it('should handle both SQLite and file storage backends', () => {
-      // Storage factory provides unified interface:
-      // - SQLite: Uses saveAgentMemory(ctx, worldId, agentId, memory)
-      // - File: Uses saveAgentMemory(rootPath, worldId, agentId, memory)
-      //
-      // Both implementations:
-      // - Accept memory array directly
-      // - Replace all memory for the agent
-      // - Handle Date serialization (toISOString)
-      // - Use atomic operations (SQLite transactions, file temp+rename)
-      //
-      // The factory wrapper ensures the correct backend is called:
-      // storage.saveAgentMemory = (worldId, agentId, memory) =>
-      //   saveAgentMemory(ctx, worldId, agentId, memory)
+      await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
-      expect(true).toBe(true); // Documentation test
+      // Verify that memory was updated in storage
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      expect(updatedAgent?.memory).toBeDefined();
+      expect(updatedAgent?.memory.length).toBe(0); // All messages removed
     });
   });
 
   describe('Edge Cases', () => {
-    it('should handle deletion of first message', () => {
-      // When targetIndex = 0 (first message):
-      // const targetTimestampValue = messages[0].createdAt.getTime();
-      // messagesToKeep = memory.filter(m =>
-      //   m.chatId !== chatId || m.createdAt < targetTimestampValue
-      // );
-      //
-      // Result: No messages in same chat have timestamp < first message
-      // All messages in target chat are removed
-      // Messages from other chats are preserved
+    it('should handle deletion of first message', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      // All messages in chat should be removed
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      expect(updatedAgent?.memory).toHaveLength(0);
+      expect(result.messagesRemovedTotal).toBe(3);
     });
 
-    it('should handle deletion of last message', () => {
-      // When targetIndex = memory.length - 1 (last message):
-      // const targetTimestampValue = messages[last].createdAt.getTime();
-      // messagesToKeep = memory.filter(m =>
-      //   m.chatId !== chatId || m.createdAt < targetTimestampValue
-      // );
-      //
-      // Result: All messages before last message kept
-      // Only the last message removed
-      // Messages from other chats are preserved
+    it('should handle deletion of last message', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' },
+          { role: 'user', content: 'msg3', messageId: 'msg-3', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:02:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-3', 'chat-1');
+
+      // Only the last message should be removed
+      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      expect(updatedAgent?.memory).toHaveLength(2);
+      expect(updatedAgent?.memory[0].messageId).toBe('msg-1');
+      expect(updatedAgent?.memory[1].messageId).toBe('msg-2');
+      expect(result.messagesRemovedTotal).toBe(1);
     });
 
-    it('should handle empty agent memory', () => {
-      // When agent.memory is empty or null:
-      // if (!fullAgent || !fullAgent.memory || fullAgent.memory.length === 0) {
-      //   processedAgents.push(agent.id);
-      //   continue;
-      // }
-      //
-      // Result: Agent marked as processed successfully
-      // No error thrown
-      // Processing continues to next agent
+    it('should handle empty agent memory', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({ memory: [] });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
+
+      // Should not throw error
+      expect(result.success).toBe(false);
+      expect(result.messagesRemovedTotal).toBe(0);
     });
 
-    it('should handle message not found in agent memory', () => {
-      // When target message doesn't exist in agent's memory:
-      // const targetIndex = fullAgent.memory.findIndex(
-      //   m => m.messageId === messageId && m.chatId === chatId
-      // );
-      // if (targetIndex === -1) {
-      //   processedAgents.push(agent.id);
-      //   continue;
-      // }
-      //
-      // Result: Agent marked as processed successfully
-      // No messages removed from that agent
-      // Processing continues to next agent
+    it('should handle message not found in agent memory', async () => {
+      const world = createTestWorld();
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:00:00Z'), agentId: 'agent-1' },
+          { role: 'assistant', content: 'msg2', messageId: 'msg-2', chatId: 'chat-1', createdAt: new Date('2024-01-01T10:01:00Z'), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      expect(true).toBe(true); // Documentation test
+      await memoryStorage.saveWorld(world);
+      await memoryStorage.saveAgent('test-world', agent);
+      await memoryStorage.saveChatData('test-world', chat);
+
+      const result = await removeMessagesFrom('test-world', 'nonexistent-msg', 'chat-1');
+
+      // Target message not found in agent memory
+      expect(result.success).toBe(false);
+      expect(result.failedAgents).toHaveLength(1);
+      expect(result.failedAgents[0].error).toContain('not found');
+      expect(result.processedAgents).toHaveLength(0);
     });
   });
 });
-
