@@ -47,6 +47,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2025-10-26: Phase 1 - Converted to AppRun native typed events with Update<State, Events> tuple pattern
  * - 2025-10-26: Fixed createMessageFromMemory to swap sender/fromAgentId for incoming agent messages
  * - 2025-10-26: Fixed display to show only first agent (intended recipient), not all recipients
  * - 2025-10-26: Fixed Bug #2 - Empty seenByAgents instead of ['unknown'] for multi-agent scenarios
@@ -66,6 +67,7 @@
  */
 
 import { app } from 'apprun';
+import type { Update } from 'apprun';
 import api from '../api';
 import {
   sendChatMessage,
@@ -80,6 +82,7 @@ import {
   handleMemoryOnlyMessage,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
+import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 import { renderMarkdown } from '../utils/markdown';
 
@@ -442,25 +445,42 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
 };
 
 
-export const worldUpdateHandlers = {
+/**
+ * World Update Handlers - AppRun Native Typed Events
+ * 
+ * Converted from object to tuple array for compile-time type safety.
+ * Uses Update<State, Events> pattern with discriminated unions.
+ * 
+ * TypeScript now validates:
+ * - Event names (catches typos at compile time)
+ * - Payload structures (ensures correct parameters)
+ * - Handler return types (state consistency)
+ */
+export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = [
 
-  initWorld,
+  // ========================================
+  // ROUTE & INITIALIZATION
+  // ========================================
+  
+  ['initWorld', initWorld],
+  ['/World', initWorld],
 
-  '/World': initWorld,
-
-  // Basic input and messaging handlers
-  'update-input': (state: WorldComponentState, e: any): WorldComponentState => ({
+  // ========================================
+  // USER INPUT & MESSAGING
+  // ========================================
+  
+  ['update-input', (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState => ({
     ...state,
-    userInput: e.target.value
-  }),
+    userInput: payload.target.value
+  })],
 
-  'key-press': (state: WorldComponentState, e: any) => {
-    if (e.key === 'Enter' && (state.userInput || '').trim()) {
+  ['key-press', (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
+    if (payload.key === 'Enter' && (state.userInput || '').trim()) {
       app.run('send-message');
     }
-  },
+  }],
 
-  'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
+  ['send-message', async (state: WorldComponentState): Promise<WorldComponentState> => {
     const messageText = state.userInput?.trim();
     if (!messageText) return state;
 
@@ -497,28 +517,36 @@ export const worldUpdateHandlers = {
         error: error.message || 'Failed to send message'
       };
     }
-  },
-  // SSE Event Handlers
-  handleStreamStart,
-  handleStreamChunk,
-  handleStreamEnd,
-  handleStreamError,
-  handleLogEvent,
-  handleMessageEvent,
-  handleSystemEvent,
-  handleError,
-  handleToolError,
-  handleToolStart,
-  handleToolResult,
-  handleMemoryOnlyMessage,
+  }],
+  
+  // ========================================
+  // SSE STREAMING EVENTS
+  // ========================================
+  
+  ['handleStreamStart', handleStreamStart],
+  ['handleStreamChunk', handleStreamChunk],
+  ['handleStreamEnd', handleStreamEnd],
+  ['handleStreamError', handleStreamError],
+  ['handleLogEvent', handleLogEvent],
+  ['handleMessageEvent', handleMessageEvent],
+  ['handleSystemEvent', handleSystemEvent],
+  ['handleError', handleError],
+  ['handleToolError', handleToolError],
+  ['handleToolStart', handleToolStart],
+  ['handleToolResult', handleToolResult],
+  ['handleMemoryOnlyMessage', handleMemoryOnlyMessage],
 
-  'toggle-log-details': (state: WorldComponentState, messageId: string | number): WorldComponentState => {
-    if (!messageId || !state.messages) {
+  // ========================================
+  // MESSAGE DISPLAY
+  // ========================================
+
+  ['toggle-log-details', (state: WorldComponentState, payload: WorldEventPayload<'toggle-log-details'>): WorldComponentState => {
+    if (!payload.messageId || !state.messages) {
       return state;
     }
 
     const messages = state.messages.map(msg => {
-      if (String(msg.id) === String(messageId)) {
+      if (String(msg.id) === String(payload.messageId)) {
         return {
           ...msg,
           isLogExpanded: !msg.isLogExpanded
@@ -532,33 +560,41 @@ export const worldUpdateHandlers = {
       messages,
       needScroll: false
     };
-  },
+  }],
 
-  'ack-scroll': (state: WorldComponentState): WorldComponentState => ({
+  ['ack-scroll', (state: WorldComponentState): WorldComponentState => ({
     ...state,
     needScroll: false
-  }),
+  })],
 
-  // Message editing handlers
-  'start-edit-message': (state: WorldComponentState, messageId: string, messageText: string): WorldComponentState => ({
+  // ========================================
+  // MESSAGE EDITING
+  // ========================================
+
+  ['start-edit-message', (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => ({
     ...state,
-    editingMessageId: messageId,
-    editingText: messageText
-  }),
+    editingMessageId: payload.messageId,
+    editingText: payload.text
+  })],
 
-  'cancel-edit-message': (state: WorldComponentState): WorldComponentState => ({
+  ['cancel-edit-message', (state: WorldComponentState): WorldComponentState => ({
     ...state,
     editingMessageId: null,
     editingText: ''
-  }),
+  })],
 
-  'update-edit-text': (state: WorldComponentState, e: any): WorldComponentState => ({
+  ['update-edit-text', (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState => ({
     ...state,
-    editingText: e.target.value
-  }),
+    editingText: payload.target.value
+  })],
 
-  // Message deletion handlers
-  'show-delete-message-confirm': (state: WorldComponentState, messageId: string, backendMessageId: string, messageText: string, userEntered: boolean): WorldComponentState => {
+  // ========================================
+  // MESSAGE DELETION
+  // ========================================
+
+  ['show-delete-message-confirm', (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState => {
+    const { messageId, backendMessageId, messageText, userEntered } = payload;
+    
     console.log('show-delete-message-confirm called:', {
       messageId,
       backendMessageId,
@@ -593,14 +629,14 @@ export const worldUpdateHandlers = {
         chatId: state.currentChat.id
       }
     };
-  },
+  }],
 
-  'hide-delete-message-confirm': (state: WorldComponentState): WorldComponentState => ({
+  ['hide-delete-message-confirm', (state: WorldComponentState): WorldComponentState => ({
     ...state,
     messageToDelete: null
-  }),
+  })],
 
-  'delete-message-confirmed': async (state: WorldComponentState): Promise<WorldComponentState> => {
+  ['delete-message-confirmed', async (state: WorldComponentState): Promise<WorldComponentState> => {
     if (!state.messageToDelete) return state;
 
     const { id, messageId, chatId } = state.messageToDelete;
@@ -824,96 +860,61 @@ export const worldUpdateHandlers = {
         error: errorMessage
       };
     }
-  },
+  }],
 
-  // Memory management handlers
-  'clear-agent-messages': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
-    try {
-      await api.clearAgentMemory(state.worldName, agent.name);
+  // ========================================
+  // CHAT HISTORY & MODALS
+  // ========================================
 
-      const updatedAgents = state.world?.agents.map(a =>
-        a.id === agent.id ? { ...a, messageCount: 0 } : a
-      ) ?? [];
-
-      const updatedSelectedAgent = state.selectedAgent?.id === agent.id
-        ? { ...state.selectedAgent, messageCount: 0 }
-        : state.selectedAgent;
-
-      return {
-        ...state,
-        world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: (state.messages || []).filter(msg => msg.sender !== agent.name),
-        selectedAgent: updatedSelectedAgent
-      };
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to clear agent messages' };
-    }
-  },
-
-  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    try {
-      await Promise.all(
-        (state.world?.agents ?? []).map(agent => api.clearAgentMemory(state.worldName, agent.name))
-      );
-
-      const updatedAgents = (state.world?.agents ?? []).map(agent => ({ ...agent, messageCount: 0 }));
-      const updatedSelectedAgent = state.selectedAgent ? { ...state.selectedAgent, messageCount: 0 } : null;
-
-      return {
-        ...state,
-        world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: [],
-        selectedAgent: updatedSelectedAgent
-      };
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to clear world messages' };
-    }
-  },
-
-
-  // Modal and deletion handlers
-  'chat-history-show-delete-confirm': (state: WorldComponentState, chat: any): WorldComponentState => ({
+  ['chat-history-show-delete-confirm', (state: WorldComponentState, payload: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState => ({
     ...state,
-    chatToDelete: chat
-  }),
+    chatToDelete: payload.chat
+  })],
 
-  'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState => ({
+  ['chat-history-hide-modals', (state: WorldComponentState): WorldComponentState => ({
     ...state,
     chatToDelete: null
-  }),
+  })],
 
-  'delete-agent': async (state: WorldComponentState, agent: Agent): Promise<WorldComponentState> => {
+  // ========================================
+  // AGENT MANAGEMENT
+  // ========================================
+
+  ['delete-agent', async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> => {
     try {
-      await api.deleteAgent(state.worldName, agent.name);
+      await api.deleteAgent(state.worldName, payload.agent.name);
 
-      const updatedAgents = (state.world?.agents ?? []).filter(a => a.id !== agent.id);
-      const isSelectedAgent = state.selectedAgent?.id === agent.id;
+      const updatedAgents = (state.world?.agents ?? []).filter(a => a.id !== payload.agent.id);
+      const isSelectedAgent = state.selectedAgent?.id === payload.agent.id;
 
       return {
         ...state,
         world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: (state.messages || []).filter(msg => msg.sender !== agent.name),
+        messages: (state.messages || []).filter(msg => msg.sender !== payload.agent.name),
         selectedAgent: isSelectedAgent ? null : state.selectedAgent,
         selectedSettingsTarget: isSelectedAgent ? 'world' : state.selectedSettingsTarget
       };
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to delete agent' };
     }
-  },
+  }],
 
-  // Export and view handlers
-  'export-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
+  // ========================================
+  // WORLD MANAGEMENT
+  // ========================================
+
+  ['export-world-markdown', async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> => {
     try {
-      window.location.href = `/api/worlds/${encodeURIComponent(worldName)}/export`;
+      window.location.href = `/api/worlds/${encodeURIComponent(payload.worldName)}/export`;
       return state;
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to export world' };
     }
-  },
+  }],
 
-  'view-world-markdown': async (state: WorldComponentState, worldName: string): Promise<WorldComponentState> => {
+  ['view-world-markdown', async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> => {
     try {
-      const markdown = await api.getWorldMarkdown(worldName);
+      const markdown = await api.getWorldMarkdown(payload.worldName);
       const htmlContent = renderMarkdown(markdown);
 
       const fullHtml = `<!DOCTYPE html>
@@ -921,7 +922,7 @@ export const worldUpdateHandlers = {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Export: ${worldName}</title>
+    <title>World Export: ${payload.worldName}</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -960,10 +961,13 @@ export const worldUpdateHandlers = {
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to view world markdown' };
     }
-  },
+  }],
 
-  // Chat management handlers
-  'create-new-chat': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+  // ========================================
+  // CHAT SESSION MANAGEMENT
+  // ========================================
+
+  ['create-new-chat', async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
     try {
       yield { ...state, loading: true };
 
@@ -976,34 +980,80 @@ export const worldUpdateHandlers = {
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to create new chat' };
     }
-  },
+  }],
 
-  'load-chat-from-history': async function* (state: WorldComponentState, chatId: string): AsyncGenerator<WorldComponentState> {
+  ['load-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       yield { ...state, loading: true };
 
-      const result = await api.setChat(state.worldName, chatId);
+      const result = await api.setChat(state.worldName, payload.chatId);
       if (!result.success) {
         yield state;
       }
-      // app.run('initWorld', state.worldName, chatId);
-      const path = `/World/${encodeURIComponent(state.worldName)}/${encodeURIComponent(chatId)}`;
+      const path = `/World/${encodeURIComponent(state.worldName)}/${encodeURIComponent(payload.chatId)}`;
       app.route(path);
       history.pushState(null, '', path);
     } catch (error: any) {
       yield { ...state, loading: false, error: error.message || 'Failed to load chat from history' };
     }
-  },
+  }],
 
-  'delete-chat-from-history': async function* (state: WorldComponentState, chatId: string): AsyncGenerator<WorldComponentState> {
+  ['delete-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'delete-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       yield { ...state, loading: true, chatToDelete: null };
-      await api.deleteChat(state.worldName, chatId);
+      await api.deleteChat(state.worldName, payload.chatId);
       const path = `/World/${encodeURIComponent(state.worldName)}`;
       app.route(path);
       history.pushState(null, '', path);
     } catch (error: any) {
       yield { ...state, loading: false, chatToDelete: null, error: error.message || 'Failed to delete chat' };
     }
-  },
-};
+  }],
+
+  // ========================================
+  // MEMORY MANAGEMENT
+  // ========================================
+
+  ['clear-agent-messages', async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> => {
+    try {
+      await api.clearAgentMemory(state.worldName, payload.agent.name);
+
+      const updatedAgents = state.world?.agents.map(a =>
+        a.id === payload.agent.id ? { ...a, messageCount: 0 } : a
+      ) ?? [];
+
+      const updatedSelectedAgent = state.selectedAgent?.id === payload.agent.id
+        ? { ...state.selectedAgent, messageCount: 0 }
+        : state.selectedAgent;
+
+      return {
+        ...state,
+        world: state.world ? { ...state.world, agents: updatedAgents } : null,
+        messages: (state.messages || []).filter(msg => msg.sender !== payload.agent.name),
+        selectedAgent: updatedSelectedAgent
+      };
+    } catch (error: any) {
+      return { ...state, error: error.message || 'Failed to clear agent messages' };
+    }
+  }],
+
+  ['clear-world-messages', async (state: WorldComponentState): Promise<WorldComponentState> => {
+    try {
+      await Promise.all(
+        (state.world?.agents ?? []).map(agent => api.clearAgentMemory(state.worldName, agent.name))
+      );
+
+      const updatedAgents = (state.world?.agents ?? []).map(agent => ({ ...agent, messageCount: 0 }));
+      const updatedSelectedAgent = state.selectedAgent ? { ...state.selectedAgent, messageCount: 0 } : null;
+
+      return {
+        ...state,
+        world: state.world ? { ...state.world, agents: updatedAgents } : null,
+        messages: [],
+        selectedAgent: updatedSelectedAgent
+      };
+    } catch (error: any) {
+      return { ...state, error: error.message || 'Failed to clear world messages' };
+    }
+  }],
+];

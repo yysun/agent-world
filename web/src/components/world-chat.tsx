@@ -182,7 +182,7 @@ export default function WorldChat(props: WorldChatProps) {
                       type="button"
                       className="log-header"
                       aria-expanded={isExpanded}
-                      $onclick={['toggle-log-details', message.id || `log-${index}`]}
+                      $onclick={['toggle-log-details', { messageId: message.id || `log-${index}` }]}
                     >
                       <span className={`log-dot ${message.logEvent.level}`}></span>
                       <span className="log-category">{message.logEvent.category}</span>
@@ -273,7 +273,7 @@ export default function WorldChat(props: WorldChatProps) {
                       <div className="message-edit-actions">
                         <button
                           className="btn-primary"
-                          $onclick={['save-edit-message', message.id]}
+                          $onclick={['save-edit-message', { messageId: message.id }]}
                         >
                           Update
                         </button>
@@ -294,7 +294,7 @@ export default function WorldChat(props: WorldChatProps) {
                         <div className="message-actions">
                           <button
                             className="message-edit-btn"
-                            $onclick={['start-edit-message', message.id, message.text]}
+                            $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
                             title="Edit message"
                             disabled={!message.messageId || message.userEntered}
                           >
@@ -302,7 +302,12 @@ export default function WorldChat(props: WorldChatProps) {
                           </button>
                           <button
                             className="message-delete-btn"
-                            $onclick={['show-delete-message-confirm', message.id, message.messageId, message.text, message.userEntered]}
+                            $onclick={['show-delete-message-confirm', {
+                              messageId: message.id,
+                              backendMessageId: message.messageId,
+                              messageText: message.text,
+                              userEntered: message.userEntered
+                            }]}
                             title="Delete message and all after it"
                             disabled={!message.messageId || message.userEntered}
                           >

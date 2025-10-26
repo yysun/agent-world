@@ -10,14 +10,17 @@
 
 import { app, Component, safeHTML } from 'apprun';
 import type { WorldComponentState, Agent } from '../types';
+import type { WorldEventName } from '../types/events';
 import WorldChat from '../components/world-chat';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
 
-export default class WorldComponent extends Component<WorldComponentState> {
-
+export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
+  //                                                   ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+  //                                                   State type           Event type (AppRun native typed events)
+  
   override state = {
     worldName: 'World',
     world: null,
@@ -139,7 +142,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                                 className={`message-badge ${isFilterActive ? 'active' : ''}`}
                                 onclick={(e: MouseEvent) => {
                                   e.stopPropagation();
-                                  app.run('toggle-agent-filter', agent.id);
+                                  app.run('toggle-agent-filter', { agentId: agent.id });
                                 }}
                               >
                                 {agent.messageCount}
@@ -192,7 +195,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 </button>
                 <button
                   className="world-settings-btn"
-                  $onclick={['export-world-markdown', state.world?.name]}
+                  $onclick={['export-world-markdown', { worldName: state.world?.name }]}
                   title="Export world to markdown file"
                   style={{ marginLeft: '8px' }}
                 >
@@ -200,7 +203,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
                 </button>
                 <button
                   className="world-settings-btn"
-                  $onclick={['view-world-markdown', state.world?.name]}
+                  $onclick={['view-world-markdown', { worldName: state.world?.name }]}
                   title="View world markdown in new tab"
                   style={{ marginLeft: '4px' }}
                 >
@@ -253,7 +256,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               <div className="form-actions">
                 <button
                   className="btn-danger"
-                  $onclick={['delete-chat-from-history', state.chatToDelete.id]}
+                  $onclick={['delete-chat-from-history', { chatId: state.chatToDelete.id }]}
                 >
                   Delete Chat
                 </button>
