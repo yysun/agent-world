@@ -157,6 +157,7 @@ export interface WorldChatProps {
   currentChat?: string;
   editingMessageId?: string | null;
   editingText?: string;
+  agentFilters?: string[];  // Agent IDs to filter messages by
 }
 
 // World Settings Component Props
@@ -263,6 +264,9 @@ export interface WorldComponentState extends SSEComponentState {
 
   // Message delete state
   messageToDelete: { id: string; messageId: string; chatId: string } | null;
+
+  // Agent filter state (badge toggle)
+  activeAgentFilters: string[];
 
   // SSE state (required overrides)
   connectionStatus: string;
