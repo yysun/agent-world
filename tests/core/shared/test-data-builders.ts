@@ -185,6 +185,10 @@ export class WorldTestBuilder {
       // Integrity operations
       validateIntegrity: jest.fn(),
       repairData: jest.fn(),
+
+      // Memory operations
+      getMemory: jest.fn().mockResolvedValue([]),
+      deleteMemoryByChatId: jest.fn().mockResolvedValue(0),
     };
 
     this.world = {
@@ -194,6 +198,7 @@ export class WorldTestBuilder {
       turnLimit: 10,
       eventEmitter: mockEventEmitter,
       agents: mockAgentsMap,
+      chats: new Map(),
     };
     return this;
   }
@@ -437,6 +442,7 @@ export class TestDataPresets {
     return {
       eventEmitter: new EventEmitter(),
       agents: new Map<string, Agent>(),
+      chats: new Map(),
       id: DEFAULT_WORLD_ID,
       name: 'Test World',
       description: 'A test world',

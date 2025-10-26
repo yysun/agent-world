@@ -2,13 +2,18 @@
  * Jest Setup for Core System Tests
  *
  * Features:
- * - Global mock configuration for all file I/O operations
+ * - Global mock configuration for file I/O operations
+ * - Uses REAL MemoryStorage instead of mocks (~400 lines eliminated!)
  * - LLM provider mocking with default responses
- * - Agent storage mocking to prevent disk operations
  * - Real logger for debugging test issues
- * - Test environment setup
- * - Automatic cleanup between tests
+ * - Test environment setup and automatic cleanup
  * - Conditional mocking (excludes integration tests)
+ * 
+ * Storage Strategy:
+ * - All tests use real MemoryStorage class from core/storage/memory-storage.ts
+ * - Shared instance ensures data persistence across mock calls
+ * - Full StorageAPI compatibility with production code
+ * - Test utilities available via __testUtils for storage clearing
  */
 
 // Mock crypto and performance globals before any imports
@@ -61,64 +66,43 @@ jest.mock('../../core/storage/world-storage', () => ({
   listWorldChats: jest.fn<any>().mockResolvedValue([])
 }));
 
-// Mock storage-factory module with enhanced API coverage
+// Mock storage-factory module to use real MemoryStorage
 jest.mock('../../core/storage/storage-factory', () => {
   // Import the actual module to get real function implementations
   const actualModule = jest.requireActual('../../core/storage/storage-factory') as any;
+  const { MemoryStorage } = jest.requireActual('../../core/storage/memory-storage') as any;
+
+  /**
+   * Shared MemoryStorage instance for all tests
+   * 
+   * Using a single instance ensures that when different parts of the code
+   * get storage instances, they all share the same underlying data.
+   * Critical for tests where:
+   * - createWorld() gets one storage instance to check worldExists()
+   * - Then saves the world with saveWorld()
+   * - Then getWorld() gets another storage instance to load the same world
+   */
+  let sharedStorage: any = new MemoryStorage();
 
   return {
     // Re-export actual functions that integration tests need
     getDefaultRootPath: actualModule.getDefaultRootPath,
     createStorageFromEnv: actualModule.createStorageFromEnv,
 
-    // Override only the storage creation functions with mocks
-    createStorageWrappers: jest.fn<any>().mockReturnValue({
-      // World operations
-      saveWorld: jest.fn<any>().mockResolvedValue(undefined),
-      loadWorld: jest.fn<any>().mockResolvedValue({}),
-      deleteWorld: jest.fn<any>().mockResolvedValue(true),
-      listWorlds: jest.fn<any>().mockResolvedValue([]),
-      worldExists: jest.fn<any>().mockResolvedValue(true),
+    // All storage creation functions return the shared MemoryStorage instance
+    createStorageWrappers: jest.fn<any>().mockImplementation(() => sharedStorage),
+    createStorageWithWrappers: jest.fn<any>().mockImplementation(async () => sharedStorage),
+    getStorageWrappers: jest.fn<any>().mockImplementation(async () => sharedStorage),
+    setStoragePath: jest.fn<any>().mockResolvedValue(undefined),
 
-      // Agent operations
-      saveAgent: jest.fn<any>().mockResolvedValue(undefined),
-      saveAgentConfig: jest.fn<any>().mockResolvedValue(undefined),
-      saveAgentMemory: jest.fn<any>().mockResolvedValue(undefined),
-      loadAgent: jest.fn<any>().mockResolvedValue(null),
-      loadAgentWithRetry: jest.fn<any>().mockResolvedValue(null),
-      deleteAgent: jest.fn<any>().mockResolvedValue(true),
-      listAgents: jest.fn<any>().mockResolvedValue([]),
-      agentExists: jest.fn<any>().mockResolvedValue(true),
-
-      // Batch operations
-      saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
-      loadAgentsBatch: jest.fn<any>().mockResolvedValue({ successful: [], failed: [] }),
-
-      // Chat history operations
-      saveChat: jest.fn<any>().mockResolvedValue(undefined),
-      loadChat: jest.fn<any>().mockResolvedValue(null),
-      deleteChat: jest.fn<any>().mockResolvedValue(true),
-      listChats: jest.fn<any>().mockResolvedValue([]),
-      updateChat: jest.fn<any>().mockResolvedValue(null),
-
-      // Snapshot operations
-      saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
-      loadSnapshot: jest.fn<any>().mockResolvedValue(null),
-      restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
-
-      // Integrity operations
-      validateIntegrity: jest.fn<any>().mockResolvedValue({ isValid: true }),
-      repairData: jest.fn<any>().mockResolvedValue(true),
-      archiveMemory: jest.fn<any>().mockResolvedValue(undefined)
-    }),
-
-    createStorageWithWrappers: jest.fn<any>().mockResolvedValue({
-      // Mirror the same API
-      saveWorld: jest.fn<any>().mockResolvedValue(undefined),
-      loadWorld: jest.fn<any>().mockResolvedValue({}),
-      deleteWorld: jest.fn<any>().mockResolvedValue(true),
-      listWorlds: jest.fn<any>().mockResolvedValue([])
-    })
+    // Test utilities for clearing storage between tests
+    __testUtils: {
+      clearStorage: () => {
+        // Create a fresh MemoryStorage instance
+        sharedStorage = new MemoryStorage();
+      },
+      getStorage: () => sharedStorage
+    }
   };
 });
 
@@ -232,8 +216,15 @@ jest.mock('dotenv', () => ({
 }));
 
 // Mock nanoid for unique ID generation
+// Return unique IDs for each call to prevent test collisions
+let nanoidCounter = 0;
 jest.mock('nanoid', () => ({
-  nanoid: jest.fn<any>().mockReturnValue('mock-nanoid-id')
+  nanoid: jest.fn<any>().mockImplementation((size?: number) => {
+    nanoidCounter++;
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    return `mock-id-${timestamp}-${random}-${nanoidCounter}`.substring(0, size || 21);
+  })
 }));
 
 // Mock SQLite storage modules for new storage backend
@@ -311,8 +302,13 @@ jest.setTimeout(10000);
 
 // Global beforeEach setup
 beforeEach(() => {
-  // Clear all mocks before each test
-  jest.clearAllMocks();
+  // DON'T clear mocks because it resets our stateful mock implementations
+  // jest.clearAllMocks();  // <-- This was breaking our stateful mocks!
+
+  // Note: Our storage mocks maintain state in shared Maps
+  // Tests using beforeAll() need data to persist across individual tests
+  // Each test suite uses unique IDs (nanoid) for isolation
+  // Tests that need clean state should create fresh data in their own beforeEach()
 
   // Reset environment variables
   delete process.env.AGENT_WORLD_DATA_PATH;
