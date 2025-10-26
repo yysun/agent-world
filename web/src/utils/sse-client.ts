@@ -7,7 +7,15 @@
  * - Event-driven state management via AppRun
  * - Proper cleanup and connection lifecycle management
  * - Phase 2.2 Enhancement: MCP tool execution event streaming
- * - Memory-only message streaming for agent→agent messages saved without response
+ * - Message streaming with start/chunk/end/error events
+ * - Tool execution tracking with progress and results
+ * - Memory-only message handling (agent→agent messages saved without response)
+ * - Log event processing for server-side logging display
+ *
+ * Bug Fixes:
+ * - 2025-10-26: Fixed memory-only message display - sender=recipient, fromAgentId=original author
+ *
+ * Architecture:
  */
 
 import app from 'apprun';
@@ -688,20 +696,22 @@ export const handleMemoryOnlyMessage = <T extends SSEComponentState>(state: T, d
 
   // Create a memory-only message (agent message saved to another agent's memory)
   // CRITICAL: sender vs agentName semantics for correct UI detection
-  // - sender: Original message sender (e.g., "a1") - displays as message author
+  // - sender: Original message sender (e.g., "a1") who wrote the message
   // - agentName: Recipient agent who saved to memory (e.g., "o1")
+  // - Display: "Agent: o1 (incoming from a1) [in-memory, no reply]"
   // - type: MUST be 'user' for incoming messages to get correct sort priority (after replies)
-  // - fromAgentId: MUST be agentName (recipient) to create sender≠fromAgentId mismatch for gray border styling
+  // - sender: MUST be agentName (recipient) - this is whose memory it's in
+  // - fromAgentId: MUST be sender (original author) to create mismatch for gray border styling
   // - seenByAgents: Required for "→ o1" indicator display in world-chat.tsx
   const memoryOnlyMessage = {
     id: `memory-only-${messageId}`,
     messageId: messageId,
     type: 'user',  // ✅ Incoming message type - gets priority 1 (after 'agent' replies)
-    sender: sender,  // Message author (e.g., "a1")
+    sender: agentName,  // ✅ Recipient agent - displays as "Agent: o1 (incoming from...)"
     text: content || '',
     createdAt: new Date(),
-    fromAgentId: agentName, // ✅ Recipient agent - creates a1≠o1 mismatch for gray border
-    seenByAgents: [agentName], // ✅ Enables "a1 → o1" indicator in UI
+    fromAgentId: sender, // ✅ Original sender - creates mismatch for gray border, shows "from a1"
+    seenByAgents: [agentName], // ✅ Enables "o1" indicator in UI
     isStreaming: false
   } as any;
 

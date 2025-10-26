@@ -9,10 +9,14 @@
  * - Message editing with frontend-driven DELETE → POST flow
  * - Message deletion with confirmation dialog (deletes message and all after it)
  * - Message deduplication by messageId for multi-agent scenarios
- * - Delivery status display showing which agents received each message
+ * - Displays only the first/intended recipient agent, not all who received it
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-10-26: Fixed agent filter to check sender first (whose memory) for in-memory messages
+ * - 2025-10-26: Fixed cross-agent message display - sender=recipient, fromAgentId=original author
+ * - 2025-10-26: Fixed 'To: unknown' bug - empty seenByAgents handled gracefully
+ * - 2025-10-26: Added comment explaining empty seenByAgents will be populated by duplicates
  * - 2025-10-26: Added message delete button with confirmation dialog
  * - 2025-10-25: Added memory-only message styling with gray left border for agent→agent messages
  * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
@@ -56,17 +60,18 @@ export default function WorldChat(props: WorldChatProps) {
   // When no filters: show all messages (current behavior)
   const filteredMessages = agentFilters.length > 0
     ? messages.filter(message => {
-        // Always show human/user messages
-        const senderType = getSenderType(message.sender);
-        if (senderType === SenderType.HUMAN) {
-          return true;
-        }
-        
-        // Check if message belongs to a filtered agent
-        // Try fromAgentId first, fallback to sender
-        const messageAgentId = message.fromAgentId || message.sender;
-        return agentFilters.includes(messageAgentId);
-      })
+      // Always show human/user messages
+      const senderType = getSenderType(message.sender);
+      if (senderType === SenderType.HUMAN) {
+        return true;
+      }
+
+      // Check if message belongs to a filtered agent
+      // For agent messages: sender represents whose memory it's in (after fix)
+      // Try sender first (recipient/owner), fallback to fromAgentId (original sender)
+      const messageAgentId = message.sender || message.fromAgentId;
+      return agentFilters.includes(messageAgentId);
+    })
     : messages;  // No filters = show all messages
 
   // Helper function to detect and format tool calls (3-tier detection matching export logic)
@@ -229,11 +234,14 @@ export default function WorldChat(props: WorldChatProps) {
                 if (message.seenByAgents && message.seenByAgents.length > 0) {
                   displayLabel += `\nTo: ${message.seenByAgents.join(', ')}`;
                 }
+                // Note: If seenByAgents is empty, don't show 'To:' line (will be populated by duplicates)
               } else if (senderType === SenderType.AGENT) {
                 // Check if this is an incoming message (cross-agent with type='user') or a reply (type='agent')
                 if (isCrossAgentMessage && isIncomingMessage) {
-                  // Incoming message to agent memory (sender sent to fromAgentId)
-                  displayLabel = `Agent: ${message.fromAgentId || message.sender} (incoming from ${message.sender})`;
+                  // Incoming message to agent memory
+                  // After fix: message.sender = recipient (o1), message.fromAgentId = original sender (a1)
+                  // Display: "Agent: o1 (incoming from a1)"
+                  displayLabel = `Agent: ${message.sender} (incoming from ${message.fromAgentId || message.sender})`;
                   // Check if this is memory-only (no reply follows)
                   if (isMemoryOnlyMessage) {
                     displayLabel += ' [in-memory, no reply]';

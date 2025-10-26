@@ -26,7 +26,7 @@
  * Message Format Examples:
  * ```
  * From: HUMAN
- * To: o1, a1
+ * To: a1
  * Time: 2025-10-25T21:24:51.218Z
  * hi
  *
@@ -61,6 +61,7 @@
  * - Consistent with frontend deduplication logic for predictable behavior
  *
  * Changes:
+ * - 2025-10-26: Fixed user message display to show only first/intended recipient agent
  * - 2025-10-26: Fixed message labeling to assign to single agent when world has only one agent (no more missing recipient)
  * - 2025-10-25: Improved message labeling - removed role/sender confusion, added in-memory detection
  * - 2025-10-25: Added tool call detection and summarization
@@ -300,11 +301,13 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           const rawSender = message.sender?.toLowerCase() === 'human' ? 'HUMAN' : message.sender;
 
           // Get agent/recipient information
+          // For user messages: show only FIRST agent (intended recipient), not all who received it
           let agentNamesStr: string | undefined;
           if (message.agentNames && message.agentNames.length > 0) {
-            agentNamesStr = message.agentNames.join(', ');
+            // Show only first agent for user messages (the intended recipient)
+            agentNamesStr = isUserMessage ? message.agentNames[0] : message.agentNames.join(', ');
           } else if (message.agentIds && message.agentIds.length > 0) {
-            agentNamesStr = message.agentIds.join(', ');
+            agentNamesStr = isUserMessage ? message.agentIds[0] : message.agentIds.join(', ');
           } else if (message.agentId) {
             const agent = agentsMap.get(message.agentId);
             agentNamesStr = agent ? agent.name : message.agentId;
