@@ -61,6 +61,7 @@
  * - Consistent with frontend deduplication logic for predictable behavior
  *
  * Changes:
+ * - 2025-10-26: Fixed message labeling to assign to single agent when world has only one agent (no more missing recipient)
  * - 2025-10-25: Improved message labeling - removed role/sender confusion, added in-memory detection
  * - 2025-10-25: Added tool call detection and summarization
  * - 2025-10-25: Refactored deduplication to use messageId-based approach (O(n) vs O(n²))
@@ -320,6 +321,9 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
                 label = `From: ${rawSender}`;
                 if (agentNamesStr) {
                   label += `\nTo: ${agentNamesStr}`;
+                } else if (agents.length === 1) {
+                  // Single agent world - assign to that agent
+                  label += `\nTo: ${agents[0].name}`;
                 }
               } else {
                 // Agent sent to another agent (incoming message)

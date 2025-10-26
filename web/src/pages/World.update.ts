@@ -47,6 +47,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2025-10-26: Fixed seenByAgents to assign to single agent when world has only one agent (no more 'unknown')
  * - 2025-10-26: Aligned seenByAgents with export.ts - incremental build from actual data, not assumption
  * - 2025-10-26: Fixed deduplicateMessages() to calculate seenByAgents with all agent IDs (CR fix)
  * - 2025-10-25: Fixed seenByAgents to include all agent IDs instead of 'unknown' for user messages
@@ -161,9 +162,19 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
         }
       } else {
         // First occurrence - initialize seenByAgents with this agent
+        // If there's only one agent and no fromAgentId, assign to that agent
+        let initialSeenBy: string[];
+        if (msg.fromAgentId) {
+          initialSeenBy = [msg.fromAgentId];
+        } else if (agents.length === 1) {
+          initialSeenBy = [agents[0].id];
+        } else {
+          initialSeenBy = ['unknown'];
+        }
+
         messageMap.set(msg.messageId, {
           ...msg,
-          seenByAgents: msg.fromAgentId ? [msg.fromAgentId] : ['unknown']
+          seenByAgents: initialSeenBy
         });
       }
     } else {
