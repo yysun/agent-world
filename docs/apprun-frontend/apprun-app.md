@@ -175,38 +175,143 @@ export default () => <div id="main"><div id="pages"></div></div>;
 
 ---
 
-## 8. 📐 Coding Rules
+## 8. 🎯 Typed Events Architecture (AppRun 3.38.0+)
 
-### File:
+### Files:
 
-* `apprun_coding_rules.md`
+* `types/events.ts`
+* `World.update.ts`
+* `domain/*.ts`
+
+### Pattern Used:
+
+* **Discriminated Union Events**: Type-safe event system with compile-time validation
+* **Domain Module Split**: Organize 40+ events into logical modules
+
+### Architecture:
+
+AppRun 3.38.0+ supports native typed events through discriminated unions and generic components:
+
+```typescript
+// types/events.ts - Event Type Definition
+export type WorldEvents =
+  | { name: 'send-message'; payload: void }
+  | { name: 'toggle-filter'; payload: string }
+  | { name: 'start-edit'; payload: { messageId: string; text: string } }
+  | { name: '/World'; payload: any };
+
+export type WorldEventName = WorldEvents['name'];
+export type WorldEventPayload<T extends WorldEventName> = 
+  Extract<WorldEvents, { name: T }>['payload'];
+```
+
+Component with typed events:
+```typescript
+export default class World extends Component<WorldComponentState, WorldEventName> {
+  override update = worldUpdateHandlers;
+}
+```
+
+### Domain Module Organization:
+
+For large components (40+ events), handlers are split into domain modules:
+
+```
+pages/world/
+├── World.tsx              # Component class
+├── World.update.ts        # Composed handlers
+└── domain/
+    ├── input.ts           # Input & send message (6 events)
+    ├── editing.ts         # Message editing (4 events)
+    ├── deletion.ts        # Message deletion (3 events)
+    ├── chat-history.ts    # Chat CRUD (8 events)
+    └── sse-streaming.ts   # SSE events (4 events)
+```
+
+Example domain module:
+```typescript
+// domain/editing.ts
+export const EditingDomain = {
+  startEditMessage: (state, messageId, text) => ({
+    ...state, editingMessageId: messageId, editingText: text
+  }),
+  cancelEditMessage: (state) => ({
+    ...state, editingMessageId: null, editingText: ''
+  })
+};
+```
+
+Composed in main update file:
+```typescript
+// World.update.ts
+import { EditingDomain } from './domain/editing';
+
+export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = {
+  'start-edit-message': (state, payload) => 
+    EditingDomain.startEditMessage(state, payload.messageId, payload.text),
+  'cancel-edit-message': (state) => 
+    EditingDomain.cancelEditMessage(state)
+};
+```
+
+### Key Benefits:
+
+* ✅ Compile-time event name validation (typos caught by TypeScript)
+* ✅ Type-safe payload structures (IDE autocomplete)
+* ✅ Refactoring safety (rename detection)
+* ✅ Domain module testing (unit test pure functions)
+* ✅ Clear separation of concerns (25 events → 5 domains)
+
+### Critical Rules:
+
+* **Handler format**: Object `{ 'event': handler }` NOT array `[['event', handler]]`
+* **Single property payloads**: Direct value `payload: string`
+* **Multi-property payloads**: Object `payload: { id: string; text: string }`
+* **DOM events**: Last parameter `(state, data, e?: Event)`
+* **Route events**: Use `payload: any` for variadic parameters
+
+---
+
+## 9. 📐 Coding Rules
+
+### Files:
+
+* `.github/prompts/apprun.prompt.md` (comprehensive guide - 990 lines)
 
 ### Summary:
 
 * Functional components for display
-* Class components can use `mounted` for sync initialization or `state = async` for async initialization
+* Class components:
+  * Use `mounted()` for JSX embedded components (REQUIRED)
+  * Use `mounted()` for sync initialization from props
+  * Use `state = async` only for top-level routed pages with async data loading
 * Prefer immutable state updates (spread syntax), but mutable updates are also allowed
 * Return state only when re-render is needed; no return = no re-render
 * Use async generators (`async function*` with `yield`) for handlers needing multiple re-renders
 * Form inputs must use `$bind`
 * Avoid anti-patterns like `app.run()` inside `$onclick`
+* For 10+ events: Use typed events with discriminated unions
+* For 40+ events: Extract domain modules for organization
 
 ---
 
 ## 9. 🧠 Prompt Engineering Guidelines
 
-### File:
+### Files:
 
-* `apprun.prompt.md`
+* `.github/prompts/apprun.prompt.md` (comprehensive - 990 lines)
 
 ### Usage:
 
+* **apprun.prompt.md**: Complete guide with detailed explanations, full templates, and comprehensive examples
+* **apprun-concise.prompt.md**: Streamlined reference optimized for LLM consumption
 * Defines how components like `AgentEdit` or `WorldChat` should be structured
 * Reinforces usage of:
-
   * Mounted lifecycle
   * Module-level `saveAgent`, `deleteWorld`
   * Parent-child coordination
+  * Typed events for large components (10+)
+  * Domain modules for very large components (40+)
 
 ---
 
@@ -217,6 +322,10 @@ export default () => <div id="main"><div id="pages"></div></div>;
 * [x] `$bind`, `$onclick`, `$oninput` used according to rules
 * [x] Error/Loading/Empty UI included in each major component
 * [x] Extracted update handlers where appropriate
+* [x] Typed events for components with 10+ events
+* [x] Domain modules for components with 40+ events
+* [x] Object format for update handlers (not array)
+* [x] DOM event parameters for stopPropagation needs
 
 ---
 

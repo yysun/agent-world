@@ -495,10 +495,24 @@ export const worldUpdateHandlers = [
 2. ✅ Architecture notes added to `World.update.ts` explaining typed events
 3. ✅ Domain module documentation in file headers
 4. ✅ Testing patterns demonstrated in all test files
+5. ✅ `apprun.prompt.md` updated with Pattern D: Typed Event System
+   - Event Types Definition Rules (7 rules)
+   - Complete template structure with examples
+   - Domain module organization patterns
+   - Critical handler format rules (object vs array)
+   - DOM event handling patterns
+   - State initialization rules (mounted vs state = async)
+   - Updated TypeScript, Component Structure, and Summary checklists
+6. ✅ `apprun-app.md` updated with Typed Events Architecture section
+   - Added discriminated union event pattern explanation
+   - Added domain module organization structure
+   - Added key benefits and critical rules
+   - Updated coding rules with state initialization guidance
+   - Removed references to deleted concise file
 
-**Note:** Documentation updates to `apprun-app.md` and `apprun.prompt.md` can be done separately as they are guidance documents, not code changes.
-
-**Commit:** f8aa52a - "test(web): Add comprehensive unit tests for domain modules"
+**Commits:**
+- f8aa52a - "test(web): Add comprehensive unit tests for domain modules"
+- (pending) - "docs: Add Pattern D Typed Events and state initialization rules"
 
 ---
 
