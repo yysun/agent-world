@@ -324,13 +324,27 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
               } else {
                 // Agent sent to another agent (incoming message)
                 label = `Agent: ${agentNamesStr || 'Unknown'} (incoming from ${rawSender})`;
-                // Check if this is in-memory only (no corresponding assistant message from same agent)
-                const hasReply = consolidatedMessages.some(m =>
-                  m.role === 'assistant' &&
-                  m.agentId === message.agentId &&
-                  m.createdAt && message.createdAt &&
-                  new Date(m.createdAt).getTime() > new Date(message.createdAt).getTime()
-                );
+
+                // Check if this is in-memory only using explicit reply relationship
+                // Priority 1: Check for explicit reply link (new messages)
+                // Priority 2: Fall back to timestamp heuristic (legacy messages) with warning
+                const hasReply = message.messageId
+                  ? consolidatedMessages.some(m => m.replyToMessageId === message.messageId)
+                  : (() => {
+                    // Legacy fallback - will be removed in future version
+                    logger.warn('Using timestamp heuristic for legacy message', {
+                      messageId: message.messageId,
+                      sender: message.sender,
+                      agentId: message.agentId
+                    });
+                    return consolidatedMessages.some(m =>
+                      m.role === 'assistant' &&
+                      m.agentId === message.agentId &&
+                      m.createdAt && message.createdAt &&
+                      new Date(m.createdAt).getTime() > new Date(message.createdAt).getTime()
+                    );
+                  })();
+
                 if (!hasReply) {
                   messageType = ' [in-memory, no reply]';
                 }

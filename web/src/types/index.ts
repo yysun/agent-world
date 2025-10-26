@@ -56,6 +56,8 @@ export interface Message {
   hasError?: boolean;
   errorMessage?: string;
   messageId?: string;
+  replyToMessageId?: string; // Parent message reference for threading
+  role?: string; // Backend role field preserved for sorting
   userEntered?: boolean;
   fromAgentId?: string;
   seenByAgents?: string[]; // Track which agents have received this message (for deduplication)

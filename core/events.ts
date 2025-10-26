@@ -539,20 +539,47 @@ export async function processAgentMessage(
     loggerMemory.debug('[processAgentMessage] Generated messageId for agent response', {
       agentId: agent.id,
       messageId,
+      triggeringMessageId: messageEvent.messageId,
       chatId: world.currentChatId,
       responsePreview: finalResponse.substring(0, 50)
     });
 
-    // Save final response to memory with pre-generated ID
+    // Validate triggering message has ID
+    if (!messageEvent.messageId) {
+      loggerMemory.error('[processAgentMessage] messageEvent.messageId is required for threading', {
+        agentId: agent.id,
+        sender: messageEvent.sender,
+        content: messageEvent.content?.substring(0, 50)
+      });
+    }
+
+    // Save final response to memory with pre-generated ID and parent link
     const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: finalResponse,
       createdAt: new Date(),
       chatId: world.currentChatId || null,
       messageId: messageId,
+      replyToMessageId: messageEvent.messageId, // Link to message we're replying to
       sender: agent.id, // Add sender field for consistency
       agentId: agent.id
     };
+
+    // Validate threading before saving
+    try {
+      const { validateMessageThreading } = await import('./types.js');
+      validateMessageThreading(assistantMessage, agent.memory);
+    } catch (error) {
+      loggerMemory.error('[processAgentMessage] Invalid threading', {
+        agentId: agent.id,
+        messageId: assistantMessage.messageId,
+        replyToMessageId: assistantMessage.replyToMessageId,
+        error: error instanceof Error ? error.message : error
+      });
+      // Don't throw - allow message to save without threading
+      assistantMessage.replyToMessageId = undefined;
+    }
+
     agent.memory.push(assistantMessage);
 
     // Publish final response with pre-generated messageId

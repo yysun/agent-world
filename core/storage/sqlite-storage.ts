@@ -340,10 +340,10 @@ async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agent
   await run(ctx, `DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?`, agentId, worldId);
   for (const message of memory) {
     await run(ctx, `
-      INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-      agentId, worldId, message.role, message.content, message.sender, message.chatId, message.messageId,
+      agentId, worldId, message.role, message.content, message.sender, message.chatId, message.messageId, message.replyToMessageId,
       message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
     );
   }
@@ -362,7 +362,7 @@ export async function deleteMemoryByChatId(ctx: SQLiteStorageContext, worldId: s
 export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<AgentMessage[]> {
   await ensureInitialized(ctx);
   const rows = await all(ctx, `
-    SELECT role, content, sender, chat_id as chatId, message_id as messageId, agent_id as agentId, created_at as createdAt
+    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, agent_id as agentId, created_at as createdAt
     FROM agent_memory
     WHERE world_id = ? AND (? = '' OR chat_id = ?)
     ORDER BY datetime(created_at) ASC, rowid ASC

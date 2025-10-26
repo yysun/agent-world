@@ -109,6 +109,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     sender,
     text: memoryItem.content || '',
     messageId: memoryItem.messageId,
+    replyToMessageId: memoryItem.replyToMessageId, // Preserve parent message reference
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
     fromAgentId: memoryItem.agentId || (isUserMessage ? undefined : agentName), // Use agentId from backend or fallback to agentName

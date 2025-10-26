@@ -28,7 +28,45 @@ export interface ChatMessage {
 }
 
 export interface AgentMessage extends ChatMessage {
-  messageId?: string; // Unique identifier - REQUIRED for all new messages (optional only for legacy data pre-migration)
+  /**
+   * Unique message identifier. REQUIRED for all new messages.
+   * Used for message editing, threading, and deduplication.
+   * 
+   * @required for new messages (as of version 6)
+   * @optional only for legacy data (pre-version 6)
+   * @example "msg-1234567890-abc"
+   */
+  messageId?: string;
+
+  /**
+   * Parent message identifier for threading support.
+   * Links this message to the message it's replying to.
+   * 
+   * Threading Semantics:
+   * - Assistant messages: Set to triggering user/agent message ID
+   * - Incoming user messages: Usually null/undefined (start of conversation)
+   * - Tool results: Set to assistant message that made tool call
+   * - System messages: Usually null/undefined
+   * 
+   * Rules:
+   * - MUST NOT equal messageId (no self-references)
+   * - MUST reference existing message in conversation
+   * - MUST NOT create circular chains (A→B→C→A)
+   * 
+   * @example
+   * // Human asks question (root message)
+   * { messageId: "msg-1", replyToMessageId: undefined, role: "user", content: "Hello?" }
+   * 
+   * // Agent responds (reply message)
+   * { messageId: "msg-2", replyToMessageId: "msg-1", role: "assistant", content: "Hi!" }
+   * 
+   * // Multi-level thread
+   * { messageId: "msg-3", replyToMessageId: "msg-2", role: "user", content: "Thanks!" }
+   * 
+   * @since version 7
+   */
+  replyToMessageId?: string;
+
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
   agentId?: string; // Agent ID for identifying message source
@@ -380,6 +418,50 @@ export interface WorldSystemEvent {
   content: string;
   timestamp: Date;
   messageId: string;
+}
+
+/**
+ * Validates message threading relationships
+ * @throws Error if threading is invalid
+ */
+export function validateMessageThreading(
+  message: AgentMessage,
+  allMessages?: AgentMessage[]
+): void {
+  // Check self-reference
+  if (message.replyToMessageId && message.replyToMessageId === message.messageId) {
+    throw new Error(`Message ${message.messageId || 'unknown'} cannot reply to itself`);
+  }
+
+  // Check parent exists (if allMessages provided)
+  if (message.replyToMessageId && allMessages) {
+    const parent = allMessages.find(m => m.messageId === message.replyToMessageId);
+    if (!parent) {
+      console.warn(`Parent message ${message.replyToMessageId} not found for message ${message.messageId || 'unknown'}`);
+      // Don't throw - parent might be in different chat or deleted
+    }
+
+    // Check for circular references (limited depth check)
+    const visited = new Set<string>();
+    let current: string | undefined = message.replyToMessageId;
+    let depth = 0;
+    const MAX_DEPTH = 100;
+
+    while (current && depth < MAX_DEPTH) {
+      if (visited.has(current)) {
+        throw new Error(`Circular reference detected in thread: ${Array.from(visited).join(' → ')} → ${current}`);
+      }
+      visited.add(current);
+
+      const parent = allMessages.find(m => m.messageId === current);
+      current = parent?.replyToMessageId;
+      depth++;
+    }
+
+    if (depth >= MAX_DEPTH) {
+      throw new Error(`Thread depth exceeds maximum (${MAX_DEPTH})`);
+    }
+  }
 }
 
 

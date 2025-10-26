@@ -181,10 +181,17 @@ export default function WorldChat(props: WorldChatProps) {
               // Identified by: type=user/human + agent sender + sender/agentId mismatch (cross-agent)
               // Note: Agent replies have type='agent' or 'assistant', incoming messages have type='user' or 'human'
               const isIncomingMessage = message.type === 'user' || message.type === 'human';
+
+              // Check if there's a reply to this incoming message (explicit threading)
+              const hasReply = message.messageId
+                ? messages.some(m => m.replyToMessageId === message.messageId)
+                : false; // Legacy messages without threading assumed to have replies
+
               const isMemoryOnlyMessage = isIncomingMessage &&
                 senderType === SenderType.AGENT &&
                 isCrossAgentMessage &&
-                !message.isStreaming;
+                !message.isStreaming &&
+                !hasReply; // Only mark as memory-only if confirmed no reply
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';

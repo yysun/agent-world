@@ -166,6 +166,7 @@ export async function initializeSchema(ctx: SQLiteSchemaContext): Promise<void> 
       agent_id TEXT NOT NULL,
       world_id TEXT NOT NULL,
       message_id TEXT,
+      reply_to_message_id TEXT,
       role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
       content TEXT NOT NULL,
       sender TEXT,
@@ -323,7 +324,7 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
 
 export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
   const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 6; // Latest version includes message_id field for user message edit
+  const targetVersion = 7; // Latest version includes reply_to_message_id field for message threading
   return currentVersion < targetVersion;
 }
 
@@ -489,6 +490,25 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
       console.warn('[sqlite-schema] Migration warning for message_id column:', error);
       // Try to continue anyway
       await setSchemaVersion(ctx, 6);
+    }
+  }
+
+  // Version 7: Add reply_to_message_id for message threading
+  if (currentVersion < 7) {
+    try {
+      const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
+      const hasReplyToMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'reply_to_message_id');
+
+      if (!hasReplyToMessageId) {
+        await run(`ALTER TABLE agent_memory ADD COLUMN reply_to_message_id TEXT`);
+        await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_reply_to_message_id ON agent_memory(reply_to_message_id)`);
+      }
+
+      await setSchemaVersion(ctx, 7);
+    } catch (error) {
+      console.warn('[sqlite-schema] Migration warning for reply_to_message_id column:', error);
+      // Try to continue anyway
+      await setSchemaVersion(ctx, 7);
     }
   }
 
