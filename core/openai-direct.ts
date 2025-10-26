@@ -38,6 +38,7 @@
  * - Enhanced logging with result content analysis and execution status
  * - Fixed MCP tool result display: Follow-up responses now stream properly to UI
  * - Added 'end' event emission after streaming completion to signal CLI properly
+ * - Added validation and handling for tool calls with empty or missing names
  */
 
 import OpenAI from 'openai';
@@ -45,6 +46,7 @@ import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls } from './tool-utils.js';
 
 const logger = createCategoryLogger('llm.adapter.openai');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -221,16 +223,25 @@ export async function streamOpenAIResponse(
     // Process function calls if any
     // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
     if (functionCalls.length > 0) {
+      // Filter and handle function calls with empty or missing names
+      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
+        functionCalls,
+        world,
+        agent,
+        publishSSE,
+        messageId
+      );
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (streaming)`, {
         sequenceId,
         agentId: agent.id,
         messageId,
-        toolCount: functionCalls.length,
-        toolNames: functionCalls.map(fc => fc.function.name)
+        toolCount: validCalls.length,
+        toolNames: validCalls.map(fc => fc.function!.name)
       });
 
-      // Add assistant message with tool calls
+      // Add assistant message with tool calls (include all calls, even invalid ones)
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: fullResponse || '',
@@ -238,13 +249,13 @@ export async function streamOpenAIResponse(
       };
 
       // Execute function calls and get results
-      const toolResults: ChatMessage[] = [];
-      for (let i = 0; i < functionCalls.length; i++) {
-        const toolCall = functionCalls[i];
+      const toolResults: ChatMessage[] = [...emptyNameToolResults];
+      for (let i = 0; i < validCalls.length; i++) {
+        const toolCall = validCalls[i];
         const startTime = performance.now();
 
         try {
-          const tool = mcpTools[toolCall.function.name];
+          const tool = mcpTools[toolCall.function!.name!];
           if (tool && tool.execute) {
             // Publish tool start event to frontend
             publishSSE(world, {
@@ -252,8 +263,8 @@ export async function streamOpenAIResponse(
               type: 'tool-start',
               messageId,
               toolExecution: {
-                toolName: toolCall.function.name,
-                toolCallId: toolCall.id,
+                toolName: toolCall.function!.name!,
+                toolCallId: toolCall.id!,
                 phase: 'starting'
               }
             });
@@ -261,23 +272,23 @@ export async function streamOpenAIResponse(
             mcpLogger.debug(`MCP tool execution starting (streaming)`, {
               sequenceId,
               toolIndex: i,
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
+              toolName: toolCall.function!.name!,
+              toolCallId: toolCall.id!,
               agentId: agent.id,
               messageId,
-              argsPresent: !!toolCall.function.arguments
+              argsPresent: !!toolCall.function!.arguments
             });
 
             let args: any = {};
             try {
-              args = toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {};
+              args = toolCall.function!.arguments ? JSON.parse(toolCall.function!.arguments) : {};
             } catch (err) {
               const parseErr = err instanceof Error ? err.message : String(err);
               mcpLogger.error(`MCP tool arguments parse error (streaming): ${parseErr}`, {
                 sequenceId,
                 toolIndex: i,
-                toolName: toolCall.function.name,
-                toolCallId: toolCall.id,
+                toolName: toolCall.function!.name!,
+                toolCallId: toolCall.id!,
                 agentId: agent.id,
                 messageId
               });
@@ -288,8 +299,8 @@ export async function streamOpenAIResponse(
                 type: 'tool-error',
                 messageId,
                 toolExecution: {
-                  toolName: toolCall.function.name,
-                  toolCallId: toolCall.id,
+                  toolName: toolCall.function!.name!,
+                  toolCallId: toolCall.id!,
                   error: `Tool arguments parse error: ${parseErr}`,
                   duration: 0,
                   phase: 'failed'
@@ -299,7 +310,7 @@ export async function streamOpenAIResponse(
               toolResults.push({
                 role: 'tool',
                 content: `Error: Tool arguments parse error: ${parseErr}`,
-                tool_call_id: toolCall.id,
+                tool_call_id: toolCall.id!,
               });
               // Skip executing this tool due to parse error
               continue;
@@ -312,8 +323,8 @@ export async function streamOpenAIResponse(
             mcpLogger.debug(`MCP tool execution completed (streaming)`, {
               sequenceId,
               toolIndex: i,
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
+              toolName: toolCall.function!.name!,
+              toolCallId: toolCall.id!,
               agentId: agent.id,
               messageId,
               status: 'success',
@@ -328,8 +339,8 @@ export async function streamOpenAIResponse(
               type: 'tool-result',
               messageId,
               toolExecution: {
-                toolName: toolCall.function.name,
-                toolCallId: toolCall.id,
+                toolName: toolCall.function!.name!,
+                toolCallId: toolCall.id!,
                 phase: 'completed',
                 duration: Math.round(duration * 100) / 100,
                 result: result,
@@ -340,7 +351,7 @@ export async function streamOpenAIResponse(
             toolResults.push({
               role: 'tool',
               content: resultString,
-              tool_call_id: toolCall.id,
+              tool_call_id: toolCall.id!,
             });
           }
         } catch (error) {
@@ -350,8 +361,8 @@ export async function streamOpenAIResponse(
           mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
+            toolName: toolCall.function!.name!,
+            toolCallId: toolCall.id!,
             agentId: agent.id,
             messageId,
             status: 'error',
@@ -366,8 +377,8 @@ export async function streamOpenAIResponse(
             type: 'tool-error',
             messageId,
             toolExecution: {
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
+              toolName: toolCall.function!.name!,
+              toolCallId: toolCall.id!,
               error: errorMessage,
               duration: Math.round(duration * 100) / 100,
               phase: 'failed'
@@ -377,7 +388,7 @@ export async function streamOpenAIResponse(
           toolResults.push({
             role: 'tool',
             content: `Error: ${(error as Error).message}`,
-            tool_call_id: toolCall.id,
+            tool_call_id: toolCall.id!,
           });
         }
       }
@@ -465,20 +476,36 @@ export async function generateOpenAIResponse(
 
     // Handle function calls
     if (message.tool_calls && message.tool_calls.length > 0) {
+      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
+      const validToolCalls = message.tool_calls.filter(tc => tc.type === 'function' && tc.function?.name && tc.function.name.trim() !== '');
+      const invalidToolCalls = message.tool_calls.filter(tc => tc.type !== 'function' || !tc.function?.name || tc.function.name.trim() === '');
+
       const sequenceId = generateId();
       mcpLogger.debug(`MCP tool call sequence starting (non-streaming)`, {
         sequenceId,
         agentId: agent.id,
-        toolCount: message.tool_calls.length,
-        toolNames: message.tool_calls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
+        toolCount: validToolCalls.length,
+        invalidToolCount: invalidToolCalls.length,
+        toolNames: validToolCalls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
       });
 
       // Execute function calls
       const toolResults: ChatMessage[] = [];
-      for (let i = 0; i < message.tool_calls.length; i++) {
-        const toolCall = message.tool_calls[i];
+      
+      // Add tool results for invalid calls (empty or missing names)
+      for (const invalidCall of invalidToolCalls) {
+        const toolCallId = invalidCall.id || 'tc-' + Math.random().toString(36).substr(2, 9);
+        toolResults.push({
+          role: 'tool',
+          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
+          tool_call_id: toolCallId,
+        });
+      }
 
-        // Skip non-function tool calls
+      for (let i = 0; i < validToolCalls.length; i++) {
+        const toolCall = validToolCalls[i];
+
+        // Skip non-function tool calls (should already be filtered, but keep for safety)
         if (toolCall.type !== 'function') continue;
 
         const startTime = performance.now();
