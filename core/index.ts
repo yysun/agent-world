@@ -19,7 +19,7 @@
  * - Chat Management: createChatData, getChatData, restoreWorldChat
  * - Event System: publishMessage, enableStreaming, disableStreaming
  * - Core Types: World, Agent, AgentMessage, WorldChat, ChatData, WorldInfo, LLMProvider, LoggerConfig, LogLevel
- * - Utilities: logger, createCategoryLogger, generateId, toKebabCase
+ * - Utilities: logger, createCategoryLogger, loggers, generateId, toKebabCase
  * - Subscription System: subscribeWorld, ClientConnection (for server API)
  *
  * Private APIs (not exported):
@@ -89,7 +89,7 @@ export {
 export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider } from './types.js';
 
 // === LOGGER ===
-export { type LoggerConfig, type LogLevel, logger, createCategoryLogger } from './logger.js';
+export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';
 
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';

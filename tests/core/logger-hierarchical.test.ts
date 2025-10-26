@@ -215,12 +215,17 @@ describe('Logger Hierarchical Category Resolution', () => {
       expect(loggers.cli).toBeDefined();
     });
 
-    it('should have consistent category names', async () => {
-      const { loggers, createCategoryLogger } = await import('../../core/logger.js');
+    it('should cache logger instances correctly', async () => {
+      const { createCategoryLogger } = await import('../../core/logger.js');
       
-      // Pre-made loggers should be the same as manually created ones
-      const coreLogger = createCategoryLogger('core');
-      expect(loggers.core).toBe(coreLogger);
+      // Creating the same logger twice should return the same instance
+      const logger1 = createCategoryLogger('test.category');
+      const logger2 = createCategoryLogger('test.category');
+      expect(logger1).toBe(logger2);
+      
+      // Creating with bindings should return a new instance
+      const logger3 = createCategoryLogger('test.category', { foo: 'bar' });
+      expect(logger3).not.toBe(logger1);
     });
   });
 });
