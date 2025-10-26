@@ -20,7 +20,7 @@ import { worldUpdateHandlers } from './World.update';
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
   //                                                   ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
   //                                                   State type           Event type (AppRun native typed events)
-  
+
   override state = {
     worldName: 'World',
     world: null,
@@ -138,12 +138,9 @@ export default class WorldComponent extends Component<WorldComponentState, World
                           <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['open-agent-edit', agent]}>
                             <div className="agent-sprite-container">
                               <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
-                              <div 
+                              <div
                                 className={`message-badge ${isFilterActive ? 'active' : ''}`}
-                                onclick={(e: MouseEvent) => {
-                                  e.stopPropagation();
-                                  app.run('toggle-agent-filter', { agentId: agent.id });
-                                }}
+                                $onclick={['toggle-agent-filter', agent.id]}
                               >
                                 {agent.messageCount}
                               </div>
@@ -362,10 +359,12 @@ export default class WorldComponent extends Component<WorldComponentState, World
     },
 
     // Badge toggle filter handler - toggle agent filter on/off
-    'toggle-agent-filter': (state: WorldComponentState, agentId: string): WorldComponentState => {
+    'toggle-agent-filter': (state: WorldComponentState, agentId: string, e?: Event): WorldComponentState => {
+      e?.stopPropagation(); // Prevent triggering parent agent-item click
+
       const currentFilters = state.activeAgentFilters || [];
       const isActive = currentFilters.includes(agentId);
-      
+
       return {
         ...state,
         activeAgentFilters: isActive

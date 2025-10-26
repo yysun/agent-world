@@ -71,7 +71,7 @@ export default function WorldSettings(props: WorldSettingsProps) {
                 <span className="setting-value">{selectedAgent.messageCount}</span>
                 <button
                   className="action-btn"
-                  onclick={handleClearMessages}
+                  $onclick={handleClearMessages}
                   title="Clear agent messages"
                 >
                   <span className="btn-icon">-</span>

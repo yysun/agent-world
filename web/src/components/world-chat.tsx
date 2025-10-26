@@ -182,7 +182,7 @@ export default function WorldChat(props: WorldChatProps) {
                       type="button"
                       className="log-header"
                       aria-expanded={isExpanded}
-                      $onclick={['toggle-log-details', { messageId: message.id || `log-${index}` }]}
+                      $onclick={['toggle-log-details', message.id || `log-${index}`]}
                     >
                       <span className={`log-dot ${message.logEvent.level}`}></span>
                       <span className="log-category">{message.logEvent.category}</span>
@@ -273,7 +273,7 @@ export default function WorldChat(props: WorldChatProps) {
                       <div className="message-edit-actions">
                         <button
                           className="btn-primary"
-                          $onclick={['save-edit-message', { messageId: message.id }]}
+                          $onclick={['save-edit-message', message.id]}
                         >
                           Update
                         </button>

@@ -461,30 +461,29 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
  * - Payload structures (ensures correct parameters)
  * - Handler return types (state consistency)
  */
-export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = [
+export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = {
 
   // ========================================
   // ROUTE & INITIALIZATION
   // ========================================
-  
-  ['initWorld', initWorld],
-  ['/World', initWorld],
+
+  'initWorld': initWorld,
+  '/World': initWorld,
 
   // ========================================
   // USER INPUT & MESSAGING
   // ========================================
-  
-  ['update-input', (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState => 
-    InputDomain.updateInput(state, payload.target.value)
-  ],
 
-  ['key-press', (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
+  'update-input': (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState =>
+    InputDomain.updateInput(state, payload.target.value),
+
+  'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
     if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
       app.run('send-message');
     }
-  }],
+  },
 
-  ['send-message', async (state: WorldComponentState): Promise<WorldComponentState> => {
+  'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
     const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
     if (!prepared) return state;
 
@@ -499,36 +498,36 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
     }
-  }],
-  
+  },
+
   // ========================================
   // SSE STREAMING EVENTS
   // ========================================
-  
-  ['handleStreamStart', handleStreamStart],
-  ['handleStreamChunk', handleStreamChunk],
-  ['handleStreamEnd', handleStreamEnd],
-  ['handleStreamError', handleStreamError],
-  ['handleLogEvent', handleLogEvent],
-  ['handleMessageEvent', handleMessageEvent],
-  ['handleSystemEvent', handleSystemEvent],
-  ['handleError', handleError],
-  ['handleToolError', handleToolError],
-  ['handleToolStart', handleToolStart],
-  ['handleToolResult', handleToolResult],
-  ['handleMemoryOnlyMessage', handleMemoryOnlyMessage],
+
+  'handleStreamStart': handleStreamStart,
+  'handleStreamChunk': handleStreamChunk,
+  'handleStreamEnd': handleStreamEnd,
+  'handleStreamError': handleStreamError,
+  'handleLogEvent': handleLogEvent,
+  'handleMessageEvent': handleMessageEvent,
+  'handleSystemEvent': handleSystemEvent,
+  'handleError': handleError,
+  'handleToolError': handleToolError,
+  'handleToolStart': handleToolStart,
+  'handleToolResult': handleToolResult,
+  'handleMemoryOnlyMessage': handleMemoryOnlyMessage,
 
   // ========================================
   // MESSAGE DISPLAY
   // ========================================
 
-  ['toggle-log-details', (state: WorldComponentState, payload: WorldEventPayload<'toggle-log-details'>): WorldComponentState => {
-    if (!payload.messageId || !state.messages) {
+  'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState => {
+    if (!messageId || !state.messages) {
       return state;
     }
 
     const messages = state.messages.map(msg => {
-      if (String(msg.id) === String(payload.messageId)) {
+      if (String(msg.id) === String(messageId)) {
         return {
           ...msg,
           isLogExpanded: !msg.isLogExpanded
@@ -542,48 +541,43 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       messages,
       needScroll: false
     };
-  }],
+  },
 
-  ['ack-scroll', (state: WorldComponentState): WorldComponentState => ({
+  'ack-scroll': (state: WorldComponentState): WorldComponentState => ({
     ...state,
     needScroll: false
-  })],
+  }),
 
   // ========================================
   // MESSAGE EDITING
   // ========================================
 
-  ['start-edit-message', (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => 
-    EditingDomain.startEditMessage(state, payload.messageId, payload.text)
-  ],
+  'start-edit-message': (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState =>
+    EditingDomain.startEditMessage(state, payload.messageId, payload.text),
 
-  ['cancel-edit-message', (state: WorldComponentState): WorldComponentState => 
-    EditingDomain.cancelEditMessage(state)
-  ],
+  'cancel-edit-message': (state: WorldComponentState): WorldComponentState =>
+    EditingDomain.cancelEditMessage(state),
 
-  ['update-edit-text', (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState => 
-    EditingDomain.updateEditText(state, payload.target.value)
-  ],
+  'update-edit-text': (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState =>
+    EditingDomain.updateEditText(state, payload.target.value),
 
   // ========================================
   // MESSAGE DELETION
   // ========================================
 
-  ['show-delete-message-confirm', (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState => 
+  'show-delete-message-confirm': (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState =>
     DeletionDomain.showDeleteConfirmation(
       state,
       payload.messageId,
       payload.backendMessageId,
       payload.messageText,
       payload.userEntered
-    )
-  ],
+    ),
 
-  ['hide-delete-message-confirm', (state: WorldComponentState): WorldComponentState => 
-    DeletionDomain.hideDeleteConfirmation(state)
-  ],
+  'hide-delete-message-confirm': (state: WorldComponentState): WorldComponentState =>
+    DeletionDomain.hideDeleteConfirmation(state),
 
-  ['delete-message-confirmed', async (state: WorldComponentState): Promise<WorldComponentState> => {
+  'delete-message-confirmed': async (state: WorldComponentState): Promise<WorldComponentState> => {
     if (!state.messageToDelete) return state;
 
     const { id, messageId, chatId } = state.messageToDelete;
@@ -663,14 +657,14 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         messageToDelete: null
       };
     }
-  }],
+  },
 
-  ['save-edit-message', async (state: WorldComponentState, payload: WorldEventPayload<'save-edit-message'>): Promise<WorldComponentState> => {
+  'save-edit-message': async (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): Promise<WorldComponentState> => {
     const editedText = state.editingText?.trim();
     if (!editedText) return state;
 
     // Find the message by frontend ID
-    const message = state.messages.find(msg => msg.id === payload.messageId);
+    const message = state.messages.find(msg => msg.id === messageId);
     if (!message) {
       return {
         ...state,
@@ -725,7 +719,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
 
     // Optimistically update UI: remove messages from edited message onwards
-    const editedIndex = state.messages.findIndex(msg => msg.id === payload.messageId);
+    const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
     const updatedMessages = editedIndex >= 0 ? state.messages.slice(0, editedIndex) : state.messages;
 
     const optimisticState = {
@@ -807,25 +801,23 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         error: errorMessage
       };
     }
-  }],
+  },
 
   // ========================================
   // CHAT HISTORY & MODALS
   // ========================================
 
-  ['chat-history-show-delete-confirm', (state: WorldComponentState, payload: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState => 
-    ChatHistoryDomain.showChatDeletionConfirm(state, payload.chat)
-  ],
+  'chat-history-show-delete-confirm': (state: WorldComponentState, chat: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState =>
+    ChatHistoryDomain.showChatDeletionConfirm(state, chat),
 
-  ['chat-history-hide-modals', (state: WorldComponentState): WorldComponentState => 
-    ChatHistoryDomain.hideChatDeletionModals(state)
-  ],
+  'chat-history-hide-modals': (state: WorldComponentState): WorldComponentState =>
+    ChatHistoryDomain.hideChatDeletionModals(state),
 
   // ========================================
   // AGENT MANAGEMENT
   // ========================================
 
-  ['delete-agent', async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> => {
+  'delete-agent': async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> => {
     try {
       await api.deleteAgent(state.worldName, payload.agent.name);
 
@@ -842,22 +834,22 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to delete agent' };
     }
-  }],
+  },
 
   // ========================================
   // WORLD MANAGEMENT
   // ========================================
 
-  ['export-world-markdown', async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> => {
+  'export-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> => {
     try {
       window.location.href = `/api/worlds/${encodeURIComponent(payload.worldName)}/export`;
       return state;
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to export world' };
     }
-  }],
+  },
 
-  ['view-world-markdown', async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> => {
+  'view-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> => {
     try {
       const markdown = await api.getWorldMarkdown(payload.worldName);
       const htmlContent = renderMarkdown(markdown);
@@ -906,13 +898,13 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to view world markdown' };
     }
-  }],
+  },
 
   // ========================================
   // CHAT SESSION MANAGEMENT
   // ========================================
 
-  ['create-new-chat', async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+  'create-new-chat': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
     try {
       yield ChatHistoryDomain.createChatLoadingState(state);
 
@@ -925,25 +917,25 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to create new chat');
     }
-  }],
+  },
 
-  ['load-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
+  'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       yield ChatHistoryDomain.createChatLoadingState(state);
 
-      const result = await api.setChat(state.worldName, payload.chatId);
+      const result = await api.setChat(state.worldName, chatId);
       if (!result.success) {
         yield state;
       }
-      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, payload.chatId);
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
       app.route(path);
       history.pushState(null, '', path);
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to load chat from history');
     }
-  }],
+  },
 
-  ['delete-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'delete-chat-from-history'>): AsyncGenerator<WorldComponentState> {
+  'delete-chat-from-history': async function* (state: WorldComponentState, payload: WorldEventPayload<'delete-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       yield ChatHistoryDomain.createChatLoadingStateWithClearedModal(state);
       await api.deleteChat(state.worldName, payload.chatId);
@@ -953,13 +945,13 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to delete chat', true);
     }
-  }],
+  },
 
   // ========================================
   // MEMORY MANAGEMENT
   // ========================================
 
-  ['clear-agent-messages', async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> => {
+  'clear-agent-messages': async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> => {
     try {
       await api.clearAgentMemory(state.worldName, payload.agent.name);
 
@@ -980,9 +972,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to clear agent messages' };
     }
-  }],
+  },
 
-  ['clear-world-messages', async (state: WorldComponentState): Promise<WorldComponentState> => {
+  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
     try {
       await Promise.all(
         (state.world?.agents ?? []).map(agent => api.clearAgentMemory(state.worldName, agent.name))
@@ -1000,5 +992,5 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       return { ...state, error: error.message || 'Failed to clear world messages' };
     }
-  }],
-];
+  },
+};

@@ -36,184 +36,186 @@ import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, S
  * All events for the World component with strongly-typed payloads.
  * Grouped by functional domain for maintainability.
  */
-export type WorldEvents = 
+export type WorldEvents =
   // ========================================
   // ROUTE & INITIALIZATION EVENTS
   // ========================================
-  
+
   /** Initialize world component with name and optional chat ID */
-  | { name: '/World'; payload: { name: string; chatId?: string } }
-  
+  | { name: '/World'; payload: any }
+
   /** Initialize world (same as route handler) */
-  | { name: 'initWorld'; payload: { name: string; chatId?: string } }
-  
+  | { name: 'initWorld'; payload: any }
+
   // ========================================
   // USER INPUT & MESSAGING EVENTS
   // ========================================
-  
+
   /** Update user input field value */
   | { name: 'update-input'; payload: { target: { value: string } } }
-  
+
   /** Handle key press in input field */
   | { name: 'key-press'; payload: { key: string } }
-  
+
   /** Send message to agents */
   | { name: 'send-message'; payload: void }
-  
+
   // ========================================
   // MESSAGE EDITING EVENTS
   // ========================================
-  
+
   /** Start editing a message */
   | { name: 'start-edit-message'; payload: { messageId: string; text: string } }
-  
+
   /** Save edited message */
-  | { name: 'save-edit-message'; payload: { messageId: string } }
-  
+  | { name: 'save-edit-message'; payload: string }
+
   /** Cancel message editing */
   | { name: 'cancel-edit-message'; payload: void }
-  
+
   /** Update editing text field */
   | { name: 'update-edit-text'; payload: { target: { value: string } } }
-  
+
   // ========================================
   // MESSAGE DELETION EVENTS
   // ========================================
-  
+
   /** Show delete confirmation modal */
-  | { name: 'show-delete-message-confirm'; payload: {
+  | {
+    name: 'show-delete-message-confirm'; payload: {
       messageId: string;
       backendMessageId: string;
       messageText: string;
       userEntered: boolean;
-    }}
-  
+    }
+  }
+
   /** Hide delete confirmation modal */
   | { name: 'hide-delete-message-confirm'; payload: void }
-  
+
   /** Confirm and execute message deletion */
   | { name: 'delete-message-confirmed'; payload: void }
-  
+
   // ========================================
   // MESSAGE DISPLAY EVENTS
   // ========================================
-  
+
   /** Toggle log details expansion */
-  | { name: 'toggle-log-details'; payload: { messageId: string | number } }
-  
+  | { name: 'toggle-log-details'; payload: string | number }
+
   /** Acknowledge scroll completed */
   | { name: 'ack-scroll'; payload: void }
-  
+
   // ========================================
   // AGENT EVENTS
   // ========================================
-  
+
   /** Toggle agent filter on/off */
-  | { name: 'toggle-agent-filter'; payload: { agentId: string } }
-  
+  | { name: 'toggle-agent-filter'; payload: string }
+
   /** Open agent creation modal */
   | { name: 'open-agent-create'; payload: void }
-  
+
   /** Open agent edit modal */
-  | { name: 'open-agent-edit'; payload: { agent: Agent } }
-  
+  | { name: 'open-agent-edit'; payload: Agent }
+
   /** Open agent delete modal */
-  | { name: 'open-agent-delete'; payload: { agent: Agent } }
-  
+  | { name: 'open-agent-delete'; payload: Agent }
+
   /** Close agent edit modal */
   | { name: 'close-agent-edit'; payload: void }
-  
+
   /** Agent saved successfully (global event) */
   | { name: 'agent-saved'; payload: void }
-  
+
   /** Agent deleted successfully (global event) */
   | { name: 'agent-deleted'; payload: void }
-  
+
   // ========================================
   // CHAT HISTORY EVENTS
   // ========================================
-  
+
   /** Create new chat session */
   | { name: 'create-new-chat'; payload: void }
-  
+
   /** Load chat from history */
-  | { name: 'load-chat-from-history'; payload: { chatId: string } }
-  
+  | { name: 'load-chat-from-history'; payload: string }
+
   /** Delete chat from history */
   | { name: 'delete-chat-from-history'; payload: { chatId: string } }
-  
+
   /** Show chat delete confirmation modal */
-  | { name: 'chat-history-show-delete-confirm'; payload: { chat: any } }
-  
+  | { name: 'chat-history-show-delete-confirm'; payload: any }
+
   /** Hide chat history modals */
   | { name: 'chat-history-hide-modals'; payload: void }
-  
+
   // ========================================
   // SSE STREAMING EVENTS
   // ========================================
-  
+
   /** Handle stream start event */
   | { name: 'handleStreamStart'; payload: StreamStartData }
-  
+
   /** Handle stream chunk event */
   | { name: 'handleStreamChunk'; payload: StreamChunkData }
-  
+
   /** Handle stream end event */
   | { name: 'handleStreamEnd'; payload: StreamEndData }
-  
+
   /** Handle stream error event */
   | { name: 'handleStreamError'; payload: StreamErrorData }
-  
+
   /** Handle message event from SSE */
   | { name: 'handleMessageEvent'; payload: any }
-  
+
   /** Handle system event from SSE */
   | { name: 'handleSystemEvent'; payload: any }
-  
+
   /** Handle general error */
   | { name: 'handleError'; payload: any }
-  
+
   /** Handle log event from SSE */
   | { name: 'handleLogEvent'; payload: any }
-  
+
   /** Handle tool error event */
   | { name: 'handleToolError'; payload: any }
-  
+
   /** Handle tool start event */
   | { name: 'handleToolStart'; payload: any }
-  
+
   /** Handle tool result event */
   | { name: 'handleToolResult'; payload: any }
-  
+
   /** Handle memory-only message event */
   | { name: 'handleMemoryOnlyMessage'; payload: any }
-  
+
   // ========================================
   // MEMORY MANAGEMENT EVENTS
   // ========================================
-  
+
   /** Clear messages for specific agent */
   | { name: 'clear-agent-messages'; payload: { agent: Agent } }
-  
+
   /** Clear all messages in world */
   | { name: 'clear-world-messages'; payload: void }
-  
+
   /** Delete agent from world */
   | { name: 'delete-agent'; payload: { agent: Agent } }
-  
+
   // ========================================
   // WORLD MANAGEMENT EVENTS
   // ========================================
-  
+
   /** Open world edit modal */
   | { name: 'open-world-edit'; payload: void }
-  
+
   /** Close world edit modal */
   | { name: 'close-world-edit'; payload: void }
-  
+
   /** Export world to markdown file */
   | { name: 'export-world-markdown'; payload: { worldName: string } }
-  
+
   /** View world markdown in new tab */
   | { name: 'view-world-markdown'; payload: { worldName: string } };
 
@@ -241,7 +243,7 @@ export type WorldEventName = WorldEvents['name'];
  * }]
  * ```
  */
-export type WorldEventPayload<T extends WorldEventName> = 
+export type WorldEventPayload<T extends WorldEventName> =
   Extract<WorldEvents, { name: T }>['payload'];
 
 /**

@@ -47,19 +47,18 @@ export default function WorldChatHistory(props: WorldChatHistoryProps) {
               return (
                 <li
                   key={chat.id}
-                  $onclick={["load-chat-from-history", { chatId: chat.id }]}
+                  $onclick={["load-chat-from-history", chat.id]}
                   className={`chat-item simplified-chat-item chat-list-li${isCurrent ? ' current' : ''}`}
                 >
                   <span
                     className={`chat-title clickable chat-list-title${isCurrent ? ' current' : ''}`}
-                    
                     title={chat.name}
                   >
                     {chat.name}
                   </span>
                   <button
                     className="chat-close-btn chat-list-close-btn"
-                    $onclick={["chat-history-show-delete-confirm", { chat }]}
+                    $onclick={["chat-history-show-delete-confirm", chat]}
                     title="Delete chat"
                   >
                     ×
