@@ -137,8 +137,10 @@ export default class WorldComponent extends Component<WorldComponentState> {
                               <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
                               <div 
                                 className={`message-badge ${isFilterActive ? 'active' : ''}`}
-                                $onclick={['toggle-agent-filter', agent.id]}
-                                onclick={(e: Event) => e.stopPropagation()}
+                                onclick={(e: Event) => {
+                                  e.stopPropagation();
+                                  app.run('toggle-agent-filter', agent.id);
+                                }}
                               >
                                 {agent.messageCount}
                               </div>
