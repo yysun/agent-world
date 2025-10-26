@@ -42,21 +42,35 @@ interface HomeState {
 }
 
 export default class HomeComponent extends Component<HomeState> {
-  override state = async () => {
-    const worlds = await api.getWorlds();
-    return {
-      worlds,
-      currentIndex: 0,
-      loading: false,
-      error: null,
-      // Simplified world edit state
-      showWorldEdit: false,
-      worldEditMode: 'create',
-      selectedWorldForEdit: null,
-    } as HomeState;
-  }
+  declare props: Readonly<{}>;
 
-  override view = (state: HomeState) => {
+  state = async () => {
+    try {
+      const worlds = await api.getWorlds();
+      return {
+        worlds,
+        currentIndex: 0,
+        loading: false,
+        error: null,
+        // Simplified world edit state
+        showWorldEdit: false,
+        worldEditMode: 'create',
+        selectedWorldForEdit: null,
+      } as HomeState;
+    } catch (error: any) {
+      return {
+        worlds: [],
+        currentIndex: 0,
+        loading: false,
+        error: error.message || 'Failed to load worlds',
+        showWorldEdit: false,
+        worldEditMode: 'create',
+        selectedWorldForEdit: null,
+      } as HomeState;
+    }
+  };
+
+  view = (state: HomeState) => {
     if (state.loading) {
       return (
         <div class="container">
@@ -216,7 +230,7 @@ export default class HomeComponent extends Component<HomeState> {
     );
   };
 
-  override update = {
+  update = {
     'prev-world': (state: HomeState): HomeState => ({
       ...state,
       currentIndex: state.currentIndex > 0 ? state.currentIndex - 1 : state.worlds.length - 1
@@ -261,6 +275,13 @@ export default class HomeComponent extends Component<HomeState> {
       showWorldEdit: false
     }),
 
+    // Global events from WorldEdit component - no return, no re-render before reload
+    'world-saved': (state: HomeState) => {
+      location.reload(); // Simple refresh after CRUD
+    },
+    'world-deleted': (state: HomeState) => {
+      location.reload();
+    }
   };
 }
 

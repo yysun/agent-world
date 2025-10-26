@@ -95,14 +95,14 @@ export default () => <div id="main"><div id="pages"></div></div>;
 
 * **Class Component with complex state**
 * **Global Update Map** + **Extracted Update Handlers**
-* **Modular Components**: `WorldChat`, `WorldSettings`, `AgentEdit`, `WorldEdit`
+* **Modular Components**: `WorldChat`, `WorldChatHistory`, `AgentEdit`, `WorldEdit`
 
 ### Key Features:
 
 * Real-time chat via SSE
 * Agent list with badges and sprite images
 * Modal for editing agents/worlds
-* Settings panel toggled by gear icon
+* Right column anchored chat history with quick action buttons (create agent, world settings, export)
 
 ### Rules Followed:
 
@@ -135,11 +135,11 @@ export default () => <div id="main"><div id="pages"></div></div>;
 
 ---
 
-## 6. ⚙️ Settings Panel
+## 6. 📜 Chat History Panel
 
 ### File:
 
-* `world-settings.tsx`
+* `world-chat-history.tsx`
 
 ### Pattern:
 
@@ -147,9 +147,10 @@ export default () => <div id="main"><div id="pages"></div></div>;
 
 ### Features:
 
-* Agent/world settings rendered conditionally
-* Button triggers like `$onclick="open-agent-edit"`
-* Internal confirmation dialogs with regular `onclick={handleClearMessages}`
+* Persistent list of saved chats with highlight for the active session
+* `✚ New Chat` button disabled until at least one agent exists
+* Delete affordances delegated to parent modal handlers via `$onclick` strings
+* Informative empty state prompting users to start their first conversation
 
 ---
 
@@ -183,8 +184,10 @@ export default () => <div id="main"><div id="pages"></div></div>;
 ### Summary:
 
 * Functional components for display
-* Class components with `mounted` for modal logic
-* Always use immutable updates
+* Class components can use `mounted` for sync initialization or `state = async` for async initialization
+* Prefer immutable state updates (spread syntax), but mutable updates are also allowed
+* Return state only when re-render is needed; no return = no re-render
+* Use async generators (`async function*` with `yield`) for handlers needing multiple re-renders
 * Form inputs must use `$bind`
 * Avoid anti-patterns like `app.run()` inside `$onclick`
 
@@ -230,4 +233,3 @@ This AppRun app demonstrates a modular, scalable design that separates concerns 
 | Display        | Functional          | `world-chat.tsx`        |
 
 By following the rules and patterns from `apprun_coding_rules.md`, the app remains easy to maintain, extend, and test.
-

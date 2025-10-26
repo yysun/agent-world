@@ -5,6 +5,8 @@
 ## Implementation Details
 - Use function based approach instead of class based approach
 - Always update relevant unit tests when making changes in `core`
+- Use memory storage for unit tests unless specifically testing storage layer
+- Use [apprun-prompt.md](prompts/apprun.prompt.md) as reference for the frontend in `web/`src
 
 ## Script Execution
 - use `npm run test` to execute the test suite

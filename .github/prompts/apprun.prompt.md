@@ -63,6 +63,7 @@ export const saveData = async function* (state: ComponentState): AsyncGenerator<
     return;
   }
 
+  // Multiple yields = multiple re-renders in one handler
   yield { ...state, loading: true, error: null };
 
   try {
@@ -72,6 +73,7 @@ export const saveData = async function* (state: ComponentState): AsyncGenerator<
       await api.update(state.formData.id, state.formData);
     }
 
+    // Yield again for success state
     yield { ...state, loading: false, successMessage: 'Saved successfully!' };
 
     // Notify parent after 2 seconds
@@ -102,7 +104,15 @@ export const closeComponent = (): void => {
 // 5. COMPONENT CLASS
 export default class YourComponent extends Component<ComponentState> {
   declare props: Readonly<ComponentProps>;
+  
+  // Option 1: Sync state initialization from props
   mounted = (props: ComponentProps): ComponentState => getStateFromProps(props);
+  
+  // Option 2: Async state initialization (for API calls)
+  // state = async (props: ComponentProps): Promise<ComponentState> => {
+  //   const data = await api.fetchData();
+  //   return { ...getStateFromProps(props), data };
+  // };
 
   view = (state: ComponentState) => {
     // GUARD CLAUSES FIRST (early returns)
@@ -319,6 +329,7 @@ export default class ParentComponent extends Component<ParentState> {
     }),
 
     // Global events from children
+    // No return = no re-render before page reload
     'data-saved': (state) => {
       location.reload(); // Simple refresh
     }
@@ -344,25 +355,44 @@ export default class ParentComponent extends Component<ParentState> {
 
 ### State Update Rules (Critical)
 
-You can mutate state directly. Only return state when you need to re-render the component.
+**Returning state triggers component re-render.** If no re-render is needed, don't return state.
 
+#### Immutable Updates (Primary Pattern - Recommended)
 ```typescript
 const stateUpdate = (state) => {
-  state.field = newValue;        // Mutation
-  state.items.push(newItem);     // Mutation
-  state.nested.field = value;
-  return state;                   // Return updated state to trigger re-render
+  return {
+    ...state,
+    field: newValue,
+    items: [...state.items, newItem]
+  }; // Return new state object to trigger re-render
 }
 ```
 
 ```typescript
 const stateUpdate = (state) => {
-  state.field = newValue;        // Mutation
-  state.items.push(newItem);     // Mutation
-  state.nested.field = value;
-  // No return needed if no need to re-render
+  // Perform side effects without returning
+  api.trackEvent(state.field);
+  // No return - no re-render triggered
 }
 ```
+
+#### Mutable Updates (Alternative Pattern - Allowed)
+```typescript
+const stateUpdate = (state) => {
+  state.field = newValue;        // Direct mutation
+  state.items.push(newItem);     // Direct mutation
+  return state;                   // Return to trigger re-render
+}
+```
+
+```typescript
+const stateUpdate = (state) => {
+  state.field = newValue;        // Mutate
+  // No return - no re-render
+}
+```
+
+**Key Rule:** Whether you use immutable or mutable updates, only return state when you want to trigger a re-render.
 
 ### Required State Properties
 
@@ -485,7 +515,9 @@ Before submitting AppRun components, verify:
 - [ ] Included loading, error, and successMessage in state
 - [ ] Used $bind for form fields
 - [ ] Used direct function references or string actions for $on directives
-- [ ] All state updates are immutable with spread operator
+- [ ] State updates return state only when re-render is needed
+- [ ] Preferred immutable state updates (or mutable if simpler for the use case)
+- [ ] Used async generators (function*) for handlers needing multiple re-renders
 - [ ] Included defensive programming with defaults
 - [ ] Added proper error handling with try/catch
 - [ ] Created TypeScript interfaces for props and state
@@ -493,4 +525,4 @@ Before submitting AppRun components, verify:
 - [ ] Followed modal structure pattern if applicable
 - [ ] Extracted complex update handlers if needed
 - [ ] Added guard clauses for loading/error states
-- [ ] No state mutation or anti-patterns present
+- [ ] No anti-patterns present
