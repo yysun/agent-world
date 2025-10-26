@@ -43,7 +43,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
     currentChat: null,
     editingMessageId: null,
     editingText: '',
-    messageToDelete: null
+    messageToDelete: null,
+    activeAgentFilters: [] as string[]  // Per-agent badge toggle filter state
   };
 
   override view = (state: WorldComponentState) => {
@@ -129,11 +130,20 @@ export default class WorldComponent extends Component<WorldComponentState> {
                     <div className="agents-list">
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
+                        const isFilterActive = state.activeAgentFilters.includes(agent.id);
                         return (
                           <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['open-agent-edit', agent]}>
                             <div className="agent-sprite-container">
                               <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
-                              <div className="message-badge">{agent.messageCount}</div>
+                              <div 
+                                className={`message-badge ${isFilterActive ? 'active' : ''}`}
+                                onclick={(e: MouseEvent) => {
+                                  e.stopPropagation();
+                                  app.run('toggle-agent-filter', agent.id);
+                                }}
+                              >
+                                {agent.messageCount}
+                              </div>
                             </div>
                             <div className="agent-name">{agent.name}</div>
                           </div>
@@ -158,6 +168,7 @@ export default class WorldComponent extends Component<WorldComponentState> {
               currentChat={state.currentChat?.name}
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
+              agentFilters={state.activeAgentFilters}
             />
           </div>
 
@@ -347,8 +358,18 @@ export default class WorldComponent extends Component<WorldComponentState> {
       location.reload();
     },
 
-
-
+    // Badge toggle filter handler - toggle agent filter on/off
+    'toggle-agent-filter': (state: WorldComponentState, agentId: string): WorldComponentState => {
+      const currentFilters = state.activeAgentFilters || [];
+      const isActive = currentFilters.includes(agentId);
+      
+      return {
+        ...state,
+        activeAgentFilters: isActive
+          ? currentFilters.filter(id => id !== agentId)  // Remove if active
+          : [...currentFilters, agentId]  // Add if not active
+      };
+    },
 
   };
 }

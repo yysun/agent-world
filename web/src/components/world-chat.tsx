@@ -40,7 +40,8 @@ export default function WorldChat(props: WorldChatProps) {
     activeAgent,
     currentChat,
     editingMessageId = null,
-    editingText = ''
+    editingText = '',
+    agentFilters = []  // Agent IDs to filter by
   } = props;
 
   // Helper function to determine if a message has sender/agent mismatch
@@ -49,6 +50,24 @@ export default function WorldChat(props: WorldChatProps) {
     const agentIdLower = toKebabCase(message.fromAgentId);
     return senderLower !== agentIdLower && !message.isStreaming;
   };
+
+  // Filter messages based on active agent filters
+  // When filters active: show human messages + messages from filtered agents
+  // When no filters: show all messages (current behavior)
+  const filteredMessages = agentFilters.length > 0
+    ? messages.filter(message => {
+        // Always show human/user messages
+        const senderType = getSenderType(message.sender);
+        if (senderType === SenderType.HUMAN) {
+          return true;
+        }
+        
+        // Check if message belongs to a filtered agent
+        // Try fromAgentId first, fallback to sender
+        const messageAgentId = message.fromAgentId || message.sender;
+        return agentFilters.includes(messageAgentId);
+      })
+    : messages;  // No filters = show all messages
 
   // Helper function to detect and format tool calls (3-tier detection matching export logic)
   const formatMessageText = (message: Message): string => {
@@ -137,10 +156,10 @@ export default function WorldChat(props: WorldChatProps) {
         >
           {messagesLoading ? (
             <div className="loading-messages">Loading messages...</div>
-          ) : messages.length === 0 ? (
+          ) : filteredMessages.length === 0 ? (
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
-            messages.map((message, index) => {
+            filteredMessages.map((message, index) => {
               if (message.logEvent) {
                 const isExpanded = !!message.isLogExpanded;
                 let formattedArgs: string | null = null;
@@ -186,7 +205,7 @@ export default function WorldChat(props: WorldChatProps) {
 
               // Check if there's a reply to this incoming message (explicit threading)
               const hasReply = message.messageId
-                ? messages.some(m => m.replyToMessageId === message.messageId)
+                ? filteredMessages.some(m => m.replyToMessageId === message.messageId)
                 : false; // Legacy messages without threading assumed to have replies
 
               const isMemoryOnlyMessage = isIncomingMessage &&
