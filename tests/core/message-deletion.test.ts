@@ -112,7 +112,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 3 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -138,7 +138,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld();
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue([]);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
@@ -174,7 +174,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 5 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -199,7 +199,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 2 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -221,7 +221,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 2 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -251,7 +251,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 6 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -291,7 +291,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 10, currentChatId: 'chat-b' });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -331,7 +331,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalAgents: 2, totalMessages: 6 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent1, mockAgent2]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent1, mockAgent2]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockImplementation(async (worldId: string, agentId: string) => {
         if (agentId === 'agent-1') return mockAgent1;
@@ -359,7 +359,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalAgents: 2, totalMessages: 3 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent1, mockAgent2]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent1, mockAgent2]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       
       // Agent 1 fails, Agent 2 succeeds
@@ -394,7 +394,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalAgents: 2, totalMessages: 6 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent1, mockAgent2]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent1, mockAgent2]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockImplementation(async (worldId: string, agentId: string) => {
         if (agentId === 'agent-1') return mockAgent1;
@@ -423,7 +423,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 2 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -452,7 +452,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 3 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -476,7 +476,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 3 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
@@ -496,7 +496,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld();
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue([]);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
@@ -518,7 +518,7 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const mockWorld = createMockWorld({ totalMessages: 2 });
 
       mockStorageAPI.loadWorld.mockResolvedValue(mockWorld);
-      mockStorageAPI.loadAgentsList.mockResolvedValue([mockAgent]);
+      mockStorageAPI.listAgents.mockResolvedValue([mockAgent]);
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
