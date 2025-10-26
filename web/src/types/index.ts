@@ -261,6 +261,9 @@ export interface WorldComponentState extends SSEComponentState {
   editingMessageId: string | null;
   editingText: string;
 
+  // Message delete state
+  messageToDelete: { id: string; messageId: string; chatId: string } | null;
+
   // SSE state (required overrides)
   connectionStatus: string;
   needScroll: boolean;

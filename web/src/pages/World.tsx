@@ -42,7 +42,8 @@ export default class WorldComponent extends Component<WorldComponentState> {
     needScroll: false,
     currentChat: null,
     editingMessageId: null,
-    editingText: ''
+    editingText: '',
+    messageToDelete: null
   };
 
   override view = (state: WorldComponentState) => {
@@ -246,6 +247,39 @@ export default class WorldComponent extends Component<WorldComponentState> {
                   Delete Chat
                 </button>
                 <button className="btn-secondary" $onclick="chat-history-hide-modals">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Message Delete Confirmation Modal */}
+        {state.messageToDelete && (
+          <div className="modal-overlay" $onclick="hide-delete-message-confirm">
+            <div className="modal-content chat-history-modal" onclick={(e: Event) => e.stopPropagation()}>
+              <button
+                className="modal-close-btn"
+                $onclick="hide-delete-message-confirm"
+                title="Close"
+              >
+                ×
+              </button>
+              <h3>Delete Message</h3>
+              <p className="delete-confirmation-text">
+                Are you sure you want to delete this message?
+              </p>
+              <p className="warning delete-confirmation-warning">
+                ⚠️ This action will delete the message and all messages after it. This cannot be undone.
+              </p>
+              <div className="form-actions">
+                <button
+                  className="btn-danger"
+                  $onclick="delete-message-confirmed"
+                >
+                  Delete Message
+                </button>
+                <button className="btn-secondary" $onclick="hide-delete-message-confirm">
                   Cancel
                 </button>
               </div>

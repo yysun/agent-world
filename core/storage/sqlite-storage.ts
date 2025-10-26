@@ -336,8 +336,9 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
   return result;
 }
 
-async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
+export async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
   await run(ctx, `DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?`, agentId, worldId);
+
   for (const message of memory) {
     await run(ctx, `
       INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, created_at)

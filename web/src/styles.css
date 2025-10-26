@@ -1064,10 +1064,26 @@ legend {
   pointer-events: auto;
 }
 
-.message-edit-btn {
+/* Message Action Buttons Container */
+.message-actions {
   position: absolute;
   top: 0.5rem;
   right: -2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: center;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+}
+
+.message-edit-btn,
+.message-delete-btn {
   background: transparent;
   color: var(--text-secondary);
   border: none !important;
@@ -1078,13 +1094,25 @@ legend {
   transition: all 0.2s ease;
   opacity: 0.7;
   pointer-events: auto;
-  z-index: 1;
 }
 
 .message-edit-btn:hover {
   opacity: 1;
   color: var(--accent-primary);
   transform: scale(1.2);
+}
+
+.message-delete-btn:hover {
+  opacity: 1;
+  color: #ff4444;
+  transform: scale(1.2);
+}
+
+.message-edit-btn:disabled,
+.message-delete-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Message Edit Container */

@@ -631,6 +631,7 @@ export async function removeMessagesFrom(
   // Find the target message to get its timestamp
   const targetMessage = memory.find(m => m.messageId === messageId);
   if (!targetMessage) {
+    logger.error('Target message not found', { messageId, chatId, availableMessageIds: memory.map(m => m.messageId) });
     return {
       success: false,
       messageId,
@@ -657,25 +658,62 @@ export async function removeMessagesFrom(
   // Process each agent
   for (const agent of agents) {
     try {
-      // Get agent's memory for this chat
-      const agentMemory = memory.filter(m => m.agentId === agent.id);
+      // Load the agent's full memory (all chats)
+      const fullAgent = await storageWrappers!.loadAgent(worldId, agent.id);
+      if (!fullAgent || !fullAgent.memory || fullAgent.memory.length === 0) {
+        processedAgents.push(agent.id);
+        continue;
+      }
 
-      // Find messages to remove (target and all subsequent)
-      const messagesToRemove = agentMemory.filter(m => {
-        const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
-        return msgTime >= targetTimestamp;
+      // Find the target message in this chat
+      const targetIndex = fullAgent.memory.findIndex(m => m.messageId === messageId && m.chatId === chatId);
+
+      if (targetIndex === -1) {
+        // Target message not found in this agent's memory - skip this agent
+        processedAgents.push(agent.id);
+        continue;
+      }
+
+      // Get the target message timestamp
+      const targetMsg = fullAgent.memory[targetIndex];
+      const targetTimestampValue = targetMsg.createdAt instanceof Date
+        ? targetMsg.createdAt.getTime()
+        : targetMsg.createdAt ? new Date(targetMsg.createdAt).getTime() : Date.now();
+
+      // Keep messages that are either:
+      // 1. From different chats (chatId !== chatId), OR
+      // 2. From this chat but before the target timestamp
+      const messagesToKeep = fullAgent.memory.filter(m => {
+        if (m.chatId !== chatId) {
+          return true; // Keep messages from other chats
+        }
+
+        const msgTimestamp = m.createdAt instanceof Date
+          ? m.createdAt.getTime()
+          : m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
+        return msgTimestamp < targetTimestampValue; // Keep only messages before target
       });
 
-      // Keep messages before the target
-      const messagesToKeep = agentMemory.filter(m => {
-        const msgTime = m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
-        return msgTime < targetTimestamp;
-      });
+      const removedCount = fullAgent.memory.length - messagesToKeep.length;
+      const removedIds = fullAgent.memory
+        .filter(m => m.chatId === chatId)
+        .filter(m => {
+          const msgTimestamp = m.createdAt instanceof Date
+            ? m.createdAt.getTime()
+            : m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
+          return msgTimestamp >= targetTimestampValue;
+        })
+        .map(m => m.messageId);
+
+      if (removedCount === 0) {
+        processedAgents.push(agent.id);
+        continue;
+      }
 
       // Save updated memory
       await storageWrappers!.saveAgentMemory(worldId, agent.id, messagesToKeep);
 
-      messagesRemovedTotal += messagesToRemove.length;
+      messagesRemovedTotal += removedCount;
       processedAgents.push(agent.id);
 
     } catch (error) {
@@ -686,6 +724,15 @@ export async function removeMessagesFrom(
       });
     }
   }
+
+  logger.info('Message removal completed', {
+    messageId,
+    success: failedAgents.length === 0,
+    totalAgents: agents.length,
+    processedAgents: processedAgents.length,
+    failedAgents: failedAgents.length,
+    messagesRemovedTotal
+  });
 
   return {
     success: failedAgents.length === 0,

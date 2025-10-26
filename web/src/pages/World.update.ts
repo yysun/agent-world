@@ -545,6 +545,131 @@ export const worldUpdateHandlers = {
     editingText: e.target.value
   }),
 
+  // Message deletion handlers
+  'show-delete-message-confirm': (state: WorldComponentState, messageId: string, backendMessageId: string, messageText: string, userEntered: boolean): WorldComponentState => {
+    console.log('show-delete-message-confirm called:', {
+      messageId,
+      backendMessageId,
+      messageText: messageText?.substring(0, 50),
+      userEntered,
+      currentChatId: state.currentChat?.id
+    });
+
+    const message = state.messages.find(msg => msg.id === messageId);
+    console.log('Found message in state:', {
+      found: !!message,
+      hasMessageId: !!message?.messageId,
+      messageId: message?.messageId,
+      userEntered: message?.userEntered
+    });
+
+    if (!message || !message.messageId || !state.currentChat?.id) {
+      console.warn('Delete blocked:', {
+        noMessage: !message,
+        noMessageId: !message?.messageId,
+        noChatId: !state.currentChat?.id
+      });
+      return state;
+    }
+
+    console.log('Setting messageToDelete state');
+    return {
+      ...state,
+      messageToDelete: {
+        id: messageId,
+        messageId: message.messageId,
+        chatId: state.currentChat.id
+      }
+    };
+  },
+
+  'hide-delete-message-confirm': (state: WorldComponentState): WorldComponentState => ({
+    ...state,
+    messageToDelete: null
+  }),
+
+  'delete-message-confirmed': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.messageToDelete) return state;
+
+    const { id, messageId, chatId } = state.messageToDelete;
+
+    console.log('Delete message confirmed:', { id, messageId, chatId });
+
+    try {
+      // Call DELETE to remove message and all subsequent messages
+      console.log('Calling api.deleteMessage...');
+      const deleteResult = await api.deleteMessage(
+        state.worldName,
+        messageId,
+        chatId
+      );
+
+      console.log('Delete result:', deleteResult);
+
+      // Check DELETE result
+      if (!deleteResult.success) {
+        console.error('Delete failed:', deleteResult);
+        return {
+          ...state,
+          error: `Failed to delete message: ${deleteResult.failedAgents?.map((a: any) => a.error).join(', ') || 'Unknown error'}`,
+          messageToDelete: null
+        };
+      }
+
+      console.log('Delete successful, reloading world...');
+      // Reload the world to get updated messages from backend
+      const world = await api.getWorld(state.worldName);
+
+      // Rebuild messages from agent memory (same logic as initWorld)
+      let messages: any[] = [];
+      // Handle agents as either array, Map-like (with values()), or plain object
+      const agents: Agent[] = Array.isArray(world.agents)
+        ? world.agents
+        : world.agents && typeof (world.agents as any).values === 'function'
+          ? Array.from((world.agents as any).values())
+          : Object.values(world.agents || {}) as Agent[];
+
+      console.log('Rebuilding messages from agents:', agents.length);
+      for (const agent of agents) {
+        agent.spriteIndex = agents.indexOf(agent) % 9;
+        agent.messageCount = 0;
+        console.log(`Agent ${agent.id} memory:`, {
+          totalMemory: agent.memory?.length || 0,
+          memoryForChat: agent.memory?.filter((m: any) => m.chatId === chatId).length || 0,
+          allChatIds: [...new Set(agent.memory?.map((m: any) => m.chatId) || [])]
+        });
+        for (const memoryItem of agent.memory || []) {
+          if (memoryItem.chatId === chatId) {
+            agent.messageCount++;
+            const message = createMessageFromMemory(memoryItem, agent.name);
+            messages.push(message);
+            console.log('Added message:', { messageId: memoryItem.messageId, chatId: memoryItem.chatId });
+          }
+        }
+      }
+
+      console.log('Messages before deduplication:', messages.length);
+      // Apply deduplication to loaded messages
+      messages = deduplicateMessages(messages, agents);
+      console.log('Messages after deduplication:', messages.length);
+
+      return {
+        ...state,
+        world,
+        messages,
+        messageToDelete: null,
+        needScroll: true
+      };
+    } catch (error: any) {
+      console.error('Delete message error:', error);
+      return {
+        ...state,
+        error: error.message || 'Failed to delete message',
+        messageToDelete: null
+      };
+    }
+  },
+
   'save-edit-message': async (state: WorldComponentState, messageId: string): Promise<WorldComponentState> => {
     const editedText = state.editingText?.trim();
     if (!editedText) return state;

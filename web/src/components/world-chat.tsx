@@ -7,11 +7,13 @@
  * - Memory-only message styling (agent messages saved to other agents' memory)
  * - User input handling with send functionality and loading states
  * - Message editing with frontend-driven DELETE → POST flow
+ * - Message deletion with confirmation dialog (deletes message and all after it)
  * - Message deduplication by messageId for multi-agent scenarios
  * - Delivery status display showing which agents received each message
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-10-26: Added message delete button with confirmation dialog
  * - 2025-10-25: Added memory-only message styling with gray left border for agent→agent messages
  * - 2025-10-25: Added delivery status badge showing seenByAgents (📨 o1, a1, o3)
  * - 2025-10-25: Edit button disabled until messageId confirmed from backend
@@ -262,14 +264,24 @@ export default function WorldChat(props: WorldChatProps) {
                         {safeHTML(renderMarkdown(formatMessageText(message)))}
                       </div>
                       {isUserMessage && !message.isStreaming && (
-                        <button
-                          className="message-edit-btn"
-                          $onclick={['start-edit-message', message.id, message.text]}
-                          title="Edit message"
-                          disabled={!message.messageId || message.userEntered}
-                        >
-                          ✎
-                        </button>
+                        <div className="message-actions">
+                          <button
+                            className="message-edit-btn"
+                            $onclick={['start-edit-message', message.id, message.text]}
+                            title="Edit message"
+                            disabled={!message.messageId || message.userEntered}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="message-delete-btn"
+                            $onclick={['show-delete-message-confirm', message.id, message.messageId, message.text, message.userEntered]}
+                            title="Delete message and all after it"
+                            disabled={!message.messageId || message.userEntered}
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       )}
                     </>
                   )}

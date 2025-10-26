@@ -286,11 +286,13 @@ export async function saveAgentMemory(
 
   // Save memory as JSON with Date serialization
   const memoryPath = path.join(agentDir, 'memory.json');
+
   // Serialize memory, preserving new lines as \n
   const serializedMemory = (memory || []).map(msg => ({
     ...msg,
     content: typeof msg.content === 'string' ? msg.content.replace(/\n/g, '\\n') : msg.content
   }));
+
   await writeJsonFile(memoryPath, serializedMemory);
 }
 

@@ -97,6 +97,11 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
 
     async saveAgentMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
       if (!storageInstance) return;
+      // Call the storage instance's saveAgentMemory directly instead of load-modify-save
+      if ('saveAgentMemory' in storageInstance && typeof storageInstance.saveAgentMemory === 'function') {
+        return storageInstance.saveAgentMemory(worldId, agentId, memory);
+      }
+      // Fallback to load-modify-save for storages without dedicated saveAgentMemory
       const agent = await storageInstance.loadAgent(worldId, agentId);
       if (agent) {
         agent.memory = memory;
@@ -538,6 +543,11 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
 
     async saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
       await ensureModulesLoaded();
+      // Use the direct saveAgentMemory function to avoid loading the entire agent
+      if (agentStorage?.saveAgentMemory) {
+        return agentStorage.saveAgentMemory(rootPath, worldId, agentId, memory);
+      }
+      // Fallback to load-modify-save if direct save not available
       const agent = await this.loadAgent(worldId, agentId);
       if (agent) {
         agent.memory = memory;
@@ -642,7 +652,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       restoreFromWorldChat,
       archiveAgentMemory,
       deleteMemoryByChatId,
-      getMemory
+      getMemory,
+      saveAgentMemory
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
@@ -715,11 +726,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       },
 
       saveAgentMemory: async (worldId: string, agentId: string, memory: any[]) => {
-        const agent = await loadAgent(ctx, worldId, agentId);
-        if (agent) {
-          agent.memory = memory;
-          await saveAgent(ctx, worldId, agent);
-        }
+        await saveAgentMemory(ctx, worldId, agentId, memory);
       },
 
       archiveMemory: async (worldId: string, agentId: string, memory: any[]) => {
