@@ -43,7 +43,6 @@ export {
   getMemory,
   migrateMessageIds,
   removeMessagesFrom,
-  resubmitMessageToWorld,
   editUserMessage,
   logEditError,
   getEditErrors

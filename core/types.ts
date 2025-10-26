@@ -371,6 +371,7 @@ export interface WorldMessageEvent {
   sender: string;
   timestamp: Date;
   messageId: string;
+  chatId?: string | null;
 }
 
 /**

@@ -88,21 +88,25 @@ export function publishEvent(world: World, type: string, content: any): void {
 /**
  * Message publishing using World.eventEmitter with chat session management
  * Returns the messageEvent so callers can access the generated messageId
+ * 
+ * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
  */
-export function publishMessage(world: World, content: string, sender: string): WorldMessageEvent {
+export function publishMessage(world: World, content: string, sender: string, chatId?: string | null): WorldMessageEvent {
   const messageId = generateId();
+  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
   const messageEvent: WorldMessageEvent = {
     content,
     sender,
     timestamp: new Date(),
-    messageId
+    messageId,
+    chatId: targetChatId
   };
 
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
     sender,
     worldId: world.id,
-    chatId: world.currentChatId,
+    chatId: targetChatId,
     contentPreview: content.substring(0, 50)
   });
 
@@ -113,13 +117,17 @@ export function publishMessage(world: World, content: string, sender: string): W
 /**
  * Message publishing with pre-generated messageId
  * Used when messageId needs to be known before publishing (e.g., for agent responses)
+ * 
+ * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
  */
-export function publishMessageWithId(world: World, content: string, sender: string, messageId: string): WorldMessageEvent {
+export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null): WorldMessageEvent {
+  const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
   const messageEvent: WorldMessageEvent = {
     content,
     sender,
     timestamp: new Date(),
-    messageId
+    messageId,
+    chatId: targetChatId
   };
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;

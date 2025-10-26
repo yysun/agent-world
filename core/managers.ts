@@ -14,7 +14,7 @@
  *
  * API: World (create/get/update/delete/list), Agent (create/get/update/delete/list/updateMemory/clearMemory),
  * Chat (newChat/listChats/deleteChat/restoreChat), Migration (migrateMessageIds), 
- * MessageEdit (removeMessagesFrom/resubmitMessageToWorld/editUserMessage/logEditError/getEditErrors)
+ * MessageEdit (removeMessagesFrom/editUserMessage/logEditError/getEditErrors)
  *
  * Implementation Details:
  * - Ensures all agent messages include agentId for proper export functionality
@@ -26,14 +26,17 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Changes:
- * - 2025-10-25: Fixed messageId bug in resubmitMessageToWorld
+ * - 2025-10-26: Consolidated message publishing - removed resubmitMessageToWorld
+ *   - Added chatId to WorldMessageEvent and publishMessage parameters
+ *   - editUserMessage now calls publishMessage directly with validation
+ *   - Simplified API by removing redundant resubmit wrapper function
+ * - 2025-10-25: Fixed messageId bug in editUserMessage resubmission
  *   - Bug: Generated unused messageId instead of capturing actual from publishMessage
  *   - Fix: Use messageEvent.messageId from publishMessage return value
  *   - Impact: Prevents "undefined" string serialization in JSON responses
  * - 2025-10-21: Added message ID migration and user message edit feature (Phases 1 & 2)
  *   - migrateMessageIds: Auto-assign IDs to existing messages (idempotent)
  *   - removeMessagesFrom: Remove target + subsequent messages by timestamp
- *   - resubmitMessageToWorld: Resubmit with session mode validation
  *   - editUserMessage: Combined removal + resubmission operation
  *   - logEditError/getEditErrors: Error persistence in edit-errors.json
  *
@@ -748,73 +751,6 @@ export async function removeMessagesFrom(
 }
 
 /**
- * Resubmit a message to the world after editing
- * Validates session mode is ON before resubmission
- * 
- * @param worldId - World ID
- * @param content - New message content
- * @param sender - Message sender (typically 'human')
- * @param chatId - Chat ID for the message
- * @returns Object with success status, new messageId, and optional error
- */
-export async function resubmitMessageToWorld(
-  worldId: string,
-  content: string,
-  sender: string,
-  chatId: string
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  await moduleInitialization;
-
-  try {
-    const world = await getWorld(worldId);
-    if (!world) {
-      return {
-        success: false,
-        error: `World '${worldId}' not found`
-      };
-    }
-
-    // Validate session mode is ON
-    if (!world.currentChatId) {
-      return {
-        success: false,
-        error: 'Cannot resubmit: session mode is OFF (currentChatId is not set)'
-      };
-    }
-
-    // Verify the chatId matches the current chat
-    if (world.currentChatId !== chatId) {
-      return {
-        success: false,
-        error: `Cannot resubmit: message belongs to chat '${chatId}' but current chat is '${world.currentChatId}'`
-      };
-    }
-
-    // Import publishMessage from events (need to add import at top of file)
-    const { publishMessage } = await import('./events.js');
-
-    // Publish the message to the world (this will trigger agent responses)
-    // publishMessage returns WorldMessageEvent with the generated messageId
-    const messageEvent = publishMessage(world, content, sender);
-
-    logger.info(`Resubmitted message to world '${worldId}' with new messageId '${messageEvent.messageId}'`);
-
-    return {
-      success: true,
-      messageId: messageEvent.messageId
-    };
-
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to resubmit message to world '${worldId}': ${errorMsg}`);
-    return {
-      success: false,
-      error: errorMsg
-    };
-  }
-}
-
-/**
  * Edit a user message by removing it and all subsequent messages, then resubmitting with new content
  * Combines removal and resubmission in a single operation with comprehensive error tracking
  * 
@@ -839,13 +775,17 @@ export async function editUserMessage(
   }
 
   if (world.isProcessing) {
-    throw new Error('Cannot edit message: world is currently processing another message');
+    throw new Error('Cannot edit message while world is processing');
   }
 
   // Step 1: Remove the message and all subsequent messages
   const removalResult = await removeMessagesFrom(worldId, messageId, chatId);
 
-  // Step 2: Verify session mode is ON before attempting resubmission
+  if (!removalResult.success) {
+    return removalResult;
+  }
+
+  // Step 2: Verify session mode is ON before resubmitting
   if (!world.currentChatId) {
     return {
       ...removalResult,
@@ -854,21 +794,34 @@ export async function editUserMessage(
     };
   }
 
-  // Step 3: Attempt resubmission
-  const resubmitResult = await resubmitMessageToWorld(worldId, newContent, 'human', chatId);
-
-  // Step 4: Update RemovalResult with resubmission status
-  if (resubmitResult.success) {
-    return {
-      ...removalResult,
-      resubmissionStatus: 'success',
-      newMessageId: resubmitResult.messageId
-    };
-  } else {
+  // Step 3: Verify the chatId matches the current chat
+  if (world.currentChatId !== chatId) {
     return {
       ...removalResult,
       resubmissionStatus: 'failed',
-      resubmissionError: resubmitResult.error
+      resubmissionError: `Cannot resubmit: message belongs to chat '${chatId}' but current chat is '${world.currentChatId}'`
+    };
+  }
+
+  // Step 4: Attempt resubmission using publishMessage directly
+  try {
+    const { publishMessage } = await import('./events.js');
+    const messageEvent = publishMessage(world, newContent, 'human', chatId);
+
+    logger.info(`Resubmitted edited message to world '${worldId}' with new messageId '${messageEvent.messageId}'`);
+
+    return {
+      ...removalResult,
+      resubmissionStatus: 'success',
+      newMessageId: messageEvent.messageId
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to resubmit message to world '${worldId}': ${errorMsg}`);
+    return {
+      ...removalResult,
+      resubmissionStatus: 'failed',
+      resubmissionError: errorMsg
     };
   }
 }
