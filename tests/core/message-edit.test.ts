@@ -37,8 +37,10 @@ const mockStorageAPI: any = {
 };
 
 // Mock storage factory
+// TypeScript limitation: mockStorageAPI must be defined before jest.mock, but TypeScript
+// can't see it at compile time. This is a known pattern for Jest ESM mocks.
 jest.mock('../../core/storage/storage-factory.js', () => ({
-  // @ts-expect-error - mockStorageAPI is defined before this mock
+  // @ts-expect-error - mockStorageAPI is defined before jest.mock but TS doesn't see it in factory scope
   createStorageWithWrappers: jest.fn().mockResolvedValue(mockStorageAPI),
   getDefaultRootPath: jest.fn().mockReturnValue('/test/data')
 }));
@@ -254,11 +256,6 @@ describe('Message Edit Feature', () => {
       mockStorageAPI.getMemory.mockResolvedValue(mockMemory);
       mockStorageAPI.loadAgent.mockResolvedValue(mockAgent);
       mockStorageAPI.saveAgentMemory.mockResolvedValue();
-
-      // Mock publishMessage to avoid actual message publishing
-      jest.mock('../../core/events.js', () => ({
-        publishMessage: jest.fn().mockReturnValue({ messageId: 'new-msg-id' })
-      }));
 
       const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
 
