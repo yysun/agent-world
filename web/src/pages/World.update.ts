@@ -31,8 +31,13 @@
  * Message Deduplication (Multi-Agent):
  * - User messages deduplicated by messageId to prevent duplicate display
  * - Each agent receives same user message, but UI shows it only once
- * - Tracks which agents received message via seenByAgents array
- * - Displays delivery status: "📨 o1, a1, o3" showing all receiving agents
+ * - Tracks which agents received message via seenByAgents array (CALCULATED, not persisted)
+ * - seenByAgents built incrementally from actual message data (matches export.ts logic)
+ * - First agent sets initial array, subsequent duplicates add their agent ID
+ * - Calculation happens in TWO places:
+ *   1. SSE streaming: handleMessageEvent() tracks agents as messages arrive from backend
+ *   2. Storage loading: deduplicateMessages() rebuilds from agent memory on page load
+ * - Displays delivery status: "📨 o1, a1, o3" showing actual receiving agents
  * - Edit button disabled until messageId confirmed (prevents premature edit attempts)
  * - Applies deduplication in TWO paths:
  *   1. SSE streaming path: handleMessageEvent() checks for existing messageId OR temp userEntered message
@@ -42,6 +47,9 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2025-10-26: Aligned seenByAgents with export.ts - incremental build from actual data, not assumption
+ * - 2025-10-26: Fixed deduplicateMessages() to calculate seenByAgents with all agent IDs (CR fix)
+ * - 2025-10-25: Fixed seenByAgents to include all agent IDs instead of 'unknown' for user messages
  * - 2025-10-25: Fixed race condition in handleMessageEvent - combined messageId and temp message check
  * - 2025-10-25: Added deduplicateMessages() helper for loading chat history from storage
  * - 2025-10-25: Applied deduplication to both SSE streaming AND load-from-storage paths
@@ -121,10 +129,19 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
  * Deduplicates messages by messageId to handle multi-agent scenarios.
  * User messages should appear only once, with seenByAgents tracking which agents received them.
  * Agent messages remain separate (one per agent).
+ * 
+ * Matches export.ts deduplication logic - builds seenByAgents from actual message data.
+ * 
+ * @param messages - Array of messages to deduplicate
+ * @param agents - Array of agents in the world (used to resolve agent IDs to names)
  */
-const deduplicateMessages = (messages: Message[]): Message[] => {
+const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message[] => {
   const messageMap = new Map<string, Message>();
   const messagesWithoutId: Message[] = [];
+
+  // Build agent lookup map for name resolution
+  const agentMap = new Map<string, Agent>();
+  agents.forEach(agent => agentMap.set(agent.id, agent));
 
   for (const msg of messages) {
     // Only deduplicate user messages with messageId
@@ -135,18 +152,18 @@ const deduplicateMessages = (messages: Message[]): Message[] => {
     if (isUserMessage && msg.messageId) {
       const existing = messageMap.get(msg.messageId);
       if (existing) {
-        // Update seenByAgents for this duplicate
-        const agentId = msg.fromAgentId || 'unknown';
-        const seenByAgents = existing.seenByAgents || [];
-        if (!seenByAgents.includes(agentId)) {
-          existing.seenByAgents = [...seenByAgents, agentId];
+        // Merge agent information for duplicate message (same logic as export.ts)
+        if (msg.fromAgentId) {
+          const seenByAgents = existing.seenByAgents || [];
+          if (!seenByAgents.includes(msg.fromAgentId)) {
+            existing.seenByAgents = [...seenByAgents, msg.fromAgentId];
+          }
         }
       } else {
-        // First occurrence - initialize seenByAgents
-        const agentId = msg.fromAgentId || 'unknown';
+        // First occurrence - initialize seenByAgents with this agent
         messageMap.set(msg.messageId, {
           ...msg,
-          seenByAgents: [agentId]
+          seenByAgents: msg.fromAgentId ? [msg.fromAgentId] : ['unknown']
         });
       }
     } else {
@@ -219,7 +236,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     }
 
     // Apply deduplication to loaded messages (same as SSE streaming path)
-    messages = deduplicateMessages(messages);
+    // Pass agents array so user messages get correct seenByAgents
+    messages = deduplicateMessages(messages, agents);
 
     yield {
       ...state,
@@ -296,31 +314,32 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
 
     if (existingMessageIndex !== -1) {
       const existingMessage = existingMessages[existingMessageIndex];
-      const agentId = fromAgentId || messageData.agentId || 'unknown';
 
       // Check if this message already has the messageId
       if (existingMessage.messageId === messageData.messageId) {
         // Message already has messageId - this is a duplicate from another agent
+        // Merge agent information (same logic as export.ts and deduplicateMessages)
+        if (fromAgentId) {
+          const seenByAgents = existingMessage.seenByAgents || [];
+          if (!seenByAgents.includes(fromAgentId)) {
+            const updatedMessages = existingMessages.map((msg, index) => {
+              if (index === existingMessageIndex) {
+                return {
+                  ...msg,
+                  seenByAgents: [...seenByAgents, fromAgentId]
+                };
+              }
+              return msg;
+            });
 
-        const seenByAgents = existingMessage.seenByAgents || [];
-        if (!seenByAgents.includes(agentId)) {
-          const updatedMessages = existingMessages.map((msg, index) => {
-            if (index === existingMessageIndex) {
-              return {
-                ...msg,
-                seenByAgents: [...seenByAgents, agentId]
-              };
-            }
-            return msg;
-          });
-
-          return {
-            ...state,
-            messages: updatedMessages,
-            needScroll: false // Don't scroll for duplicate message
-          };
+            return {
+              ...state,
+              messages: updatedMessages,
+              needScroll: false // Don't scroll for duplicate message
+            };
+          }
         }
-        // Agent already in seenByAgents, no update needed
+        // Agent already in seenByAgents or no fromAgentId, no update needed
         return state;
       }
 
@@ -332,7 +351,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
             messageId: messageData.messageId,
             createdAt: messageData.createdAt || msg.createdAt,
             userEntered: false, // No longer temporary
-            seenByAgents: [agentId] // Initialize with first agent
+            seenByAgents: fromAgentId ? [fromAgentId] : ['unknown'] // Initialize with first agent
           };
         }
         return msg;

@@ -7,7 +7,8 @@
  * - Single source of truth for UI state management and server communication
  * - Type-safe SSE event handling and component state management
  * - Message edit types (RemovalResult) for backend API integration
- * - Message deduplication (seenByAgents) for multi-agent scenarios
+ * - Message deduplication (seenByAgents - CALCULATED field, not persisted) for multi-agent scenarios
+ * - seenByAgents built incrementally from actual message data (matches core/export.ts logic)
  * 
  * Implementation:
  * - Re-exports essential core types for consistency (AgentMessage, RemovalResult, etc.)
@@ -17,6 +18,8 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
+ * - 2025-10-26: Clarified seenByAgents is CALCULATED (not persisted) - populated with all agent IDs
  * - 2025-10-25: Added seenByAgents?: string[] to Message interface for multi-agent deduplication
  * - 2025-10-21: Added RemovalResult export for message edit API integration
  * - Consolidated comment blocks - removed redundant feature descriptions
@@ -60,7 +63,7 @@ export interface Message {
   role?: string; // Backend role field preserved for sorting
   userEntered?: boolean;
   fromAgentId?: string;
-  seenByAgents?: string[]; // Track which agents have received this message (for deduplication)
+  seenByAgents?: string[]; // CALCULATED field - built incrementally from actual message data (NOT persisted)
   logEvent?: LogEvent; // For log message types
 
   // Phase 2.2 Enhancement: Tool execution event properties
