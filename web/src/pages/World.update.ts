@@ -69,6 +69,11 @@
 import { app } from 'apprun';
 import type { Update } from 'apprun';
 import api from '../api';
+import * as InputDomain from '../domain/input';
+import * as EditingDomain from '../domain/editing';
+import * as DeletionDomain from '../domain/deletion';
+import * as ChatHistoryDomain from '../domain/chat-history';
+import * as SSEStreamingDomain from '../domain/sse-streaming';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -469,53 +474,30 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // USER INPUT & MESSAGING
   // ========================================
   
-  ['update-input', (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState => ({
-    ...state,
-    userInput: payload.target.value
-  })],
+  ['update-input', (state: WorldComponentState, payload: WorldEventPayload<'update-input'>): WorldComponentState => 
+    InputDomain.updateInput(state, payload.target.value)
+  ],
 
   ['key-press', (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
-    if (payload.key === 'Enter' && (state.userInput || '').trim()) {
+    if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
       app.run('send-message');
     }
   }],
 
   ['send-message', async (state: WorldComponentState): Promise<WorldComponentState> => {
-    const messageText = state.userInput?.trim();
-    if (!messageText) return state;
+    const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
+    if (!prepared) return state;
 
-    const userMessage = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      sender: 'human',
-      text: messageText,
-      createdAt: new Date(),
-      type: 'user',
-      userEntered: true,
-      worldName: state.worldName
-    };
-
-    const newState = {
-      ...state,
-      messages: [...(state.messages || []), userMessage],
-      userInput: '',
-      isSending: true,
-      isWaiting: true,
-      needScroll: true
-    };
+    const newState = InputDomain.createSendingState(state, prepared.message);
 
     try {
       // Send the message via SSE stream
-      const cleanup = await sendChatMessage(state.worldName, messageText, 'HUMAN');
+      await sendChatMessage(state.worldName, prepared.text, 'HUMAN');
 
       // Note: isWaiting will be set to false by handleStreamEnd when the stream completes or by handleStreamError/handleError on errors
-      return { ...newState, isSending: false };
+      return InputDomain.createSentState(newState);
     } catch (error: any) {
-      return {
-        ...newState,
-        isSending: false,
-        isWaiting: false,
-        error: error.message || 'Failed to send message'
-      };
+      return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
     }
   }],
   
@@ -571,70 +553,35 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // MESSAGE EDITING
   // ========================================
 
-  ['start-edit-message', (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => ({
-    ...state,
-    editingMessageId: payload.messageId,
-    editingText: payload.text
-  })],
+  ['start-edit-message', (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => 
+    EditingDomain.startEditMessage(state, payload.messageId, payload.text)
+  ],
 
-  ['cancel-edit-message', (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    editingMessageId: null,
-    editingText: ''
-  })],
+  ['cancel-edit-message', (state: WorldComponentState): WorldComponentState => 
+    EditingDomain.cancelEditMessage(state)
+  ],
 
-  ['update-edit-text', (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState => ({
-    ...state,
-    editingText: payload.target.value
-  })],
+  ['update-edit-text', (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState => 
+    EditingDomain.updateEditText(state, payload.target.value)
+  ],
 
   // ========================================
   // MESSAGE DELETION
   // ========================================
 
-  ['show-delete-message-confirm', (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState => {
-    const { messageId, backendMessageId, messageText, userEntered } = payload;
-    
-    console.log('show-delete-message-confirm called:', {
-      messageId,
-      backendMessageId,
-      messageText: messageText?.substring(0, 50),
-      userEntered,
-      currentChatId: state.currentChat?.id
-    });
+  ['show-delete-message-confirm', (state: WorldComponentState, payload: WorldEventPayload<'show-delete-message-confirm'>): WorldComponentState => 
+    DeletionDomain.showDeleteConfirmation(
+      state,
+      payload.messageId,
+      payload.backendMessageId,
+      payload.messageText,
+      payload.userEntered
+    )
+  ],
 
-    const message = state.messages.find(msg => msg.id === messageId);
-    console.log('Found message in state:', {
-      found: !!message,
-      hasMessageId: !!message?.messageId,
-      messageId: message?.messageId,
-      userEntered: message?.userEntered
-    });
-
-    if (!message || !message.messageId || !state.currentChat?.id) {
-      console.warn('Delete blocked:', {
-        noMessage: !message,
-        noMessageId: !message?.messageId,
-        noChatId: !state.currentChat?.id
-      });
-      return state;
-    }
-
-    console.log('Setting messageToDelete state');
-    return {
-      ...state,
-      messageToDelete: {
-        id: messageId,
-        messageId: message.messageId,
-        chatId: state.currentChat.id
-      }
-    };
-  }],
-
-  ['hide-delete-message-confirm', (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    messageToDelete: null
-  })],
+  ['hide-delete-message-confirm', (state: WorldComponentState): WorldComponentState => 
+    DeletionDomain.hideDeleteConfirmation(state)
+  ],
 
   ['delete-message-confirmed', async (state: WorldComponentState): Promise<WorldComponentState> => {
     if (!state.messageToDelete) return state;
@@ -716,14 +663,14 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         messageToDelete: null
       };
     }
-  },
+  }],
 
-  'save-edit-message': async (state: WorldComponentState, messageId: string): Promise<WorldComponentState> => {
+  ['save-edit-message', async (state: WorldComponentState, payload: WorldEventPayload<'save-edit-message'>): Promise<WorldComponentState> => {
     const editedText = state.editingText?.trim();
     if (!editedText) return state;
 
     // Find the message by frontend ID
-    const message = state.messages.find(msg => msg.id === messageId);
+    const message = state.messages.find(msg => msg.id === payload.messageId);
     if (!message) {
       return {
         ...state,
@@ -778,7 +725,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
 
     // Optimistically update UI: remove messages from edited message onwards
-    const editedIndex = state.messages.findIndex(msg => msg.id === messageId);
+    const editedIndex = state.messages.findIndex(msg => msg.id === payload.messageId);
     const updatedMessages = editedIndex >= 0 ? state.messages.slice(0, editedIndex) : state.messages;
 
     const optimisticState = {
@@ -866,15 +813,13 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // CHAT HISTORY & MODALS
   // ========================================
 
-  ['chat-history-show-delete-confirm', (state: WorldComponentState, payload: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState => ({
-    ...state,
-    chatToDelete: payload.chat
-  })],
+  ['chat-history-show-delete-confirm', (state: WorldComponentState, payload: WorldEventPayload<'chat-history-show-delete-confirm'>): WorldComponentState => 
+    ChatHistoryDomain.showChatDeletionConfirm(state, payload.chat)
+  ],
 
-  ['chat-history-hide-modals', (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    chatToDelete: null
-  })],
+  ['chat-history-hide-modals', (state: WorldComponentState): WorldComponentState => 
+    ChatHistoryDomain.hideChatDeletionModals(state)
+  ],
 
   // ========================================
   // AGENT MANAGEMENT
@@ -969,44 +914,44 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   ['create-new-chat', async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
     try {
-      yield { ...state, loading: true };
+      yield ChatHistoryDomain.createChatLoadingState(state);
 
       const result = await api.newChat(state.worldName);
       if (!result.success) {
-        yield { ...state, loading: false, error: 'Failed to create new chat' };
+        yield ChatHistoryDomain.createChatErrorState(state, 'Failed to create new chat');
         return;
       }
       app.run('initWorld', state.worldName);
     } catch (error: any) {
-      yield { ...state, loading: false, error: error.message || 'Failed to create new chat' };
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to create new chat');
     }
   }],
 
   ['load-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
-      yield { ...state, loading: true };
+      yield ChatHistoryDomain.createChatLoadingState(state);
 
       const result = await api.setChat(state.worldName, payload.chatId);
       if (!result.success) {
         yield state;
       }
-      const path = `/World/${encodeURIComponent(state.worldName)}/${encodeURIComponent(payload.chatId)}`;
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, payload.chatId);
       app.route(path);
       history.pushState(null, '', path);
     } catch (error: any) {
-      yield { ...state, loading: false, error: error.message || 'Failed to load chat from history' };
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to load chat from history');
     }
   }],
 
   ['delete-chat-from-history', async function* (state: WorldComponentState, payload: WorldEventPayload<'delete-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
-      yield { ...state, loading: true, chatToDelete: null };
+      yield ChatHistoryDomain.createChatLoadingStateWithClearedModal(state);
       await api.deleteChat(state.worldName, payload.chatId);
-      const path = `/World/${encodeURIComponent(state.worldName)}`;
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName);
       app.route(path);
       history.pushState(null, '', path);
     } catch (error: any) {
-      yield { ...state, loading: false, chatToDelete: null, error: error.message || 'Failed to delete chat' };
+      yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to delete chat', true);
     }
   }],
 
