@@ -28,7 +28,7 @@ import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
-const logger = createCategoryLogger('anthropic-direct');
+const logger = createCategoryLogger('llm.adapter.anthropic');
 const mcpLogger = createCategoryLogger('llm.mcp');
 
 /**

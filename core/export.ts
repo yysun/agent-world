@@ -86,7 +86,7 @@ import { type StorageAPI, createStorageWithWrappers } from './storage/storage-fa
 import type { World, Agent, Chat, AgentMessage, WorldChat } from './types.js';
 
 // Initialize logger and storage
-const logger = createCategoryLogger('export');
+const logger = createCategoryLogger('core.export');
 let storageWrappers: StorageAPI | null = null;
 
 async function initializeModules() {
