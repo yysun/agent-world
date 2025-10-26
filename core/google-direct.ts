@@ -37,7 +37,7 @@ import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
-const logger = createCategoryLogger('google-direct');
+const logger = createCategoryLogger('llm.adapter.google');
 const mcpLogger = createCategoryLogger('llm.mcp');
 
 /**

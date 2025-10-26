@@ -46,7 +46,7 @@ import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 
-const logger = createCategoryLogger('openai-direct');
+const logger = createCategoryLogger('llm.adapter.openai');
 const mcpLogger = createCategoryLogger('llm.mcp');
 
 /**

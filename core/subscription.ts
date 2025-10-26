@@ -36,7 +36,7 @@ function toKebabCase(name: string): string {
 }
 
 // Create subscription category logger (part of core functionality)
-const logger = createCategoryLogger('core');
+const logger = createCategoryLogger('core.subscription');
 
 // Log streaming event data structure
 export interface LogStreamEvent {

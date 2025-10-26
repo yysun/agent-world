@@ -59,7 +59,7 @@ import type {
 } from './types.js';
 
 // Initialize logger and storage
-const logger = createCategoryLogger('core');
+const logger = createCategoryLogger('core.managers');
 let storageWrappers: StorageAPI | null = null;
 
 async function initializeModules() {
