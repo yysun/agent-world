@@ -37,7 +37,7 @@ import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
-import { filterAndHandleEmptyNamedFunctionCalls } from './tool-utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('llm.adapter.google');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -450,7 +450,7 @@ export async function generateGoogleResponse(
 
       // Add tool results for invalid calls (empty or missing names)
       for (const invalidCall of invalidFunctionCalls) {
-        const toolCallId = invalidCall.id || 'tc-' + Math.random().toString(36).substr(2, 9);
+        const toolCallId = invalidCall.id || generateFallbackId();
         toolResults.push({
           role: 'tool',
           content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,

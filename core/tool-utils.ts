@@ -22,9 +22,10 @@ import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 /**
  * Minimal fallback ID generator
  * Generates a simple unique identifier without external dependencies
+ * Exported for use in non-streaming handlers
  */
-function generateFallbackId(): string {
-  return 'tc-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
+export function generateFallbackId(): string {
+  return 'tc-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now().toString(36);
 }
 
 /**
