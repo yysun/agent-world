@@ -254,15 +254,8 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       streamingState.activeMessages.delete(messageId);
       break;
 
-    case 'memory-only':
-      // Handle memory-only messages (agent messages saved to another agent's memory without response)
-      publishEvent('handleMemoryOnlyMessage', {
-        messageId,
-        sender: agentName,
-        content: eventData.content || '',
-        worldName: eventData.worldName || streamingState.currentWorldName
-      });
-      break;
+    // Note: memory-only events are no longer sent via SSE as per requirements
+    // Memory-only messages are handled internally without frontend notification
 
     case 'log':
       // Handle log events from the server - ensure they're always processed
@@ -679,46 +672,6 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
   };
 };
 
-/**
- * Handle memory-only message events - agent messages saved to another agent's memory without response
- * 
- * These events occur when:
- * - An agent receives a message (saved to memory)
- * - The agent doesn't respond (no mention, turn limit reached, etc.)
- * - Provides visibility into agent→agent messages without responses
- * 
- * @param state - Current component state
- * @param data - Memory-only event data with messageId, sender (original message sender), and agentName (recipient agent)
- * @returns Updated state with memory-only message added
- */
-export const handleMemoryOnlyMessage = <T extends SSEComponentState>(state: T, data: any): T => {
-  const { messageId, sender, content, agentName } = data;
-
-  // Create a memory-only message (agent message saved to another agent's memory)
-  // CRITICAL: sender vs agentName semantics for correct UI detection
-  // - sender: Original message sender (e.g., "a1") who wrote the message
-  // - agentName: Recipient agent who saved to memory (e.g., "o1")
-  // - Display: "Agent: o1 (incoming from a1) [in-memory, no reply]"
-  // - type: MUST be 'user' for incoming messages to get correct sort priority (after replies)
-  // - sender: MUST be agentName (recipient) - this is whose memory it's in
-  // - fromAgentId: MUST be sender (original author) to create mismatch for gray border styling
-  // - seenByAgents: Required for "→ o1" indicator display in world-chat.tsx
-  const memoryOnlyMessage = {
-    id: `memory-only-${messageId}`,
-    messageId: messageId,
-    type: 'user',  // ✅ Incoming message type - gets priority 1 (after 'agent' replies)
-    sender: agentName,  // ✅ Recipient agent - displays as "Agent: o1 (incoming from...)"
-    text: content || '',
-    createdAt: new Date(),
-    fromAgentId: sender, // ✅ Original sender - creates mismatch for gray border, shows "from a1"
-    seenByAgents: [agentName], // ✅ Enables "o1" indicator in UI
-    isStreaming: false
-  } as any;
-
-  return {
-    ...state,
-    messages: [...(state.messages || []), memoryOnlyMessage],
-    needScroll: true,
-    isWaiting: false
-  };
-};
+// Note: handleMemoryOnlyMessage function removed
+// Memory-only messages are no longer sent via SSE as per requirements
+// They are handled internally in the backend without frontend notification

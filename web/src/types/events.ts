@@ -187,8 +187,7 @@ export type WorldEvents =
   /** Handle tool result event */
   | { name: 'handleToolResult'; payload: any }
 
-  /** Handle memory-only message event */
-  | { name: 'handleMemoryOnlyMessage'; payload: any }
+  // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
   // ========================================
   // MEMORY MANAGEMENT EVENTS

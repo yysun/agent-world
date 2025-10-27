@@ -84,7 +84,6 @@ import {
   handleToolError,
   handleToolStart,
   handleToolResult,
-  handleMemoryOnlyMessage,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
@@ -515,7 +514,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolError': handleToolError,
   'handleToolStart': handleToolStart,
   'handleToolResult': handleToolResult,
-  'handleMemoryOnlyMessage': handleMemoryOnlyMessage,
+  // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
   // ========================================
   // MESSAGE DISPLAY
