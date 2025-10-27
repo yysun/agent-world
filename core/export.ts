@@ -327,12 +327,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             if (rawSender) {
               if (rawSender === 'HUMAN') {
                 label = `From: ${rawSender}`;
-                if (agentNamesStr) {
-                  label += `\nTo: ${agentNamesStr}`;
-                } else if (agents.length === 1) {
-                  // Single agent world - assign to that agent
-                  label += `\nTo: ${agents[0].name}`;
-                }
+                // Frontend shows no \"To:\" line - just \"From: HUMAN\"
               } else {
                 // Agent sent to another agent (non-reply user message)
                 // This should be rare - most cross-agent messages should have replyToMessageId
@@ -364,10 +359,6 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             label = rawSender || message.role.toUpperCase();
           }
 
-          markdown += `${index + 1}. ${label}${messageType}\n`;
-          markdown += `Time: ${message.createdAt ? formatDate(message.createdAt) : 'Unknown'}\n`;
-
-          // Add content with proper formatting
           let hasToolCalls = false;
 
           // Check for tool_calls field first (proper AI SDK format)
@@ -377,16 +368,16 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
               .filter(name => name !== '');
 
             if (toolNames.length > 0) {
-              markdown += `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n`;
+              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n    \`\`\`\n\n`;
             } else {
-              markdown += `[${message.tool_calls.length} tool call${message.tool_calls.length > 1 ? 's' : ''}]\n`;
+              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${message.tool_calls.length} tool call${message.tool_calls.length > 1 ? 's' : ''}]\n    \`\`\`\n\n`;
             }
             hasToolCalls = true;
           }
           // Handle tool role messages (tool results)
           else if (message.role === 'tool') {
             const toolCallId = (message as any).tool_call_id || 'unknown';
-            markdown += `[Tool result for: ${toolCallId}]\n`;
+            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool result for: ${toolCallId}]\n    \`\`\`\n\n`;
             hasToolCalls = true;
           }
           // Fallback: check content string for tool call JSON objects
@@ -420,25 +411,51 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
                   .filter(name => name !== '');
 
                 if (toolNames.length > 0) {
-                  markdown += `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n`;
+                  markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n    \`\`\`\n\n`;
                 } else {
                   // Tool calls exist but names are empty - show count
-                  markdown += `[${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]\n`;
+                  markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]\n    \`\`\`\n\n`;
                 }
                 hasToolCalls = true;
               }
             }
           }
 
-          // Show regular content if no tool calls or if content is not empty
+          // Show regular content with proper markdown code block formatting
           if (!hasToolCalls && typeof message.content === 'string' && message.content.trim()) {
-            markdown += `${message.content}\n`;
-          } else if (hasToolCalls && typeof message.content === 'string' && message.content.trim() && message.role === 'tool') {
-            // For tool messages, also show the content (the tool result)
-            markdown += `${message.content.substring(0, 200)}${message.content.length > 200 ? '...' : ''}\n`;
-          }
+            // Preserve original content with newlines intact and escape any backticks
+            let formattedContent = message.content.trim();
 
-          markdown += `\n`;
+            // Convert literal \n to actual newlines for better readability
+            formattedContent = formattedContent.replace(/\\n/g, '\n');
+
+            // Escape any existing backticks in the content to prevent breaking code blocks
+            formattedContent = formattedContent.replace(/```/g, '\\`\\`\\`');
+
+            // Indent each line properly within the code block to maintain markdown structure
+            const indentedContent = formattedContent
+              .split('\n')
+              .map(line => `    ${line}`)
+              .join('\n');
+
+            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n${indentedContent}\n    \`\`\`\n\n`;
+          } else if (hasToolCalls && typeof message.content === 'string' && message.content.trim() && message.role === 'tool') {
+            // For tool messages with content, show truncated content in code block
+            const truncatedContent = message.content.substring(0, 200);
+            const suffix = message.content.length > 200 ? '...' : '';
+            let toolContent = (truncatedContent + suffix).trim();
+
+            // Convert literal \n to actual newlines and escape backticks
+            toolContent = toolContent.replace(/\\n/g, '\n').replace(/```/g, '\\`\\`\\`');
+
+            // Indent each line properly within the code block
+            const indentedToolContent = toolContent
+              .split('\n')
+              .map(line => `    ${line}`)
+              .join('\n');
+
+            markdown += `    \`\`\`\n${indentedToolContent}\n    \`\`\`\n\n`;
+          }
         });
 
         const userMessageCount = sortedMessages.filter(m => m.role === 'user').length;
