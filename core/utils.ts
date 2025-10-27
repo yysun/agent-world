@@ -10,6 +10,7 @@
  * - LLM message preparation with conversation history and system prompts
  * - Mention extraction with first-mention-only logic and case-insensitive matching
  * - Sender type detection for humans, agents, and system messages
+ * - Agent memory filtering for LLM context (prevents irrelevant message pollution)
  *
  * Core Utilities:
  * - generateId: Crypto-based unique ID generation for messages and events
@@ -19,6 +20,7 @@
  * - extractMentions: Case-insensitive mention extraction with first-mention-only logic
  * - determineSenderType: Sender classification for message filtering and processing
  * - prepareMessagesForLLM: Message formatting for LLM calls with history and system prompts
+ * - wouldAgentHaveRespondedToHistoricalMessage: Filters irrelevant messages from LLM context
  *
  * Implementation Details:
  * - Uses native crypto.randomUUID() for ID generation ensuring uniqueness
@@ -28,12 +30,15 @@
  * - All types imported from types.ts for better organization and reusability
  * - World-aware functions that respect world-specific configurations
  * - Message processing utilities that handle AI SDK compatibility
+ * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
  * - Enhanced comment documentation with detailed feature descriptions
  * - Improved function descriptions with implementation details
  * - Added details about world-aware operations and LLM integration
  * - Added nanoid support for chat ID generation
+ * - Added wouldAgentHaveRespondedToHistoricalMessage for LLM context filtering
+ * - Updated prepareMessagesForLLM to filter irrelevant conversation history
  */
 
 import { nanoid } from 'nanoid';
@@ -172,6 +177,69 @@ export function determineSenderType(sender: string | undefined): SenderType {
 }
 
 /**
+ * Check if agent would have responded to a historical message
+ * Replicates shouldAgentRespond logic for saved messages to filter LLM context
+ * 
+ * @param agent - The agent to check response logic for
+ * @param message - The historical message to evaluate
+ * @returns true if agent would have responded to this message
+ */
+export function wouldAgentHaveRespondedToHistoricalMessage(
+  agent: Agent,
+  message: AgentMessage
+): boolean {
+  // Always include own messages (by agentId or sender)
+  if (message.agentId === agent.id || message.sender?.toLowerCase() === agent.id.toLowerCase()) {
+    return true;
+  }
+
+  const content = message.content || '';
+
+  // Never respond to turn limit messages (prevents endless loops)
+  if (content.includes('Turn limit reached')) {
+    return false;
+  }
+
+  // Never respond to system messages
+  if (message.sender === 'system') {
+    return false;
+  }
+
+  // Always include tool messages (they are results from previous interactions)
+  if (message.role === 'tool' || message.sender === 'tool') {
+    return true;
+  }
+
+  // Always respond to world messages
+  if (message.sender === 'world') {
+    return true;
+  }
+
+  const anyMentions = extractMentions(content);
+  const mentions = extractParagraphBeginningMentions(content);
+
+  // Determine sender type
+  const senderType = determineSenderType(message.sender);
+
+  // For HUMAN messages
+  if (senderType === SenderType.HUMAN) {
+    if (mentions.length === 0) {
+      // If there are ANY mentions anywhere but none at paragraph beginnings, don't respond
+      if (anyMentions.length > 0) {
+        return false;
+      } else {
+        return true; // No mentions = public message
+      }
+    } else {
+      return mentions.includes(agent.id.toLowerCase());
+    }
+  }
+
+  // For agent messages, only respond if this agent has a paragraph-beginning mention
+  return mentions.includes(agent.id.toLowerCase());
+}
+
+/**
  * Convert MessageData to AgentMessage for memory storage
  */
 export function messageDataToAgentMessage(messageData: MessageData): AgentMessage {
@@ -185,7 +253,8 @@ export function messageDataToAgentMessage(messageData: MessageData): AgentMessag
 
 /**
  * Prepare messages array for LLM using standard chat message format
- * Filters conversation history by chatId if provided
+ * Filters conversation history by chatId if provided and excludes messages
+ * the agent would not have responded to (prevents irrelevant context pollution)
  */
 export function prepareMessagesForLLM(
   agent: Agent,
@@ -210,8 +279,14 @@ export function prepareMessagesForLLM(
     filteredHistory = conversationHistory.filter(msg => msg.chatId === chatId);
   }
 
+  // Filter to only include messages this agent would have responded to
+  // This prevents irrelevant "not mentioned" messages from polluting LLM context
+  const relevantHistory = filteredHistory.filter(msg =>
+    wouldAgentHaveRespondedToHistoricalMessage(agent, msg)
+  );
+
   // Add filtered conversation history
-  messages.push(...filteredHistory);
+  messages.push(...relevantHistory);
 
   // Add current message as user input
   messages.push(messageDataToAgentMessage(messageData));
