@@ -38,6 +38,7 @@ export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
     messages = [], // Default to empty array if undefined
+    rawMessages = [], // Raw messages before deduplication for filtering
     userInput = '', // Default to empty string if undefined
     messagesLoading,
     isSending,
@@ -58,23 +59,45 @@ export default function WorldChat(props: WorldChatProps) {
   };
 
   // Filter messages based on active agent filters
-  // When filters active: show human messages + messages from filtered agents
-  // When no filters: show all messages (current behavior)
+  // When filters active: use raw messages and filter by ownerAgentId, then deduplicate human messages
+  // When no filters: use pre-deduplicated messages for better performance
   const filteredMessages = agentFilters.length > 0
-    ? messages.filter(message => {
-      // Always show human/user messages
-      const senderType = getSenderType(message.sender);
-      if (senderType === SenderType.HUMAN) {
-        return true;
+    ? (() => {
+      // First filter by agent ownership
+      const agentMessages = rawMessages.filter(message => {
+        // Always include human/user messages (we'll deduplicate them next)
+        const senderType = getSenderType(message.sender);
+        if (senderType === SenderType.HUMAN) {
+          return true;
+        }
+
+        // Check if message is from a filtered agent's memory
+        return message.ownerAgentId && agentFilters.includes(message.ownerAgentId);
+      });
+
+      // Deduplicate human messages while preserving all agent messages
+      const messageMap = new Map<string, Message>();
+      const deduplicatedMessages: Message[] = [];
+
+      for (const message of agentMessages) {
+        const senderType = getSenderType(message.sender);
+        const isHumanMessage = senderType === SenderType.HUMAN;
+
+        if (isHumanMessage && message.messageId) {
+          // Deduplicate human messages by messageId
+          if (!messageMap.has(message.messageId)) {
+            messageMap.set(message.messageId, message);
+            deduplicatedMessages.push(message);
+          }
+        } else {
+          // Keep all agent messages
+          deduplicatedMessages.push(message);
+        }
       }
 
-      // Check if message belongs to a filtered agent
-      // For agent messages: sender represents whose memory it's in (after fix)
-      // Try sender first (recipient/owner), fallback to fromAgentId (original sender)
-      const messageAgentId = message.sender || message.fromAgentId;
-      return agentFilters.includes(messageAgentId);
-    })
-    : messages;  // No filters = show all messages
+      return deduplicatedMessages;
+    })()
+    : messages;  // No filters = use pre-deduplicated messages
 
   // Helper function to detect and format tool calls (3-tier detection matching export logic)
   const formatMessageText = (message: Message): string => {

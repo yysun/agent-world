@@ -158,6 +158,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
             <WorldChat
               worldName={state.worldName}
               messages={state.messages}
+              rawMessages={state.rawMessages}
               userInput={state.userInput}
               messagesLoading={state.messagesLoading}
               isSending={state.isSending}

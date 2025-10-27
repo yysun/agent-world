@@ -63,6 +63,7 @@ export interface Message {
   role?: string; // Backend role field preserved for sorting
   userEntered?: boolean;
   fromAgentId?: string;
+  ownerAgentId?: string; // Which agent's memory this message came from (for filtering)
   seenByAgents?: string[]; // CALCULATED field - built incrementally from actual message data (NOT persisted)
   logEvent?: LogEvent; // For log message types
 
@@ -147,6 +148,7 @@ export interface Chat {
 export interface WorldChatProps {
   worldName: string;
   messages?: Message[];
+  rawMessages?: Message[]; // Raw messages before deduplication for filtering
   userInput?: string;
   messagesLoading: boolean;
   isSending: boolean;
@@ -234,6 +236,7 @@ export interface SSEComponentState {
 export interface WorldComponentState extends SSEComponentState {
   worldName: string;
   world: World | null;
+  rawMessages?: Message[]; // Raw messages before deduplication for filtering
   userInput?: string;
   loading: boolean;
   error: string | null;

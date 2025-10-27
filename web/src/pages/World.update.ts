@@ -153,6 +153,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
     fromAgentId: displayFromAgentId,
+    ownerAgentId: toKebabCase(agentName), // Track which agent's memory this came from
     role: memoryItem.role // Preserve role for sorting
   };
 };
@@ -259,7 +260,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       await api.setChat(worldName, chatId);
     }
 
-    let messages: any[] = [];
+    let rawMessages: any[] = [];
 
     const agents: Agent[] = Array.from(world.agents.values());
     for (const agent of agents) {
@@ -269,20 +270,21 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
         if (memoryItem.chatId === chatId) {
           agent.messageCount++;
           const message = createMessageFromMemory(memoryItem, agent.name);
-          messages.push(message);
+          rawMessages.push(message);
         }
       }
     }
 
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
-    messages = deduplicateMessages(messages, agents);
+    const messages = deduplicateMessages([...rawMessages], agents);
 
     yield {
       ...state,
       world,
       currentChat: world.chats.find(c => c.id === chatId) || null,
       messages,
+      rawMessages,
       loading: false,
       needScroll: true,
     };
