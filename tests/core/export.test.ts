@@ -430,5 +430,130 @@ describe('Export Module', () => {
       expect(result).toContain('From: HUMAN');
       expect(result).toContain('To: Test Assistant');
     });
+
+    it('should display incoming messages with replyToMessageId as replies, not as incoming', async () => {
+      // This tests the fix for the bug where agent replies forwarded to other agents
+      // were incorrectly labeled as "incoming from X [in-memory, no reply]"
+      // instead of "Agent: X (reply)"
+
+      const mockWorld = {
+        id: 'test-world',
+        name: 'Multi-Agent World',
+        turnLimit: 5,
+        currentChatId: 'chat-1',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUpdated: new Date('2025-01-01T12:00:00.000Z'),
+        eventEmitter: new EventEmitter(),
+        agents: new Map(),
+        chats: new Map([
+          ['chat-1', {
+            id: 'chat-1',
+            worldId: 'test-world',
+            name: 'Cross-Agent Chat',
+            createdAt: new Date('2025-01-01T00:00:00.000Z'),
+            updatedAt: new Date('2025-01-01T12:00:00.000Z'),
+            messageCount: 4,
+          }]
+        ])
+      };
+
+      const mockAgents = [
+        {
+          id: 'a1',
+          name: 'Agent A1',
+          type: 'assistant',
+          provider: 'openai' as LLMProvider,
+          model: 'gpt-4',
+          status: 'active' as const,
+          createdAt: new Date('2025-01-01T00:00:00.000Z'),
+          lastActive: new Date('2025-01-01T00:00:00.000Z'),
+          llmCallCount: 1,
+          memory: []
+        },
+        {
+          id: 'a2',
+          name: 'Agent A2',
+          type: 'assistant',
+          provider: 'openai' as LLMProvider,
+          model: 'gpt-4',
+          status: 'active' as const,
+          createdAt: new Date('2025-01-01T00:00:00.000Z'),
+          lastActive: new Date('2025-01-01T00:00:00.000Z'),
+          llmCallCount: 1,
+          memory: []
+        }
+      ];
+
+      // Scenario: Human asks a1, a1 replies to a2, a2 receives a1's reply
+      const mockMessages = [
+        // 1. Human message to a1
+        {
+          role: 'user' as const,
+          content: '@a1, tell @a2 a word',
+          sender: 'HUMAN',
+          agentId: 'a1',
+          messageId: 'msg-1',
+          createdAt: new Date('2025-01-01T10:00:00.000Z')
+        },
+        // 2. a1's reply (has replyToMessageId pointing to human's message)
+        {
+          role: 'assistant' as const,
+          content: '@a2, the word is "Curiosity."',
+          sender: 'a1',
+          agentId: 'a1',
+          messageId: 'msg-2',
+          replyToMessageId: 'msg-1',  // This is a reply to human
+          createdAt: new Date('2025-01-01T10:00:01.000Z')
+        },
+        // 3. a2 receives a1's reply (incoming message with replyToMessageId)
+        //    This should be displayed as "Agent: a1 (reply)", NOT "incoming from a1"
+        {
+          role: 'user' as const,
+          content: '@a2, the word is "Curiosity."',
+          sender: 'a1',  // Original sender
+          agentId: 'a2', // Recipient
+          messageId: 'msg-2',  // Same messageId as a1's reply
+          replyToMessageId: 'msg-1',  // CRITICAL: Has replyToMessageId, so it's a reply
+          createdAt: new Date('2025-01-01T10:00:01.000Z')
+        },
+        // 4. a2's reply to a1's message
+        {
+          role: 'assistant' as const,
+          content: '好奇心。',
+          sender: 'a2',
+          agentId: 'a2',
+          messageId: 'msg-3',
+          replyToMessageId: 'msg-2',
+          createdAt: new Date('2025-01-01T10:00:02.000Z')
+        }
+      ];
+
+      const mockStorage = {
+        loadWorldChatFull: jest.fn()
+      } as any;
+
+      (managers.getWorld as jest.MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
+      (managers.listAgents as jest.MockedFunction<typeof managers.listAgents>).mockResolvedValue(mockAgents);
+      (managers.getAgent as jest.MockedFunction<typeof managers.getAgent>).mockImplementation(async (worldId, agentId) => {
+        return mockAgents.find(a => a.id === agentId) || null;
+      });
+      (managers.getMemory as jest.MockedFunction<typeof managers.getMemory>).mockResolvedValue(mockMessages);
+      (storageFactory.createStorageWithWrappers as jest.MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue(mockStorage as any);
+
+      const result = await exportWorldToMarkdown('test-world');
+
+      // The key assertion: incoming message with replyToMessageId should be displayed as a reply
+      // NOT as "Agent: Agent A2 (incoming from a1) [in-memory, no reply]"
+      // BUT as "Agent: Agent A1 (reply)"
+      expect(result).toContain('Agent: Agent A1 (reply)');
+
+      // Should NOT contain the old incorrect format
+      expect(result).not.toContain('incoming from a1');
+      expect(result).not.toContain('[in-memory, no reply]');
+
+      // Verify the reply is shown
+      expect(result).toContain('好奇心');
+      expect(result).toContain('Agent: Agent A2 (reply)');
+    });
   });
 });

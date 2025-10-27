@@ -732,6 +732,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
           sender: eventData.sender,
           content: eventData.content,
           messageId: eventData.messageId,
+          replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
           createdAt: eventData.timestamp || new Date().toISOString()
         };
         sendSSE(JSON.stringify({ type: 'message', data: messageData }));

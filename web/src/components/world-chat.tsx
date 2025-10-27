@@ -13,6 +13,8 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
+ * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
  * - 2025-10-26: Fixed agent filter to check sender first (whose memory) for in-memory messages
  * - 2025-10-26: Fixed cross-agent message display - sender=recipient, fromAgentId=original author
  * - 2025-10-26: Fixed 'To: unknown' bug - empty seenByAgents handled gracefully
@@ -208,12 +210,18 @@ export default function WorldChat(props: WorldChatProps) {
               // Note: Agent replies have type='agent' or 'assistant', incoming messages have type='user' or 'human'
               const isIncomingMessage = message.type === 'user' || message.type === 'human';
 
+              // Special case: user messages with replyToMessageId are actually replies from agents
+              // This happens in multi-agent scenarios where agent responses are stored as 'user' messages
+              // in the receiving agent's memory but have threading information
+              const isReplyMessage = isIncomingMessage && message.replyToMessageId;
+
               // Check if there's a reply to this incoming message (explicit threading)
               const hasReply = message.messageId
                 ? filteredMessages.some(m => m.replyToMessageId === message.messageId)
                 : false; // Legacy messages without threading assumed to have replies
 
               const isMemoryOnlyMessage = isIncomingMessage &&
+                !isReplyMessage && // Reply messages are not memory-only
                 senderType === SenderType.AGENT &&
                 isCrossAgentMessage &&
                 !message.isStreaming &&
@@ -236,19 +244,19 @@ export default function WorldChat(props: WorldChatProps) {
                 }
                 // Note: If seenByAgents is empty, don't show 'To:' line (will be populated by duplicates)
               } else if (senderType === SenderType.AGENT) {
-                // Check if this is an incoming message (cross-agent with type='user') or a reply (type='agent')
-                if (isCrossAgentMessage && isIncomingMessage) {
-                  // Incoming message to agent memory
-                  // After fix: message.sender = recipient (o1), message.fromAgentId = original sender (a1)
-                  // Display: "Agent: o1 (incoming from a1)"
-                  displayLabel = `Agent: ${message.sender} (incoming from ${message.fromAgentId || message.sender})`;
-                  // Check if this is memory-only (no reply follows)
-                  if (isMemoryOnlyMessage) {
-                    displayLabel += ' [in-memory, no reply]';
-                  }
-                } else {
-                  // Agent reply (normal agent message)
+                // Check if this is a reply message (has replyToMessageId) or incoming message
+                if (isReplyMessage) {
+                  // Cross-agent reply: user message with replyToMessageId from another agent
                   displayLabel = `Agent: ${message.sender} (reply)`;
+                } else if (message.type === 'assistant' || message.type === 'agent') {
+                  // Regular assistant/agent message
+                  displayLabel = `Agent: ${message.sender} (reply)`;
+                } else if (isCrossAgentMessage && isIncomingMessage) {
+                  // Non-reply cross-agent message (rare - most should have replyToMessageId)
+                  displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
+                } else {
+                  // Fallback
+                  displayLabel = `Agent: ${message.sender}`;
                 }
               } else if (senderType === SenderType.SYSTEM) {
                 displayLabel = message.sender;

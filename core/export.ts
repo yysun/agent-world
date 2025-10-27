@@ -297,6 +297,11 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           const isUserMessage = message.role === 'user';
           const isAssistantMessage = message.role === 'assistant';
 
+          // Special case: user messages with replyToMessageId are actually replies from agents
+          // This happens in multi-agent scenarios where agent responses are stored as 'user' messages
+          // in the receiving agent's memory but have threading information
+          const isReplyMessage = isUserMessage && message.replyToMessageId;
+
           // Get sender information
           const rawSender = message.sender?.toLowerCase() === 'human' ? 'HUMAN' : message.sender;
 
@@ -317,7 +322,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           let label: string;
           let messageType: string = '';
 
-          if (isUserMessage) {
+          if (isUserMessage && !isReplyMessage) {
             // User messages show who sent and who received
             if (rawSender) {
               if (rawSender === 'HUMAN') {
@@ -329,39 +334,28 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
                   label += `\nTo: ${agents[0].name}`;
                 }
               } else {
-                // Agent sent to another agent (incoming message)
-                label = `Agent: ${agentNamesStr || 'Unknown'} (incoming from ${rawSender})`;
-
-                // Check if this is in-memory only using explicit reply relationship
-                // Priority 1: Check for explicit reply link (new messages)
-                // Priority 2: Fall back to timestamp heuristic (legacy messages) with warning
-                const hasReply = message.messageId
-                  ? consolidatedMessages.some(m => m.replyToMessageId === message.messageId)
-                  : (() => {
-                    // Legacy fallback - will be removed in future version
-                    logger.warn('Using timestamp heuristic for legacy message', {
-                      messageId: message.messageId,
-                      sender: message.sender,
-                      agentId: message.agentId
-                    });
-                    return consolidatedMessages.some(m =>
-                      m.role === 'assistant' &&
-                      m.agentId === message.agentId &&
-                      m.createdAt && message.createdAt &&
-                      new Date(m.createdAt).getTime() > new Date(message.createdAt).getTime()
-                    );
-                  })();
-
-                if (!hasReply) {
-                  messageType = ' [in-memory, no reply]';
-                }
+                // Agent sent to another agent (non-reply user message)
+                // This should be rare - most cross-agent messages should have replyToMessageId
+                label = `Agent: ${agentNamesStr || 'Unknown'} (message from ${rawSender})`;
               }
             } else {
-              label = agentNamesStr ? `Agent: ${agentNamesStr} (incoming)` : 'Unknown sender';
+              label = agentNamesStr ? `Agent: ${agentNamesStr} (message)` : 'Unknown sender';
             }
-          } else if (isAssistantMessage) {
-            // Assistant messages show which agent replied
-            label = agentNamesStr ? `Agent: ${agentNamesStr} (reply)` : 'Unknown agent';
+          } else if (isAssistantMessage || isReplyMessage) {
+            // Assistant messages OR user messages with replyToMessageId are both replies
+            if (isReplyMessage && rawSender && rawSender !== 'HUMAN') {
+              // Cross-agent reply: user message with replyToMessageId from another agent
+              // Look up the agent name for the sender
+              const senderAgent = agents.find(a => a.id === rawSender);
+              const senderName = senderAgent ? senderAgent.name : rawSender;
+              label = `Agent: ${senderName} (reply)`;
+            } else if (isAssistantMessage) {
+              // Regular assistant message - use agentNamesStr
+              label = agentNamesStr ? `Agent: ${agentNamesStr} (reply)` : 'Unknown agent (reply)';
+            } else {
+              // isReplyMessage but from HUMAN - shouldn't happen but handle gracefully
+              label = `From: HUMAN (reply)`;
+            }
           } else if (message.role === 'tool') {
             // Tool result messages
             label = agentNamesStr ? `Agent: ${agentNamesStr} (tool result)` : 'Tool result';

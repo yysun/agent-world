@@ -372,6 +372,7 @@ export interface WorldMessageEvent {
   timestamp: Date;
   messageId: string;
   chatId?: string | null;
+  replyToMessageId?: string;  // For message threading
 }
 
 /**

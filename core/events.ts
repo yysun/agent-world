@@ -435,6 +435,7 @@ export async function saveIncomingMessageToMemory(
       createdAt: messageEvent.timestamp,
       chatId: world.currentChatId || null,
       messageId: messageEvent.messageId,
+      replyToMessageId: messageEvent.replyToMessageId, // Preserve threading information
       agentId: agent.id
     };
 
@@ -576,16 +577,36 @@ export async function processAgentMessage(
     // Validate threading before saving
     try {
       const { validateMessageThreading } = await import('./types.js');
-      validateMessageThreading(assistantMessage, agent.memory);
+
+      // Create combined context including the message we're about to add
+      // This ensures validation sees the complete picture for multi-agent scenarios
+      const validationContext = [...agent.memory, assistantMessage];
+
+      // For cross-agent threading, we need to validate against the world's complete message history
+      // But for performance, we only validate critical issues that could cause infinite loops
+      validateMessageThreading(assistantMessage, validationContext);
     } catch (error) {
-      loggerMemory.error('[processAgentMessage] Invalid threading', {
+      loggerMemory.error('[processAgentMessage] Threading validation failed', {
         agentId: agent.id,
         messageId: assistantMessage.messageId,
         replyToMessageId: assistantMessage.replyToMessageId,
         error: error instanceof Error ? error.message : error
       });
-      // Don't throw - allow message to save without threading
-      assistantMessage.replyToMessageId = undefined;
+
+      // For critical errors (self-reference, circular references), clear the threading
+      // For non-critical errors (missing parent), preserve threading
+      if (error instanceof Error &&
+        (error.message.includes('cannot reply to itself') ||
+          error.message.includes('Circular reference detected') ||
+          error.message.includes('Thread depth exceeds maximum'))) {
+        loggerMemory.warn('[processAgentMessage] Clearing threading due to critical validation error', {
+          agentId: agent.id,
+          originalReplyTo: assistantMessage.replyToMessageId,
+          error: error.message
+        });
+        assistantMessage.replyToMessageId = undefined;
+      }
+      // For missing parent warnings, preserve the threading - it might be valid cross-agent threading
     }
 
     agent.memory.push(assistantMessage);
