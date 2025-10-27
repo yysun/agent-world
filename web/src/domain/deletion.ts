@@ -36,22 +36,7 @@ export function showDeleteConfirmation(
   messageText: string,
   userEntered: boolean
 ): WorldComponentState {
-  console.log('show-delete-message-confirm called:', {
-    messageId,
-    backendMessageId,
-    messageText: messageText?.substring(0, 50),
-    userEntered,
-    currentChatId: state.currentChat?.id
-  });
-
   const message = state.messages.find(msg => msg.id === messageId);
-  console.log('Found message in state:', {
-    found: !!message,
-    hasMessageId: !!message?.messageId,
-    messageId: message?.messageId,
-    userEntered: message?.userEntered
-  });
-
   if (!message || !message.messageId || !state.currentChat?.id) {
     console.warn('Delete blocked:', {
       noMessage: !message,
@@ -61,7 +46,6 @@ export function showDeleteConfirmation(
     return state;
   }
 
-  console.log('Setting messageToDelete state');
   return {
     ...state,
     messageToDelete: {

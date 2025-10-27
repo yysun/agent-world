@@ -78,7 +78,7 @@ export async function exportWorldMarkdown(
   if (result.success) {
     return state;
   } else {
-    return { ...state, error: result.error };
+    return { ...state, error: result.error || null };
   }
 }
 
@@ -130,7 +130,7 @@ export async function viewWorldMarkdown(
   if (result.success) {
     return state;
   } else {
-    return { ...state, error: result.error };
+    return { ...state, error: result.error || null };
   }
 }
 
@@ -226,7 +226,6 @@ export function openWindowWithContent(content: string): boolean {
     }
     return false;
   } catch (error) {
-    console.error('Failed to open window:', error);
     return false;
   }
 }

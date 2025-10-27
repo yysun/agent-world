@@ -117,7 +117,7 @@ export async function deleteAgent(
       selectedSettingsTarget: result.changes.selectedSettingsTarget
     };
   } else {
-    return { ...state, error: result.error };
+    return { ...state, error: result.error || null };
   }
 }
 
@@ -200,7 +200,7 @@ export async function clearAgentMessages(
       selectedAgent: result.changes.selectedAgent
     };
   } else {
-    return { ...state, error: result.error };
+    return { ...state, error: result.error || null };
   }
 }
 
@@ -277,7 +277,7 @@ export async function clearWorldMessages(
       selectedAgent: result.changes.selectedAgent
     };
   } else {
-    return { ...state, error: result.error };
+    return { ...state, error: result.error || null };
   }
 }
 
