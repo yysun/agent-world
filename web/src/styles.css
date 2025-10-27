@@ -884,6 +884,8 @@ legend {
 
 /* Memory-only message styling: agent message saved to another agent's memory without response */
 .memory-only-message {
+  display: none !important;
+  /* Hide in-memory messages */
   align-self: flex-end;
   background-color: var(--bg-accent);
   border: 1px solid var(--border-secondary);
