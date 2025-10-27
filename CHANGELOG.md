@@ -1,3 +1,11 @@
+v0.7.0
+- Added end-to-end message editing and deletion flows.
+- Added per-agent badge toggles for chat filtering.
+- Add `messageId` and `replyToMessageId` with validation, migrations, export handling, and frontend support.
+- Revamped chat export formatting with O(n) dedupe and tool-call summarization.
+- Excluded memory-only agent messages from LLM context and conversation display.
+- Typed AppRun events, hierarchical logger namespaces, domain module refactors, and extensive automated tests.
+
 v0.6.0
 - Support MCP server in the world configuration (experimental)
 - Support stop word '<world>pass</world>'
