@@ -16,12 +16,23 @@ import type { WorldComponentState, Agent } from '../types';
 import api from '../api';
 
 /**
- * Agent Management State Interface
+ * Generic State Interface for Framework Agnosticism
+ * Can be adapted to any frontend framework
+ */
+export interface AgentManagementData {
+  agents: Agent[];
+  messages: any[];
+  selectedAgent: Agent | null;
+  selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
+}
+
+/**
+ * Agent Management State Interface (AppRun-specific)
  * Encapsulates agent-related state
  */
 export interface AgentManagementState {
   selectedAgent: Agent | null;
-  selectedSettingsTarget: 'world' | string;
+  selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
   world: {
     agents: Agent[];
   } | null;
@@ -29,7 +40,54 @@ export interface AgentManagementState {
 }
 
 /**
- * Delete agent and cleanup associated data
+ * Framework-agnostic business logic for agent deletion
+ * Returns the changes needed, not the full state
+ */
+export async function deleteAgentLogic(
+  data: AgentManagementData,
+  agent: Agent,
+  worldName: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  changes: {
+    agents: Agent[];
+    messages: any[];
+    selectedAgent: Agent | null;
+    selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
+  };
+}> {
+  try {
+    await api.deleteAgent(worldName, agent.name);
+
+    const updatedAgents = data.agents.filter(a => a.id !== agent.id);
+    const isSelectedAgent = data.selectedAgent?.id === agent.id;
+
+    return {
+      success: true,
+      changes: {
+        agents: updatedAgents,
+        messages: data.messages.filter(msg => msg.sender !== agent.name),
+        selectedAgent: isSelectedAgent ? null : data.selectedAgent,
+        selectedSettingsTarget: isSelectedAgent ? 'world' : data.selectedSettingsTarget
+      }
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to delete agent',
+      changes: {
+        agents: data.agents,
+        messages: data.messages,
+        selectedAgent: data.selectedAgent,
+        selectedSettingsTarget: data.selectedSettingsTarget
+      }
+    };
+  }
+}
+
+/**
+ * Delete agent and cleanup associated data (AppRun-specific wrapper)
  * 
  * @param state - Current component state
  * @param agent - Agent to delete
@@ -41,26 +99,79 @@ export async function deleteAgent(
   agent: Agent,
   worldName: string
 ): Promise<WorldComponentState> {
-  try {
-    await api.deleteAgent(worldName, agent.name);
+  const data: AgentManagementData = {
+    agents: state.world?.agents ?? [],
+    messages: state.messages || [],
+    selectedAgent: state.selectedAgent,
+    selectedSettingsTarget: state.selectedSettingsTarget
+  };
 
-    const updatedAgents = (state.world?.agents ?? []).filter(a => a.id !== agent.id);
-    const isSelectedAgent = state.selectedAgent?.id === agent.id;
+  const result = await deleteAgentLogic(data, agent, worldName);
 
+  if (result.success) {
     return {
       ...state,
-      world: state.world ? { ...state.world, agents: updatedAgents } : null,
-      messages: (state.messages || []).filter(msg => msg.sender !== agent.name),
-      selectedAgent: isSelectedAgent ? null : state.selectedAgent,
-      selectedSettingsTarget: isSelectedAgent ? 'world' : state.selectedSettingsTarget
+      world: state.world ? { ...state.world, agents: result.changes.agents } : null,
+      messages: result.changes.messages,
+      selectedAgent: result.changes.selectedAgent,
+      selectedSettingsTarget: result.changes.selectedSettingsTarget
     };
-  } catch (error: any) {
-    return { ...state, error: error.message || 'Failed to delete agent' };
+  } else {
+    return { ...state, error: result.error };
   }
 }
 
 /**
- * Clear memory for a specific agent
+ * Framework-agnostic business logic for clearing agent messages
+ * Returns the changes needed, not the full state
+ */
+export async function clearAgentMessagesLogic(
+  data: AgentManagementData,
+  agent: Agent,
+  worldName: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  changes: {
+    agents: Agent[];
+    messages: any[];
+    selectedAgent: Agent | null;
+  };
+}> {
+  try {
+    await api.clearAgentMemory(worldName, agent.name);
+
+    const updatedAgents = data.agents.map(a =>
+      a.id === agent.id ? { ...a, messageCount: 0 } : a
+    );
+
+    const updatedSelectedAgent = data.selectedAgent?.id === agent.id
+      ? { ...data.selectedAgent, messageCount: 0 }
+      : data.selectedAgent;
+
+    return {
+      success: true,
+      changes: {
+        agents: updatedAgents,
+        messages: data.messages.filter(msg => msg.sender !== agent.name),
+        selectedAgent: updatedSelectedAgent
+      }
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to clear agent messages',
+      changes: {
+        agents: data.agents,
+        messages: data.messages,
+        selectedAgent: data.selectedAgent
+      }
+    };
+  }
+}
+
+/**
+ * Clear memory for a specific agent - AppRun-specific wrapper
  * 
  * @param state - Current component state
  * @param agent - Agent whose memory to clear
@@ -72,30 +183,74 @@ export async function clearAgentMessages(
   agent: Agent,
   worldName: string
 ): Promise<WorldComponentState> {
-  try {
-    await api.clearAgentMemory(worldName, agent.name);
+  const data: AgentManagementData = {
+    agents: state.world?.agents ?? [],
+    messages: state.messages || [],
+    selectedAgent: state.selectedAgent,
+    selectedSettingsTarget: state.selectedSettingsTarget
+  };
 
-    const updatedAgents = state.world?.agents.map(a =>
-      a.id === agent.id ? { ...a, messageCount: 0 } : a
-    ) ?? [];
+  const result = await clearAgentMessagesLogic(data, agent, worldName);
 
-    const updatedSelectedAgent = state.selectedAgent?.id === agent.id
-      ? { ...state.selectedAgent, messageCount: 0 }
-      : state.selectedAgent;
-
+  if (result.success) {
     return {
       ...state,
-      world: state.world ? { ...state.world, agents: updatedAgents } : null,
-      messages: (state.messages || []).filter(msg => msg.sender !== agent.name),
-      selectedAgent: updatedSelectedAgent
+      world: state.world ? { ...state.world, agents: result.changes.agents } : null,
+      messages: result.changes.messages,
+      selectedAgent: result.changes.selectedAgent
     };
-  } catch (error: any) {
-    return { ...state, error: error.message || 'Failed to clear agent messages' };
+  } else {
+    return { ...state, error: result.error };
   }
 }
 
 /**
- * Clear memory for all agents in the world
+ * Framework-agnostic business logic for clearing all world messages
+ * Returns the changes needed, not the full state
+ */
+export async function clearWorldMessagesLogic(
+  data: AgentManagementData,
+  worldName: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  changes: {
+    agents: Agent[];
+    messages: any[];
+    selectedAgent: Agent | null;
+  };
+}> {
+  try {
+    await Promise.all(
+      data.agents.map(agent => api.clearAgentMemory(worldName, agent.name))
+    );
+
+    const updatedAgents = data.agents.map(agent => ({ ...agent, messageCount: 0 }));
+    const updatedSelectedAgent = data.selectedAgent ? { ...data.selectedAgent, messageCount: 0 } : null;
+
+    return {
+      success: true,
+      changes: {
+        agents: updatedAgents,
+        messages: [],
+        selectedAgent: updatedSelectedAgent
+      }
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to clear world messages',
+      changes: {
+        agents: data.agents,
+        messages: data.messages,
+        selectedAgent: data.selectedAgent
+      }
+    };
+  }
+}
+
+/**
+ * Clear memory for all agents in the world - AppRun-specific wrapper
  * 
  * @param state - Current component state
  * @param worldName - Name of the world
@@ -105,22 +260,24 @@ export async function clearWorldMessages(
   state: WorldComponentState,
   worldName: string
 ): Promise<WorldComponentState> {
-  try {
-    await Promise.all(
-      (state.world?.agents ?? []).map(agent => api.clearAgentMemory(worldName, agent.name))
-    );
+  const data: AgentManagementData = {
+    agents: state.world?.agents ?? [],
+    messages: state.messages || [],
+    selectedAgent: state.selectedAgent,
+    selectedSettingsTarget: state.selectedSettingsTarget
+  };
 
-    const updatedAgents = (state.world?.agents ?? []).map(agent => ({ ...agent, messageCount: 0 }));
-    const updatedSelectedAgent = state.selectedAgent ? { ...state.selectedAgent, messageCount: 0 } : null;
+  const result = await clearWorldMessagesLogic(data, worldName);
 
+  if (result.success) {
     return {
       ...state,
-      world: state.world ? { ...state.world, agents: updatedAgents } : null,
-      messages: [],
-      selectedAgent: updatedSelectedAgent
+      world: state.world ? { ...state.world, agents: result.changes.agents } : null,
+      messages: result.changes.messages,
+      selectedAgent: result.changes.selectedAgent
     };
-  } catch (error: any) {
-    return { ...state, error: error.message || 'Failed to clear world messages' };
+  } else {
+    return { ...state, error: result.error };
   }
 }
 

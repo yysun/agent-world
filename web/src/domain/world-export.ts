@@ -23,7 +23,15 @@ declare const window: {
 } | undefined;
 
 /**
- * World Export State Interface
+ * Generic Data Interface for Framework Agnosticism
+ * Can be adapted to any frontend framework
+ */
+export interface WorldExportData {
+  worldName: string;
+}
+
+/**
+ * World Export State Interface (AppRun-specific)
  * Encapsulates export-related state
  */
 export interface WorldExportState {
@@ -32,8 +40,32 @@ export interface WorldExportState {
 }
 
 /**
- * Export world as markdown file (download)
+ * Framework-agnostic business logic for world export
+ * Returns the result of the operation
+ */
+export async function exportWorldMarkdownLogic(
+  worldName: string
+): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    if (typeof window !== 'undefined') {
+      window.location.href = `/api/worlds/${encodeURIComponent(worldName)}/export`;
+    }
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to export world'
+    };
+  }
+}
+
+/**
+ * Export world as markdown file (download) - AppRun-specific wrapper
  * 
+ * @param state - Current component state
  * @param worldName - Name of the world to export
  * @returns Promise<WorldComponentState> - Updated state
  */
@@ -41,27 +73,26 @@ export async function exportWorldMarkdown(
   state: WorldComponentState,
   worldName: string
 ): Promise<WorldComponentState> {
-  try {
-    if (typeof window !== 'undefined') {
-      window.location.href = `/api/worlds/${encodeURIComponent(worldName)}/export`;
-    }
+  const result = await exportWorldMarkdownLogic(worldName);
+
+  if (result.success) {
     return state;
-  } catch (error: any) {
-    return { ...state, error: error.message || 'Failed to export world' };
+  } else {
+    return { ...state, error: result.error };
   }
 }
 
 /**
- * View world markdown in new window with styled HTML
- * 
- * @param state - Current component state
- * @param worldName - Name of the world to view
- * @returns Promise<WorldComponentState> - Updated state
+ * Framework-agnostic business logic for viewing world markdown
+ * Returns the result of the operation
  */
-export async function viewWorldMarkdown(
-  state: WorldComponentState,
+export async function viewWorldMarkdownLogic(
   worldName: string
-): Promise<WorldComponentState> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  htmlContent?: string;
+}> {
   try {
     const markdown = await api.getWorldMarkdown(worldName);
     const htmlContent = renderMarkdown(markdown);
@@ -74,9 +105,32 @@ export async function viewWorldMarkdown(
         newWindow.document.close();
       }
     }
-    return state;
+    return { success: true, htmlContent: fullHtml };
   } catch (error: any) {
-    return { ...state, error: error.message || 'Failed to view world markdown' };
+    return {
+      success: false,
+      error: error.message || 'Failed to view world markdown'
+    };
+  }
+}
+
+/**
+ * View world markdown in new window with styled HTML - AppRun-specific wrapper
+ * 
+ * @param state - Current component state
+ * @param worldName - Name of the world to view
+ * @returns Promise<WorldComponentState> - Updated state
+ */
+export async function viewWorldMarkdown(
+  state: WorldComponentState,
+  worldName: string
+): Promise<WorldComponentState> {
+  const result = await viewWorldMarkdownLogic(worldName);
+
+  if (result.success) {
+    return state;
+  } else {
+    return { ...state, error: result.error };
   }
 }
 

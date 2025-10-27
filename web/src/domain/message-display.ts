@@ -15,7 +15,16 @@
 import type { WorldComponentState, Message } from '../types';
 
 /**
- * Message Display State Interface
+ * Generic Data Interface for Framework Agnosticism
+ * Can be adapted to any frontend framework
+ */
+export interface MessageDisplayData {
+  messages: Message[];
+  needScroll: boolean;
+}
+
+/**
+ * Message Display State Interface (AppRun-specific)
  * Encapsulates message display-related state
  */
 export interface MessageDisplayState {
@@ -24,21 +33,30 @@ export interface MessageDisplayState {
 }
 
 /**
- * Toggle log details expansion for a specific message
- * 
- * @param state - Current component state
- * @param messageId - ID of message to toggle
- * @returns Updated state with toggled log expansion
+ * Framework-agnostic business logic for toggling log details
+ * Returns the changes needed, not the full state
  */
-export function toggleLogDetails(
-  state: WorldComponentState,
+export function toggleLogDetailsLogic(
+  data: MessageDisplayData,
   messageId: string | number
-): WorldComponentState {
-  if (!messageId || !state.messages) {
-    return state;
+): {
+  success: boolean;
+  changes: {
+    messages: Message[];
+    needScroll: boolean;
+  };
+} {
+  if (!messageId || !data.messages) {
+    return {
+      success: false,
+      changes: {
+        messages: data.messages,
+        needScroll: data.needScroll
+      }
+    };
   }
 
-  const messages = state.messages.map(msg => {
+  const messages = data.messages.map(msg => {
     if (String(msg.id) === String(messageId)) {
       return {
         ...msg,
@@ -49,14 +67,63 @@ export function toggleLogDetails(
   });
 
   return {
-    ...state,
-    messages,
-    needScroll: false // Don't auto-scroll when toggling logs
+    success: true,
+    changes: {
+      messages,
+      needScroll: false // Don't auto-scroll when toggling logs
+    }
   };
 }
 
 /**
- * Acknowledge scroll request (clear needScroll flag)
+ * Toggle log details expansion for a specific message - AppRun-specific wrapper
+ * 
+ * @param state - Current component state
+ * @param messageId - ID of message to toggle
+ * @returns Updated state with toggled log expansion
+ */
+export function toggleLogDetails(
+  state: WorldComponentState,
+  messageId: string | number
+): WorldComponentState {
+  const data: MessageDisplayData = {
+    messages: state.messages,
+    needScroll: state.needScroll
+  };
+
+  const result = toggleLogDetailsLogic(data, messageId);
+
+  if (result.success) {
+    return {
+      ...state,
+      messages: result.changes.messages,
+      needScroll: result.changes.needScroll
+    };
+  } else {
+    return state;
+  }
+}
+
+/**
+ * Framework-agnostic business logic for acknowledging scroll
+ * Returns the changes needed, not the full state
+ */
+export function acknowledgeScrollLogic(): {
+  success: boolean;
+  changes: {
+    needScroll: boolean;
+  };
+} {
+  return {
+    success: true,
+    changes: {
+      needScroll: false
+    }
+  };
+}
+
+/**
+ * Acknowledge scroll request (clear needScroll flag) - AppRun-specific wrapper
  * 
  * @param state - Current component state
  * @returns Updated state with scroll acknowledged
@@ -64,9 +131,11 @@ export function toggleLogDetails(
 export function acknowledgeScroll(
   state: WorldComponentState
 ): WorldComponentState {
+  const result = acknowledgeScrollLogic();
+
   return {
     ...state,
-    needScroll: false
+    needScroll: result.changes.needScroll
   };
 }
 
