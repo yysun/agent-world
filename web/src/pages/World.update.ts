@@ -74,6 +74,9 @@ import * as EditingDomain from '../domain/editing';
 import * as DeletionDomain from '../domain/deletion';
 import * as ChatHistoryDomain from '../domain/chat-history';
 import * as SSEStreamingDomain from '../domain/sse-streaming';
+import * as AgentManagementDomain from '../domain/agent-management';
+import * as WorldExportDomain from '../domain/world-export';
+import * as MessageDisplayDomain from '../domain/message-display';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -88,7 +91,6 @@ import {
 import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
-import { renderMarkdown } from '../utils/markdown';
 
 // Utility functions for message processing
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
@@ -522,32 +524,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // MESSAGE DISPLAY
   // ========================================
 
-  'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState => {
-    if (!messageId || !state.messages) {
-      return state;
-    }
+  'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState =>
+    MessageDisplayDomain.toggleLogDetails(state, messageId),
 
-    const messages = state.messages.map(msg => {
-      if (String(msg.id) === String(messageId)) {
-        return {
-          ...msg,
-          isLogExpanded: !msg.isLogExpanded
-        };
-      }
-      return msg;
-    });
-
-    return {
-      ...state,
-      messages,
-      needScroll: false
-    };
-  },
-
-  'ack-scroll': (state: WorldComponentState): WorldComponentState => ({
-    ...state,
-    needScroll: false
-  }),
+  'ack-scroll': (state: WorldComponentState): WorldComponentState =>
+    MessageDisplayDomain.acknowledgeScroll(state),
 
   // ========================================
   // MESSAGE EDITING
@@ -818,88 +799,18 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // AGENT MANAGEMENT
   // ========================================
 
-  'delete-agent': async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> => {
-    try {
-      await api.deleteAgent(state.worldName, payload.agent.name);
-
-      const updatedAgents = (state.world?.agents ?? []).filter(a => a.id !== payload.agent.id);
-      const isSelectedAgent = state.selectedAgent?.id === payload.agent.id;
-
-      return {
-        ...state,
-        world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: (state.messages || []).filter(msg => msg.sender !== payload.agent.name),
-        selectedAgent: isSelectedAgent ? null : state.selectedAgent,
-        selectedSettingsTarget: isSelectedAgent ? 'world' : state.selectedSettingsTarget
-      };
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to delete agent' };
-    }
-  },
+  'delete-agent': async (state: WorldComponentState, payload: WorldEventPayload<'delete-agent'>): Promise<WorldComponentState> =>
+    AgentManagementDomain.deleteAgent(state, payload.agent, state.worldName),
 
   // ========================================
   // WORLD MANAGEMENT
   // ========================================
 
-  'export-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> => {
-    try {
-      window.location.href = `/api/worlds/${encodeURIComponent(payload.worldName)}/export`;
-      return state;
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to export world' };
-    }
-  },
+  'export-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'export-world-markdown'>): Promise<WorldComponentState> =>
+    WorldExportDomain.exportWorldMarkdown(state, payload.worldName),
 
-  'view-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> => {
-    try {
-      const markdown = await api.getWorldMarkdown(payload.worldName);
-      const htmlContent = renderMarkdown(markdown);
-
-      const fullHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>World Export: ${payload.worldName}</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
-            color: #333;
-        }
-        h1, h2, h3 { color: #2c3e50; }
-        h1 { border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-        h2 { border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; }
-        code {
-            background: #f8f9fa;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-family: 'Monaco', 'Consolas', monospace;
-        }
-        pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }
-        pre code { background: none; padding: 0; }
-        ul { padding-left: 20px; }
-        li { margin-bottom: 5px; }
-        hr { border: none; height: 1px; background: #bdc3c7; margin: 30px 0; }
-        strong { color: #2c3e50; }
-    </style>
-</head>
-<body>${htmlContent}</body>
-</html>`;
-
-      const newWindow = window.open();
-      if (newWindow) {
-        newWindow.document.write(fullHtml);
-        newWindow.document.close();
-      }
-      return state;
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to view world markdown' };
-    }
-  },
+  'view-world-markdown': async (state: WorldComponentState, payload: WorldEventPayload<'view-world-markdown'>): Promise<WorldComponentState> =>
+    WorldExportDomain.viewWorldMarkdown(state, payload.worldName),
 
   // ========================================
   // CHAT SESSION MANAGEMENT
@@ -952,46 +863,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // MEMORY MANAGEMENT
   // ========================================
 
-  'clear-agent-messages': async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> => {
-    try {
-      await api.clearAgentMemory(state.worldName, payload.agent.name);
+  'clear-agent-messages': async (state: WorldComponentState, payload: WorldEventPayload<'clear-agent-messages'>): Promise<WorldComponentState> =>
+    AgentManagementDomain.clearAgentMessages(state, payload.agent, state.worldName),
 
-      const updatedAgents = state.world?.agents.map(a =>
-        a.id === payload.agent.id ? { ...a, messageCount: 0 } : a
-      ) ?? [];
-
-      const updatedSelectedAgent = state.selectedAgent?.id === payload.agent.id
-        ? { ...state.selectedAgent, messageCount: 0 }
-        : state.selectedAgent;
-
-      return {
-        ...state,
-        world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: (state.messages || []).filter(msg => msg.sender !== payload.agent.name),
-        selectedAgent: updatedSelectedAgent
-      };
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to clear agent messages' };
-    }
-  },
-
-  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> => {
-    try {
-      await Promise.all(
-        (state.world?.agents ?? []).map(agent => api.clearAgentMemory(state.worldName, agent.name))
-      );
-
-      const updatedAgents = (state.world?.agents ?? []).map(agent => ({ ...agent, messageCount: 0 }));
-      const updatedSelectedAgent = state.selectedAgent ? { ...state.selectedAgent, messageCount: 0 } : null;
-
-      return {
-        ...state,
-        world: state.world ? { ...state.world, agents: updatedAgents } : null,
-        messages: [],
-        selectedAgent: updatedSelectedAgent
-      };
-    } catch (error: any) {
-      return { ...state, error: error.message || 'Failed to clear world messages' };
-    }
-  },
+  'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
+    AgentManagementDomain.clearWorldMessages(state, state.worldName),
 };
