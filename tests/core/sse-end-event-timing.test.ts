@@ -52,9 +52,29 @@ vi.mock('../../core/llm-config.js', () => ({
 }));
 
 // Unmock llm-manager so we get the real implementation
-jest.unmock('../../core/llm-manager.js');
+vi.unmock('../../core/llm-manager.js');
 
-// Import the mocked modules (already mocked by setup.ts)
+// Mock the direct integration modules
+vi.mock('../../core/openai-direct.js', () => ({
+  createOpenAIClientForAgent: vi.fn<any>().mockReturnValue({}),
+  createClientForProvider: vi.fn<any>().mockReturnValue({}),
+  streamOpenAIResponse: vi.fn<any>().mockResolvedValue('Mock OpenAI streaming response'),
+  generateOpenAIResponse: vi.fn<any>().mockResolvedValue('Mock OpenAI response')
+}));
+
+vi.mock('../../core/anthropic-direct.js', () => ({
+  createAnthropicClientForAgent: vi.fn<any>().mockReturnValue({}),
+  streamAnthropicResponse: vi.fn<any>().mockResolvedValue('Mock Anthropic streaming response'),
+  generateAnthropicResponse: vi.fn<any>().mockResolvedValue('Mock Anthropic response')
+}));
+
+vi.mock('../../core/google-direct.js', () => ({
+  createGoogleClientForAgent: vi.fn<any>().mockReturnValue({}),
+  streamGoogleResponse: vi.fn<any>().mockResolvedValue('Mock Google streaming response'),
+  generateGoogleResponse: vi.fn<any>().mockResolvedValue('Mock Google response')
+}));
+
+// Import after mocks are set up
 import * as openaiDirect from '../../core/openai-direct.js';
 import * as anthropicDirect from '../../core/anthropic-direct.js';
 import * as googleDirect from '../../core/google-direct.js';
@@ -112,7 +132,7 @@ describe('SSE End Event Timing', () => {
   describe('OpenAI Provider - No Tool Calls', () => {
     test('should emit end event AFTER text streaming when NO tool calls', async () => {
       // Mock streaming response without tool calls
-      (openaiDirect.streamOpenAIResponse as jest.MockedFunction<any>).mockImplementation((...args: any[]) => {
+      (openaiDirect.streamOpenAIResponse as any).mockImplementation((...args: any[]) => {
         const [, , , localAgent, , localWorld, localPublishSSE, messageId] = args;
         // Simulate text streaming
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'start', messageId });
@@ -146,7 +166,7 @@ describe('SSE End Event Timing', () => {
   describe('OpenAI Provider - With Tool Calls', () => {
     test('should emit end event AFTER tool result when tool calls exist', async () => {
       // Mock streaming response with tool call
-      (openaiDirect.streamOpenAIResponse as jest.MockedFunction<any>).mockImplementation((...args: any[]) => {
+      (openaiDirect.streamOpenAIResponse as any).mockImplementation((...args: any[]) => {
         const [, , , localAgent, , localWorld, localPublishSSE, messageId] = args;
 
         // First call: stream text + tool execution (NO end event)
@@ -184,7 +204,7 @@ describe('SSE End Event Timing', () => {
     });
 
     test('should NOT emit end event before tool-start', async () => {
-      (openaiDirect.streamOpenAIResponse as jest.MockedFunction<any>).mockImplementation((...args: any[]) => {
+      (openaiDirect.streamOpenAIResponse as any).mockImplementation((...args: any[]) => {
         const [, , , localAgent, , localWorld, localPublishSSE, messageId] = args;
 
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'start', messageId });
@@ -221,7 +241,7 @@ describe('SSE End Event Timing', () => {
 
   describe('Event Order Validation', () => {
     test('should maintain correct event order: start -> chunks -> tool events -> end', async () => {
-      (openaiDirect.streamOpenAIResponse as jest.MockedFunction<any>).mockImplementation((...args: any[]) => {
+      (openaiDirect.streamOpenAIResponse as any).mockImplementation((...args: any[]) => {
         const [, , , localAgent, , localWorld, localPublishSSE, messageId] = args;
 
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'start', messageId });

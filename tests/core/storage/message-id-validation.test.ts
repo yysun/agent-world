@@ -13,18 +13,18 @@
  * - Validates migration logging and behavior
  */
 
-import { describe, test, expect, beforeEach, jest } from 'vitest';
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage';
 import type { Agent, AgentMessage } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
 
 // Mock generateId to ensure it works in tests
 let idCounter = 0;
-jest.mock('../../../core/utils', () => {
-  const actual = jest.requireActual<typeof import('../../../core/utils')>('../../../core/utils');
+vi.mock('../../../core/utils', async () => {
+  const actual = await vi.importActual<typeof import('../../../core/utils')>('../../../core/utils');
   return {
     ...actual,
-    generateId: jest.fn(() => `test-id-${++idCounter}`)
+    generateId: vi.fn(() => `test-id-${++idCounter}`)
   };
 });
 

@@ -3,6 +3,7 @@
  *
  * Tests for the in-memory storage implementation used in non-Node environments.
  */
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage.js';
 import type { StorageAPI, World, Agent, Chat, WorldChat } from '../../../core/types.js';
 import { LLMProvider } from '../../../core/types.js';

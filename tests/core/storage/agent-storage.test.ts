@@ -18,10 +18,10 @@
  * - Tests chatId field preservation and filtering functionality
  */
 
-import { describe, test, expect, beforeEach, afterEach, jest } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // We need to unmock agent-storage for this test since we're testing it
-jest.unmock('../../../core/storage/agent-storage');
+vi.unmock('../../../core/storage/agent-storage');
 
 import {
   listAgents,
@@ -317,9 +317,9 @@ describe('Core Agent Storage with Mocks', () => {
       // Verify memory file was written with chatId values
       const memoryCallIndex = Array.from({ length: fs.writeFile.mock.calls.length }, (_, i) => i)
         .find(i => fs.writeFile.mock.calls[i][0].includes('memory.json'));
-      
+
       expect(memoryCallIndex).toBeDefined();
-      
+
       if (memoryCallIndex !== undefined) {
         const savedMemoryData = JSON.parse(fs.writeFile.mock.calls[memoryCallIndex][1]);
         expect(savedMemoryData).toHaveLength(3);

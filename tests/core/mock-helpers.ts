@@ -8,13 +8,13 @@
  * - Test isolation and cleanup utilities
  *
  * Implementation:
- * - Uses jest.mock for module mocking
+ * - Uses vi.mock for module mocking
  * - In-memory file system simulation
  * - Configurable LLM response patterns
  * - Automatic cleanup between tests
  */
 
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { Agent, AgentMessage, LLMProvider, CreateAgentParams, CreateWorldParams } from '../../core/types.js';
 
 // Mock file system state
@@ -33,7 +33,7 @@ export function resetAllMocks(): void {
   mockFileSystem = {};
   mockLLMResponses.clear();
   mockLLMCallCount = 0;
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 }
 
 /**
@@ -41,14 +41,14 @@ export function resetAllMocks(): void {
  */
 export const mockFs = {
   promises: {
-    readFile: jest.fn<(path: string, encoding?: string) => Promise<string>>(),
-    writeFile: jest.fn<(path: string, data: string, encoding?: string) => Promise<void>>(),
-    mkdir: jest.fn<(path: string, options?: any) => Promise<void>>(),
-    rm: jest.fn<(path: string, options?: any) => Promise<void>>(),
-    access: jest.fn<(path: string) => Promise<void>>(),
-    readdir: jest.fn<(path: string, options?: any) => Promise<any[]>>(),
-    rename: jest.fn<(oldPath: string, newPath: string) => Promise<void>>(),
-    unlink: jest.fn<(path: string) => Promise<void>>()
+    readFile: vi.fn<(path: string, encoding?: string) => Promise<string>>(),
+    writeFile: vi.fn<(path: string, data: string, encoding?: string) => Promise<void>>(),
+    mkdir: vi.fn<(path: string, options?: any) => Promise<void>>(),
+    rm: vi.fn<(path: string, options?: any) => Promise<void>>(),
+    access: vi.fn<(path: string) => Promise<void>>(),
+    readdir: vi.fn<(path: string, options?: any) => Promise<any[]>>(),
+    rename: vi.fn<(oldPath: string, newPath: string) => Promise<void>>(),
+    unlink: vi.fn<(path: string) => Promise<void>>()
   }
 };
 
@@ -58,36 +58,36 @@ export const mockFs = {
  */
 export const mockStorage = {
   // World operations
-  saveWorld: jest.fn<any>().mockResolvedValue(undefined),
-  loadWorld: jest.fn<any>().mockResolvedValue({}),
-  deleteWorld: jest.fn<any>().mockResolvedValue(true),
-  listWorlds: jest.fn<any>().mockResolvedValue([]),
-  
+  saveWorld: vi.fn<any>().mockResolvedValue(undefined),
+  loadWorld: vi.fn<any>().mockResolvedValue({}),
+  deleteWorld: vi.fn<any>().mockResolvedValue(true),
+  listWorlds: vi.fn<any>().mockResolvedValue([]),
+
   // Agent operations  
-  saveAgent: jest.fn<any>().mockResolvedValue(undefined),
-  loadAgent: jest.fn<any>().mockResolvedValue(null),
-  deleteAgent: jest.fn<any>().mockResolvedValue(true),
-  listAgents: jest.fn<any>().mockResolvedValue([]),
-  
+  saveAgent: vi.fn<any>().mockResolvedValue(undefined),
+  loadAgent: vi.fn<any>().mockResolvedValue(null),
+  deleteAgent: vi.fn<any>().mockResolvedValue(true),
+  listAgents: vi.fn<any>().mockResolvedValue([]),
+
   // Batch operations
-  saveAgentsBatch: jest.fn<any>().mockResolvedValue(undefined),
-  loadAgentsBatch: jest.fn<any>().mockResolvedValue([]),
-  
+  saveAgentsBatch: vi.fn<any>().mockResolvedValue(undefined),
+  loadAgentsBatch: vi.fn<any>().mockResolvedValue([]),
+
   // Chat history operations - new mock surfaces
-  saveChat: jest.fn<any>().mockResolvedValue(undefined),
-  loadChat: jest.fn<any>().mockResolvedValue(null),
-  deleteChat: jest.fn<any>().mockResolvedValue(true),
-  listChats: jest.fn<any>().mockResolvedValue([]),
-  updateChat: jest.fn<any>().mockResolvedValue(null),
-  
+  saveChat: vi.fn<any>().mockResolvedValue(undefined),
+  loadChat: vi.fn<any>().mockResolvedValue(null),
+  deleteChat: vi.fn<any>().mockResolvedValue(true),
+  listChats: vi.fn<any>().mockResolvedValue([]),
+  updateChat: vi.fn<any>().mockResolvedValue(null),
+
   // Snapshot operations - new mock surfaces
-  saveSnapshot: jest.fn<any>().mockResolvedValue(undefined),
-  loadSnapshot: jest.fn<any>().mockResolvedValue(null),
-  restoreFromSnapshot: jest.fn<any>().mockResolvedValue(true),
-  
+  saveSnapshot: vi.fn<any>().mockResolvedValue(undefined),
+  loadSnapshot: vi.fn<any>().mockResolvedValue(null),
+  restoreFromSnapshot: vi.fn<any>().mockResolvedValue(true),
+
   // Integrity operations - new mock surfaces
-  validateIntegrity: jest.fn<any>().mockResolvedValue(true),
-  repairData: jest.fn<any>().mockResolvedValue(true),
+  validateIntegrity: vi.fn<any>().mockResolvedValue(true),
+  repairData: vi.fn<any>().mockResolvedValue(true),
 };
 
 /**

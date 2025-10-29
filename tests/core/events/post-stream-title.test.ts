@@ -14,7 +14,7 @@ import { publishSSE, subscribeWorldToMessages } from '../../../core/events';
 vi.mock('../../../core/storage/storage-factory', () => ({
   createStorageWithWrappers: async () => ({
     updateChatData: vi.fn(),
-    getMemory: jest.fn(async (_worldId: string, _chatId: string | null) => [
+    getMemory: vi.fn(async (_worldId: string, _chatId: string | null) => [
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi! How can I help you?' }
     ])
@@ -22,7 +22,7 @@ vi.mock('../../../core/storage/storage-factory', () => ({
 }));
 
 vi.mock('../../../core/llm-manager', () => ({
-  generateAgentResponse: jest.fn(async () => 'Generated Chat Title')
+  generateAgentResponse: vi.fn(async () => 'Generated Chat Title')
 }));
 
 describe('Post-stream title update', () => {

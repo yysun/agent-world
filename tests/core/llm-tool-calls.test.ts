@@ -14,10 +14,10 @@ describe('LLM tool call flows', () => {
     // Re-setup the mock return values after clearing
     (openaiDirect.generateOpenAIResponse as any).mockResolvedValue('Mock OpenAI response');
     (openaiDirect.streamOpenAIResponse as any).mockResolvedValue('Mock OpenAI streaming response');
-    (anthropicDirect.generateAnthropicResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Anthropic response');
-    (anthropicDirect.streamAnthropicResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Anthropic streaming response');
-    (googleDirect.generateGoogleResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Google response');
-    (googleDirect.streamGoogleResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Google streaming response');
+    (anthropicDirect.generateAnthropicResponse as any).mockResolvedValue('Mock Anthropic response');
+    (anthropicDirect.streamAnthropicResponse as any).mockResolvedValue('Mock Anthropic streaming response');
+    (googleDirect.generateGoogleResponse as any).mockResolvedValue('Mock Google response');
+    (googleDirect.streamGoogleResponse as any).mockResolvedValue('Mock Google streaming response');
   });
 
   test('OpenAI non-streaming: executes tool and returns follow-up response', async () => {

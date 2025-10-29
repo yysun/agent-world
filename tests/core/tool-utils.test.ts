@@ -14,7 +14,7 @@
  * - Verifies tool_call_id handling with fallback
  */
 
-import { describe, test, expect, jest, beforeEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { filterAndHandleEmptyNamedFunctionCalls } from '../../core/tool-utils.js';
 import type { World, Agent, WorldSSEEvent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
