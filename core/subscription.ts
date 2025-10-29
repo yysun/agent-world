@@ -206,31 +206,6 @@ export function setupWorldEventListeners(world: World, client: ClientConnection)
   world.eventEmitter.on('world', worldListener);
   listeners.set('world', worldListener);
 
-  // World activity events
-  const activityListener = (eventData: any) => {
-    if (client.onWorldEvent) {
-      client.onWorldEvent('world-activity', eventData);
-    }
-  };
-  world.eventEmitter.on('world-activity', activityListener);
-  listeners.set('world-activity', activityListener);
-
-  const processingListener = (eventData: any) => {
-    if (client.onWorldEvent) {
-      client.onWorldEvent('processing', eventData);
-    }
-  };
-  world.eventEmitter.on('processing', processingListener);
-  listeners.set('processing', processingListener);
-
-  const idleListener = (eventData: any) => {
-    if (client.onWorldEvent) {
-      client.onWorldEvent('idle', eventData);
-    }
-  };
-  world.eventEmitter.on('idle', idleListener);
-  listeners.set('idle', idleListener);
-
   // Message events
   const messageListener = (eventData: any) => {
     if (client.onWorldEvent) {
@@ -248,6 +223,14 @@ export function setupWorldEventListeners(world: World, client: ClientConnection)
   };
   world.eventEmitter.on('sse', sseListener);
   listeners.set('sse', sseListener);
+
+  const activityListener = (eventData: any) => {
+    if (client.onWorldEvent) {
+      client.onWorldEvent('world-activity', eventData);
+    }
+  };
+  world.eventEmitter.on('world-activity', activityListener);
+  listeners.set('world-activity', activityListener);
 
   // Log streaming - set up if client has onLog callback
   if (client.onLog) {

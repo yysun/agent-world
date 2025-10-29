@@ -85,6 +85,13 @@ export {
   publishMessageWithId,
 } from './events.js';
 
+export {
+  beginWorldActivity,
+  trackWorldActivity,
+  type WorldActivityEventPayload,
+  type WorldActivityEventState,
+} from './activity-tracker.js';
+
 // LLM Provider enum (needed for agent configuration)
 export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider } from './types.js';
 

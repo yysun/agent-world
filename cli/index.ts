@@ -47,9 +47,10 @@ import {
   createCategoryLogger,
   LLMProvider,
   enableStreaming,
-  disableStreaming
+  disableStreaming,
+  type WorldActivityEventPayload,
+  type WorldActivityEventState
 } from '../core/index.js';
-import { WorldSubscription } from '../core/subscription.js';
 import { World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput } from './commands.js';
@@ -114,80 +115,68 @@ const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
 
-type ActivityEventState = 'processing' | 'idle';
+type ActivityEventState = WorldActivityEventState;
 
-interface ActivityEventPayload {
-  state?: ActivityEventState;
-  pendingOperations?: number;
-  activityId?: number;
-  timestamp?: string;
-  source?: string;
-}
-
-interface ActivitySnapshot {
+interface ActivityEventSnapshot {
   activityId: number;
-  timestampMs: number;
   state: ActivityEventState | null;
 }
 
 interface IdleWaiter {
-  startedAt: number;
-  snapshot: ActivitySnapshot;
+  activityId: number;
+  resolveCallback: () => void;
+  rejectCallback: (error: Error) => void;
   seenProcessing: boolean;
-  targetActivityId: number | null;
-  resolve: () => void;
-  reject: (error: Error) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
   noActivityTimeoutId?: ReturnType<typeof setTimeout>;
-  resolved: boolean;
 }
 
 class WorldActivityMonitor {
-  private lastEvent: (ActivitySnapshot & { pendingOperations: number; source?: string }) | null = null;
+  private lastEvent: (WorldActivityEventPayload & { timestampMs: number }) | null = null;
   private waiters: Set<IdleWaiter> = new Set();
 
-  captureSnapshot(): ActivitySnapshot {
-    const now = Date.now();
-
-    if (!this.lastEvent) {
-      return {
-        activityId: 0,
-        timestampMs: now,
-        state: null
-      };
-    }
-
+  captureSnapshot(): ActivityEventSnapshot {
     return {
-      activityId: this.lastEvent.activityId,
-      timestampMs: this.lastEvent.timestampMs,
-      state: this.lastEvent.state
+      activityId: this.lastEvent?.activityId ?? 0,
+      state: this.lastEvent?.state ?? null
     };
   }
 
-  handle(eventData: ActivityEventPayload): void {
-    if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+  handle(event: WorldActivityEventPayload): void {
+    if (!event || (event.state !== 'processing' && event.state !== 'idle')) {
       return;
     }
 
-    const timestampMsRaw = eventData.timestamp ? Date.parse(eventData.timestamp) : Date.now();
+    const timestampMsRaw = event.timestamp ? Date.parse(event.timestamp) : Date.now();
     const timestampMs = Number.isFinite(timestampMsRaw) ? timestampMsRaw : Date.now();
-    const activityId = typeof eventData.activityId === 'number'
-      ? eventData.activityId
-      : this.lastEvent?.activityId ?? 0;
 
     this.lastEvent = {
-      activityId,
-      timestampMs,
-      state: eventData.state,
-      pendingOperations: eventData.pendingOperations ?? (eventData.state === 'processing' ? 1 : 0),
-      source: eventData.source
+      ...event,
+      timestampMs
     };
 
-    this.evaluateWaiters();
+    for (const waiter of Array.from(this.waiters)) {
+      if (event.state === 'processing' && event.activityId > waiter.activityId) {
+        waiter.seenProcessing = true;
+        if (waiter.noActivityTimeoutId) {
+          clearTimeout(waiter.noActivityTimeoutId);
+          waiter.noActivityTimeoutId = undefined;
+        }
+      }
+
+      if (event.state === 'idle') {
+        const shouldResolve = event.activityId > waiter.activityId ||
+          (event.activityId === waiter.activityId && waiter.seenProcessing);
+
+        if (shouldResolve) {
+          this.finishWaiter(waiter, true);
+        }
+      }
+    }
   }
 
   async waitForIdle(options: {
-    snapshot?: ActivitySnapshot;
+    snapshot?: ActivityEventSnapshot;
     timeoutMs?: number;
     noActivityTimeoutMs?: number;
   } = {}): Promise<void> {
@@ -197,184 +186,142 @@ class WorldActivityMonitor {
       noActivityTimeoutMs = 1_000
     } = options;
 
-    const last = this.lastEvent;
-    const now = Date.now();
+    const targetActivityId = snapshot.activityId;
 
-    if (last && last.state === 'idle') {
-      const hasNewIdle = last.activityId > snapshot.activityId || last.timestampMs > snapshot.timestampMs;
-      if (hasNewIdle) {
-        return;
-      }
+    if (this.lastEvent && this.lastEvent.state === 'idle' && this.lastEvent.activityId > targetActivityId) {
+      return;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const waiter: IdleWaiter = {
-        startedAt: now,
-        snapshot,
-        seenProcessing: false,
-        targetActivityId: null,
-        resolve,
-        reject,
-        resolved: false
-      };
-
-      const finish = (error?: Error) => {
-        if (waiter.resolved) return;
-        waiter.resolved = true;
-        if (waiter.timeoutId) clearTimeout(waiter.timeoutId);
-        if (waiter.noActivityTimeoutId) clearTimeout(waiter.noActivityTimeoutId);
-        this.waiters.delete(waiter);
-        if (error) {
-          reject(error);
-        } else {
+        activityId: targetActivityId,
+        resolveCallback: () => {
+          cleanup();
           resolve();
-        }
+        },
+        rejectCallback: (error: Error) => {
+          cleanup();
+          reject(error);
+        },
+        seenProcessing: false
       };
 
-      if (timeoutMs > 0) {
-        waiter.timeoutId = setTimeout(() => {
-          finish(new Error('Timed out waiting for world to become idle'));
-        }, timeoutMs);
-      }
+      const cleanup = () => {
+        if (waiter.timeoutId) {
+          clearTimeout(waiter.timeoutId);
+          waiter.timeoutId = undefined;
+        }
+        if (waiter.noActivityTimeoutId) {
+          clearTimeout(waiter.noActivityTimeoutId);
+          waiter.noActivityTimeoutId = undefined;
+        }
+        this.waiters.delete(waiter);
+      };
 
-      if (noActivityTimeoutMs > 0) {
-        waiter.noActivityTimeoutId = setTimeout(() => {
-          if (!waiter.seenProcessing) {
-            finish();
-          }
-        }, noActivityTimeoutMs);
-      }
+      const last = this.lastEvent;
+      if (!last) {
+        waiter.noActivityTimeoutId = setTimeout(() => this.finishWaiter(waiter, true), noActivityTimeoutMs);
+      } else {
+        if (last.state === 'processing' && last.activityId > targetActivityId) {
+          waiter.seenProcessing = true;
+        }
 
-      if (last) {
-        if (last.state === 'processing') {
-          const afterSnapshot =
-            last.activityId > snapshot.activityId ||
-            last.timestampMs >= snapshot.timestampMs ||
-            snapshot.state !== 'processing';
+        if (last.state === 'idle' && last.activityId === targetActivityId) {
+          waiter.noActivityTimeoutId = setTimeout(() => this.finishWaiter(waiter, true), noActivityTimeoutMs);
+        }
 
-          if (afterSnapshot) {
-            waiter.seenProcessing = true;
-            waiter.targetActivityId = last.activityId;
-            if (waiter.noActivityTimeoutId) {
-              clearTimeout(waiter.noActivityTimeoutId);
-              waiter.noActivityTimeoutId = undefined;
-            }
-          }
-        } else if (last.state === 'idle') {
-          const hasNewIdle =
-            last.activityId > snapshot.activityId ||
-            last.timestampMs > snapshot.timestampMs;
-
-          if (hasNewIdle) {
-            finish();
-            return;
-          }
+        if (last.state === 'idle' && last.activityId > targetActivityId) {
+          resolve();
+          return;
         }
       }
+
+      waiter.timeoutId = setTimeout(() => {
+        this.finishWaiter(waiter, false, new Error('Timed out waiting for world to become idle'));
+      }, timeoutMs);
 
       this.waiters.add(waiter);
-      this.evaluateWaiters();
     });
   }
 
-  isIdle(): boolean {
-    return this.lastEvent?.state === 'idle';
-  }
-
-  reset(): void {
+  reset(reason: string = 'World subscription reset'): void {
+    const error = new Error(reason);
     for (const waiter of Array.from(this.waiters)) {
-      this.finishWaiter(waiter, new Error('Activity monitor reset'));
+      this.finishWaiter(waiter, false, error);
     }
     this.lastEvent = null;
   }
 
-  private evaluateWaiters(): void {
-    if (!this.lastEvent) return;
-
-    for (const waiter of Array.from(this.waiters)) {
-      if (!waiter.seenProcessing && this.lastEvent.state === 'processing') {
-        const afterSnapshot =
-          this.lastEvent.activityId > waiter.snapshot.activityId ||
-          this.lastEvent.timestampMs >= waiter.snapshot.timestampMs ||
-          waiter.snapshot.state !== 'processing';
-
-        if (afterSnapshot) {
-          waiter.seenProcessing = true;
-          waiter.targetActivityId = this.lastEvent.activityId;
-          if (waiter.noActivityTimeoutId) {
-            clearTimeout(waiter.noActivityTimeoutId);
-            waiter.noActivityTimeoutId = undefined;
-          }
-        }
-      }
-
-      if (this.lastEvent.state === 'idle') {
-        const idleAfterStart = this.lastEvent.timestampMs >= waiter.startedAt;
-        const activitySatisfied =
-          waiter.targetActivityId === null ||
-          this.lastEvent.activityId >= waiter.targetActivityId;
-
-        if ((waiter.seenProcessing || waiter.targetActivityId === null) && idleAfterStart && activitySatisfied) {
-          this.finishWaiter(waiter);
-        }
-      }
-    }
+  getActiveSources(): string[] {
+    return this.lastEvent?.activeSources ?? [];
   }
 
-  private finishWaiter(waiter: IdleWaiter, error?: Error): void {
-    if (waiter.resolved) return;
-    waiter.resolved = true;
-    if (waiter.timeoutId) clearTimeout(waiter.timeoutId);
-    if (waiter.noActivityTimeoutId) clearTimeout(waiter.noActivityTimeoutId);
+  private finishWaiter(waiter: IdleWaiter, resolve: boolean, error?: Error): void {
+    if (!this.waiters.has(waiter)) {
+      return;
+    }
+
+    if (waiter.timeoutId) {
+      clearTimeout(waiter.timeoutId);
+      waiter.timeoutId = undefined;
+    }
+    if (waiter.noActivityTimeoutId) {
+      clearTimeout(waiter.noActivityTimeoutId);
+      waiter.noActivityTimeoutId = undefined;
+    }
+
     this.waiters.delete(waiter);
-    if (error) {
-      waiter.reject(error);
+
+    if (resolve) {
+      waiter.resolveCallback();
     } else {
-      waiter.resolve();
+      waiter.rejectCallback(error ?? new Error('World activity waiter cancelled'));
     }
   }
 }
 
+function parseActivitySource(source?: string): { type: 'agent' | 'message'; name: string } | null {
+  if (!source) return null;
+  if (source.startsWith('agent:')) {
+    return { type: 'agent', name: source.slice('agent:'.length) };
+  }
+  if (source.startsWith('message:')) {
+    return { type: 'message', name: source.slice('message:'.length) };
+  }
+  return null;
+}
 
 class ActivityProgressRenderer {
-  private sourceState: Map<string, { state: ActivityEventState; activityId: number | null }> = new Map();
+  private activeAgents = new Set<string>();
 
-  handle(eventData: ActivityEventPayload, display: boolean): void {
-    if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+  handle(event: WorldActivityEventPayload): void {
+    if (!event) return;
+
+    if (event.state === 'idle') {
+      this.reset();
       return;
     }
 
-    const source = eventData.source ?? '';
-    const activityId = typeof eventData.activityId === 'number' ? eventData.activityId : null;
-
-    if (!source.startsWith('agent:')) {
+    const details = parseActivitySource(event.source);
+    if (!details || details.type !== 'agent') {
       return;
     }
 
-    const agentId = source.slice('agent:'.length) || 'agent';
-
-    if (eventData.state === 'processing') {
-      const previous = this.sourceState.get(`${source}:previous`);
-      if (!display) {
-        this.sourceState.delete(`${source}:previous`);
-        return;
-      }
-
-      if (!previous || previous.state !== 'processing' || previous.activityId !== activityId) {
-        this.sourceState.set(`${source}:previous`, { state: 'processing', activityId });
-        console.log(`\n${cyan(agentId)} ${gray('thinking ...')}`);
-      }
-      return;
+    if (event.change === 'start' && !this.activeAgents.has(details.name)) {
+      this.activeAgents.add(details.name);
+      console.log(`${boldGreen(details.name)} ${gray('thinking ...')}`);
     }
 
-    if (eventData.state === 'idle') {
-      this.sourceState.delete(`${source}:previous`);
-      this.sourceState.delete(source);
+    if (event.change === 'end' && this.activeAgents.has(details.name)) {
+      this.activeAgents.delete(details.name);
     }
   }
 
   reset(): void {
-    this.sourceState.clear();
+    if (this.activeAgents.size > 0) {
+      this.activeAgents.clear();
+      console.log(gray('All agents finished.'));
+    }
   }
 }
 
@@ -468,171 +415,151 @@ function printCLIResult(result: any) {
   }
 }
 
-// Pipeline mode execution with activity-aware completion
+// Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   disableStreaming();
 
-  const activityMonitor = new WorldActivityMonitor();
-  let worldSubscription: WorldSubscription | null = null;
-  let world: World | null = null;
-
-  const pipelineClient: ClientConnection = {
-    isOpen: true,
-    onWorldEvent: (eventType: string, eventData: any) => {
-      if (eventType === 'world-activity') {
-        activityMonitor.handle(eventData);
-        return;
-      }
-
-      if (eventData.content && eventData.content.includes('Success message sent')) return;
-
-      if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
-        return;
-      }
-
-      if (eventType === 'message' && eventData.sender === 'system') {
-        const msg = eventData.content;
-        console.log(`${boldRed('● system:')} ${msg}`);
-        return;
-      }
-
-      if (eventType === 'message' && eventData.content) {
-        const sender = eventData.sender || 'agent';
-        if (sender.toUpperCase() === 'HUMAN' || sender.toUpperCase() === 'CLI') return;
-        console.log(`${boldGreen('● ' + sender + ':')} ${eventData.content}`);
-      }
-    },
-    onError: (error: string) => {
-      console.log(red(`Error: ${error}`));
-    }
-  };
-
-  const exitPipeline = async (code: number): Promise<void> => {
-    if (worldSubscription) {
-      try {
-        await worldSubscription.unsubscribe();
-      } catch (err) {
-        logger.warn('Failed to clean up pipeline world subscription', {
-          error: err instanceof Error ? err.message : err
-        });
-      }
-      worldSubscription = null;
-    }
-
-    process.exit(code);
-  };
-
   try {
+    let world: World | null = null;
+    let worldSubscription: any = null;
+    const activityMonitor = new WorldActivityMonitor();
+    const progressRenderer = new ActivityProgressRenderer();
+
+    const pipelineClient: ClientConnection = {
+      isOpen: true,
+      onWorldEvent: (eventType: string, eventData: any) => {
+        if (eventType === 'world-activity') {
+          activityMonitor.handle(eventData as WorldActivityEventPayload);
+          progressRenderer.handle(eventData as WorldActivityEventPayload);
+          return;
+        }
+
+        if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+        if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
+          // existing logic
+        } else if (eventType === 'message' && eventData.sender === 'system') {
+          const msg = eventData.content;
+          console.log(`${boldRed('● system:')} ${msg}`);
+        }
+        if (eventType === 'message' && eventData.content) {
+          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
+        }
+      },
+      onError: (error: string) => {
+        console.log(red(`Error: ${error}`));
+      }
+    };
+
     if (options.world) {
       worldSubscription = await subscribeWorld(options.world, pipelineClient);
       if (!worldSubscription) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
-        await exitPipeline(1);
-        return;
+        process.exit(1);
       }
-      world = worldSubscription.world as World;
+      world = worldSubscription.world;
     }
 
+    // Execute command from --command option
     if (options.command) {
-      const isCommand = options.command.startsWith('/');
-      if (!isCommand && !world) {
+      if (!options.command.startsWith('/') && !world) {
         console.error(boldRed('Error: World must be specified to send user messages'));
-        await exitPipeline(1);
-        return;
+        process.exit(1);
       }
-
-      const snapshot = !isCommand && world ? activityMonitor.captureSnapshot() : undefined;
+      const snapshot = activityMonitor.captureSnapshot();
       const result = await processCLIInput(options.command, world, 'HUMAN');
       printCLIResult(result);
 
-      if (!isCommand && world) {
+      if (!options.command.startsWith('/') && world) {
         try {
           await activityMonitor.waitForIdle({ snapshot });
-        } catch (err) {
-          console.error(boldRed('Error waiting for world to become idle:'), err instanceof Error ? err.message : err);
-          await exitPipeline(1);
-          return;
+        } catch (error) {
+          console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
         }
+      } else {
+        if (worldSubscription) worldSubscription.unsubscribe();
+        process.exit(result.success ? 0 : 1);
       }
-
-      await exitPipeline(result.success ? 0 : 1);
-      return;
-    }
-
-    const pendingMessages: { text: string; source: string }[] = [];
-
-    if (messageFromArgs) {
-      pendingMessages.push({ text: messageFromArgs, source: 'arguments' });
-    }
-
-    if (!process.stdin.isTTY) {
-      let input = '';
-      process.stdin.setEncoding('utf8');
-      for await (const chunk of process.stdin) {
-        input += chunk;
-      }
-
-      if (input.trim()) {
-        pendingMessages.push({ text: input.trim(), source: 'stdin' });
-      }
-    }
-
-    if (pendingMessages.length === 0) {
-      program.help();
-      return;
-    }
-
-    if (!world) {
-      console.error(boldRed('Error: World must be specified to send user messages'));
-      await exitPipeline(1);
-      return;
-    }
-
-    for (const message of pendingMessages) {
-      const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(message.text, world, 'HUMAN');
-      printCLIResult(result);
 
       if (!result.success) {
-        await exitPipeline(1);
+        setTimeout(() => process.exit(1), 100);
         return;
       }
+    }
+
+    // Execute message from args
+    if (messageFromArgs) {
+      if (!world) {
+        console.error(boldRed('Error: World must be specified to send user messages'));
+        process.exit(1);
+      }
+      const snapshot = activityMonitor.captureSnapshot();
+      const result = await processCLIInput(messageFromArgs, world, 'HUMAN');
+      printCLIResult(result);
 
       try {
         await activityMonitor.waitForIdle({ snapshot });
-      } catch (err) {
-        console.error(boldRed('Error waiting for world to become idle:'), err instanceof Error ? err.message : err);
-        await exitPipeline(1);
+      } catch (error) {
+        console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+      }
+
+      if (!result.success) {
+        setTimeout(() => process.exit(1), 100);
         return;
       }
     }
 
-    await exitPipeline(0);
+    // Handle stdin input
+    if (!process.stdin.isTTY) {
+      let input = '';
+      process.stdin.setEncoding('utf8');
+      for await (const chunk of process.stdin) input += chunk;
+
+      if (input.trim()) {
+        if (!world) {
+          console.error(boldRed('Error: World must be specified to send user messages'));
+          process.exit(1);
+        }
+        const snapshot = activityMonitor.captureSnapshot();
+        const result = await processCLIInput(input.trim(), world, 'HUMAN');
+        printCLIResult(result);
+
+        try {
+          await activityMonitor.waitForIdle({ snapshot });
+        } catch (error) {
+          console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+        }
+
+        if (!result.success) {
+          setTimeout(() => process.exit(1), 100);
+          return;
+        }
+        return;
+      }
+    }
+
+    if (!options.command && !messageFromArgs) {
+      program.help();
+    }
+
+    if (worldSubscription) {
+      await worldSubscription.unsubscribe();
+    }
+    process.exit(0);
   } catch (error) {
     console.error(boldRed('Error:'), error instanceof Error ? error.message : error);
-    await exitPipeline(1);
+    process.exit(1);
   }
 }
 
 interface WorldState {
-  subscription: WorldSubscription;
+  subscription: any;
   world: World;
-  activityMonitor: WorldActivityMonitor;
-  progressRenderer: ActivityProgressRenderer;
 }
 
-async function cleanupWorldSubscription(worldState: WorldState | null): Promise<void> {
-  if (!worldState?.subscription) return;
-
-  worldState.activityMonitor.reset();
-  worldState.progressRenderer.reset();
-
-  try {
-    await worldState.subscription.unsubscribe();
-  } catch (error) {
-    logger.warn('Failed to clean up world subscription', {
-      error: error instanceof Error ? error.message : error
-    });
+function cleanupWorldSubscription(worldState: WorldState | null): void {
+  if (worldState?.subscription) {
+    worldState.subscription.unsubscribe();
   }
 }
 
@@ -642,24 +569,14 @@ async function handleSubscribe(
   worldName: string,
   streaming: StreamingState,
   globalState: GlobalState,
-  rl?: readline.Interface,
-  onActivityEvent?: (eventData: any, monitor: WorldActivityMonitor, renderer: ActivityProgressRenderer) => void
+  activityMonitor: WorldActivityMonitor,
+  progressRenderer: ActivityProgressRenderer,
+  rl?: readline.Interface
 ): Promise<WorldState | null> {
-  const activityMonitor = new WorldActivityMonitor();
-  const progressRenderer = new ActivityProgressRenderer();
-
   const cliClient: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      if (eventType === 'world-activity') {
-        activityMonitor.handle(eventData);
-        if (onActivityEvent) {
-          onActivityEvent(eventData, activityMonitor, progressRenderer);
-        }
-        return;
-      }
-
-      handleWorldEvent(eventType, eventData, streaming, globalState, rl);
+      handleWorldEvent(eventType, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     },
     onError: (error: string) => {
       console.log(red(`Error: ${error}`));
@@ -669,7 +586,7 @@ async function handleSubscribe(
   const subscription = await subscribeWorld(worldName, cliClient);
   if (!subscription) throw new Error('Failed to load world');
 
-  return { subscription, world: subscription.world as World, activityMonitor, progressRenderer };
+  return { subscription, world: subscription.world as World };
 }
 
 // Handle world events with streaming support
@@ -678,8 +595,22 @@ function handleWorldEvent(
   eventData: any,
   streaming: StreamingState,
   globalState: GlobalState,
+  activityMonitor: WorldActivityMonitor,
+  progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): void {
+  if (eventType === 'world-activity') {
+    const payload = eventData as WorldActivityEventPayload;
+    activityMonitor.handle(payload);
+    progressRenderer.handle(payload);
+
+    if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
+      globalState.awaitingResponse = false;
+      rl.prompt();
+    }
+    return;
+  }
+
   if (handleWorldEventWithStreaming(eventType, eventData, streaming)) {
     return;
   }
@@ -767,6 +698,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
+  const activityMonitor = new WorldActivityMonitor();
+  const progressRenderer = new ActivityProgressRenderer();
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -783,9 +716,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         streaming.content = '';
         streaming.sender = undefined;
         streaming.messageId = undefined;
-      }
-
-      if (!globalState.awaitingResponse) {
+        rl.prompt();
+      } else {
         rl.prompt();
       }
     }, delay);
@@ -802,32 +734,14 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   let currentWorldName = '';
   let isExiting = false;
 
-  const handleActivityEvent = (
-    eventData: ActivityEventPayload,
-    _monitor: WorldActivityMonitor,
-    renderer: ActivityProgressRenderer
-  ) => {
-    const wasAwaiting = globalState.awaitingResponse;
-    renderer.handle(eventData, globalState.awaitingResponse);
-
-    if (eventData.state === 'idle' && wasAwaiting) {
-      globalState.awaitingResponse = false;
-
-      if (streaming.stopWait) streaming.stopWait();
-      clearPromptTimer(globalState);
-
-      if (!streaming.isActive && !isExiting) {
-        rl.prompt();
-      }
-    }
-  };
-
   try {
     // Load initial world or prompt for selection
     if (options.world) {
       logger.debug(`Loading world: ${options.world}`);
       try {
-        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, rl, handleActivityEvent);
+        activityMonitor.reset();
+        progressRenderer.reset();
+        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, progressRenderer, rl);
         currentWorldName = options.world;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -850,7 +764,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       logger.debug(`Loading world: ${selectedWorld}`);
       try {
-        worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl, handleActivityEvent);
+        activityMonitor.reset();
+        progressRenderer.reset();
+        worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, activityMonitor, progressRenderer, rl);
         currentWorldName = selectedWorld;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -881,78 +797,76 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       const trimmedInput = input.trim();
 
       if (!trimmedInput) {
-        if (!globalState.awaitingResponse) {
-          rl.prompt();
-        }
+        rl.prompt();
         return;
       }
 
+      // Check for exit commands before anything else
       const isExitCommand = trimmedInput.toLowerCase() === '/exit' || trimmedInput.toLowerCase() === '/quit';
       if (isExitCommand) {
         if (isExiting) return;
         isExiting = true;
+        // Clear any existing timers immediately
         clearPromptTimer(globalState);
         if (streaming.stopWait) streaming.stopWait();
         console.log(`\n${boldCyan('Goodbye!')}`);
-        if (worldState) {
-          await cleanupWorldSubscription(worldState);
-          worldState = null;
-        }
+        if (worldState) cleanupWorldSubscription(worldState);
         rl.close();
         process.exit(0);
       }
 
-      const isCommand = trimmedInput.startsWith('/');
-      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
-      const monitor = worldState?.activityMonitor || null;
-      const activitySnapshot = !isCommand && monitor ? monitor.captureSnapshot() : undefined;
+        console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
-      if (!isCommand && monitor) {
-        globalState.awaitingResponse = true;
-      }
+        const isCommand = trimmedInput.startsWith('/');
+        let snapshot: ActivityEventSnapshot | null = null;
 
-      console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
+        if (!isCommand) {
+          globalState.awaitingResponse = true;
+          snapshot = activityMonitor.captureSnapshot();
+        }
 
-      let shouldPromptAfter = false;
+        try {
+          const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
-      try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
-
+        // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
-          if (isExiting) return;
+          if (isExiting) return; // Prevent duplicate exit handling
           isExiting = true;
           clearPromptTimer(globalState);
           if (streaming.stopWait) streaming.stopWait();
           console.log(`\n${boldCyan('Goodbye!')}`);
-          if (worldState) {
-            await cleanupWorldSubscription(worldState);
-            worldState = null;
-          }
+          if (worldState) cleanupWorldSubscription(worldState);
           rl.close();
           process.exit(0);
         }
 
+        // Handle world selection command
         if (result.data?.selectWorld) {
           console.log(`\n${boldBlue('Discovering available worlds...')}`);
           const selectedWorld = await selectWorld(rootPath, rl);
 
           if (!selectedWorld) {
             console.log(error('No world selected.'));
-            globalState.awaitingResponse = false;
             rl.prompt();
             return;
           }
 
           logger.debug(`Loading world: ${selectedWorld}`);
           try {
+            // Clean up existing world subscription first
             if (worldState) {
               logger.debug('Cleaning up previous world subscription...');
-              await cleanupWorldSubscription(worldState);
+              cleanupWorldSubscription(worldState);
               worldState = null;
+              // Small delay to ensure cleanup is complete
               await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl, handleActivityEvent);
+            // Subscribe to the new world
+            logger.debug(`Subscribing to world: ${selectedWorld}...`);
+            activityMonitor.reset();
+            progressRenderer.reset();
+            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, activityMonitor, progressRenderer, rl);
             currentWorldName = selectedWorld;
             console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -963,7 +877,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
           }
 
-          globalState.awaitingResponse = false;
+          // Show prompt immediately after world selection
           rl.prompt();
           return;
         }
@@ -976,14 +890,30 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           console.log(success(result.message));
         }
 
+        // if (result.data && !(result.data.sender === 'HUMAN')) {
+        //   // Print a concise summary of result.data if present and not already in message
+        //   if (result.data) {
+        //     if (typeof result.data === 'string') {
+        //       console.log(`${boldMagenta('Data:')} ${result.data}`);
+        //     } else if (result.data.name) {
+        //       // If it's an agent or world object
+        //       console.log(`${boldMagenta('Data:')} ${result.data.name}`);
+        //     } else if (Array.isArray(result.data)) {
+        //       console.log(`${boldMagenta('Data:')} ${result.data.length} items`);
+        //     } else {
+        //       // Fallback: print keys
+        //       console.log(`${boldMagenta('Data:')} ${Object.keys(result.data).join(', ')}`);
+        //     }
+        //   }
+        // }
+
+        // Refresh world if needed
         if (result.refreshWorld && currentWorldName && worldState) {
           try {
             console.log(boldBlue('Refreshing world state...'));
 
-            worldState.activityMonitor.reset();
-            worldState.progressRenderer.reset();
-
-            const refreshedWorld = await worldState.subscription.refresh();
+            // Use the subscription's refresh method to properly destroy old world and create new
+            const refreshedWorld = await worldState.subscription.refresh(rootPath);
             worldState.world = refreshedWorld;
 
             console.log(success('World state refreshed'));
@@ -992,39 +922,41 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           }
         }
 
-        if (!isCommand && monitor) {
-          try {
-            await monitor.waitForIdle({ snapshot: activitySnapshot });
-          } catch (err) {
-            console.error(error(`Error waiting for world activity: ${err instanceof Error ? err.message : 'Unknown error'}`));
-            globalState.awaitingResponse = false;
-            shouldPromptAfter = true;
-          }
-        }
       } catch (err) {
         console.error(error(`Command error: ${err instanceof Error ? err.message : 'Unknown error'}`));
-        if (!isCommand) {
+        if (!isCommand && globalState.awaitingResponse) {
           globalState.awaitingResponse = false;
-          shouldPromptAfter = true;
-        }
-      } finally {
-        if (isCommand || !monitor) {
-          globalState.awaitingResponse = false;
-          shouldPromptAfter = true;
-        }
-      }
-
-      if (isSelectCommand) {
-        if (shouldPromptAfter) {
-          if (streaming.stopWait) streaming.stopWait();
           rl.prompt();
         }
-        return;
+        snapshot = null;
       }
 
-      if (shouldPromptAfter) {
-        if (streaming.stopWait) streaming.stopWait();
+      if (!isCommand && snapshot) {
+        try {
+            await activityMonitor.waitForIdle({ snapshot });
+          } catch (error) {
+            console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+          } finally {
+            if (globalState.awaitingResponse) {
+              globalState.awaitingResponse = false;
+              rl.prompt();
+            }
+          }
+          continue;
+        }
+
+        // Set timer based on input type: commands get short delay, messages get longer delay
+        const isSelectCommand = trimmedInput.toLowerCase() === '/select';
+
+        if (isSelectCommand) {
+          // For select command, prompt is already shown in the handler
+          return;
+      } else if (isCommand) {
+        // For other commands, show prompt immediately
         rl.prompt();
+      } else if (streaming.wait) {
+        // For messages, wait for potential agent responses
+        streaming.wait(5000);
       }
     });
 
@@ -1034,10 +966,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       clearPromptTimer(globalState);
       if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        void cleanupWorldSubscription(worldState);
-        worldState = null;
-      }
+      if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
     });
 
@@ -1048,10 +977,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       clearPromptTimer(globalState);
       if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) {
-        void cleanupWorldSubscription(worldState);
-        worldState = null;
-      }
+      if (worldState) cleanupWorldSubscription(worldState);
       rl.close();
       process.exit(0);
     });
