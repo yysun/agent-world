@@ -21,6 +21,7 @@ describe('Editing Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'chat',
       selectedAgent: null,
       activeAgent: null,
@@ -44,7 +45,7 @@ describe('Editing Domain Module', () => {
   describe('startEditMessage', () => {
     it('should set editing state with messageId and text', () => {
       const result = EditingDomain.startEditMessage(mockState, 'msg-123', 'Original text');
-      
+
       expect(result.editingMessageId).toBe('msg-123');
       expect(result.editingText).toBe('Original text');
     });
@@ -52,16 +53,16 @@ describe('Editing Domain Module', () => {
     it('should preserve other state properties', () => {
       mockState.worldName = 'my-world';
       mockState.messages = [{ id: 'msg1' }] as any;
-      
+
       const result = EditingDomain.startEditMessage(mockState, 'msg-123', 'Text');
-      
+
       expect(result.worldName).toBe('my-world');
       expect(result.messages).toEqual(mockState.messages);
     });
 
     it('should handle empty text', () => {
       const result = EditingDomain.startEditMessage(mockState, 'msg-123', '');
-      
+
       expect(result.editingMessageId).toBe('msg-123');
       expect(result.editingText).toBe('');
     });
@@ -69,9 +70,9 @@ describe('Editing Domain Module', () => {
     it('should override previous editing state', () => {
       mockState.editingMessageId = 'old-msg';
       mockState.editingText = 'old text';
-      
+
       const result = EditingDomain.startEditMessage(mockState, 'new-msg', 'new text');
-      
+
       expect(result.editingMessageId).toBe('new-msg');
       expect(result.editingText).toBe('new text');
     });
@@ -81,9 +82,9 @@ describe('Editing Domain Module', () => {
     it('should clear editing state', () => {
       mockState.editingMessageId = 'msg-123';
       mockState.editingText = 'Some text';
-      
+
       const result = EditingDomain.cancelEditMessage(mockState);
-      
+
       expect(result.editingMessageId).toBeNull();
       expect(result.editingText).toBe('');
     });
@@ -93,9 +94,9 @@ describe('Editing Domain Module', () => {
       mockState.editingText = 'Text';
       mockState.userInput = 'User input';
       mockState.messages = [{ id: 'msg1' }] as any;
-      
+
       const result = EditingDomain.cancelEditMessage(mockState);
-      
+
       expect(result.userInput).toBe('User input');
       expect(result.messages).toEqual(mockState.messages);
     });
@@ -103,9 +104,9 @@ describe('Editing Domain Module', () => {
     it('should work when no editing is active', () => {
       mockState.editingMessageId = null;
       mockState.editingText = '';
-      
+
       const result = EditingDomain.cancelEditMessage(mockState);
-      
+
       expect(result.editingMessageId).toBeNull();
       expect(result.editingText).toBe('');
     });
@@ -115,38 +116,38 @@ describe('Editing Domain Module', () => {
     it('should update editingText with provided value', () => {
       mockState.editingMessageId = 'msg-123';
       mockState.editingText = 'Original';
-      
+
       const result = EditingDomain.updateEditText(mockState, 'Updated text');
-      
+
       expect(result.editingText).toBe('Updated text');
     });
 
     it('should preserve editingMessageId', () => {
       mockState.editingMessageId = 'msg-123';
-      
+
       const result = EditingDomain.updateEditText(mockState, 'New text');
-      
+
       expect(result.editingMessageId).toBe('msg-123');
     });
 
     it('should handle empty string', () => {
       mockState.editingText = 'Some text';
-      
+
       const result = EditingDomain.updateEditText(mockState, '');
-      
+
       expect(result.editingText).toBe('');
     });
 
     it('should handle incremental updates', () => {
       let state = mockState;
       state.editingMessageId = 'msg-123';
-      
+
       state = EditingDomain.updateEditText(state, 'H');
       expect(state.editingText).toBe('H');
-      
+
       state = EditingDomain.updateEditText(state, 'He');
       expect(state.editingText).toBe('He');
-      
+
       state = EditingDomain.updateEditText(state, 'Hello');
       expect(state.editingText).toBe('Hello');
     });
@@ -177,19 +178,19 @@ describe('Editing Domain Module', () => {
   describe('Edit Lifecycle', () => {
     it('should support complete edit workflow', () => {
       let state = mockState;
-      
+
       // Start editing
       state = EditingDomain.startEditMessage(state, 'msg-123', 'Original text');
       expect(state.editingMessageId).toBe('msg-123');
       expect(state.editingText).toBe('Original text');
-      
+
       // Update text
       state = EditingDomain.updateEditText(state, 'Modified text');
       expect(state.editingText).toBe('Modified text');
-      
+
       // Validate
       expect(EditingDomain.isEditTextValid(state.editingText)).toBe(true);
-      
+
       // Cancel
       state = EditingDomain.cancelEditMessage(state);
       expect(state.editingMessageId).toBeNull();
@@ -198,15 +199,15 @@ describe('Editing Domain Module', () => {
 
     it('should handle edit-cancel-edit sequence', () => {
       let state = mockState;
-      
+
       // First edit
       state = EditingDomain.startEditMessage(state, 'msg-1', 'Text 1');
       expect(state.editingMessageId).toBe('msg-1');
-      
+
       // Cancel
       state = EditingDomain.cancelEditMessage(state);
       expect(state.editingMessageId).toBeNull();
-      
+
       // Second edit
       state = EditingDomain.startEditMessage(state, 'msg-2', 'Text 2');
       expect(state.editingMessageId).toBe('msg-2');
@@ -218,7 +219,7 @@ describe('Editing Domain Module', () => {
     it('should handle very long text', () => {
       const longText = 'a'.repeat(100000);
       const result = EditingDomain.updateEditText(mockState, longText);
-      
+
       expect(result.editingText).toBe(longText);
       expect(EditingDomain.isEditTextValid(longText)).toBe(true);
     });
@@ -226,7 +227,7 @@ describe('Editing Domain Module', () => {
     it('should handle special characters', () => {
       const specialText = '<script>alert("xss")</script> @mention #tag';
       const result = EditingDomain.updateEditText(mockState, specialText);
-      
+
       expect(result.editingText).toBe(specialText);
       expect(EditingDomain.isEditTextValid(specialText)).toBe(true);
     });
@@ -234,7 +235,7 @@ describe('Editing Domain Module', () => {
     it('should handle unicode characters', () => {
       const unicodeText = '你好 🚀 مرحبا Здравствуйте';
       const result = EditingDomain.updateEditText(mockState, unicodeText);
-      
+
       expect(result.editingText).toBe(unicodeText);
       expect(EditingDomain.isEditTextValid(unicodeText)).toBe(true);
     });
@@ -242,7 +243,7 @@ describe('Editing Domain Module', () => {
     it('should handle newlines and formatting', () => {
       const multilineText = 'Line 1\nLine 2\n\nLine 4';
       const result = EditingDomain.updateEditText(mockState, multilineText);
-      
+
       expect(result.editingText).toBe(multilineText);
       expect(EditingDomain.isEditTextValid(multilineText)).toBe(true);
     });

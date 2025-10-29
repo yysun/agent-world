@@ -21,6 +21,7 @@ describe('Input Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'chat',
       selectedAgent: null,
       activeAgent: null,
@@ -44,20 +45,20 @@ describe('Input Domain Module', () => {
   describe('updateInput', () => {
     it('should update userInput with provided value', () => {
       const result = InputDomain.updateInput(mockState, 'Hello world');
-      
+
       expect(result.userInput).toBe('Hello world');
       expect(result.worldName).toBe('test-world'); // Other state unchanged
     });
 
     it('should handle empty string', () => {
       const result = InputDomain.updateInput(mockState, '');
-      
+
       expect(result.userInput).toBe('');
     });
 
     it('should handle whitespace-only input', () => {
       const result = InputDomain.updateInput(mockState, '   ');
-      
+
       expect(result.userInput).toBe('   ');
     });
   });
@@ -86,7 +87,7 @@ describe('Input Domain Module', () => {
   describe('validateAndPrepareMessage', () => {
     it('should prepare valid message', () => {
       const result = InputDomain.validateAndPrepareMessage('Hello world', 'test-world');
-      
+
       expect(result).not.toBeNull();
       expect(result!.text).toBe('Hello world');
       expect(result!.message.text).toBe('Hello world');
@@ -100,7 +101,7 @@ describe('Input Domain Module', () => {
 
     it('should trim whitespace from input', () => {
       const result = InputDomain.validateAndPrepareMessage('  Hello  ', 'test-world');
-      
+
       expect(result!.text).toBe('Hello');
       expect(result!.message.text).toBe('Hello');
     });
@@ -117,7 +118,7 @@ describe('Input Domain Module', () => {
     it('should generate unique message IDs', () => {
       const result1 = InputDomain.validateAndPrepareMessage('Hello', 'test-world');
       const result2 = InputDomain.validateAndPrepareMessage('World', 'test-world');
-      
+
       expect(result1!.message.id).not.toBe(result2!.message.id);
     });
   });
@@ -135,7 +136,7 @@ describe('Input Domain Module', () => {
       };
 
       const result = InputDomain.createSendingState(mockState, userMessage);
-      
+
       expect(result.messages).toHaveLength(1);
       expect(result.messages[0]).toBe(userMessage);
       expect(result.userInput).toBe('');
@@ -146,7 +147,7 @@ describe('Input Domain Module', () => {
 
     it('should append to existing messages', () => {
       mockState.messages = [{ id: 'msg1', text: 'Previous', type: 'user', sender: 'human', createdAt: new Date() }] as any;
-      
+
       const userMessage = {
         id: 'user-123',
         sender: 'human',
@@ -158,7 +159,7 @@ describe('Input Domain Module', () => {
       };
 
       const result = InputDomain.createSendingState(mockState, userMessage);
-      
+
       expect(result.messages).toHaveLength(2);
       expect(result.messages[0].id).toBe('msg1');
       expect(result.messages[1]).toBe(userMessage);
@@ -169,9 +170,9 @@ describe('Input Domain Module', () => {
     it('should clear isSending flag', () => {
       mockState.isSending = true;
       mockState.isWaiting = true;
-      
+
       const result = InputDomain.createSentState(mockState);
-      
+
       expect(result.isSending).toBe(false);
       expect(result.isWaiting).toBe(true); // Should remain true until stream ends
     });
@@ -180,9 +181,9 @@ describe('Input Domain Module', () => {
       mockState.isSending = true;
       mockState.messages = [{ id: 'msg1' }] as any;
       mockState.userInput = 'test';
-      
+
       const result = InputDomain.createSentState(mockState);
-      
+
       expect(result.messages).toEqual(mockState.messages);
       expect(result.userInput).toBe('test');
     });
@@ -192,9 +193,9 @@ describe('Input Domain Module', () => {
     it('should set error and clear sending flags', () => {
       mockState.isSending = true;
       mockState.isWaiting = true;
-      
+
       const result = InputDomain.createSendErrorState(mockState, 'Network error');
-      
+
       expect(result.isSending).toBe(false);
       expect(result.isWaiting).toBe(false);
       expect(result.error).toBe('Network error');
@@ -202,9 +203,9 @@ describe('Input Domain Module', () => {
 
     it('should preserve messages', () => {
       mockState.messages = [{ id: 'msg1' }, { id: 'msg2' }] as any;
-      
+
       const result = InputDomain.createSendErrorState(mockState, 'Error occurred');
-      
+
       expect(result.messages).toEqual(mockState.messages);
     });
   });
@@ -213,7 +214,7 @@ describe('Input Domain Module', () => {
     it('should handle very long input text', () => {
       const longText = 'a'.repeat(10000);
       const result = InputDomain.validateAndPrepareMessage(longText, 'test-world');
-      
+
       expect(result!.text).toBe(longText);
       expect(result!.message.text).toBe(longText);
     });
@@ -221,14 +222,14 @@ describe('Input Domain Module', () => {
     it('should handle special characters in input', () => {
       const specialText = '@agent1 Hello! <script>alert("test")</script>';
       const result = InputDomain.validateAndPrepareMessage(specialText, 'test-world');
-      
+
       expect(result!.text).toBe(specialText);
     });
 
     it('should handle unicode characters', () => {
       const unicodeText = '你好世界 🚀 مرحبا';
       const result = InputDomain.validateAndPrepareMessage(unicodeText, 'test-world');
-      
+
       expect(result!.text).toBe(unicodeText);
     });
   });

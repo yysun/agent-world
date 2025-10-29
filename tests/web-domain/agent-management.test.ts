@@ -71,6 +71,7 @@ describe('Agent Management Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'agent',
       selectedAgent: mockAgent,
       activeAgent: null,

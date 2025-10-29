@@ -28,6 +28,7 @@ describe('Deletion Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'chat',
       selectedAgent: null,
       activeAgent: null,
@@ -57,7 +58,7 @@ describe('Deletion Domain Module', () => {
         'Test message',
         false
       );
-      
+
       expect(result.messageToDelete).toEqual({
         id: 'msg-123',
         messageId: 'backend-123',
@@ -73,7 +74,7 @@ describe('Deletion Domain Module', () => {
         'Text',
         false
       );
-      
+
       expect(result.messageToDelete).toBeNull();
     });
 
@@ -85,7 +86,7 @@ describe('Deletion Domain Module', () => {
         sender: 'human',
         createdAt: new Date()
       }] as any;
-      
+
       const result = DeletionDomain.showDeleteConfirmation(
         mockState,
         'msg-123',
@@ -93,13 +94,13 @@ describe('Deletion Domain Module', () => {
         'Test',
         false
       );
-      
+
       expect(result.messageToDelete).toBeNull();
     });
 
     it('should return unchanged state when no currentChat', () => {
       mockState.currentChat = null;
-      
+
       const result = DeletionDomain.showDeleteConfirmation(
         mockState,
         'msg-123',
@@ -107,14 +108,14 @@ describe('Deletion Domain Module', () => {
         'Test message',
         false
       );
-      
+
       expect(result.messageToDelete).toBeNull();
     });
 
     it('should preserve other state properties', () => {
       mockState.userInput = 'test input';
       mockState.loading = true;
-      
+
       const result = DeletionDomain.showDeleteConfirmation(
         mockState,
         'msg-123',
@@ -122,7 +123,7 @@ describe('Deletion Domain Module', () => {
         'Test message',
         false
       );
-      
+
       expect(result.userInput).toBe('test input');
       expect(result.loading).toBe(true);
     });
@@ -135,9 +136,9 @@ describe('Deletion Domain Module', () => {
         messageId: 'backend-123',
         chatId: 'chat-1'
       };
-      
+
       const result = DeletionDomain.hideDeleteConfirmation(mockState);
-      
+
       expect(result.messageToDelete).toBeNull();
     });
 
@@ -149,18 +150,18 @@ describe('Deletion Domain Module', () => {
       };
       mockState.messages = [{ id: 'msg1' }] as any;
       mockState.userInput = 'input';
-      
+
       const result = DeletionDomain.hideDeleteConfirmation(mockState);
-      
+
       expect(result.messages).toEqual(mockState.messages);
       expect(result.userInput).toBe('input');
     });
 
     it('should work when messageToDelete is already null', () => {
       mockState.messageToDelete = null;
-      
+
       const result = DeletionDomain.hideDeleteConfirmation(mockState);
-      
+
       expect(result.messageToDelete).toBeNull();
     });
   });
@@ -172,7 +173,7 @@ describe('Deletion Domain Module', () => {
         messageId: 'backend-123',
         chatId: 'chat-1'
       };
-      
+
       expect(DeletionDomain.canProceedWithDeletion(messageToDelete)).toBe(true);
     });
 
@@ -188,12 +189,12 @@ describe('Deletion Domain Module', () => {
         messageId: 'backend-123',
         chatId: 'chat-1'
       };
-      
+
       const result = DeletionDomain.createDeletionErrorState(
         mockState,
         'Delete failed'
       );
-      
+
       expect(result.error).toBe('Delete failed');
       expect(result.messageToDelete).toBeNull();
     });
@@ -206,12 +207,12 @@ describe('Deletion Domain Module', () => {
       };
       mockState.messages = [{ id: 'msg1' }] as any;
       mockState.isSending = true;
-      
+
       const result = DeletionDomain.createDeletionErrorState(
         mockState,
         'Error'
       );
-      
+
       expect(result.messages).toEqual(mockState.messages);
       expect(result.isSending).toBe(true);
     });
@@ -224,9 +225,9 @@ describe('Deletion Domain Module', () => {
         messageId: 'backend-123',
         chatId: 'chat-1'
       };
-      
+
       const result = DeletionDomain.createDeletionSuccessState(mockState);
-      
+
       expect(result.messageToDelete).toBeNull();
     });
 
@@ -238,9 +239,9 @@ describe('Deletion Domain Module', () => {
       };
       mockState.messages = [{ id: 'msg1' }] as any;
       mockState.error = 'previous error';
-      
+
       const result = DeletionDomain.createDeletionSuccessState(mockState);
-      
+
       expect(result.messages).toEqual(mockState.messages);
       expect(result.error).toBe('previous error');
     });
@@ -249,7 +250,7 @@ describe('Deletion Domain Module', () => {
   describe('Deletion Flow', () => {
     it('should support complete deletion workflow', () => {
       let state = mockState;
-      
+
       // Show confirmation
       state = DeletionDomain.showDeleteConfirmation(
         state,
@@ -260,7 +261,7 @@ describe('Deletion Domain Module', () => {
       );
       expect(state.messageToDelete).not.toBeNull();
       expect(DeletionDomain.canProceedWithDeletion(state.messageToDelete)).toBe(true);
-      
+
       // Success
       state = DeletionDomain.createDeletionSuccessState(state);
       expect(state.messageToDelete).toBeNull();
@@ -268,7 +269,7 @@ describe('Deletion Domain Module', () => {
 
     it('should handle deletion cancellation', () => {
       let state = mockState;
-      
+
       // Show confirmation
       state = DeletionDomain.showDeleteConfirmation(
         state,
@@ -278,7 +279,7 @@ describe('Deletion Domain Module', () => {
         false
       );
       expect(state.messageToDelete).not.toBeNull();
-      
+
       // Cancel
       state = DeletionDomain.hideDeleteConfirmation(state);
       expect(state.messageToDelete).toBeNull();
@@ -286,7 +287,7 @@ describe('Deletion Domain Module', () => {
 
     it('should handle deletion error', () => {
       let state = mockState;
-      
+
       // Show confirmation
       state = DeletionDomain.showDeleteConfirmation(
         state,
@@ -296,7 +297,7 @@ describe('Deletion Domain Module', () => {
         false
       );
       expect(state.messageToDelete).not.toBeNull();
-      
+
       // Error occurs
       state = DeletionDomain.createDeletionErrorState(state, 'Network error');
       expect(state.messageToDelete).toBeNull();
@@ -314,7 +315,7 @@ describe('Deletion Domain Module', () => {
         longText,
         false
       );
-      
+
       expect(result.messageToDelete).not.toBeNull();
     });
 
@@ -327,7 +328,7 @@ describe('Deletion Domain Module', () => {
         specialText,
         false
       );
-      
+
       expect(result.messageToDelete).not.toBeNull();
     });
 
@@ -350,7 +351,7 @@ describe('Deletion Domain Module', () => {
           createdAt: new Date()
         }
       ] as any;
-      
+
       const result = DeletionDomain.showDeleteConfirmation(
         mockState,
         'msg-123',
@@ -358,7 +359,7 @@ describe('Deletion Domain Module', () => {
         'First',
         false
       );
-      
+
       // Should find first matching message
       expect(result.messageToDelete).not.toBeNull();
       expect(result.messageToDelete?.messageId).toBe('backend-1');

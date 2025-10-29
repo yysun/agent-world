@@ -46,6 +46,7 @@ describe('World Export Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'world',
       selectedAgent: null,
       activeAgent: null,

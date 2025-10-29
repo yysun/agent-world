@@ -37,7 +37,8 @@ jest.mock('../../../core/events', () => {
 });
 
 jest.mock('../../../core/llm-manager', () => ({
-  streamAgentResponse: jest.fn()
+  streamAgentResponse: jest.fn(),
+  getLLMQueueStatus: jest.fn(() => ({ activeRequests: 0, queueLength: 0 }))
 }));
 
 describe('shouldAgentRespond', () => {

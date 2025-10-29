@@ -285,6 +285,7 @@ describe('Agent Filtering', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'chat',
       selectedAgent: null,
       activeAgent: null,

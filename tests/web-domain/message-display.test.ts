@@ -64,6 +64,7 @@ describe('Message Display Domain Module', () => {
       messagesLoading: false,
       isSending: false,
       isWaiting: false,
+      agentActivities: {},
       selectedSettingsTarget: 'world',
       selectedAgent: null,
       activeAgent: null,
