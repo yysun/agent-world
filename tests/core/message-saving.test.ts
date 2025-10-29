@@ -8,10 +8,11 @@
  */
 
 // Mock nanoid before any imports
-jest.mock('nanoid', () => ({
+vi.mock('nanoid', () => ({
   nanoid: () => `test-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
 }));
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent, WorldMessageEvent } from '../../core/types';
 import { LLMProvider } from '../../core/types';
@@ -36,9 +37,9 @@ const mockStorageAPI = {
 };
 
 // Mock getStorageWrappers
-jest.mock('../../core/storage/storage-factory', () => ({
-  getStorageWrappers: jest.fn().mockResolvedValue(mockStorageAPI),
-  setStoragePath: jest.fn()
+vi.mock('../../core/storage/storage-factory', () => ({
+  getStorageWrappers: vi.fn().mockResolvedValue(mockStorageAPI),
+  setStoragePath: vi.fn()
 }));
 
 import { publishMessage, subscribeAgentToMessages } from '../../core/events';
@@ -52,7 +53,7 @@ describe('Message Saving with MessageIds', () => {
 
   beforeEach(() => {
     // Reset all mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     mockStorageAPI.reset();
 

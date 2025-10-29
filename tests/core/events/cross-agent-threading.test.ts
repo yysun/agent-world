@@ -5,7 +5,7 @@
  * when messages are saved to multiple agents' memory.
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from 'vitest';
 import { saveIncomingMessageToMemory } from '../../../core/events.js';
 import { LLMProvider, type World, type Agent, type WorldMessageEvent } from '../../../core/types.js';
 import { EventEmitter } from 'events';

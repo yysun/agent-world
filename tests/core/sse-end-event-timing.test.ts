@@ -37,18 +37,18 @@
  * - Verifies fix for MCP timeout errors not reaching frontend
  */
 
-import { jest } from '@jest/globals';
+import { jest } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent, WorldSSEEvent } from '../../core/types.js';
 
 // Mock llm-config to provide fake configuration
-jest.mock('../../core/llm-config.js', () => ({
-  configureLLMProvider: jest.fn<any>(),
-  getLLMProviderConfig: jest.fn<any>().mockReturnValue({
+vi.mock('../../core/llm-config.js', () => ({
+  configureLLMProvider: vi.fn<any>(),
+  getLLMProviderConfig: vi.fn<any>().mockReturnValue({
     apiKey: 'fake-key',
     baseURL: 'https://fake.url'
   }),
-  clearLLMProviderConfig: jest.fn<any>()
+  clearLLMProviderConfig: vi.fn<any>()
 }));
 
 // Unmock llm-manager so we get the real implementation
@@ -67,7 +67,7 @@ describe('SSE End Event Timing', () => {
   let publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     sseEvents = [];
 
     // Create test world with event emitter
@@ -96,7 +96,7 @@ describe('SSE End Event Timing', () => {
     } as Agent;
 
     // Mock publishSSE to capture events
-    publishSSE = jest.fn<any>((w: World, data: Partial<WorldSSEEvent>) => {
+    publishSSE = vi.fn<any>((w: World, data: Partial<WorldSSEEvent>) => {
       sseEvents.push({ type: data.type!, data });
     });
   });

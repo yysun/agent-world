@@ -12,7 +12,7 @@
  * - Provider integration readiness
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 
 describe('AI SDK MCP Integration (Phase 1.3)', () => {
 

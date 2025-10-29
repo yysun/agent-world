@@ -4,15 +4,16 @@
  * Tests for agent deletion, memory clearing, and state management.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as AgentManagementDomain from '../../web/src/domain/agent-management';
 import type { WorldComponentState, Agent } from '../../web/src/types';
 import { LLMProvider } from '../../core/types';
 import api from '../../web/src/api';
 
 // Mock the API
-jest.mock('../../web/src/api', () => ({
-  deleteAgent: jest.fn(),
-  clearAgentMemory: jest.fn(),
+vi.mock('../../web/src/api', () => ({
+  deleteAgent: vi.fn(),
+  clearAgentMemory: vi.fn(),
 }));
 
 const mockApi = api as jest.Mocked<typeof api>;
@@ -92,7 +93,7 @@ describe('Agent Management Domain Module', () => {
     };
 
     // Reset mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('deleteAgent', () => {

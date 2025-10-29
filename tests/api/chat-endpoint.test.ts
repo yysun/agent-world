@@ -12,6 +12,7 @@
  * - Tests that verify both stream=true and stream=false are handled
  */
 
+import { describe, it, expect, beforeEach } from 'vitest';
 import { z } from 'zod';
 
 // Import the schema definition (we'll test it directly)
@@ -221,7 +222,7 @@ describe('Chat Message Schema with Stream Flag', () => {
       };
 
       const result = ChatMessageSchema.parse(validMessage);
-      
+
       // TypeScript should infer these types correctly
       const messageType: string = result.message;
       const senderType: string = result.sender;

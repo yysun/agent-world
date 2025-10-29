@@ -5,6 +5,7 @@
  * using toKebabCase to handle case-insensitive lookups.
  */
 
+import { describe, it, expect } from 'vitest';
 import { toKebabCase } from '../../core/utils.js';
 
 describe('Case-Insensitive Agent Lookup', () => {

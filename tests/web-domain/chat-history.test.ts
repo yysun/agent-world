@@ -4,6 +4,7 @@
  * Tests for chat session management and navigation.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as ChatHistoryDomain from '../../web/src/domain/chat-history';
 import type { WorldComponentState } from '../../web/src/types';
 

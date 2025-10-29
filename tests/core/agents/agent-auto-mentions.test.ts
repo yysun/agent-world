@@ -16,7 +16,7 @@
  * - Validates world tag processing for advanced mention control with stop keywords
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 import {
   hasAnyMentionAtBeginning,
   addAutoMention,

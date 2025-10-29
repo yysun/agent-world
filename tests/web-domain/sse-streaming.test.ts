@@ -4,6 +4,7 @@
  * Tests for Server-Sent Events streaming state management.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as SSEStreamingDomain from '../../web/src/domain/sse-streaming';
 import type { WorldComponentState } from '../../web/src/types';
 

@@ -43,7 +43,7 @@ Object.defineProperty(global, 'performance', {
 // Hoist shared storage pattern for storage-factory mock
 const { getSharedStorage, clearSharedStorage } = vi.hoisted(() => {
   let storage: any = null;
-  
+
   return {
     getSharedStorage: () => {
       if (!storage) {
@@ -61,11 +61,10 @@ const { getSharedStorage, clearSharedStorage } = vi.hoisted(() => {
 });
 
 // Hoist nanoid counter pattern
-const { getNanoidId, incrementNanoidCounter } = vi.hoisted(() => {
+const { getNanoidId } = vi.hoisted(() => {
   let nanoidCounter = 0;
-  
+
   return {
-    incrementNanoidCounter: () => ++nanoidCounter,
     getNanoidId: (size?: number) => {
       const counter = ++nanoidCounter;
       const timestamp = Date.now();
@@ -120,7 +119,7 @@ vi.mock('./core/storage/world-storage', () => ({
 // Mock storage-factory module to use real MemoryStorage with shared instance
 vi.mock('./core/storage/storage-factory', async () => {
   const actualModule = await vi.importActual('./core/storage/storage-factory') as any;
-  
+
   return {
     // Re-export actual functions that integration tests need
     getDefaultRootPath: actualModule.getDefaultRootPath,
@@ -297,20 +296,42 @@ vi.mock('./core/storage/sqlite-storage', () => ({
 
 // Mock sqlite3 module
 vi.mock('sqlite3', () => ({
-  Database: vi.fn<any>().mockImplementation(() => ({
-    run: vi.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+  default: {
+    Database: vi.fn(() => ({
+      run: vi.fn((sql: any, params: any, callback: any) => {
+        if (callback) callback(null);
+      }),
+      get: vi.fn((sql: any, params: any, callback: any) => {
+        if (callback) callback(null, {});
+      }),
+      all: vi.fn((sql: any, params: any, callback: any) => {
+        if (callback) callback(null, []);
+      }),
+      close: vi.fn((callback: any) => {
+        if (callback) callback(null);
+      }),
+      serialize: vi.fn((callback: any) => {
+        if (callback) callback();
+      })
+    })),
+    OPEN_READWRITE: 2,
+    OPEN_CREATE: 4
+  },
+  // Also export named exports for dual-mode compatibility
+  Database: vi.fn(() => ({
+    run: vi.fn((sql: any, params: any, callback: any) => {
       if (callback) callback(null);
     }),
-    get: vi.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+    get: vi.fn((sql: any, params: any, callback: any) => {
       if (callback) callback(null, {});
     }),
-    all: vi.fn<any>().mockImplementation((sql: any, params: any, callback: any) => {
+    all: vi.fn((sql: any, params: any, callback: any) => {
       if (callback) callback(null, []);
     }),
-    close: vi.fn<any>().mockImplementation((callback: any) => {
+    close: vi.fn((callback: any) => {
       if (callback) callback(null);
     }),
-    serialize: vi.fn<any>().mockImplementation((callback: any) => {
+    serialize: vi.fn((callback: any) => {
       if (callback) callback();
     })
   })),

@@ -18,7 +18,7 @@
  * introduced in Option 1 implementation - filtering irrelevant messages from LLM context.
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 import { prepareMessagesForLLM } from '../../../core/utils.js';
 
 describe('Message Formatting Utilities', () => {

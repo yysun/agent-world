@@ -14,7 +14,7 @@
  * - Verifies tool_call_id handling with fallback
  */
 
-import { describe, test, expect, jest, beforeEach } from '@jest/globals';
+import { describe, test, expect, jest, beforeEach } from 'vitest';
 import { filterAndHandleEmptyNamedFunctionCalls } from '../../core/tool-utils.js';
 import type { World, Agent, WorldSSEEvent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
@@ -54,7 +54,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       lastActive: new Date(),
     };
 
-    mockPublishSSE = jest.fn();
+    mockPublishSSE = vi.fn();
   });
 
   test('should return only valid calls when all have names', () => {
@@ -281,7 +281,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
   });
 
   test('should not throw if publishSSE fails', () => {
-    const failingPublishSSE = jest.fn(() => {
+    const failingPublishSSE = vi.fn(() => {
       throw new Error('SSE publish failed');
     });
 

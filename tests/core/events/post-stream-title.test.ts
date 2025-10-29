@@ -5,7 +5,7 @@
  * using current chat's stored messages and not causing mid-stream refresh.
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';

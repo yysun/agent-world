@@ -4,6 +4,7 @@
  * Tests for message UI state management and display operations.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as MessageDisplayDomain from '../../web/src/domain/message-display';
 import type { WorldComponentState, Message } from '../../web/src/types';
 

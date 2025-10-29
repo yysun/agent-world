@@ -4,24 +4,25 @@
  * Tests for markdown export and view operations.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as WorldExportDomain from '../../web/src/domain/world-export';
 import type { WorldComponentState } from '../../web/src/types';
 import api from '../../web/src/api';
 
 // Mock the API
-jest.mock('../../web/src/api', () => ({
-  getWorldMarkdown: jest.fn(),
+vi.mock('../../web/src/api', () => ({
+  getWorldMarkdown: vi.fn(),
 }));
 
 // Mock the markdown renderer
-jest.mock('../../web/src/utils/markdown', () => ({
-  renderMarkdown: jest.fn(),
+vi.mock('../../web/src/utils/markdown', () => ({
+  renderMarkdown: vi.fn(),
 }));
 
 const mockApi = api as jest.Mocked<typeof api>;
 
 // Mock window.open for testing
-const mockWindowOpen = jest.fn();
+const mockWindowOpen = vi.fn();
 (global as any).window = {
   open: mockWindowOpen,
   location: {
@@ -67,7 +68,7 @@ describe('World Export Domain Module', () => {
     };
 
     // Reset mocks and window
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockWindowOpen.mockClear();
 
     // Restore window mock
@@ -121,8 +122,8 @@ describe('World Export Domain Module', () => {
     it('should fetch markdown, render HTML, and open in new window', async () => {
       const mockNewWindow = {
         document: {
-          write: jest.fn(),
-          close: jest.fn(),
+          write: vi.fn(),
+          close: vi.fn(),
         },
       };
       mockWindowOpen.mockReturnValue(mockNewWindow as any);
@@ -240,8 +241,8 @@ describe('World Export Domain Module', () => {
       it('should open window and write content successfully', () => {
         const mockNewWindow = {
           document: {
-            write: jest.fn(),
-            close: jest.fn(),
+            write: vi.fn(),
+            close: vi.fn(),
           },
         };
         mockWindowOpen.mockReturnValue(mockNewWindow as any);
@@ -268,10 +269,10 @@ describe('World Export Domain Module', () => {
       it('should handle errors during window operations', () => {
         const mockNewWindow = {
           document: {
-            write: jest.fn(() => {
+            write: vi.fn(() => {
               throw new Error('Write failed');
             }),
-            close: jest.fn(),
+            close: vi.fn(),
           },
         };
         mockWindowOpen.mockReturnValue(mockNewWindow as any);

@@ -3,7 +3,7 @@
  * Tests the actual scenario from the bug report
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 
 // This test simulates the actual correction logic
 function simulateTypeCorrection(args: any, schema: any): any {

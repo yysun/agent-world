@@ -4,6 +4,7 @@
  * Tests for message deletion confirmation and state management.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as DeletionDomain from '../../web/src/domain/deletion';
 import type { WorldComponentState } from '../../web/src/types';
 

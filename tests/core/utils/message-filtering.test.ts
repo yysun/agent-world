@@ -14,7 +14,7 @@
  * - Tests edge cases for memory pollution prevention
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach } from 'vitest';
 import {
   wouldAgentHaveRespondedToHistoricalMessage,
   prepareMessagesForLLM,

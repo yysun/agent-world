@@ -15,7 +15,7 @@
  * - Validates message count at different stages
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from 'vitest';
 import { prepareMessagesForLLM } from '../../../core/utils';
 import type { World, Agent, WorldMessageEvent, AgentMessage, MessageData } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';

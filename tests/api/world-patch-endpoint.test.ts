@@ -1,19 +1,9 @@
 /**
- * Unit Tests for World PATCH Endpoint
- * 
- * Features tested:
- * - World update schema handles all valid fields
- * - LLM provider and model fields are processed correctly
- * - PATCH requests don't fail when provider/model are omitted
- * - All schema fields are properly handled in update logic
- * 
- * Implementation tested:
- * - WorldUpdateSchema validation behavior
- * - PATCH endpoint field processing logic
- * - Field filtering and update application
+ * World PATCH Endpoint Tests
+ * Tests the PATCH /api/worlds/:worldName endpoint for updating world properties
  */
 
-import { z } from 'zod';
+import { describe, it, expect, beforeEach } from 'vitest'; import { z } from 'zod';
 
 // Copy the WorldUpdateSchema from server/api.ts for testing
 const WorldUpdateSchema = z.object({

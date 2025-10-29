@@ -18,7 +18,7 @@
  * - Tests chatId field preservation and filtering functionality
  */
 
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, jest } from 'vitest';
 
 // We need to unmock agent-storage for this test since we're testing it
 jest.unmock('../../../core/storage/agent-storage');

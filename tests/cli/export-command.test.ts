@@ -4,7 +4,7 @@
  * Tests for the /export command functionality
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 
 describe('Export Command', () => {
   it('should have export command in CLI_COMMAND_MAP', () => {

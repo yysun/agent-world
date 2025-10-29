@@ -1,16 +1,10 @@
 /**
- * Unit Tests for API Timestamp Protection
+ * Timestamp Protection Tests
  * 
- * Features tested:
- * - API validation schemas prevent client timestamp manipulation
- * - Agent update schema excludes timestamp fields
- * - World creation/update handles timestamps correctly
- * 
- * Implementation tested:
- * - AgentUpdateSchema validation behavior
- * - Client timestamp values are filtered out
- * - Only allowed fields pass validation
+ * Tests for timestamp immutability in World and Agent updates
  */
+
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import { z } from 'zod';
 

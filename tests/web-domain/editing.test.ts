@@ -4,6 +4,7 @@
  * Tests for message editing state management and validation.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as EditingDomain from '../../web/src/domain/editing';
 import type { WorldComponentState } from '../../web/src/types';
 

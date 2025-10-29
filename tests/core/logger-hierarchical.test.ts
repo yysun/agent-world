@@ -1,17 +1,18 @@
 /**
- * Tests for Logger Hierarchical Category Resolution
+ * Tests for Hierarchical Logger Instances
  * 
- * This test suite validates that the logger correctly implements hierarchical
- * category resolution where more-specific category log levels override
- * less-specific ones (e.g., LOG_CORE_DB > LOG_CORE > LOG_LEVEL).
+ * Ensures child loggers properly inherit configuration from parent loggers
+ * while maintaining independent log levels when explicitly set.
  */
+
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import { createCategoryLogger, getCategoryLogLevel, initializeLogger } from '../../core/logger.js';
 
 describe('Logger Hierarchical Category Resolution', () => {
   // Save original env vars
   const originalEnv = { ...process.env };
-  
+
   afterEach(() => {
     // Restore original env
     process.env = { ...originalEnv };
@@ -50,10 +51,10 @@ describe('Logger Hierarchical Category Resolution', () => {
       // api.handler.users should inherit from api.handler
       expect(getCategoryLogLevel('api.handler.users')).toBe('info');
       expect(getCategoryLogLevel('api.handler.users.create')).toBe('info');
-      
+
       // api.other should inherit from api
       expect(getCategoryLogLevel('api.other')).toBe('warn');
-      
+
       // Unrelated category falls back to global
       expect(getCategoryLogLevel('storage')).toBe('error');
     });
@@ -95,7 +96,7 @@ describe('Logger Hierarchical Category Resolution', () => {
     it('should preserve dots for hierarchy', () => {
       const logger1 = createCategoryLogger('core.db');
       const logger2 = createCategoryLogger('core.db');
-      
+
       // Same normalized category should return same instance
       expect(logger1).toBe(logger2);
     });
@@ -104,7 +105,7 @@ describe('Logger Hierarchical Category Resolution', () => {
       const logger1 = createCategoryLogger('core-db');
       const logger2 = createCategoryLogger('core_db');
       const logger3 = createCategoryLogger('core.db');
-      
+
       // All should normalize to 'core.db' and return same instance
       expect(logger1).toBe(logger2);
       expect(logger2).toBe(logger3);
@@ -113,7 +114,7 @@ describe('Logger Hierarchical Category Resolution', () => {
     it('should handle mixed separators in hierarchy', () => {
       const logger1 = createCategoryLogger('api-handler_users');
       const logger2 = createCategoryLogger('api.handler.users');
-      
+
       // Should normalize to same hierarchical category
       expect(logger1).toBe(logger2);
       expect(getCategoryLogLevel('api-handler_users')).toBe(getCategoryLogLevel('api.handler.users'));
@@ -164,7 +165,7 @@ describe('Logger Hierarchical Category Resolution', () => {
 
       // Child should have the same level as parent
       expect(childLogger.level).toBe(parentLogger.level);
-      
+
       // Child should be a different instance
       expect(childLogger).not.toBe(parentLogger);
     });
@@ -203,7 +204,7 @@ describe('Logger Hierarchical Category Resolution', () => {
     it('should have access to common pre-made loggers', async () => {
       // Dynamic import to get fresh loggers object
       const { loggers } = await import('../../core/logger.js');
-      
+
       expect(loggers.core).toBeDefined();
       expect(loggers['core.db']).toBeDefined();
       expect(loggers.api).toBeDefined();
@@ -217,12 +218,12 @@ describe('Logger Hierarchical Category Resolution', () => {
 
     it('should cache logger instances correctly', async () => {
       const { createCategoryLogger } = await import('../../core/logger.js');
-      
+
       // Creating the same logger twice should return the same instance
       const logger1 = createCategoryLogger('test.category');
       const logger2 = createCategoryLogger('test.category');
       expect(logger1).toBe(logger2);
-      
+
       // Creating with bindings should return a new instance
       const logger3 = createCategoryLogger('test.category', { foo: 'bar' });
       expect(logger3).not.toBe(logger1);

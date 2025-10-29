@@ -4,6 +4,7 @@
  * Tests for user input handling, validation, and state transitions.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as InputDomain from '../../web/src/domain/input';
 import type { WorldComponentState } from '../../web/src/types';
 

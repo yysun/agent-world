@@ -13,7 +13,7 @@
  * - Ensures ID consistency in memory and events
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach } from 'vitest';
 import { publishMessage, publishMessageWithId } from '../../../core/events';
 import type { World, Agent, AgentMessage } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
@@ -75,19 +75,21 @@ describe('Pre-Generated Message IDs', () => {
       expect(capturedEvent.messageId).toBe(testId);
     });
 
-    test('publishMessageWithId should emit correct event', (done) => {
-      const testId = 'pre-generated-id';
-      const testContent = 'Pre-generated message';
-      const testSender = 'agent';
+    test('publishMessageWithId should emit correct event', () => {
+      return new Promise<void>((resolve) => {
+        const testId = 'pre-generated-id';
+        const testContent = 'Pre-generated message';
+        const testSender = 'agent';
 
-      mockWorld.eventEmitter.on('message', (event) => {
-        expect(event.messageId).toBe(testId);
-        expect(event.content).toBe(testContent);
-        expect(event.sender).toBe(testSender);
-        done();
+        mockWorld.eventEmitter.on('message', (event) => {
+          expect(event.messageId).toBe(testId);
+          expect(event.content).toBe(testContent);
+          expect(event.sender).toBe(testSender);
+          resolve();
+        });
+
+        publishMessageWithId(mockWorld, testContent, testSender, testId);
       });
-
-      publishMessageWithId(mockWorld, testContent, testSender, testId);
     });
 
     test('publishMessage should still generate IDs automatically', () => {
@@ -233,20 +235,22 @@ describe('Pre-Generated Message IDs', () => {
   });
 
   describe('Event Emission', () => {
-    test('publishMessageWithId should emit to eventEmitter immediately', (done) => {
-      const testId = 'immediate-emit-id';
-      let eventReceived = false;
+    test('publishMessageWithId should emit to eventEmitter immediately', () => {
+      return new Promise<void>((resolve) => {
+        const testId = 'immediate-emit-id';
+        let eventReceived = false;
 
-      mockWorld.eventEmitter.on('message', (event) => {
-        eventReceived = true;
-        expect(event.messageId).toBe(testId);
-        done();
+        mockWorld.eventEmitter.on('message', (event) => {
+          eventReceived = true;
+          expect(event.messageId).toBe(testId);
+          resolve();
+        });
+
+        publishMessageWithId(mockWorld, 'Test', 'sender', testId);
+
+        // Event should be received synchronously
+        expect(eventReceived).toBe(true);
       });
-
-      publishMessageWithId(mockWorld, 'Test', 'sender', testId);
-
-      // Event should be received synchronously
-      expect(eventReceived).toBe(true);
     });
 
     test('should handle multiple subscribers correctly', () => {

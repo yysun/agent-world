@@ -3,7 +3,7 @@
  * 
  * Tests for the getMemory functionality across different storage backends.
  */
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage';
 import type { Agent, AgentMessage, StorageAPI, World } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';

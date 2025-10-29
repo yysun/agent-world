@@ -13,7 +13,7 @@
  * - Validates migration logging and behavior
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from 'vitest';
 import { createMemoryStorage } from '../../../core/storage/memory-storage';
 import type { Agent, AgentMessage } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';

@@ -5,7 +5,7 @@
  * common LLM mistakes when generating tool call arguments.
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 
 // We'll test the behavior through the public API since the function is internal
 // This test documents the expected behavior

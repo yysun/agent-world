@@ -6,6 +6,7 @@
  * filtering by message sender instead of message memory ownership.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { WorldComponentState, Message, Agent } from '../../web/src/types';
 
 describe('Agent Filtering', () => {

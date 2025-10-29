@@ -5,6 +5,7 @@
  * environment variables and function calls to fix lookup mismatches.
  */
 
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createCategoryLogger, getCategoryLogLevel, shouldLogForCategory } from '../../core/logger.js';
 
 // We can't directly test the internal normalizeCategoryKey function since it's not exported,

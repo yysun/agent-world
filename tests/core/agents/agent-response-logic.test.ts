@@ -14,7 +14,7 @@
  * - Validates agent response behavior patterns
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from 'vitest';
 import { shouldAgentRespond } from '../../../core/events';
 import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../../core/types';
 import { createMockAgent } from '../mock-helpers';

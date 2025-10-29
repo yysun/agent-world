@@ -5,7 +5,7 @@
  * Validates export format, content accuracy, and chat message inclusion.
  */
 
-import { jest } from '@jest/globals';
+import { jest } from 'vitest';
 import { exportWorldToMarkdown } from '../../core/export.js';
 import * as managers from '../../core/managers.js';
 import * as storageFactory from '../../core/storage/storage-factory.js';
@@ -13,21 +13,21 @@ import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 
 // Mock the managers module
-jest.mock('../../core/managers.js', () => ({
-  getWorld: jest.fn(),
-  listAgents: jest.fn(),
-  getAgent: jest.fn(),
-  getMemory: jest.fn(),
+vi.mock('../../core/managers.js', () => ({
+  getWorld: vi.fn(),
+  listAgents: vi.fn(),
+  getAgent: vi.fn(),
+  getMemory: vi.fn(),
 }));
 
 // Mock the storage factory
-jest.mock('../../core/storage/storage-factory.js', () => ({
-  createStorageWithWrappers: jest.fn(),
+vi.mock('../../core/storage/storage-factory.js', () => ({
+  createStorageWithWrappers: vi.fn(),
 }));
 
 describe('Export Module', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('exportWorldToMarkdown', () => {
@@ -127,7 +127,7 @@ describe('Export Module', () => {
 
       // Mock storage
       const mockStorage = {
-        loadWorldChatFull: jest.fn(),
+        loadWorldChatFull: vi.fn(),
       } as any;
       mockStorage.loadWorldChatFull.mockResolvedValue(mockWorldChat);
 
@@ -205,7 +205,7 @@ describe('Export Module', () => {
       };
 
       const mockStorage = {
-        loadWorldChatFull: jest.fn(),
+        loadWorldChatFull: vi.fn(),
       } as any;
       mockStorage.loadWorldChatFull.mockResolvedValue(null);
 
@@ -252,7 +252,7 @@ describe('Export Module', () => {
       ];
 
       const mockStorage = {
-        loadWorldChatFull: jest.fn(),
+        loadWorldChatFull: vi.fn(),
       } as any;
       mockStorage.loadWorldChatFull.mockResolvedValue(null);
 
@@ -326,7 +326,7 @@ describe('Export Module', () => {
 
       // Mock storage 
       const mockStorage = {
-        loadWorldChatFull: jest.fn(),
+        loadWorldChatFull: vi.fn(),
       } as any;
       mockStorage.loadWorldChatFull.mockResolvedValue(null);
 
@@ -412,7 +412,7 @@ describe('Export Module', () => {
       ];
 
       const mockStorage = {
-        createStorageWithWrappers: jest.fn()
+        createStorageWithWrappers: vi.fn()
       };
 
       // Setup mocks
@@ -530,7 +530,7 @@ describe('Export Module', () => {
       ];
 
       const mockStorage = {
-        loadWorldChatFull: jest.fn()
+        loadWorldChatFull: vi.fn()
       } as any;
 
       (managers.getWorld as jest.MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
@@ -738,7 +738,7 @@ describe('Export Module', () => {
       ];
 
       const mockStorage = {
-        loadWorldChatFull: jest.fn()
+        loadWorldChatFull: vi.fn()
       } as any;
 
       (managers.getWorld as jest.MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);

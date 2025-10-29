@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { jest } from 'vitest';
 
 // Import the modules - they should already be mocked by setup.ts
 import * as openaiDirect from '../../core/openai-direct.js';
@@ -9,7 +9,7 @@ import * as googleDirect from '../../core/google-direct.js';
 describe('LLM tool call flows', () => {
   beforeEach(() => {
     // Don't clear mocks completely, just reset their call history
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     
     // Re-setup the mock return values after clearing
     (openaiDirect.generateOpenAIResponse as jest.MockedFunction<any>).mockResolvedValue('Mock OpenAI response');
@@ -39,7 +39,7 @@ describe('LLM tool call flows', () => {
   test('OpenAI streaming: reconstructs fragmented function.arguments and executes tool once', async () => {
     const fakeClient: any = {};
     const mcpTools: Record<string, any> = {};
-    const publish = jest.fn();
+    const publish = vi.fn();
 
     const response = await openaiDirect.streamOpenAIResponse(fakeClient, 'gpt-test', [], { id: 'agent1', temperature: 0.5, maxTokens: 100, provider: 'openai' } as any, mcpTools as any, {} as any, publish, 'msg1');
 

@@ -6,7 +6,7 @@
  * /integration/test-message-threading.ts
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 import {
   validateMessageThreading,
   type AgentMessage

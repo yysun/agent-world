@@ -4,7 +4,7 @@
  * Tests the actual validateAndCorrectToolArgs integration in executeMCPTool
  */
 
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 
 // Helper function that simulates the validation logic
 function simulateValidation(args: any, schema: any): any {
