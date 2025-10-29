@@ -15,6 +15,8 @@
 // Color helpers
 const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
 const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
+const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
+const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
 const error = (text: string) => `\x1b[1m\x1b[31m✗\x1b[0m ${text}`;
 
 // Streaming state interface
@@ -77,13 +79,15 @@ export function handleStreamingEvents(
   // PHASE 2.2 ENHANCEMENT: Handle tool execution events
   if (eventData.type === 'tool-start' && eventData.toolExecution) {
     const toolName = eventData.toolExecution.toolName;
-    console.log(`\n${gray('🔧')} ${boldGreen('Tool:')} ${toolName} ${gray('starting...')}`);
+    const agentName = eventData.agentName || eventData.sender || 'agent';
+    console.log(`\n${cyan(agentName)} ${gray('calling tool -')} ${yellow(toolName)} ${gray('...')}`);
     return;
   }
 
   if (eventData.type === 'tool-progress' && eventData.toolExecution) {
     const toolName = eventData.toolExecution.toolName;
-    console.log(`${gray('⚙️  Tool:')} ${toolName} ${gray('executing...')}`);
+    const agentName = eventData.agentName || eventData.sender || 'agent';
+    console.log(`${cyan(agentName)} ${gray('continuing tool -')} ${yellow(toolName)} ${gray('...')}`);
     return;
   }
 
@@ -91,13 +95,15 @@ export function handleStreamingEvents(
     const { toolName, duration, resultSize } = eventData.toolExecution;
     const durationText = duration ? `${Math.round(duration)}ms` : 'completed';
     const sizeText = resultSize ? `, ${resultSize} chars` : '';
-    console.log(`${gray('✅ Tool:')} ${toolName} ${gray(`completed (${durationText}${sizeText})`)}`);
+    const agentName = eventData.agentName || eventData.sender || 'agent';
+    console.log(`${cyan(agentName)} ${gray('tool finished -')} ${yellow(toolName)} ${gray(`(${durationText}${sizeText})`)}`);
     return;
   }
 
   if (eventData.type === 'tool-error' && eventData.toolExecution) {
     const { toolName, error: toolError } = eventData.toolExecution;
-    console.log(`${error('❌ Tool:')} ${toolName} ${error(`failed: ${toolError}`)}`);
+    const agentName = eventData.agentName || eventData.sender || 'agent';
+    console.log(`${error(`${agentName} tool failed - ${toolName}: ${toolError}`)}`);
     return;
   }
 

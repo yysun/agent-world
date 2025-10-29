@@ -82,13 +82,14 @@ import {
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
-  handleStreamError,
+  handleStreamError as handleStreamErrorBase,
   handleLogEvent,
-  handleToolError,
-  handleToolStart,
-  handleToolResult,
+  handleToolError as handleToolErrorBase,
+  handleToolStart as handleToolStartBase,
+  handleToolProgress as handleToolProgressBase,
+  handleToolResult as handleToolResultBase,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message, AgentActivityStatus } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -235,6 +236,244 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
+type AgentActivityMap = Record<string, AgentActivityStatus>;
+
+function cloneAgentActivities(map: AgentActivityMap | undefined): AgentActivityMap {
+  return map ? { ...map } : {};
+}
+
+function normalizeAgentId(agentId?: string | null): string {
+  if (!agentId) {
+    return 'agent';
+  }
+  return toKebabCase(agentId);
+}
+
+function setAgentActivity(
+  state: WorldComponentState,
+  agentIdRaw: string | null | undefined,
+  options: {
+    message: string;
+    phase: AgentActivityStatus['phase'];
+    activityId?: number | null;
+    toolName?: string;
+  }
+): WorldComponentState {
+  const agentId = normalizeAgentId(agentIdRaw);
+  const currentActivities = state.agentActivities ?? {};
+  const previous = currentActivities[agentId];
+  const activityId = options.activityId ?? previous?.activityId ?? null;
+  const toolName = options.toolName ?? previous?.toolName;
+
+  const nextEntry: AgentActivityStatus = {
+    agentId,
+    message: options.message,
+    phase: options.phase,
+    activityId,
+    toolName,
+    updatedAt: Date.now()
+  };
+
+  if (
+    previous &&
+    previous.message === nextEntry.message &&
+    previous.phase === nextEntry.phase &&
+    previous.activityId === nextEntry.activityId &&
+    previous.toolName === nextEntry.toolName
+  ) {
+    if (!state.isWaiting) {
+      return { ...state, isWaiting: true };
+    }
+    return state;
+  }
+
+  const nextActivities: AgentActivityMap = {
+    ...currentActivities,
+    [agentId]: nextEntry
+  };
+
+  return {
+    ...state,
+    agentActivities: nextActivities,
+    isWaiting: true
+  };
+}
+
+function clearAgentActivity(
+  state: WorldComponentState,
+  agentIdRaw: string | null | undefined,
+  pendingOperations?: number
+): WorldComponentState {
+  const agentId = normalizeAgentId(agentIdRaw);
+  const currentActivities = state.agentActivities ?? {};
+
+  if (!currentActivities[agentId]) {
+    const pending = pendingOperations ?? 0;
+    if (pending === 0 && state.isWaiting && Object.keys(currentActivities).length === 0) {
+      return { ...state, isWaiting: false };
+    }
+    return state;
+  }
+
+  const nextActivities = cloneAgentActivities(currentActivities);
+  delete nextActivities[agentId];
+
+  const hasRemaining = Object.keys(nextActivities).length > 0;
+  const pending = pendingOperations ?? 0;
+  const shouldWait = hasRemaining || pending > 0;
+
+  return {
+    ...state,
+    agentActivities: nextActivities,
+    isWaiting: shouldWait
+  };
+}
+
+function clearAllAgentActivities(state: WorldComponentState, pendingOperations: number = 0): WorldComponentState {
+  if (!state.agentActivities || Object.keys(state.agentActivities).length === 0) {
+    if (pendingOperations === 0 && state.isWaiting) {
+      return { ...state, isWaiting: false };
+    }
+    return state;
+  }
+
+  const shouldWait = pendingOperations > 0;
+  return {
+    ...state,
+    agentActivities: {},
+    isWaiting: shouldWait ? state.isWaiting : false
+  };
+}
+
+function formatThinkingMessage(agentIdRaw: string | null | undefined): string {
+  return `${normalizeAgentId(agentIdRaw)} thinking ...`;
+}
+
+function formatToolMessage(
+  agentIdRaw: string | null | undefined,
+  action: string,
+  toolName?: string,
+  suffix?: string
+): string {
+  const agentId = normalizeAgentId(agentIdRaw);
+  const segments = [`${agentId} ${action}`];
+  if (toolName) {
+    segments.push(`- ${toolName}`);
+  }
+  if (suffix) {
+    segments.push(suffix);
+  }
+  return segments.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractToolName(eventData: any): string | undefined {
+  return eventData?.toolExecution?.toolName ?? eventData?.toolExecution?.name ?? undefined;
+}
+
+function extractToolAgentId(eventData: any): string | undefined {
+  return eventData?.sender ?? eventData?.agentName ?? eventData?.toolExecution?.agentId ?? undefined;
+}
+
+const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
+  return clearAllAgentActivities(handleStreamErrorBase(state, data));
+};
+
+const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
+  const nextState = handleToolStartBase(state, data);
+  const agentId = extractToolAgentId(data);
+  const toolName = extractToolName(data);
+  const message = formatToolMessage(agentId, 'calling tool', toolName, '...');
+  return setAgentActivity(nextState, agentId, {
+    message,
+    phase: 'tool-start',
+    toolName
+  });
+};
+
+const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
+  const nextState = handleToolProgressBase(state, data);
+  const agentId = extractToolAgentId(data);
+  const toolName = extractToolName(data);
+  const message = formatToolMessage(agentId, 'continuing tool', toolName, '...');
+  return setAgentActivity(nextState, agentId, {
+    message,
+    phase: 'tool-progress',
+    toolName
+  });
+};
+
+const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
+  const nextState = handleToolResultBase(state, data);
+  const agentId = extractToolAgentId(data);
+  const toolName = extractToolName(data);
+
+  const duration = data?.toolExecution?.duration;
+  const resultSize = data?.toolExecution?.resultSize;
+  const parts: string[] = [];
+  if (typeof duration === 'number' && Number.isFinite(duration)) {
+    parts.push(`${Math.round(duration)}ms`);
+  }
+  if (typeof resultSize === 'number' && Number.isFinite(resultSize) && resultSize > 0) {
+    parts.push(`${resultSize} chars`);
+  }
+  const suffix = parts.length > 0 ? `(${parts.join(', ')})` : undefined;
+
+  const message = formatToolMessage(agentId, 'tool finished', toolName, suffix);
+  return setAgentActivity(nextState, agentId, {
+    message,
+    phase: 'tool-result',
+    toolName
+  });
+};
+
+const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
+  const nextState = handleToolErrorBase(state, data);
+  const agentId = extractToolAgentId(data);
+  const toolName = extractToolName(data) ?? 'tool';
+  const toolError = data?.toolExecution?.error ?? 'failed';
+  const message = `${normalizeAgentId(agentId)} tool failed - ${toolName}: ${toolError}`;
+  return setAgentActivity(nextState, agentId, {
+    message,
+    phase: 'tool-error',
+    toolName
+  });
+};
+
+const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
+  if (!activity || (activity.state !== 'processing' && activity.state !== 'idle')) {
+    return state;
+  }
+
+  const activityId = typeof activity.activityId === 'number' ? activity.activityId : null;
+  const pending = typeof activity.pendingOperations === 'number' ? activity.pendingOperations : 0;
+  const source = typeof activity.source === 'string' ? activity.source : '';
+
+  if (source.startsWith('agent:')) {
+    const agentId = source.slice('agent:'.length);
+    if (activity.state === 'processing') {
+      return setAgentActivity(state, agentId, {
+        message: formatThinkingMessage(agentId),
+        phase: 'thinking',
+        activityId
+      });
+    }
+
+    if (activity.state === 'idle') {
+      return clearAgentActivity(state, agentId, pending);
+    }
+  } else {
+    if (activity.state === 'processing') {
+      return state.isWaiting ? state : { ...state, isWaiting: true };
+    }
+
+    if (activity.state === 'idle' && pending === 0) {
+      return clearAllAgentActivities(state, pending);
+    }
+  }
+
+  return state;
+};
+
 // World initialization with core auto-restore
 async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
@@ -289,6 +528,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       rawMessages,
       loading: false,
       needScroll: true,
+      agentActivities: {},
+      isWaiting: false,
     };
 
   } catch (error: any) {
@@ -297,6 +538,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       error: error.message || 'Failed to load world data',
       loading: false,
       needScroll: false,
+      agentActivities: {},
+      isWaiting: false,
     };
   }
 }
@@ -443,10 +686,12 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
     hasError: true
   };
 
+  const clearedState = clearAllAgentActivities(state);
+
   return {
-    ...state,
+    ...clearedState,
     error: errorMessage,
-    messages: [...(state.messages || []), errorMsg],
+    messages: [...(clearedState.messages || []), errorMsg],
     needScroll: true,
     isWaiting: false
   };
@@ -490,7 +735,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
     if (!prepared) return state;
 
-    const newState = InputDomain.createSendingState(state, prepared.message);
+    const sendingState = InputDomain.createSendingState(state, prepared.message);
+    const newState: WorldComponentState = {
+      ...sendingState,
+      agentActivities: {}
+    };
 
     try {
       // Send the message via SSE stream
@@ -517,7 +766,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleError': handleError,
   'handleToolError': handleToolError,
   'handleToolStart': handleToolStart,
+  'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
+  'handleWorldActivity': handleWorldActivity,
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
   // ========================================

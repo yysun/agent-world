@@ -47,10 +47,13 @@ export default class WorldComponent extends Component<WorldComponentState, World
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
-    activeAgentFilters: [] as string[]  // Per-agent badge toggle filter state
+    activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
+    agentActivities: {}
   };
 
   override view = (state: WorldComponentState) => {
+
+    const agentActivities = Object.values(state.agentActivities ?? {}).sort((a, b) => a.updatedAt - b.updatedAt);
 
     // Guard clauses for loading and error states
     // if (state.loading) {
@@ -163,6 +166,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               messagesLoading={state.messagesLoading}
               isSending={state.isSending}
               isWaiting={state.isWaiting}
+              agentActivities={agentActivities}
               needScroll={state.needScroll}
               activeAgent={state.activeAgent}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}

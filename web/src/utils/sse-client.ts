@@ -81,7 +81,25 @@ interface SSECompleteData extends SSEBaseData {
   payload?: any;
 }
 
-type SSEData = SSEStreamingData | SSEMessageData | SSEErrorData | SSEConnectionData | SSECompleteData | SSEBaseData;
+interface SSEWorldActivityData extends SSEBaseData {
+  type: 'world-activity';
+  data?: {
+    state?: string;
+    pendingOperations?: number;
+    activityId?: number;
+    timestamp?: string;
+    source?: string;
+  };
+}
+
+type SSEData =
+  | SSEStreamingData
+  | SSEMessageData
+  | SSEErrorData
+  | SSEConnectionData
+  | SSECompleteData
+  | SSEWorldActivityData
+  | SSEBaseData;
 
 // Streaming state management
 interface ActiveStreamMessage {
@@ -128,6 +146,9 @@ const handleSSEData = (data: SSEData): void => {
       break;
     case 'error':
       publishEvent('handleError', { message: data.message || 'SSE error' });
+      break;
+    case 'world-activity':
+      publishEvent('handleWorldActivity', data.data ?? data.payload ?? data);
       break;
   }
 };
@@ -431,7 +452,7 @@ export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: Str
   const targetId = activeStreamMessageId ?? data.messageId;
 
   state.messages = state.messages.filter(msg => msg.messageId !== targetId);
-  return { ...state, activeStreamMessageId: undefined, needScroll: false, isWaiting: false };
+  return { ...state, activeStreamMessageId: undefined, needScroll: false };
 };
 
 // Handle streaming errors
@@ -540,8 +561,7 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
     ...state,
     messages: [...(state.messages || []), toolStartMessage],
     activeStreamMessageId: messageId,
-    needScroll: true,
-    isWaiting: false
+    needScroll: true
   };
 };
 
@@ -573,8 +593,7 @@ export const handleToolProgress = <T extends SSEComponentState>(state: T, data: 
     ...state,
     messages,
     activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
-    needScroll: true,
-    isWaiting: false
+    needScroll: true
   };
 };
 
@@ -612,8 +631,7 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
     ...state,
     messages,
     activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
-    needScroll: true,
-    isWaiting: false
+    needScroll: true
   };
 };
 
@@ -658,8 +676,7 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
       ...state,
       messages: [...messages, toolErrorMessage],
       activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
-      needScroll: true,
-      isWaiting: false
+      needScroll: true
     };
   }
 
@@ -667,8 +684,7 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
     ...state,
     messages,
     activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
-    needScroll: true,
-    isWaiting: false
+    needScroll: true
   };
 };
 

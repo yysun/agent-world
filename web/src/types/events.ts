@@ -184,8 +184,14 @@ export type WorldEvents =
   /** Handle tool start event */
   | { name: 'handleToolStart'; payload: any }
 
+  /** Handle tool progress event */
+  | { name: 'handleToolProgress'; payload: any }
+
   /** Handle tool result event */
   | { name: 'handleToolResult'; payload: any }
+
+  /** Handle world activity event */
+  | { name: 'handleWorldActivity'; payload: any }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
