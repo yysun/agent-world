@@ -43,7 +43,8 @@ import {
   AgentMessage, MessageData, SenderType, Chat, WorldChat
 } from './types.js';
 import { generateId } from './utils.js';
-import { generateAgentResponse, getLLMQueueStatus } from './llm-manager.js';
+import { generateAgentResponse } from './llm-manager.js';
+import { beginWorldActivity } from './activity-tracker.js';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
 import { createCategoryLogger } from './logger.js';
@@ -61,95 +62,6 @@ const loggerChatTitle = createCategoryLogger('core.events.chattitle');
 let globalStreamingEnabled = true;
 export function enableStreaming(): void { globalStreamingEnabled = true; }
 export function disableStreaming(): void { globalStreamingEnabled = false; }
-
-
-// --- World activity tracking -------------------------------------------------
-
-type ActivityState = {
-  pendingOperations: number;
-  lastActivityId: number;
-  activeActivityId: number | null;
-};
-
-type ActivityEventState = 'processing' | 'idle';
-
-const worldActivityStateKey: unique symbol = Symbol('worldActivityState');
-
-function getActivityState(world: World): ActivityState {
-  const existing = (world as any)[worldActivityStateKey] as ActivityState | undefined;
-  if (existing) {
-    return existing;
-  }
-
-  const initial: ActivityState = {
-    pendingOperations: 0,
-    lastActivityId: 0,
-    activeActivityId: null
-  };
-
-  (world as any)[worldActivityStateKey] = initial;
-  return initial;
-}
-
-function scheduleMicrotask(task: () => void): void {
-  if (typeof queueMicrotask === 'function') {
-    queueMicrotask(task);
-  } else {
-    Promise.resolve().then(task).catch((error) => {
-      loggerPublish.error('Failed to schedule microtask for world activity cleanup', {
-        error: error instanceof Error ? error.message : error
-      });
-    });
-  }
-}
-
-function emitActivityEvent(world: World, state: ActivityEventState, pendingOperations: number, source?: string): void {
-  const activityState = getActivityState(world);
-  const activityId = activityState.activeActivityId ?? activityState.lastActivityId;
-
-  world.isProcessing = state === 'processing';
-
-  const payload = {
-    state,
-    pendingOperations,
-    timestamp: new Date().toISOString(),
-    activityId,
-    source,
-    queue: getLLMQueueStatus()
-  };
-
-  world.eventEmitter.emit('world-activity', payload);
-  world.eventEmitter.emit(state, payload);
-}
-
-function beginWorldActivity(world: World, source?: string): () => void {
-  const activityState = getActivityState(world);
-  activityState.pendingOperations += 1;
-
-  if (activityState.pendingOperations === 1) {
-    activityState.lastActivityId += 1;
-    activityState.activeActivityId = activityState.lastActivityId;
-  }
-
-  emitActivityEvent(world, 'processing', activityState.pendingOperations, source);
-
-  let completed = false;
-  return () => {
-    if (completed) return;
-    completed = true;
-
-    const state = getActivityState(world);
-    state.pendingOperations = Math.max(0, state.pendingOperations - 1);
-
-    if (state.pendingOperations === 0) {
-      const completedActivityId = state.activeActivityId ?? state.lastActivityId;
-      state.activeActivityId = null;
-      emitActivityEvent(world, 'idle', 0, source ?? `activity:${completedActivityId}`);
-    } else {
-      emitActivityEvent(world, 'processing', state.pendingOperations, source);
-    }
-  };
-}
 
 
 
@@ -192,7 +104,6 @@ export function publishMessage(world: World, content: string, sender: string, ch
   };
 
   const completeActivity = beginWorldActivity(world, `message:${sender}`);
-
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
     sender,
@@ -202,7 +113,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
   });
 
   world.eventEmitter.emit('message', messageEvent);
-  scheduleMicrotask(completeActivity);
+  queueMicrotask(completeActivity);
   return messageEvent;
 }
 
@@ -223,7 +134,7 @@ export function publishMessageWithId(world: World, content: string, sender: stri
   };
   const completeActivity = beginWorldActivity(world, `message:${sender}`);
   world.eventEmitter.emit('message', messageEvent);
-  scheduleMicrotask(completeActivity);
+  queueMicrotask(completeActivity);
   return messageEvent;
 }
 
@@ -716,7 +627,8 @@ export async function processAgentMessage(
   } catch (error) {
     loggerAgent.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     publishEvent(world, 'system', { message: `[Error] ${(error as Error).message}`, type: 'error' });
-  } finally {
+  }
+  finally {
     completeActivity();
   }
 }
