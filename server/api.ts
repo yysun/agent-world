@@ -555,50 +555,86 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
 // Chat Helper Functions
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   disableStreaming();
+  let subscription: Awaited<ReturnType<typeof subscribeWorld>> | null = null;
   try {
     let responseContent = '';
-    let isComplete = false;
     let hasError = false;
     let errorMessage = '';
+    let idleResolved = false;
 
-    const responsePromise = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (!isComplete) {
-          hasError = true;
-          errorMessage = 'Request timeout - no response received within 15 seconds';
-          reject(new Error(errorMessage));
-        }
-      }, 15000);
-
-      const client: ClientConnection = {
-        isOpen: true,
-        onWorldEvent: (eventType: string, eventData: any) => {
-          responseContent = JSON.stringify({ type: eventType, data: eventData });
-          clearTimeout(timer);
-          isComplete = true;
-          resolve();
-        }
-      };
-
-      subscribeWorld(worldName, client).then(subscription => {
-        if (!subscription) {
-          hasError = true;
-          errorMessage = 'Failed to subscribe to world';
-          reject(new Error(errorMessage));
-          return;
-        }
-        publishMessage(subscription.world, message, sender);
-      }).catch(error => {
-        hasError = true;
-        errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
-        reject(new Error(errorMessage));
-      });
+    let idleResolve: (() => void) | null = null;
+    const idlePromise = new Promise<void>((resolve) => {
+      idleResolve = resolve;
     });
 
-    await responsePromise;
+    let fallbackTimer: NodeJS.Timeout | null = null;
+
+    const resolveIdle = () => {
+      if (idleResolved) return;
+      idleResolved = true;
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      idleResolve?.();
+    };
+
+    fallbackTimer = setTimeout(() => {
+      if (idleResolved) return;
+      hasError = true;
+      errorMessage = 'Request timeout - world did not become idle within 30 seconds';
+      resolveIdle();
+    }, 30000);
+
+    const client: ClientConnection = {
+      isOpen: true,
+      onWorldEvent: (eventType: string, eventData: any) => {
+        if (eventType === 'message') {
+          responseContent = JSON.stringify({ type: eventType, data: eventData });
+        }
+
+        if (eventType === 'world-activity') {
+          if (eventData?.state === 'idle') {
+            resolveIdle();
+          }
+          return;
+        }
+
+        if (eventType === 'processing') {
+          return;
+        }
+
+        if (eventType === 'idle') {
+          resolveIdle();
+          return;
+        }
+
+        if (eventType === 'error') {
+          hasError = true;
+          errorMessage = typeof eventData === 'string' ? eventData : eventData?.message || 'Unknown world error';
+          resolveIdle();
+        }
+      },
+      onError: (error: string) => {
+        hasError = true;
+        errorMessage = error;
+        resolveIdle();
+      }
+    };
+
+    subscription = await subscribeWorld(worldName, client);
+    if (!subscription) {
+      resolveIdle();
+      sendError(res, 500, 'Failed to subscribe to world', 'CHAT_ERROR');
+      return;
+    }
+
+    publishMessage(subscription.world, message, sender);
+
+    await idlePromise;
 
     if (hasError) {
-      sendError(res, 500, errorMessage, 'CHAT_ERROR');
+      sendError(res, 500, errorMessage || 'Failed to process message', 'CHAT_ERROR');
       return;
     }
 
@@ -613,6 +649,9 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
   } catch (error) {
     sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
   } finally {
+    if (subscription) {
+      await subscription.unsubscribe();
+    }
     enableStreaming();
   }
 }
@@ -624,51 +663,35 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let hasReceivedEvents = false;
   let isResponseEnded = false;
-  let lastEventTime = Date.now();
-  let activeAgents = new Set<string>();
-  let pendingEvents = 0;
-  let activeToolCalls = new Set<string>(); // Track active MCP tool executions
+  let subscription: Awaited<ReturnType<typeof subscribeWorld>> | null = null;
 
-  const resetTimer = (delay: number = 8000): void => {
-    if (timer) clearTimeout(timer);
-    if (isResponseEnded) return;
+  let idleResolved = false;
+  let idleResolve: (() => void) | null = null;
+  const idlePromise = new Promise<void>((resolve) => {
+    idleResolve = resolve;
+  });
 
-    timer = setTimeout(() => {
-      if (!isResponseEnded) {
-        const timeSinceLastEvent = Date.now() - lastEventTime;
-        const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0 || activeToolCalls.size > 0;
+  let fallbackTimer: NodeJS.Timeout | null = null;
 
-        loggerStream.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}, activeToolCalls=${activeToolCalls.size}`);
-
-        // Only end if we've had events and no recent activity
-        if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
-          loggerStream.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
-          endResponse();
-        } else if (!hasReceivedEvents && timeSinceLastEvent >= 15000) {
-          // Fallback: if no events received at all after 15 seconds
-          loggerStream.debug('Ending stream: no events received within 15 seconds');
-          endResponse();
-        } else {
-          // Continue waiting - reset timer for shorter interval
-          resetTimer(3000);
-        }
-      }
-    }, delay);
+  const resolveIdle = () => {
+    if (idleResolved) return;
+    idleResolved = true;
+    if (fallbackTimer) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+    }
+    idleResolve?.();
   };
+
+  fallbackTimer = setTimeout(() => {
+    loggerStream.warn('Streaming fallback timeout waiting for world to become idle', { worldName });
+    resolveIdle();
+  }, 60000);
 
   const endResponse = (): void => {
     if (isResponseEnded) return;
     isResponseEnded = true;
-
-    if (timer) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-
-    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}, activeToolCalls=${activeToolCalls.size}`);
 
     try {
       if (!res.destroyed) {
@@ -684,55 +707,51 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
     try {
       res.write(`data: ${data}\n\n`);
-      hasReceivedEvents = true;
-      lastEventTime = Date.now();
-      // Reset the timer on each event to allow for continued activity
-      resetTimer(8000);
     } catch (error) {
       loggerStream.debug('Error writing SSE data:', error);
+      resolveIdle();
       endResponse();
+    }
+  };
+
+  const forwardActivityEvent = (state: string | undefined, eventData: any) => {
+    if (!eventData) return;
+    sendSSE(JSON.stringify({ type: 'world-activity', data: { ...eventData, state } }));
+    if (state === 'idle') {
+      resolveIdle();
     }
   };
 
   const client: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      // Track agent activity for better timeout management
-      if (eventType === 'sse') {
-        const agentName = eventData.agentName;
-        if (agentName) {
-          if (eventData.type === 'start') {
-            activeAgents.add(agentName);
-            pendingEvents++;
-            loggerStream.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-          } else if (eventData.type === 'end' || eventData.type === 'error') {
-            activeAgents.delete(agentName);
-            pendingEvents = Math.max(0, pendingEvents - 1);
-            loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-          }
-          // Track MCP tool executions to prevent premature stream closure
-          else if (eventData.type === 'tool-start') {
-            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
-            activeToolCalls.add(toolKey);
-            pendingEvents++;
-            loggerStream.debug(`Tool start: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-          } else if (eventData.type === 'tool-result' || eventData.type === 'tool-error') {
-            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
-            activeToolCalls.delete(toolKey);
-            pendingEvents = Math.max(0, pendingEvents - 1);
-            loggerStream.debug(`Tool ${eventData.type === 'tool-error' ? 'error' : 'complete'}: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-          }
-        }
+      if (eventType === 'world-activity') {
+        forwardActivityEvent(eventData?.state, eventData);
+        return;
       }
-      // Convert message events to include complete data for frontend
-      else if (eventType === 'message') {
-        // Enhance message event data with structured format
+
+      if (eventType === 'processing') {
+        forwardActivityEvent('processing', eventData);
+        return;
+      }
+
+      if (eventType === 'idle') {
+        forwardActivityEvent('idle', eventData);
+        return;
+      }
+
+      if (eventType === 'sse') {
+        sendSSE(JSON.stringify({ type: 'sse', data: eventData }));
+        return;
+      }
+
+      if (eventType === 'message') {
         const messageData = {
           type: 'message',
           sender: eventData.sender,
           content: eventData.content,
           messageId: eventData.messageId,
-          replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
+          replyToMessageId: eventData.replyToMessageId,
           createdAt: eventData.timestamp || new Date().toISOString()
         };
         sendSSE(JSON.stringify({ type: 'message', data: messageData }));
@@ -742,7 +761,6 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       sendSSE(JSON.stringify({ type: eventType, data: eventData }));
     },
     onLog: (logEvent) => {
-      // Stream log events as SSE data with 'sse' type and 'log' subtype
       sendSSE(JSON.stringify({
         type: 'sse',
         data: {
@@ -762,45 +780,53 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     onError: (error: string) => {
       loggerStream.error(`World error: ${error}`);
       sendSSE(JSON.stringify({ type: 'error', message: error }));
-      // Don't immediately end on error - let natural timeout handle it
-      // unless it's a critical error
-      if (error.includes('Failed to') || error.includes('Critical')) {
-        setTimeout(() => endResponse(), 1000);
-      }
+      resolveIdle();
     }
   };
 
-  const subscription = await subscribeWorld(worldName, client);
+  subscription = await subscribeWorld(worldName, client);
   if (!subscription) {
     loggerStream.error('Unexpected: subscription is null after world existence check');
     sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
+    resolveIdle();
     endResponse();
     return;
   }
 
+  const cleanupSubscription = async () => {
+    if (subscription) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+  };
+
+  req.on('close', () => {
+    loggerStream.debug('Chat client disconnected, cleaning up');
+    resolveIdle();
+    endResponse();
+    void cleanupSubscription();
+  });
+
   try {
-    const messageEvent = publishMessage(subscription.world, message, sender);
-
-    // Message is automatically sent via the event listener in subscription
-    // No need to send explicitly - would cause duplicate
-
-    // Start the initial timer - give more time for the first event
-    resetTimer(12000);
-  }
-  catch (error) {
+    publishMessage(subscription.world, message, sender);
+  } catch (error) {
     sendSSE(JSON.stringify({
       type: 'error',
       message: 'Failed to send message',
       data: { error: error instanceof Error ? error.message : String(error) }
     }));
-    setTimeout(() => endResponse(), 1000);
+    resolveIdle();
+    endResponse();
+    await cleanupSubscription();
+    return;
   }
 
-  req.on('close', () => {
-    loggerStream.debug('Chat client disconnected, cleaning up');
-    endResponse();
-    subscription?.unsubscribe();
-  });
+  try {
+    await idlePromise;
+  } finally {
+    setTimeout(() => endResponse(), 25).unref?.();
+    await cleanupSubscription();
+  }
 }
 
 // Chat Routes
