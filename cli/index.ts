@@ -49,6 +49,7 @@ import {
   enableStreaming,
   disableStreaming
 } from '../core/index.js';
+import { WorldSubscription } from '../core/subscription.js';
 import { World } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput } from './commands.js';
@@ -65,6 +66,7 @@ const logger = createCategoryLogger('cli');
 // Timer management for prompt restoration
 interface GlobalState {
   promptTimer?: ReturnType<typeof setTimeout>;
+  awaitingResponse: boolean;
 }
 
 function setupPromptTimer(
@@ -85,7 +87,9 @@ function clearPromptTimer(globalState: GlobalState): void {
 }
 
 function createGlobalState(): GlobalState {
-  return {};
+  return {
+    awaitingResponse: false
+  };
 }
 
 // Color helpers - consolidated styling API
@@ -108,6 +112,228 @@ const boldCyan = (text: string) => `\x1b[1m\x1b[36m${text}\x1b[0m`;
 const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
+
+
+type ActivityEventState = 'processing' | 'idle';
+
+interface ActivityEventPayload {
+  state?: ActivityEventState;
+  pendingOperations?: number;
+  activityId?: number;
+  timestamp?: string;
+  source?: string;
+}
+
+interface ActivitySnapshot {
+  activityId: number;
+  timestampMs: number;
+  state: ActivityEventState | null;
+}
+
+interface IdleWaiter {
+  startedAt: number;
+  snapshot: ActivitySnapshot;
+  seenProcessing: boolean;
+  targetActivityId: number | null;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
+  noActivityTimeoutId?: ReturnType<typeof setTimeout>;
+  resolved: boolean;
+}
+
+class WorldActivityMonitor {
+  private lastEvent: (ActivitySnapshot & { pendingOperations: number; source?: string }) | null = null;
+  private waiters: Set<IdleWaiter> = new Set();
+
+  captureSnapshot(): ActivitySnapshot {
+    const now = Date.now();
+
+    if (!this.lastEvent) {
+      return {
+        activityId: 0,
+        timestampMs: now,
+        state: null
+      };
+    }
+
+    return {
+      activityId: this.lastEvent.activityId,
+      timestampMs: this.lastEvent.timestampMs,
+      state: this.lastEvent.state
+    };
+  }
+
+  handle(eventData: ActivityEventPayload): void {
+    if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+      return;
+    }
+
+    const timestampMsRaw = eventData.timestamp ? Date.parse(eventData.timestamp) : Date.now();
+    const timestampMs = Number.isFinite(timestampMsRaw) ? timestampMsRaw : Date.now();
+    const activityId = typeof eventData.activityId === 'number'
+      ? eventData.activityId
+      : this.lastEvent?.activityId ?? 0;
+
+    this.lastEvent = {
+      activityId,
+      timestampMs,
+      state: eventData.state,
+      pendingOperations: eventData.pendingOperations ?? (eventData.state === 'processing' ? 1 : 0),
+      source: eventData.source
+    };
+
+    this.evaluateWaiters();
+  }
+
+  async waitForIdle(options: {
+    snapshot?: ActivitySnapshot;
+    timeoutMs?: number;
+    noActivityTimeoutMs?: number;
+  } = {}): Promise<void> {
+    const {
+      snapshot = this.captureSnapshot(),
+      timeoutMs = 60_000,
+      noActivityTimeoutMs = 1_000
+    } = options;
+
+    const last = this.lastEvent;
+    const now = Date.now();
+
+    if (last && last.state === 'idle') {
+      const hasNewIdle = last.activityId > snapshot.activityId || last.timestampMs > snapshot.timestampMs;
+      if (hasNewIdle) {
+        return;
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter: IdleWaiter = {
+        startedAt: now,
+        snapshot,
+        seenProcessing: false,
+        targetActivityId: null,
+        resolve,
+        reject,
+        resolved: false
+      };
+
+      const finish = (error?: Error) => {
+        if (waiter.resolved) return;
+        waiter.resolved = true;
+        if (waiter.timeoutId) clearTimeout(waiter.timeoutId);
+        if (waiter.noActivityTimeoutId) clearTimeout(waiter.noActivityTimeoutId);
+        this.waiters.delete(waiter);
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+
+      if (timeoutMs > 0) {
+        waiter.timeoutId = setTimeout(() => {
+          finish(new Error('Timed out waiting for world to become idle'));
+        }, timeoutMs);
+      }
+
+      if (noActivityTimeoutMs > 0) {
+        waiter.noActivityTimeoutId = setTimeout(() => {
+          if (!waiter.seenProcessing) {
+            finish();
+          }
+        }, noActivityTimeoutMs);
+      }
+
+      if (last) {
+        if (last.state === 'processing') {
+          const afterSnapshot =
+            last.activityId > snapshot.activityId ||
+            last.timestampMs >= snapshot.timestampMs ||
+            snapshot.state !== 'processing';
+
+          if (afterSnapshot) {
+            waiter.seenProcessing = true;
+            waiter.targetActivityId = last.activityId;
+            if (waiter.noActivityTimeoutId) {
+              clearTimeout(waiter.noActivityTimeoutId);
+              waiter.noActivityTimeoutId = undefined;
+            }
+          }
+        } else if (last.state === 'idle') {
+          const hasNewIdle =
+            last.activityId > snapshot.activityId ||
+            last.timestampMs > snapshot.timestampMs;
+
+          if (hasNewIdle) {
+            finish();
+            return;
+          }
+        }
+      }
+
+      this.waiters.add(waiter);
+      this.evaluateWaiters();
+    });
+  }
+
+  isIdle(): boolean {
+    return this.lastEvent?.state === 'idle';
+  }
+
+  reset(): void {
+    for (const waiter of Array.from(this.waiters)) {
+      this.finishWaiter(waiter, new Error('Activity monitor reset'));
+    }
+    this.lastEvent = null;
+  }
+
+  private evaluateWaiters(): void {
+    if (!this.lastEvent) return;
+
+    for (const waiter of Array.from(this.waiters)) {
+      if (!waiter.seenProcessing && this.lastEvent.state === 'processing') {
+        const afterSnapshot =
+          this.lastEvent.activityId > waiter.snapshot.activityId ||
+          this.lastEvent.timestampMs >= waiter.snapshot.timestampMs ||
+          waiter.snapshot.state !== 'processing';
+
+        if (afterSnapshot) {
+          waiter.seenProcessing = true;
+          waiter.targetActivityId = this.lastEvent.activityId;
+          if (waiter.noActivityTimeoutId) {
+            clearTimeout(waiter.noActivityTimeoutId);
+            waiter.noActivityTimeoutId = undefined;
+          }
+        }
+      }
+
+      if (this.lastEvent.state === 'idle') {
+        const idleAfterStart = this.lastEvent.timestampMs >= waiter.startedAt;
+        const activitySatisfied =
+          waiter.targetActivityId === null ||
+          this.lastEvent.activityId >= waiter.targetActivityId;
+
+        if ((waiter.seenProcessing || waiter.targetActivityId === null) && idleAfterStart && activitySatisfied) {
+          this.finishWaiter(waiter);
+        }
+      }
+    }
+  }
+
+  private finishWaiter(waiter: IdleWaiter, error?: Error): void {
+    if (waiter.resolved) return;
+    waiter.resolved = true;
+    if (waiter.timeoutId) clearTimeout(waiter.timeoutId);
+    if (waiter.noActivityTimeoutId) clearTimeout(waiter.noActivityTimeoutId);
+    this.waiters.delete(waiter);
+    if (error) {
+      waiter.reject(error);
+    } else {
+      waiter.resolve();
+    }
+  }
+}
 
 
 
@@ -201,142 +427,169 @@ function printCLIResult(result: any) {
   }
 }
 
-// Pipeline mode execution with timer-based cleanup
+// Pipeline mode execution with activity-aware completion
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   disableStreaming();
 
-  try {
-    let world: World | null = null;
-    let worldSubscription: any = null;
-    let timeoutId: NodeJS.Timeout | null = null;
+  const activityMonitor = new WorldActivityMonitor();
+  let worldSubscription: WorldSubscription | null = null;
+  let world: World | null = null;
 
-    const pipelineClient: ClientConnection = {
-      isOpen: true,
-      onWorldEvent: (eventType: string, eventData: any) => {
-        if (eventData.content && eventData.content.includes('Success message sent')) return;
-
-        if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
-          // existing logic
-        } else if (eventType === 'message' && eventData.sender === 'system') {
-          const msg = eventData.content;
-          console.log(`${boldRed('● system:')} ${msg}`);
-        }
-
-        if (eventType === 'sse' && eventData.content) {
-          setupExitTimer(5000);
-        }
-
-        if (eventType === 'message' && eventData.content) {
-          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
-          setupExitTimer(3000);
-        }
-      },
-      onError: (error: string) => {
-        console.log(red(`Error: ${error}`));
+  const pipelineClient: ClientConnection = {
+    isOpen: true,
+    onWorldEvent: (eventType: string, eventData: any) => {
+      if (eventType === 'world-activity') {
+        activityMonitor.handle(eventData);
+        return;
       }
-    };
 
-    const setupExitTimer = (delay: number = 2000) => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        if (worldSubscription) worldSubscription.unsubscribe();
-        process.exit(0);
-      }, delay);
-    };
+      if (eventData.content && eventData.content.includes('Success message sent')) return;
 
+      if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
+        return;
+      }
+
+      if (eventType === 'message' && eventData.sender === 'system') {
+        const msg = eventData.content;
+        console.log(`${boldRed('● system:')} ${msg}`);
+        return;
+      }
+
+      if (eventType === 'message' && eventData.content) {
+        const sender = eventData.sender || 'agent';
+        if (sender.toUpperCase() === 'HUMAN' || sender.toUpperCase() === 'CLI') return;
+        console.log(`${boldGreen('● ' + sender + ':')} ${eventData.content}`);
+      }
+    },
+    onError: (error: string) => {
+      console.log(red(`Error: ${error}`));
+    }
+  };
+
+  const exitPipeline = async (code: number): Promise<void> => {
+    if (worldSubscription) {
+      try {
+        await worldSubscription.unsubscribe();
+      } catch (err) {
+        logger.warn('Failed to clean up pipeline world subscription', {
+          error: err instanceof Error ? err.message : err
+        });
+      }
+      worldSubscription = null;
+    }
+
+    process.exit(code);
+  };
+
+  try {
     if (options.world) {
       worldSubscription = await subscribeWorld(options.world, pipelineClient);
       if (!worldSubscription) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
-        process.exit(1);
+        await exitPipeline(1);
+        return;
       }
-      world = worldSubscription.world;
+      world = worldSubscription.world as World;
     }
 
-    // Execute command from --command option
     if (options.command) {
-      if (!options.command.startsWith('/') && !world) {
+      const isCommand = options.command.startsWith('/');
+      if (!isCommand && !world) {
         console.error(boldRed('Error: World must be specified to send user messages'));
-        process.exit(1);
+        await exitPipeline(1);
+        return;
       }
+
+      const snapshot = !isCommand && world ? activityMonitor.captureSnapshot() : undefined;
       const result = await processCLIInput(options.command, world, 'HUMAN');
       printCLIResult(result);
 
-      // Only set timer if sending message to world (not for commands)
-      if (!options.command.startsWith('/') && world) {
-        setupExitTimer();
-      } else {
-        // For commands, exit immediately after processing
-        if (worldSubscription) worldSubscription.unsubscribe();
-        process.exit(result.success ? 0 : 1);
+      if (!isCommand && world) {
+        try {
+          await activityMonitor.waitForIdle({ snapshot });
+        } catch (err) {
+          console.error(boldRed('Error waiting for world to become idle:'), err instanceof Error ? err.message : err);
+          await exitPipeline(1);
+          return;
+        }
       }
 
-      if (!result.success) {
-        setTimeout(() => process.exit(1), 100);
-        return;
-      }
+      await exitPipeline(result.success ? 0 : 1);
+      return;
     }
 
-    // Execute message from args
+    const pendingMessages: { text: string; source: string }[] = [];
+
     if (messageFromArgs) {
-      if (!world) {
-        console.error(boldRed('Error: World must be specified to send user messages'));
-        process.exit(1);
-      }
-      const result = await processCLIInput(messageFromArgs, world, 'HUMAN');
-      printCLIResult(result);
-
-      // Set timer with longer delay for message processing (always needed for messages)
-      setupExitTimer(8000);
-
-      if (!result.success) {
-        setTimeout(() => process.exit(1), 100);
-        return;
-      }
+      pendingMessages.push({ text: messageFromArgs, source: 'arguments' });
     }
 
-    // Handle stdin input
     if (!process.stdin.isTTY) {
       let input = '';
       process.stdin.setEncoding('utf8');
-      for await (const chunk of process.stdin) input += chunk;
+      for await (const chunk of process.stdin) {
+        input += chunk;
+      }
 
       if (input.trim()) {
-        if (!world) {
-          console.error(boldRed('Error: World must be specified to send user messages'));
-          process.exit(1);
-        }
-        const result = await processCLIInput(input.trim(), world, 'HUMAN');
-        printCLIResult(result);
+        pendingMessages.push({ text: input.trim(), source: 'stdin' });
+      }
+    }
 
-        // Set timer with longer delay for message processing (always needed for stdin messages)
-        setupExitTimer(8000);
+    if (pendingMessages.length === 0) {
+      program.help();
+      return;
+    }
 
-        if (!result.success) {
-          setTimeout(() => process.exit(1), 100);
-          return;
-        }
+    if (!world) {
+      console.error(boldRed('Error: World must be specified to send user messages'));
+      await exitPipeline(1);
+      return;
+    }
+
+    for (const message of pendingMessages) {
+      const snapshot = activityMonitor.captureSnapshot();
+      const result = await processCLIInput(message.text, world, 'HUMAN');
+      printCLIResult(result);
+
+      if (!result.success) {
+        await exitPipeline(1);
+        return;
+      }
+
+      try {
+        await activityMonitor.waitForIdle({ snapshot });
+      } catch (err) {
+        console.error(boldRed('Error waiting for world to become idle:'), err instanceof Error ? err.message : err);
+        await exitPipeline(1);
         return;
       }
     }
 
-    if (!options.command && !messageFromArgs) {
-      program.help();
-    }
+    await exitPipeline(0);
   } catch (error) {
     console.error(boldRed('Error:'), error instanceof Error ? error.message : error);
-    process.exit(1);
+    await exitPipeline(1);
   }
 }
 
 interface WorldState {
-  subscription: any;
+  subscription: WorldSubscription;
   world: World;
+  activityMonitor: WorldActivityMonitor;
 }
 
-function cleanupWorldSubscription(worldState: WorldState | null): void {
-  if (worldState?.subscription) {
-    worldState.subscription.unsubscribe();
+async function cleanupWorldSubscription(worldState: WorldState | null): Promise<void> {
+  if (!worldState?.subscription) return;
+
+  worldState.activityMonitor.reset();
+
+  try {
+    await worldState.subscription.unsubscribe();
+  } catch (error) {
+    logger.warn('Failed to clean up world subscription', {
+      error: error instanceof Error ? error.message : error
+    });
   }
 }
 
@@ -346,11 +599,22 @@ async function handleSubscribe(
   worldName: string,
   streaming: StreamingState,
   globalState: GlobalState,
-  rl?: readline.Interface
+  rl?: readline.Interface,
+  onActivityEvent?: (eventData: any, monitor: WorldActivityMonitor) => void
 ): Promise<WorldState | null> {
+  const activityMonitor = new WorldActivityMonitor();
+
   const cliClient: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
+      if (eventType === 'world-activity') {
+        activityMonitor.handle(eventData);
+        if (onActivityEvent) {
+          onActivityEvent(eventData, activityMonitor);
+        }
+        return;
+      }
+
       handleWorldEvent(eventType, eventData, streaming, globalState, rl);
     },
     onError: (error: string) => {
@@ -361,7 +625,7 @@ async function handleSubscribe(
   const subscription = await subscribeWorld(worldName, cliClient);
   if (!subscription) throw new Error('Failed to load world');
 
-  return { subscription, world: subscription.world as World };
+  return { subscription, world: subscription.world as World, activityMonitor };
 }
 
 // Handle world events with streaming support
@@ -475,8 +739,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         streaming.content = '';
         streaming.sender = undefined;
         streaming.messageId = undefined;
-        rl.prompt();
-      } else {
+      }
+
+      if (!globalState.awaitingResponse) {
         rl.prompt();
       }
     }, delay);
@@ -493,12 +758,23 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   let currentWorldName = '';
   let isExiting = false;
 
+  const handleActivityEvent = (eventData: any, monitor: WorldActivityMonitor) => {
+    if (eventData.state === 'idle') {
+      if (streaming.stopWait) streaming.stopWait();
+      clearPromptTimer(globalState);
+
+      if (!globalState.awaitingResponse && !streaming.isActive && !isExiting) {
+        rl.prompt();
+      }
+    }
+  };
+
   try {
     // Load initial world or prompt for selection
     if (options.world) {
       logger.debug(`Loading world: ${options.world}`);
       try {
-        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, rl);
+        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, rl, handleActivityEvent);
         currentWorldName = options.world;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -521,7 +797,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       logger.debug(`Loading world: ${selectedWorld}`);
       try {
-        worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl);
+        worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl, handleActivityEvent);
         currentWorldName = selectedWorld;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -552,22 +828,34 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       const trimmedInput = input.trim();
 
       if (!trimmedInput) {
-        rl.prompt();
+        if (!globalState.awaitingResponse) {
+          rl.prompt();
+        }
         return;
       }
 
-      // Check for exit commands before anything else
       const isExitCommand = trimmedInput.toLowerCase() === '/exit' || trimmedInput.toLowerCase() === '/quit';
       if (isExitCommand) {
         if (isExiting) return;
         isExiting = true;
-        // Clear any existing timers immediately
         clearPromptTimer(globalState);
         if (streaming.stopWait) streaming.stopWait();
         console.log(`\n${boldCyan('Goodbye!')}`);
-        if (worldState) cleanupWorldSubscription(worldState);
+        if (worldState) {
+          await cleanupWorldSubscription(worldState);
+          worldState = null;
+        }
         rl.close();
         process.exit(0);
+      }
+
+      const isCommand = trimmedInput.startsWith('/');
+      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
+      const monitor = worldState?.activityMonitor || null;
+      const activitySnapshot = !isCommand && monitor ? monitor.captureSnapshot() : undefined;
+
+      if (!isCommand && monitor) {
+        globalState.awaitingResponse = true;
       }
 
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
@@ -575,43 +863,41 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       try {
         const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
-        // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
-          if (isExiting) return; // Prevent duplicate exit handling
+          if (isExiting) return;
           isExiting = true;
           clearPromptTimer(globalState);
           if (streaming.stopWait) streaming.stopWait();
           console.log(`\n${boldCyan('Goodbye!')}`);
-          if (worldState) cleanupWorldSubscription(worldState);
+          if (worldState) {
+            await cleanupWorldSubscription(worldState);
+            worldState = null;
+          }
           rl.close();
           process.exit(0);
         }
 
-        // Handle world selection command
         if (result.data?.selectWorld) {
           console.log(`\n${boldBlue('Discovering available worlds...')}`);
           const selectedWorld = await selectWorld(rootPath, rl);
 
           if (!selectedWorld) {
             console.log(error('No world selected.'));
+            globalState.awaitingResponse = false;
             rl.prompt();
             return;
           }
 
           logger.debug(`Loading world: ${selectedWorld}`);
           try {
-            // Clean up existing world subscription first
             if (worldState) {
               logger.debug('Cleaning up previous world subscription...');
-              cleanupWorldSubscription(worldState);
+              await cleanupWorldSubscription(worldState);
               worldState = null;
-              // Small delay to ensure cleanup is complete
               await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            // Subscribe to the new world
-            logger.debug(`Subscribing to world: ${selectedWorld}...`);
-            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl);
+            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, rl, handleActivityEvent);
             currentWorldName = selectedWorld;
             console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -622,7 +908,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));
           }
 
-          // Show prompt immediately after world selection
+          globalState.awaitingResponse = false;
           rl.prompt();
           return;
         }
@@ -635,30 +921,13 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           console.log(success(result.message));
         }
 
-        // if (result.data && !(result.data.sender === 'HUMAN')) {
-        //   // Print a concise summary of result.data if present and not already in message
-        //   if (result.data) {
-        //     if (typeof result.data === 'string') {
-        //       console.log(`${boldMagenta('Data:')} ${result.data}`);
-        //     } else if (result.data.name) {
-        //       // If it's an agent or world object
-        //       console.log(`${boldMagenta('Data:')} ${result.data.name}`);
-        //     } else if (Array.isArray(result.data)) {
-        //       console.log(`${boldMagenta('Data:')} ${result.data.length} items`);
-        //     } else {
-        //       // Fallback: print keys
-        //       console.log(`${boldMagenta('Data:')} ${Object.keys(result.data).join(', ')}`);
-        //     }
-        //   }
-        // }
-
-        // Refresh world if needed
         if (result.refreshWorld && currentWorldName && worldState) {
           try {
             console.log(boldBlue('Refreshing world state...'));
 
-            // Use the subscription's refresh method to properly destroy old world and create new
-            const refreshedWorld = await worldState.subscription.refresh(rootPath);
+            worldState.activityMonitor.reset();
+
+            const refreshedWorld = await worldState.subscription.refresh();
             worldState.world = refreshedWorld;
 
             console.log(success('World state refreshed'));
@@ -667,23 +936,30 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           }
         }
 
+        if (!isCommand && monitor) {
+          try {
+            await monitor.waitForIdle({ snapshot: activitySnapshot });
+          } catch (err) {
+            console.error(error(`Error waiting for world activity: ${err instanceof Error ? err.message : 'Unknown error'}`));
+          }
+        }
       } catch (err) {
         console.error(error(`Command error: ${err instanceof Error ? err.message : 'Unknown error'}`));
+      } finally {
+        if (!isCommand) {
+          globalState.awaitingResponse = false;
+        }
       }
 
-      // Set timer based on input type: commands get short delay, messages get longer delay
-      const isCommand = trimmedInput.startsWith('/');
-      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
-
       if (isSelectCommand) {
-        // For select command, prompt is already shown in the handler
         return;
-      } else if (isCommand) {
-        // For other commands, show prompt immediately
+      }
+
+      if (isCommand) {
         rl.prompt();
-      } else if (streaming.wait) {
-        // For messages, wait for potential agent responses
-        streaming.wait(5000);
+      } else {
+        if (streaming.stopWait) streaming.stopWait();
+        rl.prompt();
       }
     });
 
@@ -693,7 +969,10 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       clearPromptTimer(globalState);
       if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) cleanupWorldSubscription(worldState);
+      if (worldState) {
+        void cleanupWorldSubscription(worldState);
+        worldState = null;
+      }
       process.exit(0);
     });
 
@@ -704,7 +983,10 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       clearPromptTimer(globalState);
       if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
-      if (worldState) cleanupWorldSubscription(worldState);
+      if (worldState) {
+        void cleanupWorldSubscription(worldState);
+        worldState = null;
+      }
       rl.close();
       process.exit(0);
     });
