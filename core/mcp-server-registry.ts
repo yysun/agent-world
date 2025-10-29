@@ -1349,13 +1349,32 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
 
 /**
  * Execute MCP tool by server ID and tool name
+ * 
+ * @param serverId - Server ID from registry
+ * @param toolName - Name of the tool to execute
+ * @param args - Tool arguments (will be validated if schema provided)
+ * @param sequenceId - Optional sequence ID for tracking
+ * @param parentToolCall - Optional parent tool call ID
+ * @param toolSchema - Optional tool input schema for parameter validation.
+ *                     If provided, applies validateAndCorrectToolArgs to fix
+ *                     common LLM parameter mistakes (string→array, string→number, 
+ *                     invalid enums, etc.)
+ * 
+ * @example
+ * // With validation (recommended for external callers)
+ * const schema = { properties: { limit: { type: 'number' } }, required: [] };
+ * const result = await executeMCPTool(serverId, 'searchAgents', args, seq, parent, schema);
+ * 
+ * // Without validation (legacy behavior)
+ * const result = await executeMCPTool(serverId, 'searchAgents', args);
  */
 export async function executeMCPTool(
   serverId: string,
   toolName: string,
   args: any,
   sequenceId?: string,
-  parentToolCall?: string
+  parentToolCall?: string,
+  toolSchema?: any
 ): Promise<any> {
   const serverInstance = serverRegistry.get(serverId);
   if (!serverInstance) {
@@ -1377,15 +1396,29 @@ export async function executeMCPTool(
     sequenceId,
     parentToolCall,
     argsPresent: !!args,
-    argsKeys: args ? Object.keys(args) : []
+    argsKeys: args ? Object.keys(args) : [],
+    hasSchema: !!toolSchema
   });
 
-  // Debug log: Request data being sent to MCP server
   // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
-  let translatedArgs = translateOllamaArguments(args || {}, null); // Schema not available here
-  // Note: Full type correction requires schema, which isn't available in direct execution
-  // Type corrections are primarily applied in mcpToolsToAiTools execute wrapper
-  const requestPayload = { name: toolName, arguments: translatedArgs };
+  let validatedArgs = translateOllamaArguments(args || {}, toolSchema);
+
+  // ENHANCEMENT: Apply parameter validation if schema provided
+  // This ensures executeMCPTool has same validation as mcpToolsToAiTools wrapper
+  if (toolSchema) {
+    validatedArgs = validateAndCorrectToolArgs(validatedArgs, toolSchema);
+
+    logger.debug(`Parameter validation applied in executeMCPTool`, {
+      executionId,
+      serverId: serverId.slice(0, 8),
+      toolName,
+      hasSchema: true,
+      originalArgs: args,
+      validatedArgs
+    });
+  }
+
+  const requestPayload = { name: toolName, arguments: validatedArgs };
   logger.debug(`MCP server direct request payload`, {
     executionId,
     serverId: serverId.slice(0, 8),
