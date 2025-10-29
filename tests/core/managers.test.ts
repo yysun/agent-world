@@ -9,7 +9,7 @@
  * - New chat creation when no chats left after deletion
  */
 
-import { beforeAll, describe, it, expect } from '@jest/globals';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 describe('Managers Module - Enhanced Chat Management', () => {
   let managers: any;
