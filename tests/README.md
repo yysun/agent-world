@@ -3,26 +3,37 @@
 ## Overview
 This directory contains the comprehensive test suite for Agent World, including unit tests, integration tests, and end-to-end tests.
 
+## Quick Start
+
+```bash
+npm test                    # Run all tests
+npm test -- specific.test   # Run specific test
+npm run test:watch         # Watch mode with hot reload
+npm run test:ui            # Visual test UI
+npm run test:coverage      # Coverage report with v8
+npm run test:integration   # Integration tests
+```
+
 ## Test Structure
 ```
 tests/
-├── core/           # Core system unit tests
-│   ├── setup.ts    # Global test setup and mocks
-│   ├── agents/     # Agent-specific tests
-│   ├── events/     # Event system tests
-│   ├── storage/    # Storage layer tests
-│   └── shared/     # Shared test utilities
-├── api/            # API endpoint tests
-├── cli/            # CLI command tests
-├── integration/    # Integration tests
-└── web/            # Web interface tests
+├── core/              # Core system unit tests
+│   ├── vitest-setup.ts  # Global test setup and mocks
+│   ├── agents/        # Agent-specific tests
+│   ├── events/        # Event system tests
+│   ├── storage/       # Storage layer tests
+│   └── shared/        # Shared test utilities
+├── api/               # API endpoint tests
+├── cli/               # CLI command tests
+├── integration/       # Integration tests
+└── web/               # Web interface tests
 ```
 
 ## Mock Strategy
 
-### Global Setup (`tests/core/setup.ts`)
+### Global Setup (`tests/vitest-setup.ts`)
 
-The global setup file provides consistent mocks for all unit tests. It is automatically loaded by Jest before running tests.
+The global setup file provides consistent mocks for all unit tests. It is automatically loaded by Vitest before running tests.
 
 **What it mocks:**
 - ✅ File system operations (`fs`, `fs/promises`)
@@ -64,9 +75,9 @@ Use local overrides only when you need to:
 1. **Test error conditions**
    ```typescript
    // Override MemoryStorage to simulate failures
-   const { __testUtils } = jest.requireMock('../../core/storage/storage-factory');
+   const { __testUtils } = await vi.importMock('../../core/storage/storage-factory');
    const storage = __testUtils.getStorage();
-   storage.saveWorld = jest.fn().mockRejectedValue(new Error('Storage full'));
+   storage.saveWorld = vi.fn().mockRejectedValue(new Error('Storage full'));
    ```
 
 2. **Clear storage mid-test** (rarely needed)
@@ -101,8 +112,11 @@ Tests use **real `MemoryStorage`** class from `core/storage/memory-storage.ts`:
 
 ```typescript
 // In tests/core/setup.ts
-jest.mock('../../core/storage/storage-factory', () => {
-  const { MemoryStorage } = jest.requireActual('../../core/storage/memory-storage');
+Example with custom storage:
+
+```typescript
+vi.mock('../../core/storage/storage-factory', async () => {
+  const { MemoryStorage } = await vi.importActual('../../core/storage/memory-storage');
   let sharedStorage = new MemoryStorage();
   
   return {
@@ -313,7 +327,7 @@ npm test -- -t "should save agent with messageIds"
 
 ### Debug with Node inspector
 ```bash
-node --inspect-brk node_modules/.bin/jest --runInBand
+node --inspect-brk node_modules/.bin/vitest run
 ```
 
 ## Common Issues
@@ -345,7 +359,7 @@ createWorld({ name: 'Test' });
 const storage = await createStorageWithWrappers();
 
 // ⚠️ May conflict - Local mock overrides global
-jest.mock('../../core/storage/storage-factory', () => ({ ... }));
+vi.mock('../../core/storage/storage-factory', () => ({ ... }));
 ```
 
 ### Issue: Memory leaks or out-of-memory errors

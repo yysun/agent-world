@@ -149,12 +149,30 @@ export OLLAMA_BASE_URL="http://localhost:11434"
 
 Or create a `.env` file in your working directory with:
 
-```env
-OPENAI_API_KEY=your-key-here
-ANTHROPIC_API_KEY=your-key-here
-GOOGLE_API_KEY=your-key-here
-OLLAMA_BASE_URL=http://localhost:11434
+## Testing
+
+**Run all tests:**
+```bash
+npm test              # Run all unit tests
+npm run test:watch    # Watch mode with hot reload
+npm run test:ui       # Visual test UI
+npm run test:coverage # Generate coverage report
 ```
+
+**Run specific tests:**
+```bash
+npm test -- tests/core/events/  # Test a directory
+npm test -- message-saving      # Test files matching pattern
+```
+
+**Integration tests:**
+```bash
+npm run test:integration  # Run integration tests with real filesystem
+```
+
+Agent World uses Vitest for fast, modern testing with native TypeScript support.
+
+## Learn More
 
 ### World Database Setup
 
