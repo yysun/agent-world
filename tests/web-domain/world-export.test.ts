@@ -9,9 +9,12 @@ import * as WorldExportDomain from '../../web/src/domain/world-export';
 import type { WorldComponentState } from '../../web/src/types';
 import api from '../../web/src/api';
 
-// Mock the API
+// Mock the API module
 vi.mock('../../web/src/api', () => ({
-  getWorldMarkdown: vi.fn(),
+  default: {
+    exportWorldMarkdown: vi.fn(),
+  },
+  exportWorldMarkdown: vi.fn(),
 }));
 
 // Mock the markdown renderer

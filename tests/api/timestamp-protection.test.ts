@@ -4,7 +4,7 @@
  * Tests for timestamp immutability in World and Agent updates
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, test, it, expect, beforeEach } from 'vitest';
 
 import { z } from 'zod';
 

@@ -5,7 +5,7 @@
  * Validates export format, content accuracy, and chat message inclusion.
  */
 
-import { jest } from 'vitest';
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { exportWorldToMarkdown } from '../../core/export.js';
 import * as managers from '../../core/managers.js';
 import * as storageFactory from '../../core/storage/storage-factory.js';

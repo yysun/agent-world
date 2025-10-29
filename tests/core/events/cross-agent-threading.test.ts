@@ -5,13 +5,13 @@
  * when messages are saved to multiple agents' memory.
  */
 
-import { describe, test, expect, beforeEach, jest } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { saveIncomingMessageToMemory } from '../../../core/events.js';
 import { LLMProvider, type World, type Agent, type WorldMessageEvent } from '../../../core/types.js';
 import { EventEmitter } from 'events';
 
 // Skip complex mocking for now - just test the core logic
-jest.mock('../../../core/storage/storage-factory.js');
+vi.mock('../../../core/storage/storage-factory.js');
 
 describe('Cross-Agent Threading Integration', () => {
   let mockWorld: World;

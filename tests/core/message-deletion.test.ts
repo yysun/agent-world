@@ -7,7 +7,7 @@
  * Uses in-memory storage for testing.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Agent, AgentMessage, World } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { createMemoryStorage } from '../../core/storage/memory-storage.js';
@@ -17,11 +17,11 @@ import { EventEmitter } from 'events';
 const memoryStorage = createMemoryStorage();
 
 // Mock the storage factory to return our in-memory storage
-vi.mock('../../core/storage/storage-factory.js', () => {
-  const { createStorageWrappers } = jest.requireActual('../../core/storage/storage-factory.js');
+vi.mock('../../core/storage/storage-factory.js', async () => {
+  const actual = await vi.importActual<typeof import('../../core/storage/storage-factory.js')>('../../core/storage/storage-factory.js');
   return {
-    createStorageWithWrappers: vi.fn().mockResolvedValue(createStorageWrappers(memoryStorage)),
-    createStorageWrappers,
+    ...actual,
+    createStorageWithWrappers: vi.fn().mockResolvedValue(actual.createStorageWrappers(memoryStorage)),
     getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
   };
 });

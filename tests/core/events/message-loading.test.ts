@@ -15,22 +15,22 @@
  * - Validates message count at different stages
  */
 
-import { describe, test, expect, beforeEach, jest } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { prepareMessagesForLLM } from '../../../core/utils';
 import type { World, Agent, WorldMessageEvent, AgentMessage, MessageData } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
 import { EventEmitter } from 'events';
 
 // Mock dependencies
-jest.mock('../../../core/storage/agent-storage', () => ({
-  saveAgentConfigToDisk: jest.fn(),
-  saveAgentMemoryToDisk: jest.fn(),
-  saveAgentToDisk: jest.fn()
+vi.mock('../../../core/storage/agent-storage', () => ({
+  saveAgentConfigToDisk: vi.fn(),
+  saveAgentMemoryToDisk: vi.fn(),
+  saveAgentToDisk: vi.fn()
 }));
 
-jest.mock('../../../core/llm-manager', () => ({
-  streamAgentResponse: jest.fn(),
-  generateAgentResponse: jest.fn()
+vi.mock('../../../core/llm-manager', () => ({
+  streamAgentResponse: vi.fn(),
+  generateAgentResponse: vi.fn()
 }));
 
 describe('Message Loading and Count Verification', () => {

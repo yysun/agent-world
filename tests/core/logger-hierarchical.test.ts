@@ -5,7 +5,7 @@
  * while maintaining independent log levels when explicitly set.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { createCategoryLogger, getCategoryLogLevel, initializeLogger } from '../../core/logger.js';
 

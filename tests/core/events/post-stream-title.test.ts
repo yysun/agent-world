@@ -5,15 +5,15 @@
  * using current chat's stored messages and not causing mid-stream refresh.
  */
 
-import { describe, test, expect, beforeEach, jest } from 'vitest';
+import { describe, test, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
 import { publishSSE, subscribeWorldToMessages } from '../../../core/events';
 
-jest.mock('../../../core/storage/storage-factory', () => ({
+vi.mock('../../../core/storage/storage-factory', () => ({
   createStorageWithWrappers: async () => ({
-    updateChatData: jest.fn(),
+    updateChatData: vi.fn(),
     getMemory: jest.fn(async (_worldId: string, _chatId: string | null) => [
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi! How can I help you?' }
@@ -21,7 +21,7 @@ jest.mock('../../../core/storage/storage-factory', () => ({
   }),
 }));
 
-jest.mock('../../../core/llm-manager', () => ({
+vi.mock('../../../core/llm-manager', () => ({
   generateAgentResponse: jest.fn(async () => 'Generated Chat Title')
 }));
 

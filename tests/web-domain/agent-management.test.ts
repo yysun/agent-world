@@ -12,11 +12,15 @@ import api from '../../web/src/api';
 
 // Mock the API
 vi.mock('../../web/src/api', () => ({
+  default: {
+    deleteAgent: vi.fn(),
+    clearAgentMemory: vi.fn(),
+  },
   deleteAgent: vi.fn(),
   clearAgentMemory: vi.fn(),
 }));
 
-const mockApi = api as jest.Mocked<typeof api>;
+const mockApi = api as any;
 
 describe('Agent Management Domain Module', () => {
   let mockState: WorldComponentState;

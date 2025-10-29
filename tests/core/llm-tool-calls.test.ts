@@ -1,4 +1,4 @@
-import { jest } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 
 // Import the modules - they should already be mocked by setup.ts
 import * as openaiDirect from '../../core/openai-direct.js';
@@ -10,10 +10,10 @@ describe('LLM tool call flows', () => {
   beforeEach(() => {
     // Don't clear mocks completely, just reset their call history
     vi.clearAllMocks();
-    
+
     // Re-setup the mock return values after clearing
-    (openaiDirect.generateOpenAIResponse as jest.MockedFunction<any>).mockResolvedValue('Mock OpenAI response');
-    (openaiDirect.streamOpenAIResponse as jest.MockedFunction<any>).mockResolvedValue('Mock OpenAI streaming response');
+    (openaiDirect.generateOpenAIResponse as any).mockResolvedValue('Mock OpenAI response');
+    (openaiDirect.streamOpenAIResponse as any).mockResolvedValue('Mock OpenAI streaming response');
     (anthropicDirect.generateAnthropicResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Anthropic response');
     (anthropicDirect.streamAnthropicResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Anthropic streaming response');
     (googleDirect.generateGoogleResponse as jest.MockedFunction<any>).mockResolvedValue('Mock Google response');

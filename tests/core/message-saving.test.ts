@@ -7,38 +7,42 @@
  * 3. Reloading from storage preserves messageIds
  */
 
-// Mock nanoid before any imports
-vi.mock('nanoid', () => ({
-  nanoid: () => `test-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
-}));
-
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent, WorldMessageEvent } from '../../core/types';
 import { LLMProvider } from '../../core/types';
 
-// Mock storage BEFORE imports
-const mockStorageAPI = {
-  savedAgents: new Map<string, any>(),
+// Mock nanoid
+vi.mock('nanoid', () => ({
+  nanoid: () => `test-msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+}));
 
-  async saveAgent(worldId: string, agent: Agent): Promise<void> {
-    const key = `${worldId}:${agent.id}`;
-    this.savedAgents.set(key, JSON.parse(JSON.stringify(agent)));
-  },
+// Mock storage using vi.hoisted for proper initialization order
+const { mockStorageAPI } = vi.hoisted(() => {
+  const mockStorageAPI = {
+    savedAgents: new Map<string, any>(),
 
-  async loadAgent(worldId: string, agentId: string): Promise<Agent | null> {
-    const key = `${worldId}:${agentId}`;
-    return this.savedAgents.get(key) || null;
-  },
+    async saveAgent(worldId: string, agent: Agent): Promise<void> {
+      const key = `${worldId}:${agent.id}`;
+      this.savedAgents.set(key, JSON.parse(JSON.stringify(agent)));
+    },
 
-  reset() {
-    this.savedAgents.clear();
-  }
-};
+    async loadAgent(worldId: string, agentId: string): Promise<Agent | null> {
+      const key = `${worldId}:${agentId}`;
+      return this.savedAgents.get(key) || null;
+    },
+
+    reset() {
+      this.savedAgents.clear();
+    }
+  };
+
+  return { mockStorageAPI };
+});
 
 // Mock getStorageWrappers
 vi.mock('../../core/storage/storage-factory', () => ({
-  getStorageWrappers: vi.fn().mockResolvedValue(mockStorageAPI),
+  getStorageWrappers: vi.fn(() => Promise.resolve(mockStorageAPI)),
   setStoragePath: vi.fn()
 }));
 

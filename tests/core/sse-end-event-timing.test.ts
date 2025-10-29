@@ -37,7 +37,7 @@
  * - Verifies fix for MCP timeout errors not reaching frontend
  */
 
-import { jest } from 'vitest';
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent, WorldSSEEvent } from '../../core/types.js';
 

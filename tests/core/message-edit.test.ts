@@ -5,7 +5,7 @@
  * Uses in-memory storage for testing.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Agent, AgentMessage, World } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { createMemoryStorage } from '../../core/storage/memory-storage.js';
@@ -20,10 +20,11 @@ vi.mock('nanoid', () => ({
 const memoryStorage = createMemoryStorage();
 
 // Mock the storage factory to return our in-memory storage
-vi.mock('../../core/storage/storage-factory.js', () => {
-  const { createStorageWrappers } = jest.requireActual('../../core/storage/storage-factory.js');
+vi.mock('../../core/storage/storage-factory.js', async () => {
+  const actual = await vi.importActual<typeof import('../../core/storage/storage-factory.js')>('../../core/storage/storage-factory.js');
   return {
-    createStorageWithWrappers: vi.fn().mockResolvedValue(createStorageWrappers(memoryStorage)),
+    ...actual,
+    createStorageWithWrappers: vi.fn().mockResolvedValue(actual.createStorageWrappers(memoryStorage)),
     createStorageWrappers,
     getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
   };
@@ -114,7 +115,7 @@ describe('Message Edit Feature', () => {
       // Note: In-memory storage auto-migrates message IDs on save, so result will be 0
       // In production (SQLite/file storage), this would be 2
       expect(result).toBe(0);
-      
+
       // Verify that the messages have messageIds (auto-migrated by memory storage)
       const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0]).toHaveProperty('messageId');
@@ -141,7 +142,7 @@ describe('Message Edit Feature', () => {
 
       // Should have migrated 0 messages (all already have IDs)
       expect(result).toBe(0);
-      
+
       // Verify that existing IDs are preserved
       const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0].messageId).toBe('existing-id-1');
@@ -168,7 +169,7 @@ describe('Message Edit Feature', () => {
       // Note: In-memory storage auto-migrates message IDs on save, so result will be 0
       // In production (SQLite/file storage), this would be 1
       expect(result).toBe(0);
-      
+
       // Verify that existing IDs are preserved and new ones were assigned (auto-migrated)
       const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0].messageId).toBe('existing-id-1');

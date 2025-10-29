@@ -14,31 +14,30 @@
  * - Validates agent response behavior patterns
  */
 
-import { describe, test, expect, beforeEach, jest } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { shouldAgentRespond } from '../../../core/events';
 import { World, Agent, WorldMessageEvent, SenderType, LLMProvider } from '../../../core/types';
 import { createMockAgent } from '../mock-helpers';
 
 // Mock dependencies
-jest.mock('../../../core/storage/agent-storage', () => ({
-  saveAgentConfigToDisk: jest.fn(),
-  saveAgentMemoryToDisk: jest.fn(),
-  saveAgentToDisk: jest.fn()
+vi.mock('../../../core/storage/agent-storage', () => ({
+  saveAgentConfigToDisk: vi.fn(),
+  saveAgentMemoryToDisk: vi.fn(),
+  saveAgentToDisk: vi.fn()
 }));
 
-jest.mock('../../../core/events', () => {
-  const originalModule = jest.requireActual('../../../core/events') as any;
+vi.mock('../../../core/events', async () => {
+  const originalModule = await vi.importActual<typeof import('../../../core/events')>('../../../core/events');
   return {
     ...originalModule,
-    subscribeToMessages: jest.fn(),
-    publishMessage: jest.fn(),
-    publishSSE: jest.fn()
+    subscribeToMessages: vi.fn(),
+    publishMessage: vi.fn(),
+    publishSSE: vi.fn()
   };
 });
 
-jest.mock('../../../core/llm-manager', () => ({
-  streamAgentResponse: jest.fn(),
-  getLLMQueueStatus: jest.fn(() => ({ activeRequests: 0, queueLength: 0 }))
+vi.mock('../../../core/llm-manager', () => ({
+  streamAgentResponse: vi.fn()
 }));
 
 describe('shouldAgentRespond', () => {
@@ -54,10 +53,10 @@ describe('shouldAgentRespond', () => {
       rootPath: '/test/path',
       agents: new Map(),
       eventEmitter: {
-        emit: jest.fn(),
-        on: jest.fn(),
-        off: jest.fn(),
-        removeAllListeners: jest.fn()
+        emit: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+        removeAllListeners: vi.fn()
       } as any,
       turnLimit: 5
     } as any;
