@@ -336,6 +336,47 @@ class WorldActivityMonitor {
 }
 
 
+class ActivityProgressRenderer {
+  private sourceState: Map<string, { state: ActivityEventState; activityId: number | null }> = new Map();
+
+  handle(eventData: ActivityEventPayload, display: boolean): void {
+    if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+      return;
+    }
+
+    const source = eventData.source ?? '';
+    const activityId = typeof eventData.activityId === 'number' ? eventData.activityId : null;
+
+    if (!source.startsWith('agent:')) {
+      return;
+    }
+
+    const agentId = source.slice('agent:'.length) || 'agent';
+
+    if (eventData.state === 'processing') {
+      const previous = this.sourceState.get(`${source}:previous`);
+      if (!display) {
+        this.sourceState.delete(`${source}:previous`);
+        return;
+      }
+
+      if (!previous || previous.state !== 'processing' || previous.activityId !== activityId) {
+        this.sourceState.set(`${source}:previous`, { state: 'processing', activityId });
+        console.log(`\n${cyan(agentId)} ${gray('thinking ...')}`);
+      }
+      return;
+    }
+
+    if (eventData.state === 'idle') {
+      this.sourceState.delete(`${source}:previous`);
+      this.sourceState.delete(source);
+    }
+  }
+
+  reset(): void {
+    this.sourceState.clear();
+  }
+}
 
 // LLM Provider configuration from environment variables
 function configureLLMProvidersFromEnv(): void {
@@ -577,12 +618,14 @@ interface WorldState {
   subscription: WorldSubscription;
   world: World;
   activityMonitor: WorldActivityMonitor;
+  progressRenderer: ActivityProgressRenderer;
 }
 
 async function cleanupWorldSubscription(worldState: WorldState | null): Promise<void> {
   if (!worldState?.subscription) return;
 
   worldState.activityMonitor.reset();
+  worldState.progressRenderer.reset();
 
   try {
     await worldState.subscription.unsubscribe();
@@ -600,9 +643,10 @@ async function handleSubscribe(
   streaming: StreamingState,
   globalState: GlobalState,
   rl?: readline.Interface,
-  onActivityEvent?: (eventData: any, monitor: WorldActivityMonitor) => void
+  onActivityEvent?: (eventData: any, monitor: WorldActivityMonitor, renderer: ActivityProgressRenderer) => void
 ): Promise<WorldState | null> {
   const activityMonitor = new WorldActivityMonitor();
+  const progressRenderer = new ActivityProgressRenderer();
 
   const cliClient: ClientConnection = {
     isOpen: true,
@@ -610,7 +654,7 @@ async function handleSubscribe(
       if (eventType === 'world-activity') {
         activityMonitor.handle(eventData);
         if (onActivityEvent) {
-          onActivityEvent(eventData, activityMonitor);
+          onActivityEvent(eventData, activityMonitor, progressRenderer);
         }
         return;
       }
@@ -625,7 +669,7 @@ async function handleSubscribe(
   const subscription = await subscribeWorld(worldName, cliClient);
   if (!subscription) throw new Error('Failed to load world');
 
-  return { subscription, world: subscription.world as World, activityMonitor };
+  return { subscription, world: subscription.world as World, activityMonitor, progressRenderer };
 }
 
 // Handle world events with streaming support
@@ -758,12 +802,21 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   let currentWorldName = '';
   let isExiting = false;
 
-  const handleActivityEvent = (eventData: any, monitor: WorldActivityMonitor) => {
-    if (eventData.state === 'idle') {
+  const handleActivityEvent = (
+    eventData: ActivityEventPayload,
+    _monitor: WorldActivityMonitor,
+    renderer: ActivityProgressRenderer
+  ) => {
+    const wasAwaiting = globalState.awaitingResponse;
+    renderer.handle(eventData, globalState.awaitingResponse);
+
+    if (eventData.state === 'idle' && wasAwaiting) {
+      globalState.awaitingResponse = false;
+
       if (streaming.stopWait) streaming.stopWait();
       clearPromptTimer(globalState);
 
-      if (!globalState.awaitingResponse && !streaming.isActive && !isExiting) {
+      if (!streaming.isActive && !isExiting) {
         rl.prompt();
       }
     }
@@ -860,6 +913,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
+      let shouldPromptAfter = false;
+
       try {
         const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
@@ -926,6 +981,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             console.log(boldBlue('Refreshing world state...'));
 
             worldState.activityMonitor.reset();
+            worldState.progressRenderer.reset();
 
             const refreshedWorld = await worldState.subscription.refresh();
             worldState.world = refreshedWorld;
@@ -941,23 +997,32 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             await monitor.waitForIdle({ snapshot: activitySnapshot });
           } catch (err) {
             console.error(error(`Error waiting for world activity: ${err instanceof Error ? err.message : 'Unknown error'}`));
+            globalState.awaitingResponse = false;
+            shouldPromptAfter = true;
           }
         }
       } catch (err) {
         console.error(error(`Command error: ${err instanceof Error ? err.message : 'Unknown error'}`));
-      } finally {
         if (!isCommand) {
           globalState.awaitingResponse = false;
+          shouldPromptAfter = true;
+        }
+      } finally {
+        if (isCommand || !monitor) {
+          globalState.awaitingResponse = false;
+          shouldPromptAfter = true;
         }
       }
 
       if (isSelectCommand) {
+        if (shouldPromptAfter) {
+          if (streaming.stopWait) streaming.stopWait();
+          rl.prompt();
+        }
         return;
       }
 
-      if (isCommand) {
-        rl.prompt();
-      } else {
+      if (shouldPromptAfter) {
         if (streaming.stopWait) streaming.stopWait();
         rl.prompt();
       }

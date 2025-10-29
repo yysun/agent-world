@@ -43,6 +43,7 @@ export default function WorldChat(props: WorldChatProps) {
     messagesLoading,
     isSending,
     isWaiting,
+    agentActivities = [],
     needScroll = false,
     activeAgent,
     currentChat,
@@ -50,6 +51,13 @@ export default function WorldChat(props: WorldChatProps) {
     editingText = '',
     agentFilters = []  // Agent IDs to filter by
   } = props;
+
+  const promptReady = !isWaiting;
+  const promptIndicator = promptReady ? '>' : '…';
+  const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
+  const inputDisabled = isSending || isWaiting;
+  const disableSend = !userInput.trim() || isSending || isWaiting;
+  const showWaitingDots = isWaiting && agentActivities.length === 0;
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -374,7 +382,18 @@ export default function WorldChat(props: WorldChatProps) {
           )}
 
           {/* Waiting indicator - three dots when waiting for streaming to start */}
-          {isWaiting && (
+          {agentActivities.length > 0 && (
+            <div className="agent-activity-status">
+              {agentActivities.map(activity => (
+                <div key={`activity-${activity.agentId}-${activity.activityId ?? 'current'}-${activity.updatedAt}`} className="agent-activity-row">
+                  <span className="agent-activity-agent">{activity.agentId}</span>
+                  <span className="agent-activity-message">{activity.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showWaitingDots && (
             <div className="message user-message waiting-message">
               <div className="message-content">
                 <div className="waiting-dots">
@@ -390,18 +409,20 @@ export default function WorldChat(props: WorldChatProps) {
         {/* User Input Area */}
         <div className="input-area">
           <div className="input-container">
+            <span className={`prompt-indicator ${promptReady ? 'prompt-ready' : 'prompt-waiting'}`}>{promptIndicator}</span>
             <input
               type="text"
               className="message-input"
-              placeholder="Type your message..."
+              placeholder={inputPlaceholder}
               value={userInput || ''}
               $oninput='update-input'
               $onkeypress='key-press'
+              disabled={inputDisabled}
             />
             <button
               className="send-button"
               $onclick="send-message"
-              disabled={!userInput.trim() || isSending}
+              disabled={disableSend}
             >
               {isSending ? 'Sending...' : 'Send'}
             </button>
