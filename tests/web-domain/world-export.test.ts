@@ -7,14 +7,13 @@
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as WorldExportDomain from '../../web/src/domain/world-export';
 import type { WorldComponentState } from '../../web/src/types';
-import api from '../../web/src/api';
 
 // Mock the API module
 vi.mock('../../web/src/api', () => ({
   default: {
+    getWorldMarkdown: vi.fn(),
     exportWorldMarkdown: vi.fn(),
   },
-  exportWorldMarkdown: vi.fn(),
 }));
 
 // Mock the markdown renderer
@@ -22,7 +21,13 @@ vi.mock('../../web/src/utils/markdown', () => ({
   renderMarkdown: vi.fn(),
 }));
 
-const mockApi = api as jest.Mocked<typeof api>;
+// Import after mocks
+import api from '../../web/src/api';
+import { renderMarkdown } from '../../web/src/utils/markdown';
+
+// Get mocked functions with proper typing
+const mockApi = vi.mocked(api);
+const mockRenderMarkdown = vi.mocked(renderMarkdown);
 
 // Mock window.open for testing
 const mockWindowOpen = vi.fn();
@@ -32,9 +37,6 @@ const mockWindowOpen = vi.fn();
     href: '',
   },
 };
-
-import { renderMarkdown } from '../../web/src/utils/markdown';
-const mockRenderMarkdown = renderMarkdown as jest.MockedFunction<typeof renderMarkdown>;
 
 describe('World Export Domain Module', () => {
   let mockState: WorldComponentState;

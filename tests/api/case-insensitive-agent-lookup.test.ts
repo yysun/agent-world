@@ -5,7 +5,18 @@
  * using toKebabCase to handle case-insensitive lookups.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Mock storage-factory early to prevent SQLite initialization
+vi.mock('../../core/storage/storage-factory.js', () => ({
+  createStorageWithWrappers: vi.fn().mockResolvedValue({
+    saveWorld: vi.fn(),
+    loadWorld: vi.fn(),
+    worldExists: vi.fn().mockResolvedValue(false)
+  }),
+  getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+}));
+
 import { toKebabCase } from '../../core/utils.js';
 
 describe('Case-Insensitive Agent Lookup', () => {

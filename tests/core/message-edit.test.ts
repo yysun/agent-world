@@ -6,7 +6,7 @@
  */
 
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Agent, AgentMessage, World } from '../../core/types.js';
+import type { Agent, AgentMessage, World, StorageAPI } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 import { createMemoryStorage } from '../../core/storage/memory-storage.js';
@@ -16,24 +16,33 @@ vi.mock('nanoid', () => ({
   nanoid: vi.fn(() => 'test-message-id-' + Math.random().toString(36).substr(2, 5))
 }));
 
-// Create a shared storage instance at module level
-const memoryStorage = createMemoryStorage();
+// Use hoisted to create getter that will be called during mock execution
+const { getMemoryStorage } = vi.hoisted(() => {
+  let storage: StorageAPI | null = null;
+  return {
+    getMemoryStorage: () => {
+      if (!storage) {
+        storage = createMemoryStorage();
+      }
+      return storage;
+    },
+    resetStorage: () => {
+      storage = null;
+    }
+  };
+});
 
-// Mock the storage factory to return our in-memory storage
+// Mock the storage factory to return our memory storage instance
 vi.mock('../../core/storage/storage-factory.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../core/storage/storage-factory.js')>();
   return {
     ...actual,
-    createStorageWithWrappers: vi.fn(async () => actual.createStorageWrappers(memoryStorage)),
+    createStorageWithWrappers: vi.fn(async () => actual.createStorageWrappers(getMemoryStorage())),
     getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
   };
 });
 
-// Import after mocks are set up
-import {
-  migrateMessageIds,
-  editUserMessage
-} from '../../core/index.js';
+import { migrateMessageIds, editUserMessage } from '../../core/index.js';
 
 // Helper to create a test world
 function createTestWorld(overrides: Partial<World> = {}): World {
@@ -73,13 +82,13 @@ function createTestAgent(overrides: Partial<Agent> = {}): Agent {
 
 describe('Message Edit Feature', () => {
   beforeEach(async () => {
-    // Clear storage state between tests by deleting test world
+    // Storage will be created on first access via getMemoryStorage()
   });
 
   afterEach(async () => {
     // Clean up by deleting test world if it exists
     try {
-      await memoryStorage.deleteWorld('test-world');
+      await getMemoryStorage().deleteWorld('test-world');
     } catch (e) {
       // Ignore errors if world doesn't exist
     }
@@ -104,10 +113,10 @@ describe('Message Edit Feature', () => {
       ];
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent); // Save agent without memory first
-      await memoryStorage.saveAgentMemory('test-world', 'agent-1', memory); // Then save memory directly (will auto-migrate)
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent); // Save agent without memory first
+      await getMemoryStorage().saveAgentMemory('test-world', 'agent-1', memory); // Then save memory directly (will auto-migrate)
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await migrateMessageIds('test-world');
 
@@ -116,7 +125,7 @@ describe('Message Edit Feature', () => {
       expect(result).toBe(0);
 
       // Verify that the messages have messageIds (auto-migrated by memory storage)
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0]).toHaveProperty('messageId');
       expect(updatedAgent?.memory[1]).toHaveProperty('messageId');
       expect(typeof updatedAgent?.memory[0].messageId).toBe('string');
@@ -133,9 +142,9 @@ describe('Message Edit Feature', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await migrateMessageIds('test-world');
 
@@ -143,7 +152,7 @@ describe('Message Edit Feature', () => {
       expect(result).toBe(0);
 
       // Verify that existing IDs are preserved
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0].messageId).toBe('existing-id-1');
       expect(updatedAgent?.memory[1].messageId).toBe('existing-id-2');
     });
@@ -158,10 +167,10 @@ describe('Message Edit Feature', () => {
       ];
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent); // Save agent without memory first
-      await memoryStorage.saveAgentMemory('test-world', 'agent-1', memory); // Then save memory directly (will auto-migrate)
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent); // Save agent without memory first
+      await getMemoryStorage().saveAgentMemory('test-world', 'agent-1', memory); // Then save memory directly (will auto-migrate)
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await migrateMessageIds('test-world');
 
@@ -170,7 +179,7 @@ describe('Message Edit Feature', () => {
       expect(result).toBe(0);
 
       // Verify that existing IDs are preserved and new ones were assigned (auto-migrated)
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory[0].messageId).toBe('existing-id-1');
       expect(updatedAgent?.memory[1]).toHaveProperty('messageId');
       expect(updatedAgent?.memory[1].messageId).not.toBe('existing-id-1');
@@ -201,8 +210,8 @@ describe('Message Edit Feature', () => {
       const world = createTestWorld({ isProcessing: true });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       await expect(
         editUserMessage('test-world', 'msg-1', 'new content', 'chat-1')
@@ -219,9 +228,9 @@ describe('Message Edit Feature', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
 
@@ -240,9 +249,9 @@ describe('Message Edit Feature', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
 
@@ -261,9 +270,9 @@ describe('Message Edit Feature', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
 

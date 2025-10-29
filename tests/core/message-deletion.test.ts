@@ -8,25 +8,37 @@
  */
 
 import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import type { Agent, AgentMessage, World } from '../../core/types.js';
+import type { Agent, AgentMessage, World, StorageAPI } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 import { createMemoryStorage } from '../../core/storage/memory-storage.js';
 
-// Create a shared storage instance at module level
-const memoryStorage = createMemoryStorage();
+// Use hoisted to create getter that will be called during mock execution
+const { getMemoryStorage } = vi.hoisted(() => {
+  let storage: StorageAPI | null = null;
+  return {
+    getMemoryStorage: () => {
+      if (!storage) {
+        storage = createMemoryStorage();
+      }
+      return storage;
+    },
+    resetStorage: () => {
+      storage = null;
+    }
+  };
+});
 
-// Mock the storage factory to return our in-memory storage
+// Mock the storage factory to return our memory storage instance
 vi.mock('../../core/storage/storage-factory.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../core/storage/storage-factory.js')>();
   return {
     ...actual,
-    createStorageWithWrappers: vi.fn(async () => actual.createStorageWrappers(memoryStorage)),
+    createStorageWithWrappers: vi.fn(async () => actual.createStorageWrappers(getMemoryStorage())),
     getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
   };
 });
 
-// Import after mocks are set up
 import { removeMessagesFrom } from '../../core/index.js';
 
 // Helper to create a test world
@@ -66,14 +78,13 @@ function createTestAgent(overrides: Partial<Agent> = {}): Agent {
 
 describe('Message Deletion Feature - Unit Tests', () => {
   beforeEach(async () => {
-    // Clear all data from in-memory storage before each test
-    // Note: Memory storage doesn't have a clear method, so we'll work with fresh data each test
+    // Storage will be created on first access via getMemoryStorage()
   });
 
   afterEach(async () => {
     // Clean up by deleting test world if it exists
     try {
-      await memoryStorage.deleteWorld('test-world');
+      await getMemoryStorage().deleteWorld('test-world');
     } catch (e) {
       // Ignore errors if world doesn't exist
     }
@@ -104,9 +115,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
 
@@ -128,8 +139,8 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const world = createTestWorld();
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
@@ -160,14 +171,14 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 5, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       await removeMessagesFrom('test-world', 'msg-3', 'chat-1');
 
       // Verify that only messages before msg-3 remain
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory).toHaveLength(2);
       expect(updatedAgent?.memory[0].messageId).toBe('msg-1');
       expect(updatedAgent?.memory[1].messageId).toBe('msg-2');
@@ -183,9 +194,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
@@ -204,9 +215,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
@@ -234,14 +245,14 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const chat1 = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
       const chat2 = { id: 'chat-2', name: 'Chat 2', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat1);
-      await memoryStorage.saveChatData('test-world', chat2);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat1);
+      await getMemoryStorage().saveChatData('test-world', chat2);
 
       await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
 
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       const chat1Messages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-1');
       const chat2Messages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-2');
 
@@ -276,15 +287,15 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const chatB = { id: 'chat-b', name: 'Chat B', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
       const chatC = { id: 'chat-c', name: 'Chat C', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chatA);
-      await memoryStorage.saveChatData('test-world', chatB);
-      await memoryStorage.saveChatData('test-world', chatC);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chatA);
+      await getMemoryStorage().saveChatData('test-world', chatB);
+      await getMemoryStorage().saveChatData('test-world', chatC);
 
       await removeMessagesFrom('test-world', 'b-2', 'chat-b');
 
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       const chatAMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-a');
       const chatBMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-b');
       const chatCMessages = updatedAgent?.memory.filter((m: AgentMessage) => m.chatId === 'chat-c');
@@ -325,10 +336,10 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 6, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent1);
-      await memoryStorage.saveAgent('test-world', agent2);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent1);
+      await getMemoryStorage().saveAgent('test-world', agent2);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
 
@@ -348,10 +359,10 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
+      await getMemoryStorage().saveWorld(world);
       // Don't save agent-1 - it will be in listAgents but loadAgent will fail
-      await memoryStorage.saveAgent('test-world', agent2);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveAgent('test-world', agent2);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
@@ -379,10 +390,10 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 6, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent1);
-      await memoryStorage.saveAgent('test-world', agent2);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent1);
+      await getMemoryStorage().saveAgent('test-world', agent2);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-2', 'chat-1');
 
@@ -404,14 +415,14 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
       // Verify that memory was updated in storage
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory).toBeDefined();
       expect(updatedAgent?.memory.length).toBe(0); // All messages removed
     });
@@ -429,14 +440,14 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
       // All messages in chat should be removed
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory).toHaveLength(0);
       expect(result.messagesRemovedTotal).toBe(3);
     });
@@ -452,14 +463,14 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 3, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-3', 'chat-1');
 
       // Only the last message should be removed
-      const updatedAgent = await memoryStorage.loadAgent('test-world', 'agent-1');
+      const updatedAgent = await getMemoryStorage().loadAgent('test-world', 'agent-1');
       expect(updatedAgent?.memory).toHaveLength(2);
       expect(updatedAgent?.memory[0].messageId).toBe('msg-1');
       expect(updatedAgent?.memory[1].messageId).toBe('msg-2');
@@ -471,9 +482,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
       const agent = createTestAgent({ memory: [] });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'msg-1', 'chat-1');
 
@@ -492,9 +503,9 @@ describe('Message Deletion Feature - Unit Tests', () => {
       });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 2, createdAt: new Date(), updatedAt: new Date() };
 
-      await memoryStorage.saveWorld(world);
-      await memoryStorage.saveAgent('test-world', agent);
-      await memoryStorage.saveChatData('test-world', chat);
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
 
       const result = await removeMessagesFrom('test-world', 'nonexistent-msg', 'chat-1');
 

@@ -37,7 +37,13 @@ vi.mock('../../../core/events', async () => {
 });
 
 vi.mock('../../../core/llm-manager', () => ({
-  streamAgentResponse: vi.fn()
+  streamAgentResponse: vi.fn(),
+  getLLMQueueStatus: vi.fn().mockReturnValue({
+    queueSize: 0,
+    isProcessing: false,
+    completedCalls: 0,
+    failedCalls: 0
+  })
 }));
 
 describe('shouldAgentRespond', () => {

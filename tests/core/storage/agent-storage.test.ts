@@ -34,7 +34,8 @@ import { Agent, LLMProvider } from '../../../core/types';
 import { createMockAgent } from '../mock-helpers';
 
 // Get the global fs mock from setup
-const fs = require('fs').promises;
+import * as fsModule from 'fs';
+const fs = vi.mocked(fsModule.promises);
 
 describe('Core Agent Storage with Mocks', () => {
   const worldId = 'test-world';
@@ -42,6 +43,8 @@ describe('Core Agent Storage with Mocks', () => {
   beforeEach(async () => {
     // Setup environment for correct paths
     process.env.AGENT_WORLD_DATA_PATH = 'test-data/worlds';
+    // Reset all mocks before each test
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -52,7 +55,7 @@ describe('Core Agent Storage with Mocks', () => {
   describe('listAgents', () => {
     test('should return empty array when no agents exist', async () => {
       // Mock empty directory
-      fs.readdir.mockResolvedValue([]);
+      vi.mocked(fs.readdir).mockResolvedValue([]);
 
       const loadedAgents = await listAgents('test-data/worlds', worldId);
       expect(loadedAgents).toEqual([]);
@@ -62,10 +65,10 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'test-agent-1';
 
       // Mock directory listing
-      fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
+      vi.mocked(fs.readdir).mockResolvedValue([{ name: agentId, isDirectory: () => true }] as any);
 
       // Mock agent files
-      fs.readFile.mockImplementation(async (path: string) => {
+      vi.mocked(fs.readFile).mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
           return JSON.stringify({
             id: agentId,
@@ -101,10 +104,10 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'corrupted-agent';
 
       // Mock directory listing
-      fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
+      vi.mocked(fs.readdir).mockResolvedValue([{ name: agentId, isDirectory: () => true }] as any);
 
       // Mock corrupted config file
-      fs.readFile.mockImplementation(async (path: string) => {
+      vi.mocked(fs.readFile).mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
           return '{ invalid json }';
         }
@@ -121,10 +124,10 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'memory-agent';
 
       // Mock directory listing
-      fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
+      vi.mocked(fs.readdir).mockResolvedValue([{ name: agentId, isDirectory: () => true }] as any);
 
       // Mock agent files with memory
-      fs.readFile.mockImplementation(async (path: string) => {
+      vi.mocked(fs.readFile).mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
           return JSON.stringify({
             id: agentId,
@@ -166,7 +169,7 @@ describe('Core Agent Storage with Mocks', () => {
   describe('loadAgent', () => {
     test('should return null for non-existent agent', async () => {
       // Mock file access failure
-      fs.readFile.mockRejectedValue(new Error('ENOENT: no such file or directory'));
+      vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
       const loadedAgent = await loadAgent('test-data/worlds', worldId, 'non-existent');
       expect(loadedAgent).toBeNull();
@@ -176,7 +179,7 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'mock-agent';
 
       // Mock agent files
-      fs.readFile.mockImplementation(async (path: string) => {
+      vi.mocked(fs.readFile).mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
           return JSON.stringify({
             id: agentId,
@@ -228,13 +231,13 @@ describe('Core Agent Storage with Mocks', () => {
       await saveAgent('test-data/worlds', worldId, agent);
 
       // Verify directory creation
-      expect(fs.mkdir).toHaveBeenCalledWith(
+      expect(vi.mocked(fs.mkdir)).toHaveBeenCalledWith(
         expect.stringContaining(agentId),
         { recursive: true }
       );
 
       // Verify files were written
-      expect(fs.writeFile).toHaveBeenCalledTimes(3); // config, system-prompt, memory
+      expect(vi.mocked(fs.writeFile)).toHaveBeenCalledTimes(3); // config, system-prompt, memory
     });
 
     test('should handle agents with complex memory using mocks', async () => {
@@ -271,7 +274,7 @@ describe('Core Agent Storage with Mocks', () => {
       await expect(saveAgent('test-data/worlds', worldId, agent)).resolves.toBeUndefined();
 
       // Verify files were written
-      expect(fs.writeFile).toHaveBeenCalledTimes(3); // config, system-prompt, memory
+      expect(vi.mocked(fs.writeFile)).toHaveBeenCalledTimes(3); // config, system-prompt, memory
     });
 
     test('should preserve chatId field when saving agents with mocks', async () => {
@@ -315,13 +318,14 @@ describe('Core Agent Storage with Mocks', () => {
       await saveAgent('test-data/worlds', worldId, agent);
 
       // Verify memory file was written with chatId values
-      const memoryCallIndex = Array.from({ length: fs.writeFile.mock.calls.length }, (_, i) => i)
-        .find(i => fs.writeFile.mock.calls[i][0].includes('memory.json'));
+      const writeFileMock = vi.mocked(fs.writeFile);
+      const memoryCallIndex = Array.from({ length: writeFileMock.mock.calls.length }, (_, i) => i)
+        .find(i => writeFileMock.mock.calls[i][0].includes('memory.json'));
 
       expect(memoryCallIndex).toBeDefined();
 
       if (memoryCallIndex !== undefined) {
-        const savedMemoryData = JSON.parse(fs.writeFile.mock.calls[memoryCallIndex][1]);
+        const savedMemoryData = JSON.parse(writeFileMock.mock.calls[memoryCallIndex][1] as string);
         expect(savedMemoryData).toHaveLength(3);
         expect(savedMemoryData[0].chatId).toBe('chat-1');
         expect(savedMemoryData[1].chatId).toBe('chat-2');
@@ -333,7 +337,7 @@ describe('Core Agent Storage with Mocks', () => {
   describe('deleteAgent', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
-      fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
+      vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
       const result = await deleteAgent('test-data/worlds', worldId, 'non-existent');
       expect(result).toBe(false);
@@ -343,13 +347,13 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'delete-agent';
 
       // Mock successful access
-      fs.access.mockResolvedValue(undefined);
+      vi.mocked(fs.access).mockResolvedValue(undefined);
 
       const result = await deleteAgent('test-data/worlds', worldId, agentId);
       expect(result).toBe(true);
 
       // Verify deletion was called
-      expect(fs.rm).toHaveBeenCalledWith(
+      expect(vi.mocked(fs.rm)).toHaveBeenCalledWith(
         expect.stringContaining(agentId),
         { recursive: true, force: true }
       );
@@ -359,7 +363,7 @@ describe('Core Agent Storage with Mocks', () => {
   describe('agentExists', () => {
     test('should return false for non-existent agent', async () => {
       // Mock access failure
-      fs.access.mockRejectedValue(new Error('ENOENT: no such file or directory'));
+      vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
       const exists = await agentExists('test-data/worlds', worldId, 'non-existent');
       expect(exists).toBe(false);
@@ -369,13 +373,13 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'existing-agent';
 
       // Mock successful access
-      fs.access.mockResolvedValue(undefined);
+      vi.mocked(fs.access).mockResolvedValue(undefined);
 
       const exists = await agentExists('test-data/worlds', worldId, agentId);
       expect(exists).toBe(true);
 
       // Verify access was called with config path
-      expect(fs.access).toHaveBeenCalledWith(
+      expect(vi.mocked(fs.access)).toHaveBeenCalledWith(
         expect.stringContaining('config.json')
       );
     });
@@ -386,10 +390,10 @@ describe('Core Agent Storage with Mocks', () => {
       const agentId = 'permission-test';
 
       // Mock directory listing
-      fs.readdir.mockResolvedValue([{ name: agentId, isDirectory: () => true }]);
+      vi.mocked(fs.readdir).mockResolvedValue([{ name: agentId, isDirectory: () => true }] as any);
 
       // Mock permission error for config file
-      fs.readFile.mockImplementation(async (path: string) => {
+      vi.mocked(fs.readFile).mockImplementation(async (path: string) => {
         if (path.includes('config.json')) {
           const error = new Error('EACCES: permission denied');
           (error as any).code = 'EACCES';
@@ -422,7 +426,7 @@ describe('Core Agent Storage with Mocks', () => {
       // Mock disk full error
       const diskError = new Error('ENOSPC: no space left on device');
       (diskError as any).code = 'ENOSPC';
-      fs.writeFile.mockRejectedValue(diskError);
+      vi.mocked(fs.writeFile).mockRejectedValue(diskError);
 
       await expect(saveAgent('test-data/worlds', worldId, agent))
         .rejects.toThrow('ENOSPC: no space left on device');

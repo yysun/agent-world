@@ -43,6 +43,7 @@ const { mockStorageAPI } = vi.hoisted(() => {
 // Mock getStorageWrappers
 vi.mock('../../core/storage/storage-factory', () => ({
   getStorageWrappers: vi.fn(() => Promise.resolve(mockStorageAPI)),
+  createStorageWithWrappers: vi.fn(() => Promise.resolve(mockStorageAPI)),
   setStoragePath: vi.fn()
 }));
 

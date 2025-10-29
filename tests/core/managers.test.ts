@@ -9,7 +9,17 @@
  * - New chat creation when no chats left after deletion
  */
 
-import { beforeAll, describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
+
+// Mock storage-factory early to prevent SQLite initialization
+vi.mock('../../core/storage/storage-factory.js', () => ({
+  createStorageWithWrappers: vi.fn().mockResolvedValue({
+    saveWorld: vi.fn(),
+    loadWorld: vi.fn(),
+    worldExists: vi.fn().mockResolvedValue(false)
+  }),
+  getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+}));
 
 describe('Managers Module - Enhanced Chat Management', () => {
   let managers: any;

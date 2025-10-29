@@ -67,9 +67,10 @@ const { getNanoidId } = vi.hoisted(() => {
   return {
     getNanoidId: (size?: number) => {
       const counter = ++nanoidCounter;
-      const timestamp = Date.now();
-      const random = Math.floor(Math.random() * 10000);
-      return `mock-id-${timestamp}-${random}-${counter}`.substring(0, size || 21);
+      // Use counter as primary uniqueness guarantee (not timestamp)
+      // This ensures each call gets a unique ID even in rapid succession
+      const uniqueId = `mock-id-${counter}`;
+      return size ? uniqueId.substring(0, Math.min(size, uniqueId.length)) : uniqueId;
     }
   };
 });
@@ -121,9 +122,11 @@ vi.mock('./core/storage/storage-factory', async () => {
   const actualModule = await vi.importActual('./core/storage/storage-factory') as any;
 
   return {
-    // Re-export actual functions that integration tests need
-    getDefaultRootPath: actualModule.getDefaultRootPath,
-    createStorageFromEnv: actualModule.createStorageFromEnv,
+    // Mock getDefaultRootPath to avoid file system access
+    getDefaultRootPath: vi.fn<any>().mockReturnValue('/test/data'),
+
+    // Mock createStorageFromEnv to always return MemoryStorage (no SQLite detection)
+    createStorageFromEnv: vi.fn<any>(async () => getSharedStorage()),
 
     // All storage creation functions return the shared MemoryStorage instance
     createStorageWrappers: vi.fn<any>(() => getSharedStorage()),
@@ -254,7 +257,7 @@ vi.mock('dotenv', () => ({
 
 // Mock nanoid for unique ID generation using hoisted counter
 vi.mock('nanoid', () => ({
-  nanoid: vi.fn((size?: number) => getNanoidId(size))
+  nanoid: (size?: number) => getNanoidId(size)
 }));
 
 // Mock SQLite storage modules for new storage backend
@@ -368,6 +371,29 @@ beforeEach(() => {
 
   // Set test environment
   process.env.NODE_ENV = 'test';
+});
+
+// Suppress unhandled rejections from SQLite initialization in module loading
+// This can happen when some modules are loaded before mocks are fully applied
+const originalUnhandledRejection = process.listeners('unhandledRejection');
+beforeAll(() => {
+  process.removeAllListeners('unhandledRejection');
+  process.on('unhandledRejection', (reason: any) => {
+    // Ignore SQLite browser environment errors during test setup
+    if (reason?.message?.includes('SQLite not available in browser environment')) {
+      return; // Suppress this specific error
+    }
+    // Re-throw other unhandled rejections
+    throw reason;
+  });
+});
+
+afterAll(() => {
+  process.removeAllListeners('unhandledRejection');
+  // Restore original handlers
+  originalUnhandledRejection.forEach((handler) => {
+    process.on('unhandledRejection', handler as any);
+  });
 });
 
 // Global afterEach cleanup

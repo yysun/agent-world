@@ -13,7 +13,18 @@
  * - Ensures ID consistency in memory and events
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
+
+// Mock storage-factory early to prevent SQLite initialization
+vi.mock('../../../core/storage/storage-factory.js', () => ({
+  createStorageWithWrappers: vi.fn().mockResolvedValue({
+    saveWorld: vi.fn(),
+    loadWorld: vi.fn(),
+    worldExists: vi.fn().mockResolvedValue(false)
+  }),
+  getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+}));
+
 import { publishMessage, publishMessageWithId } from '../../../core/events';
 import type { World, Agent, AgentMessage } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
