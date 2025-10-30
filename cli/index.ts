@@ -62,7 +62,7 @@ import {
 } from '../core/index.js';
 import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
-import { processCLIInput } from './commands.js';
+import { processCLIInput, displayChatMessages } from './commands.js';
 import {
   StreamingState,
   createStreamingState,
@@ -898,6 +898,11 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     console.log(`  ${bullet(gray('Enable debug logs via'))} ${cyan('--logLevel debug')}`);
     console.log('');
 
+    // Display current chat messages after Quick Start tips
+    if (worldState?.world) {
+      await displayChatMessages(worldState.world.id, worldState.world.currentChatId);
+    }
+
     console.log(); // Empty line before prompt
     rl.prompt();
 
@@ -977,6 +982,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
             if (worldState?.world) {
               console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
+
+              // Display current chat messages
+              await displayChatMessages(worldState.world.id, worldState.world.currentChatId);
             }
           } catch (err) {
             console.error(error(`Error loading world: ${err instanceof Error ? err.message : 'Unknown error'}`));

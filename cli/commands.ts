@@ -55,7 +55,8 @@ import {
   exportChatToMarkdown,
   newChat,
   restoreChat,
-  deleteChat
+  deleteChat,
+  getMemory
 } from '../core/index.js';
 import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
@@ -115,6 +116,127 @@ interface AgentCreateAnswers {
 
 interface ConfirmationAnswer {
   confirmed: boolean;
+}
+
+// Color helpers (matching cli/index.ts styles)
+const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
+const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
+const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
+const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
+const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
+
+const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
+const boldYellow = (text: string) => `\x1b[1m\x1b[33m${text}\x1b[0m`;
+const boldRed = (text: string) => `\x1b[1m\x1b[31m${text}\x1b[0m`;
+
+/**
+ * Display chat messages in a formatted, readable way
+ * Shows sender, timestamp, and content for each message
+ * Logic:
+ * - HUMAN messages: deduplicate by messageId (they're replicated across all agents)
+ * - Agent messages: only show if sender matches agentId (the agent that created it)
+ * - System messages: deduplicate by messageId
+ */
+export async function displayChatMessages(worldId: string, chatId?: string | null): Promise<void> {
+  try {
+    const messages = await getMemory(worldId, chatId);
+
+    if (!messages || messages.length === 0) {
+      console.log(gray('\n  No messages in current chat.\n'));
+      return;
+    }
+
+    // Filter and deduplicate messages
+    const humanMessageMap = new Map<string, typeof messages[0]>();
+    const agentMessages: typeof messages = [];
+    const messagesWithoutId: typeof messages = [];
+
+    for (const msg of messages) {
+      const isHumanMessage = msg.sender === 'HUMAN' || msg.sender === 'CLI' ||
+        msg.role === 'user' ||
+        (msg.sender || '').toLowerCase() === 'human';
+
+      const isSystemMessage = msg.sender === 'system' || msg.role === 'system';
+
+      if (isHumanMessage) {
+        // Deduplicate HUMAN messages by messageId (exclude agent response copies with role=user)
+        if (msg.messageId && (msg.sender === 'HUMAN' || msg.sender === 'CLI' || (msg.sender || '').toLowerCase() === 'human')) {
+          if (!humanMessageMap.has(msg.messageId)) {
+            humanMessageMap.set(msg.messageId, msg);
+          }
+        } else if (!msg.messageId && (msg.sender === 'HUMAN' || msg.sender === 'CLI')) {
+          messagesWithoutId.push(msg);
+        }
+      } else if (isSystemMessage) {
+        // Deduplicate system messages by messageId
+        if (msg.messageId) {
+          if (!humanMessageMap.has(msg.messageId)) {
+            humanMessageMap.set(msg.messageId, msg);
+          }
+        } else {
+          messagesWithoutId.push(msg);
+        }
+      } else if (msg.role === 'assistant') {
+        // Agent response message: only show messages with role=assistant
+        // This filters out copies stored in other agents' memories (which have role=user)
+        agentMessages.push(msg);
+      }
+    }
+
+    // Combine all message types
+    const deduplicatedMessages = [
+      ...Array.from(humanMessageMap.values()),
+      ...agentMessages,
+      ...messagesWithoutId
+    ];
+
+    // Sort by timestamp
+    deduplicatedMessages.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateA - dateB;
+    });
+
+    console.log(cyan('\n=== Current Chat Messages ===\n'));
+
+    for (const msg of deduplicatedMessages) {
+      // Format timestamp if available
+      const timestamp = msg.createdAt
+        ? new Date(msg.createdAt).toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
+        : '';
+
+      // Determine sender display
+      let senderDisplay = '';
+      if (msg.sender) {
+        // Color code by sender type
+        if (msg.sender === 'HUMAN' || msg.sender === 'CLI') {
+          senderDisplay = boldYellow(`${msg.sender}`);
+        } else if (msg.sender === 'system') {
+          senderDisplay = boldRed('system');
+        } else {
+          // Agent message
+          senderDisplay = boldGreen(msg.sender);
+        }
+      } else {
+        // Fallback to role if no sender
+        senderDisplay = gray(msg.role || 'unknown');
+      }
+
+      // Display message
+      const timestampPart = timestamp ? gray(`[${timestamp}]`) : '';
+      console.log(`${timestampPart} ${senderDisplay}: ${msg.content}`);
+    }
+
+    console.log(gray(`\n  Total: ${deduplicatedMessages.length} message${deduplicatedMessages.length !== 1 ? 's' : ''}\n`));
+  } catch (err) {
+    console.error(red(`Failed to load chat messages: ${err instanceof Error ? err.message : String(err)}`));
+  }
 }
 
 // CLI Command Mapping with Short Aliases
