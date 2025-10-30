@@ -37,7 +37,7 @@ async function cleanupTestDir(dir: string): Promise<void> {
 // Helper to create test database
 async function createTestDatabase(): Promise<any> {
   await fs.mkdir(TEST_SQLITE_ROOT, { recursive: true });
-  const dbPath = path.join(TEST_SQLITE_ROOT, `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.db`);
+  const dbPath = path.join(TEST_SQLITE_ROOT, `test-${Date.now()}-${Math.random().toString(36).substring(2, 11)}.db`);
   
   // Dynamically import sqlite3
   const sqlite3Module = await import('sqlite3');

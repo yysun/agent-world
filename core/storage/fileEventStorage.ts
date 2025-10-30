@@ -237,7 +237,7 @@ async function deleteEventsByWorldAndChat(
       const worldDir = path.dirname(filePath);
       const files = await fs.readdir(worldDir);
       if (files.length === 0) {
-        await fs.rmdir(worldDir);
+        await fs.rm(worldDir, { recursive: false });
       }
     } catch {
       // Ignore errors when cleaning up directories
