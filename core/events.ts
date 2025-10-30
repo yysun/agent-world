@@ -14,6 +14,7 @@
  * Storage: Automatic memory persistence and agent state saving with error handling
  * Chat Title Generation: Smart title generation excluding tool messages from conversation context
  * Message ID Tracking: All messages (user and assistant) include messageId and agentId for edit feature
+ * Message Threading: replyToMessageId preserved through publish->SSE->frontend pipeline
  *
  * Consolidation Changes (CC):
  * - Condensed verbose header documentation from 60+ lines to 15 lines
@@ -39,6 +40,7 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-10-30: Fixed replyToMessageId missing in frontend - added parameter to publish functions
  * - 2025-10-30: Fixed premature idle signal - removed activity tracking from message publishing
  * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
  * - 2025-10-25: Fixed agent message messageId - use messageId from publishMessage() return value
@@ -98,8 +100,9 @@ export function publishEvent(world: World, type: string, content: any): void {
  * Returns the messageEvent so callers can access the generated messageId
  * 
  * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
+ * @param replyToMessageId - Optional parent message ID for threading
  */
-export function publishMessage(world: World, content: string, sender: string, chatId?: string | null): WorldMessageEvent {
+export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
   const messageEvent: WorldMessageEvent = {
@@ -107,7 +110,8 @@ export function publishMessage(world: World, content: string, sender: string, ch
     sender,
     timestamp: new Date(),
     messageId,
-    chatId: targetChatId
+    chatId: targetChatId,
+    replyToMessageId
   };
 
   loggerMemory.debug('[publishMessage] Generated messageId', {
@@ -127,15 +131,17 @@ export function publishMessage(world: World, content: string, sender: string, ch
  * Used when messageId needs to be known before publishing (e.g., for agent responses)
  * 
  * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
+ * @param replyToMessageId - Optional parent message ID for threading
  */
-export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null): WorldMessageEvent {
+export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
   const messageEvent: WorldMessageEvent = {
     content,
     sender,
     timestamp: new Date(),
     messageId,
-    chatId: targetChatId
+    chatId: targetChatId,
+    replyToMessageId
   };
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;
@@ -630,9 +636,9 @@ export async function processAgentMessage(
 
     agent.memory.push(assistantMessage);
 
-    // Publish final response with pre-generated messageId
+    // Publish final response with pre-generated messageId and threading info
     if (finalResponse && typeof finalResponse === 'string') {
-      publishMessageWithId(world, finalResponse, agent.id, messageId);
+      publishMessageWithId(world, finalResponse, agent.id, messageId, world.currentChatId, messageEvent.messageId);
     }
 
     // Auto-save memory after adding response (now with correct messageId)

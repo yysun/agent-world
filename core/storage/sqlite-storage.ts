@@ -272,7 +272,7 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
   `, agentId, worldId) as any;
   if (!agentData) return null;
   const memoryData = await all(ctx, `
-    SELECT role, content, sender, chat_id as chatId, message_id as messageId, created_at as createdAt
+    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, created_at as createdAt
     FROM agent_memory
     WHERE agent_id = ? AND world_id = ?
     ORDER BY created_at ASC
@@ -315,7 +315,7 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
   const result: Agent[] = [];
   for (const agentData of agents) {
     const memoryData = await all(ctx, `
-      SELECT role, content, sender, chat_id as chatId, message_id as messageId, created_at as createdAt
+      SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, created_at as createdAt
       FROM agent_memory
       WHERE agent_id = ? AND world_id = ?
       ORDER BY created_at ASC
@@ -328,7 +328,8 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
       memory: memoryData.map(msg => ({
         ...msg,
         createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
-        chatId: msg.chatId // Preserve chatId field
+        chatId: msg.chatId, // Preserve chatId field
+        replyToMessageId: msg.replyToMessageId // Preserve replyToMessageId field
       })),
     } as Agent;
     result.push(agent);
@@ -375,6 +376,7 @@ export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chat
     sender: r.sender,
     chatId: r.chatId,
     messageId: r.messageId,
+    replyToMessageId: r.replyToMessageId, // FIX: Include replyToMessageId from database
     agentId: r.agentId,
     createdAt: r.createdAt ? new Date(r.createdAt) : new Date()
   }));

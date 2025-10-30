@@ -61,6 +61,7 @@ interface SSEMessageData extends SSEBaseData {
     content?: string;
     message?: string;
     messageId?: string;
+    replyToMessageId?: string; // Threading: parent message reference
     createdAt?: string;
     worldName?: string;
   };

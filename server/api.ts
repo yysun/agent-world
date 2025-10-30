@@ -94,9 +94,9 @@ const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
 interface MessageEventPayload {
   sender: string;
   content: string;
-  messageId?: string;
-  replyToMessageId?: string;
-  timestamp?: string;
+  timestamp?: Date;
+  messageId: string;
+  replyToMessageId?: string;  // Parent message ID for threading (links replies to original messages)
   [key: string]: any;
 }
 
@@ -845,12 +845,13 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
   const messageListener = (eventData: MessageEventPayload) => {
     // Enhance message event data with structured format
+    // CRITICAL: replyToMessageId must be included for frontend threading display
     const messageData = {
       type: 'message',
       sender: eventData.sender,
       content: eventData.content,
       messageId: eventData.messageId,
-      replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
+      replyToMessageId: eventData.replyToMessageId,  // Threading: parent message reference
       createdAt: eventData.timestamp || new Date().toISOString()
     };
     sendSSE(JSON.stringify({ type: EventType.MESSAGE, data: messageData }));

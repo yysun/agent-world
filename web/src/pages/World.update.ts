@@ -688,7 +688,8 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     text: messageData.content || messageData.message || '',
     createdAt: messageData.createdAt || new Date().toISOString(),
     fromAgentId,
-    messageId: messageData.messageId
+    messageId: messageData.messageId,
+    replyToMessageId: messageData.replyToMessageId
   };
 
   const existingMessages = state.messages || [];

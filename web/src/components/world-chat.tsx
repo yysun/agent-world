@@ -69,19 +69,16 @@ export default function WorldChat(props: WorldChatProps) {
   // Helper function to resolve reply target from replyToMessageId
   const getReplyTarget = (message: Message, allMessages: Message[]): string | null => {
     if (!message.replyToMessageId) {
-      console.log(`[DEBUG] No replyToMessageId for message ${message.id} (${message.sender})`);
       return null;
     }
 
     const parentMessage = allMessages.find(m => m.messageId === message.replyToMessageId);
     if (!parentMessage) {
-      console.log(`[DEBUG] Parent message not found for replyToMessageId: ${message.replyToMessageId}`);
       return null;
     }
 
     const senderType = getSenderType(parentMessage.sender);
     const replyTarget = senderType === SenderType.HUMAN ? 'HUMAN' : parentMessage.sender;
-    console.log(`[DEBUG] Reply target found: ${replyTarget} for message ${message.id} (${message.sender})`);
     return replyTarget;
   };
 
@@ -255,42 +252,9 @@ export default function WorldChat(props: WorldChatProps) {
 
               // Render world events (system and world)
               if (message.worldEvent) {
-                const isExpanded = !!message.isLogExpanded;
-                let formattedData: string | null = null;
-                if (message.worldEvent.data !== undefined) {
-                  try {
-                    formattedData = JSON.stringify(message.worldEvent.data, null, 2);
-                  } catch (error) {
-                    formattedData = String(message.worldEvent.data);
-                  }
-                }
-
-                // Map world event types to log levels for dot color
-                const dotLevel = message.worldEvent.level ||
-                  (message.worldEvent.type === 'system' ? 'info' : 'debug');
-
-                return (
-                  <div key={message.id || 'world-event-' + index} className="message log-message">
-                    <button
-                      type="button"
-                      className="log-header"
-                      aria-expanded={isExpanded}
-                      $onclick={['toggle-log-details', message.id || `world-event-${index}`]}
-                    >
-                      <span className={`log-dot ${dotLevel}`}></span>
-                      <span className="log-category">{message.worldEvent.category}</span>
-                      <span className="log-content">{message.worldEvent.message}</span>
-                      <span className="log-toggle-icon" aria-hidden="true">
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
-                    </button>
-                    {isExpanded && formattedData && (
-                      <pre className="log-details">
-                        {formattedData}
-                      </pre>
-                    )}
-                  </div>
-                );
+                // Log to console but don't display in UI
+                console.log(`[World Event] ${message.worldEvent.category}: ${message.worldEvent.message}`, message.worldEvent.data);
+                return null;
               }
 
               const senderType = getSenderType(message.sender);
@@ -301,22 +265,40 @@ export default function WorldChat(props: WorldChatProps) {
               // Note: Agent replies have type='agent' or 'assistant', incoming messages have type='user' or 'human'
               const isIncomingMessage = message.type === 'user' || message.type === 'human';
 
+              // Helper: Check if message is replying to the current viewing agent
+              const isReplyingToCurrentAgent = (): boolean => {
+                if (!message.replyToMessageId) return false;
+                const parentMessage = filteredMessages.find(m => m.messageId === message.replyToMessageId);
+                if (!parentMessage) return false;
+                // Check if parent is from the current agent (the owner of this memory)
+                return parentMessage.sender === message.fromAgentId;
+              };
+
               // Special case: user messages with replyToMessageId are actually replies from agents
               // This happens in multi-agent scenarios where agent responses are stored as 'user' messages
-              // in the receiving agent's memory but have threading information
-              const isReplyMessage = isIncomingMessage && message.replyToMessageId;
+              // BUT: if the replyToMessageId points to HUMAN or another agent (not the current agent),
+              // it's memory-only (the agent was responding to someone else, not this agent)
+              const isReplyMessage = isIncomingMessage && message.replyToMessageId && isReplyingToCurrentAgent();
 
-              // Check if there's a reply to this incoming message (explicit threading)
+              // Memory-only logic:
+              // For threaded messages (with replyToMessageId): If not replying to current agent, it's memory-only
+              // For non-threaded messages (legacy): Check if there's a reply to determine if it's memory-only
+              const hasThreading = !!message.replyToMessageId;
               const hasReply = message.messageId
                 ? filteredMessages.some(m => m.replyToMessageId === message.messageId)
-                : false; // Legacy messages without threading assumed to have replies
+                : false;
 
               const isMemoryOnlyMessage = isIncomingMessage &&
-                !isReplyMessage && // Reply messages are not memory-only
                 senderType === SenderType.AGENT &&
                 isCrossAgentMessage &&
                 !message.isStreaming &&
-                !hasReply; // Only mark as memory-only if confirmed no reply
+                (hasThreading ? !isReplyMessage : !hasReply); // Threaded: hide if not replying to us. Non-threaded: hide if no reply
+
+              // Skip rendering memory-only messages completely
+              if (isMemoryOnlyMessage) {
+                return null;
+              }
+
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
@@ -338,7 +320,6 @@ export default function WorldChat(props: WorldChatProps) {
                 // Check if this is a reply message (has replyToMessageId) or incoming message
                 if (isReplyMessage) {
                   // Cross-agent reply: user message with replyToMessageId from another agent
-                  console.log(`[DEBUG] Processing isReplyMessage for ${message.sender}, messageId: ${message.messageId}, replyToMessageId: ${message.replyToMessageId}`);
                   const replyTarget = getReplyTarget(message, filteredMessages);
                   if (replyTarget) {
                     displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
@@ -347,7 +328,6 @@ export default function WorldChat(props: WorldChatProps) {
                   }
                 } else if (message.type === 'assistant' || message.type === 'agent') {
                   // Regular assistant/agent message
-                  console.log(`[DEBUG] Processing assistant/agent message for ${message.sender}, messageId: ${message.messageId}, replyToMessageId: ${message.replyToMessageId}`);
                   const replyTarget = getReplyTarget(message, filteredMessages);
                   if (replyTarget) {
                     displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
