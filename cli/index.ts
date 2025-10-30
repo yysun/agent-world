@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /*
  * cli/index.ts
  * Summary: CLI entrypoint and interactive world subscription logic.
