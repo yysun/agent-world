@@ -60,7 +60,8 @@ import {
   type Agent,
   type Chat,
   type WorldActivityEventPayload,
-  LLMProvider
+  LLMProvider,
+  EventType
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
 import {
@@ -81,13 +82,7 @@ const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
 
-// Event name constants
-const WORLD_EVENTS = {
-  WORLD: 'world',
-  MESSAGE: 'message',
-  SSE: 'sse',
-  SYSTEM: 'system'
-} as const;
+// Event name constants - using typed EventType enum from core/types.ts
 
 // Timeout constants for streaming
 const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
@@ -660,12 +655,12 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         };
 
         // Listen to all event types for non-streaming mode
-        world.eventEmitter.on(WORLD_EVENTS.WORLD, eventListener);
-        listeners.set(WORLD_EVENTS.WORLD, eventListener);
-        world.eventEmitter.on(WORLD_EVENTS.MESSAGE, eventListener);
-        listeners.set(WORLD_EVENTS.MESSAGE, eventListener);
-        world.eventEmitter.on(WORLD_EVENTS.SYSTEM, eventListener);
-        listeners.set(WORLD_EVENTS.SYSTEM, eventListener);
+        world.eventEmitter.on(EventType.WORLD, eventListener);
+        listeners.set(EventType.WORLD, eventListener);
+        world.eventEmitter.on(EventType.MESSAGE, eventListener);
+        listeners.set(EventType.MESSAGE, eventListener);
+        world.eventEmitter.on(EventType.SYSTEM, eventListener);
+        listeners.set(EventType.SYSTEM, eventListener);
 
         // Publish message
         publishMessage(world, message, sender);
@@ -841,10 +836,10 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       }
     }
 
-    sendSSE(JSON.stringify({ type: WORLD_EVENTS.WORLD, data: eventData }));
+    sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));
   };
-  world.eventEmitter.on(WORLD_EVENTS.WORLD, worldListener);
-  listeners.set(WORLD_EVENTS.WORLD, worldListener);
+  world.eventEmitter.on(EventType.WORLD, worldListener);
+  listeners.set(EventType.WORLD, worldListener);
 
   const messageListener = (eventData: MessageEventPayload) => {
     // Enhance message event data with structured format
@@ -856,10 +851,10 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
       createdAt: eventData.timestamp || new Date().toISOString()
     };
-    sendSSE(JSON.stringify({ type: WORLD_EVENTS.MESSAGE, data: messageData }));
+    sendSSE(JSON.stringify({ type: EventType.MESSAGE, data: messageData }));
   };
-  world.eventEmitter.on(WORLD_EVENTS.MESSAGE, messageListener);
-  listeners.set(WORLD_EVENTS.MESSAGE, messageListener);
+  world.eventEmitter.on(EventType.MESSAGE, messageListener);
+  listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
     const agentName = eventData.agentName;
@@ -874,16 +869,16 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
         loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
       }
     }
-    sendSSE(JSON.stringify({ type: WORLD_EVENTS.SSE, data: eventData }));
+    sendSSE(JSON.stringify({ type: EventType.SSE, data: eventData }));
   };
-  world.eventEmitter.on(WORLD_EVENTS.SSE, sseListener);
-  listeners.set(WORLD_EVENTS.SSE, sseListener);
+  world.eventEmitter.on(EventType.SSE, sseListener);
+  listeners.set(EventType.SSE, sseListener);
 
   const systemListener = (eventData: SystemEventPayload) => {
-    sendSSE(JSON.stringify({ type: WORLD_EVENTS.SYSTEM, data: eventData }));
+    sendSSE(JSON.stringify({ type: EventType.SYSTEM, data: eventData }));
   };
-  world.eventEmitter.on(WORLD_EVENTS.SYSTEM, systemListener);
-  listeners.set(WORLD_EVENTS.SYSTEM, systemListener);
+  world.eventEmitter.on(EventType.SYSTEM, systemListener);
+  listeners.set(EventType.SYSTEM, systemListener);
 
   // Cleanup function to remove all listeners
   const cleanupListeners = () => {
