@@ -707,15 +707,15 @@ function handleWorldEvent(
 ): void {
   if (eventType === 'world') {
     const payload = eventData as any;
-    // Handle activity events
-    if (payload.state === 'processing' || payload.state === 'idle') {
+    // Handle activity events (new format: type = 'response-start' | 'response-end' | 'idle')
+    if (payload.type === 'response-start' || payload.type === 'response-end' || payload.type === 'idle') {
       activityMonitor.handle(payload as WorldActivityEventPayload);
       progressRenderer.handle(payload as WorldActivityEventPayload);
 
       // Call handleActivityEvents for verbose activity logging
       handleActivityEvents(payload);
 
-      if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
+      if (payload.type === 'idle' && rl && globalState.awaitingResponse) {
         globalState.awaitingResponse = false;
         console.log(); // Empty line before prompt
         rl.prompt();

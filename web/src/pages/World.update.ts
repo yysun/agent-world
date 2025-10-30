@@ -440,13 +440,6 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
-  console.log('🌍 [World Activity] Received:', {
-    activity,
-    state: activity?.type,
-    source: activity?.source,
-    timestamp: new Date().toISOString()
-  });
-
   // Check for valid event types
   if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {
     return state;
@@ -496,36 +489,15 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
 
   let newState = state;
   if (shouldCreateMessage) {
-    const worldMessage: Message = {
-      id: `world-${activityId}-${Date.now()}`,
-      type: 'world',
-      sender: 'WORLD',
-      text: '',
-      createdAt: new Date(),
-      worldEvent: {
-        type: 'world',
-        category,
-        message: activityMessage,
-        timestamp: activity.timestamp || new Date().toISOString(),
-        level: logLevel,
-        data: {
-          type: activity.type,
-          pendingOperations: pending,
-          activityId,
-          source,
-          activeSources: activity.activeSources,
-          queue: activity.queue
-        },
-        messageId: `world-${activityId}`
-      },
-      isLogExpanded: false
-    };
+    // Log world activity event once when received (not on every render)
+    // Format: [World] message | pending: N | activityId: N | source: agent:id
+    const sourceName = source.startsWith('agent:') ? source.slice('agent:'.length) : source;
+    console.log(`[World] ${activityMessage} | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
 
-    newState = {
-      ...state,
-      messages: [...(state.messages || []), worldMessage],
-      needScroll: true
-    };
+    // Note: We used to add world events to messages array, but this caused duplicate logs
+    // on every component re-render. Now we just log once here and don't add to messages.
+    // The UI doesn't display world events anyway (they return null in the view).
+    newState = state;
   }
 
   // Update agent activity status

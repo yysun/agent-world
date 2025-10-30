@@ -252,8 +252,7 @@ export default function WorldChat(props: WorldChatProps) {
 
               // Render world events (system and world)
               if (message.worldEvent) {
-                // Log to console but don't display in UI
-                console.log(`[World Event] ${message.worldEvent.category}: ${message.worldEvent.message}`, message.worldEvent.data);
+                // Don't display in UI and don't log here (logged once in handler to prevent duplicates on re-renders)
                 return null;
               }
 

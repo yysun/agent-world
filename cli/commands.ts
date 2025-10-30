@@ -215,8 +215,9 @@ export async function displayChatMessages(worldId: string, chatId?: string | nul
       let senderDisplay = '';
       if (msg.sender) {
         // Color code by sender type
-        if (msg.sender === 'HUMAN' || msg.sender === 'CLI') {
-          senderDisplay = boldYellow(`${msg.sender}`);
+        const senderUpper = msg.sender.toUpperCase();
+        if (senderUpper === 'HUMAN' || senderUpper === 'CLI') {
+          senderDisplay = boldYellow(senderUpper);
         } else if (msg.sender === 'system') {
           senderDisplay = boldRed('system');
         } else {

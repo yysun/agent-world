@@ -135,27 +135,21 @@ export function handleActivityEvents(eventData: any): void {
 
   const source = eventData.source || '';
   const pending = eventData.pendingOperations || 0;
+  const activityId = eventData.activityId || 0;
   const activeSources = eventData.activeSources || [];
+  const sourceName = source.startsWith('agent:') ? source.slice('agent:'.length) : source;
 
-  // Display significant activity changes with verbose logging
+  // Display activity events with same format as web: [World] message | pending: N | activityId: N | source: name
   if (eventData.type === 'response-start') {
-    if (source.startsWith('agent:')) {
-      const agentName = source.slice('agent:'.length);
-      console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('started processing')}`);
-    } else if (source) {
-      console.log(`${gray('[world]')} ${yellow(source)} ${gray('started')}`);
-    }
-  } else if (eventData.type === 'response-end' && source.startsWith('agent:')) {
-    // Display when individual agent finishes processing
-    const agentName = source.slice('agent:'.length);
-    console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('finished processing')}`);
+    const message = sourceName ? `${sourceName} started processing` : 'started';
+    console.log(`${gray('[World]')} ${message} ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
   } else if (eventData.type === 'idle' && pending === 0) {
-    console.log(`${gray('[world]')} ${green('idle')} ${gray('- all processing complete')}`);
+    console.log(`${gray('[World]')} All processing complete ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
   } else if (eventData.type === 'response-end' && pending > 0) {
     // Show ongoing activity when one source finishes but others are still active
     if (activeSources.length > 0) {
       const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
-      console.log(`${gray('[world]')} ${yellow('active:')} ${gray(activeList)} ${gray(`(${pending} pending)`)}`);
+      console.log(`${gray('[World]')} Active: ${activeList} (${pending} pending) ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
     }
   }
 }
