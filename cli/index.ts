@@ -2,9 +2,9 @@
 
 /*
  * cli/index.ts
- * Summary: CLI entrypoint and interactive world subscription logic.
+ * Summary: CLI entrypoint and interactive world subscription logic with event-driven prompt display.
  * Implementation: Uses subscribeWorld to obtain a managed WorldSubscription, then subscribes directly to world.eventEmitter for CLI-specific handling.
- * Change: Stop using ClientConnection.onWorldEvent forwarding; attach direct listeners to the World.eventEmitter for 'world', 'message', 'sse', and 'system'.
+ * Architecture: Event-driven prompt display using world activity events instead of timers.
  */
 
 // Load environment variables from .env file
@@ -18,13 +18,13 @@ dotenv.config({ quiet: true });
  * real-time streaming, and comprehensive world management.
  *
  * FEATURES:
- * - Pipeline Mode: Execute commands and exit with timer-based cleanup
+ * - Pipeline Mode: Execute commands and exit with event-based completion tracking
  * - Interactive Mode: Real-time console interface with streaming responses
  * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
  * - Real-time Streaming: Live agent responses via stream.ts module
  * - Color Helpers: Consistent styling with simplified color functions
- * - Timer Management: Smart prompt restoration and exit handling
+ * - Event-Driven Prompt: Uses world activity events to show prompt when agents finish
  * - Debug Logging: Configurable log levels using core logger module
  * - Environment Variables: Automatically loads .env file for API keys and configuration
  *
@@ -35,6 +35,8 @@ dotenv.config({ quiet: true });
  * - Uses readline for interactive input with proper cleanup
  * - Delegates streaming display to stream.ts module for real-time chunk accumulation
  * - Uses core logger for structured debug logging with configurable levels
+ * - Event-driven prompt display: listens to world 'idle' events instead of using timers
+ * - WorldActivityMonitor tracks agent processing and signals when world becomes idle
  *
  * USAGE:
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"

@@ -1,3 +1,10 @@
+v0.7.1
+- Refactored CLI display logic to use world events instead of timers
+- CLI now listens to world activity events (processing/idle) to determine when to show prompt
+- Removed timer-based prompt restoration logic (setupPromptTimer, clearPromptTimer)
+- Improved event-driven architecture for more responsive CLI interaction
+- Exported EventType enum from core for use in CLI and server
+
 v0.7.0
 - Added end-to-end message editing and deletion flows.
 - Added per-agent badge toggles for chat filtering.
