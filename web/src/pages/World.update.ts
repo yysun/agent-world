@@ -447,11 +447,68 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   const activityId = typeof activity.activityId === 'number' ? activity.activityId : null;
   const pending = typeof activity.pendingOperations === 'number' ? activity.pendingOperations : 0;
   const source = typeof activity.source === 'string' ? activity.source : '';
+  const change = activity.change;
 
+  // Create log-style message for significant world activity events
+  let shouldCreateMessage = false;
+  let activityMessage = '';
+  let category = 'world';
+
+  if (change === 'start' && activity.state === 'processing') {
+    if (source.startsWith('agent:')) {
+      const agentId = source.slice('agent:'.length);
+      const agent = state.world?.agents.find(a => a.id === agentId);
+      activityMessage = `Agent ${agent?.name || agentId} started processing`;
+      category = 'world.agent';
+      shouldCreateMessage = true;
+    } else if (source) {
+      activityMessage = `Activity started: ${source}`;
+      shouldCreateMessage = true;
+    }
+  } else if (change === 'end' && activity.state === 'idle' && pending === 0) {
+    activityMessage = 'World idle - all processing complete';
+    shouldCreateMessage = true;
+  }
+
+  let newState = state;
+  if (shouldCreateMessage) {
+    const worldMessage: Message = {
+      id: `world-activity-${activityId}-${Date.now()}`,
+      type: 'world-activity',
+      sender: 'WORLD',
+      text: '',
+      createdAt: new Date(),
+      worldEvent: {
+        type: 'world-activity',
+        category,
+        message: activityMessage,
+        timestamp: activity.timestamp || new Date().toISOString(),
+        data: {
+          state: activity.state,
+          pendingOperations: pending,
+          activityId,
+          source,
+          change,
+          activeSources: activity.activeSources,
+          queue: activity.queue
+        },
+        messageId: `world-activity-${activityId}`
+      },
+      isLogExpanded: false
+    };
+
+    newState = {
+      ...state,
+      messages: [...(state.messages || []), worldMessage],
+      needScroll: true
+    };
+  }
+
+  // Update agent activity status
   if (source.startsWith('agent:')) {
     const agentId = source.slice('agent:'.length);
     if (activity.state === 'processing') {
-      return setAgentActivity(state, agentId, {
+      return setAgentActivity(newState, agentId, {
         message: formatThinkingMessage(agentId),
         phase: 'thinking',
         activityId
@@ -459,19 +516,19 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
     }
 
     if (activity.state === 'idle') {
-      return clearAgentActivity(state, agentId, pending);
+      return clearAgentActivity(newState, agentId, pending);
     }
   } else {
     if (activity.state === 'processing') {
-      return state.isWaiting ? state : { ...state, isWaiting: true };
+      return newState.isWaiting ? newState : { ...newState, isWaiting: true };
     }
 
     if (activity.state === 'idle' && pending === 0) {
-      return clearAllAgentActivities(state, pending);
+      return clearAllAgentActivities(newState, pending);
     }
   }
 
-  return state;
+  return newState;
 };
 
 // World initialization with core auto-restore
@@ -547,14 +604,39 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
 // Event handlers for SSE and system events
 const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
-  if (data.content === 'chat-title-updated') {
-    const updates = initWorld(state, state.worldName, data.chatId);
+  // Create a log-style message for system events
+  const systemMessage: Message = {
+    id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: 'system',
+    sender: 'SYSTEM',
+    text: '',
+    createdAt: new Date(),
+    worldEvent: {
+      type: 'system',
+      category: 'system',
+      message: typeof data === 'string' ? data : (data.content || data.message || 'System event'),
+      timestamp: new Date().toISOString(),
+      data: typeof data === 'object' ? data : undefined,
+      messageId: `system-${Date.now()}`
+    },
+    isLogExpanded: false
+  };
+
+  const newState = {
+    ...state,
+    messages: [...(state.messages || []), systemMessage],
+    needScroll: true
+  };
+
+  // Handle specific system events
+  if (data.content === 'chat-title-updated' || data === 'chat-title-updated') {
+    const updates = initWorld(newState, newState.worldName, data.chatId);
     for await (const update of updates) {
-      state = { ...state, ...update };
+      return { ...newState, ...update };
     }
-    return state;
   }
-  return state;
+
+  return newState;
 };
 
 const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {

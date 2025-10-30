@@ -46,6 +46,16 @@ export interface LogEvent {
   messageId: string;
 }
 
+// World Event Interface - for world activity and system events
+export interface WorldEvent {
+  type: 'world-activity' | 'system';
+  category: string;
+  message: string;
+  timestamp: string;
+  data?: any;
+  messageId: string;
+}
+
 // Web UI Message Interface - extends core with streaming states
 export interface Message {
   id: string;
@@ -66,6 +76,7 @@ export interface Message {
   ownerAgentId?: string; // Which agent's memory this message came from (for filtering)
   seenByAgents?: string[]; // CALCULATED field - built incrementally from actual message data (NOT persisted)
   logEvent?: LogEvent; // For log message types
+  worldEvent?: WorldEvent; // For world/system event types
 
   // Phase 2.2 Enhancement: Tool execution event properties
   isToolEvent?: boolean;

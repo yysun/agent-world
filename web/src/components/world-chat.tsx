@@ -198,6 +198,7 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             filteredMessages.map((message, index) => {
+              // Render log events (server logs)
               if (message.logEvent) {
                 const isExpanded = !!message.isLogExpanded;
                 let formattedArgs: string | null = null;
@@ -227,6 +228,45 @@ export default function WorldChat(props: WorldChatProps) {
                     {isExpanded && (
                       <pre className="log-details">
                         {formattedArgs ?? 'No additional details'}
+                      </pre>
+                    )}
+                  </div>
+                );
+              }
+
+              // Render world events (system and world-activity)
+              if (message.worldEvent) {
+                const isExpanded = !!message.isLogExpanded;
+                let formattedData: string | null = null;
+                if (message.worldEvent.data !== undefined) {
+                  try {
+                    formattedData = JSON.stringify(message.worldEvent.data, null, 2);
+                  } catch (error) {
+                    formattedData = String(message.worldEvent.data);
+                  }
+                }
+
+                // Map world event types to log levels for dot color
+                const dotLevel = message.worldEvent.type === 'system' ? 'info' : 'debug';
+
+                return (
+                  <div key={message.id || 'world-event-' + index} className="message log-message">
+                    <button
+                      type="button"
+                      className="log-header"
+                      aria-expanded={isExpanded}
+                      $onclick={['toggle-log-details', message.id || `world-event-${index}`]}
+                    >
+                      <span className={`log-dot ${dotLevel}`}></span>
+                      <span className="log-category">{message.worldEvent.category}</span>
+                      <span className="log-content">{message.worldEvent.message}</span>
+                      <span className="log-toggle-icon" aria-hidden="true">
+                        {isExpanded ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {isExpanded && formattedData && (
+                      <pre className="log-details">
+                        {formattedData}
                       </pre>
                     )}
                   </div>
