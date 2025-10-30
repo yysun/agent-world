@@ -189,7 +189,6 @@ export async function streamAnthropicResponse(
         functionCalls,
         world,
         agent,
-        publishSSE,
         messageId
       );
 

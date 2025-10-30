@@ -18,6 +18,7 @@
  */
 
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { publishToolEvent } from './events.js';
 
 /**
  * Minimal fallback ID generator
@@ -46,7 +47,6 @@ interface FunctionCall {
  * @param functionCalls - Array of function calls to validate
  * @param world - World context for event publishing
  * @param agent - Agent making the calls
- * @param publishSSE - SSE event publisher function
  * @param messageId - Message ID for tracking
  * @returns Object with validCalls array and toolResults array for invalid calls
  */
@@ -54,7 +54,6 @@ export function filterAndHandleEmptyNamedFunctionCalls(
   functionCalls: FunctionCall[],
   world: World,
   agent: Agent,
-  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
   messageId: string
 ): { validCalls: FunctionCall[]; toolResults: ChatMessage[] } {
   const validCalls: FunctionCall[] = [];
@@ -73,9 +72,9 @@ export function filterAndHandleEmptyNamedFunctionCalls(
         tool_call_id: toolCallId,
       });
 
-      // Emit tool-error SSE event (best-effort)
+      // Emit tool-error event on world channel (best-effort)
       try {
-        publishSSE(world, {
+        publishToolEvent(world, {
           agentName: agent.id || agent.name || 'unknown',
           type: 'tool-error',
           messageId,
@@ -86,8 +85,8 @@ export function filterAndHandleEmptyNamedFunctionCalls(
           },
         });
       } catch (error) {
-        // Best-effort: don't throw if SSE publishing fails
-        console.error('Failed to publish tool-error SSE event:', error);
+        // Best-effort: don't throw if event publishing fails
+        console.error('Failed to publish tool-error event:', error);
       }
     } else {
       // Valid call with non-empty name

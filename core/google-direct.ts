@@ -205,7 +205,6 @@ export async function streamGoogleResponse(
         functionCalls,
         world,
         agent,
-        publishSSE,
         messageId
       );
 

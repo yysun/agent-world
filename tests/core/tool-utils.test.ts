@@ -16,17 +16,24 @@
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { filterAndHandleEmptyNamedFunctionCalls } from '../../core/tool-utils.js';
-import type { World, Agent, WorldSSEEvent } from '../../core/types.js';
+import type { World, Agent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
+import * as events from '../../core/events.js';
+
+// Mock publishToolEvent
+vi.mock('../../core/events.js', () => ({
+  publishToolEvent: vi.fn(),
+}));
 
 describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
   let mockWorld: World;
   let mockAgent: Agent;
-  let mockPublishSSE: jest.Mock<(world: World, data: Partial<WorldSSEEvent>) => void>;
   const testMessageId = 'msg-test-123';
 
   beforeEach(() => {
+    vi.clearAllMocks();
+
     mockWorld = {
       id: 'test-world',
       name: 'Test World',
@@ -53,8 +60,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       createdAt: new Date(),
       lastActive: new Date(),
     };
-
-    mockPublishSSE = vi.fn();
   });
 
   test('should return only valid calls when all have names', () => {
@@ -75,13 +80,12 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
     expect(result.validCalls).toHaveLength(2);
     expect(result.toolResults).toHaveLength(0);
-    expect(mockPublishSSE).not.toHaveBeenCalled();
+    expect(events.publishToolEvent).not.toHaveBeenCalled();
   });
 
   test('should filter out calls with empty name string', () => {
@@ -97,7 +101,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -105,7 +108,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
     expect(result.toolResults).toHaveLength(1);
   });
 
-  test('should filter out calls with missing name', () => {
+  test('should filter out calls with no function property', () => {
     const functionCalls = [
       {
         id: 'call-1',
@@ -118,7 +121,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -139,7 +141,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -160,7 +161,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -180,10 +180,9 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
     ];
 
     const result = filterAndHandleEmptyNamedFunctionCalls(
-      functionCalls,
+      functionCalls as any,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -205,12 +204,11 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
-    expect(mockPublishSSE).toHaveBeenCalledTimes(1);
-    expect(mockPublishSSE).toHaveBeenCalledWith(mockWorld, {
+    expect(events.publishToolEvent).toHaveBeenCalledTimes(1);
+    expect(events.publishToolEvent).toHaveBeenCalledWith(mockWorld, {
       agentName: 'test-agent',
       type: 'tool-error',
       messageId: testMessageId,
@@ -250,7 +248,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
@@ -262,7 +259,7 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
     expect(result.toolResults[0].tool_call_id).toBe('call-invalid-1');
     expect(result.toolResults[1].tool_call_id).toBe('call-invalid-2');
 
-    expect(mockPublishSSE).toHaveBeenCalledTimes(2);
+    expect(events.publishToolEvent).toHaveBeenCalledTimes(2);
   });
 
   test('should handle empty functionCalls array', () => {
@@ -270,18 +267,18 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       [],
       mockWorld,
       mockAgent,
-      mockPublishSSE,
       testMessageId
     );
 
     expect(result.validCalls).toHaveLength(0);
     expect(result.toolResults).toHaveLength(0);
-    expect(mockPublishSSE).not.toHaveBeenCalled();
+    expect(events.publishToolEvent).not.toHaveBeenCalled();
   });
 
-  test('should not throw if publishSSE fails', () => {
-    const failingPublishSSE = vi.fn(() => {
-      throw new Error('SSE publish failed');
+  test('should not throw if publishToolEvent fails', () => {
+    // Make publishToolEvent throw an error
+    vi.mocked(events.publishToolEvent).mockImplementationOnce(() => {
+      throw new Error('Tool event publish failed');
     });
 
     const functionCalls = [
@@ -297,13 +294,12 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
         functionCalls,
         mockWorld,
         mockAgent,
-        failingPublishSSE as any,
         testMessageId
       );
     }).not.toThrow();
   });
 
-  test('should use agent.name as fallback for agentName in SSE', () => {
+  test('should use agent.name as fallback for agentName in tool event', () => {
     const agentWithoutId = {
       ...mockAgent,
       id: '',
@@ -322,11 +318,10 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       functionCalls,
       mockWorld,
       agentWithoutId,
-      mockPublishSSE,
       testMessageId
     );
 
-    expect(mockPublishSSE).toHaveBeenCalledWith(mockWorld, expect.objectContaining({
+    expect(events.publishToolEvent).toHaveBeenCalledWith(mockWorld, expect.objectContaining({
       agentName: 'FallbackName',
     }));
   });

@@ -229,7 +229,6 @@ export async function streamOpenAIResponse(
         functionCalls,
         world,
         agent,
-        publishSSE,
         messageId
       );
 
