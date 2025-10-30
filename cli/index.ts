@@ -72,6 +72,27 @@ import { configureLLMProvider } from '../core/llm-config.js';
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
 
+// Event name constants
+const WORLD_EVENTS = {
+  WORLD: 'world',
+  MESSAGE: 'message',
+  SSE: 'sse',
+  SYSTEM: 'system'
+} as const;
+
+// Event payload types
+interface MessageEventPayload {
+  sender: string;
+  content: string;
+  [key: string]: any;
+}
+
+interface SystemEventPayload {
+  message?: string;
+  content?: string;
+  [key: string]: any;
+}
+
 // Timer management for prompt restoration
 interface GlobalState {
   promptTimer?: ReturnType<typeof setTimeout>;
@@ -423,15 +444,108 @@ function printCLIResult(result: any) {
   }
 }
 
+/**
+ * Attach CLI event listeners to world EventEmitter
+ * 
+ * @param world - World instance to attach listeners to
+ * @param streaming - Streaming state for interactive mode (null for pipeline mode)
+ * @param globalState - Global state for interactive mode (null for pipeline mode)
+ * @param activityMonitor - Activity monitor for tracking world events
+ * @param progressRenderer - Progress renderer for displaying activity
+ * @param rl - Readline interface for interactive mode (undefined for pipeline mode)
+ * @returns Map of event types to listener functions for cleanup
+ */
+function attachCLIListeners(
+  world: World,
+  streaming: StreamingState | null,
+  globalState: GlobalState | null,
+  activityMonitor: WorldActivityMonitor,
+  progressRenderer: ActivityProgressRenderer,
+  rl?: readline.Interface
+): Map<string, (...args: any[]) => void> {
+  const listeners = new Map<string, (...args: any[]) => void>();
+
+  // World activity events
+  const worldListener = (eventData: WorldActivityEventPayload) => {
+    activityMonitor.handle(eventData);
+    progressRenderer.handle(eventData);
+    if (streaming && globalState && rl) {
+      handleWorldEvent(WORLD_EVENTS.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+    }
+  };
+  world.eventEmitter.on(WORLD_EVENTS.WORLD, worldListener);
+  listeners.set(WORLD_EVENTS.WORLD, worldListener);
+
+  // Message events
+  const messageListener = (eventData: MessageEventPayload) => {
+    if (eventData.content && eventData.content.includes('Success message sent')) return;
+
+    if (streaming && globalState && rl) {
+      handleWorldEvent(WORLD_EVENTS.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+    } else {
+      // Pipeline mode: simple console output
+      if (eventData.sender === 'system') {
+        console.log(`${boldRed('● system:')} ${eventData.content}`);
+      }
+      if (eventData.content) {
+        console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
+      }
+    }
+  };
+  world.eventEmitter.on(WORLD_EVENTS.MESSAGE, messageListener);
+  listeners.set(WORLD_EVENTS.MESSAGE, messageListener);
+
+  // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
+  if (streaming && globalState && rl) {
+    const sseListener = (eventData: any) => {
+      handleWorldEvent(WORLD_EVENTS.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+    };
+    world.eventEmitter.on(WORLD_EVENTS.SSE, sseListener);
+    listeners.set(WORLD_EVENTS.SSE, sseListener);
+  }
+
+  // System events
+  const systemListener = (eventData: SystemEventPayload) => {
+    if (eventData.content && eventData.content.includes('Success message sent')) return;
+    if (streaming && globalState && rl) {
+      handleWorldEvent(WORLD_EVENTS.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+    } else if (eventData.message || eventData.content) {
+      // Pipeline mode: system messages are handled by message listener
+    }
+  };
+  world.eventEmitter.on(WORLD_EVENTS.SYSTEM, systemListener);
+  listeners.set(WORLD_EVENTS.SYSTEM, systemListener);
+
+  return listeners;
+}
+
+/**
+ * Cleanup CLI event listeners from world EventEmitter
+ * 
+ * @param world - World instance to remove listeners from
+ * @param listeners - Map of event types to listener functions
+ */
+function detachCLIListeners(
+  world: World,
+  listeners: Map<string, (...args: any[]) => void>
+): void {
+  for (const [eventType, listener] of listeners.entries()) {
+    world.eventEmitter.removeListener(eventType, listener);
+  }
+  listeners.clear();
+}
+
 // Pipeline mode execution with timer-based cleanup
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   disableStreaming();
 
+  let world: World | null = null;
+  let worldSubscription: any = null;
+  let cliListeners: Map<string, (...args: any[]) => void> | null = null;
+  const activityMonitor = new WorldActivityMonitor();
+  const progressRenderer = new ActivityProgressRenderer();
+
   try {
-    let world: World | null = null;
-    let worldSubscription: any = null;
-    const activityMonitor = new WorldActivityMonitor();
-    const progressRenderer = new ActivityProgressRenderer();
 
     if (options.world) {
       // Subscribe to world lifecycle but do not request forwarding callbacks
@@ -443,28 +557,8 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       world = worldSubscription.world as World;
 
       // Attach direct listeners to the world.eventEmitter for pipeline handling
-      world.eventEmitter.on('world', (eventData: any) => {
-        activityMonitor.handle(eventData as WorldActivityEventPayload);
-        progressRenderer.handle(eventData as WorldActivityEventPayload);
-      });
-
-      world.eventEmitter.on('message', (eventData: any) => {
-        if (eventData.content && eventData.content.includes('Success message sent')) return;
-        if (eventData.sender === 'system') {
-          const msg = eventData.content;
-          console.log(`${boldRed('● system:')} ${msg}`);
-        }
-        if (eventData.content) {
-          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
-        }
-      });
-
-      world.eventEmitter.on('system', (eventData: any) => {
-        if (eventData.content && eventData.content.includes('Success message sent')) return;
-        if (eventData.message || eventData.content) {
-          // existing logic
-        }
-      });
+      // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
+      cliListeners = attachCLIListeners(world, null, null, activityMonitor, progressRenderer);
     }
 
     // Execute command from --command option
@@ -550,11 +644,20 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
     }
 
     if (worldSubscription) {
+      if (cliListeners && world) {
+        detachCLIListeners(world, cliListeners);
+      }
       await worldSubscription.unsubscribe();
     }
     process.exit(0);
   } catch (error) {
     console.error(boldRed('Error:'), error instanceof Error ? error.message : error);
+    if (worldSubscription) {
+      if (cliListeners && world) {
+        detachCLIListeners(world, cliListeners);
+      }
+      await worldSubscription.unsubscribe();
+    }
     process.exit(1);
   }
 }
@@ -570,7 +673,18 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
   }
 }
 
-// World subscription handler
+/**
+ * Subscribe to world and attach CLI event listeners for interactive mode
+ * 
+ * @param rootPath - Root path for world storage (unused, kept for compatibility)
+ * @param worldName - Name of the world to subscribe to
+ * @param streaming - Streaming state for real-time response display
+ * @param globalState - Global state for timer management
+ * @param activityMonitor - Activity monitor for tracking world events
+ * @param progressRenderer - Progress renderer for displaying activity
+ * @param rl - Readline interface for interactive input
+ * @returns WorldState with subscription and world instance
+ */
 async function handleSubscribe(
   rootPath: string,
   worldName: string,
@@ -587,25 +701,8 @@ async function handleSubscribe(
   const world = subscription.world as World;
 
   // Attach direct listeners to the world.eventEmitter for CLI handling
-  const worldListener = (eventData: any) => {
-    handleWorldEvent('world', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
-  };
-  world.eventEmitter.on('world', worldListener);
-
-  const messageListener = (eventData: any) => {
-    handleWorldEvent('message', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
-  };
-  world.eventEmitter.on('message', messageListener);
-
-  const sseListener = (eventData: any) => {
-    handleWorldEvent('sse', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
-  };
-  world.eventEmitter.on('sse', sseListener);
-
-  const systemListener = (eventData: any) => {
-    handleWorldEvent('system', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
-  };
-  world.eventEmitter.on('system', systemListener);
+  // Interactive mode needs all event types including SSE for streaming responses
+  attachCLIListeners(world, streaming, globalState, activityMonitor, progressRenderer, rl);
 
   return { subscription, world };
 }

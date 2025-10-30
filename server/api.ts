@@ -25,6 +25,10 @@
  * - 2025-10-21: Fixed message event streaming to include messageId for frontend edit feature
  *   - Message events now streamed with complete data (sender, content, messageId, createdAt)
  *   - Enables frontend to track and edit user messages by server-generated messageId
+ * - 2025-10-30: Refactored to use direct world.eventEmitter subscription pattern
+ *   - Eliminates ClientConnection.onWorldEvent forwarding (same pattern as CLI)
+ *   - Attaches listeners directly to world.eventEmitter for better performance
+ *   - Proper listener cleanup in both streaming and non-streaming handlers
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -75,6 +79,43 @@ const loggerValidation = createCategoryLogger('api.validation');
 const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
+
+// Event name constants
+const WORLD_EVENTS = {
+  WORLD: 'world',
+  MESSAGE: 'message',
+  SSE: 'sse',
+  SYSTEM: 'system'
+} as const;
+
+// Event payload types for API handlers
+interface MessageEventPayload {
+  sender: string;
+  content: string;
+  messageId?: string;
+  replyToMessageId?: string;
+  timestamp?: string;
+  [key: string]: any;
+}
+
+interface SSEEventPayload {
+  type: string;
+  agentName?: string;
+  [key: string]: any;
+}
+
+interface WorldActivityPayload {
+  state?: string;
+  type?: string;
+  agentName?: string;
+  toolExecution?: {
+    toolCallId?: string;
+    toolName?: string;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}
+
 type WorldContext = {
   id: string;
   load: () => Promise<World | null>;
@@ -555,6 +596,9 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
 // Chat Helper Functions
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   disableStreaming();
+  let subscription: any = null;
+  let listeners: Map<string, (...args: any[]) => void> = new Map();
+
   try {
     let responseContent = '';
     let isComplete = false;
@@ -570,24 +614,35 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         }
       }, 15000);
 
-      const client: ClientConnection = {
-        isOpen: true,
-        onWorldEvent: (eventType: string, eventData: any) => {
-          responseContent = JSON.stringify({ type: eventType, data: eventData });
-          clearTimeout(timer);
-          isComplete = true;
-          resolve();
-        }
-      };
-
-      subscribeWorld(worldName, client).then(subscription => {
-        if (!subscription) {
+      // Subscribe with minimal client (no forwarding callbacks)
+      subscribeWorld(worldName, { isOpen: true }).then(sub => {
+        if (!sub) {
           hasError = true;
           errorMessage = 'Failed to subscribe to world';
           reject(new Error(errorMessage));
           return;
         }
-        publishMessage(subscription.world, message, sender);
+        subscription = sub;
+        const world = subscription.world;
+
+        // Attach direct listener to world.eventEmitter
+        const eventListener = (eventData: any) => {
+          responseContent = JSON.stringify({ type: 'event', data: eventData });
+          clearTimeout(timer);
+          isComplete = true;
+          resolve();
+        };
+
+        // Listen to all event types for non-streaming mode
+        world.eventEmitter.on(WORLD_EVENTS.WORLD, eventListener);
+        listeners.set(WORLD_EVENTS.WORLD, eventListener);
+        world.eventEmitter.on(WORLD_EVENTS.MESSAGE, eventListener);
+        listeners.set(WORLD_EVENTS.MESSAGE, eventListener);
+        world.eventEmitter.on(WORLD_EVENTS.SYSTEM, eventListener);
+        listeners.set(WORLD_EVENTS.SYSTEM, eventListener);
+
+        // Publish message
+        publishMessage(world, message, sender);
       }).catch(error => {
         hasError = true;
         errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
@@ -613,6 +668,15 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
   } catch (error) {
     sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'CHAT_ERROR');
   } finally {
+    // Cleanup listeners
+    if (subscription && listeners.size > 0) {
+      const world = subscription.world;
+      for (const [eventType, listener] of listeners.entries()) {
+        world.eventEmitter.removeListener(eventType, listener);
+      }
+      listeners.clear();
+      await subscription.unsubscribe();
+    }
     enableStreaming();
   }
 }
@@ -695,97 +759,8 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     }
   };
 
-  const client: ClientConnection = {
-    isOpen: true,
-    onWorldEvent: (eventType: string, eventData: any) => {
-      // Track agent activity and tool execution for better timeout management
-      if (eventType === 'world') {
-        const payload = eventData as any;
-        // Handle activity events
-        if (payload?.state === 'processing') {
-          awaitingWorldIdle = true;
-        } else if (payload?.state === 'idle') {
-          awaitingWorldIdle = false;
-        }
-        // Handle tool events (migrated from sse channel)
-        else if (payload?.type === 'tool-start' || payload?.type === 'tool-result' || payload?.type === 'tool-error') {
-          const agentName = payload.agentName;
-          if (agentName) {
-            if (payload.type === 'tool-start') {
-              const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
-              activeToolCalls.add(toolKey);
-              pendingEvents++;
-              loggerStream.debug(`Tool start: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-            } else if (payload.type === 'tool-result' || payload.type === 'tool-error') {
-              const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
-              activeToolCalls.delete(toolKey);
-              pendingEvents = Math.max(0, pendingEvents - 1);
-              loggerStream.debug(`Tool ${payload.type === 'tool-error' ? 'error' : 'complete'}: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-            }
-          }
-        }
-      }
-      else if (eventType === 'sse') {
-        const agentName = eventData.agentName;
-        if (agentName) {
-          if (eventData.type === 'start') {
-            activeAgents.add(agentName);
-            pendingEvents++;
-            loggerStream.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-          } else if (eventData.type === 'end' || eventData.type === 'error') {
-            activeAgents.delete(agentName);
-            pendingEvents = Math.max(0, pendingEvents - 1);
-            loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-          }
-        }
-      }
-      // Convert message events to include complete data for frontend
-      else if (eventType === 'message') {
-        // Enhance message event data with structured format
-        const messageData = {
-          type: 'message',
-          sender: eventData.sender,
-          content: eventData.content,
-          messageId: eventData.messageId,
-          replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
-          createdAt: eventData.timestamp || new Date().toISOString()
-        };
-        sendSSE(JSON.stringify({ type: 'message', data: messageData }));
-        return;
-      }
-
-      sendSSE(JSON.stringify({ type: eventType, data: eventData }));
-    },
-    onLog: (logEvent) => {
-      // Stream log events as SSE data with 'sse' type and 'log' subtype
-      sendSSE(JSON.stringify({
-        type: 'sse',
-        data: {
-          type: 'log',
-          agentName: 'system',
-          messageId: logEvent.messageId,
-          logEvent: {
-            level: logEvent.level,
-            category: logEvent.category,
-            message: logEvent.message,
-            timestamp: logEvent.timestamp,
-            data: logEvent.data
-          }
-        }
-      }));
-    },
-    onError: (error: string) => {
-      loggerStream.error(`World error: ${error}`);
-      sendSSE(JSON.stringify({ type: 'error', message: error }));
-      // Don't immediately end on error - let natural timeout handle it
-      // unless it's a critical error
-      if (error.includes('Failed to') || error.includes('Critical')) {
-        setTimeout(() => endResponse(), 1000);
-      }
-    }
-  };
-
-  const subscription = await subscribeWorld(worldName, client);
+  // Subscribe with minimal client (no forwarding callbacks - we'll attach direct listeners)
+  const subscription = await subscribeWorld(worldName, { isOpen: true });
   if (!subscription) {
     loggerStream.error('Unexpected: subscription is null after world existence check');
     sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
