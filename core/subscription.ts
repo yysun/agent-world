@@ -1,29 +1,8 @@
-/**
- * World Subscription Management Module
- *
- * Features:
- * - Centralized world subscription and event handling
- * - Transport-agnostic client connection interface
- * - Event listener setup and cleanup management
- * - Memory leak prevention and proper resource cleanup
- * - World instance isolation and complete destruction during refresh
- * - EventEmitter recreation and agent map repopulation
- * - World message subscription functions
- *
- * Purpose:
- * - Preserve essential world subscription functionality
- * - Maintain transport abstraction for CLI and WebSocket
- * - Provide code reuse for event handling across transports
- * - Ensure proper world lifecycle management across refresh operations
- * - WebSocket command processing moved to server/ws.ts for better separation
- * - Enable worlds to subscribe/unsubscribe to message events
- *
- * World Refresh Architecture:
- * - Each subscription maintains reference to current world instance
- * - Refresh completely destroys old world (EventEmitter, agents map, listeners)
- * - Creates fresh world instance with new EventEmitter and repopulated agents
- * - Prevents event crosstalk between old and new world instances
- * - Maintains subscription continuity for client connections
+/*
+ * core/subscription.ts
+ * Summary: World subscription management and event forwarding.
+ * Implementation: Provides startWorld/subscribeWorld APIs that manage world lifecycle, agent subscriptions, and event listener setup.
+ * Change: Only set up forwarding listeners when a client provides callbacks (onWorldEvent/onLog). This allows callers (like the CLI) to attach direct listeners to world.eventEmitter without redundant no-op forwarding listeners being registered.
  */
 
 import { World } from './types.js';
@@ -66,8 +45,12 @@ export interface WorldSubscription {
 
 // Start world with event listeners - extracted from subscribeWorld
 export async function startWorld(world: World, client: ClientConnection): Promise<WorldSubscription> {
-  // Set up event listeners
-  let worldEventListeners = setupWorldEventListeners(world, client);
+  // Only set up forwarding listeners when the client actually wants them.
+  let worldEventListeners: Map<string, (...args: any[]) => void> = new Map();
+  if (client && (client.onWorldEvent || client.onLog)) {
+    worldEventListeners = setupWorldEventListeners(world, client);
+  }
+
   let currentWorld: World | null = world;
 
   // Subscribe all loaded agents to world messages (moved from getFullWorld)
@@ -125,8 +108,12 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       // Update current references
       currentWorld = refreshedWorld;
 
-      // Set up new event listeners on the fresh world
-      worldEventListeners = setupWorldEventListeners(currentWorld, client);
+      // Set up new event listeners on the fresh world only if client wants forwarding
+      if (client && (client.onWorldEvent || client.onLog)) {
+        worldEventListeners = setupWorldEventListeners(currentWorld, client);
+      } else {
+        worldEventListeners = new Map();
+      }
 
       // Subscribe all loaded agents to world messages (moved from getFullWorld)
       for (const agent of currentWorld.agents.values()) {

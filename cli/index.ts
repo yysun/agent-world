@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+/*
+ * cli/index.ts
+ * Summary: CLI entrypoint and interactive world subscription logic.
+ * Implementation: Uses subscribeWorld to obtain a managed WorldSubscription, then subscribes directly to world.eventEmitter for CLI-specific handling.
+ * Change: Stop using ClientConnection.onWorldEvent forwarding; attach direct listeners to the World.eventEmitter for 'world', 'message', 'sse', and 'system'.
+ */
+
 // Load environment variables from .env file
 import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
@@ -426,39 +433,38 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
     const activityMonitor = new WorldActivityMonitor();
     const progressRenderer = new ActivityProgressRenderer();
 
-    const pipelineClient: ClientConnection = {
-      isOpen: true,
-      onWorldEvent: (eventType: string, eventData: any) => {
-        if (eventType === 'world') {
-          activityMonitor.handle(eventData as WorldActivityEventPayload);
-          progressRenderer.handle(eventData as WorldActivityEventPayload);
-          return;
-        }
-
-        if (eventData.content && eventData.content.includes('Success message sent')) return;
-
-        if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
-          // existing logic
-        } else if (eventType === 'message' && eventData.sender === 'system') {
-          const msg = eventData.content;
-          console.log(`${boldRed('● system:')} ${msg}`);
-        }
-        if (eventType === 'message' && eventData.content) {
-          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
-        }
-      },
-      onError: (error: string) => {
-        console.log(red(`Error: ${error}`));
-      }
-    };
-
     if (options.world) {
-      worldSubscription = await subscribeWorld(options.world, pipelineClient);
+      // Subscribe to world lifecycle but do not request forwarding callbacks
+      worldSubscription = await subscribeWorld(options.world, { isOpen: true });
       if (!worldSubscription) {
         console.error(boldRed(`Error: World '${options.world}' not found`));
         process.exit(1);
       }
-      world = worldSubscription.world;
+      world = worldSubscription.world as World;
+
+      // Attach direct listeners to the world.eventEmitter for pipeline handling
+      world.eventEmitter.on('world', (eventData: any) => {
+        activityMonitor.handle(eventData as WorldActivityEventPayload);
+        progressRenderer.handle(eventData as WorldActivityEventPayload);
+      });
+
+      world.eventEmitter.on('message', (eventData: any) => {
+        if (eventData.content && eventData.content.includes('Success message sent')) return;
+        if (eventData.sender === 'system') {
+          const msg = eventData.content;
+          console.log(`${boldRed('● system:')} ${msg}`);
+        }
+        if (eventData.content) {
+          console.log(`${boldGreen('● ' + (eventData.sender || 'agent') + ':')} ${eventData.content}`);
+        }
+      });
+
+      world.eventEmitter.on('system', (eventData: any) => {
+        if (eventData.content && eventData.content.includes('Success message sent')) return;
+        if (eventData.message || eventData.content) {
+          // existing logic
+        }
+      });
     }
 
     // Execute command from --command option
@@ -574,20 +580,34 @@ async function handleSubscribe(
   progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
-  const cliClient: ClientConnection = {
-    isOpen: true,
-    onWorldEvent: (eventType: string, eventData: any) => {
-      handleWorldEvent(eventType, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
-    },
-    onError: (error: string) => {
-      console.log(red(`Error: ${error}`));
-    }
-  };
-
-  const subscription = await subscribeWorld(worldName, cliClient);
+  // Subscribe to world lifecycle but do not request forwarding callbacks
+  const subscription = await subscribeWorld(worldName, { isOpen: true });
   if (!subscription) throw new Error('Failed to load world');
 
-  return { subscription, world: subscription.world as World };
+  const world = subscription.world as World;
+
+  // Attach direct listeners to the world.eventEmitter for CLI handling
+  const worldListener = (eventData: any) => {
+    handleWorldEvent('world', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+  };
+  world.eventEmitter.on('world', worldListener);
+
+  const messageListener = (eventData: any) => {
+    handleWorldEvent('message', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+  };
+  world.eventEmitter.on('message', messageListener);
+
+  const sseListener = (eventData: any) => {
+    handleWorldEvent('sse', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+  };
+  world.eventEmitter.on('sse', sseListener);
+
+  const systemListener = (eventData: any) => {
+    handleWorldEvent('system', eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+  };
+  world.eventEmitter.on('system', systemListener);
+
+  return { subscription, world };
 }
 
 // Handle world events with streaming support
