@@ -18,7 +18,7 @@ dotenv.config({ quiet: true });
  * real-time streaming, and comprehensive world management.
  *
  * FEATURES:
- * - Pipeline Mode: Execute commands and exit with event-based completion tracking
+ * - Pipeline Mode: Execute commands and exit with event-driven completion tracking (with timeout fallback)
  * - Interactive Mode: Real-time console interface with streaming responses
  * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
@@ -514,7 +514,7 @@ function detachCLIListeners(
   listeners.clear();
 }
 
-// Pipeline mode execution with timer-based cleanup
+// Pipeline mode execution with event-driven completion tracking
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   disableStreaming();
 
