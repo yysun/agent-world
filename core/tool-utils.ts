@@ -80,7 +80,7 @@ export function filterAndHandleEmptyNamedFunctionCalls(
           type: 'tool-error',
           messageId,
           toolExecution: {
-            toolName: '',
+            toolName,
             toolCallId,
             error: 'empty tool name from LLM',
           },

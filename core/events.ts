@@ -32,7 +32,14 @@
  * - Priority 3: Updated type documentation to clarify messageId requirement
  * - Added publishMessageWithId() for pre-generated IDs
  *
+ * Activity Tracking Fix (2025-10-30):
+ * - Removed premature activity completion from publishMessage/publishMessageWithId
+ * - Activity tracking now managed by actual work (agent processing) not message publication
+ * - Prevents world from signaling 'idle' before agents start processing
+ * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
+ *
  * Changes:
+ * - 2025-10-30: Fixed premature idle signal - removed activity tracking from message publishing
  * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
  * - 2025-10-25: Fixed agent message messageId - use messageId from publishMessage() return value
  * - 2025-10-21: Added messageId and agentId to all messages saved to agent memory
@@ -103,7 +110,6 @@ export function publishMessage(world: World, content: string, sender: string, ch
     chatId: targetChatId
   };
 
-  const completeActivity = beginWorldActivity(world, `message:${sender}`);
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
     sender,
@@ -113,7 +119,6 @@ export function publishMessage(world: World, content: string, sender: string, ch
   });
 
   world.eventEmitter.emit('message', messageEvent);
-  queueMicrotask(completeActivity);
   return messageEvent;
 }
 
@@ -132,9 +137,7 @@ export function publishMessageWithId(world: World, content: string, sender: stri
     messageId,
     chatId: targetChatId
   };
-  const completeActivity = beginWorldActivity(world, `message:${sender}`);
   world.eventEmitter.emit('message', messageEvent);
-  queueMicrotask(completeActivity);
   return messageEvent;
 }
 
