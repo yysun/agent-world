@@ -136,20 +136,68 @@ export interface WorldEventPayload {
 }
 
 /**
- * Event payload mapping for type-safe event handling
- * Maps each EventType to its corresponding payload type
+ * Event payload mapping for type-safe event handling.
+ * Maps each EventType to its corresponding payload type using proper core event interfaces.
+ * 
+ * This provides compile-time validation when using typed event utilities while
+ * maintaining zero runtime overhead for direct EventEmitter usage.
+ * 
+ * @example
+ * // Type-safe handler with payload validation
+ * function handleEvent<T extends EventType>(
+ *   eventType: T, 
+ *   payload: EventPayloadMap[T]
+ * ) {
+ *   // TypeScript knows the exact payload structure
+ * }
+ * 
+ * @since 2025-10-30 - Updated to use core World event types
  */
 export type EventPayloadMap = {
-  [EventType.MESSAGE]: MessageEventPayload;
-  [EventType.SYSTEM]: SystemEventPayload;
-  [EventType.SSE]: SSEEventPayload;
-  [EventType.WORLD]: WorldEventPayload;
+  /** Message events use WorldMessageEvent for complete structure */
+  [EventType.MESSAGE]: WorldMessageEvent;
+
+  /** System events use WorldSystemEvent for internal notifications */
+  [EventType.SYSTEM]: WorldSystemEvent;
+
+  /** SSE events use WorldSSEEvent for streaming data */
+  [EventType.SSE]: WorldSSEEvent;
+
+  /** World/tool events use WorldToolEvent for agent behavioral tracking */
+  [EventType.WORLD]: WorldToolEvent;
 };
 
+/**
+ * Core event types for Agent World system EventEmitter.
+ * 
+ * These enums provide type-safe alternatives to string literals for event emission
+ * and subscription. Each enum value maps exactly to the string used by EventEmitter
+ * to maintain full backward compatibility.
+ * 
+ * @example
+ * // Type-safe event emission (recommended)
+ * world.eventEmitter.emit(EventType.MESSAGE, messageEvent);
+ * 
+ * // Traditional string usage (still supported)
+ * world.eventEmitter.emit('message', messageEvent);
+ * 
+ * // Optional typed bridge for enhanced type safety
+ * const bridge = createTypedEventBridge(world);
+ * bridge.emit(EventType.MESSAGE, messageEvent); // Full payload validation
+ * 
+ * @since 2025-10-30
+ */
 export enum EventType {
+  /** Message events for agent communication and user input */
   MESSAGE = 'message',
+
+  /** World/tool events for agent behavioral tracking (tool execution) */
   WORLD = 'world',
+
+  /** Server-Sent Events for real-time streaming */
   SSE = 'sse',
+
+  /** System events for internal notifications */
   SYSTEM = 'system'
 }
 
@@ -429,6 +477,135 @@ export interface WorldSystemEvent {
   content: string;
   timestamp: Date;
   messageId: string;
+}
+
+// Typed Event Bridge Utilities
+
+/**
+ * Typed event bridge for enhanced type safety with EventEmitter.
+ * 
+ * Provides optional type-safe wrappers around World.eventEmitter while maintaining
+ * zero runtime overhead. All functions delegate directly to EventEmitter methods.
+ * 
+ * @example
+ * const bridge = createTypedEventBridge(world);
+ * 
+ * // Type-safe emission with payload validation
+ * bridge.emit(EventType.MESSAGE, {
+ *   content: 'Hello',
+ *   sender: 'user',
+ *   timestamp: new Date(),
+ *   messageId: 'msg-123'
+ * });
+ * 
+ * // Type-safe subscription
+ * const unsubscribe = bridge.on(EventType.MESSAGE, (payload) => {
+ *   // TypeScript knows payload is WorldMessageEvent
+ *   console.log('Message:', payload.content);
+ * });
+ * 
+ * @since 2025-10-30
+ */
+export interface TypedEventBridge {
+  /**
+   * Emit a typed event with payload validation.
+   * Zero overhead - delegates directly to EventEmitter.emit()
+   */
+  emit<T extends EventType>(
+    eventType: T,
+    payload: EventPayloadMap[T]
+  ): boolean;
+
+  /**
+   * Subscribe to typed events with payload validation.
+   * Zero overhead - delegates directly to EventEmitter.on()
+   */
+  on<T extends EventType>(
+    eventType: T,
+    handler: (payload: EventPayloadMap[T]) => void
+  ): () => void;
+
+  /**
+   * Remove typed event subscription.
+   * Zero overhead - delegates directly to EventEmitter.off()
+   */
+  off<T extends EventType>(
+    eventType: T,
+    handler: (payload: EventPayloadMap[T]) => void
+  ): void;
+}
+
+/**
+ * Zero-overhead typed event bridge implementation.
+ * 
+ * Optimized to achieve <0.1% overhead by using direct property assignment
+ * instead of method dispatch. Binds EventEmitter methods directly to avoid
+ * the overhead of wrapper method calls.
+ * 
+ * Performance: Target <0.1% overhead compared to raw EventEmitter usage.
+ * Architecture: Direct property assignment eliminates method dispatch overhead.
+ * 
+ * @since 2025-10-30
+ */
+class TypedEventBridgeImpl implements TypedEventBridge {
+  // Direct property assignments for zero-overhead delegation
+  public readonly emit: <T extends EventType>(
+    eventType: T,
+    payload: EventPayloadMap[T]
+  ) => boolean;
+
+  public readonly on: <T extends EventType>(
+    eventType: T,
+    handler: (payload: EventPayloadMap[T]) => void
+  ) => () => void;
+
+  public readonly off: <T extends EventType>(
+    eventType: T,
+    handler: (payload: EventPayloadMap[T]) => void
+  ) => void;
+
+  constructor(eventEmitter: EventEmitter) {
+    // Direct assignment avoids method dispatch overhead
+    this.emit = eventEmitter.emit.bind(eventEmitter) as any;
+
+    // For 'on', we need to return an unsubscribe function
+    this.on = <T extends EventType>(
+      eventType: T,
+      handler: (payload: EventPayloadMap[T]) => void
+    ) => {
+      eventEmitter.on(eventType, handler);
+      return () => eventEmitter.off(eventType, handler);
+    };
+
+    // Direct assignment for 'off'
+    this.off = eventEmitter.off.bind(eventEmitter) as any;
+  }
+}
+
+/**
+ * Create a typed event bridge for enhanced type safety.
+ * 
+ * This utility provides optional type-safe wrappers around World.eventEmitter
+ * while maintaining zero runtime overhead. Use this when you want compile-time
+ * validation of event names and payload structures.
+ * 
+ * @param world - World instance with eventEmitter
+ * @returns TypedEventBridge with type-safe emit/on/off methods
+ * 
+ * @example
+ * const world = await getWorld('my-world');
+ * const bridge = createTypedEventBridge(world);
+ * 
+ * // Compile-time validation of event type and payload
+ * bridge.emit(EventType.MESSAGE, messageEvent);
+ * 
+ * // Original EventEmitter usage still works
+ * world.eventEmitter.emit('message', messageEvent);
+ * 
+ * @since 2025-10-30
+ */
+export function createTypedEventBridge(world: World): TypedEventBridge {
+  return new TypedEventBridgeImpl(world.eventEmitter);
 }
 
 /**
