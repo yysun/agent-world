@@ -18,13 +18,18 @@ dotenv.config({ quiet: true });
  * real-time streaming, and comprehensive world management.
  *
  * FEATURES:
- * - Pipeline Mode: Execute commands and exit with event-driven completion tracking (with timeout fallback)
+ * - Pipeline Mode: Execute commands and exit with pure event-driven completion tracking
+ *   - Uses world activity events (response-start, response-end, idle) for completion detection
+ *   - No visible activity progress (clean output for scripting)
+ *   - Extended timeout (120s) with quick exit on no activity (2s)
+ *   - Silent timeout handling (no error messages for clean pipelines)
  * - Interactive Mode: Real-time console interface with streaming responses
+ *   - Full activity progress display with world events, tool execution, and streaming
+ *   - Event-driven prompt display using world idle events
  * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
- * - Real-time Streaming: Live agent responses via stream.ts module
+ * - Real-time Streaming: Live agent responses via stream.ts module (interactive only)
  * - Color Helpers: Consistent styling with simplified color functions
- * - Event-Driven Prompt: Uses world activity events to show prompt when agents finish
  * - Debug Logging: Configurable log levels using core logger module
  * - Environment Variables: Automatically loads .env file for API keys and configuration
  *
@@ -193,8 +198,8 @@ class WorldActivityMonitor {
   } = {}): Promise<void> {
     const {
       snapshot = this.captureSnapshot(),
-      timeoutMs = 60_000,
-      noActivityTimeoutMs = 1_000
+      timeoutMs = 120_000, // Default 2 minutes for complex operations
+      noActivityTimeoutMs = 2_000 // Default 2 seconds for quick exit
     } = options;
 
     const targetActivityId = snapshot.activityId;
@@ -456,10 +461,12 @@ function attachCLIListeners(
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
     activityMonitor.handle(eventData);
-    progressRenderer.handle(eventData);
+    // Only render activity progress in interactive mode
     if (streaming && globalState && rl) {
+      progressRenderer.handle(eventData);
       handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     }
+    // Pipeline mode: silently track events for completion detection
   };
   world.eventEmitter.on(EventType.WORLD, worldListener);
   listeners.set(EventType.WORLD, worldListener);
@@ -561,9 +568,15 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
 
       if (!options.command.startsWith('/') && world) {
         try {
-          await activityMonitor.waitForIdle({ snapshot });
+          // Event-driven completion: wait for world idle state
+          await activityMonitor.waitForIdle({
+            snapshot,
+            timeoutMs: 120_000, // Extended timeout for complex operations
+            noActivityTimeoutMs: 2_000 // Quick exit if no activity detected
+          });
         } catch (error) {
-          console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+          // Silent exit on timeout - events may have completed
+          logger.debug('Pipeline mode completion timeout', { error: (error as Error).message });
         }
       } else {
         if (worldSubscription) worldSubscription.unsubscribe();
@@ -587,9 +600,15 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       printCLIResult(result);
 
       try {
-        await activityMonitor.waitForIdle({ snapshot });
+        // Event-driven completion: wait for world idle state
+        await activityMonitor.waitForIdle({
+          snapshot,
+          timeoutMs: 120_000,
+          noActivityTimeoutMs: 2_000
+        });
       } catch (error) {
-        console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+        // Silent exit on timeout - events may have completed
+        logger.debug('Pipeline mode completion timeout', { error: (error as Error).message });
       }
 
       if (!result.success) {
@@ -614,9 +633,15 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         printCLIResult(result);
 
         try {
-          await activityMonitor.waitForIdle({ snapshot });
+          // Event-driven completion: wait for world idle state
+          await activityMonitor.waitForIdle({
+            snapshot,
+            timeoutMs: 120_000,
+            noActivityTimeoutMs: 2_000
+          });
         } catch (error) {
-          console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+          // Silent exit on timeout - events may have completed
+          logger.debug('Pipeline mode completion timeout', { error: (error as Error).message });
         }
 
         if (!result.success) {

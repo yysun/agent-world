@@ -1979,7 +1979,7 @@ export async function processCLIInput(
     publishMessage(world as any, input, sender);
     return {
       success: true,
-      message: 'Message sent to world',
+      message: '',
       data: { sender },
       technicalDetails: `Message published to world '${world.name}'`
     };
