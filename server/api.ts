@@ -59,6 +59,7 @@ import {
   type World,
   type Agent,
   type Chat,
+  type WorldActivityEventPayload,
   LLMProvider
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
@@ -88,6 +89,13 @@ const WORLD_EVENTS = {
   SYSTEM: 'system'
 } as const;
 
+// Timeout constants for streaming
+const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
+const STREAM_TIMEOUT_CHECK_INTERVAL_MS = 3000;
+const STREAM_TIMEOUT_INITIAL_MS = 12000;
+const STREAM_TIMEOUT_ACTIVITY_MS = 8000;
+const NON_STREAM_TIMEOUT_MS = 15000;
+
 // Event payload types for API handlers
 interface MessageEventPayload {
   sender: string;
@@ -101,6 +109,12 @@ interface MessageEventPayload {
 interface SSEEventPayload {
   type: string;
   agentName?: string;
+  [key: string]: any;
+}
+
+interface SystemEventPayload {
+  message?: string;
+  content?: string;
   [key: string]: any;
 }
 
@@ -594,6 +608,18 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
 });
 
 // Chat Helper Functions
+
+/**
+ * Handles non-streaming chat requests by subscribing to world events and collecting all messages.
+ * Disables streaming, subscribes to world events, publishes the message, and waits for completion
+ * or timeout before returning the aggregated response.
+ * 
+ * @param res - Express response object
+ * @param worldName - Name of the world to send message to
+ * @param message - The message to send
+ * @param sender - Agent name sending the message
+ * @returns Promise that resolves when chat is complete
+ */
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   disableStreaming();
   let subscription: any = null;
@@ -670,17 +696,33 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
   } finally {
     // Cleanup listeners
     if (subscription && listeners.size > 0) {
-      const world = subscription.world;
-      for (const [eventType, listener] of listeners.entries()) {
-        world.eventEmitter.removeListener(eventType, listener);
+      try {
+        const world = subscription.world;
+        for (const [eventType, listener] of listeners.entries()) {
+          world.eventEmitter.removeListener(eventType, listener);
+        }
+        listeners.clear();
+        await subscription.unsubscribe();
+      } catch (cleanupError) {
+        loggerChat.error('Error during cleanup', { error: cleanupError instanceof Error ? cleanupError.message : cleanupError });
       }
-      listeners.clear();
-      await subscription.unsubscribe();
     }
     enableStreaming();
   }
 }
 
+/**
+ * Handles streaming chat requests using Server-Sent Events (SSE).
+ * Subscribes to world events and streams them to the client in real-time.
+ * Implements intelligent timeout management based on agent activity and tool execution.
+ * 
+ * @param req - Express request object
+ * @param res - Express response object
+ * @param worldName - Name of the world to send message to
+ * @param message - The message to send
+ * @param sender - Agent name sending the message
+ * @returns Promise that resolves when stream is complete
+ */
 async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -697,7 +739,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   let activeToolCalls = new Set<string>(); // Track active MCP tool executions
   let awaitingWorldIdle = false;
 
-  const resetTimer = (delay: number = 8000): void => {
+  const resetTimer = (delay: number = STREAM_TIMEOUT_ACTIVITY_MS): void => {
     if (timer) clearTimeout(timer);
     if (isResponseEnded) return;
 
@@ -712,13 +754,13 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
         if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
           loggerStream.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
           endResponse();
-        } else if (!hasReceivedEvents && timeSinceLastEvent >= 15000) {
-          // Fallback: if no events received at all after 15 seconds
-          loggerStream.debug('Ending stream: no events received within 15 seconds');
+        } else if (!hasReceivedEvents && timeSinceLastEvent >= STREAM_TIMEOUT_NO_EVENTS_MS) {
+          // Fallback: if no events received at all after timeout
+          loggerStream.debug(`Ending stream: no events received within ${STREAM_TIMEOUT_NO_EVENTS_MS}ms`);
           endResponse();
         } else {
           // Continue waiting - reset timer for shorter interval
-          resetTimer(3000);
+          resetTimer(STREAM_TIMEOUT_CHECK_INTERVAL_MS);
         }
       }
     }, delay);
@@ -752,7 +794,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       hasReceivedEvents = true;
       lastEventTime = Date.now();
       // Reset the timer on each event to allow for continued activity
-      resetTimer(8000);
+      resetTimer(STREAM_TIMEOUT_ACTIVITY_MS);
     } catch (error) {
       loggerStream.debug('Error writing SSE data:', error);
       endResponse();
@@ -768,14 +810,97 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     return;
   }
 
-  try {
-    const messageEvent = publishMessage(subscription.world, message, sender);
+  const world = subscription.world;
+  const listeners = new Map<string, (...args: any[]) => void>();
 
-    // Message is automatically sent via the event listener in subscription
+  // Attach direct listeners to world.eventEmitter
+  const worldListener = (eventData: WorldActivityPayload) => {
+    // Track agent activity and tool execution for better timeout management
+    const payload = eventData;
+    // Handle activity events
+    if (payload?.state === 'processing') {
+      awaitingWorldIdle = true;
+    } else if (payload?.state === 'idle') {
+      awaitingWorldIdle = false;
+    }
+    // Handle tool events (migrated from sse channel)
+    else if (payload?.type === 'tool-start' || payload?.type === 'tool-result' || payload?.type === 'tool-error') {
+      const agentName = payload.agentName;
+      if (agentName) {
+        if (payload.type === 'tool-start') {
+          const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
+          activeToolCalls.add(toolKey);
+          pendingEvents++;
+          loggerStream.debug(`Tool start: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
+        } else if (payload.type === 'tool-result' || payload.type === 'tool-error') {
+          const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
+          activeToolCalls.delete(toolKey);
+          pendingEvents = Math.max(0, pendingEvents - 1);
+          loggerStream.debug(`Tool ${payload.type === 'tool-error' ? 'error' : 'complete'}: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
+        }
+      }
+    }
+
+    sendSSE(JSON.stringify({ type: WORLD_EVENTS.WORLD, data: eventData }));
+  };
+  world.eventEmitter.on(WORLD_EVENTS.WORLD, worldListener);
+  listeners.set(WORLD_EVENTS.WORLD, worldListener);
+
+  const messageListener = (eventData: MessageEventPayload) => {
+    // Enhance message event data with structured format
+    const messageData = {
+      type: 'message',
+      sender: eventData.sender,
+      content: eventData.content,
+      messageId: eventData.messageId,
+      replyToMessageId: eventData.replyToMessageId,  // Include threading info for frontend
+      createdAt: eventData.timestamp || new Date().toISOString()
+    };
+    sendSSE(JSON.stringify({ type: WORLD_EVENTS.MESSAGE, data: messageData }));
+  };
+  world.eventEmitter.on(WORLD_EVENTS.MESSAGE, messageListener);
+  listeners.set(WORLD_EVENTS.MESSAGE, messageListener);
+
+  const sseListener = (eventData: SSEEventPayload) => {
+    const agentName = eventData.agentName;
+    if (agentName) {
+      if (eventData.type === 'start') {
+        activeAgents.add(agentName);
+        pendingEvents++;
+        loggerStream.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+      } else if (eventData.type === 'end' || eventData.type === 'error') {
+        activeAgents.delete(agentName);
+        pendingEvents = Math.max(0, pendingEvents - 1);
+        loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
+      }
+    }
+    sendSSE(JSON.stringify({ type: WORLD_EVENTS.SSE, data: eventData }));
+  };
+  world.eventEmitter.on(WORLD_EVENTS.SSE, sseListener);
+  listeners.set(WORLD_EVENTS.SSE, sseListener);
+
+  const systemListener = (eventData: SystemEventPayload) => {
+    sendSSE(JSON.stringify({ type: WORLD_EVENTS.SYSTEM, data: eventData }));
+  };
+  world.eventEmitter.on(WORLD_EVENTS.SYSTEM, systemListener);
+  listeners.set(WORLD_EVENTS.SYSTEM, systemListener);
+
+  // Cleanup function to remove all listeners
+  const cleanupListeners = () => {
+    for (const [eventType, listener] of listeners.entries()) {
+      world.eventEmitter.removeListener(eventType, listener);
+    }
+    listeners.clear();
+  };
+
+  try {
+    const messageEvent = publishMessage(world, message, sender);
+
+    // Message is automatically sent via the event listener
     // No need to send explicitly - would cause duplicate
 
     // Start the initial timer - give more time for the first event
-    resetTimer(12000);
+    resetTimer(STREAM_TIMEOUT_INITIAL_MS);
   }
   catch (error) {
     sendSSE(JSON.stringify({
@@ -783,11 +908,15 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       message: 'Failed to send message',
       data: { error: error instanceof Error ? error.message : String(error) }
     }));
-    setTimeout(() => endResponse(), 1000);
+    setTimeout(() => {
+      cleanupListeners();
+      endResponse();
+    }, 1000);
   }
 
   req.on('close', () => {
     loggerStream.debug('Chat client disconnected, cleaning up');
+    cleanupListeners();
     endResponse();
     subscription?.unsubscribe();
   });
