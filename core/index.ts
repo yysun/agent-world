@@ -93,7 +93,7 @@ export {
 } from './activity-tracker.js';
 
 // LLM Provider enum (needed for agent configuration)
-export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider } from './types.js';
+export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider, EventType } from './types.js';
 
 // === LOGGER ===
 export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';

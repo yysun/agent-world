@@ -8,14 +8,12 @@
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
  * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
- * - Enhanced handleStreamingChat with intelligent timeout management:
- *   - Tracks active agents and pending events to prevent premature stream closure
- *   - Implements adaptive timeout logic (12s initial, 3s check intervals, 15s max without events)
- *   - Better error handling that doesn't immediately close streams on non-critical errors
- *   - Agent activity tracking via SSE start/end events for accurate completion detection
- *   - **MCP tool execution tracking via tool-start/tool-result/tool-error events to prevent timeout during long-running tool calls**
- *   - Detailed logging for debugging streaming issues
- *   - Graceful handling of race conditions between timers and event processing
+ * - Enhanced chat handlers with event-driven completion:
+ *   - Non-streaming: Listens to world 'idle' event to complete response (with 60s timeout fallback)
+ *   - Streaming: Ends SSE stream when world becomes 'idle' (with 60s timeout fallback)
+ *   - Removed complex timer management (adaptive timeouts, agent tracking, tool tracking)
+ *   - Simpler, more accurate completion based on actual world activity state
+ *   - Better aligned with CLI event-driven approach
  * - 2025-10-21: Refactored message edit to frontend-driven approach (DELETE removal only)
  *   - DELETE endpoint simplified: only accepts { chatId } (no newContent)
  *   - Calls removeMessagesFrom() directly (no resubmission)
@@ -29,6 +27,11 @@
  *   - Eliminates ClientConnection.onWorldEvent forwarding (same pattern as CLI)
  *   - Attaches listeners directly to world.eventEmitter for better performance
  *   - Proper listener cleanup in both streaming and non-streaming handlers
+ * - 2025-10-30: Refactored to use event-driven completion instead of timers
+ *   - Non-streaming: Waits for world 'idle' event to complete response
+ *   - Streaming: Ends stream when world becomes 'idle'
+ *   - Removed complex timer logic (resetTimer, activeAgents tracking, tool tracking)
+ *   - Timeout only used as fallback (60s) instead of primary completion mechanism
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -84,12 +87,8 @@ const DEFAULT_WORLD_NAME = 'Default World';
 
 // Event name constants - using typed EventType enum from core/types.ts
 
-// Timeout constants for streaming
+// Timeout constants for streaming (fallback only)
 const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
-const STREAM_TIMEOUT_CHECK_INTERVAL_MS = 3000;
-const STREAM_TIMEOUT_INITIAL_MS = 12000;
-const STREAM_TIMEOUT_ACTIVITY_MS = 8000;
-const NON_STREAM_TIMEOUT_MS = 15000;
 
 // Event payload types for API handlers
 interface MessageEventPayload {
@@ -606,8 +605,8 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
 
 /**
  * Handles non-streaming chat requests by subscribing to world events and collecting all messages.
- * Disables streaming, subscribes to world events, publishes the message, and waits for completion
- * or timeout before returning the aggregated response.
+ * Disables streaming, subscribes to world events, publishes the message, and waits for world idle
+ * event (with timeout fallback) before returning the aggregated response.
  * 
  * @param res - Express response object
  * @param worldName - Name of the world to send message to
@@ -625,15 +624,17 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
     let isComplete = false;
     let hasError = false;
     let errorMessage = '';
+    let awaitingIdle = false;
 
     const responsePromise = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timeoutTimer = setTimeout(() => {
         if (!isComplete) {
           hasError = true;
-          errorMessage = 'Request timeout - no response received within 15 seconds';
+          errorMessage = 'Request timeout - no response received within 60 seconds';
+          loggerChat.debug('Non-streaming timeout', { awaitingIdle, hasError });
           reject(new Error(errorMessage));
         }
-      }, 15000);
+      }, 60000); // Longer timeout as fallback since we rely on events
 
       // Subscribe with minimal client (no forwarding callbacks)
       subscribeWorld(worldName, { isOpen: true }).then(sub => {
@@ -646,21 +647,36 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         subscription = sub;
         const world = subscription.world;
 
-        // Attach direct listener to world.eventEmitter
-        const eventListener = (eventData: any) => {
-          responseContent = JSON.stringify({ type: 'event', data: eventData });
-          clearTimeout(timer);
-          isComplete = true;
-          resolve();
+        // Listen to world activity events to detect when all processing is complete
+        const worldActivityListener = (eventData: WorldActivityEventPayload) => {
+          if (eventData.state === 'processing') {
+            awaitingIdle = true;
+            loggerChat.debug('Non-streaming: world processing started', { 
+              activityId: eventData.activityId,
+              source: eventData.source 
+            });
+          } else if (eventData.state === 'idle' && awaitingIdle) {
+            loggerChat.debug('Non-streaming: world idle, completing response', { 
+              activityId: eventData.activityId 
+            });
+            clearTimeout(timeoutTimer);
+            isComplete = true;
+            resolve();
+          }
         };
 
-        // Listen to all event types for non-streaming mode
-        world.eventEmitter.on(EventType.WORLD, eventListener);
-        listeners.set(EventType.WORLD, eventListener);
-        world.eventEmitter.on(EventType.MESSAGE, eventListener);
-        listeners.set(EventType.MESSAGE, eventListener);
-        world.eventEmitter.on(EventType.SYSTEM, eventListener);
-        listeners.set(EventType.SYSTEM, eventListener);
+        // Collect message events for response
+        const messageListener = (eventData: MessageEventPayload) => {
+          responseContent = JSON.stringify({ type: 'message', data: eventData });
+        };
+
+        // Listen to activity events for completion detection
+        world.eventEmitter.on(EventType.WORLD, worldActivityListener);
+        listeners.set(EventType.WORLD, worldActivityListener);
+        
+        // Listen to message events for response content
+        world.eventEmitter.on(EventType.MESSAGE, messageListener);
+        listeners.set(EventType.MESSAGE, messageListener);
 
         // Publish message
         publishMessage(world, message, sender);
@@ -709,7 +725,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
 /**
  * Handles streaming chat requests using Server-Sent Events (SSE).
  * Subscribes to world events and streams them to the client in real-time.
- * Implements intelligent timeout management based on agent activity and tool execution.
+ * Uses world activity events to determine when to end the stream (with timeout fallback).
  * 
  * @param req - Express request object
  * @param res - Express response object
@@ -725,52 +741,44 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
   let hasReceivedEvents = false;
   let isResponseEnded = false;
   let lastEventTime = Date.now();
-  let activeAgents = new Set<string>();
-  let pendingEvents = 0;
-  let activeToolCalls = new Set<string>(); // Track active MCP tool executions
   let awaitingWorldIdle = false;
 
-  const resetTimer = (delay: number = STREAM_TIMEOUT_ACTIVITY_MS): void => {
-    if (timer) clearTimeout(timer);
+  const startTimeoutFallback = (): void => {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     if (isResponseEnded) return;
 
-    timer = setTimeout(() => {
+    // Fallback timeout - only used if world never becomes idle
+    timeoutTimer = setTimeout(() => {
       if (!isResponseEnded) {
         const timeSinceLastEvent = Date.now() - lastEventTime;
-        const hasActiveTasks = pendingEvents > 0 || activeAgents.size > 0 || activeToolCalls.size > 0 || awaitingWorldIdle;
-
-        loggerStream.debug(`Streaming timeout check: timeSinceLastEvent=${timeSinceLastEvent}ms, hasActiveTasks=${hasActiveTasks}, pendingEvents=${pendingEvents}, activeAgents=${activeAgents.size}, activeToolCalls=${activeToolCalls.size}`);
-
-        // Only end if we've had events and no recent activity
-        if (hasReceivedEvents && timeSinceLastEvent >= delay && !hasActiveTasks) {
-          loggerStream.debug(`Ending stream: ${delay}ms of inactivity with no active tasks`);
-          endResponse();
-        } else if (!hasReceivedEvents && timeSinceLastEvent >= STREAM_TIMEOUT_NO_EVENTS_MS) {
-          // Fallback: if no events received at all after timeout
+        loggerStream.debug(`Streaming timeout fallback triggered: timeSinceLastEvent=${timeSinceLastEvent}ms, awaitingWorldIdle=${awaitingWorldIdle}`);
+        
+        if (!hasReceivedEvents && timeSinceLastEvent >= STREAM_TIMEOUT_NO_EVENTS_MS) {
           loggerStream.debug(`Ending stream: no events received within ${STREAM_TIMEOUT_NO_EVENTS_MS}ms`);
           endResponse();
-        } else {
-          // Continue waiting - reset timer for shorter interval
-          resetTimer(STREAM_TIMEOUT_CHECK_INTERVAL_MS);
+        } else if (timeSinceLastEvent >= 60000) {
+          // 60 second absolute timeout as fallback
+          loggerStream.debug(`Ending stream: absolute timeout (60s) reached`);
+          endResponse();
         }
       }
-    }, delay);
+    }, 60000);
   };
 
   const endResponse = (): void => {
     if (isResponseEnded) return;
     isResponseEnded = true;
 
-    if (timer) {
-      clearTimeout(timer);
-      timer = undefined;
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = undefined;
     }
 
-    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, activeAgents=${activeAgents.size}, pendingEvents=${pendingEvents}, activeToolCalls=${activeToolCalls.size}`);
+    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, awaitingWorldIdle=${awaitingWorldIdle}`);
 
     try {
       if (!res.destroyed) {
@@ -788,8 +796,6 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       res.write(`data: ${data}\n\n`);
       hasReceivedEvents = true;
       lastEventTime = Date.now();
-      // Reset the timer on each event to allow for continued activity
-      resetTimer(STREAM_TIMEOUT_ACTIVITY_MS);
     } catch (error) {
       loggerStream.debug('Error writing SSE data:', error);
       endResponse();
@@ -810,30 +816,26 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
   // Attach direct listeners to world.eventEmitter
   const worldListener = (eventData: WorldActivityPayload) => {
-    // Track agent activity and tool execution for better timeout management
     const payload = eventData;
-    // Handle activity events
+    
+    // Handle world activity events for stream completion
     if (payload?.state === 'processing') {
       awaitingWorldIdle = true;
-    } else if (payload?.state === 'idle') {
-      awaitingWorldIdle = false;
-    }
-    // Handle tool events (migrated from sse channel)
-    else if (payload?.type === 'tool-start' || payload?.type === 'tool-result' || payload?.type === 'tool-error') {
-      const agentName = payload.agentName;
-      if (agentName) {
-        if (payload.type === 'tool-start') {
-          const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
-          activeToolCalls.add(toolKey);
-          pendingEvents++;
-          loggerStream.debug(`Tool start: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-        } else if (payload.type === 'tool-result' || payload.type === 'tool-error') {
-          const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
-          activeToolCalls.delete(toolKey);
-          pendingEvents = Math.max(0, pendingEvents - 1);
-          loggerStream.debug(`Tool ${payload.type === 'tool-error' ? 'error' : 'complete'}: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-        }
-      }
+      loggerStream.debug('World processing started', { 
+        activityId: payload.activityId,
+        source: payload.source 
+      });
+    } else if (payload?.state === 'idle' && awaitingWorldIdle) {
+      loggerStream.debug('World idle detected, ending stream', { 
+        activityId: payload.activityId 
+      });
+      // Stream all pending events, then end
+      sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));
+      // Give a small delay for any final events to be sent
+      setTimeout(() => {
+        endResponse();
+      }, 500);
+      return;
     }
 
     sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));
@@ -857,18 +859,6 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
-    const agentName = eventData.agentName;
-    if (agentName) {
-      if (eventData.type === 'start') {
-        activeAgents.add(agentName);
-        pendingEvents++;
-        loggerStream.debug(`SSE start: agent ${agentName} started responding. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-      } else if (eventData.type === 'end' || eventData.type === 'error') {
-        activeAgents.delete(agentName);
-        pendingEvents = Math.max(0, pendingEvents - 1);
-        loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-      }
-    }
     sendSSE(JSON.stringify({ type: EventType.SSE, data: eventData }));
   };
   world.eventEmitter.on(EventType.SSE, sseListener);
@@ -894,8 +884,8 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     // Message is automatically sent via the event listener
     // No need to send explicitly - would cause duplicate
 
-    // Start the initial timer - give more time for the first event
-    resetTimer(STREAM_TIMEOUT_INITIAL_MS);
+    // Start the fallback timeout
+    startTimeoutFallback();
   }
   catch (error) {
     sendSSE(JSON.stringify({

@@ -2,9 +2,9 @@
 
 /*
  * cli/index.ts
- * Summary: CLI entrypoint and interactive world subscription logic.
+ * Summary: CLI entrypoint and interactive world subscription logic with event-driven prompt display.
  * Implementation: Uses subscribeWorld to obtain a managed WorldSubscription, then subscribes directly to world.eventEmitter for CLI-specific handling.
- * Change: Stop using ClientConnection.onWorldEvent forwarding; attach direct listeners to the World.eventEmitter for 'world', 'message', 'sse', and 'system'.
+ * Architecture: Event-driven prompt display using world activity events instead of timers.
  */
 
 // Load environment variables from .env file
@@ -18,13 +18,13 @@ dotenv.config({ quiet: true });
  * real-time streaming, and comprehensive world management.
  *
  * FEATURES:
- * - Pipeline Mode: Execute commands and exit with timer-based cleanup
+ * - Pipeline Mode: Execute commands and exit with event-driven completion tracking (with timeout fallback)
  * - Interactive Mode: Real-time console interface with streaming responses
  * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
  * - Real-time Streaming: Live agent responses via stream.ts module
  * - Color Helpers: Consistent styling with simplified color functions
- * - Timer Management: Smart prompt restoration and exit handling
+ * - Event-Driven Prompt: Uses world activity events to show prompt when agents finish
  * - Debug Logging: Configurable log levels using core logger module
  * - Environment Variables: Automatically loads .env file for API keys and configuration
  *
@@ -35,6 +35,8 @@ dotenv.config({ quiet: true });
  * - Uses readline for interactive input with proper cleanup
  * - Delegates streaming display to stream.ts module for real-time chunk accumulation
  * - Uses core logger for structured debug logging with configurable levels
+ * - Event-driven prompt display: listens to world 'idle' events instead of using timers
+ * - WorldActivityMonitor tracks agent processing and signals when world becomes idle
  *
  * USAGE:
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"
@@ -88,27 +90,9 @@ interface SystemEventPayload {
   [key: string]: any;
 }
 
-// Timer management for prompt restoration
+// State management for interactive mode
 interface GlobalState {
-  promptTimer?: ReturnType<typeof setTimeout>;
   awaitingResponse: boolean;
-}
-
-function setupPromptTimer(
-  globalState: GlobalState,
-  rl: readline.Interface,
-  callback: () => void,
-  delay: number = 2000
-): void {
-  clearPromptTimer(globalState);
-  globalState.promptTimer = setTimeout(callback, delay);
-}
-
-function clearPromptTimer(globalState: GlobalState): void {
-  if (globalState.promptTimer) {
-    clearTimeout(globalState.promptTimer);
-    globalState.promptTimer = undefined;
-  }
 }
 
 function createGlobalState(): GlobalState {
@@ -530,7 +514,7 @@ function detachCLIListeners(
   listeners.clear();
 }
 
-// Pipeline mode execution with timer-based cleanup
+// Pipeline mode execution with event-driven completion tracking
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
   disableStreaming();
 
@@ -830,26 +814,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     prompt: '> '
   });
 
-  // Set up streaming callbacks
-  streaming.wait = (delay: number) => {
-    setupPromptTimer(globalState, rl, () => {
-      if (streaming.isActive) {
-        console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
-        streaming.isActive = false;
-        streaming.content = '';
-        streaming.sender = undefined;
-        streaming.messageId = undefined;
-        rl.prompt();
-      } else {
-        rl.prompt();
-      }
-    }, delay);
-  };
-
-  streaming.stopWait = () => {
-    clearPromptTimer(globalState);
-  };
-
   console.log(boldCyan('Agent World CLI (Interactive Mode)'));
   console.log(cyan('===================================='));
 
@@ -929,9 +893,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       if (isExitCommand) {
         if (isExiting) return;
         isExiting = true;
-        // Clear any existing timers immediately
-        clearPromptTimer(globalState);
-        if (streaming.stopWait) streaming.stopWait();
         console.log(`\n${boldCyan('Goodbye!')}`);
         if (worldState) cleanupWorldSubscription(worldState);
         rl.close();
@@ -955,8 +916,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (result.data?.exit) {
           if (isExiting) return; // Prevent duplicate exit handling
           isExiting = true;
-          clearPromptTimer(globalState);
-          if (streaming.stopWait) streaming.stopWait();
           console.log(`\n${boldCyan('Goodbye!')}`);
           if (worldState) cleanupWorldSubscription(worldState);
           rl.close();
@@ -1068,7 +1027,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
-      // Set timer based on input type: commands get short delay, messages get longer delay
+      // For commands, show prompt immediately. For messages, world events will trigger the prompt
       const isSelectCommand = trimmedInput.toLowerCase() === '/select';
 
       if (isSelectCommand) {
@@ -1077,17 +1036,13 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       } else if (isCommand) {
         // For other commands, show prompt immediately
         rl.prompt();
-      } else if (streaming.wait) {
-        // For messages, wait for potential agent responses
-        streaming.wait(5000);
       }
+      // For messages, waitForIdle() above will handle prompt display via world 'idle' event
     });
 
     rl.on('close', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-      clearPromptTimer(globalState);
-      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
@@ -1097,8 +1052,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
       console.log(`\n${boldCyan('Shutting down...')}`);
-      clearPromptTimer(globalState);
-      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       rl.close();

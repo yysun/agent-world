@@ -9,7 +9,7 @@
  * - Comprehensive event processing (chunk, end, error)
  * - Color-coded streaming indicators and status messages
  * - Modular design for reuse across CLI components
- * - Callback-based timer management for flexibility
+ * - Event-driven display (no timer dependencies)
  */
 
 // Color helpers
@@ -26,8 +26,6 @@ export interface StreamingState {
   content: string;
   sender?: string;
   messageId?: string;
-  wait?: (delay: number) => void;
-  stopWait?: () => void;
 }
 
 export function createStreamingState(): StreamingState {
@@ -35,9 +33,7 @@ export function createStreamingState(): StreamingState {
     isActive: false,
     content: '',
     sender: undefined,
-    messageId: undefined,
-    wait: undefined,
-    stopWait: undefined
+    messageId: undefined
   };
 }
 
@@ -54,9 +50,6 @@ export function handleStreamingEvents(
       streaming.sender = eventData.agentName || eventData.sender;
       streaming.messageId = eventData.messageId;
       process.stdout.write(`\n${boldGreen(`● ${streaming.sender}`)} ${gray('is responding...')}`);
-      if (streaming.stopWait) {
-        streaming.stopWait();
-      }
     }
 
     if (streaming.messageId === eventData.messageId) {
@@ -69,10 +62,6 @@ export function handleStreamingEvents(
 
       streaming.content += eventData.content;
       process.stdout.write(eventData.content);
-
-      if (streaming.wait) {
-        streaming.wait(500);
-      }
     }
     return;
   }
