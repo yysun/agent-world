@@ -18,7 +18,7 @@ import { z } from 'zod';
 // Import the schema definition (we'll test it directly)
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
-  sender: z.string().default("HUMAN"),
+  sender: z.string().default("human"),
   stream: z.boolean().optional().default(true)
 });
 
@@ -65,7 +65,7 @@ describe('Chat Message Schema with Stream Flag', () => {
       }
     });
 
-    it('should default sender to HUMAN when not provided', () => {
+    it('should default sender to human when not provided', () => {
       const messageWithoutSender = {
         message: 'Hello world',
         stream: false
@@ -74,7 +74,7 @@ describe('Chat Message Schema with Stream Flag', () => {
       const result = ChatMessageSchema.safeParse(messageWithoutSender);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.sender).toBe('HUMAN');
+        expect(result.data.sender).toBe('human');
         expect(result.data.stream).toBe(false);
       }
     });
@@ -88,7 +88,7 @@ describe('Chat Message Schema with Stream Flag', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.message).toBe('Hello world');
-        expect(result.data.sender).toBe('HUMAN');
+        expect(result.data.sender).toBe('human');
         expect(result.data.stream).toBe(true);
       }
     });

@@ -24,7 +24,7 @@ describe('Agent Filtering', () => {
     // Use raw messages and filter by ownerAgentId
     const agentMessages = rawMessages.filter(message => {
       // Always include human/user messages (we'll deduplicate them next)
-      const isHumanMessage = message.sender === 'HUMAN' || message.sender === 'human' || message.sender === 'USER';
+      const isHumanMessage = message.sender === 'human' || message.sender === 'user';
       if (isHumanMessage) {
         return true;
       }
@@ -38,7 +38,7 @@ describe('Agent Filtering', () => {
     const deduplicatedMessages: Message[] = [];
 
     for (const message of agentMessages) {
-      const isHumanMessage = message.sender === 'HUMAN' || message.sender === 'human' || message.sender === 'USER';
+      const isHumanMessage = message.sender === 'human' || message.sender === 'user';
 
       if (isHumanMessage && message.messageId) {
         // Deduplicate human messages by messageId
@@ -70,7 +70,7 @@ describe('Agent Filtering', () => {
       {
         id: 'msg-1-a1',
         messageId: '3Ib1V8wJtfo2zfVTZr0cI',
-        sender: 'HUMAN',
+        sender: 'human',
         text: 'hi',
         type: 'user',
         ownerAgentId: 'a1',
@@ -79,7 +79,7 @@ describe('Agent Filtering', () => {
       {
         id: 'msg-1-g1',
         messageId: '3Ib1V8wJtfo2zfVTZr0cI',
-        sender: 'HUMAN',
+        sender: 'human',
         text: 'hi',
         type: 'user',
         ownerAgentId: 'g1',
@@ -88,7 +88,7 @@ describe('Agent Filtering', () => {
       {
         id: 'msg-1-o1',
         messageId: '3Ib1V8wJtfo2zfVTZr0cI',
-        sender: 'HUMAN',
+        sender: 'human',
         text: 'hi',
         type: 'user',
         ownerAgentId: 'o1',
@@ -203,7 +203,7 @@ describe('Agent Filtering', () => {
       {
         id: 'msg-1-a1',
         messageId: '3Ib1V8wJtfo2zfVTZr0cI',
-        sender: 'HUMAN',
+        sender: 'human',
         text: 'hi',
         type: 'user',
         ownerAgentId: 'a1', // First occurrence
@@ -370,7 +370,7 @@ describe('Agent Filtering', () => {
       }));
 
       expect(messageTypes).toContainEqual({
-        sender: 'HUMAN',
+        sender: 'human',
         ownerAgentId: 'a1',
         text: 'hi'
       });
@@ -408,7 +408,7 @@ describe('Agent Filtering', () => {
       }));
 
       expect(messageTypes).toContainEqual({
-        sender: 'HUMAN',
+        sender: 'human',
         ownerAgentId: 'a1', // First occurrence in raw messages
         fromAgentId: undefined
       });
@@ -445,7 +445,7 @@ describe('Agent Filtering', () => {
 
     it('should show no duplicate human messages in filtered view', () => {
       const filtered = filterMessagesByAgent(mockMessages, mockRawMessages, ['a1']);
-      const humanMessages = filtered.filter(m => m.sender === 'HUMAN');
+      const humanMessages = filtered.filter(m => m.sender === 'human');
 
       expect(humanMessages).toHaveLength(1);
       expect(humanMessages[0].text).toBe('hi');
@@ -464,10 +464,10 @@ describe('Agent Filtering', () => {
       // Should show messages from both a1 and g1 memories, but only one human message
       expect(filtered.length).toBeGreaterThan(4); // More than single agent
 
-      const humanMessages = filtered.filter(m => m.sender === 'HUMAN');
+      const humanMessages = filtered.filter(m => m.sender === 'human');
       expect(humanMessages).toHaveLength(1); // Still only one human message
 
-      const agentMessages = filtered.filter(m => m.sender !== 'HUMAN');
+      const agentMessages = filtered.filter(m => m.sender !== 'human');
       const ownerIds = agentMessages.map(m => m.ownerAgentId);
 
       // All agent messages should be from a1 or g1 memory
@@ -480,7 +480,7 @@ describe('Agent Filtering', () => {
   describe('cross-agent message ownership', () => {
     it('should correctly track message ownership across agents', () => {
       // Test that the same message appears in multiple agent memories with correct ownerAgentId
-      const humanMessages = mockRawMessages.filter(m => m.sender === 'HUMAN');
+      const humanMessages = mockRawMessages.filter(m => m.sender === 'human');
       expect(humanMessages).toHaveLength(3);
 
       const ownerIds = humanMessages.map(m => m.ownerAgentId);

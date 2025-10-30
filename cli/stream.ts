@@ -160,7 +160,7 @@ export function handleWorldEventWithStreaming(
   streaming: StreamingState
 ): boolean {
   // Skip user messages to prevent echo
-  if (eventData.sender && (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user'))) {
+  if (eventData.sender && (eventData.sender === 'human' || eventData.sender.startsWith('user'))) {
     return false;
   }
 

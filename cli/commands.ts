@@ -152,19 +152,19 @@ export async function displayChatMessages(worldId: string, chatId?: string | nul
     const messagesWithoutId: typeof messages = [];
 
     for (const msg of messages) {
-      const isHumanMessage = msg.sender === 'HUMAN' || msg.sender === 'CLI' ||
+      const isHumanMessage = msg.sender === 'human' ||
         msg.role === 'user' ||
         (msg.sender || '').toLowerCase() === 'human';
 
       const isSystemMessage = msg.sender === 'system' || msg.role === 'system';
 
       if (isHumanMessage) {
-        // Deduplicate HUMAN messages by messageId (exclude agent response copies with role=user)
-        if (msg.messageId && (msg.sender === 'HUMAN' || msg.sender === 'CLI' || (msg.sender || '').toLowerCase() === 'human')) {
+        // Deduplicate human messages by messageId (exclude agent response copies with role=user)
+        if (msg.messageId && (msg.sender === 'human' || (msg.sender || '').toLowerCase() === 'human')) {
           if (!humanMessageMap.has(msg.messageId)) {
             humanMessageMap.set(msg.messageId, msg);
           }
-        } else if (!msg.messageId && (msg.sender === 'HUMAN' || msg.sender === 'CLI')) {
+        } else if (!msg.messageId && msg.sender === 'human') {
           messagesWithoutId.push(msg);
         }
       } else if (isSystemMessage) {
@@ -215,9 +215,9 @@ export async function displayChatMessages(worldId: string, chatId?: string | nul
       let senderDisplay = '';
       if (msg.sender) {
         // Color code by sender type
-        const senderUpper = msg.sender.toUpperCase();
-        if (senderUpper === 'HUMAN' || senderUpper === 'CLI') {
-          senderDisplay = boldYellow(senderUpper);
+        const senderLower = msg.sender.toLowerCase();
+        if (senderLower === 'human') {
+          senderDisplay = boldYellow('HUMAN');
         } else if (msg.sender === 'system') {
           senderDisplay = boldRed('system');
         } else {
@@ -1925,7 +1925,7 @@ export async function processCLICommand(
 export async function processCLIInput(
   input: string,
   world: World | null,
-  sender: string = 'HUMAN'
+  sender: string = 'human'
 ): Promise<CLIResponse> {
   const context: CLIContext = {
     currentWorld: world,

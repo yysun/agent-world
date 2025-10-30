@@ -100,9 +100,9 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
   // Determine message type based on role field from backend
   // role='user' → incoming message (type='user') - saved to agent memory
   // role='assistant' → agent reply (type='agent') - agent's own response
-  // sender='HUMAN'/'USER' → human message (type='user')
+  // sender='human'/'user' → human message (type='user')
   let messageType: string;
-  if (sender === 'HUMAN' || sender === 'USER' || sender === 'human' || sender === 'user') {
+  if (sender === 'human' || sender === 'user') {
     messageType = 'user';
   } else if (memoryItem.role === 'user') {
     // Agent message saved to memory as incoming (not a reply)
@@ -131,7 +131,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
   // - We need to swap them for display consistency with SSE:
   //   - sender should be recipient (o1)
   //   - fromAgentId should be original author (a1)
-  const isAgentSender = sender !== 'HUMAN' && sender !== 'USER' && sender !== 'human' && sender !== 'user';
+  const isAgentSender = sender !== 'human' && sender !== 'user';
   const isIncomingAgentMessage = isUserMessage && isAgentSender;
 
   let displaySender: string;

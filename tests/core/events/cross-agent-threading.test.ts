@@ -69,7 +69,7 @@ describe('Cross-Agent Threading Integration', () => {
     // 1. Human message saved to both agents
     const humanMessage: WorldMessageEvent = {
       content: '@a1 tell @a2 hello',
-      sender: 'HUMAN',
+      sender: 'human',
       messageId: 'msg-human-1',
       timestamp: new Date()
     };
@@ -127,7 +127,7 @@ describe('Cross-Agent Threading Integration', () => {
     // 1. Human message to a1
     const humanMessage: WorldMessageEvent = {
       content: '@a1 tell @a2 a good word',
-      sender: 'HUMAN',
+      sender: 'human',
       messageId: 'UZxAs6pWWELjov6oJerk_',
       timestamp: new Date('2025-10-27T03:43:28.163Z')
     };

@@ -13,12 +13,12 @@ describe('Agent Reply Context Display', () => {
   // Mock the helper function as it would be defined in world-chat.tsx
   const getReplyTarget = (message: Message, allMessages: Message[]): string | null => {
     if (!message.replyToMessageId) return null;
-    
+
     const parentMessage = allMessages.find(m => m.messageId === message.replyToMessageId);
     if (!parentMessage) return null;
-    
+
     const senderType = getSenderType(parentMessage.sender);
-    return senderType === SenderType.HUMAN ? 'HUMAN' : parentMessage.sender;
+    return senderType === SenderType.HUMAN ? 'human' : parentMessage.sender;
   };
 
   // Mock the display label generation logic
@@ -28,7 +28,7 @@ describe('Agent Reply Context Display', () => {
     const isReplyMessage = isIncomingMessage && message.replyToMessageId;
 
     if (senderType === SenderType.HUMAN) {
-      return 'From: HUMAN';
+      return 'From: human';
     } else if (senderType === SenderType.AGENT) {
       if (isReplyMessage || message.type === 'assistant' || message.type === 'agent') {
         const replyTarget = getReplyTarget(message, allMessages);
@@ -49,8 +49,8 @@ describe('Agent Reply Context Display', () => {
       {
         id: 'msg-1',
         type: 'user',
-        sender: 'HUMAN',
-        text: 'Hello, agent!',
+        sender: 'human',
+        text: 'Hi there',
         createdAt: new Date(),
         messageId: 'backend-msg-1'
       },
@@ -66,7 +66,7 @@ describe('Agent Reply Context Display', () => {
     ];
 
     const displayLabel = generateDisplayLabel(messages[1], messages);
-    expect(displayLabel).toBe('Agent: a1 (reply to HUMAN)');
+    expect(displayLabel).toBe('Agent: a1 (reply to human)');
   });
 
   test('should show agent reply target for agent replying to agent', () => {
@@ -133,7 +133,7 @@ describe('Agent Reply Context Display', () => {
       {
         id: 'msg-1',
         type: 'user',
-        sender: 'HUMAN',
+        sender: 'human',
         text: 'Human message',
         createdAt: new Date(),
         messageId: 'backend-msg-1'
@@ -141,6 +141,6 @@ describe('Agent Reply Context Display', () => {
     ];
 
     const displayLabel = generateDisplayLabel(messages[0], messages);
-    expect(displayLabel).toBe('From: HUMAN');
+    expect(displayLabel).toBe('From: human');
   });
 });

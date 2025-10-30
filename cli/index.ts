@@ -556,7 +556,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(options.command, world, 'HUMAN');
+      const result = await processCLIInput(options.command, world, 'human');
       printCLIResult(result);
 
       if (!options.command.startsWith('/') && world) {
@@ -583,7 +583,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(messageFromArgs, world, 'HUMAN');
+      const result = await processCLIInput(messageFromArgs, world, 'human');
       printCLIResult(result);
 
       try {
@@ -737,7 +737,7 @@ function handleWorldEvent(
   // Handle regular message events from agents (non-streaming or after streaming ends)
   if (eventType === 'message' && eventData.sender && eventData.content) {
     // Skip user messages to prevent echo
-    if (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user')) {
+    if (eventData.sender === 'human' || eventData.sender.startsWith('user')) {
       return;
     }
 
@@ -1114,7 +1114,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           console.log(success(result.message));
         }
 
-        // if (result.data && !(result.data.sender === 'HUMAN')) {
+        // if (result.data && !(result.data.sender === 'human')) {
         //   // Print a concise summary of result.data if present and not already in message
         //   if (result.data) {
         //     if (typeof result.data === 'string') {

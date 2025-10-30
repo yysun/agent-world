@@ -118,21 +118,21 @@ describe('Message Saving with MessageIds', () => {
 
   test('should save human messages with messageId to all agents', async () => {
     // Send a human message
-    const messageEvent = publishMessage(world, 'Hello everyone', 'HUMAN');
+    const messageEvent = publishMessage(world, 'Hello everyone', 'human');
 
     // Wait for async handlers
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Filter for human messages only (sender must be HUMAN, not from agents)
-    const agent1HumanMessages = agent1.memory.filter(m => m.sender === 'HUMAN');
-    const agent2HumanMessages = agent2.memory.filter(m => m.sender === 'HUMAN');
+    // Filter for human messages only (sender must be human, not from agents)
+    const agent1HumanMessages = agent1.memory.filter(m => m.sender === 'human');
+    const agent2HumanMessages = agent2.memory.filter(m => m.sender === 'human');
 
     // Check agent1's memory
     expect(agent1HumanMessages).toHaveLength(1);
     expect(agent1HumanMessages[0]).toMatchObject({
       role: 'user',
       content: 'Hello everyone',
-      sender: 'HUMAN',
+      sender: 'human',
       chatId: 'test-chat-123',
       messageId: messageEvent.messageId,
       agentId: 'agent-1'
@@ -145,7 +145,7 @@ describe('Message Saving with MessageIds', () => {
     expect(agent2HumanMessages[0]).toMatchObject({
       role: 'user',
       content: 'Hello everyone',
-      sender: 'HUMAN',
+      sender: 'human',
       chatId: 'test-chat-123',
       messageId: messageEvent.messageId,
       agentId: 'agent-2'

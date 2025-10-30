@@ -273,7 +273,7 @@ const AgentCreateSchema = z.object({
 
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
-  sender: z.string().default("HUMAN"),
+  sender: z.string().default("human"),
   stream: z.boolean().optional().default(true)
 });
 

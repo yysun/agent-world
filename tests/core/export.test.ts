@@ -491,7 +491,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: '@a1, tell @a2 a word',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'a1',
           messageId: 'msg-1',
           createdAt: new Date('2025-01-01T10:00:00.000Z')
@@ -630,7 +630,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'hi',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'g1',
           messageId: 'msg-1',
           createdAt: new Date('2025-10-27T17:25:39.863Z')
@@ -638,7 +638,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'hi',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'a1',
           messageId: 'msg-1', // Same messageId - should be deduplicated
           createdAt: new Date('2025-10-27T17:25:39.863Z')
@@ -646,7 +646,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'hi',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'o1',
           messageId: 'msg-1', // Same messageId - should be deduplicated
           createdAt: new Date('2025-10-27T17:25:39.863Z')
@@ -843,7 +843,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'Hello without messageId',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'agent-1',
           // No messageId
           createdAt: new Date('2025-01-01T10:00:00.000Z')
@@ -851,7 +851,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'Hello without messageId', // Same content, timestamp, role
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'agent-2',
           // No messageId  
           createdAt: new Date('2025-01-01T10:00:00.000Z')
@@ -883,7 +883,7 @@ describe('Export Module', () => {
         {
           role: 'user' as const,
           content: 'Different message',
-          sender: 'HUMAN',
+          sender: 'human',
           agentId: 'agent-1',
           // No messageId - should not be deduplicated (different content)
           createdAt: new Date('2025-01-01T10:02:00.000Z')
