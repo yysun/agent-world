@@ -48,10 +48,11 @@ export interface LogEvent {
 
 // World Event Interface - for world activity and system events
 export interface WorldEvent {
-  type: 'world-activity' | 'system';
+  type: 'world' | 'system';
   category: string;
   message: string;
   timestamp: string;
+  level?: 'trace' | 'debug' | 'info' | 'warn' | 'error'; // Log level for visual styling
   data?: any;
   messageId: string;
 }

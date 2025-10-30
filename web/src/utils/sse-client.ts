@@ -81,8 +81,8 @@ interface SSECompleteData extends SSEBaseData {
   payload?: any;
 }
 
-interface SSEWorldActivityData extends SSEBaseData {
-  type: 'world-activity';
+interface SSEWorldData extends SSEBaseData {
+  type: 'world';
   data?: {
     state?: string;
     pendingOperations?: number;
@@ -98,7 +98,7 @@ type SSEData =
   | SSEErrorData
   | SSEConnectionData
   | SSECompleteData
-  | SSEWorldActivityData
+  | SSEWorldData
   | SSEBaseData;
 
 // Streaming state management
@@ -116,12 +116,8 @@ interface StreamingState {
 
 
 // Utility functions
-const publishEvent = (eventType: string, data?: any): void => {
-  if (app?.run) {
-    app.run(eventType, data);
-  } else {
-    console.warn('AppRun app not available for event:', eventType);
-  }
+const publishEvent = (eventName: string, data?: any): void => {
+  app.run(eventName, data);
 };
 
 // Global streaming state
@@ -132,7 +128,9 @@ let streamingState: StreamingState = {
 
 // Main SSE data handler - routes events to appropriate processors
 const handleSSEData = (data: SSEData): void => {
-  if (!data || typeof data !== 'object') return;
+  if (!data || typeof data !== 'object') {
+    return;
+  }
 
   switch (data.type) {
     case 'sse':
@@ -147,7 +145,7 @@ const handleSSEData = (data: SSEData): void => {
     case 'error':
       publishEvent('handleError', { message: data.message || 'SSE error' });
       break;
-    case 'world-activity':
+    case 'world':
       publishEvent('handleWorldActivity', data.data ?? data.payload ?? data);
       break;
   }
@@ -344,16 +342,16 @@ export async function sendChatMessage(
     try {
       while (isActive) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.trim() === '' || !line.startsWith('data: ')) continue;
-
-          try {
+          if (line.trim() === '' || !line.startsWith('data: ')) continue; try {
             const dataContent = line.slice(6).trim();
             if (dataContent === '') continue;
 

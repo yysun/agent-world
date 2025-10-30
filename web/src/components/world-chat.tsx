@@ -66,6 +66,25 @@ export default function WorldChat(props: WorldChatProps) {
     return senderLower !== agentIdLower && !message.isStreaming;
   };
 
+  // Helper function to resolve reply target from replyToMessageId
+  const getReplyTarget = (message: Message, allMessages: Message[]): string | null => {
+    if (!message.replyToMessageId) {
+      console.log(`[DEBUG] No replyToMessageId for message ${message.id} (${message.sender})`);
+      return null;
+    }
+
+    const parentMessage = allMessages.find(m => m.messageId === message.replyToMessageId);
+    if (!parentMessage) {
+      console.log(`[DEBUG] Parent message not found for replyToMessageId: ${message.replyToMessageId}`);
+      return null;
+    }
+
+    const senderType = getSenderType(parentMessage.sender);
+    const replyTarget = senderType === SenderType.HUMAN ? 'HUMAN' : parentMessage.sender;
+    console.log(`[DEBUG] Reply target found: ${replyTarget} for message ${message.id} (${message.sender})`);
+    return replyTarget;
+  };
+
   // Filter messages based on active agent filters
   // When filters active: use raw messages and filter by ownerAgentId, then deduplicate human messages
   // When no filters: use pre-deduplicated messages for better performance
@@ -234,7 +253,7 @@ export default function WorldChat(props: WorldChatProps) {
                 );
               }
 
-              // Render world events (system and world-activity)
+              // Render world events (system and world)
               if (message.worldEvent) {
                 const isExpanded = !!message.isLogExpanded;
                 let formattedData: string | null = null;
@@ -247,7 +266,8 @@ export default function WorldChat(props: WorldChatProps) {
                 }
 
                 // Map world event types to log levels for dot color
-                const dotLevel = message.worldEvent.type === 'system' ? 'info' : 'debug';
+                const dotLevel = message.worldEvent.level ||
+                  (message.worldEvent.type === 'system' ? 'info' : 'debug');
 
                 return (
                   <div key={message.id || 'world-event-' + index} className="message log-message">
@@ -318,10 +338,22 @@ export default function WorldChat(props: WorldChatProps) {
                 // Check if this is a reply message (has replyToMessageId) or incoming message
                 if (isReplyMessage) {
                   // Cross-agent reply: user message with replyToMessageId from another agent
-                  displayLabel = `Agent: ${message.sender} (reply)`;
+                  console.log(`[DEBUG] Processing isReplyMessage for ${message.sender}, messageId: ${message.messageId}, replyToMessageId: ${message.replyToMessageId}`);
+                  const replyTarget = getReplyTarget(message, filteredMessages);
+                  if (replyTarget) {
+                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
+                  } else {
+                    displayLabel = `Agent: ${message.sender} (reply)`;
+                  }
                 } else if (message.type === 'assistant' || message.type === 'agent') {
                   // Regular assistant/agent message
-                  displayLabel = `Agent: ${message.sender} (reply)`;
+                  console.log(`[DEBUG] Processing assistant/agent message for ${message.sender}, messageId: ${message.messageId}, replyToMessageId: ${message.replyToMessageId}`);
+                  const replyTarget = getReplyTarget(message, filteredMessages);
+                  if (replyTarget) {
+                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
+                  } else {
+                    displayLabel = `Agent: ${message.sender} (reply)`;
+                  }
                 } else if (isCrossAgentMessage && isIncomingMessage) {
                   // Non-reply cross-agent message (rare - most should have replyToMessageId)
                   displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
@@ -421,18 +453,6 @@ export default function WorldChat(props: WorldChatProps) {
             })
           )}
 
-          {/* Waiting indicator - three dots when waiting for streaming to start */}
-          {agentActivities.length > 0 && (
-            <div className="agent-activity-status">
-              {agentActivities.map(activity => (
-                <div key={`activity-${activity.agentId}-${activity.activityId ?? 'current'}-${activity.updatedAt}`} className="agent-activity-row">
-                  <span className="agent-activity-agent">{activity.agentId}</span>
-                  <span className="agent-activity-message">{activity.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           {showWaitingDots && (
             <div className="message user-message waiting-message">
               <div className="message-content">
@@ -449,7 +469,6 @@ export default function WorldChat(props: WorldChatProps) {
         {/* User Input Area */}
         <div className="input-area">
           <div className="input-container">
-            <span className={`prompt-indicator ${promptReady ? 'prompt-ready' : 'prompt-waiting'}`}>{promptIndicator}</span>
             <input
               type="text"
               className="message-input"

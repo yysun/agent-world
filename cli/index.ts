@@ -66,6 +66,7 @@ import {
   createStreamingState,
   handleWorldEventWithStreaming,
   handleToolEvents,
+  handleActivityEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
@@ -723,6 +724,9 @@ function handleWorldEvent(
     if (payload.state === 'processing' || payload.state === 'idle') {
       activityMonitor.handle(payload as WorldActivityEventPayload);
       progressRenderer.handle(payload as WorldActivityEventPayload);
+
+      // Call handleActivityEvents for verbose activity logging
+      handleActivityEvents(payload);
 
       if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
         globalState.awaitingResponse = false;

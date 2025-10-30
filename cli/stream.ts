@@ -17,6 +17,7 @@ const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
 const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
 const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
+const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
 const error = (text: string) => `\x1b[1m\x1b[31m✗\x1b[0m ${text}`;
 
 // Streaming state interface
@@ -108,6 +109,36 @@ export function handleToolEvents(eventData: any): void {
     const agentName = eventData.agentName || eventData.sender || 'agent';
     console.log(`${error(`${agentName} tool failed - ${toolName}: ${toolError}`)}`);
     return;
+  }
+}
+
+// Handle world activity events (processing/idle states)
+export function handleActivityEvents(eventData: any): void {
+  if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+    return;
+  }
+
+  const source = eventData.source || '';
+  const change = eventData.change;
+  const pending = eventData.pendingOperations || 0;
+  const activeSources = eventData.activeSources || [];
+
+  // Display significant activity changes with verbose logging
+  if (change === 'start' && eventData.state === 'processing') {
+    if (source.startsWith('agent:')) {
+      const agentName = source.slice('agent:'.length);
+      console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('started processing')}`);
+    } else if (source) {
+      console.log(`${gray('[world]')} ${yellow(source)} ${gray('started')}`);
+    }
+  } else if (change === 'end' && eventData.state === 'idle' && pending === 0) {
+    console.log(`${gray('[world]')} ${green('idle')} ${gray('- all processing complete')}`);
+  } else if (change === 'end' && eventData.state === 'processing' && pending > 0) {
+    // Show ongoing activity when one source finishes but others are still active
+    if (activeSources.length > 0) {
+      const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
+      console.log(`${gray('[world]')} ${yellow('active:')} ${gray(activeList)} ${gray(`(${pending} pending)`)}`);
+    }
   }
 }
 

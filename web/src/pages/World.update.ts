@@ -440,6 +440,14 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
+  console.log('🌍 [World Activity] Received:', {
+    activity,
+    state: activity?.state,
+    source: activity?.source,
+    change: activity?.change,
+    timestamp: new Date().toISOString()
+  });
+
   if (!activity || (activity.state !== 'processing' && activity.state !== 'idle')) {
     return state;
   }
@@ -453,36 +461,54 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   let shouldCreateMessage = false;
   let activityMessage = '';
   let category = 'world';
+  let logLevel: 'info' | 'debug' = 'debug';
 
   if (change === 'start' && activity.state === 'processing') {
     if (source.startsWith('agent:')) {
       const agentId = source.slice('agent:'.length);
       const agent = state.world?.agents.find(a => a.id === agentId);
-      activityMessage = `Agent ${agent?.name || agentId} started processing`;
-      category = 'world.agent';
+      activityMessage = `${agent?.name || agentId} started processing`;
+      category = 'activity';
+      logLevel = 'info';
       shouldCreateMessage = true;
     } else if (source) {
-      activityMessage = `Activity started: ${source}`;
+      activityMessage = `${source} started`;
+      category = 'activity';
+      logLevel = 'info';
       shouldCreateMessage = true;
     }
   } else if (change === 'end' && activity.state === 'idle' && pending === 0) {
-    activityMessage = 'World idle - all processing complete';
+    activityMessage = 'All processing complete';
+    category = 'activity';
+    logLevel = 'info';
     shouldCreateMessage = true;
+  } else if (change === 'end' && activity.state === 'processing' && pending > 0) {
+    // Show ongoing activity when one source finishes but others are still active
+    if (activity.activeSources && activity.activeSources.length > 0) {
+      const activeList = activity.activeSources
+        .map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s)
+        .join(', ');
+      activityMessage = `Active: ${activeList} (${pending} pending)`;
+      category = 'activity';
+      logLevel = 'debug';
+      shouldCreateMessage = true;
+    }
   }
 
   let newState = state;
   if (shouldCreateMessage) {
     const worldMessage: Message = {
-      id: `world-activity-${activityId}-${Date.now()}`,
-      type: 'world-activity',
+      id: `world-${activityId}-${Date.now()}`,
+      type: 'world',
       sender: 'WORLD',
       text: '',
       createdAt: new Date(),
       worldEvent: {
-        type: 'world-activity',
+        type: 'world',
         category,
         message: activityMessage,
         timestamp: activity.timestamp || new Date().toISOString(),
+        level: logLevel,
         data: {
           state: activity.state,
           pendingOperations: pending,
@@ -492,7 +518,7 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
           activeSources: activity.activeSources,
           queue: activity.queue
         },
-        messageId: `world-activity-${activityId}`
+        messageId: `world-${activityId}`
       },
       isLogExpanded: false
     };
@@ -850,7 +876,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStart': handleToolStart,
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
-  'handleWorldActivity': handleWorldActivity,
+  'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState => {
+    return handleWorldActivity(state, activity);
+  },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
   // ========================================
@@ -897,22 +925,16 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
     const { id, messageId, chatId } = state.messageToDelete;
 
-    console.log('Delete message confirmed:', { id, messageId, chatId });
-
     try {
       // Call DELETE to remove message and all subsequent messages
-      console.log('Calling api.deleteMessage...');
       const deleteResult = await api.deleteMessage(
         state.worldName,
         messageId,
         chatId
       );
 
-      console.log('Delete result:', deleteResult);
-
       // Check DELETE result
       if (!deleteResult.success) {
-        console.error('Delete failed:', deleteResult);
         return {
           ...state,
           error: `Failed to delete message: ${deleteResult.failedAgents?.map((a: any) => a.error).join(', ') || 'Unknown error'}`,
@@ -920,7 +942,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         };
       }
 
-      console.log('Delete successful, reloading world...');
       // Reload the world to get updated messages from backend
       const world = await api.getWorld(state.worldName);
 
@@ -933,29 +954,20 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
           ? Array.from((world.agents as any).values())
           : Object.values(world.agents || {}) as Agent[];
 
-      console.log('Rebuilding messages from agents:', agents.length);
       for (const agent of agents) {
         agent.spriteIndex = agents.indexOf(agent) % 9;
         agent.messageCount = 0;
-        console.log(`Agent ${agent.id} memory:`, {
-          totalMemory: agent.memory?.length || 0,
-          memoryForChat: agent.memory?.filter((m: any) => m.chatId === chatId).length || 0,
-          allChatIds: [...new Set(agent.memory?.map((m: any) => m.chatId) || [])]
-        });
         for (const memoryItem of agent.memory || []) {
           if (memoryItem.chatId === chatId) {
             agent.messageCount++;
             const message = createMessageFromMemory(memoryItem, agent.name);
             messages.push(message);
-            console.log('Added message:', { messageId: memoryItem.messageId, chatId: memoryItem.chatId });
           }
         }
       }
 
-      console.log('Messages before deduplication:', messages.length);
       // Apply deduplication to loaded messages
       messages = deduplicateMessages(messages, agents);
-      console.log('Messages after deduplication:', messages.length);
 
       return {
         ...state,
@@ -965,7 +977,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         needScroll: true
       };
     } catch (error: any) {
-      console.error('Delete message error:', error);
       return {
         ...state,
         error: error.message || 'Failed to delete message',
