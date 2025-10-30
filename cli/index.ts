@@ -88,27 +88,9 @@ interface SystemEventPayload {
   [key: string]: any;
 }
 
-// Timer management for prompt restoration
+// State management for interactive mode
 interface GlobalState {
-  promptTimer?: ReturnType<typeof setTimeout>;
   awaitingResponse: boolean;
-}
-
-function setupPromptTimer(
-  globalState: GlobalState,
-  rl: readline.Interface,
-  callback: () => void,
-  delay: number = 2000
-): void {
-  clearPromptTimer(globalState);
-  globalState.promptTimer = setTimeout(callback, delay);
-}
-
-function clearPromptTimer(globalState: GlobalState): void {
-  if (globalState.promptTimer) {
-    clearTimeout(globalState.promptTimer);
-    globalState.promptTimer = undefined;
-  }
 }
 
 function createGlobalState(): GlobalState {
@@ -830,26 +812,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     prompt: '> '
   });
 
-  // Set up streaming callbacks
-  streaming.wait = (delay: number) => {
-    setupPromptTimer(globalState, rl, () => {
-      if (streaming.isActive) {
-        console.log(`\n${gray('Streaming appears stalled - waiting for user input...')}`);
-        streaming.isActive = false;
-        streaming.content = '';
-        streaming.sender = undefined;
-        streaming.messageId = undefined;
-        rl.prompt();
-      } else {
-        rl.prompt();
-      }
-    }, delay);
-  };
-
-  streaming.stopWait = () => {
-    clearPromptTimer(globalState);
-  };
-
   console.log(boldCyan('Agent World CLI (Interactive Mode)'));
   console.log(cyan('===================================='));
 
@@ -929,9 +891,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       if (isExitCommand) {
         if (isExiting) return;
         isExiting = true;
-        // Clear any existing timers immediately
-        clearPromptTimer(globalState);
-        if (streaming.stopWait) streaming.stopWait();
         console.log(`\n${boldCyan('Goodbye!')}`);
         if (worldState) cleanupWorldSubscription(worldState);
         rl.close();
@@ -955,8 +914,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         if (result.data?.exit) {
           if (isExiting) return; // Prevent duplicate exit handling
           isExiting = true;
-          clearPromptTimer(globalState);
-          if (streaming.stopWait) streaming.stopWait();
           console.log(`\n${boldCyan('Goodbye!')}`);
           if (worldState) cleanupWorldSubscription(worldState);
           rl.close();
@@ -1068,7 +1025,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
-      // Set timer based on input type: commands get short delay, messages get longer delay
+      // For commands, show prompt immediately. For messages, world events will trigger the prompt
       const isSelectCommand = trimmedInput.toLowerCase() === '/select';
 
       if (isSelectCommand) {
@@ -1077,17 +1034,13 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       } else if (isCommand) {
         // For other commands, show prompt immediately
         rl.prompt();
-      } else if (streaming.wait) {
-        // For messages, wait for potential agent responses
-        streaming.wait(5000);
       }
+      // For messages, waitForIdle() above will handle prompt display via world 'idle' event
     });
 
     rl.on('close', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
-      clearPromptTimer(globalState);
-      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
@@ -1097,8 +1050,6 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
       console.log(`\n${boldCyan('Shutting down...')}`);
-      clearPromptTimer(globalState);
-      if (streaming.stopWait) streaming.stopWait();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       rl.close();
