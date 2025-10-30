@@ -89,7 +89,7 @@ export {
   beginWorldActivity,
   trackWorldActivity,
   type WorldActivityEventPayload,
-  type WorldActivityEventState,
+  type WorldActivityEventType,
 } from './activity-tracker.js';
 
 // LLM Provider enum (needed for agent configuration)

@@ -128,30 +128,30 @@ export function handleToolEvents(eventData: any): void {
 
 // Handle world activity events (processing/idle states)
 export function handleActivityEvents(eventData: any): void {
-  if (!eventData || (eventData.state !== 'processing' && eventData.state !== 'idle')) {
+  // Check for valid event types
+  if (!eventData || (eventData.type !== 'response-start' && eventData.type !== 'response-end' && eventData.type !== 'idle')) {
     return;
   }
 
   const source = eventData.source || '';
-  const change = eventData.change;
   const pending = eventData.pendingOperations || 0;
   const activeSources = eventData.activeSources || [];
 
   // Display significant activity changes with verbose logging
-  if (change === 'start' && eventData.state === 'processing') {
+  if (eventData.type === 'response-start') {
     if (source.startsWith('agent:')) {
       const agentName = source.slice('agent:'.length);
       console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('started processing')}`);
     } else if (source) {
       console.log(`${gray('[world]')} ${yellow(source)} ${gray('started')}`);
     }
-  } else if (change === 'end' && source.startsWith('agent:')) {
+  } else if (eventData.type === 'response-end' && source.startsWith('agent:')) {
     // Display when individual agent finishes processing
     const agentName = source.slice('agent:'.length);
     console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('finished processing')}`);
-  } else if (change === 'end' && eventData.state === 'idle' && pending === 0) {
+  } else if (eventData.type === 'idle' && pending === 0) {
     console.log(`${gray('[world]')} ${green('idle')} ${gray('- all processing complete')}`);
-  } else if (change === 'end' && eventData.state === 'processing' && pending > 0) {
+  } else if (eventData.type === 'response-end' && pending > 0) {
     // Show ongoing activity when one source finishes but others are still active
     if (activeSources.length > 0) {
       const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');

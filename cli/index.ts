@@ -58,7 +58,7 @@ import {
   enableStreaming,
   disableStreaming,
   type WorldActivityEventPayload,
-  type WorldActivityEventState
+  type WorldActivityEventType
 } from '../core/index.js';
 import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
@@ -123,11 +123,11 @@ const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
 
-type ActivityEventState = WorldActivityEventState;
+type ActivityEventState = WorldActivityEventType;
 
 interface ActivityEventSnapshot {
   activityId: number;
-  state: ActivityEventState | null;
+  type: ActivityEventState | null;
 }
 
 interface IdleWaiter {
@@ -146,12 +146,13 @@ class WorldActivityMonitor {
   captureSnapshot(): ActivityEventSnapshot {
     return {
       activityId: this.lastEvent?.activityId ?? 0,
-      state: this.lastEvent?.state ?? null
+      type: this.lastEvent?.type ?? null
     };
   }
 
   handle(event: WorldActivityEventPayload): void {
-    if (!event || (event.state !== 'processing' && event.state !== 'idle')) {
+    // Check for valid event types
+    if (!event || (event.type !== 'response-start' && event.type !== 'response-end' && event.type !== 'idle')) {
       return;
     }
 
@@ -164,7 +165,8 @@ class WorldActivityMonitor {
     };
 
     for (const waiter of Array.from(this.waiters)) {
-      if (event.state === 'processing' && event.activityId > waiter.activityId) {
+      // Track when we see response-start after the target activity
+      if (event.type === 'response-start' && event.activityId > waiter.activityId) {
         waiter.seenProcessing = true;
         if (waiter.noActivityTimeoutId) {
           clearTimeout(waiter.noActivityTimeoutId);
@@ -172,7 +174,8 @@ class WorldActivityMonitor {
         }
       }
 
-      if (event.state === 'idle') {
+      // Resolve waiter on idle event if conditions are met
+      if (event.type === 'idle') {
         const shouldResolve = event.activityId > waiter.activityId ||
           (event.activityId === waiter.activityId && waiter.seenProcessing);
 
@@ -196,7 +199,8 @@ class WorldActivityMonitor {
 
     const targetActivityId = snapshot.activityId;
 
-    if (this.lastEvent && this.lastEvent.state === 'idle' && this.lastEvent.activityId > targetActivityId) {
+    // Already idle after target activity
+    if (this.lastEvent && this.lastEvent.type === 'idle' && this.lastEvent.activityId > targetActivityId) {
       return;
     }
 
@@ -230,15 +234,18 @@ class WorldActivityMonitor {
       if (!last) {
         waiter.noActivityTimeoutId = setTimeout(() => this.finishWaiter(waiter, true), noActivityTimeoutMs);
       } else {
-        if (last.state === 'processing' && last.activityId > targetActivityId) {
+        // Track if we've seen response-start after target activity
+        if (last.type === 'response-start' && last.activityId > targetActivityId) {
           waiter.seenProcessing = true;
         }
 
-        if (last.state === 'idle' && last.activityId === targetActivityId) {
+        // If already idle at target activity, set short timeout
+        if (last.type === 'idle' && last.activityId === targetActivityId) {
           waiter.noActivityTimeoutId = setTimeout(() => this.finishWaiter(waiter, true), noActivityTimeoutMs);
         }
 
-        if (last.state === 'idle' && last.activityId > targetActivityId) {
+        // If already idle after target activity, resolve immediately
+        if (last.type === 'idle' && last.activityId > targetActivityId) {
           resolve();
           return;
         }
@@ -305,7 +312,8 @@ class ActivityProgressRenderer {
   handle(event: WorldActivityEventPayload): void {
     if (!event) return;
 
-    if (event.state === 'idle') {
+    // Reset on idle
+    if (event.type === 'idle') {
       this.reset();
       return;
     }
@@ -315,11 +323,13 @@ class ActivityProgressRenderer {
       return;
     }
 
-    if (event.change === 'start' && !this.activeAgents.has(details.name)) {
+    // Track agent start on response-start
+    if (event.type === 'response-start' && !this.activeAgents.has(details.name)) {
       this.activeAgents.add(details.name);
     }
 
-    if (event.change === 'end' && this.activeAgents.has(details.name)) {
+    // Track agent end on response-end
+    if (event.type === 'response-end' && this.activeAgents.has(details.name)) {
       this.activeAgents.delete(details.name);
     }
   }
@@ -817,6 +827,63 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
   });
 }
 
+// Chat discovery and selection
+async function selectChat(world: World, chats: any[], currentChatId: string | null, rl: readline.Interface): Promise<string | null> {
+  if (chats.length === 0) {
+    console.log(boldRed(`No chats found in world '${world.name}'`));
+    return null;
+  }
+
+  if (chats.length === 1) {
+    console.log(`${boldGreen('Auto-selecting the only available chat:')} ${cyan(chats[0].name)}`);
+    return chats[0].id;
+  }
+
+  console.log(`\n${boldMagenta('Available chats:')}`);
+  console.log(`  ${yellow('0.')} ${cyan('Cancel')}`);
+  chats.forEach((chat, index) => {
+    const isCurrent = currentChatId && chat.id === currentChatId;
+    const currentIndicator = isCurrent ? ' (current)' : '';
+    const msgCount = chat.messageCount || 0;
+    console.log(`  ${yellow(`${index + 1}.`)} ${cyan(`${chat.name}${currentIndicator} - (${msgCount}`)}`);
+  });
+
+  return new Promise((resolve) => {
+    function askForSelection() {
+      rl.question(`\n${boldMagenta('Select a chat (number or name), or 0 to cancel:')} `, (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (num === 0) {
+          resolve(null);
+          return;
+        }
+
+        if (!isNaN(num) && num >= 1 && num <= chats.length) {
+          resolve(chats[num - 1].id);
+          return;
+        }
+
+        const found = chats.find(chat =>
+          chat.name.toLowerCase() === trimmed.toLowerCase() ||
+          chat.name.toLowerCase().includes(trimmed.toLowerCase()) ||
+          chat.id === trimmed
+        );
+
+        if (found) {
+          resolve(found.id);
+          return;
+        }
+
+        console.log(boldRed('Invalid selection. Please try again.'));
+        askForSelection();
+      });
+    }
+
+    askForSelection();
+  });
+}
+
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
@@ -891,7 +958,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     console.log(`\n${gray('Quick Start:')}`);
     console.log(`  ${bullet(gray('World commands:'))} ${cyan('/world list')}, ${cyan('/world create')}, ${cyan('/world select')}`);
     console.log(`  ${bullet(gray('Agent commands:'))} ${cyan('/agent list')}, ${cyan('/agent create Ava')}, ${cyan('/agent update Ava')}`);
-    console.log(`  ${bullet(gray('Chat commands:'))} ${cyan('/chat list --active')}, ${cyan('/chat create')}, ${cyan('/chat export')}`);
+    console.log(`  ${bullet(gray('Chat commands:'))} ${cyan('/chat list')}, ${cyan('/chat select')}, ${cyan('/chat create')}, ${cyan('/chat export')}`);
     console.log(`  ${bullet(gray('Need help?'))} ${cyan('/help world')}, ${cyan('/help agent')}, ${cyan('/help chat')}`);
     console.log(`  ${bullet(gray('Type messages to talk with the world'))}`);
     console.log(`  ${bullet(gray('Exit with'))} ${cyan('/quit')} ${gray('or')} ${cyan('/exit')} ${gray('or press')} ${boldYellow('Ctrl+C')}`);
@@ -996,6 +1063,49 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           return;
         }
 
+        // Handle chat selection command
+        if (result.data?.selectChat && worldState?.world) {
+          const { chats, currentChatId } = result.data;
+          const selectedChatId = await selectChat(worldState.world, chats, currentChatId, rl);
+
+          if (!selectedChatId) {
+            console.log(error('No chat selected.'));
+            console.log(); // Empty line before prompt
+            rl.prompt();
+            return;
+          }
+
+          try {
+            // Restore the selected chat
+            const { restoreChat } = await import('../core/index.js');
+            const restored = await restoreChat(worldState.world.id, selectedChatId);
+
+            if (!restored) {
+              console.log(error(`Failed to restore chat '${selectedChatId}'`));
+            } else {
+              const selectedChat = chats.find((c: any) => c.id === selectedChatId);
+              const chatName = selectedChat?.name || selectedChatId;
+              console.log(success(`Chat '${chatName}' selected and loaded`));
+
+              // Display chat messages
+              await displayChatMessages(worldState.world.id, selectedChatId);
+
+              // Refresh world state
+              // console.log(boldBlue('Refreshing world state...'));
+              const refreshedWorld = await worldState.subscription.refresh(rootPath);
+              worldState.world = refreshedWorld;
+              console.log(success('World state refreshed'));
+            }
+          } catch (err) {
+            console.error(error(`Error loading chat: ${err instanceof Error ? err.message : 'Unknown error'}`));
+          }
+
+          // Show prompt immediately after chat selection
+          console.log(); // Empty line before prompt
+          rl.prompt();
+          return;
+        }
+
         if (result.success === false) {
           console.log(error(`Error: ${result.error || result.message || 'Command failed'}`));
         } else if (result.message &&
@@ -1024,7 +1134,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         // Refresh world if needed
         if (result.refreshWorld && currentWorldName && worldState) {
           try {
-            console.log(boldBlue('Refreshing world state...'));
+            // console.log(boldBlue('Refreshing world state...'));
 
             // Use the subscription's refresh method to properly destroy old world and create new
             const refreshedWorld = await worldState.subscription.refresh(rootPath);
@@ -1061,10 +1171,11 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
 
       // For commands, show prompt immediately. For messages, world events will trigger the prompt
-      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
+      const isSelectCommand = trimmedInput.toLowerCase() === '/select' ||
+        trimmedInput.toLowerCase() === '/world select';
 
       if (isSelectCommand) {
-        // For select command, prompt is already shown in the handler
+        // For world select command, prompt is already shown in the handler
         return;
       } else if (isCommand) {
         // For other commands, show prompt immediately

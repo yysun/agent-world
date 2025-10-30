@@ -442,20 +442,19 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
   console.log('🌍 [World Activity] Received:', {
     activity,
-    state: activity?.state,
+    state: activity?.type,
     source: activity?.source,
-    change: activity?.change,
     timestamp: new Date().toISOString()
   });
 
-  if (!activity || (activity.state !== 'processing' && activity.state !== 'idle')) {
+  // Check for valid event types
+  if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {
     return state;
   }
 
   const activityId = typeof activity.activityId === 'number' ? activity.activityId : null;
   const pending = typeof activity.pendingOperations === 'number' ? activity.pendingOperations : 0;
   const source = typeof activity.source === 'string' ? activity.source : '';
-  const change = activity.change;
 
   // Create log-style message for significant world activity events
   let shouldCreateMessage = false;
@@ -463,7 +462,7 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   let category = 'world';
   let logLevel: 'info' | 'debug' = 'debug';
 
-  if (change === 'start' && activity.state === 'processing') {
+  if (activity.type === 'response-start') {
     if (source.startsWith('agent:')) {
       const agentId = source.slice('agent:'.length);
       const agent = state.world?.agents.find(a => a.id === agentId);
@@ -477,12 +476,12 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
       logLevel = 'info';
       shouldCreateMessage = true;
     }
-  } else if (change === 'end' && activity.state === 'idle' && pending === 0) {
+  } else if (activity.type === 'idle' && pending === 0) {
     activityMessage = 'All processing complete';
     category = 'activity';
     logLevel = 'info';
     shouldCreateMessage = true;
-  } else if (change === 'end' && activity.state === 'processing' && pending > 0) {
+  } else if (activity.type === 'response-end' && pending > 0) {
     // Show ongoing activity when one source finishes but others are still active
     if (activity.activeSources && activity.activeSources.length > 0) {
       const activeList = activity.activeSources
@@ -510,11 +509,10 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
         timestamp: activity.timestamp || new Date().toISOString(),
         level: logLevel,
         data: {
-          state: activity.state,
+          type: activity.type,
           pendingOperations: pending,
           activityId,
           source,
-          change,
           activeSources: activity.activeSources,
           queue: activity.queue
         },
@@ -533,7 +531,7 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   // Update agent activity status
   if (source.startsWith('agent:')) {
     const agentId = source.slice('agent:'.length);
-    if (activity.state === 'processing') {
+    if (activity.type === 'response-start') {
       return setAgentActivity(newState, agentId, {
         message: formatThinkingMessage(agentId),
         phase: 'thinking',
@@ -541,15 +539,15 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
       });
     }
 
-    if (activity.state === 'idle') {
+    if (activity.type === 'idle') {
       return clearAgentActivity(newState, agentId, pending);
     }
   } else {
-    if (activity.state === 'processing') {
+    if (activity.type === 'response-start') {
       return newState.isWaiting ? newState : { ...newState, isWaiting: true };
     }
 
-    if (activity.state === 'idle' && pending === 0) {
+    if (activity.type === 'idle' && pending === 0) {
       return clearAllAgentActivities(newState, pending);
     }
   }

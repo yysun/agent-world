@@ -8,15 +8,14 @@ type ActivityState = {
   activeSources: Map<string, number>;
 };
 
-export type WorldActivityEventState = 'processing' | 'idle';
+export type WorldActivityEventType = 'response-start' | 'response-end' | 'idle';
 
 export interface WorldActivityEventPayload {
-  state: WorldActivityEventState;
+  type: WorldActivityEventType;
   pendingOperations: number;
   activityId: number;
   timestamp: string;
   source?: string;
-  change?: 'start' | 'end';
   activeSources: string[];
   queue: ReturnType<typeof getLLMQueueStatus>;
 }
@@ -41,26 +40,27 @@ function getActivityState(world: World): ActivityState {
 
 function emitActivityEvent(
   world: World,
-  state: WorldActivityEventState,
+  type: WorldActivityEventType,
   pendingOperations: number,
   activityId: number,
-  source?: string,
-  change?: 'start' | 'end'
+  source?: string
 ): void {
   const payload: WorldActivityEventPayload = {
-    state,
+    type,
     pendingOperations,
     activityId,
     timestamp: new Date().toISOString(),
     source,
-    change,
     activeSources: Array.from(getActivityState(world).activeSources.keys()),
     queue: getLLMQueueStatus()
   };
 
-  world.isProcessing = state === 'processing';
+  // Set isProcessing flag: true for response-start/response-end, false only on idle
+  world.isProcessing = type !== 'idle';
+
+  // Dual emission pattern: generic 'world' channel + type-specific channel
   world.eventEmitter.emit('world', payload);
-  world.eventEmitter.emit(state, payload);
+  world.eventEmitter.emit(type, payload);
 }
 
 export function beginWorldActivity(world: World, source?: string): () => void {
@@ -71,12 +71,13 @@ export function beginWorldActivity(world: World, source?: string): () => void {
     activityState.activeSources.set(source, (activityState.activeSources.get(source) ?? 0) + 1);
   }
 
+  // Increment activityId when starting first operation
   if (activityState.pendingOperations === 1) {
     activityState.lastActivityId += 1;
-    emitActivityEvent(world, 'processing', activityState.pendingOperations, activityState.lastActivityId, source, 'start');
-  } else {
-    emitActivityEvent(world, 'processing', activityState.pendingOperations, activityState.lastActivityId, source, 'start');
   }
+
+  // Emit response-start for all operation starts
+  emitActivityEvent(world, 'response-start', activityState.pendingOperations, activityState.lastActivityId, source);
 
   let finished = false;
   const currentActivityId = activityState.lastActivityId;
@@ -97,10 +98,11 @@ export function beginWorldActivity(world: World, source?: string): () => void {
       }
     }
 
+    // Emit idle when all operations complete, otherwise response-end
     if (state.pendingOperations === 0) {
-      emitActivityEvent(world, 'idle', 0, currentActivityId, source, 'end');
+      emitActivityEvent(world, 'idle', 0, currentActivityId, source);
     } else {
-      emitActivityEvent(world, 'processing', state.pendingOperations, state.lastActivityId, source, 'end');
+      emitActivityEvent(world, 'response-end', state.pendingOperations, state.lastActivityId, source);
     }
   };
 }

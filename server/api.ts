@@ -649,13 +649,13 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
 
         // Listen to world activity events to detect when all processing is complete
         const worldActivityListener = (eventData: WorldActivityEventPayload) => {
-          if (eventData.state === 'processing') {
+          if (eventData.type === 'response-start') {
             awaitingIdle = true;
             loggerChat.debug('Non-streaming: world processing started', {
               activityId: eventData.activityId,
               source: eventData.source
             });
-          } else if (eventData.state === 'idle' && awaitingIdle) {
+          } else if (eventData.type === 'idle' && awaitingIdle) {
             loggerChat.debug('Non-streaming: world idle, completing response', {
               activityId: eventData.activityId
             });
