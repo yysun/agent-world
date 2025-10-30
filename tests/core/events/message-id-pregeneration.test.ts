@@ -105,7 +105,7 @@ describe('Pre-Generated Message IDs', () => {
 
     test('publishMessage should still generate IDs automatically', () => {
       // Note: In test environment, if nanoid fails to load, publishMessage might return undefined messageId
-      // This test verifies the API contract, but acknowledges ESM module loading issues in Jest
+      // This test verifies the API contract, but acknowledges ESM module loading issues
       const result1 = publishMessage(mockWorld, 'Message 1', 'user');
       const result2 = publishMessage(mockWorld, 'Message 2', 'user');
 
@@ -118,8 +118,8 @@ describe('Pre-Generated Message IDs', () => {
         expect(typeof result1.messageId).toBe('string');
         expect(result1.messageId.length).toBeGreaterThan(0);
       } else {
-        // Log warning but don't fail - this is a known Jest + ESM module issue
-        console.warn('[Warning] publishMessage did not generate messageIds - likely Jest ESM module loading issue');
+        // Log warning but don't fail - this is a known ESM module loading issue
+        console.warn('[Warning] publishMessage did not generate messageIds - likely ESM module loading issue');
       }
     });
 

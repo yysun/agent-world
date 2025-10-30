@@ -22,6 +22,7 @@ import type {
   StorageAPI,
 } from '../../../core/types';
 import { EventEmitter } from 'events';
+import { vi } from 'vitest';
 
 /**
  * Ensure all messages in memory have messageId set
@@ -149,46 +150,46 @@ export class WorldTestBuilder {
     // Create mock storage manager
     const mockStorage: StorageAPI = {
       // World operations
-      saveWorld: jest.fn(),
-      loadWorld: jest.fn(),
-      deleteWorld: jest.fn(),
-      listWorlds: jest.fn(),
-      worldExists: jest.fn(),
+      saveWorld: vi.fn(),
+      loadWorld: vi.fn(),
+      deleteWorld: vi.fn(),
+      listWorlds: vi.fn(),
+      worldExists: vi.fn(),
 
       // Agent operations
-      saveAgent: jest.fn(),
-      loadAgent: jest.fn(),
-      loadAgentWithRetry: jest.fn(),
-      deleteAgent: jest.fn(),
-      listAgents: jest.fn(),
-      agentExists: jest.fn(),
-      saveAgentMemory: jest.fn(),
-      archiveMemory: jest.fn(),
+      saveAgent: vi.fn(),
+      loadAgent: vi.fn(),
+      loadAgentWithRetry: vi.fn(),
+      deleteAgent: vi.fn(),
+      listAgents: vi.fn(),
+      agentExists: vi.fn(),
+      saveAgentMemory: vi.fn(),
+      archiveMemory: vi.fn(),
 
       // Batch operations
-      saveAgentsBatch: jest.fn(),
-      loadAgentsBatch: jest.fn(),
+      saveAgentsBatch: vi.fn(),
+      loadAgentsBatch: vi.fn(),
 
       // Chat data operations
-      saveChatData: jest.fn(),
-      loadChatData: jest.fn(),
-      deleteChatData: jest.fn(),
-      listChats: jest.fn(),
-      updateChatData: jest.fn(),
+      saveChatData: vi.fn(),
+      loadChatData: vi.fn(),
+      deleteChatData: vi.fn(),
+      listChats: vi.fn(),
+      updateChatData: vi.fn(),
 
       // World chat operations
-      saveWorldChat: jest.fn(),
-      loadWorldChat: jest.fn(),
-      loadWorldChatFull: jest.fn(),
-      restoreFromWorldChat: jest.fn(),
+      saveWorldChat: vi.fn(),
+      loadWorldChat: vi.fn(),
+      loadWorldChatFull: vi.fn(),
+      restoreFromWorldChat: vi.fn(),
 
       // Integrity operations
-      validateIntegrity: jest.fn(),
-      repairData: jest.fn(),
+      validateIntegrity: vi.fn(),
+      repairData: vi.fn(),
 
       // Memory operations
-      getMemory: jest.fn().mockResolvedValue([]),
-      deleteMemoryByChatId: jest.fn().mockResolvedValue(0),
+      getMemory: vi.fn().mockResolvedValue([]),
+      deleteMemoryByChatId: vi.fn().mockResolvedValue(0),
     };
 
     this.world = {

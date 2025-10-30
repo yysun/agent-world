@@ -12,7 +12,7 @@
  * Note: These tests make real LLM API calls and may take 10-15 seconds.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import {
   createWorld,
   createAgent,

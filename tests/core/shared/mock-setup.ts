@@ -8,7 +8,7 @@
  * Updated to use direct SDK mocks (OpenAI, Anthropic, Google) instead of AI SDK.
  */
 
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 /**
  * Global File I/O Mocking
@@ -16,25 +16,25 @@ import { jest } from '@jest/globals';
  */
 export function setupFileSystemMocks(): void {
   // Mock the core fs module (not fs/promises)
-  jest.doMock('fs', () => ({
+  vi.mock('fs', () => ({
     promises: {
-      readFile: jest.fn<any>().mockResolvedValue('{}'),
-      writeFile: jest.fn<any>().mockResolvedValue(undefined),
-      mkdir: jest.fn<any>().mockResolvedValue(undefined),
-      rm: jest.fn<any>().mockResolvedValue(undefined),
-      access: jest.fn<any>().mockResolvedValue(undefined),
-      readdir: jest.fn<any>().mockResolvedValue([]),
-      rename: jest.fn<any>().mockResolvedValue(undefined),
-      unlink: jest.fn<any>().mockResolvedValue(undefined),
-      stat: jest.fn<any>().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
-      lstat: jest.fn<any>().mockResolvedValue({ isDirectory: () => false, isFile: () => true })
+      readFile: vi.fn<any>().mockResolvedValue('{}'),
+      writeFile: vi.fn<any>().mockResolvedValue(undefined),
+      mkdir: vi.fn<any>().mockResolvedValue(undefined),
+      rm: vi.fn<any>().mockResolvedValue(undefined),
+      access: vi.fn<any>().mockResolvedValue(undefined),
+      readdir: vi.fn<any>().mockResolvedValue([]),
+      rename: vi.fn<any>().mockResolvedValue(undefined),
+      unlink: vi.fn<any>().mockResolvedValue(undefined),
+      stat: vi.fn<any>().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
+      lstat: vi.fn<any>().mockResolvedValue({ isDirectory: () => false, isFile: () => true })
     },
     // Also mock synchronous versions that might be used
-    readFileSync: jest.fn<any>().mockReturnValue('{}'),
-    writeFileSync: jest.fn<any>().mockReturnValue(undefined),
-    existsSync: jest.fn<any>().mockReturnValue(true),
-    mkdirSync: jest.fn<any>().mockReturnValue(undefined),
-    readdirSync: jest.fn<any>().mockReturnValue([])
+    readFileSync: vi.fn<any>().mockReturnValue('{}'),
+    writeFileSync: vi.fn<any>().mockReturnValue(undefined),
+    existsSync: vi.fn<any>().mockReturnValue(true),
+    mkdirSync: vi.fn<any>().mockReturnValue(undefined),
+    readdirSync: vi.fn<any>().mockReturnValue([])
   }));
 }
 
@@ -45,17 +45,17 @@ export function setupFileSystemMocks(): void {
 export function setupAgentStorageMocks(): void {
   // Mock all agent storage functions with flexible import paths
   const mockStorageFunctions = {
-    saveAgentMemoryToDisk: jest.fn<any>().mockResolvedValue(undefined),
-    saveAgentConfigToDisk: jest.fn<any>().mockResolvedValue(undefined),
-    saveAgentToDisk: jest.fn<any>().mockResolvedValue(undefined),
-    loadAgentMemoryFromDisk: jest.fn<any>().mockResolvedValue([]),
-    loadAgentConfigFromDisk: jest.fn<any>().mockResolvedValue({}),
-    loadAgentFromDisk: jest.fn<any>().mockResolvedValue(null),
-    loadAllAgentsFromDisk: jest.fn<any>().mockResolvedValue([]),
-    deleteAgentFromDisk: jest.fn<any>().mockResolvedValue(true),
-    agentExistsOnDisk: jest.fn<any>().mockResolvedValue(true),
-    saveWorldToDisk: jest.fn<any>().mockResolvedValue(undefined),
-    loadWorldFromDisk: jest.fn<any>().mockResolvedValue({})
+    saveAgentMemoryToDisk: vi.fn<any>().mockResolvedValue(undefined),
+    saveAgentConfigToDisk: vi.fn<any>().mockResolvedValue(undefined),
+    saveAgentToDisk: vi.fn<any>().mockResolvedValue(undefined),
+    loadAgentMemoryFromDisk: vi.fn<any>().mockResolvedValue([]),
+    loadAgentConfigFromDisk: vi.fn<any>().mockResolvedValue({}),
+    loadAgentFromDisk: vi.fn<any>().mockResolvedValue(null),
+    loadAllAgentsFromDisk: vi.fn<any>().mockResolvedValue([]),
+    deleteAgentFromDisk: vi.fn<any>().mockResolvedValue(true),
+    agentExistsOnDisk: vi.fn<any>().mockResolvedValue(true),
+    saveWorldToDisk: vi.fn<any>().mockResolvedValue(undefined),
+    loadWorldFromDisk: vi.fn<any>().mockResolvedValue({})
   };
 
   // Mock all possible import paths that tests might use
@@ -65,7 +65,7 @@ export function setupAgentStorageMocks(): void {
   ];
 
   agentStoragePaths.forEach(path => {
-    jest.doMock(path, () => mockStorageFunctions);
+    vi.mock(path, () => mockStorageFunctions);
   });
 }
 
@@ -75,23 +75,23 @@ export function setupAgentStorageMocks(): void {
  */
 export function setupLLMManagerMocks(): void {
   const mockLLMFunctions = {
-    streamAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration streaming response'),
-    generateAgentResponse: jest.fn<any>().mockResolvedValue('Mock direct integration response'),
-    getLLMQueueStatus: jest.fn<any>().mockReturnValue({
+    streamAgentResponse: vi.fn<any>().mockResolvedValue('Mock direct integration streaming response'),
+    generateAgentResponse: vi.fn<any>().mockResolvedValue('Mock direct integration response'),
+    getLLMQueueStatus: vi.fn<any>().mockReturnValue({
       queueSize: 0,
       isProcessing: false,
       completedCalls: 0,
       failedCalls: 0
     }),
-    clearLLMQueue: jest.fn<any>().mockResolvedValue(undefined),
+    clearLLMQueue: vi.fn<any>().mockResolvedValue(undefined),
     // Provider helper functions for testing (updated for direct integrations)
-    isOpenAIProvider: jest.fn<any>().mockImplementation((provider: string) =>
+    isOpenAIProvider: vi.fn<any>().mockImplementation((provider: string) =>
       ['openai', 'azure', 'xai', 'openai-compatible', 'ollama'].includes(provider?.toLowerCase())
     ),
-    isAnthropicProvider: jest.fn<any>().mockImplementation((provider: string) =>
+    isAnthropicProvider: vi.fn<any>().mockImplementation((provider: string) =>
       provider?.toLowerCase() === 'anthropic'
     ),
-    isGoogleProvider: jest.fn<any>().mockImplementation((provider: string) =>
+    isGoogleProvider: vi.fn<any>().mockImplementation((provider: string) =>
       provider?.toLowerCase() === 'google'
     )
   };
@@ -103,7 +103,7 @@ export function setupLLMManagerMocks(): void {
   ];
 
   llmManagerPaths.forEach(path => {
-    jest.doMock(path, () => mockLLMFunctions);
+    vi.mock(path, () => mockLLMFunctions);
   });
 }
 
@@ -113,11 +113,11 @@ export function setupLLMManagerMocks(): void {
  */
 export function setupDirectSDKMocks(): void {
   // Mock OpenAI SDK
-  jest.doMock('openai', () => ({
-    default: jest.fn<any>().mockImplementation(() => ({
+  vi.mock('openai', () => ({
+    default: vi.fn<any>().mockImplementation(() => ({
       chat: {
         completions: {
-          create: jest.fn<any>().mockResolvedValue({
+          create: vi.fn<any>().mockResolvedValue({
             choices: [{ message: { content: 'Mock OpenAI response', tool_calls: [] } }]
           })
         }
@@ -126,14 +126,14 @@ export function setupDirectSDKMocks(): void {
   }));
 
   // Mock Anthropic SDK
-  jest.doMock('@anthropic-ai/sdk', () => ({
-    default: jest.fn<any>().mockImplementation(() => ({
+  vi.mock('@anthropic-ai/sdk', () => ({
+    default: vi.fn<any>().mockImplementation(() => ({
       messages: {
-        create: jest.fn<any>().mockResolvedValue({
+        create: vi.fn<any>().mockResolvedValue({
           content: [{ type: 'text', text: 'Mock Anthropic response' }],
           role: 'assistant'
         }),
-        stream: jest.fn<any>().mockImplementation(async function* () {
+        stream: vi.fn<any>().mockImplementation(async function* () {
           yield { type: 'content_block_delta', delta: { text: 'Mock Anthropic streaming response' } };
         })
       }
@@ -141,17 +141,17 @@ export function setupDirectSDKMocks(): void {
   }));
 
   // Mock Google Generative AI SDK
-  jest.doMock('@google/generative-ai', () => ({
-    GoogleGenerativeAI: jest.fn<any>().mockImplementation(() => ({
-      getGenerativeModel: jest.fn<any>().mockReturnValue({
-        generateContent: jest.fn<any>().mockResolvedValue({
+  vi.mock('@google/generative-ai', () => ({
+    GoogleGenerativeAI: vi.fn<any>().mockImplementation(() => ({
+      getGenerativeModel: vi.fn<any>().mockReturnValue({
+        generateContent: vi.fn<any>().mockResolvedValue({
           response: {
-            text: jest.fn<any>().mockReturnValue('Mock Google response')
+            text: vi.fn<any>().mockReturnValue('Mock Google response')
           }
         }),
-        generateContentStream: jest.fn<any>().mockResolvedValue({
+        generateContentStream: vi.fn<any>().mockResolvedValue({
           stream: (async function* () {
-            yield { text: jest.fn<any>().mockReturnValue('Mock Google streaming response') };
+            yield { text: vi.fn<any>().mockReturnValue('Mock Google streaming response') };
           })()
         })
       })
@@ -165,7 +165,7 @@ export function setupDirectSDKMocks(): void {
  */
 export function setupEnvironmentMocks(): void {
   // Mock path module for cross-platform compatibility
-  jest.doMock('path', () => ({
+  vi.mock('path', () => ({
     join: (...paths: string[]) => paths.filter(p => p).join('/'),
     dirname: (path: string) => path.split('/').slice(0, -1).join('/'),
     basename: (path: string) => path.split('/').pop() || '',
@@ -181,7 +181,7 @@ export function setupEnvironmentMocks(): void {
   }));
 
   // Mock os module
-  jest.doMock('os', () => ({
+  vi.mock('os', () => ({
     tmpdir: () => '/tmp',
     homedir: () => '/home/user',
     platform: () => 'linux',
@@ -195,16 +195,16 @@ export function setupEnvironmentMocks(): void {
  */
 export function setupEventMocks(): void {
   // Mock events module
-  jest.doMock('events', () => ({
-    EventEmitter: jest.fn<any>().mockImplementation(() => ({
-      on: jest.fn<any>(),
-      off: jest.fn<any>(),
-      emit: jest.fn<any>(),
-      removeAllListeners: jest.fn<any>(),
-      addListener: jest.fn<any>(),
-      removeListener: jest.fn<any>(),
-      listeners: jest.fn<any>().mockReturnValue([]),
-      eventNames: jest.fn<any>().mockReturnValue([])
+  vi.mock('events', () => ({
+    EventEmitter: vi.fn<any>().mockImplementation(() => ({
+      on: vi.fn<any>(),
+      off: vi.fn<any>(),
+      emit: vi.fn<any>(),
+      removeAllListeners: vi.fn<any>(),
+      addListener: vi.fn<any>(),
+      removeListener: vi.fn<any>(),
+      listeners: vi.fn<any>().mockReturnValue([]),
+      eventNames: vi.fn<any>().mockReturnValue([])
     }))
   }));
 }
@@ -215,20 +215,20 @@ export function setupEventMocks(): void {
  */
 export function setupUtilityMocks(): void {
   // Mock crypto module for ID generation
-  jest.doMock('crypto', () => ({
-    randomUUID: jest.fn<any>(() => 'mock-uuid-12345'),
-    randomBytes: jest.fn<any>(() => Buffer.from('mock-random-bytes')),
-    createHash: jest.fn<any>(() => ({
-      update: jest.fn<any>().mockReturnThis(),
-      digest: jest.fn<any>(() => 'mock-hash')
+  vi.mock('crypto', () => ({
+    randomUUID: vi.fn<any>(() => 'mock-uuid-12345'),
+    randomBytes: vi.fn<any>(() => Buffer.from('mock-random-bytes')),
+    createHash: vi.fn<any>(() => ({
+      update: vi.fn<any>().mockReturnThis(),
+      digest: vi.fn<any>(() => 'mock-hash')
     }))
   }));
 
   // Mock util module
-  jest.doMock('util', () => ({
-    promisify: jest.fn<any>((fn: any) => fn),
-    inspect: jest.fn<any>((obj: any) => JSON.stringify(obj)),
-    format: jest.fn<any>((...args: any[]) => args.join(' '))
+  vi.mock('util', () => ({
+    promisify: vi.fn<any>((fn: any) => fn),
+    inspect: vi.fn<any>((obj: any) => JSON.stringify(obj)),
+    format: vi.fn<any>((...args: any[]) => args.join(' '))
   }));
 }
 
@@ -238,25 +238,25 @@ export function setupUtilityMocks(): void {
  */
 export function setupDirectIntegrationMocks(): void {
   // Mock OpenAI direct integration
-  jest.doMock('../../../core/openai-direct', () => ({
-    createOpenAIClientForAgent: jest.fn<any>().mockReturnValue({}),
-    createClientForProvider: jest.fn<any>().mockReturnValue({}),
-    streamOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI streaming response'),
-    generateOpenAIResponse: jest.fn<any>().mockResolvedValue('Mock OpenAI response')
+  vi.mock('../../../core/openai-direct', () => ({
+    createOpenAIClientForAgent: vi.fn<any>().mockReturnValue({}),
+    createClientForProvider: vi.fn<any>().mockReturnValue({}),
+    streamOpenAIResponse: vi.fn<any>().mockResolvedValue('Mock OpenAI streaming response'),
+    generateOpenAIResponse: vi.fn<any>().mockResolvedValue('Mock OpenAI response')
   }));
 
   // Mock Anthropic direct integration
-  jest.doMock('../../../core/anthropic-direct', () => ({
-    createAnthropicClientForAgent: jest.fn<any>().mockReturnValue({}),
-    streamAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic streaming response'),
-    generateAnthropicResponse: jest.fn<any>().mockResolvedValue('Mock Anthropic response')
+  vi.mock('../../../core/anthropic-direct', () => ({
+    createAnthropicClientForAgent: vi.fn<any>().mockReturnValue({}),
+    streamAnthropicResponse: vi.fn<any>().mockResolvedValue('Mock Anthropic streaming response'),
+    generateAnthropicResponse: vi.fn<any>().mockResolvedValue('Mock Anthropic response')
   }));
 
   // Mock Google direct integration
-  jest.doMock('../../../core/google-direct', () => ({
-    createGoogleClientForAgent: jest.fn<any>().mockReturnValue({}),
-    streamGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google streaming response'),
-    generateGoogleResponse: jest.fn<any>().mockResolvedValue('Mock Google response')
+  vi.mock('../../../core/google-direct', () => ({
+    createGoogleClientForAgent: vi.fn<any>().mockReturnValue({}),
+    streamGoogleResponse: vi.fn<any>().mockResolvedValue('Mock Google streaming response'),
+    generateGoogleResponse: vi.fn<any>().mockResolvedValue('Mock Google response')
   }));
 }
 
@@ -280,8 +280,8 @@ export function setupAllMocks(): void {
  * Provides functions to reset mocks between tests
  */
 export function resetAllMocks(): void {
-  jest.clearAllMocks();
-  jest.resetAllMocks();
+  vi.clearAllMocks();
+  vi.resetAllMocks();
 
   // Reset environment variables
   delete process.env.AGENT_WORLD_DATA_PATH;

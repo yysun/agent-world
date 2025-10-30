@@ -5,7 +5,7 @@
  * during the test reorganization process.
  */
 
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 /**
  * Enhanced Mock Validation
@@ -262,7 +262,7 @@ export function generateMockCoverageReport(): {
   // Check file system mocking
   try {
     const fs = require('fs');
-    report.fileSystem = !!(fs.promises && jest.isMockFunction(fs.promises.readFile));
+    report.fileSystem = !!(fs.promises && vi.isMockFunction(fs.promises.readFile));
   } catch (error) {
     // Keep false
   }
@@ -270,7 +270,7 @@ export function generateMockCoverageReport(): {
   // Check agent storage mocking
   try {
     const agentStorage = require('../../core/agent-storage');
-    report.agentStorage = jest.isMockFunction(agentStorage.saveAgentToDisk);
+    report.agentStorage = vi.isMockFunction(agentStorage.saveAgentToDisk);
   } catch (error) {
     // Keep false
   }
@@ -278,7 +278,7 @@ export function generateMockCoverageReport(): {
   // Check LLM manager mocking
   try {
     const llmManager = require('../../core/llm-manager');
-    report.llmManager = jest.isMockFunction(llmManager.streamAgentResponse);
+    report.llmManager = vi.isMockFunction(llmManager.streamAgentResponse);
   } catch (error) {
     // Keep false
   }
@@ -290,9 +290,9 @@ export function generateMockCoverageReport(): {
     const google = require('@google/generative-ai');
     // Consider covered if direct SDKs are mocked
     report.externalSDKs = (
-      jest.isMockFunction(openai.default) ||
-      jest.isMockFunction(anthropic.default) ||
-      jest.isMockFunction(google.GoogleGenerativeAI)
+      vi.isMockFunction(openai.default) ||
+      vi.isMockFunction(anthropic.default) ||
+      vi.isMockFunction(google.GoogleGenerativeAI)
     );
   } catch (error) {
     // Direct SDKs are optional in test environment
@@ -302,7 +302,7 @@ export function generateMockCoverageReport(): {
   // Check utilities
   try {
     const crypto = require('crypto');
-    report.utilities = jest.isMockFunction(crypto.randomUUID);
+    report.utilities = vi.isMockFunction(crypto.randomUUID);
   } catch (error) {
     // Keep false
   }
@@ -310,7 +310,7 @@ export function generateMockCoverageReport(): {
   // Check events
   try {
     const events = require('events');
-    report.events = jest.isMockFunction(events.EventEmitter);
+    report.events = vi.isMockFunction(events.EventEmitter);
   } catch (error) {
     // Keep false
   }
@@ -344,12 +344,12 @@ export function validateMockReset(): {
     }
 
     // Reset mocks
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     // Check if reset worked
     const newCalls = fs.promises?.readFile?.mock?.calls?.length || 0;
     if (newCalls !== 0) {
-      errors.push('jest.clearAllMocks() did not reset call counts');
+      errors.push('vi.clearAllMocks() did not reset call counts');
     }
 
     return {
