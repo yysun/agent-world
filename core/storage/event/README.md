@@ -21,9 +21,9 @@ All implementations share a common `EventStorage` interface and support:
 ### Basic Usage
 
 ```typescript
-import { createEventStorage } from './core/storage/event/index.js';
-import { wireEventStorage } from './core/storage/event/wireListener.js';
-import { createWorld } from './core/managers.js';
+import { createEventStorage } from '@agent-world/core/storage/event/index.js';
+import { wireEventStorage } from '@agent-world/core/storage/event/wireListener.js';
+import { createWorld } from '@agent-world/core/managers.js';
 
 // Create a world
 const world = await createWorld({ name: 'My World' });
