@@ -539,12 +539,17 @@ export async function processAgentMessage(
 
     // Generate LLM response (streaming or non-streaming)
     let response: string;
+    let messageId: string;
+
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
-      response = await streamAgentResponse(world, agent, messages, publishSSE);
+      const result = await streamAgentResponse(world, agent, messages, publishSSE);
+      response = result.response;
+      messageId = result.messageId; // Use the same messageId from streaming
     } else {
       const { generateAgentResponse } = await import('./llm-manager.js');
       response = await generateAgentResponse(world, agent, messages);
+      messageId = generateId(); // Generate new ID for non-streaming
     }
 
     if (!response) {
@@ -558,9 +563,6 @@ export async function processAgentMessage(
     if (shouldAutoMention(finalResponse, messageEvent.sender, agent.id)) {
       finalResponse = addAutoMention(finalResponse, messageEvent.sender);
     }
-
-    // Pre-generate message ID for agent response
-    const messageId = generateId();
 
     loggerMemory.debug('[processAgentMessage] Generated messageId for agent response', {
       agentId: agent.id,

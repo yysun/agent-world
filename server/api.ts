@@ -651,13 +651,13 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         const worldActivityListener = (eventData: WorldActivityEventPayload) => {
           if (eventData.state === 'processing') {
             awaitingIdle = true;
-            loggerChat.debug('Non-streaming: world processing started', { 
+            loggerChat.debug('Non-streaming: world processing started', {
               activityId: eventData.activityId,
-              source: eventData.source 
+              source: eventData.source
             });
           } else if (eventData.state === 'idle' && awaitingIdle) {
-            loggerChat.debug('Non-streaming: world idle, completing response', { 
-              activityId: eventData.activityId 
+            loggerChat.debug('Non-streaming: world idle, completing response', {
+              activityId: eventData.activityId
             });
             clearTimeout(timeoutTimer);
             isComplete = true;
@@ -673,7 +673,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         // Listen to activity events for completion detection
         world.eventEmitter.on(EventType.WORLD, worldActivityListener);
         listeners.set(EventType.WORLD, worldActivityListener);
-        
+
         // Listen to message events for response content
         world.eventEmitter.on(EventType.MESSAGE, messageListener);
         listeners.set(EventType.MESSAGE, messageListener);
@@ -756,7 +756,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
       if (!isResponseEnded) {
         const timeSinceLastEvent = Date.now() - lastEventTime;
         loggerStream.debug(`Streaming timeout fallback triggered: timeSinceLastEvent=${timeSinceLastEvent}ms, awaitingWorldIdle=${awaitingWorldIdle}`);
-        
+
         if (!hasReceivedEvents && timeSinceLastEvent >= STREAM_TIMEOUT_NO_EVENTS_MS) {
           loggerStream.debug(`Ending stream: no events received within ${STREAM_TIMEOUT_NO_EVENTS_MS}ms`);
           endResponse();
@@ -817,17 +817,17 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   // Attach direct listeners to world.eventEmitter
   const worldListener = (eventData: WorldActivityPayload) => {
     const payload = eventData;
-    
+
     // Handle world activity events for stream completion
     if (payload?.state === 'processing') {
       awaitingWorldIdle = true;
-      loggerStream.debug('World processing started', { 
+      loggerStream.debug('World processing started', {
         activityId: payload.activityId,
-        source: payload.source 
+        source: payload.source
       });
     } else if (payload?.state === 'idle' && awaitingWorldIdle) {
-      loggerStream.debug('World idle detected, ending stream', { 
-        activityId: payload.activityId 
+      loggerStream.debug('World idle detected, ending stream', {
+        activityId: payload.activityId
       });
       // Stream all pending events, then end
       sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));

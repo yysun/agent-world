@@ -317,7 +317,6 @@ class ActivityProgressRenderer {
 
     if (event.change === 'start' && !this.activeAgents.has(details.name)) {
       this.activeAgents.add(details.name);
-      console.log(`${boldGreen(details.name)} ${gray('thinking ...')}`);
     }
 
     if (event.change === 'end' && this.activeAgents.has(details.name)) {
@@ -328,7 +327,7 @@ class ActivityProgressRenderer {
   reset(): void {
     if (this.activeAgents.size > 0) {
       this.activeAgents.clear();
-      console.log(gray('All agents finished.'));
+      // console.log(gray('All agents finished.'));
     }
   }
 }
@@ -708,6 +707,7 @@ function handleWorldEvent(
 
       if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
         globalState.awaitingResponse = false;
+        console.log(); // Empty line before prompt
         rl.prompt();
       }
     }
@@ -724,11 +724,31 @@ function handleWorldEvent(
 
   if (eventData.content && eventData.content.includes('Success message sent')) return;
 
+  // Handle regular message events from agents (non-streaming or after streaming ends)
+  if (eventType === 'message' && eventData.sender && eventData.content) {
+    // Skip user messages to prevent echo
+    if (eventData.sender === 'HUMAN' || eventData.sender === 'CLI' || eventData.sender.startsWith('user')) {
+      return;
+    }
+
+    // Skip if this message was already displayed via streaming
+    if (streaming.messageId === eventData.messageId) {
+      return;
+    }
+
+    // Display system messages
+    if (eventData.sender === 'system') {
+      console.log(`${boldRed('● system:')} ${eventData.content}`);
+      return;
+    }
+
+    // Display agent messages (fallback for non-streaming or missed messages)
+    console.log(`\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
+    return;
+  }
+
   if ((eventType === 'system' || eventType === 'world') && (eventData.message || eventData.content)) {
     // existing logic
-  } else if (eventType === 'message' && eventData.sender === 'system') {
-    const msg = eventData.content;
-    console.log(`${boldRed('● system:')} ${msg}`);
   }
 }
 
@@ -878,12 +898,14 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     console.log(`  ${bullet(gray('Enable debug logs via'))} ${cyan('--logLevel debug')}`);
     console.log('');
 
+    console.log(); // Empty line before prompt
     rl.prompt();
 
     rl.on('line', async (input) => {
       const trimmedInput = input.trim();
 
       if (!trimmedInput) {
+        console.log(); // Empty line before prompt
         rl.prompt();
         return;
       }
@@ -929,6 +951,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
           if (!selectedWorld) {
             console.log(error('No world selected.'));
+            console.log(); // Empty line before prompt
             rl.prompt();
             return;
           }
@@ -960,6 +983,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           }
 
           // Show prompt immediately after world selection
+          console.log(); // Empty line before prompt
           rl.prompt();
           return;
         }
@@ -1021,6 +1045,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         } finally {
           if (globalState.awaitingResponse) {
             globalState.awaitingResponse = false;
+            console.log(); // Empty line before prompt
             rl.prompt();
           }
         }
@@ -1035,6 +1060,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       } else if (isCommand) {
         // For other commands, show prompt immediately
+        console.log(); // Empty line before prompt
         rl.prompt();
       }
       // For messages, waitForIdle() above will handle prompt display via world 'idle' event

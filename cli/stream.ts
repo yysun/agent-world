@@ -48,7 +48,7 @@ export function handleStreamingEvents(
       streaming.isActive = true;
       streaming.content = '';
       streaming.sender = eventData.agentName || eventData.sender;
-      streaming.messageId = eventData.messageId;
+      streaming.messageId = eventData.messageId; // Set new messageId for this stream
       process.stdout.write(`\n${boldGreen(`● ${streaming.sender}`)} ${gray('is responding...')}`);
     }
 
@@ -62,6 +62,31 @@ export function handleStreamingEvents(
 
       streaming.content += eventData.content;
       process.stdout.write(eventData.content);
+    }
+    return;
+  }
+
+  // Handle end events - finish streaming but keep messageId to prevent duplicate display
+  if (eventData.type === 'end') {
+    if (streaming.isActive && streaming.messageId === eventData.messageId) {
+      process.stdout.write('\n\n'); // End the streaming line with extra newline for spacing
+      streaming.isActive = false;
+      streaming.content = '';
+      streaming.sender = undefined;
+      // Keep messageId temporarily to prevent duplicate display of the final message event
+    }
+    return;
+  }
+
+  // Handle error events
+  if (eventData.type === 'error') {
+    if (streaming.isActive && streaming.messageId === eventData.messageId) {
+      const errorMsg = eventData.error || 'Unknown error';
+      process.stdout.write(`\n${error(`Error: ${errorMsg}`)}\n`);
+      streaming.isActive = false;
+      streaming.content = '';
+      streaming.sender = undefined;
+      // Keep messageId temporarily to prevent duplicate display
     }
     return;
   }
@@ -120,6 +145,10 @@ export function handleActivityEvents(eventData: any): void {
     } else if (source) {
       console.log(`${gray('[world]')} ${yellow(source)} ${gray('started')}`);
     }
+  } else if (change === 'end' && source.startsWith('agent:')) {
+    // Display when individual agent finishes processing
+    const agentName = source.slice('agent:'.length);
+    console.log(`${gray('[world]')} ${cyan(agentName)} ${gray('finished processing')}`);
   } else if (change === 'end' && eventData.state === 'idle' && pending === 0) {
     console.log(`${gray('[world]')} ${green('idle')} ${gray('- all processing complete')}`);
   } else if (change === 'end' && eventData.state === 'processing' && pending > 0) {

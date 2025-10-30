@@ -295,7 +295,7 @@ export async function streamAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
-): Promise<string> {
+): Promise<{ response: string; messageId: string }> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
     return await executeStreamAgentResponse(world, agent, messages, publishSSE);
@@ -310,7 +310,7 @@ async function executeStreamAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
-): Promise<string> {
+): Promise<{ response: string; messageId: string }> {
   const messageId = generateId();
 
   try {
@@ -352,7 +352,7 @@ async function executeStreamAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      return await streamOpenAIResponse(
+      const response = await streamOpenAIResponse(
         client,
         agent.model,
         llmMessages,
@@ -362,12 +362,13 @@ async function executeStreamAgentResponse(
         publishSSE,
         messageId
       );
+      return { response, messageId };
     }
 
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      return await streamAnthropicResponse(
+      const response = await streamAnthropicResponse(
         client,
         agent.model,
         llmMessages,
@@ -377,12 +378,13 @@ async function executeStreamAgentResponse(
         publishSSE,
         messageId
       );
+      return { response, messageId };
     }
 
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      return await streamGoogleResponse(
+      const response = await streamGoogleResponse(
         client,
         agent.model,
         llmMessages,
@@ -392,6 +394,7 @@ async function executeStreamAgentResponse(
         publishSSE,
         messageId
       );
+      return { response, messageId };
     }
 
     // All providers now use direct integrations - no AI SDK needed
