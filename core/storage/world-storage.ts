@@ -10,11 +10,12 @@
  * - Handles World serialization without EventEmitter and agents Map
  * - Complete isolation from other internal modules
  * - Explicit rootPath parameter handling (no environment variables)
+ * - Cascade deletion for data integrity (world → agents/chats, chat → messages)
  *
  * Core Functions:
  * - saveWorld: Save world config.json with flat structure (excludes eventEmitter and agents)
  * - loadWorld: Load world configuration from file
- * - deleteWorld: Remove world directory and all contents
+ * - deleteWorld: Remove world directory and all contents (cascades to agents and chats)
  * - listWorlds: Scan and load all worlds in root directory
  * - worldExists: Check if world directory exists
  * - getWorldDir: Get world directory path
@@ -23,13 +24,13 @@
  * Chat Functions:
  * - saveChatData: Save complete chat data with metadata and content
  * - loadChatData: Load complete chat data with Date reconstruction
- * - deleteChatData: Remove chat files
+ * - deleteChatData: Remove chat files and cascade delete associated messages from agent memory
  * - listChatHistories: List all chat metadata for a world
  * - updateChatData: Update existing chat with partial data
  * - getMemory: Aggregate memory across all agents for chat sessions
  *
- * Version: 2.0.0 - Updated for new ChatData/WorldChat architecture
- * Date: 2025-08-01
+ * Version: 2.1.0 - Added cascade deletion for chat operations
+ * Date: 2025-10-30
  */
 
 import { promises as fs } from 'fs';
@@ -37,7 +38,7 @@ import * as path from 'path';
 import { toKebabCase } from '../utils.js';
 import { logger } from '../logger.js';
 import type { World, Chat, CreateChatParams, UpdateChatParams, AgentMessage } from '../types.js';
-import { listAgents, loadAgent } from './agent-storage.js';
+import { listAgents, loadAgent, deleteMemoryByChatId } from './agent-storage.js';
 
 // Extract readdir and exists from fs for convenience
 const { readdir, access } = fs;
@@ -102,10 +103,10 @@ export async function saveWorld(root: string, worldData: World): Promise<void> {
 
   // Create a copy of worldData without mcpConfig for config.json
   const { mcpConfig, ...configData } = worldData;
-  
+
   // Save main config without mcpConfig
   await writeJsonFile(configPath, configData);
-  
+
   // Save mcpConfig to separate file if it exists
   if (mcpConfig !== undefined && mcpConfig !== null) {
     try {
@@ -265,12 +266,17 @@ export async function updateChatData(rootPath: string, worldId: string, chatId: 
 }
 
 /**
- * Delete chat data from disk
+ * Delete chat data from disk with cascade deletion of associated messages
  */
 export async function deleteChatData(rootPath: string, worldId: string, chatId: string): Promise<boolean> {
   try {
+    // Delete the chat file
     const chatPath = getChatFilePath(rootPath, worldId, chatId);
     await fs.unlink(chatPath);
+
+    // Cascade delete: Remove all agent memory messages with this chatId
+    await deleteMemoryByChatId(rootPath, worldId, chatId);
+
     return true;
   } catch {
     return false;
