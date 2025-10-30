@@ -32,6 +32,7 @@
     "cli/**/*",
     "server/**/*",
     "core/**/*",
+    "src/**/*",
     "tests/**/*"
   ],
   "exclude": [
