@@ -29,6 +29,7 @@ import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
+import { publishToolEvent } from './events.js';
 
 const logger = createCategoryLogger('llm.adapter.anthropic');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -219,15 +220,16 @@ export async function streamAnthropicResponse(
         try {
           const tool = mcpTools[toolUse.name];
           if (tool && tool.execute) {
-            // Publish tool start event to frontend
-            publishSSE(world, {
+            // Publish tool start event to world channel (agent behavioral event)
+            publishToolEvent(world, {
               agentName: agent.id,
               type: 'tool-start',
               messageId,
               toolExecution: {
                 toolName: toolUse.name,
                 toolCallId: toolUse.id,
-                phase: 'starting'
+                sequenceId,
+                input: JSON.stringify(toolUse.input)
               }
             });
 
@@ -258,17 +260,19 @@ export async function streamAnthropicResponse(
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
             });
 
-            // Publish tool result event to frontend
-            publishSSE(world, {
+            // Publish tool result event to world channel (agent behavioral event)
+            publishToolEvent(world, {
               agentName: agent.id,
               type: 'tool-result',
               messageId,
               toolExecution: {
                 toolName: toolUse.name,
                 toolCallId: toolUse.id,
-                phase: 'completed',
+                sequenceId,
                 duration: Math.round(duration * 100) / 100,
+                input: JSON.stringify(toolUse.input),
                 result: result,
+                resultType: typeof result as any,
                 resultSize: resultString.length
               }
             });
@@ -296,17 +300,17 @@ export async function streamAnthropicResponse(
             errorStack: error instanceof Error ? error.stack : undefined
           });
 
-          // Publish tool error event to frontend
-          publishSSE(world, {
+          // Publish tool error event to world channel (agent behavioral event)
+          publishToolEvent(world, {
             agentName: agent.id,
             type: 'tool-error',
             messageId,
             toolExecution: {
               toolName: toolUse.name,
               toolCallId: toolUse.id,
+              sequenceId,
               error: errorMessage,
-              duration: Math.round(duration * 100) / 100,
-              phase: 'failed'
+              duration: Math.round(duration * 100) / 100
             }
           });
 

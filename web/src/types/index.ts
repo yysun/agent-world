@@ -75,7 +75,6 @@ export interface Message {
     toolName: string;
     toolCallId: string;
     sequenceId?: string;
-    phase: 'starting' | 'executing' | 'completed' | 'failed';
     duration?: number;
     input?: any;
     result?: any;

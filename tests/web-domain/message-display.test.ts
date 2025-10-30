@@ -48,7 +48,6 @@ describe('Message Display Domain Module', () => {
         toolExecution: {
           toolName: 'test-tool',
           toolCallId: 'call-123',
-          phase: 'completed',
           input: { param: 'value' },
           result: { success: true }
         }

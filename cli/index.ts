@@ -58,6 +58,7 @@ import {
   StreamingState,
   createStreamingState,
   handleWorldEventWithStreaming,
+  handleToolEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
@@ -428,7 +429,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
     const pipelineClient: ClientConnection = {
       isOpen: true,
       onWorldEvent: (eventType: string, eventData: any) => {
-        if (eventType === 'world-activity') {
+        if (eventType === 'world') {
           activityMonitor.handle(eventData as WorldActivityEventPayload);
           progressRenderer.handle(eventData as WorldActivityEventPayload);
           return;
@@ -599,14 +600,21 @@ function handleWorldEvent(
   progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
 ): void {
-  if (eventType === 'world-activity') {
-    const payload = eventData as WorldActivityEventPayload;
-    activityMonitor.handle(payload);
-    progressRenderer.handle(payload);
+  if (eventType === 'world') {
+    const payload = eventData as any;
+    // Handle activity events
+    if (payload.state === 'processing' || payload.state === 'idle') {
+      activityMonitor.handle(payload as WorldActivityEventPayload);
+      progressRenderer.handle(payload as WorldActivityEventPayload);
 
-    if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
-      globalState.awaitingResponse = false;
-      rl.prompt();
+      if (payload.state === 'idle' && rl && globalState.awaitingResponse) {
+        globalState.awaitingResponse = false;
+        rl.prompt();
+      }
+    }
+    // Handle tool events (migrated from sse channel)
+    else if (payload.type === 'tool-start' || payload.type === 'tool-result' || payload.type === 'tool-error' || payload.type === 'tool-progress') {
+      handleToolEvents(payload);
     }
     return;
   }
@@ -815,18 +823,18 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         process.exit(0);
       }
 
-        console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
+      console.log(`\n${boldYellow('● you:')} ${trimmedInput}`);
 
-        const isCommand = trimmedInput.startsWith('/');
-        let snapshot: ActivityEventSnapshot | null = null;
+      const isCommand = trimmedInput.startsWith('/');
+      let snapshot: ActivityEventSnapshot | null = null;
 
-        if (!isCommand) {
-          globalState.awaitingResponse = true;
-          snapshot = activityMonitor.captureSnapshot();
-        }
+      if (!isCommand) {
+        globalState.awaitingResponse = true;
+        snapshot = activityMonitor.captureSnapshot();
+      }
 
-        try {
-          const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
+      try {
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {
@@ -933,24 +941,24 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
       if (!isCommand && snapshot) {
         try {
-            await activityMonitor.waitForIdle({ snapshot });
-          } catch (error) {
-            console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
-          } finally {
-            if (globalState.awaitingResponse) {
-              globalState.awaitingResponse = false;
-              rl.prompt();
-            }
+          await activityMonitor.waitForIdle({ snapshot });
+        } catch (error) {
+          console.error(red(`Timed out waiting for responses: ${(error as Error).message}`));
+        } finally {
+          if (globalState.awaitingResponse) {
+            globalState.awaitingResponse = false;
+            rl.prompt();
           }
-          continue;
         }
+        return;
+      }
 
-        // Set timer based on input type: commands get short delay, messages get longer delay
-        const isSelectCommand = trimmedInput.toLowerCase() === '/select';
+      // Set timer based on input type: commands get short delay, messages get longer delay
+      const isSelectCommand = trimmedInput.toLowerCase() === '/select';
 
-        if (isSelectCommand) {
-          // For select command, prompt is already shown in the handler
-          return;
+      if (isSelectCommand) {
+        // For select command, prompt is already shown in the handler
+        return;
       } else if (isCommand) {
         // For other commands, show prompt immediately
         rl.prompt();

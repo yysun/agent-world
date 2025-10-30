@@ -377,10 +377,11 @@ export interface WorldMessageEvent {
 
 /**
  * World SSE event data structure for World.eventEmitter
+ * Note: Tool events have been migrated to world channel (see WorldToolEvent)
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log';
   content?: string;
   error?: string;
   messageId: string;
@@ -396,12 +397,20 @@ export interface WorldSSEEvent {
     timestamp: string;
     data?: any;
   };
-  // Enhanced tool execution metadata for Phase 2.2
-  toolExecution?: {
+}
+
+/**
+ * World tool event data structure for agent behavioral events
+ * Emitted on world channel to track agent actions (tool execution)
+ */
+export interface WorldToolEvent {
+  agentName: string;
+  type: 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
+  messageId: string;
+  toolExecution: {
     toolName: string;
     toolCallId: string;
     sequenceId?: string;
-    phase: 'starting' | 'executing' | 'completed' | 'failed';
     duration?: number;
     input?: any;
     result?: any;

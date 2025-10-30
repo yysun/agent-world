@@ -39,7 +39,7 @@
  */
 
 import {
-  World, Agent, WorldMessageEvent, WorldSSEEvent, WorldSystemEvent,
+  World, Agent, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent,
   AgentMessage, MessageData, SenderType, Chat, WorldChat
 } from './types.js';
 import { generateId } from './utils.js';
@@ -147,7 +147,7 @@ export function subscribeToMessages(
 }
 
 /**
- * SSE events using World.eventEmitter
+ * SSE events using World.eventEmitter (for LLM streaming)
  */
 export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
   const sseEvent: WorldSSEEvent = {
@@ -156,7 +156,8 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     content: data.content,
     error: data.error,
     messageId: data.messageId || generateId(),
-    usage: data.usage
+    usage: data.usage,
+    logEvent: data.logEvent
   };
   world.eventEmitter.emit('sse', sseEvent);
 
@@ -182,6 +183,19 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
       }
     });
   }
+}
+
+/**
+ * Tool events using World.eventEmitter (for agent behavioral events)
+ */
+export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): void {
+  const toolEvent: WorldToolEvent = {
+    agentName: data.agentName!,
+    type: data.type!,
+    messageId: data.messageId || generateId(),
+    toolExecution: data.toolExecution!
+  };
+  world.eventEmitter.emit('world', toolEvent);
 }
 
 /**

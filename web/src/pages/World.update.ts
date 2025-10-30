@@ -694,7 +694,7 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
     messages: [...(clearedState.messages || []), errorMsg],
     needScroll: true,
     isWaiting: false
-  };
+  } as T;
 };
 
 

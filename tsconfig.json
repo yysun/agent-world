@@ -23,8 +23,7 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false,
     "types": [
-      "node",
-      "jest"
+      "node"
     ],
     "outDir": "./dist",
   },

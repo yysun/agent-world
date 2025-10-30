@@ -217,7 +217,6 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
       toolExecution: {
         toolName: '',
         toolCallId: 'call-bad',
-        phase: 'failed',
         error: 'empty tool name from LLM',
       },
     });

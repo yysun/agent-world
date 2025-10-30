@@ -59,7 +59,7 @@ function emitActivityEvent(
   };
 
   world.isProcessing = state === 'processing';
-  world.eventEmitter.emit('world-activity', payload);
+  world.eventEmitter.emit('world', payload);
   world.eventEmitter.emit(state, payload);
 }
 

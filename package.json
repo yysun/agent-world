@@ -28,6 +28,7 @@
     "prestart": "npm run build",
     "start": "node dist/server/index.js",
     "cli": "npx tsx cli/index.ts",
+    "cli:watch": "npx tsx --watch cli/index.ts",
     "server": "npx tsx server/index.ts",
     "dev": "npm-run-all --parallel server:watch web:dev",
     "server:watch": "npx tsx --watch server/index.ts",

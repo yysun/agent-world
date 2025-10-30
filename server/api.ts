@@ -698,13 +698,31 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   const client: ClientConnection = {
     isOpen: true,
     onWorldEvent: (eventType: string, eventData: any) => {
-      // Track agent activity for better timeout management
-      if (eventType === 'world-activity') {
+      // Track agent activity and tool execution for better timeout management
+      if (eventType === 'world') {
         const payload = eventData as any;
+        // Handle activity events
         if (payload?.state === 'processing') {
           awaitingWorldIdle = true;
         } else if (payload?.state === 'idle') {
           awaitingWorldIdle = false;
+        }
+        // Handle tool events (migrated from sse channel)
+        else if (payload?.type === 'tool-start' || payload?.type === 'tool-result' || payload?.type === 'tool-error') {
+          const agentName = payload.agentName;
+          if (agentName) {
+            if (payload.type === 'tool-start') {
+              const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
+              activeToolCalls.add(toolKey);
+              pendingEvents++;
+              loggerStream.debug(`Tool start: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
+            } else if (payload.type === 'tool-result' || payload.type === 'tool-error') {
+              const toolKey = `${agentName}-${payload.toolExecution?.toolCallId}`;
+              activeToolCalls.delete(toolKey);
+              pendingEvents = Math.max(0, pendingEvents - 1);
+              loggerStream.debug(`Tool ${payload.type === 'tool-error' ? 'error' : 'complete'}: ${payload.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
+            }
+          }
         }
       }
       else if (eventType === 'sse') {
@@ -718,18 +736,6 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
             activeAgents.delete(agentName);
             pendingEvents = Math.max(0, pendingEvents - 1);
             loggerStream.debug(`SSE end/error: agent ${agentName} finished. Active: ${activeAgents.size}, Pending: ${pendingEvents}`);
-          }
-          // Track MCP tool executions to prevent premature stream closure
-          else if (eventData.type === 'tool-start') {
-            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
-            activeToolCalls.add(toolKey);
-            pendingEvents++;
-            loggerStream.debug(`Tool start: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
-          } else if (eventData.type === 'tool-result' || eventData.type === 'tool-error') {
-            const toolKey = `${agentName}-${eventData.toolExecution?.toolCallId}`;
-            activeToolCalls.delete(toolKey);
-            pendingEvents = Math.max(0, pendingEvents - 1);
-            loggerStream.debug(`Tool ${eventData.type === 'tool-error' ? 'error' : 'complete'}: ${eventData.toolExecution?.toolName} (${toolKey}). Active tools: ${activeToolCalls.size}, Pending: ${pendingEvents}`);
           }
         }
       }

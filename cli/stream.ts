@@ -76,7 +76,10 @@ export function handleStreamingEvents(
     return;
   }
 
-  // PHASE 2.2 ENHANCEMENT: Handle tool execution events
+}
+
+// PHASE 2.2 ENHANCEMENT: Handle tool execution events (from world channel)
+export function handleToolEvents(eventData: any): void {
   if (eventData.type === 'tool-start' && eventData.toolExecution) {
     const toolName = eventData.toolExecution.toolName;
     const agentName = eventData.agentName || eventData.sender || 'agent';
@@ -105,27 +108,6 @@ export function handleStreamingEvents(
     const agentName = eventData.agentName || eventData.sender || 'agent';
     console.log(`${error(`${agentName} tool failed - ${toolName}: ${toolError}`)}`);
     return;
-  }
-
-  // Handle end events
-  if (eventData.type === 'end' && streaming.isActive && streaming.messageId === eventData.messageId) {
-    console.log('\n');
-    resetStreamingState(streaming);
-
-    if (streaming.wait) {
-      streaming.wait(2000);
-    }
-    return;
-  }
-
-  // Handle error events
-  if (eventData.type === 'error' && streaming.isActive && streaming.messageId === eventData.messageId) {
-    console.log(error(`Stream error: ${eventData.error || eventData.message}`));
-    resetStreamingState(streaming);
-
-    if (streaming.wait) {
-      streaming.wait(2000);
-    }
   }
 }
 

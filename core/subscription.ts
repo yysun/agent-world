@@ -197,15 +197,6 @@ export function setupWorldEventListeners(world: World, client: ClientConnection)
   world.eventEmitter.on('system', systemListener);
   listeners.set('system', systemListener);
 
-  // World events
-  const worldListener = (eventData: any) => {
-    if (client.onWorldEvent) {
-      client.onWorldEvent('world', eventData);
-    }
-  };
-  world.eventEmitter.on('world', worldListener);
-  listeners.set('world', worldListener);
-
   // Message events
   const messageListener = (eventData: any) => {
     if (client.onWorldEvent) {
@@ -224,13 +215,15 @@ export function setupWorldEventListeners(world: World, client: ClientConnection)
   world.eventEmitter.on('sse', sseListener);
   listeners.set('sse', sseListener);
 
-  const activityListener = (eventData: any) => {
+  // World events (includes activity tracking)
+  // Note: 'world' channel receives WorldActivityEventPayload for activity tracking
+  const worldActivityListener = (eventData: any) => {
     if (client.onWorldEvent) {
-      client.onWorldEvent('world-activity', eventData);
+      client.onWorldEvent('world', eventData);
     }
   };
-  world.eventEmitter.on('world-activity', activityListener);
-  listeners.set('world-activity', activityListener);
+  world.eventEmitter.on('world', worldActivityListener);
+  listeners.set('world', worldActivityListener);
 
   // Log streaming - set up if client has onLog callback
   if (client.onLog) {

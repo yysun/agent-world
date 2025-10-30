@@ -47,6 +47,7 @@ import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
+import { publishToolEvent } from './events.js';
 
 const logger = createCategoryLogger('llm.adapter.openai');
 const mcpLogger = createCategoryLogger('llm.mcp');
@@ -257,15 +258,16 @@ export async function streamOpenAIResponse(
         try {
           const tool = mcpTools[toolCall.function!.name!];
           if (tool && tool.execute) {
-            // Publish tool start event to frontend
-            publishSSE(world, {
+            // Publish tool start event to world channel (agent behavioral event)
+            publishToolEvent(world, {
               agentName: agent.id,
               type: 'tool-start',
               messageId,
               toolExecution: {
                 toolName: toolCall.function!.name!,
                 toolCallId: toolCall.id!,
-                phase: 'starting'
+                sequenceId,
+                input: toolCall.function!.arguments
               }
             });
 
@@ -293,17 +295,17 @@ export async function streamOpenAIResponse(
                 messageId
               });
 
-              // Publish tool error event for argument parsing errors
-              publishSSE(world, {
+              // Publish tool error event for argument parsing errors (world channel)
+              publishToolEvent(world, {
                 agentName: agent.id,
                 type: 'tool-error',
                 messageId,
                 toolExecution: {
                   toolName: toolCall.function!.name!,
                   toolCallId: toolCall.id!,
+                  sequenceId,
                   error: `Tool arguments parse error: ${parseErr}`,
-                  duration: 0,
-                  phase: 'failed'
+                  duration: 0
                 }
               });
 
@@ -333,17 +335,19 @@ export async function streamOpenAIResponse(
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
             });
 
-            // Publish tool result event to frontend
-            publishSSE(world, {
+            // Publish tool result event to world channel (agent behavioral event)
+            publishToolEvent(world, {
               agentName: agent.id,
               type: 'tool-result',
               messageId,
               toolExecution: {
                 toolName: toolCall.function!.name!,
                 toolCallId: toolCall.id!,
-                phase: 'completed',
+                sequenceId,
                 duration: Math.round(duration * 100) / 100,
+                input: toolCall.function!.arguments,
                 result: result,
+                resultType: typeof result as any,
                 resultSize: resultString.length
               }
             });
@@ -371,17 +375,17 @@ export async function streamOpenAIResponse(
             errorStack: error instanceof Error ? error.stack : undefined
           });
 
-          // Publish tool error event to frontend
-          publishSSE(world, {
+          // Publish tool error event to world channel (agent behavioral event)
+          publishToolEvent(world, {
             agentName: agent.id,
             type: 'tool-error',
             messageId,
             toolExecution: {
               toolName: toolCall.function!.name!,
               toolCallId: toolCall.id!,
+              sequenceId,
               error: errorMessage,
-              duration: Math.round(duration * 100) / 100,
-              phase: 'failed'
+              duration: Math.round(duration * 100) / 100
             }
           });
 
@@ -491,7 +495,7 @@ export async function generateOpenAIResponse(
 
       // Execute function calls
       const toolResults: ChatMessage[] = [];
-      
+
       // Add tool results for invalid calls (empty or missing names)
       for (const invalidCall of invalidToolCalls) {
         const toolCallId = invalidCall.id || generateFallbackId();

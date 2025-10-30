@@ -176,13 +176,13 @@ describe('SSE End Event Timing', () => {
           agentName: localAgent.id,
           type: 'tool-start',
           messageId,
-          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', phase: 'starting' }
+          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123' }
         });
         localPublishSSE(localWorld, {
           agentName: localAgent.id,
           type: 'tool-result',
           messageId,
-          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', phase: 'completed', duration: 100 }
+          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', duration: 100 }
         });
         // End event comes AFTER tool completes
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'end', messageId });
@@ -214,13 +214,13 @@ describe('SSE End Event Timing', () => {
           agentName: localAgent.id,
           type: 'tool-start',
           messageId,
-          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', phase: 'starting' }
+          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123' }
         });
         localPublishSSE(localWorld, {
           agentName: localAgent.id,
           type: 'tool-result',
           messageId,
-          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', phase: 'completed', duration: 50 }
+          toolExecution: { toolName: 'test_tool', toolCallId: 'call_123', duration: 50 }
         });
         // End comes after tool
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'end', messageId });
@@ -251,13 +251,13 @@ describe('SSE End Event Timing', () => {
           agentName: localAgent.id,
           type: 'tool-start',
           messageId,
-          toolExecution: { toolName: 'test', toolCallId: 'call_1', phase: 'starting' }
+          toolExecution: { toolName: 'test', toolCallId: 'call_1' }
         });
         localPublishSSE(localWorld, {
           agentName: localAgent.id,
           type: 'tool-result',
           messageId,
-          toolExecution: { toolName: 'test', toolCallId: 'call_1', phase: 'completed', duration: 100 }
+          toolExecution: { toolName: 'test', toolCallId: 'call_1', duration: 100 }
         });
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'chunk', content: 'Final', messageId });
         localPublishSSE(localWorld, { agentName: localAgent.id, type: 'end', messageId });

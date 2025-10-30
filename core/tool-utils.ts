@@ -82,7 +82,6 @@ export function filterAndHandleEmptyNamedFunctionCalls(
           toolExecution: {
             toolName: '',
             toolCallId,
-            phase: 'failed',
             error: 'empty tool name from LLM',
           },
         });
