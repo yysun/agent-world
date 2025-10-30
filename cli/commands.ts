@@ -422,6 +422,14 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     aliases: ['new-chat'],
     category: 'chat'
   },
+  'chat select': {
+    type: 'selectChat',
+    requiresWorld: true,
+    description: 'Show chat selection menu and display messages from selected chat',
+    usage: '/chat select',
+    parameters: [],
+    category: 'chat'
+  },
   'chat switch': {
     type: 'loadChat',
     requiresWorld: true,
@@ -1692,6 +1700,73 @@ export async function processCLICommand(
           cliResponse = {
             success: false,
             message: 'Failed to create chat',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'selectChat':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          // Get all chats for the world
+          const chats = await listChats(world!.id);
+
+          if (chats.length === 0) {
+            cliResponse = {
+              success: true,
+              message: `No chat history found in world '${world!.name}'.`
+            };
+            break;
+          }
+
+          // Get current chat ID
+          const worldState = await getWorld(world!.id);
+          const currentChatId = worldState?.currentChatId || null;
+
+          // If only one chat, auto-select it
+          if (chats.length === 1) {
+            const chat = chats[0];
+            console.log(`\n${boldGreen('Auto-selecting the only available chat:')} ${cyan(chat.name)} (${gray(chat.id)})`);
+
+            // Restore the chat
+            const restored = await restoreChat(world!.id, chat.id);
+            if (!restored) {
+              cliResponse = {
+                success: false,
+                message: `Failed to restore chat '${chat.id}'`
+              };
+              break;
+            }
+
+            // Display chat messages
+            await displayChatMessages(world!.id, chat.id);
+
+            cliResponse = {
+              success: true,
+              message: `Chat '${chat.name}' selected and loaded`,
+              data: { worldId: restored.id, currentChatId: restored.currentChatId },
+              needsWorldRefresh: true
+            };
+            break;
+          }
+
+          // Return data for interactive chat selection in CLI
+          cliResponse = {
+            success: true,
+            message: 'Opening chat selection...',
+            data: {
+              selectChat: true,
+              chats,
+              currentChatId
+            }
+          };
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to select chat',
             error: error instanceof Error ? error.message : String(error)
           };
         }
