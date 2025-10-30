@@ -20,7 +20,8 @@
  * Implementation Notes:
  * - Uses Node.js fs/promises for async file operations
  * - Creates directories as needed
- * - Handles concurrent writes with queue
+ * - Note: This implementation is NOT thread-safe for concurrent writes
+ * - For production with high concurrency, consider using SQLite storage instead
  * - Provides compaction to reclaim space after deletions
  */
 
@@ -175,6 +176,7 @@ export class FileEventStorage implements EventStorage {
   
   /**
    * Save multiple events in batch
+   * Note: This method generates sequence numbers sequentially to avoid race conditions
    */
   async saveEvents(events: StoredEvent[]): Promise<void> {
     // Group events by world/chat
@@ -185,13 +187,10 @@ export class FileEventStorage implements EventStorage {
       if (!groupedEvents.has(key)) {
         groupedEvents.set(key, []);
       }
-      
-      // Auto-generate sequence number if not provided
-      const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
-      groupedEvents.get(key)!.push({ ...event, seq });
+      groupedEvents.get(key)!.push(event);
     }
     
-    // Write each group to its file
+    // Process each group sequentially to avoid race conditions with seq generation
     for (const [key, groupEvents] of groupedEvents.entries()) {
       const [worldId, chatIdStr] = key.split(':');
       const chatId = chatIdStr === 'null' ? null : chatIdStr;
@@ -201,8 +200,15 @@ export class FileEventStorage implements EventStorage {
       
       const filePath = getEventFilePath(this.baseDir, worldId, chatId);
       
-      // Append all events for this group
+      // Generate seq numbers sequentially to avoid duplicates
+      const eventsWithSeq: StoredEvent[] = [];
       for (const event of groupEvents) {
+        const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
+        eventsWithSeq.push({ ...event, seq });
+      }
+      
+      // Append all events for this group
+      for (const event of eventsWithSeq) {
         await appendEventToFile(filePath, event);
       }
     }
