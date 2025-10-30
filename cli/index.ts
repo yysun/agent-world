@@ -58,7 +58,7 @@ import {
   type WorldActivityEventPayload,
   type WorldActivityEventState
 } from '../core/index.js';
-import { World } from '../core/types.js';
+import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput } from './commands.js';
 import {
@@ -73,13 +73,7 @@ import { configureLLMProvider } from '../core/llm-config.js';
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
 
-// Event name constants
-const WORLD_EVENTS = {
-  WORLD: 'world',
-  MESSAGE: 'message',
-  SSE: 'sse',
-  SYSTEM: 'system'
-} as const;
+// Event name constants - using typed EventType enum from core/types.ts
 
 // Event payload types
 interface MessageEventPayload {
@@ -471,18 +465,18 @@ function attachCLIListeners(
     activityMonitor.handle(eventData);
     progressRenderer.handle(eventData);
     if (streaming && globalState && rl) {
-      handleWorldEvent(WORLD_EVENTS.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     }
   };
-  world.eventEmitter.on(WORLD_EVENTS.WORLD, worldListener);
-  listeners.set(WORLD_EVENTS.WORLD, worldListener);
+  world.eventEmitter.on(EventType.WORLD, worldListener);
+  listeners.set(EventType.WORLD, worldListener);
 
   // Message events
   const messageListener = (eventData: MessageEventPayload) => {
     if (eventData.content && eventData.content.includes('Success message sent')) return;
 
     if (streaming && globalState && rl) {
-      handleWorldEvent(WORLD_EVENTS.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     } else {
       // Pipeline mode: simple console output
       if (eventData.sender === 'system') {
@@ -493,29 +487,29 @@ function attachCLIListeners(
       }
     }
   };
-  world.eventEmitter.on(WORLD_EVENTS.MESSAGE, messageListener);
-  listeners.set(WORLD_EVENTS.MESSAGE, messageListener);
+  world.eventEmitter.on(EventType.MESSAGE, messageListener);
+  listeners.set(EventType.MESSAGE, messageListener);
 
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl) {
     const sseListener = (eventData: any) => {
-      handleWorldEvent(WORLD_EVENTS.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     };
-    world.eventEmitter.on(WORLD_EVENTS.SSE, sseListener);
-    listeners.set(WORLD_EVENTS.SSE, sseListener);
+    world.eventEmitter.on(EventType.SSE, sseListener);
+    listeners.set(EventType.SSE, sseListener);
   }
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
     if (eventData.content && eventData.content.includes('Success message sent')) return;
     if (streaming && globalState && rl) {
-      handleWorldEvent(WORLD_EVENTS.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     } else if (eventData.message || eventData.content) {
       // Pipeline mode: system messages are handled by message listener
     }
   };
-  world.eventEmitter.on(WORLD_EVENTS.SYSTEM, systemListener);
-  listeners.set(WORLD_EVENTS.SYSTEM, systemListener);
+  world.eventEmitter.on(EventType.SYSTEM, systemListener);
+  listeners.set(EventType.SYSTEM, systemListener);
 
   return listeners;
 }
