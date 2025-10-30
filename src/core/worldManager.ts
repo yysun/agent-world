@@ -34,7 +34,6 @@ interface WorldState {
   emitter?: EventEmitter;
   refCount: number;
   loader: WorldLoader;
-  forwarders?: Map<string, (...args: any[]) => void>;
 }
 
 export class WorldManager {
@@ -48,7 +47,7 @@ export class WorldManager {
     if (!actor) {
       // spawn actor for this world id
       const loader = this.loaderFactory(worldId);
-      const state: WorldState = { id: worldId, loader, refCount: 0, forwarders: new Map() };
+      const state: WorldState = { id: worldId, loader, refCount: 0 };
 
       const behavior = async (ctx: any, msg: InternalMsg) => {
         if (msg.type === 'subscribe') {
@@ -59,7 +58,7 @@ export class WorldManager {
             state.emitter = loaded;
           }
 
-          // create a forwarder stub that clients can use — but we will return emitter to client so they can attach directly
+          // create unsubscribe function that tells the actor to decrement refcount
           const unsubscribe = () => ctx.self.tell({ type: 'unsubscribe', subscriberId: msg.subscriberId });
 
           msg.resolve({ emitter: state.emitter!, unsubscribe });
