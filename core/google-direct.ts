@@ -40,8 +40,8 @@ import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 import { publishToolEvent } from './events.js';
 
-const logger = createCategoryLogger('llm.adapter.google');
-const mcpLogger = createCategoryLogger('llm.mcp');
+const logger = createCategoryLogger('llm.google');
+const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**
  * Google client factory

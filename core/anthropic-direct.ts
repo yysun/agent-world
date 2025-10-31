@@ -31,8 +31,8 @@ import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 import { publishToolEvent } from './events.js';
 
-const logger = createCategoryLogger('llm.adapter.anthropic');
-const mcpLogger = createCategoryLogger('llm.mcp');
+const logger = createCategoryLogger('llm.anthropic');
+const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**
  * Anthropic client factory

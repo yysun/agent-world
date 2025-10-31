@@ -1,6 +1,17 @@
 /**
  * World Storage Module - File I/O Operations for World Data and Chat Operations
  *
+ * Logger Category: storage.query
+ * Purpose: World and chat data file I/O operations
+ * 
+ * Enable with: LOG_STORAGE_QUERY=debug npm run server
+ * 
+ * What you'll see:
+ * - World config saves and loads
+ * - Chat data operations
+ * - Memory aggregation queries
+ * - File operation errors
+ *
  * Features:
  * - World configuration persistence to config.json with flattened structure
  * - Complete chat operations with file-based storage (chats directory)
@@ -31,14 +42,18 @@
  *
  * Version: 2.1.0 - Added cascade deletion for chat operations
  * Date: 2025-10-30
+ * Version: 2.2.0 - Updated to structured logging (storage.query)
+ * Date: 2025-10-31
  */
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { toKebabCase } from '../utils.js';
-import { logger } from '../logger.js';
+import { createCategoryLogger } from '../logger.js';
 import type { World, Chat, CreateChatParams, UpdateChatParams, AgentMessage } from '../types.js';
 import { listAgents, loadAgent, deleteMemoryByChatId } from './agent-storage.js';
+
+const logger = createCategoryLogger('storage.query');
 
 // Extract readdir and exists from fs for convenience
 const { readdir, access } = fs;
@@ -242,7 +257,11 @@ export async function loadChatData(rootPath: string, worldId: string, chatId: st
 
     return chatData;
   } catch (error) {
-    logger.debug('Error loading chat data:', error);
+    logger.error('Failed to load chat data', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId,
+      chatId
+    });
     return null;
   }
 }
@@ -320,7 +339,10 @@ export async function listChatHistories(rootPath: string, worldId: string): Prom
 
     return chats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   } catch (error) {
-    logger.error('Error listing chat histories:', error);
+    logger.error('Failed to list chat histories', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId
+    });
     return [];
   }
 }
@@ -355,7 +377,11 @@ export async function getMemory(rootPath: string, worldId: string, chatId: strin
 
     return messages;
   } catch (error) {
-    logger.error('Error getting aggregated memory:', error);
+    logger.error('Failed to get aggregated memory', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId,
+      chatId
+    });
     return [];
   }
 }

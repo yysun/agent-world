@@ -205,13 +205,23 @@ describe('Logger Hierarchical Category Resolution', () => {
       // Dynamic import to get fresh loggers object
       const { loggers } = await import('../../core/logger.js');
 
-      expect(loggers.core).toBeDefined();
-      expect(loggers['core.db']).toBeDefined();
-      expect(loggers.api).toBeDefined();
+      // Storage loggers
+      expect(loggers.storage).toBeDefined();
+      expect(loggers['storage.migration']).toBeDefined();
+      expect(loggers['storage.query']).toBeDefined();
+
+      // MCP loggers
+      expect(loggers.mcp).toBeDefined();
+      expect(loggers['mcp.lifecycle']).toBeDefined();
+
+      // LLM loggers
       expect(loggers.llm).toBeDefined();
+      expect(loggers['llm.openai']).toBeDefined();
+
+      // Infrastructure loggers
+      expect(loggers.api).toBeDefined();
       expect(loggers.events).toBeDefined();
       expect(loggers.ws).toBeDefined();
-      expect(loggers.storage).toBeDefined();
       expect(loggers.server).toBeDefined();
       expect(loggers.cli).toBeDefined();
     });

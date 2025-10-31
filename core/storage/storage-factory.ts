@@ -1,6 +1,17 @@
 /**
  * Storage Factory
  *
+ * Logger Category: storage.init
+ * Purpose: Storage initialization and configuration
+ * 
+ * Enable with: LOG_STORAGE_INIT=info npm run server
+ * 
+ * What you'll see:
+ * - Storage path and type selection
+ * - Module loading and initialization
+ * - Default data creation
+ * - Environment detection
+ *
  * Unified, type-safe interface for file-based, SQLite-based, and memory-based storage backends.
  * Provides environment detection, dynamic loading, caching, and NoOp browser implementations.
  *
@@ -24,6 +35,7 @@
  * - 2025-08-05: Consolidated code and removed redundant comments
  * - 2025-08-01: Added full chat CRUD and snapshot support
  * - 2025-07-27: Changed default storage type to SQLite
+ * - 2025-10-31: Updated to structured logging (storage.init category)
  */
 import type { StorageAPI, Chat, UpdateChatParams, WorldChat, Agent, AgentMessage, World } from '../types.js';
 import { validateAgentMessageIds } from './validation.js';
@@ -32,7 +44,7 @@ import { SQLiteConfig } from './sqlite-schema.js';
 import { isNodeEnvironment } from '../utils.js';
 import * as path from 'path';
 
-const loggerFactory = createCategoryLogger('core.storage.factory');
+const logger = createCategoryLogger('storage.init');
 import * as fs from 'fs';
 
 // Re-export StorageAPI type for external use
@@ -369,7 +381,7 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       // Auto-migrate legacy messages without messageId
       const migrated = validateAgentMessageIds(agent);
       if (migrated) {
-        loggerFactory.info('Auto-migrated agent messages with missing messageIds', {
+        logger.info('Auto-migrated agent messages with missing messageIds', {
           agentId: agent.id,
           worldId,
           messageCount: agent.memory.length
@@ -388,7 +400,7 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
           // Auto-migrate on load if needed
           const migrated = validateAgentMessageIds(agent);
           if (migrated) {
-            loggerFactory.info('Auto-migrated agent messages on load', {
+            logger.info('Auto-migrated agent messages on load', {
               agentId,
               worldId,
               messageCount: agent.memory.length
@@ -824,7 +836,10 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
 
   // Only log on first initialization to avoid duplicate logs
   if (!hasLoggedStorageInit) {
-    loggerFactory.info(`🟢 Storage path: ${config.rootPath} - ${config.type}`);
+    logger.info('Storage initialized', {
+      path: config.rootPath,
+      type: config.type
+    });
     hasLoggedStorageInit = true;
   }
 

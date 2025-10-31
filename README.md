@@ -172,6 +172,25 @@ npm run test:integration  # Run integration tests with real filesystem
 
 Agent World uses Vitest for fast, modern testing with native TypeScript support.
 
+## Logging and Debugging
+
+Agent World uses **scenario-based logging** to help you debug specific issues without noise. Enable only the logs you need for your current task.
+
+### Quick Examples
+
+```bash
+# Database migration issues
+LOG_STORAGE_MIGRATION=info npm run server
+
+# MCP server problems  
+LOG_MCP=debug npm run server
+
+# Agent response debugging
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run server
+```
+
+**For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
+
 ## Learn More
 
 ### World Database Setup

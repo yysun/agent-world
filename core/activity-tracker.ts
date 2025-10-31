@@ -22,7 +22,7 @@ export interface WorldActivityEventPayload {
   messageId: string; // Added for event persistence
 }
 
-const logger = createCategoryLogger('core.activity');
+const logger = createCategoryLogger('world.activity');
 const stateKey: unique symbol = Symbol('worldActivityState');
 
 function getActivityState(world: World): ActivityState {

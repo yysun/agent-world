@@ -49,8 +49,8 @@ import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 import { publishToolEvent } from './events.js';
 
-const logger = createCategoryLogger('llm.adapter.openai');
-const mcpLogger = createCategoryLogger('llm.mcp');
+const logger = createCategoryLogger('llm.openai');
+const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**
  * OpenAI client factory for standard OpenAI API

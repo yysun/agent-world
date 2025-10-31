@@ -1,6 +1,22 @@
 /**
  * MCP Server Registry and Tools Integration - Clean Implementation with Runtime AI SDK Patch
  *
+ * Logger Categories: mcp.lifecycle, mcp.connection, mcp.tools, mcp.execution
+ * Purpose: MCP server management and tool execution
+ * 
+ * Enable with: 
+ * - LOG_MCP_LIFECYCLE=info - Server start/stop/ready events
+ * - LOG_MCP_CONNECTION=debug - Connection establishment details
+ * - LOG_MCP_TOOLS=debug - Tool discovery and caching
+ * - LOG_MCP_EXECUTION=debug - Tool execution and results
+ * - LOG_MCP=debug - Enable all MCP logs
+ * 
+ * What you'll see:
+ * - Server lifecycle: start, stop, ready, shutdown
+ * - Connection: transport creation, connection attempts
+ * - Tools: discovery, caching, schema validation
+ * - Execution: tool calls, results, performance metrics
+ *
  * Comprehensive MCP (Model Context Protocol) management system providing:
  * - Server lifecycle management with reference counting and connection pooling
  * - Configuration-based server identification and sharing across worlds
@@ -64,6 +80,7 @@
  * Consolidated from: mcp-server-registry.ts + mcp-tools.ts (August 2025)
  * Runtime patch integration: Works with ai-sdk-patch.ts for Azure compatibility (August 2025)
  * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
+ * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  */
 
 import { createHash } from 'crypto';
@@ -74,6 +91,15 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
+
+// Scenario-based loggers for different MCP operations
+const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
+const connectionLogger = createCategoryLogger('mcp.connection');
+const toolsLogger = createCategoryLogger('mcp.tools');
+const executionLogger = createCategoryLogger('mcp.execution');
+
+// Legacy logger for backward compatibility and general debug logs
+const logger = createCategoryLogger('llm.mcp');
 
 
 /**
@@ -220,8 +246,6 @@ function validateAndCorrectToolArgs(args: any, toolSchema: any): any {
 
   return corrected;
 }
-
-const logger = createCategoryLogger('llm.mcp');
 
 // === TYPE DEFINITIONS ===
 

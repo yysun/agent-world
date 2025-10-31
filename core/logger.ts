@@ -360,17 +360,52 @@ export function shouldLogForCategory(messageLevel: LogLevel, category: string): 
 // Default logger instance
 export const logger = createSimpleLogger();
 
-// Pre-created category loggers for common use cases
+// Pre-created category loggers for common use cases - scenario-based naming
 export const loggers = {
-  core: createCategoryLogger('core'),
-  'core.db': createCategoryLogger('core.db'),
-  api: createCategoryLogger('api'),
-  llm: createCategoryLogger('llm'),
-  events: createCategoryLogger('events'),
-  ws: createCategoryLogger('ws'),
+  // Storage operations
   storage: createCategoryLogger('storage'),
+  'storage.migration': createCategoryLogger('storage.migration'),
+  'storage.query': createCategoryLogger('storage.query'),
+  'storage.memory': createCategoryLogger('storage.memory'),
+  'storage.init': createCategoryLogger('storage.init'),
+
+  // MCP operations
+  mcp: createCategoryLogger('mcp'),
+  'mcp.lifecycle': createCategoryLogger('mcp.lifecycle'),
+  'mcp.connection': createCategoryLogger('mcp.connection'),
+  'mcp.tools': createCategoryLogger('mcp.tools'),
+  'mcp.execution': createCategoryLogger('mcp.execution'),
+
+  // LLM operations
+  llm: createCategoryLogger('llm'),
+  'llm.openai': createCategoryLogger('llm.openai'),
+  'llm.anthropic': createCategoryLogger('llm.anthropic'),
+  'llm.google': createCategoryLogger('llm.google'),
+
+  // Chat operations
+  chat: createCategoryLogger('chat'),
+  'chat.session': createCategoryLogger('chat.session'),
+
+  // World/Agent operations
+  world: createCategoryLogger('world'),
+  'world.lifecycle': createCategoryLogger('world.lifecycle'),
+  'world.subscription': createCategoryLogger('world.subscription'),
+  'world.activity': createCategoryLogger('world.activity'),
+  agent: createCategoryLogger('agent'),
+  'agent.lifecycle': createCategoryLogger('agent.lifecycle'),
+
+  // Event operations
+  events: createCategoryLogger('events'),
+  'events.publish': createCategoryLogger('events.publish'),
+  'events.agent': createCategoryLogger('events.agent'),
+  'events.response': createCategoryLogger('events.response'),
+  'events.memory': createCategoryLogger('events.memory'),
+
+  // Infrastructure
+  api: createCategoryLogger('api'),
   server: createCategoryLogger('server'),
   cli: createCategoryLogger('cli'),
+  ws: createCategoryLogger('ws'),
 };
 
 export default logger;

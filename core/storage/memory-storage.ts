@@ -1,6 +1,16 @@
 /**
  * Memory Storage Implementation
  *
+ * Logger Category: storage.memory
+ * Purpose: In-memory storage operations for tests and browser environments
+ * 
+ * Enable with: LOG_STORAGE_MEMORY=debug npm run server
+ * 
+ * What you'll see:
+ * - World/agent/chat CRUD operations
+ * - Memory operations and queries
+ * - Data validation errors
+ *
  * In-memory storage backend for unit tests, browser environments, and development.
  * Provides full StorageAPI compatibility with data persistence during runtime session.
  *
@@ -25,6 +35,7 @@
  * Changes:
  * - 2025-08-07: Initial implementation for non-Node environments
  * - 2025-08-09: Added agentId to getMemory response for storage compatibility
+ * - 2025-10-31: Updated to structured logging (storage.memory category)
  */
 import type {
   StorageAPI,
@@ -39,7 +50,7 @@ import { validateAgentMessageIds } from './validation.js';
 import { createCategoryLogger } from '../logger.js';
 import { EventEmitter } from 'events';
 
-const loggerStorage = createCategoryLogger('core.storage.memory');
+const logger = createCategoryLogger('storage.memory');
 
 /**
  * Deep clone utility for data isolation
@@ -175,7 +186,7 @@ export class MemoryStorage implements StorageAPI {
     // Auto-migrate legacy messages without messageId
     const migrated = validateAgentMessageIds(agent);
     if (migrated) {
-      loggerStorage.info('Auto-migrated agent messages with missing messageIds', {
+      logger.info('Auto-migrated agent messages with missing messageIds', {
         agentId: agent.id,
         worldId,
         messageCount: agent.memory.length
@@ -202,7 +213,7 @@ export class MemoryStorage implements StorageAPI {
     // Auto-migrate on load if needed
     const migrated = validateAgentMessageIds(clonedAgent);
     if (migrated) {
-      loggerStorage.info('Auto-migrated agent messages on load', {
+      logger.info('Auto-migrated agent messages on load', {
         agentId,
         worldId,
         messageCount: clonedAgent.memory.length

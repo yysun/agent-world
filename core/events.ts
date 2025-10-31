@@ -1,6 +1,22 @@
 /**
  * Unified Events Module - World and Agent Event Functions
  *
+ * Logger Categories: events.publish, events.agent, events.response, events.memory, events.automention, events.turnlimit, events.chattitle
+ * Purpose: World and agent event processing
+ * 
+ * Enable with: 
+ * - LOG_EVENTS_PUBLISH=debug - Message publishing
+ * - LOG_EVENTS_AGENT=debug - Agent processing
+ * - LOG_EVENTS=debug - Enable all event logs
+ * 
+ * What you'll see:
+ * - Message publishing and subscriptions
+ * - Agent response generation
+ * - Memory persistence operations
+ * - Auto-mention detection
+ * - Turn limit enforcement
+ * - Chat title generation
+ *
  * Core Event System:
  * - Direct World.eventEmitter event publishing/subscription with type safety
  * - Natural event isolation per World instance preventing cross-world interference
@@ -45,6 +61,7 @@
  * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
  * - 2025-10-25: Fixed agent message messageId - use messageId from publishMessage() return value
  * - 2025-10-21: Added messageId and agentId to all messages saved to agent memory
+ * - 2025-10-31: Updated to scenario-based logging (events.* categories)
  */
 
 import {
@@ -59,13 +76,13 @@ import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, 
 import { createCategoryLogger } from './logger.js';
 
 // Function-specific loggers for granular debugging control
-const loggerPublish = createCategoryLogger('core.events.publish');
-const loggerAgent = createCategoryLogger('core.events.agent');
-const loggerResponse = createCategoryLogger('core.events.response');
-const loggerMemory = createCategoryLogger('core.events.memory');
-const loggerAutoMention = createCategoryLogger('core.events.automention');
-const loggerTurnLimit = createCategoryLogger('core.events.turnlimit');
-const loggerChatTitle = createCategoryLogger('core.events.chattitle');
+const loggerPublish = createCategoryLogger('events.publish');
+const loggerAgent = createCategoryLogger('events.agent');
+const loggerResponse = createCategoryLogger('events.response');
+const loggerMemory = createCategoryLogger('events.memory');
+const loggerAutoMention = createCategoryLogger('events.automention');
+const loggerTurnLimit = createCategoryLogger('events.turnlimit');
+const loggerChatTitle = createCategoryLogger('events.chattitle');
 
 // Global streaming control
 let globalStreamingEnabled = true;
