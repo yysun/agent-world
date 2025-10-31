@@ -5,6 +5,7 @@
  * - World configuration and metadata
  * - Agent configurations and system prompts (memory excluded)
  * - Chat sessions with complete message histories
+ * - World events in chronological order with CLI-style formatting
  * - Improved message labeling for better readability
  * - In-memory message detection (messages received without reply)
  * - Timestamp formatting and content preservation
@@ -16,8 +17,14 @@
  * - Current chat message history with improved formatting:
  *   - Human messages: "From: HUMAN / To: agent1, agent2"
  *   - Agent incoming: "Agent: agentName (incoming from sender)"
- *   - Agent reply: "Agent: agentName (reply)"
+ *   - Agent reply: "Agent: agentName (reply to targetName)"
  *   - In-memory detection: "[in-memory, no reply]" for received messages without response
+ * - World events section with chronological order and CLI-style display:
+ *   - Message events: ● sender: content preview
+ *   - SSE events: ● agent: content or [type]
+ *   - Tool events: ● agent: [tool: type] or ● source: [activity-type]
+ *   - System events: ● system: content preview
+ *   - Timestamp shown as HH:MM:SS for readability
  * - Structured markdown with clear sections and navigation
  * - Uses getMemory() for efficient message retrieval
  * - O(n) messageId-based deduplication (replaces O(n²) content-based approach)
@@ -34,7 +41,7 @@
  * Time: 2025-10-25T21:24:57.105Z
  * [2 tool calls: function1, function2]
  *
- * Agent: o1 (reply)
+ * Agent: o1 (reply to human)
  * Time: 2025-10-25T21:24:57.105Z
  * [2 tool calls: function1, function2]
  *
@@ -43,15 +50,26 @@
  * Hi — how can I help you today?
  * ```
  *
+ * Event Format Examples:
+ * ```
+ * 1. `10:00:00` ● human: Test message content
+ * 2. `10:01:00` ● Test Agent: [start]
+ * 3. `10:02:00` ● Test Agent: [tool: tool-start]
+ * 4. `10:03:00` ● world: [response-end] pending=0
+ * ```
+ *
  * Implementation:
  * - Uses managers module for data access
  * - Formats dates consistently as ISO strings
  * - Preserves message content with proper escaping
- * - Organizes export by logical sections (world → agents → current chat)
+ * - Organizes export by logical sections (world → agents → current chat → events)
  * - Simplified chat loading using world.chats.get() and getMemory()
  * - Maps agentId to agent names for clear identification
  * - Deduplicates user messages by messageId using Map for O(1) lookup
  * - Detects in-memory messages by checking for subsequent assistant replies
+ * - Events displayed in chronological order (not grouped by type)
+ * - Limits event display to 100 events with overflow indication
+ * - Uses CLI-style formatting for events (● sender: content)
  *
  * Deduplication Strategy:
  * - Only user messages with messageId are deduplicated
@@ -61,6 +79,10 @@
  * - Consistent with frontend deduplication logic for predictable behavior
  *
  * Changes:
+ * - 2025-10-31: Updated reply labels to show target: "(reply to targetName)" instead of just "(reply)"
+ * - 2025-10-31: Changed events to chronological order (not grouped by type), using CLI-style format (● sender: content)
+ * - 2025-10-31: Added World Events section with event type grouping and details
+ * - 2025-10-31: Updated export format version to 1.1
  * - 2025-10-26: Fixed user message display to show only first/intended recipient agent
  * - 2025-10-26: Fixed message labeling to assign to single agent when world has only one agent (no more missing recipient)
  * - 2025-10-25: Improved message labeling - removed role/sender confusion, added in-memory detection
@@ -338,18 +360,40 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             }
           } else if (isAssistantMessage || isReplyMessage) {
             // Assistant messages OR user messages with replyToMessageId are both replies
+            // Look up the reply target from replyToMessageId
+            let replyTarget: string | null = null;
+            if (message.replyToMessageId) {
+              const parentMessage = consolidatedMessages.find(m => m.messageId === message.replyToMessageId);
+              if (parentMessage) {
+                const parentSender = parentMessage.sender?.toLowerCase() === 'human' ? 'human' : parentMessage.sender;
+                replyTarget = parentSender || null;
+              }
+            }
+
             if (isReplyMessage && rawSender && rawSender !== 'HUMAN') {
               // Cross-agent reply: user message with replyToMessageId from another agent
               // Look up the agent name for the sender
               const senderAgent = agents.find(a => a.id === rawSender);
               const senderName = senderAgent ? senderAgent.name : rawSender;
-              label = `Agent: ${senderName} (reply)`;
+              label = replyTarget
+                ? `Agent: ${senderName} (reply to ${replyTarget})`
+                : `Agent: ${senderName} (reply)`;
             } else if (isAssistantMessage) {
               // Regular assistant message - use agentNamesStr
-              label = agentNamesStr ? `Agent: ${agentNamesStr} (reply)` : 'Unknown agent (reply)';
+              if (agentNamesStr) {
+                label = replyTarget
+                  ? `Agent: ${agentNamesStr} (reply to ${replyTarget})`
+                  : `Agent: ${agentNamesStr} (reply)`;
+              } else {
+                label = replyTarget
+                  ? `Unknown agent (reply to ${replyTarget})`
+                  : 'Unknown agent (reply)';
+              }
             } else {
               // isReplyMessage but from HUMAN - shouldn't happen but handle gracefully
-              label = `From: HUMAN (reply)`;
+              label = replyTarget
+                ? `From: HUMAN (reply to ${replyTarget})`
+                : `From: HUMAN (reply)`;
             }
           } else if (message.role === 'tool') {
             // Tool result messages
@@ -475,12 +519,107 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
     markdown += `## Current Chat\n\nNo current chat found in this world.\n\n`;
   }
 
+  // World Events Section
+  if (worldData.eventStorage) {
+    try {
+      // Get all events for this world in chronological order
+      const allEvents = await worldData.eventStorage.getEventsByWorldAndChat(
+        worldData.id,
+        null,
+        { order: 'asc', limit: 1000 }
+      );
+
+      if (allEvents.length > 0) {
+        markdown += `## World Events (${allEvents.length})\n\n`;
+
+        const eventTypes = Array.from(new Set(allEvents.map((e: any) => e.type)));
+        markdown += `**Event Types:** ${eventTypes.join(', ')}\n\n`;
+
+        // Display events in chronological order (already sorted by query)
+        // Limit to 100 events to avoid overly large exports
+        const displayLimit = 100;
+        const eventsToDisplay = allEvents.slice(0, displayLimit);
+
+        eventsToDisplay.forEach((event: any, index: number) => {
+          const timestamp = event.createdAt instanceof Date
+            ? event.createdAt.toISOString()
+            : new Date(event.createdAt).toISOString();
+
+          // Format events similar to CLI: ● sender: content
+          let displayLine = '';
+
+          if (event.type === 'message' && event.payload) {
+            const sender = event.payload.sender || 'agent';
+            const content = typeof event.payload.content === 'string'
+              ? event.payload.content.substring(0, 200)
+              : JSON.stringify(event.payload.content).substring(0, 200);
+            displayLine = `● ${sender}: ${content}${content.length >= 200 ? '...' : ''}`;
+          } else if (event.type === 'sse' && event.payload) {
+            const agentName = event.payload.agentName || 'agent';
+            const sseType = event.payload.type || 'unknown';
+            const content = event.payload.content
+              ? (typeof event.payload.content === 'string' ? event.payload.content.substring(0, 200) : '')
+              : `[${sseType}]`;
+            displayLine = `● ${agentName}: ${content}${content.length >= 200 ? '...' : ''}`;
+          } else if (event.type === 'tool' && event.payload) {
+            // Check if this is an activity event or tool execution event
+            if (event.payload.activityType) {
+              // Activity event (response-start, response-end, idle)
+              const activityType = event.payload.activityType;
+              const source = event.payload.source || 'world';
+              displayLine = `● ${source}: [${activityType}] pending=${event.payload.pendingOperations || 0}`;
+            } else {
+              // Tool execution event
+              const agentName = event.payload.agentName || 'agent';
+              const toolType = event.payload.type || 'unknown';
+              displayLine = `● ${agentName}: [tool: ${toolType}]`;
+            }
+          } else if (event.type === 'system' && event.payload) {
+            const content = typeof event.payload === 'string'
+              ? event.payload.substring(0, 200)
+              : JSON.stringify(event.payload).substring(0, 200);
+            displayLine = `● system: ${content}${content.length >= 200 ? '...' : ''}`;
+          } else {
+            displayLine = `● [${event.type}]: ${JSON.stringify(event.payload).substring(0, 200)}`;
+          }
+
+          markdown += `${index + 1}. \`${timestamp.substring(11, 19)}\` ${displayLine}\n`;
+        });
+
+        if (allEvents.length > displayLimit) {
+          markdown += `\n*... and ${allEvents.length - displayLimit} more events (showing first ${displayLimit})*\n`;
+        }
+
+        markdown += `\n`;
+      } else {
+        markdown += `## World Events\n\nNo events recorded for this world.\n\n`;
+      }
+    } catch (error) {
+      logger.warn('Failed to load world events', { worldId: worldData.id, error: error instanceof Error ? error.message : error });
+      markdown += `## World Events\n\nUnable to load events (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
+    }
+  } else {
+    markdown += `## World Events\n\nEvent storage not configured for this world.\n\n`;
+  }
+
   // Export metadata
   markdown += `## Export Metadata\n\n`;
-  markdown += `- **Export Format Version:** 1.0\n`;
+  markdown += `- **Export Format Version:** 1.1\n`;
   markdown += `- **Agent World Version:** ${process.env.npm_package_version || 'Unknown'}\n`;
   markdown += `- **Total Export Size:** ${markdown.length} characters\n`;
-  markdown += `- **Sections:** World Configuration, Agents (${agents.length}), Current Chat (${hasCurrentChat ? 1 : 0})\n`;
+
+  // Count events if available
+  let eventCount = 0;
+  if (worldData.eventStorage) {
+    try {
+      const events = await worldData.eventStorage.getEventsByWorldAndChat(worldData.id, null, { limit: 10000 });
+      eventCount = events.length;
+    } catch {
+      // Ignore errors in metadata generation
+    }
+  }
+
+  markdown += `- **Sections:** World Configuration, Agents (${agents.length}), Current Chat (${hasCurrentChat ? 1 : 0}), Events (${eventCount})\n`;
 
   return markdown;
 }

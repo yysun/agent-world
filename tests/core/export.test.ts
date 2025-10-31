@@ -179,8 +179,11 @@ describe('Export Module', () => {
       expect(result).toContain('```\n    Hi there!\n    ```');
 
       // Verify export metadata
-      expect(result).toContain('- **Export Format Version:** 1.0');
-      expect(result).toContain('- **Sections:** World Configuration, Agents (1), Current Chat (1)');
+      expect(result).toContain('- **Export Format Version:** 1.1');
+      expect(result).toContain('- **Sections:** World Configuration, Agents (1), Current Chat (1), Events (0)');
+
+      // Verify world events section is present
+      expect(result).toContain('## World Events');
     });
 
     it('should handle world not found', async () => {
@@ -545,17 +548,17 @@ describe('Export Module', () => {
 
       // The key assertion: incoming message with replyToMessageId should be displayed as a reply
       // NOT as "Agent: Agent A2 (incoming from a1) [in-memory, no reply]"
-      // BUT as "Agent: Agent A1 (reply)"
-      expect(result).toContain('2. **Agent: Agent A1 (reply)**:');
+      // BUT as "Agent: Agent A1 (reply to human)"
+      expect(result).toContain('2. **Agent: Agent A1 (reply to human)**:');
       expect(result).toContain('```\n    @a2, the word is "Curiosity."\n    ```');
 
       // Should NOT contain the old incorrect format
       expect(result).not.toContain('incoming from a1');
       expect(result).not.toContain('[in-memory, no reply]');
 
-      // Verify the reply is shown
+      // Verify the reply is shown with target
       expect(result).toContain('```\n    好奇心。\n    ```');
-      expect(result).toContain('4. **Agent: Agent A2 (reply)**:');
+      expect(result).toContain('4. **Agent: Agent A2 (reply to a1)**:');
     });
 
     it('should handle cross-agent message deduplication with mixed message types and prevent numbering issues', async () => {
@@ -915,5 +918,119 @@ describe('Export Module', () => {
       expect(result).toContain('```\n    Reply without messageId\n    ```');
       expect(result).toContain('```\n    Different message\n    ```');
     });
+
+    it('should include world events section when event storage is available', async () => {
+      const mockEventStorage = {
+        getEventsByWorldAndChat: vi.fn().mockResolvedValue([
+          {
+            id: 'event-1',
+            worldId: 'test-world',
+            chatId: 'chat-1',
+            seq: 1,
+            type: 'message',
+            payload: {
+              content: 'Test message content',
+              sender: 'human'
+            },
+            meta: { sender: 'human' },
+            createdAt: new Date('2025-01-01T10:00:00.000Z')
+          },
+          {
+            id: 'event-2',
+            worldId: 'test-world',
+            chatId: null,
+            seq: 2,
+            type: 'sse',
+            payload: {
+              agentName: 'Test Agent',
+              type: 'start'
+            },
+            meta: { agentName: 'Test Agent' },
+            createdAt: new Date('2025-01-01T10:01:00.000Z')
+          },
+          {
+            id: 'event-3',
+            worldId: 'test-world',
+            chatId: null,
+            seq: 3,
+            type: 'tool',
+            payload: {
+              agentName: 'Test Agent',
+              type: 'tool-start'
+            },
+            meta: {},
+            createdAt: new Date('2025-01-01T10:02:00.000Z')
+          }
+        ])
+      };
+
+      const mockWorld = {
+        id: 'test-world',
+        name: 'Test World',
+        description: 'A test world',
+        turnLimit: 5,
+        currentChatId: 'chat-1',
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUpdated: new Date('2025-01-02T00:00:00.000Z'),
+        totalAgents: 0,
+        totalMessages: 0,
+        eventEmitter: new EventEmitter(),
+        agents: new Map(),
+        chats: new Map([['chat-1', { id: 'chat-1', name: 'Test Chat', worldId: 'test-world', createdAt: new Date(), updatedAt: new Date(), messageCount: 0 }]]),
+        eventStorage: mockEventStorage
+      };
+
+      (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
+      (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
+      (managers.getMemory as MockedFunction<typeof managers.getMemory>).mockResolvedValue([]);
+      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue({} as any);
+
+      const result = await exportWorldToMarkdown('test-world');
+
+      // Verify world events section exists
+      expect(result).toContain('## World Events (3)');
+      expect(result).toContain('**Event Types:** message, sse, tool');
+
+      // Verify events are displayed in chronological order (CLI format)
+      // Events should use the ● format
+      expect(result).toContain('● human: Test message content');
+      expect(result).toContain('● Test Agent: [start]');
+      expect(result).toContain('● Test Agent: [tool: tool-start]');
+
+      // Verify export metadata includes events count
+      expect(result).toContain('Events (3)');
+    });
+
+    it('should handle world without event storage gracefully', async () => {
+      const mockWorld = {
+        id: 'test-world',
+        name: 'Test World',
+        description: 'A test world',
+        turnLimit: 5,
+        currentChatId: null,
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUpdated: new Date('2025-01-02T00:00:00.000Z'),
+        totalAgents: 0,
+        totalMessages: 0,
+        eventEmitter: new EventEmitter(),
+        agents: new Map(),
+        chats: new Map(),
+        eventStorage: null // No event storage
+      };
+
+      (managers.getWorld as MockedFunction<typeof managers.getWorld>).mockResolvedValue(mockWorld as any);
+      (managers.listAgents as MockedFunction<typeof managers.listAgents>).mockResolvedValue([]);
+      (storageFactory.createStorageWithWrappers as MockedFunction<typeof storageFactory.createStorageWithWrappers>).mockResolvedValue({} as any);
+
+      const result = await exportWorldToMarkdown('test-world');
+
+      // Should show event storage not configured message
+      expect(result).toContain('## World Events');
+      expect(result).toContain('Event storage not configured for this world.');
+
+      // Verify export metadata shows 0 events
+      expect(result).toContain('Events (0)');
+    });
   });
 });
+

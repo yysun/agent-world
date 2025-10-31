@@ -124,7 +124,7 @@ export function setupEventPersistence(world: World): () => void {
   };
 
   // Message event persistence
-  const messageHandler = (event: WorldMessageEvent) => {
+  const messageHandler = (event: WorldMessageEvent): void | Promise<void> => {
     const eventData = {
       id: event.messageId,
       worldId: world.id,
@@ -150,7 +150,7 @@ export function setupEventPersistence(world: World): () => void {
   };
 
   // SSE event persistence
-  const sseHandler = (event: WorldSSEEvent) => {
+  const sseHandler = (event: WorldSSEEvent): void | Promise<void> => {
     const eventData = {
       id: event.messageId,
       worldId: world.id,
@@ -178,22 +178,36 @@ export function setupEventPersistence(world: World): () => void {
   };
 
   // Tool event persistence (world channel)
-  const toolHandler = (event: WorldToolEvent) => {
+  // Handles both WorldToolEvent (tool execution) and WorldActivityEventPayload (activity tracking)
+  const toolHandler = (event: any): void | Promise<void> => {
+    // Check if this is an activity event or tool event
+    const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
+
     const eventData = {
-      id: event.messageId,
+      id: event.messageId || null,
       worldId: world.id,
       chatId: null,
       type: 'tool',
-      payload: {
+      payload: isActivityEvent ? {
+        activityType: event.type,
+        pendingOperations: event.pendingOperations,
+        activityId: event.activityId,
+        source: event.source,
+        activeSources: event.activeSources,
+        timestamp: event.timestamp
+      } : {
         agentName: event.agentName,
         type: event.type,
         toolExecution: event.toolExecution
       },
-      meta: {
+      meta: isActivityEvent ? {
+        activityType: event.type,
+        source: event.source
+      } : {
         agentName: event.agentName,
         toolType: event.type
       },
-      createdAt: new Date()
+      createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };
 
     if (syncMode) {
@@ -204,7 +218,7 @@ export function setupEventPersistence(world: World): () => void {
   };
 
   // System event persistence
-  const systemHandler = (event: WorldSystemEvent) => {
+  const systemHandler = (event: WorldSystemEvent): void | Promise<void> => {
     const eventData = {
       id: event.messageId,
       worldId: world.id,

@@ -1,6 +1,7 @@
 import { World } from './types.js';
 import { createCategoryLogger } from './logger.js';
 import { getLLMQueueStatus } from './llm-manager.js';
+import { nanoid } from 'nanoid';
 
 type ActivityState = {
   pendingOperations: number;
@@ -18,6 +19,7 @@ export interface WorldActivityEventPayload {
   source?: string;
   activeSources: string[];
   queue: ReturnType<typeof getLLMQueueStatus>;
+  messageId: string; // Added for event persistence
 }
 
 const logger = createCategoryLogger('core.activity');
@@ -52,7 +54,8 @@ function emitActivityEvent(
     timestamp: new Date().toISOString(),
     source,
     activeSources: Array.from(getActivityState(world).activeSources.keys()),
-    queue: getLLMQueueStatus()
+    queue: getLLMQueueStatus(),
+    messageId: nanoid(10) // Generate unique ID for event persistence
   };
 
   // Set isProcessing flag: true for response-start/response-end, false only on idle
