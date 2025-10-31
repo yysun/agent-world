@@ -393,22 +393,24 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       return;
     }
 
-    // Always save incoming messages to agent memory (regardless of whether they respond)
-    await saveIncomingMessageToMemory(world, agent, messageEvent);
-
     // Reset LLM call count if needed (for human/system messages)
     await resetLLMCallCountIfNeeded(world, agent, messageEvent);
 
     // Process message if agent should respond
     loggerResponse.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
-    if (await shouldAgentRespond(world, agent, messageEvent)) {
+    const shouldRespond = await shouldAgentRespond(world, agent, messageEvent);
+
+    if (shouldRespond) {
+      // Save incoming messages to agent memory only when they plan to respond
+      await saveIncomingMessageToMemory(world, agent, messageEvent);
+
       loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
       await processAgentMessage(world, agent, messageEvent);
     } else {
-      loggerAgent.debug('Agent will NOT respond - no SSE publishing for memory-only message', { agentId: agent.id, sender: messageEvent.sender });
-
-      // Memory-only messages are saved to agent memory but do NOT trigger SSE events
-      // This prevents unnecessary network traffic for internal agent-to-agent messages
+      loggerAgent.debug('Agent will NOT respond - skipping memory save and SSE publishing', {
+        agentId: agent.id,
+        sender: messageEvent.sender
+      });
     }
   };
 
