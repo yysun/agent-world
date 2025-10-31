@@ -113,7 +113,14 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
     eventEmitter: new EventEmitter(),
     agents: new Map<string, Agent>(),
     chats: new Map<string, Chat>(),
+    eventStorage: (storageWrappers as any)?.eventStorage,
   };
+
+  // Setup event persistence
+  if (worldData.eventStorage) {
+    const { setupEventPersistence } = await import('./events.js');
+    worldData._eventPersistenceCleanup = setupEventPersistence(worldData);
+  }
 
   await storageWrappers!.saveWorld(worldData);
 
@@ -156,6 +163,13 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
 export async function deleteWorld(worldId: string): Promise<boolean> {
   await ensureInitialization();
   const normalizedWorldId = utils.toKebabCase(worldId);
+
+  // Clean up event persistence listeners if world is currently loaded
+  const world = await getWorld(normalizedWorldId);
+  if (world?._eventPersistenceCleanup) {
+    world._eventPersistenceCleanup();
+  }
+
   return await storageWrappers!.deleteWorld(normalizedWorldId);
 }
 
@@ -217,12 +231,22 @@ export async function getWorld(worldId: string): Promise<World | null> {
     chats = await storageWrappers!.listChats(normalizedWorldId);
   }
 
-  return {
+  const world: World = {
     ...worldData,
     eventEmitter: new EventEmitter(),
     agents: new Map(agents.map((agent: Agent) => [agent.id, agent])),
     chats: new Map(chats.map((chat: Chat) => [chat.id, chat])),
+    eventStorage: (storageWrappers as any)?.eventStorage,
+    _eventPersistenceCleanup: undefined, // Will be set by setupEventPersistence
   };
+
+  // Setup event persistence
+  if (world.eventStorage) {
+    const { setupEventPersistence } = await import('./events.js');
+    world._eventPersistenceCleanup = setupEventPersistence(world);
+  }
+
+  return world;
 }
 
 /**

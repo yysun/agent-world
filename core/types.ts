@@ -350,6 +350,8 @@ export interface World {
   eventEmitter: EventEmitter;
   agents: Map<string, Agent>;
   chats: Map<string, Chat>;
+  eventStorage?: any; // EventStorage interface - optional for backward compatibility
+  _eventPersistenceCleanup?: () => void; // Internal cleanup function for event listeners
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

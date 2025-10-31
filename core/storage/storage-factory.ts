@@ -49,7 +49,7 @@ export interface StorageConfig {
  * Provides unified interface across all storage backends with graceful NoOp fallbacks.
  */
 export function createStorageWrappers(storageInstance: StorageAPI | null): StorageAPI {
-  return {
+  const wrappers = {
     // World operations
     async saveWorld(worldData: any): Promise<void> {
       if (!storageInstance) return;
@@ -300,6 +300,13 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
     }
   };
+
+  // Expose eventStorage if it exists on the storage instance
+  if (storageInstance && (storageInstance as any).eventStorage) {
+    (wrappers as any).eventStorage = (storageInstance as any).eventStorage;
+  }
+
+  return wrappers;
 }
 
 // File storage adapter with dynamic module loading
@@ -612,6 +619,10 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
     // Use memory storage - available in all environments
     const { createMemoryStorage } = await import('./memory-storage.js');
     storage = createMemoryStorage();
+
+    // Add memory event storage
+    const { createMemoryEventStorage } = await import('./eventStorage/index.js');
+    (storage as any).eventStorage = createMemoryEventStorage();
   } else if (config.type === 'sqlite') {
     if (!isNodeEnvironment()) {
       throw new Error('SQLite storage not available in browser environment');
@@ -742,8 +753,18 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)
     } as any;
+
+    // Add SQLite event storage using same DB connection
+    const { createSQLiteEventStorage } = await import('./eventStorage/index.js');
+    (storage as any).eventStorage = await createSQLiteEventStorage(ctx.db);
   } else {
     storage = createFileStorageAdapter(config.rootPath);
+
+    // Add file-based event storage
+    const { createFileEventStorage } = await import('./eventStorage/index.js');
+    (storage as any).eventStorage = createFileEventStorage({
+      baseDir: path.join(config.rootPath, 'events')
+    });
   }
 
   storageCache.set(cacheKey, storage);

@@ -84,6 +84,166 @@ async function getStorageWrappers(): Promise<StorageAPI> {
 }
 
 /**
+ * Setup automatic event persistence listeners on World event emitter.
+ * Should be called once during World initialization.
+ * 
+ * Events are persisted asynchronously (or synchronously in test mode).
+ * Failures are logged but don't block event emission.
+ * Returns a cleanup function to remove listeners.
+ * 
+ * Environment variables:
+ * - DISABLE_EVENT_PERSISTENCE=true: Skip all persistence
+ * - SYNC_EVENT_PERSISTENCE=true: Synchronous mode for tests
+ */
+export function setupEventPersistence(world: World): () => void {
+  if (process.env.DISABLE_EVENT_PERSISTENCE === 'true') {
+    loggerPublish.debug('Event persistence disabled by environment', { worldId: world.id });
+    return () => { }; // Return no-op cleanup
+  }
+
+  if (!world.eventStorage) {
+    loggerPublish.debug('Event storage not configured - events will not be persisted', { worldId: world.id });
+    return () => { }; // Return no-op cleanup
+  }
+
+  const storage = world.eventStorage;
+  const syncMode = process.env.SYNC_EVENT_PERSISTENCE === 'true';
+
+  // Helper to handle async persistence with sync mode support
+  const persistEvent = async (eventData: any) => {
+    try {
+      await storage.saveEvent(eventData);
+    } catch (error) {
+      loggerPublish.warn('Failed to persist event', {
+        worldId: world.id,
+        eventId: eventData.id,
+        eventType: eventData.type,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+  };
+
+  // Message event persistence
+  const messageHandler = (event: WorldMessageEvent) => {
+    const eventData = {
+      id: event.messageId,
+      worldId: world.id,
+      chatId: event.chatId || null,
+      type: 'message',
+      payload: {
+        content: event.content,
+        sender: event.sender,
+        replyToMessageId: event.replyToMessageId
+      },
+      meta: {
+        sender: event.sender,
+        chatId: event.chatId
+      },
+      createdAt: event.timestamp
+    };
+
+    if (syncMode) {
+      return persistEvent(eventData);
+    } else {
+      persistEvent(eventData).catch(() => { }); // Fire and forget
+    }
+  };
+
+  // SSE event persistence
+  const sseHandler = (event: WorldSSEEvent) => {
+    const eventData = {
+      id: event.messageId,
+      worldId: world.id,
+      chatId: null, // SSE events are not chat-specific
+      type: 'sse',
+      payload: {
+        agentName: event.agentName,
+        type: event.type,
+        content: event.content,
+        error: event.error,
+        usage: event.usage
+      },
+      meta: {
+        agentName: event.agentName,
+        sseType: event.type
+      },
+      createdAt: new Date()
+    };
+
+    if (syncMode) {
+      return persistEvent(eventData);
+    } else {
+      persistEvent(eventData).catch(() => { });
+    }
+  };
+
+  // Tool event persistence (world channel)
+  const toolHandler = (event: WorldToolEvent) => {
+    const eventData = {
+      id: event.messageId,
+      worldId: world.id,
+      chatId: null,
+      type: 'tool',
+      payload: {
+        agentName: event.agentName,
+        type: event.type,
+        toolExecution: event.toolExecution
+      },
+      meta: {
+        agentName: event.agentName,
+        toolType: event.type
+      },
+      createdAt: new Date()
+    };
+
+    if (syncMode) {
+      return persistEvent(eventData);
+    } else {
+      persistEvent(eventData).catch(() => { });
+    }
+  };
+
+  // System event persistence
+  const systemHandler = (event: WorldSystemEvent) => {
+    const eventData = {
+      id: event.messageId,
+      worldId: world.id,
+      chatId: null,
+      type: 'system',
+      payload: event.content,
+      meta: {},
+      createdAt: event.timestamp
+    };
+
+    if (syncMode) {
+      return persistEvent(eventData);
+    } else {
+      persistEvent(eventData).catch(() => { });
+    }
+  };
+
+  // Attach listeners
+  world.eventEmitter.on('message', messageHandler);
+  world.eventEmitter.on('sse', sseHandler);
+  world.eventEmitter.on('world', toolHandler);
+  world.eventEmitter.on('system', systemHandler);
+
+  loggerPublish.debug('Event persistence setup complete', {
+    worldId: world.id,
+    syncMode
+  });
+
+  // Return cleanup function
+  return () => {
+    world.eventEmitter.off('message', messageHandler);
+    world.eventEmitter.off('sse', sseHandler);
+    world.eventEmitter.off('world', toolHandler);
+    world.eventEmitter.off('system', systemHandler);
+    loggerPublish.debug('Event persistence listeners cleaned up', { worldId: world.id });
+  };
+}
+
+/**
  * Publish event to a specific channel using World.eventEmitter
  */
 export function publishEvent(world: World, type: string, content: any): void {

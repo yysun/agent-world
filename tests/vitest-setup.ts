@@ -43,19 +43,28 @@ Object.defineProperty(global, 'performance', {
 // Hoist shared storage pattern for storage-factory mock
 const { getSharedStorage, clearSharedStorage } = vi.hoisted(() => {
   let storage: any = null;
+  let eventStorage: any = null;
 
   return {
     getSharedStorage: () => {
       if (!storage) {
         // Lazy initialization - MemoryStorage not yet imported during hoisting
         const { MemoryStorage } = require('./core/storage/memory-storage');
+        const { createMemoryEventStorage } = require('./core/storage/eventStorage/index');
         storage = new MemoryStorage();
+        eventStorage = createMemoryEventStorage();
+        // Attach event storage to main storage
+        storage.eventStorage = eventStorage;
       }
       return storage;
     },
     clearSharedStorage: () => {
       const { MemoryStorage } = require('./core/storage/memory-storage');
+      const { createMemoryEventStorage } = require('./core/storage/eventStorage/index');
       storage = new MemoryStorage();
+      eventStorage = createMemoryEventStorage();
+      // Attach event storage to main storage
+      storage.eventStorage = eventStorage;
     }
   };
 });
@@ -371,6 +380,12 @@ beforeEach(() => {
 
   // Set test environment
   process.env.NODE_ENV = 'test';
+
+  // Enable synchronous event persistence for reliable testing
+  process.env.SYNC_EVENT_PERSISTENCE = 'true';
+
+  // Use memory storage by default
+  process.env.AGENT_WORLD_STORAGE_TYPE = 'memory';
 });
 
 // Suppress unhandled rejections from SQLite initialization in module loading
@@ -402,5 +417,8 @@ afterEach(() => {
   delete process.env.AGENT_WORLD_DATA_PATH;
   delete process.env.AGENT_WORLD_ID;
   delete process.env.NODE_ENV;
+  delete process.env.SYNC_EVENT_PERSISTENCE;
+  delete process.env.AGENT_WORLD_STORAGE_TYPE;
+  delete process.env.DISABLE_EVENT_PERSISTENCE;
 });
 
