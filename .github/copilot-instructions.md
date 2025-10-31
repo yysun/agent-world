@@ -1,18 +1,42 @@
-## File Comment Blocks
-- Add/update comment blocks at the top of each source file summarizing features, implementation, and changes.
-- Create before editing, if missing update after changes.
+# AGENTS.md – Agent World Project
 
-## Implementation Details
-- Use function based approach instead of class based approach
-- Always update relevant unit tests when making changes in `core`
-- Use memory storage for unit tests unless specifically testing storage layer
-- Use [apprun-prompt.md](prompts/apprun.prompt.md) as reference for the frontend in `web/`src
+## Project Overview  
+**Agent World** is a framework for creating and managing teams of AI agents using natural language. It allows users to define agent behaviors and interactions through prompts (without writing code). The core is an event-driven system where agents communicate in a shared “world”.
 
-## Script Execution
-- use `npm run test` to execute the test suite
-- use `npm run check` to check syntax and linting
-- use `npm run server` to start the server
-- use `npm run dev` to start the frontend development
+## Tech Stack  
+- Language: TypeScript  
+- Backend/Core: Node.js  
+- Frontend : AppRun (in `web/`)
+- Frontend (Future): Next.js + React + Tailwind CSS (in `next/`)  
+- Testing: vitest  
+- Linting & Formatting: ESLint + Prettier (`npm run check`)
 
+## Project Structure  
+This is a monorepo (npm workspaces) with key packages:  
+- `core/` — main library for agent & world management (business-logic)  
+- `cli/` — command-line interface for interacting with Agent World  
+- `server/` — Express-based REST API  
+- `next/` — modern Next.js web application (primary UI)  
+- `web/` — legacy AppRun UI
 
-DO NOT run `npm run server` and then test it in same terminal. Always ask me to start server before testing.
+## Development Commands  
+- `npm run test` — Run the full test suite  
+- `npm run check` — Syntax, linting & formatting check  
+- `npm run cli:watch` — Start CLI development mode  
+- `npm run dev` — Start API + frontend dev mode  
+
+**Important:** DO NOT run `npm run server` and then test in the **same terminal**. Always ask the user (developer) to start the server first before testing.
+
+## Code & Implementation Guidelines  
+- Use a **function-based approach** rather than class-based unless a compelling reason exists.  
+- When editing the `core/` package (business logic), always update the relevant unit tests in `tests/core/`.  
+- Use **in-memory storage** for unit tests (unless specifically testing the storage layer).  
+- Maintain comment blocks at the top of each source file: summarise the file’s purpose, features implemented, and any changes made. If the file lacks a comment block, create one *before* editing; if changes are made, update the block *after*.  
+- For the frontend in `web/src`, use `prompts/apprun.prompt.md` as a reference for frontend patterns.
+
+## Contribution & Commit Guidelines  
+- Before submitting code, ensure all tests pass and lint/format checks succeed.  
+- Follow the existing coding style; new code should blend into existing patterns (especially function-based style, TypeScript, React hooks, etc).  
+- Add or update documentation in `.docs/` when you introduce significant features or changes.  
+- Comment blocks and updates (per above) are mandatory.
+
