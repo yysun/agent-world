@@ -232,7 +232,6 @@ autoInitializeLogger();
 
 // Add startup diagnostic logging (only when not in production)
 if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-  console.info(`[LOGGER] Initialized with globalLevel: ${globalLevel}`);
   if (Object.keys(categoryLevels).length > 0) {
     console.info(`[LOGGER] Category levels:`, Object.keys(categoryLevels).sort());
   }
@@ -341,12 +340,12 @@ export function createCategoryLogger(category: string, bindings?: Record<string,
   // Use hierarchical resolution to get the effective level
   const level = getEffectiveLevelForCategory(normalizedCategory);
   const logger = createSimpleLogger(normalizedCategory, level, bindings);
-  
+
   // Only cache loggers without additional bindings
   if (!bindings) {
     categoryLoggers[normalizedCategory] = logger;
   }
-  
+
   return logger;
 }
 

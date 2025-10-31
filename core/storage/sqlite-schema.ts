@@ -356,6 +356,10 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
   const get = promisify(ctx.db.get.bind(ctx.db));
   const all = promisify(ctx.db.all.bind(ctx.db));
 
+  // Import logger dynamically to avoid circular dependencies
+  const { logger } = await import('../logger.js');
+  logger.info('sqlite-schema', `Starting migration from version ${currentVersion} to version 7`);
+
   if (currentVersion === 0) {
     // Check if tables exist (existing database) or need to be created (fresh database)
     try {
@@ -363,16 +367,19 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
       if (!tableCheck) {
         // Fresh database - create all tables with current schema
+        logger.info('sqlite-schema', 'Initializing fresh database with current schema');
         await initializeSchema(ctx);
         await setSchemaVersion(ctx, 6);
       } else {
         // Existing database with version 0 - check if chat_id column exists
+        logger.info('sqlite-schema', 'Migrating existing database from version 0');
         try {
           const columns = await all("PRAGMA table_info(agent_memory)") as any[];
           const hasChatIdColumn = columns && Array.isArray(columns) && columns.some((col: any) => col.name === 'chat_id');
 
           if (!hasChatIdColumn) {
             // Add missing chat_id column
+            logger.info('sqlite-schema', 'Adding chat_id column to agent_memory table');
             await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
             await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
           }
@@ -384,12 +391,15 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
           const hasCurrentChatId = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'current_chat_id');
 
           if (!hasLLMProvider) {
+            logger.info('sqlite-schema', 'Adding chat_llm_provider column to worlds table');
             await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
           }
           if (!hasLLMModel) {
+            logger.info('sqlite-schema', 'Adding chat_llm_model column to worlds table');
             await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
           }
           if (!hasCurrentChatId) {
+            logger.info('sqlite-schema', 'Adding current_chat_id column to worlds table');
             await run(`ALTER TABLE worlds ADD COLUMN current_chat_id TEXT`);
           }
 
@@ -406,6 +416,7 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
     }
   } else if (currentVersion === 1) {
     // Migration from version 1 to 2: Add chatId column to agent_memory
+    logger.info('sqlite-schema', 'Migrating from version 1 to 2: Adding chat_id column');
     try {
       await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
       await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
@@ -418,15 +429,18 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
   if (currentVersion < 3) {
     // Migration to version 3: Add LLM provider/model columns to worlds table
+    logger.info('sqlite-schema', 'Migrating to version 3: Adding LLM provider/model columns');
     try {
       const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
       const hasLLMProvider = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_provider');
       const hasLLMModel = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_model');
 
       if (!hasLLMProvider) {
+        logger.info('sqlite-schema', 'Adding chat_llm_provider column');
         await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
       }
       if (!hasLLMModel) {
+        logger.info('sqlite-schema', 'Adding chat_llm_model column');
         await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
       }
 
@@ -440,11 +454,13 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
   if (currentVersion < 4) {
     // Migration to version 4: Add current_chat_id column to worlds table
+    logger.info('sqlite-schema', 'Migrating to version 4: Adding current_chat_id column');
     try {
       const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
       const hasCurrentChatId = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'current_chat_id');
 
       if (!hasCurrentChatId) {
+        logger.info('sqlite-schema', 'Adding current_chat_id column to worlds table');
         await run(`ALTER TABLE worlds ADD COLUMN current_chat_id TEXT`);
       }
 
@@ -458,11 +474,13 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
   // Migration to version 5: Add mcpConfig column to worlds table
   if (currentVersion < 5) {
+    logger.info('sqlite-schema', 'Migrating to version 5: Adding mcp_config column');
     try {
       const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
       const hasMcpConfig = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'mcp_config');
 
       if (!hasMcpConfig) {
+        logger.info('sqlite-schema', 'Adding mcp_config column to worlds table');
         await run(`ALTER TABLE worlds ADD COLUMN mcp_config TEXT`);
       }
 
@@ -476,11 +494,13 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
   // Migration to version 6: Add message_id column to agent_memory table for user message edit feature
   if (currentVersion < 6) {
+    logger.info('sqlite-schema', 'Migrating to version 6: Adding message_id column for edit feature');
     try {
       const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
       const hasMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'message_id');
 
       if (!hasMessageId) {
+        logger.info('sqlite-schema', 'Adding message_id column to agent_memory table');
         await run(`ALTER TABLE agent_memory ADD COLUMN message_id TEXT`);
         await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_message_id ON agent_memory(message_id)`);
       }
@@ -495,11 +515,13 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
 
   // Version 7: Add reply_to_message_id for message threading
   if (currentVersion < 7) {
+    logger.info('sqlite-schema', 'Migrating to version 7: Adding reply_to_message_id for threading');
     try {
       const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
       const hasReplyToMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'reply_to_message_id');
 
       if (!hasReplyToMessageId) {
+        logger.info('sqlite-schema', 'Adding reply_to_message_id column to agent_memory table');
         await run(`ALTER TABLE agent_memory ADD COLUMN reply_to_message_id TEXT`);
         await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_reply_to_message_id ON agent_memory(reply_to_message_id)`);
       }
@@ -513,6 +535,11 @@ async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
   }
 
   // Future migrations would go here
+
+  const finalVersion = await getSchemaVersion(ctx);
+  if (finalVersion > currentVersion) {
+    logger.info('sqlite-schema', `Migration completed: version ${currentVersion} → ${finalVersion}`);
+  }
 } export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
   const get = promisify(ctx.db.get.bind(ctx.db));
   const all = promisify(ctx.db.all.bind(ctx.db));

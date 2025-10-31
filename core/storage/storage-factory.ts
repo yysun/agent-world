@@ -803,7 +803,7 @@ export async function createStorageFromEnv(): Promise<StorageAPI> {
 
   // Only log on first initialization to avoid duplicate logs
   if (!hasLoggedStorageInit) {
-    console.log('🟢 Storage path:', config.rootPath + ' - ' + config.type);
+    loggerFactory.info(`🟢 Storage path: ${config.rootPath} - ${config.type}`);
     hasLoggedStorageInit = true;
   }
 
