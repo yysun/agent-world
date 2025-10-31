@@ -208,15 +208,15 @@ describe('Message Saving with MessageIds', () => {
   });
 
   test('should not save agent own messages', async () => {
-    // Agent 1 sends a message
-    const messageEvent = publishMessage(world, 'Message from agent1', 'agent-1');
+    // Agent 1 sends a message mentioning agent-2
+    const messageEvent = publishMessage(world, '@agent-2 Message from agent1', 'agent-1');
 
     await new Promise(resolve => setTimeout(resolve, 100));
 
     // Agent 1 should NOT save its own message
     expect(agent1.memory).toHaveLength(0);
 
-    // Agent 2 should receive and save the message
+    // Agent 2 should receive and save the message (because it's mentioned)
     expect(agent2.memory).toHaveLength(1);
     expect(agent2.memory[0].messageId).toBe(messageEvent.messageId);
   });
