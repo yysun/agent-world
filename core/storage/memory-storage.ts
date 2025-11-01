@@ -18,7 +18,13 @@
  * - Full StorageAPI implementation using in-memory Maps
  * - No external dependencies or file system access required
  * - Suitable for unit tests, browser environments, and development
- * - Complete chat CRUD operations with proper data isolation
+ * - Complete chat lifecycle management with parent-child relationships
+ * - Cross-agent memory aggregation for world-level contexts
+ * - Data integrity through cascade deletion
+ * - Runtime property exclusion: eventEmitter, agents, chats, eventStorage are not persisted
+ * 
+ * Changes:
+ * - 2025-11-01: Exclude runtime properties from saveWorld to prevent storing EventEmitter and Map instances
  * - Batch operations with atomic-like behavior
  * - Memory archiving and cleanup operations
  * - Data validation and integrity checks
@@ -120,8 +126,18 @@ export class MemoryStorage implements StorageAPI {
       throw new Error('World ID is required');
     }
 
+    // Exclude runtime properties before cloning and storing
+    const {
+      eventEmitter,
+      agents,
+      chats,
+      eventStorage,
+      _eventPersistenceCleanup,
+      ...persistableWorld
+    } = worldData;
+
     // Deep clone to prevent external mutations
-    const clonedWorld = deepClone(worldData);
+    const clonedWorld = deepClone(persistableWorld as World);
     this.worlds.set(worldData.id, clonedWorld);
   }
 

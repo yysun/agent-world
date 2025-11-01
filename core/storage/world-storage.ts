@@ -24,11 +24,14 @@
  * - Cascade deletion for data integrity (world → agents/chats, chat → messages)
  *
  * Core Functions:
- * - saveWorld: Save world config.json with flat structure (excludes eventEmitter and agents)
+ * - saveWorld: Save world config.json with flat structure (excludes runtime properties: eventEmitter, agents, chats, eventStorage, _eventPersistenceCleanup)
  * - loadWorld: Load world configuration from file
  * - deleteWorld: Remove world directory and all contents (cascades to agents and chats)
  * - listWorlds: Scan and load all worlds in root directory
  * - worldExists: Check if world directory exists
+ * 
+ * Changes:
+ * - 2025-11-01: Explicitly exclude runtime properties (eventEmitter, agents, chats, eventStorage, _eventPersistenceCleanup) from saveWorld
  * - getWorldDir: Get world directory path
  * - ensureWorldDirectory: Create world directory structure
  *
@@ -116,10 +119,18 @@ export async function saveWorld(root: string, worldData: World): Promise<void> {
   const configPath = path.join(worldDir, 'config.json');
   const mcpConfigPath = path.join(worldDir, 'mcp.json');
 
-  // Create a copy of worldData without mcpConfig for config.json
-  const { mcpConfig, ...configData } = worldData;
+  // Exclude runtime properties and mcpConfig from config.json
+  const {
+    mcpConfig,
+    eventEmitter,
+    agents,
+    chats,
+    eventStorage,
+    _eventPersistenceCleanup,
+    ...configData
+  } = worldData;
 
-  // Save main config without mcpConfig
+  // Save main config without runtime properties
   await writeJsonFile(configPath, configData);
 
   // Save mcpConfig to separate file if it exists

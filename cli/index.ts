@@ -5,6 +5,20 @@
  * Summary: CLI entrypoint and interactive world subscription logic with event-driven prompt display.
  * Implementation: Uses subscribeWorld to obtain a managed WorldSubscription, then subscribes directly to world.eventEmitter for CLI-specific handling.
  * Architecture: Event-driven prompt display using world activity events instead of timers.
+ * 
+ * Features:
+ * - World selection with "From file..." option for importing worlds from external folders
+ * - Load and import worlds from file storage with confirmation and overwrite protection
+ * - Complete data migration including world config, agents, chats, and events
+ * - Support for multiple worlds in import folder with selection menu
+ * - Work with loaded world without importing (uses external storage path)
+ * 
+ * Changes:
+ * - 2025-11-01: Added multi-world selection in loadWorldFromFile
+ * - 2025-11-01: Allow working with external worlds without importing
+ * - 2025-11-01: Changed selectWorld return type to support external path tracking
+ * - 2025-11-01: Added loadWorldFromFile function for importing worlds from external folders
+ * - 2025-11-01: Enhanced selectWorld with "(From file...)" option and async support
  */
 
 // Load environment variables from .env file
@@ -798,7 +812,7 @@ async function getAvailableWorldNames(rootPath: string): Promise<string[]> {
   }
 }
 
-async function selectWorld(rootPath: string, rl: readline.Interface): Promise<string | null> {
+async function selectWorld(rootPath: string, rl: readline.Interface): Promise<{ worldName: string; externalPath?: string } | null> {
   const worlds = await getAvailableWorldNames(rootPath);
 
   if (worlds.length === 0) {
@@ -808,7 +822,7 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 
   if (worlds.length === 1) {
     console.log(`${boldGreen('Auto-selecting the only available world:')} ${cyan(worlds[0])}`);
-    return worlds[0];
+    return { worldName: worlds[0] };
   }
 
   console.log(`\n${boldMagenta('Available worlds:')}`);
@@ -816,10 +830,11 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
   worlds.forEach((world, index) => {
     console.log(`  ${yellow(`${index + 1}.`)} ${cyan(world)}`);
   });
+  console.log(`  ${yellow(`${worlds.length + 1}.`)} ${cyan('(From file...)')}`);
 
   return new Promise((resolve) => {
-    function askForSelection() {
-      rl.question(`\n${boldMagenta('Select a world (number or name), or 0 to exit:')} `, (answer) => {
+    async function askForSelection() {
+      rl.question(`\n${boldMagenta('Select a world (number or name), or 0 to exit:')} `, async (answer) => {
         const trimmed = answer.trim();
         const num = parseInt(trimmed);
 
@@ -828,8 +843,15 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
           return;
         }
 
+        // Check if user selected "From file..."
+        if (num === worlds.length + 1) {
+          const result = await loadWorldFromFile(rootPath, rl);
+          resolve(result);
+          return;
+        }
+
         if (!isNaN(num) && num >= 1 && num <= worlds.length) {
-          resolve(worlds[num - 1]);
+          resolve({ worldName: worlds[num - 1] });
           return;
         }
 
@@ -839,7 +861,7 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
         );
 
         if (found) {
-          resolve(found);
+          resolve({ worldName: found });
           return;
         }
 
@@ -850,6 +872,200 @@ async function selectWorld(rootPath: string, rl: readline.Interface): Promise<st
 
     askForSelection();
   });
+}
+
+// Load world from external file folder
+async function loadWorldFromFile(currentRootPath: string, rl: readline.Interface): Promise<{ worldName: string; externalPath?: string } | null> {
+  const fs = await import('fs');
+
+  // Get world folder path
+  const folderPath = await new Promise<string | null>((resolve) => {
+    rl.question(`\n${boldMagenta('Enter path to world folder:')} `, (answer) => {
+      const trimmed = answer.trim();
+      if (trimmed === '') {
+        resolve(null);
+      } else {
+        resolve(trimmed);
+      }
+    });
+  });
+
+  if (!folderPath) {
+    console.log(boldRed('Load cancelled.'));
+    return null;
+  }
+
+  // Validate folder exists
+  if (!fs.existsSync(folderPath)) {
+    console.log(boldRed(`Folder does not exist: ${folderPath}`));
+    return null;
+  }
+
+  try {
+    // Import necessary functions
+    const { createStorage } = await import('../core/storage/storage-factory.js');
+    const { checkTargetExists, deleteExistingData } = await import('./commands.js');
+
+    // Create storage instance for source folder
+    const sourceStorage = await createStorage({
+      type: 'file' as const,
+      rootPath: folderPath
+    });
+
+    // List worlds in the source folder
+    const worldsInFolder = await sourceStorage.listWorlds();
+    if (worldsInFolder.length === 0) {
+      console.log(boldRed(`No worlds found in: ${folderPath}`));
+      return null;
+    }
+
+    // Select world if multiple
+    let worldData;
+    if (worldsInFolder.length === 1) {
+      worldData = worldsInFolder[0];
+    } else {
+      console.log(`\n${boldMagenta('Multiple worlds found in folder:')}`);
+      console.log(`  ${yellow('0.')} ${cyan('Cancel')}`);
+      worldsInFolder.forEach((world, index) => {
+        console.log(`  ${yellow(`${index + 1}.`)} ${cyan(world.name)} ${gray(`(${world.id})`)}`);
+      });
+
+      const selectedIndex = await new Promise<number>((resolve) => {
+        function askForSelection() {
+          rl.question(`\n${boldMagenta('Select a world (1-' + worldsInFolder.length + '), or 0 to cancel:')} `, (answer) => {
+            const trimmed = answer.trim();
+            const num = parseInt(trimmed);
+
+            if (num === 0) {
+              resolve(-1);
+              return;
+            }
+
+            if (!isNaN(num) && num >= 1 && num <= worldsInFolder.length) {
+              resolve(num - 1);
+              return;
+            }
+
+            console.log(boldRed('Invalid selection. Please try again.'));
+            askForSelection();
+          });
+        }
+        askForSelection();
+      });
+
+      if (selectedIndex === -1) {
+        console.log(yellow('Load cancelled.'));
+        return null;
+      }
+
+      worldData = worldsInFolder[selectedIndex];
+    }
+
+    console.log(`\n${boldGreen('Found world:')} ${cyan(worldData.name)}`);
+    console.log(`  ${yellow('ID:')} ${worldData.id}`);
+
+    // Load agents
+    const agents = await sourceStorage.listAgents(worldData.id);
+    console.log(`  ${yellow('Agents:')} ${agents.length}`);
+
+    // Load chats
+    const chats = await sourceStorage.listChats(worldData.id);
+    console.log(`  ${yellow('Chats:')} ${chats.length}`);
+
+    // Ask if user wants to import
+    const shouldImport = await new Promise<boolean>((resolve) => {
+      rl.question(`\n${boldMagenta('Import this world to current storage?')} ${boldMagenta('(yes/no):')} `, (answer) => {
+        const trimmed = answer.trim().toLowerCase();
+        resolve(trimmed === 'yes' || trimmed === 'y');
+      });
+    });
+
+    if (!shouldImport) {
+      console.log(yellow('World loaded from external storage (not imported).'));
+      // Return world name with external path to use that storage
+      return { worldName: worldData.name, externalPath: folderPath };
+    }
+
+    // Check if world already exists in current storage
+    const checkResult = await checkTargetExists(currentRootPath, 'file', worldData.id);
+
+    if (checkResult.exists) {
+      // Confirm overwrite
+      const shouldOverwrite = await new Promise<boolean>((resolve) => {
+        rl.question(`\n${boldYellow(`World '${worldData.name}' already exists. Overwrite?`)} ${boldMagenta('(yes/no):')} `, (answer) => {
+          const trimmed = answer.trim().toLowerCase();
+          resolve(trimmed === 'yes' || trimmed === 'y');
+        });
+      });
+
+      if (!shouldOverwrite) {
+        console.log(yellow('Import cancelled. Loading from external storage instead.'));
+        // Return world name with external path to use that storage
+        return { worldName: worldData.name, externalPath: folderPath };
+      }
+
+      // Delete existing world
+      await deleteExistingData(currentRootPath, 'file', worldData.id);
+      console.log(green(`Deleted existing world '${worldData.name}'`));
+    }
+
+    // Create storage instance for target
+    const targetStorage = await createStorage({
+      type: 'file' as const,
+      rootPath: currentRootPath
+    });
+
+    // Save world
+    await targetStorage.saveWorld(worldData);
+
+    // Save all agents
+    for (const agent of agents) {
+      await targetStorage.saveAgent(worldData.id, agent);
+    }
+
+    // Save all chats
+    for (const chat of chats) {
+      await targetStorage.saveChatData(worldData.id, chat);
+    }
+
+    // Copy events if both storages have eventStorage
+    let eventCount = 0;
+    if ((sourceStorage as any).eventStorage && (targetStorage as any).eventStorage) {
+      const sourceEvents = (sourceStorage as any).eventStorage;
+      const targetEvents = (targetStorage as any).eventStorage;
+
+      try {
+        // Copy world-level events (chatId = null)
+        const worldEvents = await sourceEvents.getEventsByWorldAndChat(worldData.id, null);
+        if (worldEvents && worldEvents.length > 0) {
+          await targetEvents.saveEvents(worldEvents);
+          eventCount += worldEvents.length;
+        }
+
+        // Copy events for each chat
+        for (const chat of chats) {
+          const chatEvents = await sourceEvents.getEventsByWorldAndChat(worldData.id, chat.id);
+          if (chatEvents && chatEvents.length > 0) {
+            await targetEvents.saveEvents(chatEvents);
+            eventCount += chatEvents.length;
+          }
+        }
+      } catch (error) {
+        console.log(boldYellow(`Warning: Could not copy all events: ${error instanceof Error ? error.message : String(error)}`));
+      }
+    }
+
+    console.log(boldGreen(`\n✓ World '${worldData.name}' imported successfully!`));
+    console.log(`  ${yellow('Agents:')} ${agents.length}`);
+    console.log(`  ${yellow('Chats:')} ${chats.length}`);
+    console.log(`  ${yellow('Events:')} ${eventCount}`);
+
+    return { worldName: worldData.name };
+
+  } catch (error) {
+    console.log(boldRed(`Error loading world: ${error instanceof Error ? error.message : String(error)}`));
+    return null;
+  }
 }
 
 // Chat discovery and selection
@@ -1025,13 +1241,18 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
         return;
       }
 
-      logger.debug(`Loading world: ${selectedWorld}`);
+      // Use external path if loading from external storage
+      const effectiveRootPath = selectedWorld.externalPath || rootPath;
+      logger.debug(`Loading world: ${selectedWorld.worldName} from ${effectiveRootPath}`);
       try {
         activityMonitor.reset();
         progressRenderer.reset();
-        worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, activityMonitor, progressRenderer, rl);
-        currentWorldName = selectedWorld;
+        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
+        currentWorldName = selectedWorld.worldName;
         console.log(success(`Connected to world: ${currentWorldName}`));
+        if (selectedWorld.externalPath) {
+          console.log(gray(`  (loaded from external storage: ${selectedWorld.externalPath})`));
+        }
 
         if (worldState?.world) {
           console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
@@ -1117,7 +1338,9 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             return;
           }
 
-          logger.debug(`Loading world: ${selectedWorld}`);
+          // Use external path if loading from external storage
+          const effectiveRootPath = selectedWorld.externalPath || rootPath;
+          logger.debug(`Loading world: ${selectedWorld.worldName} from ${effectiveRootPath}`);
           try {
             // Clean up existing world subscription first
             if (worldState) {
@@ -1129,12 +1352,15 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             }
 
             // Subscribe to the new world
-            logger.debug(`Subscribing to world: ${selectedWorld}...`);
+            logger.debug(`Subscribing to world: ${selectedWorld.worldName}...`);
             activityMonitor.reset();
             progressRenderer.reset();
-            worldState = await handleSubscribe(rootPath, selectedWorld, streaming, globalState, activityMonitor, progressRenderer, rl);
-            currentWorldName = selectedWorld;
+            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
+            currentWorldName = selectedWorld.worldName;
             console.log(success(`Connected to world: ${currentWorldName}`));
+            if (selectedWorld.externalPath) {
+              console.log(gray(`  (loaded from external storage: ${selectedWorld.externalPath})`));
+            }
 
             if (worldState?.world) {
               console.log(`${gray('Agents:')} ${yellow(String(worldState.world.agents?.size || 0))} ${gray('| Turn Limit:')} ${yellow(String(worldState.world.turnLimit || 'N/A'))}`);
