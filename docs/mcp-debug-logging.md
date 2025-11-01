@@ -2,178 +2,242 @@
 
 ## Overview
 
-The MCP Server Registry now includes comprehensive debug logging to show all data being sent to and received from MCP servers. This is extremely useful for troubleshooting MCP communication issues and understanding what's happening during tool execution.
+The MCP Server Registry now includes comprehensive scenario-based debug logging to show all data being sent to and received from MCP servers. This is extremely useful for troubleshooting MCP communication issues and understanding what's happening during tool execution.
 
 ## Enabling Debug Logging
 
-To see the detailed MCP communication logs, set the `LOG_LLM_MCP` environment variable to `debug`:
+The MCP logging system uses scenario-based categories for granular control:
+
+### Enable All MCP Logs
 
 ```bash
-export LOG_LLM_MCP=debug
-npm run server
+LOG_MCP=debug npm run server
 ```
 
-Or start the server with the environment variable:
+### Enable Specific MCP Categories
 
 ```bash
-LOG_LLM_MCP=debug npm run server
+# Server lifecycle only (start/stop/ready)
+LOG_MCP_LIFECYCLE=info npm run server
+
+# Connection details
+LOG_MCP_CONNECTION=debug npm run server
+
+# Tool discovery and caching
+LOG_MCP_TOOLS=debug npm run server
+
+# Tool execution (request/response payloads)
+LOG_MCP_EXECUTION=debug npm run server
+
+# Multiple categories
+LOG_MCP_LIFECYCLE=info LOG_MCP_EXECUTION=debug npm run server
 ```
+
+## Logging Categories
+
+Agent World uses four scenario-based categories for MCP operations:
+
+| Category | Purpose | Log Level | Use When |
+|----------|---------|-----------|----------|
+| `mcp.lifecycle` | Server start/stop/ready events | `info` | Server not starting |
+| `mcp.connection` | Transport connections | `debug` | Connection failures |
+| `mcp.tools` | Tool discovery/caching | `debug` | Tools not appearing |
+| `mcp.execution` | Tool execution details | `debug` | Tool call failures |
 
 ## Debug Log Categories
 
-### 1. Server Connection Logs
-Shows the configuration and transport details when connecting to MCP servers:
+### 1. Server Lifecycle Logs (`mcp.lifecycle`)
+Shows server start/stop and ready status:
 
 ```
-MCP server connection attempt: {
-  "serverName": "example-server",
-  "transport": "stdio",
-  "connectionConfig": {
-    "command": "python",
-    "args": ["-m", "example_server"],
-    "env": ["PATH", "PYTHONPATH"]
-  }
+[INFO] MCP.LIFECYCLE: Starting MCP server {
+  serverName: "filesystem",
+  transport: "stdio"
+}
+
+[INFO] MCP.LIFECYCLE: MCP server ready {
+  serverName: "filesystem",
+  toolCount: 5
 }
 ```
 
-### 2. Server Registration Logs
-Shows the complete server configuration being registered:
+**Enable with:** `LOG_MCP_LIFECYCLE=info`
+
+### 2. Connection Logs (`mcp.connection`)
+Shows transport creation and connection attempts:
 
 ```
-MCP server registration configuration: {
-  "serverId": "a1b2c3d4",
-  "serverName": "example-server",
-  "worldId": "world123",
-  "fullConfig": {
-    "name": "example-server",
-    "transport": "stdio",
-    "command": "python",
-    "args": ["-m", "example_server"]
-  }
+[DEBUG] MCP.CONNECTION: Creating stdio transport {
+  serverName: "filesystem",
+  command: "python",
+  args: ["-m", "example_server"]
+}
+
+[DEBUG] MCP.CONNECTION: Connection established {
+  serverName: "filesystem"
 }
 ```
 
-### 3. Tools List Logs
-Shows the request for available tools and the complete response:
+**Enable with:** `LOG_MCP_CONNECTION=debug`
+
+### 3. Tool Discovery Logs (`mcp.tools`)
+Shows tool listing and caching operations:
 
 ```
-MCP tools list request starting: {
-  "serverName": "example-server",
-  "operation": "listTools"
+[DEBUG] MCP.TOOLS: Fetching tools from server {
+  serverName: "filesystem"
 }
 
-MCP server tools list response: {
-  "serverName": "example-server",
-  "operation": "listTools",
-  "toolsCount": 3,
-  "toolNames": ["read_file", "write_file", "list_directory"],
-  "toolsPayload": "[{\"name\":\"read_file\",\"description\":\"Read file contents\",\"inputSchema\":{...}}]"
-}
-```
-
-### 4. Tool Execution Request Logs
-Shows the exact payload being sent to the MCP server:
-
-```
-MCP server request payload: {
-  "executionId": "example-server-read_file-1692123456789",
-  "serverName": "example-server", 
-  "toolName": "read_file",
-  "requestPayload": "{\n  \"name\": \"read_file\",\n  \"arguments\": {\n    \"path\": \"/path/to/file.txt\"\n  }\n}"
+[DEBUG] MCP.TOOLS: Tools cached {
+  serverName: "filesystem",
+  toolCount: 5,
+  toolNames: ["read_file", "write_file", "list_directory"]
 }
 ```
 
-### 5. Tool Execution Response Logs
-Shows the complete response received from the MCP server:
+**Enable with:** `LOG_MCP_TOOLS=debug`
+
+### 4. Tool Execution Logs (`mcp.execution`)
+Shows tool call request/response payloads:
 
 ```
-MCP server response payload: {
-  "executionId": "example-server-read_file-1692123456789",
-  "serverName": "example-server",
-  "toolName": "read_file", 
-  "responsePayload": "{\n  \"content\": [{\n    \"type\": \"text\",\n    \"text\": \"File contents here...\"\n  }]\n}",
-  "responseType": "object",
-  "hasContent": true,
-  "contentLength": 1
+[DEBUG] MCP.EXECUTION: Executing tool {
+  serverName: "filesystem",
+  toolName: "read_file",
+  args: { path: "/path/to/file.txt" }
+}
+
+[DEBUG] MCP.EXECUTION: Tool execution completed {
+  serverName: "filesystem",
+  toolName: "read_file",
+  status: "success",
+  duration: 45.67
 }
 ```
 
-### 6. Performance and Error Tracking
-Standard execution logs with timing and error information:
-
-```
-MCP tool execution completed: {
-  "executionId": "example-server-read_file-1692123456789",
-  "status": "success",
-  "duration": 45.67,
-  "resultType": "text",
-  "resultSize": 1024,
-  "resultPreview": "File contents here..."
-}
-```
+**Enable with:** `LOG_MCP_EXECUTION=debug`
 
 ## Use Cases for Debug Logging
 
-### 1. Troubleshooting Tool Calls
-When a tool call isn't working as expected, you can see:
+### 1. Troubleshooting Server Startup
+When MCP servers aren't starting:
+```bash
+LOG_MCP_LIFECYCLE=info LOG_MCP_CONNECTION=debug npm run server
+```
+You'll see:
+- Server initialization attempts
+- Transport configuration
+- Connection establishment
+- Startup errors
+
+### 2. Debugging Tool Discovery
+When tools aren't appearing or being cached:
+```bash
+LOG_MCP_TOOLS=debug npm run server
+```
+You'll see:
+- Tool fetching operations
+- Complete tool lists with schemas
+- Caching operations
+- Schema validation
+
+### 3. Analyzing Tool Execution
+When tool calls aren't working as expected:
+```bash
+LOG_MCP_EXECUTION=debug npm run server
+```
+You'll see:
 - Exact arguments being sent
-- Complete response structure 
-- Any data transformation issues
+- Complete response structure
+- Execution timing
+- Error details
 
-### 2. Schema Debugging  
-When schema validation fails, you can see:
-- The original schema from the MCP server
-- The simplified schema created for Azure OpenAI
-- Any schema transformation issues
-
-### 3. Performance Analysis
-Track tool execution times and identify slow tools:
-- Connection establishment time
-- Tool listing time
-- Individual tool execution duration
-
-### 4. Configuration Validation
-Verify server configurations are correct:
-- Transport settings
-- Command line arguments
-- Environment variables
-- URL and header configurations
+### 4. Full MCP Debugging
+For complete visibility into all MCP operations:
+```bash
+LOG_MCP=debug npm run server
+```
+This enables all four categories at debug level.
 
 ## Example Debug Session
 
 ```bash
-# Enable debug logging
-export LOG_LLM_MCP=debug
+# Enable all MCP debug logging
+export LOG_MCP=debug
+
+# Or enable specific categories
+export LOG_MCP_LIFECYCLE=info
+export LOG_MCP_EXECUTION=debug
 
 # Start the server
 npm run server
+
+# Expected output:
+# [INFO] MCP.LIFECYCLE: Starting MCP server { serverName: "filesystem", transport: "stdio" }
+# [DEBUG] MCP.CONNECTION: Creating stdio transport { ... }
+# [DEBUG] MCP.CONNECTION: Connection established { ... }
+# [DEBUG] MCP.TOOLS: Fetching tools from server { ... }
+# [DEBUG] MCP.TOOLS: Tools cached { serverName: "filesystem", toolCount: 5 }
+# [INFO] MCP.LIFECYCLE: MCP server ready { serverName: "filesystem", toolCount: 5 }
 
 # In another terminal, make a request that uses MCP tools
 curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"worldId": "test", "message": "Please read the file example.txt"}'
-```
 
-You'll see a complete trace of:
-1. Server registration and connection
-2. Tools list retrieval  
-3. Tool execution request/response
-4. Performance metrics
-5. Any errors or issues
+# You'll see:
+# [DEBUG] MCP.EXECUTION: Executing tool { serverName: "filesystem", toolName: "read_file", ... }
+# [DEBUG] MCP.EXECUTION: Tool execution completed { status: "success", duration: 45.67, ... }
+```
 
 ## Log Output Management
 
 The debug logs can be quite verbose. To filter for specific information:
 
 ```bash
-# Only show request/response payloads
-LOG_LLM_MCP=debug npm run server | grep "payload"
+# Only show lifecycle events
+LOG_MCP_LIFECYCLE=info npm run server
 
 # Only show tool execution
-LOG_LLM_MCP=debug npm run server | grep "execution"
+LOG_MCP_EXECUTION=debug npm run server
 
-# Only show connection issues
-LOG_LLM_MCP=debug npm run server | grep -E "(connection|error)"
+# Filter output with grep
+LOG_MCP=debug npm run server | grep "MCP.EXECUTION"
+
+# Show only errors
+LOG_MCP=debug npm run server | grep "ERROR"
+
+# Combine multiple filters
+LOG_MCP=debug npm run server | grep -E "(LIFECYCLE|EXECUTION)"
+```
+
+## Hierarchical Control
+
+The MCP logging follows a hierarchical structure:
+
+```
+mcp (parent)
+├── mcp.lifecycle
+├── mcp.connection
+├── mcp.tools
+└── mcp.execution
+```
+
+Setting the parent category enables all children:
+
+```bash
+# This enables all four MCP categories at debug level
+LOG_MCP=debug npm run server
+
+# Equivalent to:
+LOG_MCP_LIFECYCLE=debug LOG_MCP_CONNECTION=debug LOG_MCP_TOOLS=debug LOG_MCP_EXECUTION=debug npm run server
+```
+
+You can override specific children:
+
+```bash
+# All MCP at debug, but lifecycle at info only
+LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run server
 ```
 
 ## Important Notes
@@ -182,8 +246,16 @@ LOG_LLM_MCP=debug npm run server | grep -E "(connection|error)"
 
 2. **Sensitive Data**: Debug logs may contain sensitive information from tool arguments and responses. Be careful in production.
 
-3. **Log Size**: With debug logging enabled, log files can grow large quickly.
+3. **Log Size**: With debug logging enabled, log files can grow large quickly. Consider using specific categories instead of enabling all MCP logs.
 
-4. **JSON Formatting**: Request/response payloads are formatted with 2-space indentation for readability.
+4. **Structured Format**: All logs use structured format with constant message strings and context objects for easy parsing and filtering.
 
-This enhanced logging provides complete visibility into MCP server communication, making it much easier to debug issues and understand what's happening during tool execution.
+5. **Default Level**: By default, only `error` level logs are shown. You must explicitly enable categories to see debug information.
+
+## Related Documentation
+
+- [Complete Logging Guide](./logging-guide.md) - Full reference for all logging categories
+- [README Logging Section](../README.md#logging-and-debugging) - Quick start guide
+- [Architecture Plan](../.docs/plans/2025-10-31/plan-scenario-based-logging.md) - Implementation details
+
+This enhanced scenario-based logging provides complete visibility into MCP server communication with granular control over what you see, making it much easier to debug issues and understand what's happening during tool execution.
