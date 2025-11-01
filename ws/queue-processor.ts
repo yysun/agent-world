@@ -139,7 +139,7 @@ export class QueueProcessor {
 
     // Get queue statistics to find worlds with pending messages
     const stats = await this.config.queueStorage.getQueueStats();
-    
+
     for (const [worldId, worldStats] of Object.entries(stats)) {
       // Skip if world is already processing
       if (this.processingWorlds.has(worldId)) {
@@ -173,7 +173,7 @@ export class QueueProcessor {
       while (this.running) {
         // Dequeue next message for this world
         const message = await this.config.queueStorage.dequeue(worldId);
-        
+
         if (!message) {
           // No more messages for this world
           break;
@@ -197,7 +197,7 @@ export class QueueProcessor {
    */
   private async processMessage(message: QueueMessage): Promise<void> {
     const { worldId, messageId, chatId, content, sender } = message;
-    
+
     console.log(`[QueueProcessor] Processing message ${messageId} for world ${worldId}`);
 
     // Broadcast processing status
