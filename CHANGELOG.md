@@ -1,10 +1,15 @@
-v0.7.1
-- Refactored CLI display logic to use world events instead of timers
-- CLI now listens to world activity events (processing/idle) to determine when to show prompt
-- Removed timer-based prompt restoration logic (setupPromptTimer, clearPromptTimer)
-- Improved event-driven architecture for more responsive CLI interaction
-- Exported EventType enum from core for use in CLI and server
-
+v0.8.0
+- Complete test suite migration from Jest to Vitest (547+ tests passing)
+- Comprehensive world chat session management with auto-save and title generation
+- Persistent event storage with automatic world event persistence and markdown export
+- Interactive CLI world management: load/import and save (file/sqlite)
+- Event-driven CLI and API using world activity events instead of timers
+- TypedEventBridge enhancement with discriminated union pattern across all layers
+- Added `/chat select` command with formatted chat history display
+- Cascade delete agent memory on chat deletion
+- Preserve replyToMessageId through publish->DB->SSE->UI pipeline
+- Structured logging with migration diagnostics and scenario-based MCP debug guide
+- Expanded project documentation and contribution guidelines
 v0.7.0
 - Added end-to-end message editing and deletion flows.
 - Added per-agent badge toggles for chat filtering.
