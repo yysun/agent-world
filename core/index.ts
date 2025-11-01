@@ -102,4 +102,39 @@ export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers
 export { type ClientConnection, subscribeWorld } from './subscription.js';
 
 export { getDefaultRootPath } from './storage/storage-factory.js';
+
+// === OAUTH2 ===
+export {
+  OAuth2Client,
+  createOAuth2Client,
+  validateTokenResponse
+} from './oauth2-client.js';
+
+export {
+  generatePKCEPair,
+  generateState,
+  discoverOAuth2Endpoints,
+  buildAuthorizationURL,
+  exchangeCodeForToken,
+  validateState,
+  parseCallbackParams,
+  getDefaultScope,
+  validateProviderConfig
+} from './oauth2-utils.js';
+
+export {
+  type OpenIDConnectDiscovery,
+  type OAuth2ProviderConfig,
+  type PKCEPair,
+  type OAuth2AuthorizationRequest,
+  type OAuth2TokenRequest,
+  type OAuth2TokenResponse,
+  type OAuth2ErrorResponse,
+  type OAuth2CallbackParams,
+  type OAuth2Session,
+  OAuth2Provider,
+  WELL_KNOWN_DISCOVERY_URLS,
+  FALLBACK_OAUTH2_ENDPOINTS
+} from './oauth2-types.js';
+
 export const VERSION = '0.5.0';
