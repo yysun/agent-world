@@ -19,11 +19,12 @@
  *   - Agent incoming: "Agent: agentName (incoming from sender)"
  *   - Agent reply: "Agent: agentName (reply to targetName)"
  *   - In-memory detection: "[in-memory, no reply]" for received messages without response
- * - World events section with chronological order and CLI-style display:
- *   - Message events: ● sender: content preview
- *   - SSE events: ● agent: content or [type]
- *   - Tool events: ● agent: [tool: type] or ● source: [activity-type]
- *   - System events: ● system: content preview
+ * - Chat events section for current chat only with chronological order:
+ *   - Message events: ● [message] sender: content preview
+ *   - SSE events: ● [sse] agent: type content (shows streaming chunks)
+ *   - World events: ● [world] agent: activity pending=N (activity tracking)
+ *   - Tool events: ● [tool] agent type (tool execution)
+ *   - System events: ● [system] content preview
  *   - Timestamp shown as HH:MM:SS for readability
  * - Structured markdown with clear sections and navigation
  * - Uses getMemory() for efficient message retrieval
@@ -52,10 +53,14 @@
  *
  * Event Format Examples:
  * ```
- * 1. `10:00:00` ● human: Test message content
- * 2. `10:01:00` ● Test Agent: [start]
- * 3. `10:02:00` ● Test Agent: [tool: tool-start]
- * 4. `10:03:00` ● world: [response-end] pending=0
+ * 1. `10:00:00` ● [message] human: Test message content
+ * 2. `10:01:00` ● [sse] Test Agent: start
+ * 3. `10:01:01` ● [sse] Test Agent: chunk Hello world
+ * 4. `10:01:02` ● [sse] Test Agent: end
+ * 5. `10:02:00` ● [world] a1: response-start pending=1
+ * 6. `10:03:00` ● [world] a1: response-end pending=0
+ * 7. `10:04:00` ● [tool] Test Agent tool-start
+ * 8. `10:05:00` ● [system] chat-title-updated
  * ```
  *
  * Implementation:
@@ -67,9 +72,9 @@
  * - Maps agentId to agent names for clear identification
  * - Deduplicates user messages by messageId using Map for O(1) lookup
  * - Detects in-memory messages by checking for subsequent assistant replies
- * - Events displayed in chronological order (not grouped by type)
+ * - Events displayed in chronological order for current chat only
  * - Limits event display to 100 events with overflow indication
- * - Uses CLI-style formatting for events (● sender: content)
+ * - Event format: time ● [type] agent: event-name content
  *
  * Deduplication Strategy:
  * - Only user messages with messageId are deduplicated
@@ -78,25 +83,11 @@
  * - Tracks which agents received each message via agentIds/agentNames arrays
  * - Consistent with frontend deduplication logic for predictable behavior
  *
- * Changes:
- * - 2025-10-31: Updated reply labels to show target: "(reply to targetName)" instead of just "(reply)"
- * - 2025-10-31: Changed events to chronological order (not grouped by type), using CLI-style format (● sender: content)
- * - 2025-10-31: Added World Events section with event type grouping and details
- * - 2025-10-31: Updated export format version to 1.1
- * - 2025-10-26: Fixed user message display to show only first/intended recipient agent
- * - 2025-10-26: Fixed message labeling to assign to single agent when world has only one agent (no more missing recipient)
- * - 2025-10-25: Improved message labeling - removed role/sender confusion, added in-memory detection
- * - 2025-10-25: Added tool call detection and summarization
- * - 2025-10-25: Refactored deduplication to use messageId-based approach (O(n) vs O(n²))
- * - 2025-10-25: Aligned with frontend deduplication strategy for consistency
- * - 2025-10-25: Only deduplicate user messages (agent messages kept separate)
- * - 2025-08-07: Extracted from managers.ts and enhanced with chat export
- * - 2025-08-07: Added complete chat message history support
- * - 2025-08-07: Enhanced formatting and structure for better readability
- * - 2025-08-09: Exclude agent memory and export only current chat
- * - 2025-08-09: Add sender label formatting (human → HUMAN)
- * - 2025-08-09: Simplified chat loading using getMemory() instead of complex fallback logic
- * - 2025-08-09: Added agentId to AgentMessage and automatic agent name fallback for assistant messages
+  * Changes:
+ * - 2025-11-01: Fixed export to show events for current chat only (not all chats)
+ * - 2025-11-01: Reformatted events to show: time ● [type] agent: event-name content
+ * - 2025-11-01: SSE chunk events now properly display content in export
+ * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
  */
 
 // Core module imports
@@ -510,7 +501,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
         markdown += `**Messages:** No messages found for this chat\n\n`;
       }
     } catch (error) {
-      logger.warn('Failed to load chat messages', { chatId: currentChat.id, error: error instanceof Error ? error.message : error });
+      logger.error('Failed to load chat messages', { chatId: currentChat.id, error: error instanceof Error ? error.message : error });
       markdown += `**Messages:** Unable to load messages (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
     }
 
@@ -520,17 +511,17 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
   }
 
   // World Events Section
-  if (worldData.eventStorage) {
+  if (worldData.eventStorage && currentChat) {
     try {
-      // Get all events for this world in chronological order
+      // Get events for current chat in chronological order
       const allEvents = await worldData.eventStorage.getEventsByWorldAndChat(
         worldData.id,
-        null,
+        currentChat.id,
         { order: 'asc', limit: 1000 }
       );
 
       if (allEvents.length > 0) {
-        markdown += `## World Events (${allEvents.length})\n\n`;
+        markdown += `## Chat Events (${allEvents.length})\n\n`;
 
         const eventTypes = Array.from(new Set(allEvents.map((e: any) => e.type)));
         markdown += `**Event Types:** ${eventTypes.join(', ')}\n\n`;
@@ -553,32 +544,33 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             const content = typeof event.payload.content === 'string'
               ? event.payload.content.substring(0, 200)
               : JSON.stringify(event.payload.content).substring(0, 200);
-            displayLine = `● ${sender}: ${content}${content.length >= 200 ? '...' : ''}`;
+            displayLine = `● [message] ${sender}: ${content}${content.length >= 200 ? '...' : ''}`;
           } else if (event.type === 'sse' && event.payload) {
             const agentName = event.payload.agentName || 'agent';
             const sseType = event.payload.type || 'unknown';
             const content = event.payload.content
               ? (typeof event.payload.content === 'string' ? event.payload.content.substring(0, 200) : '')
-              : `[${sseType}]`;
-            displayLine = `● ${agentName}: ${content}${content.length >= 200 ? '...' : ''}`;
+              : '';
+            displayLine = content
+              ? `● [sse] ${agentName}: ${sseType} ${content}${content.length >= 200 ? '...' : ''}`
+              : `● [sse] ${agentName}: ${sseType}`;
+          } else if (event.type === 'world' && event.payload) {
+            // World activity event (response-start, response-end, idle)
+            const activityType = event.payload.activityType || event.payload.type || 'unknown';
+            const source = event.payload.source || 'world';
+            // Remove 'agent:' prefix if present
+            const displaySource = source.startsWith('agent:') ? source.substring(6) : source;
+            displayLine = `● [world] ${displaySource}: ${activityType} pending=${event.payload.pendingOperations || 0}`;
           } else if (event.type === 'tool' && event.payload) {
-            // Check if this is an activity event or tool execution event
-            if (event.payload.activityType) {
-              // Activity event (response-start, response-end, idle)
-              const activityType = event.payload.activityType;
-              const source = event.payload.source || 'world';
-              displayLine = `● ${source}: [${activityType}] pending=${event.payload.pendingOperations || 0}`;
-            } else {
-              // Tool execution event
-              const agentName = event.payload.agentName || 'agent';
-              const toolType = event.payload.type || 'unknown';
-              displayLine = `● ${agentName}: [tool: ${toolType}]`;
-            }
+            // Tool execution event
+            const agentName = event.payload.agentName || 'agent';
+            const toolType = event.payload.type || 'unknown';
+            displayLine = `● [tool] ${agentName} ${toolType}`;
           } else if (event.type === 'system' && event.payload) {
             const content = typeof event.payload === 'string'
               ? event.payload.substring(0, 200)
               : JSON.stringify(event.payload).substring(0, 200);
-            displayLine = `● system: ${content}${content.length >= 200 ? '...' : ''}`;
+            displayLine = `● [system] ${content}${content.length >= 200 ? '...' : ''}`;
           } else {
             displayLine = `● [${event.type}]: ${JSON.stringify(event.payload).substring(0, 200)}`;
           }
@@ -592,14 +584,14 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
 
         markdown += `\n`;
       } else {
-        markdown += `## World Events\n\nNo events recorded for this world.\n\n`;
+        markdown += `## Chat Events\n\nNo events recorded for this chat.\n\n`;
       }
     } catch (error) {
-      logger.warn('Failed to load world events', { worldId: worldData.id, error: error instanceof Error ? error.message : error });
-      markdown += `## World Events\n\nUnable to load events (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
+      logger.error('Failed to load chat events', { worldId: worldData.id, chatId: currentChat?.id, error: error instanceof Error ? error.message : error });
+      markdown += `## Chat Events\n\nUnable to load events (${error instanceof Error ? error.message : 'Unknown error'})\n\n`;
     }
   } else {
-    markdown += `## World Events\n\nEvent storage not configured for this world.\n\n`;
+    markdown += `## Chat Events\n\n${currentChat ? 'Event storage not configured for this world.' : 'No current chat to display events for.'}\n\n`;
   }
 
   // Export metadata

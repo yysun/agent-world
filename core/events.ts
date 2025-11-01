@@ -62,6 +62,7 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-11-01: Removed SYNC_EVENT_PERSISTENCE flag - event persistence now always synchronous/awaitable
  * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
  * - 2025-10-30: Fixed replyToMessageId missing in frontend - added parameter to publish functions
  * - 2025-10-30: Fixed premature idle signal - removed activity tracking from message publishing
@@ -111,13 +112,12 @@ async function getStorageWrappers(): Promise<StorageAPI> {
  * Setup automatic event persistence listeners on World event emitter.
  * Should be called once during World initialization.
  * 
- * Events are persisted asynchronously (or synchronously in test mode).
+ * Events are persisted synchronously/awaitable for reliability.
  * Failures are logged but don't block event emission.
  * Returns a cleanup function to remove listeners.
  * 
  * Environment variables:
  * - DISABLE_EVENT_PERSISTENCE=true: Skip all persistence
- * - SYNC_EVENT_PERSISTENCE=true: Synchronous mode for tests
  */
 export function setupEventPersistence(world: World): () => void {
   if (process.env.DISABLE_EVENT_PERSISTENCE === 'true') {
@@ -131,14 +131,13 @@ export function setupEventPersistence(world: World): () => void {
   }
 
   const storage = world.eventStorage;
-  const syncMode = process.env.SYNC_EVENT_PERSISTENCE === 'true';
 
-  // Helper to handle async persistence with sync mode support
+  // Helper to handle async persistence
   const persistEvent = async (eventData: any) => {
     try {
       await storage.saveEvent(eventData);
     } catch (error) {
-      loggerPublish.warn('Failed to persist event', {
+      loggerPublish.error('Failed to persist event', {
         worldId: world.id,
         eventId: eventData.id,
         eventType: eventData.type,
@@ -166,17 +165,13 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: event.timestamp
     };
 
-    if (syncMode) {
-      return persistEvent(eventData);
-    } else {
-      persistEvent(eventData).catch(() => { }); // Fire and forget
-    }
+    return persistEvent(eventData);
   };
 
   // SSE event persistence
   const sseHandler = (event: WorldSSEEvent): void | Promise<void> => {
     const eventData = {
-      id: event.messageId,
+      id: event.messageId, // Use messageId directly as the event ID
       worldId: world.id,
       chatId: world.currentChatId || null, // Default to current chat
       type: 'sse',
@@ -194,11 +189,7 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: new Date()
     };
 
-    if (syncMode) {
-      return persistEvent(eventData);
-    } else {
-      persistEvent(eventData).catch(() => { });
-    }
+    return persistEvent(eventData);
   };
 
   // Tool event persistence (world channel)
@@ -211,7 +202,7 @@ export function setupEventPersistence(world: World): () => void {
       id: event.messageId || null,
       worldId: world.id,
       chatId: world.currentChatId || null, // Default to current chat
-      type: 'tool',
+      type: isActivityEvent ? 'world' : 'tool',
       payload: isActivityEvent ? {
         activityType: event.type,
         pendingOperations: event.pendingOperations,
@@ -234,11 +225,7 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };
 
-    if (syncMode) {
-      return persistEvent(eventData);
-    } else {
-      persistEvent(eventData).catch(() => { });
-    }
+    return persistEvent(eventData);
   };
 
   // System event persistence
@@ -253,11 +240,7 @@ export function setupEventPersistence(world: World): () => void {
       createdAt: event.timestamp
     };
 
-    if (syncMode) {
-      return persistEvent(eventData);
-    } else {
-      persistEvent(eventData).catch(() => { });
-    }
+    return persistEvent(eventData);
   };
 
   // Attach listeners
@@ -267,8 +250,7 @@ export function setupEventPersistence(world: World): () => void {
   world.eventEmitter.on('system', systemHandler);
 
   loggerPublish.debug('Event persistence setup complete', {
-    worldId: world.id,
-    syncMode
+    worldId: world.id
   });
 
   // Return cleanup function
@@ -693,10 +675,10 @@ export async function saveIncomingMessageToMemory(
         messageId: messageEvent.messageId
       });
     } catch (error) {
-      loggerMemory.warn('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.error('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   } catch (error) {
-    loggerMemory.warn('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+    loggerMemory.error('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
   }
 }
 
@@ -718,7 +700,7 @@ export async function processAgentMessage(
       const allMessages = await storage.getMemory(world.id, world.currentChatId);
       conversationHistory = allMessages.slice(-10); // Get last 10 messages for current chat
     } catch (error) {
-      loggerMemory.warn('Could not load conversation history from storage', { agentId: agent.id, chatId: world.currentChatId, error: error instanceof Error ? error.message : error });
+      loggerMemory.error('Could not load conversation history from storage', { agentId: agent.id, chatId: world.currentChatId, error: error instanceof Error ? error.message : error });
     }
 
     // Prepare messages for LLM with history + current message
@@ -741,7 +723,7 @@ export async function processAgentMessage(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      loggerAgent.warn('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerAgent.error('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
     // Generate LLM response (streaming or non-streaming)
@@ -847,7 +829,7 @@ export async function processAgentMessage(
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
     } catch (error) {
-      loggerMemory.warn('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.error('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
   } catch (error) {

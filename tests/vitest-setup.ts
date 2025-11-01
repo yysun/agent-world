@@ -381,9 +381,6 @@ beforeEach(() => {
   // Set test environment
   process.env.NODE_ENV = 'test';
 
-  // Enable synchronous event persistence for reliable testing
-  process.env.SYNC_EVENT_PERSISTENCE = 'true';
-
   // Use memory storage by default
   process.env.AGENT_WORLD_STORAGE_TYPE = 'memory';
 });

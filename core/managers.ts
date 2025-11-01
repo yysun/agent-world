@@ -397,7 +397,7 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
       await storageWrappers!.archiveMemory(worldId, agentId, existingAgentData.memory);
       logger.debug('Memory archived successfully');
     } catch (error) {
-      logger.warn('Failed to archive memory', { agentId, error: error instanceof Error ? error.message : error });
+      logger.error('Failed to archive memory', { agentId, error: error instanceof Error ? error.message : error });
     }
   }
 

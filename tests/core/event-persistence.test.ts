@@ -6,7 +6,7 @@
  * 
  * Test Strategy:
  * - Uses memory event storage for fast, isolated tests
- * - SYNC_EVENT_PERSISTENCE=true ensures predictable timing
+ * - Event persistence is always synchronous/awaitable for reliability
  * - Tests all event types (message, SSE, tool, system)
  * - Verifies event data integrity and sequence ordering
  */
@@ -40,7 +40,7 @@ describe('Event Persistence Integration', () => {
     // Emit a message
     const messageEvent = publishMessage(world!, 'Hello World', 'user-1', world!.currentChatId);
 
-    // With SYNC_EVENT_PERSISTENCE=true, persistence is synchronous
+    // Event persistence is synchronous/awaitable
     // No need for setTimeout
 
     // Verify event was persisted

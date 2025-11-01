@@ -182,8 +182,8 @@ describe('Export Module', () => {
       expect(result).toContain('- **Export Format Version:** 1.1');
       expect(result).toContain('- **Sections:** World Configuration, Agents (1), Current Chat (1), Events (0)');
 
-      // Verify world events section is present
-      expect(result).toContain('## World Events');
+      // Verify chat events section is present
+      expect(result).toContain('## Chat Events');
     });
 
     it('should handle world not found', async () => {
@@ -919,7 +919,7 @@ describe('Export Module', () => {
       expect(result).toContain('```\n    Different message\n    ```');
     });
 
-    it('should include world events section when event storage is available', async () => {
+    it('should include chat events section when event storage is available', async () => {
       const mockEventStorage = {
         getEventsByWorldAndChat: vi.fn().mockResolvedValue([
           {
@@ -987,15 +987,15 @@ describe('Export Module', () => {
 
       const result = await exportWorldToMarkdown('test-world');
 
-      // Verify world events section exists
-      expect(result).toContain('## World Events (3)');
+      // Verify chat events section exists
+      expect(result).toContain('## Chat Events (3)');
       expect(result).toContain('**Event Types:** message, sse, tool');
 
-      // Verify events are displayed in chronological order (CLI format)
-      // Events should use the ● format
-      expect(result).toContain('● human: Test message content');
-      expect(result).toContain('● Test Agent: [start]');
-      expect(result).toContain('● Test Agent: [tool: tool-start]');
+      // Verify events are displayed in chronological order with new format
+      // Events should use the ● [type] format
+      expect(result).toContain('● [message] human: Test message content');
+      expect(result).toContain('● [sse] Test Agent: start');
+      expect(result).toContain('● [tool] Test Agent tool-start');
 
       // Verify export metadata includes events count
       expect(result).toContain('Events (3)');
@@ -1024,9 +1024,9 @@ describe('Export Module', () => {
 
       const result = await exportWorldToMarkdown('test-world');
 
-      // Should show event storage not configured message
-      expect(result).toContain('## World Events');
-      expect(result).toContain('Event storage not configured for this world.');
+      // Should show event storage not configured or no chat message
+      expect(result).toContain('## Chat Events');
+      expect(result).toContain('No current chat to display events for.');
 
       // Verify export metadata shows 0 events
       expect(result).toContain('Events (0)');
