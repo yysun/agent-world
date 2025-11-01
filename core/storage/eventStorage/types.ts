@@ -37,23 +37,23 @@ export interface GetEventsOptions {
    * Get events with sequence number greater than this value
    */
   sinceSeq?: number;
-  
+
   /**
    * Get events created after this timestamp
    */
   sinceTime?: Date;
-  
+
   /**
    * Maximum number of events to return
    */
   limit?: number;
-  
+
   /**
    * Order by sequence or time
    * Default: 'asc'
    */
   order?: 'asc' | 'desc';
-  
+
   /**
    * Filter by event types
    */
@@ -65,31 +65,47 @@ export interface EventStorage {
    * Save a single event to storage
    */
   saveEvent(event: StoredEvent): Promise<void>;
-  
+
   /**
    * Save multiple events in a batch
    */
   saveEvents(events: StoredEvent[]): Promise<void>;
-  
+
   /**
    * Get events for a specific world and chat
    */
   getEventsByWorldAndChat(
-    worldId: string, 
-    chatId: string | null, 
+    worldId: string,
+    chatId: string | null,
     options?: GetEventsOptions
   ): Promise<StoredEvent[]>;
-  
+
   /**
    * Delete all events for a specific world and chat
    */
   deleteEventsByWorldAndChat(worldId: string, chatId: string | null): Promise<number>;
-  
+
   /**
    * Delete all events for a specific world (all chats)
    */
   deleteEventsByWorld(worldId: string): Promise<number>;
-  
+
+  /**
+   * Get the latest sequence number for a world/chat context
+   * Returns 0 if no events exist
+   */
+  getLatestSeq(worldId: string, chatId: string | null): Promise<number>;
+
+  /**
+   * Get events within a specific sequence range (inclusive)
+   */
+  getEventRange(
+    worldId: string,
+    chatId: string | null,
+    fromSeq: number,
+    toSeq: number
+  ): Promise<StoredEvent[]>;
+
   /**
    * Close/cleanup storage resources
    */

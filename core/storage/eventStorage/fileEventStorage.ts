@@ -329,6 +329,64 @@ export class FileEventStorage implements EventStorage {
   }
 
   /**
+   * Get the latest sequence number for a world/chat context
+   * Returns 0 if no events exist
+   */
+  async getLatestSeq(worldId: string, chatId: string | null): Promise<number> {
+    const key = this.getContextKey(worldId, chatId);
+
+    // Check cache first
+    if (this.seqCounters.has(key)) {
+      return this.seqCounters.get(key)!;
+    }
+
+    // Load from file to find max seq
+    const worldDir = path.join(this.baseDir, worldId);
+    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const events = await readEventsFromFile(filePath);
+    const maxSeq = events.reduce((max, e) => Math.max(max, e.seq ?? 0), 0);
+
+    // Update cache
+    if (maxSeq > 0) {
+      this.seqCounters.set(key, maxSeq);
+    }
+
+    return maxSeq;
+  }
+
+  /**
+   * Get events within a specific sequence range (inclusive)
+   */
+  async getEventRange(
+    worldId: string,
+    chatId: string | null,
+    fromSeq: number,
+    toSeq: number
+  ): Promise<StoredEvent[]> {
+    const worldDir = path.join(this.baseDir, worldId);
+    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    let events = await readEventsFromFile(filePath);
+
+    // Filter by sequence range
+    events = events.filter(e => {
+      const seq = e.seq ?? 0;
+      return seq >= fromSeq && seq <= toSeq;
+    });
+
+    // Sort by sequence and time
+    events.sort((a, b) => {
+      const seqA = a.seq ?? 0;
+      const seqB = b.seq ?? 0;
+      if (seqA !== seqB) {
+        return seqA - seqB;
+      }
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+
+    return events;
+  }
+
+  /**
    * Compact a specific event file (remove deleted events, rewrite file)
    * This is useful after bulk deletions to reclaim space
    */
