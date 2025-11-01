@@ -352,6 +352,7 @@ export interface World {
   chats: Map<string, Chat>;
   eventStorage?: any; // EventStorage interface - optional for backward compatibility
   _eventPersistenceCleanup?: () => void; // Internal cleanup function for event listeners
+  _activityListenerCleanup?: () => void; // Internal cleanup function for activity listener
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

@@ -118,8 +118,9 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
 
   // Setup event persistence
   if (worldData.eventStorage) {
-    const { setupEventPersistence } = await import('./events.js');
+    const { setupEventPersistence, setupWorldActivityListener } = await import('./events.js');
     worldData._eventPersistenceCleanup = setupEventPersistence(worldData);
+    worldData._activityListenerCleanup = setupWorldActivityListener(worldData);
   }
 
   await storageWrappers!.saveWorld(worldData);
@@ -168,6 +169,9 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
   const world = await getWorld(normalizedWorldId);
   if (world?._eventPersistenceCleanup) {
     world._eventPersistenceCleanup();
+  }
+  if (world?._activityListenerCleanup) {
+    world._activityListenerCleanup();
   }
 
   return await storageWrappers!.deleteWorld(normalizedWorldId);
@@ -238,12 +242,14 @@ export async function getWorld(worldId: string): Promise<World | null> {
     chats: new Map(chats.map((chat: Chat) => [chat.id, chat])),
     eventStorage: (storageWrappers as any)?.eventStorage,
     _eventPersistenceCleanup: undefined, // Will be set by setupEventPersistence
+    _activityListenerCleanup: undefined, // Will be set by setupWorldActivityListener
   };
 
-  // Setup event persistence
+  // Setup event persistence and activity listener
   if (world.eventStorage) {
-    const { setupEventPersistence } = await import('./events.js');
+    const { setupEventPersistence, setupWorldActivityListener } = await import('./events.js');
     world._eventPersistenceCleanup = setupEventPersistence(world);
+    world._activityListenerCleanup = setupWorldActivityListener(world);
   }
 
   return world;

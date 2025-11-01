@@ -62,6 +62,7 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-11-01: Chat title updates moved from SSE end to world idle event (prevents duplicate updates with multiple agents)
  * - 2025-11-01: Removed SYNC_EVENT_PERSISTENCE flag - event persistence now always synchronous/awaitable
  * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
  * - 2025-10-30: Fixed replyToMessageId missing in frontend - added parameter to publish functions
@@ -350,29 +351,6 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     logEvent: data.logEvent
   };
   world.eventEmitter.emit('sse', sseEvent);
-
-  // Post-stream title update: when we get an 'end' SSE for a streaming response
-  if (sseEvent.type === 'end') {
-    queueMicrotask(async () => {
-      try {
-        if (!world.currentChatId) return;
-        const chat = world.chats.get(world.currentChatId);
-        if (!chat) return;
-        // Only update if still default title
-        if (chat.name === 'New Chat') {
-          const title = await generateChatTitleFromMessages(world, '');
-          if (title) {
-            chat.name = title;
-            const storage = await getStorageWrappers();
-            await storage.updateChatData(world.id, world.currentChatId, { name: title });
-            publishEvent(world, 'system', `chat-title-updated`);
-          }
-        }
-      } catch (err) {
-        loggerChatTitle.warn('Post-stream title update failed', { error: err instanceof Error ? err.message : err });
-      }
-    });
-  }
 }
 
 /**
@@ -944,9 +922,40 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
  */
 export function subscribeWorldToMessages(world: World): () => void {
   return subscribeToMessages(world, async (_event: WorldMessageEvent) => {
-    // No-op for pre-stream title updates to avoid mid-stream refresh race conditions.
-    // Title updates will be handled post-stream on SSE 'end'.
+    // No-op - title updates handled by setupWorldActivityListener on idle
   });
+}
+
+/**
+ * Setup world activity listener for chat title updates
+ * Triggers title generation when world becomes idle (pendingOperations === 0)
+ */
+export function setupWorldActivityListener(world: World): () => void {
+  const handler = async (event: any) => {
+    // Only update title when world becomes idle (all agents done)
+    if (event.type === 'idle' && event.pendingOperations === 0) {
+      try {
+        if (!world.currentChatId) return;
+        const chat = world.chats.get(world.currentChatId);
+        if (!chat) return;
+        // Only update if still default title
+        if (chat.name === 'New Chat') {
+          const title = await generateChatTitleFromMessages(world, '');
+          if (title) {
+            chat.name = title;
+            const storage = await getStorageWrappers();
+            await storage.updateChatData(world.id, world.currentChatId, { name: title });
+            publishEvent(world, 'system', `chat-title-updated`);
+          }
+        }
+      } catch (err) {
+        loggerChatTitle.warn('Activity-based title update failed', { error: err instanceof Error ? err.message : err });
+      }
+    }
+  };
+
+  world.eventEmitter.on('world', handler);
+  return () => world.eventEmitter.off('world', handler);
 }
 
 /**

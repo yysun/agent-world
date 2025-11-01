@@ -1,15 +1,16 @@
 /**
- * Post-stream Chat Title Update Tests
+ * World Activity-Based Chat Title Update Tests
  *
- * Verifies that chat title is updated after streaming completes (SSE 'end'),
- * using current chat's stored messages and not causing mid-stream refresh.
+ * Verifies that chat title is updated when world becomes idle (pendingOperations === 0),
+ * using current chat's stored messages. This ensures title updates occur only after
+ * all agents have finished responding, preventing duplicate updates.
  */
 
 import { describe, test, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { World, Agent } from '../../../core/types';
 import { LLMProvider } from '../../../core/types';
-import { publishSSE, subscribeWorldToMessages } from '../../../core/events';
+import { setupWorldActivityListener } from '../../../core/events';
 
 vi.mock('../../../core/storage/storage-factory', () => ({
   createStorageWithWrappers: async () => ({
@@ -25,7 +26,7 @@ vi.mock('../../../core/llm-manager', () => ({
   generateAgentResponse: vi.fn(async () => 'Generated Chat Title')
 }));
 
-describe('Post-stream title update', () => {
+describe('World activity-based title update', () => {
   let world: World;
   let agent: Agent;
 
@@ -62,13 +63,21 @@ describe('Post-stream title update', () => {
       lastActive: new Date(),
     } as any;
 
-    // Ensure message subscription installed (no-op for pre-stream in current impl)
-    subscribeWorldToMessages(world);
+    // Setup world activity listener
+    setupWorldActivityListener(world);
   });
 
-  test('updates title on SSE end when chat is New Chat', async () => {
-    // Fire SSE end event (mimic end of streaming)
-    publishSSE(world, { agentName: agent.id, type: 'end' });
+  test('updates title on idle when chat is New Chat', async () => {
+    // Fire idle event (world finished all processing)
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id'
+    });
 
     // Allow microtask to run and wait for async title generation
     await new Promise(r => setTimeout(r, 10));
@@ -83,9 +92,36 @@ describe('Post-stream title update', () => {
     const chat = world.chats.get('chat-1')!;
     chat.name = 'Existing Title';
 
-    publishSSE(world, { agentName: agent.id, type: 'end' });
-    await new Promise(r => setTimeout(r, 0));
+    world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: [],
+      queue: { queueSize: 0, isProcessing: false, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id'
+    });
+
+    await new Promise(r => setTimeout(r, 10));
 
     expect(world.chats.get('chat-1')!.name).toBe('Existing Title');
+  });
+
+  test('does not update title on non-idle events', async () => {
+    // Fire response-start event (not idle)
+    world.eventEmitter.emit('world', {
+      type: 'response-start',
+      pendingOperations: 1,
+      activityId: 1,
+      timestamp: new Date().toISOString(),
+      activeSources: ['agent-1'],
+      queue: { queueSize: 0, isProcessing: true, completedCalls: 0, failedCalls: 0 },
+      messageId: 'test-msg-id'
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Title should remain unchanged
+    expect(world.chats.get('chat-1')!.name).toBe('New Chat');
   });
 });
