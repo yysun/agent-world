@@ -27,26 +27,26 @@ Implementation plan for asynchronous world message processing with WebSocket-bas
 
 ## Simplified Phase Structure (5 Phases, 23 Days)
 
-### Phase 1: Storage Layer (Days 1-5)
+### Phase 1: Storage Layer (Days 1-5) ✅ COMPLETE
 Event sequences + message queue + atomic operations
 
-### Phase 2: Network Layer (Days 6-10)
-WebSocket server + protocol + connection management
+### Phase 2: Message Queue Infrastructure (Days 6-8) ✅ COMPLETE
+Queue storage + migration + per-world locking + heartbeat monitoring
 
-### Phase 3: Business Logic (Days 11-16)
-Queue processor + event replay + command abstraction
+### Phase 3: WebSocket Server (Days 9-11) ✅ COMPLETE
+WebSocket server + protocol + connection management + event broadcasting
 
-### Phase 4: Client & Testing (Days 17-21)
-Client library + comprehensive testing + performance validation
+### Phase 4: Queue Processor (Days 12-14) ✅ COMPLETE
+Async worker + world integration + event streaming + error handling
 
 ### Phase 5: Deployment (Days 22-23)
 Documentation + monitoring + rollout
 
 ---
 
-## Phase 1: Storage Layer (Days 1-5)
+## Phase 1: Storage Layer (Days 1-5) ✅ COMPLETE
 
-### Task 1.1: Atomic Sequence Number Generation
+### Task 1.1: Atomic Sequence Number Generation ✅
 
 **CRITICAL FIX**: Use dedicated sequences table with atomic increment to prevent race conditions.
 
@@ -106,18 +106,18 @@ async saveEvent(event: StoredEvent): Promise<void> {
 ```
 
 **Tasks**:
-- [ ] Update `StoredEvent` interface with `seq: number`
-- [ ] Create migration script for schema changes
-- [ ] Implement atomic increment in SQLite storage
-- [ ] Implement in Memory storage (in-memory counter)
-- [ ] Implement in File storage (similar to SQLite)
-- [ ] Add migration script to backfill existing events
-- [ ] Unit test: Concurrent inserts get unique sequences
-- [ ] Unit test: Sequences independent per (worldId, chatId)
+- [x] Update `StoredEvent` interface with `seq: number`
+- [x] Create migration script for schema changes
+- [x] Implement atomic increment in SQLite storage
+- [x] Implement in Memory storage (in-memory counter)
+- [x] Implement in File storage (similar to SQLite)
+- [x] Add migration script to backfill existing events
+- [x] Unit test: Concurrent inserts get unique sequences
+- [x] Unit test: Sequences independent per (worldId, chatId)
 
-**Deliverable**: Race-condition-free sequence generation
+**Deliverable**: Race-condition-free sequence generation ✅ ✅
 
-### Task 1.2: Enhance Query API for Replay
+### Task 1.2: Enhance Query API for Replay ✅
 **File**: `core/storage/eventStorage/types.ts`
 
 ```typescript
@@ -131,17 +131,17 @@ export interface GetEventsOptions {
 ```
 
 **Implementation**:
-- [ ] Update `getEventsByWorldAndChat()` to support `sinceSeq` filtering
-- [ ] Optimize query with index on `(worldId, chatId, seq)`
-- [ ] Add `getLatestSeq(worldId, chatId)` helper method
-- [ ] Add `getEventRange(worldId, chatId, fromSeq, toSeq)` for bounded replay
+- [x] Update `getEventsByWorldAndChat()` to support `sinceSeq` filtering
+- [x] Optimize query with index on `(worldId, chatId, seq)`
+- [x] Add `getLatestSeq(worldId, chatId)` helper method
+- [x] Add `getEventRange(worldId, chatId, fromSeq, toSeq)` for bounded replay
 
 **Testing**:
-- [ ] Unit tests: Query by sequence range returns correct events
-- [ ] Performance tests: Replay 1000 events < 500ms
-- [ ] Edge case tests: Empty chat, non-existent sequences
+- [x] Unit tests: Query by sequence range returns correct events
+- [x] Performance tests: Replay 1000 events < 500ms
+- [x] Edge case tests: Empty chat, non-existent sequences
 
-**Deliverable**: Efficient event replay queries
+**Deliverable**: Efficient event replay queries ✅
 
 ### Task 1.3: Update Event Persistence Setup
 **File**: `core/events.ts` - `setupEventPersistence()`
