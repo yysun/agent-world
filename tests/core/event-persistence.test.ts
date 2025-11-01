@@ -70,10 +70,10 @@ describe('Event Persistence Integration', () => {
       content: 'Starting generation'
     });
 
-    // Query for SSE events (chatId is null for SSE)
+    // Query for SSE events (now use currentChatId since they default to it)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
       worldId,
-      null,
+      world!.currentChatId,
       { types: ['sse'] }
     );
 
@@ -81,6 +81,7 @@ describe('Event Persistence Integration', () => {
     const sseEvent = events.find((e: any) => e.id === 'msg-sse-123');
     expect(sseEvent).toBeDefined();
     expect(sseEvent!.type).toBe('sse');
+    expect(sseEvent!.chatId).toBe(world!.currentChatId);
     expect(sseEvent!.payload.agentName).toBe('test-agent');
     expect(sseEvent!.payload.type).toBe('start');
   });
@@ -100,16 +101,17 @@ describe('Event Persistence Integration', () => {
       }
     });
 
-    // Query for tool events
+    // Query for tool events (now use currentChatId)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
       worldId,
-      null,
+      world!.currentChatId,
       { types: ['tool'] }
     );
 
     expect(events.length).toBeGreaterThan(0);
     const toolEvent = events.find((e: any) => e.id === 'msg-tool-456');
     expect(toolEvent).toBeDefined();
+    expect(toolEvent!.chatId).toBe(world!.currentChatId);
     expect(toolEvent!.type).toBe('tool');
     expect(toolEvent!.payload.agentName).toBe('test-agent');
     expect(toolEvent!.payload.toolExecution.toolName).toBe('test-tool');
@@ -124,15 +126,16 @@ describe('Event Persistence Integration', () => {
     // Give a small delay for async persistence
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Query for system events
+    // Query for system events (now use currentChatId)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
       worldId,
-      null,
+      world!.currentChatId,
       { types: ['system'] }
     );
 
     expect(events.length).toBeGreaterThan(0);
     const systemEvent = events[events.length - 1]; // Get last event
+    expect(systemEvent.chatId).toBe(world!.currentChatId);
     expect(systemEvent.type).toBe('system');
     expect(systemEvent.payload.message).toBe('System initialized');
   });
@@ -202,10 +205,10 @@ describe('Event Persistence Integration', () => {
     expect(messageEvents).toHaveLength(2);
     expect(messageEvents.every((e: any) => e.type === 'message')).toBe(true);
 
-    // Query only SSE events (chatId is null)
+    // Query for SSE events only (now use currentChatId)
     const sseEvents = await world!.eventStorage!.getEventsByWorldAndChat(
       worldId,
-      null,
+      world!.currentChatId,
       { types: ['sse'] }
     );
 
@@ -329,5 +332,78 @@ describe('Event Persistence Integration', () => {
     // Events should be empty (or whatever was there before)
     // The test is that it doesn't crash when persistence is disabled
     expect(events).toBeDefined();
+  });
+
+  // ChatId defaults tests
+  describe('ChatId Defaults', () => {
+    test('SSE events default to world.currentChatId', async () => {
+      const world = await getWorld(worldId);
+      const chatId = world!.currentChatId!;
+
+      publishSSE(world!, {
+        agentName: 'agent',
+        type: 'chunk',
+        messageId: 'sse-default-chatid'
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['sse'] });
+      const sseEvent = events.find((e: any) => e.id === 'sse-default-chatid');
+
+      expect(sseEvent).toBeDefined();
+      expect(sseEvent!.chatId).toBe(chatId);
+    });
+
+    test('Tool events default to world.currentChatId', async () => {
+      const world = await getWorld(worldId);
+      const chatId = world!.currentChatId!;
+
+      publishToolEvent(world!, {
+        agentName: 'agent',
+        type: 'tool-result',
+        messageId: 'tool-default-chatid',
+        toolExecution: { toolName: 'test', toolCallId: 'call-1', result: {} }
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['tool'] });
+      const toolEvent = events.find((e: any) => e.id === 'tool-default-chatid');
+
+      expect(toolEvent).toBeDefined();
+      expect(toolEvent!.chatId).toBe(chatId);
+    });
+
+    test('System events default to world.currentChatId', async () => {
+      const world = await getWorld(worldId);
+      const chatId = world!.currentChatId!;
+
+      publishEvent(world!, 'system', 'test-message');
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['system'] });
+
+      expect(events.length).toBeGreaterThan(0);
+      expect(events[0].chatId).toBe(chatId);
+    });
+
+    test('Events with null currentChatId persist as null', async () => {
+      const world = await getWorld(worldId);
+      world!.currentChatId = null;
+
+      publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-null-chatid' });
+      publishToolEvent(world!, {
+        agentName: 'agent',
+        type: 'tool-start',
+        messageId: 'tool-null-chatid',
+        toolExecution: { toolName: 'test', toolCallId: 'call-1' }
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, null);
+
+      const sseEvent = events.find((e: any) => e.id === 'sse-null-chatid');
+      const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid');
+
+      expect(sseEvent).toBeDefined();
+      expect(sseEvent!.chatId).toBeNull();
+      expect(toolEvent).toBeDefined();
+      expect(toolEvent!.chatId).toBeNull();
+    });
   });
 });

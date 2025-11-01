@@ -32,6 +32,12 @@
  * Message ID Tracking: All messages (user and assistant) include messageId and agentId for edit feature
  * Message Threading: replyToMessageId preserved through publish->SSE->frontend pipeline
  *
+ * Event Persistence:
+ * - All events (message, SSE, tool, system) automatically default chatId to world.currentChatId
+ * - Enables proper chat-based event filtering and history retrieval
+ * - Events with world.currentChatId = null persist with null chatId (for global/session-less events)
+ * - System events can override chatId by setting it explicitly in the event payload
+ *
  * Consolidation Changes (CC):
  * - Condensed verbose header documentation from 60+ lines to 15 lines
  * - Consolidated duplicate ID generation logic into single generateMessageId helper
@@ -56,6 +62,7 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
  * - 2025-10-30: Fixed replyToMessageId missing in frontend - added parameter to publish functions
  * - 2025-10-30: Fixed premature idle signal - removed activity tracking from message publishing
  * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
@@ -171,7 +178,7 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: event.messageId,
       worldId: world.id,
-      chatId: null, // SSE events are not chat-specific
+      chatId: world.currentChatId || null, // Default to current chat
       type: 'sse',
       payload: {
         agentName: event.agentName,
@@ -203,7 +210,7 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: event.messageId || null,
       worldId: world.id,
-      chatId: null,
+      chatId: world.currentChatId || null, // Default to current chat
       type: 'tool',
       payload: isActivityEvent ? {
         activityType: event.type,
@@ -239,7 +246,7 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: event.messageId,
       worldId: world.id,
-      chatId: null,
+      chatId: event.chatId !== undefined ? event.chatId : (world.currentChatId || null), // Default to current chat
       type: 'system',
       payload: event.content,
       meta: {},
@@ -281,7 +288,8 @@ export function publishEvent(world: World, type: string, content: any): void {
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
-    messageId: generateId()
+    messageId: generateId(),
+    chatId: world.currentChatId || null
   };
   world.eventEmitter.emit(type, event);
 }

@@ -479,6 +479,7 @@ export interface WorldSystemEvent {
   content: string;
   timestamp: Date;
   messageId: string;
+  chatId?: string | null; // Optional chat context for system events
 }
 
 // Typed Event Bridge Utilities
