@@ -909,6 +909,70 @@ async function selectChat(world: World, chats: any[], currentChatId: string | nu
   });
 }
 
+// Storage type selection
+async function selectStorageType(rl: readline.Interface): Promise<'file' | 'sqlite' | null> {
+  const storageTypes = ['file', 'sqlite'];
+
+  console.log(`\n${boldMagenta('Select storage type:')}`);
+  console.log(`  ${yellow('0.')} ${cyan('Cancel')}`);
+  storageTypes.forEach((type, index) => {
+    console.log(`  ${yellow(`${index + 1}.`)} ${cyan(type)}`);
+  });
+
+  return new Promise((resolve) => {
+    function askForSelection() {
+      rl.question(`\n${boldMagenta('Select storage type (number or name), or 0 to cancel:')} `, (answer) => {
+        const trimmed = answer.trim().toLowerCase();
+        const num = parseInt(trimmed);
+
+        if (num === 0) {
+          resolve(null);
+          return;
+        }
+
+        if (!isNaN(num) && num >= 1 && num <= storageTypes.length) {
+          resolve(storageTypes[num - 1] as 'file' | 'sqlite');
+          return;
+        }
+
+        if (trimmed === 'file' || trimmed === 'sqlite') {
+          resolve(trimmed as 'file' | 'sqlite');
+          return;
+        }
+
+        console.log(boldRed('Invalid selection. Please try again.'));
+        askForSelection();
+      });
+    }
+
+    askForSelection();
+  });
+}
+
+// Storage path input
+async function getStoragePath(defaultPath: string, rl: readline.Interface): Promise<string | null> {
+  return new Promise((resolve) => {
+    rl.question(`\n${boldMagenta(`Enter storage folder path or press Enter for default (${defaultPath}):`)} `, (answer) => {
+      const trimmed = answer.trim();
+      if (trimmed === '') {
+        resolve(defaultPath);
+      } else {
+        resolve(trimmed);
+      }
+    });
+  });
+}
+
+// Confirm overwrite
+async function confirmOverwrite(message: string, rl: readline.Interface): Promise<boolean> {
+  return new Promise((resolve) => {
+    rl.question(`\n${boldYellow(message)} ${boldMagenta('(yes/no):')} `, (answer) => {
+      const trimmed = answer.trim().toLowerCase();
+      resolve(trimmed === 'yes' || trimmed === 'y');
+    });
+  });
+}
+
 // Interactive mode: console-based interface
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
@@ -981,7 +1045,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
     // Show usage tips
     console.log(`\n${gray('Quick Start:')}`);
-    console.log(`  ${bullet(gray('World commands:'))} ${cyan('/world list')}, ${cyan('/world create')}, ${cyan('/world select')}`);
+    console.log(`  ${bullet(gray('World commands:'))} ${cyan('/world list')}, ${cyan('/world create')}, ${cyan('/world select')}, ${cyan('/world save')}`);
     console.log(`  ${bullet(gray('Agent commands:'))} ${cyan('/agent list')}, ${cyan('/agent create Ava')}, ${cyan('/agent update Ava')}`);
     console.log(`  ${bullet(gray('Chat commands:'))} ${cyan('/chat list')}, ${cyan('/chat select')}, ${cyan('/chat create')}, ${cyan('/chat export')}`);
     console.log(`  ${bullet(gray('Need help?'))} ${cyan('/help world')}, ${cyan('/help agent')}, ${cyan('/help chat')}`);
@@ -1126,6 +1190,84 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
           }
 
           // Show prompt immediately after chat selection
+          console.log(); // Empty line before prompt
+          rl.prompt();
+          return;
+        }
+
+        // Handle world save command
+        if (result.data?.saveWorld && worldState?.world) {
+          try {
+            // Select storage type
+            const storageType = await selectStorageType(rl);
+            if (!storageType) {
+              console.log(error('World save cancelled.'));
+              console.log(); // Empty line before prompt
+              rl.prompt();
+              return;
+            }
+
+            // Get default path and ask for custom path
+            const { getDefaultRootPath } = await import('../core/storage/storage-factory.js');
+            const defaultPath = getDefaultRootPath();
+            const targetPath = await getStoragePath(defaultPath, rl);
+
+            if (!targetPath) {
+              console.log(error('World save cancelled.'));
+              console.log(); // Empty line before prompt
+              rl.prompt();
+              return;
+            }
+
+            // Check if target exists and confirm overwrite
+            const { checkTargetExists } = await import('./commands.js');
+            const existsInfo = await checkTargetExists(targetPath, storageType, worldState.world.id);
+
+            if (existsInfo.exists) {
+              console.log(yellow(`\n⚠ Warning: ${existsInfo.message}`));
+              const confirmed = await confirmOverwrite('Do you want to overwrite the existing data?', rl);
+
+              if (!confirmed) {
+                console.log(error('World save cancelled.'));
+                console.log(); // Empty line before prompt
+                rl.prompt();
+                return;
+              }
+
+              // Delete existing data before saving
+              const { deleteExistingData } = await import('./commands.js');
+              const deleteResult = await deleteExistingData(targetPath, storageType, worldState.world.id);
+              if (!deleteResult.success) {
+                console.log(error(`Failed to delete existing data: ${deleteResult.error}`));
+                console.log(); // Empty line before prompt
+                rl.prompt();
+                return;
+              }
+              console.log(gray('Existing data deleted.'));
+            }
+
+            // Perform the actual save
+            const { performWorldSave } = await import('./commands.js');
+            const saveResult = await performWorldSave(worldState.world, storageType, targetPath);
+
+            if (saveResult.success) {
+              console.log(success(saveResult.message));
+              if (saveResult.data) {
+                console.log(`${gray('Storage Type:')} ${yellow(saveResult.data.storageType)}`);
+                console.log(`${gray('Path:')} ${yellow(saveResult.data.path)}`);
+                console.log(`${gray('Agents:')} ${yellow(saveResult.data.agentCount)} ${gray('| Chats:')} ${yellow(saveResult.data.chatCount)} ${gray('| Events:')} ${yellow(saveResult.data.eventCount || 0)}`);
+              }
+            } else {
+              console.log(error(saveResult.message));
+              if (saveResult.error) {
+                console.log(error(saveResult.error));
+              }
+            }
+          } catch (err) {
+            console.error(error(`Error saving world: ${err instanceof Error ? err.message : 'Unknown error'}`));
+          }
+
+          // Show prompt immediately after save operation
           console.log(); // Empty line before prompt
           rl.prompt();
           return;

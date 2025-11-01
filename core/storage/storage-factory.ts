@@ -775,7 +775,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
     // Add file-based event storage
     const { createFileEventStorage } = await import('./eventStorage/index.js');
     (storage as any).eventStorage = createFileEventStorage({
-      baseDir: path.join(config.rootPath, 'events')
+      baseDir: config.rootPath
     });
   }
 

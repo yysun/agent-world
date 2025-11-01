@@ -11,6 +11,7 @@
  * - World instance isolation and proper cleanup during refresh
  * - Short command aliases for improved usability
  * - Context-sensitive commands that adapt based on world selection
+ * - World data persistence to File Storage or SQLite with folder selection
  *
  * Available Commands:
  * - Legacy: new (create-world), add (create-agent), clear, select
@@ -19,6 +20,7 @@
  * - Short Explicit: lsw (list-worlds), lsa (list-agents)
  * - Full CRUD: list-worlds, create-world, show-world, update-world, delete-world
  * - Full CRUD: list-agents, add-agent, show-agent, update-agent, delete-agent
+ * - World Save: save (save world to File or SQLite storage with folder selection)
  *
  * Short Alias System:
  * - Context-sensitive aliases adapt behavior based on whether a world is selected
@@ -33,6 +35,14 @@
  * - Event subscriptions are cleanly transferred to new world instances
  * - Prevents memory leaks and ensures event isolation between old/new worlds
  * - Agent persistence maintained across refresh cycles
+ *
+ * World Save Feature:
+ * - Interactive storage type selection (File or SQLite)
+ * - Custom folder path with default option
+ * - Saves world, all agents, all chat histories, and all events
+ * - Creates target directory if it doesn't exist
+ * - Supports migration between storage types
+ * - Event history preserved across different storage backends
  */
 
 import {
@@ -58,6 +68,8 @@ import {
   deleteChat,
   getMemory
 } from '../core/index.js';
+import { createStorage, getDefaultRootPath } from '../core/storage/storage-factory.js';
+import type { StorageConfig } from '../core/storage/storage-factory.js';
 import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
 import readline from 'readline';
@@ -336,6 +348,15 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'file', required: false, description: 'Output file path (defaults to [world]-timestamp.md)', type: 'string' }
     ],
     aliases: ['export'],
+    category: 'world'
+  },
+  'world save': {
+    type: 'saveWorld',
+    requiresWorld: true,
+    description: 'Save world data to File Storage or SQL Storage with folder selection (overwrites existing data with confirmation)',
+    usage: '/world save',
+    parameters: [],
+    aliases: ['save'],
     category: 'world'
   },
   'agent list': {
@@ -786,6 +807,191 @@ async function exportChatToMarkdownFile(
     return {
       success: false,
       message: 'Failed to export chat',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+// Save world to different storage (File or SQLite)
+async function saveWorldToStorage(world: World): Promise<CLIResponse> {
+  try {
+    // This function returns data to trigger interactive selection in CLI
+    // The actual save will be handled by the CLI after user selection
+    return {
+      success: true,
+      message: 'Opening storage selection...',
+      data: {
+        saveWorld: true,
+        worldId: world.id,
+        worldName: world.name
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to initiate world save',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+// Check if target storage location exists
+export async function checkTargetExists(
+  targetPath: string,
+  storageType: 'file' | 'sqlite',
+  worldId: string
+): Promise<{ exists: boolean; message: string }> {
+  try {
+    if (storageType === 'sqlite') {
+      const dbPath = path.join(targetPath, 'database.db');
+      if (fs.existsSync(dbPath)) {
+        return {
+          exists: true,
+          message: `SQLite database already exists at ${dbPath}`
+        };
+      }
+    } else {
+      // For file storage, check if world folder exists
+      const worldPath = path.join(targetPath, worldId);
+      if (fs.existsSync(worldPath)) {
+        return {
+          exists: true,
+          message: `World folder already exists at ${worldPath}`
+        };
+      }
+    }
+    return { exists: false, message: '' };
+  } catch (error) {
+    return { exists: false, message: '' };
+  }
+}
+
+// Delete existing data at target location
+export async function deleteExistingData(
+  targetPath: string,
+  storageType: 'file' | 'sqlite',
+  worldId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (storageType === 'sqlite') {
+      const dbPath = path.join(targetPath, 'database.db');
+      if (fs.existsSync(dbPath)) {
+        // Delete the database file and related files
+        fs.unlinkSync(dbPath);
+        // Also delete WAL and SHM files if they exist
+        const walPath = `${dbPath}-wal`;
+        const shmPath = `${dbPath}-shm`;
+        if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
+        if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath);
+      }
+    } else {
+      // For file storage, delete the world folder
+      const worldPath = path.join(targetPath, worldId);
+      if (fs.existsSync(worldPath)) {
+        fs.rmSync(worldPath, { recursive: true, force: true });
+      }
+    }
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+// Actual save implementation called from CLI after user selection
+export async function performWorldSave(
+  world: World,
+  storageType: 'file' | 'sqlite',
+  targetPath: string
+): Promise<CLIResponse> {
+  try {
+
+    // Ensure directory exists
+    if (!fs.existsSync(targetPath)) {
+      fs.mkdirSync(targetPath, { recursive: true });
+    }
+
+    // Create storage configuration
+    const config: StorageConfig = {
+      type: storageType,
+      rootPath: targetPath,
+      sqlite: storageType === 'sqlite'
+        ? {
+          database: path.join(targetPath, 'database.db'),
+          enableWAL: true,
+          busyTimeout: 30000,
+          cacheSize: -64000,
+          enableForeignKeys: true
+        }
+        : undefined
+    };
+
+    // Create storage instance
+    const storage = await createStorage(config);
+
+    // Save world data
+    await storage.saveWorld(world);
+
+    // Save all agents
+    const agents = await listAgents(world.id);
+    for (const agent of agents) {
+      await storage.saveAgent(world.id, agent);
+    }
+
+    // Save all chats
+    const chats = await listChats(world.id);
+    for (const chat of chats) {
+      await storage.saveChatData(world.id, chat);
+    }
+
+    // Save all events if eventStorage is available on both source and target
+    let eventCount = 0;
+    if (world.eventStorage && (storage as any).eventStorage) {
+      try {
+        const sourceEventStorage = world.eventStorage;
+        const targetEventStorage = (storage as any).eventStorage;
+
+        // Get events for world-level context (chatId = null)
+        const worldEvents = await sourceEventStorage.getEventsByWorldAndChat(world.id, null);
+        if (worldEvents && worldEvents.length > 0) {
+          await targetEventStorage.saveEvents(worldEvents);
+          eventCount = worldEvents.length;
+        }
+
+        // Get events for each specific chat
+        for (const chat of chats) {
+          const chatEvents = await sourceEventStorage.getEventsByWorldAndChat(world.id, chat.id);
+          if (chatEvents && chatEvents.length > 0) {
+            await targetEventStorage.saveEvents(chatEvents);
+            eventCount += chatEvents.length;
+          }
+        }
+      } catch (error) {
+        // Log but don't fail the save if events can't be copied
+        console.warn(`Warning: Failed to copy events: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return {
+      success: true,
+      message: `World '${world.name}' saved successfully to ${storageType} storage at: ${targetPath}`,
+      data: {
+        worldName: world.name,
+        worldId: world.id,
+        storageType,
+        path: targetPath,
+        agentCount: agents.length,
+        chatCount: chats.length,
+        eventCount
+      }
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      message: 'Failed to save world to storage',
       error: error instanceof Error ? error.message : String(error)
     };
   }
@@ -1584,6 +1790,22 @@ export async function processCLICommand(
           cliResponse = {
             success: false,
             message: 'Failed to export world',
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+        break;
+
+      case 'saveWorld':
+        {
+          const worldError = requireWorldOrError(world, command);
+          if (worldError) return worldError;
+        }
+        try {
+          cliResponse = await saveWorldToStorage(world!);
+        } catch (error) {
+          cliResponse = {
+            success: false,
+            message: 'Failed to save world',
             error: error instanceof Error ? error.message : String(error)
           };
         }
