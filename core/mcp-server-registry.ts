@@ -39,6 +39,24 @@
  * - Sequence tracking: Tool call dependencies and execution relationships
  * - Data flow debugging: Complete request/response payload logging
  *
+ * Connection Resilience & Lifecycle Management (November 2025):
+ * - Automatic reconnection: Detects connection-level errors and attempts reconnection
+ * - Retry strategy: Up to 2 attempts for transient network failures
+ * - Connection error patterns: ECONNRESET, EPIPE, socket hang up, transport errors
+ * - Race condition protection: Prevents concurrent reconnection attempts via reconnecting flag
+ * - Client lifecycle management: ClientRef pattern for tracking active connections
+ * - Proper resource cleanup: Ensures clients are closed on cache eviction and shutdown
+ * - Memory leak prevention: Cache entries deleted even if disposal fails
+ * - MCP error response detection: Handles both isError and type: 'error' formats
+ *
+ * Reconnection Logic:
+ * - Triggered automatically on connection-level errors during tool execution
+ * - First attempt: Try to reconnect and retry the operation
+ * - Second attempt: Fail and propagate error if reconnection unsuccessful
+ * - Concurrent calls: Wait for in-progress reconnection instead of creating new ones
+ * - Cache refresh: Update cache timestamp after successful reconnection
+ * - Logging: Detailed tracking of reconnection attempts and outcomes
+ *
  * MCP Communication Debug Logging (LOG_LLM_MCP=debug):
  * - Server connection attempts with transport and configuration details
  * - Tool list requests and responses with full payload data
@@ -48,6 +66,7 @@
  * - Raw JSON payloads for deep debugging of MCP communication
  * - Connection establishment and transport creation logging
  * - Server registration configuration details
+ * - Reconnection attempts and retry logic execution
  *
  * MCP Tool Execution Logging (LOG_LLM_MCP=debug):
  * - Tool execution performance metrics with millisecond precision
@@ -58,6 +77,7 @@
  * - Argument validation and presence checking
  * - Result preview for debugging without exposing full content
  * - Complete request/response payload logging for troubleshooting
+ * - Retry attempt tracking with attempt number and max attempts
  *
  * Schema Approach:
  * - Uses simplified property types (string, number, boolean, array with string items)
@@ -81,6 +101,7 @@
  * Runtime patch integration: Works with ai-sdk-patch.ts for Azure compatibility (August 2025)
  * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
+ * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  */
 
 import { createHash } from 'crypto';
@@ -279,7 +300,10 @@ export type MCPServerConfig = {
   headers?: Record<string, string>;
 };
 
-type ClientRef = { current: Client | null };
+type ClientRef = {
+  current: Client | null;
+  reconnecting: Promise<void> | null;
+};
 type ReconnectClient = (reason: string) => Promise<void>;
 
 export interface MCPServerInstance {
@@ -395,9 +419,19 @@ async function disposeToolCacheEntry(entry: ToolCacheEntry, reason: string): Pro
 async function disposeAllToolCacheEntries(reason: string): Promise<number> {
   let disposed = 0;
   for (const [key, entry] of Array.from(toolsCache.entries())) {
-    await disposeToolCacheEntry(entry, reason);
-    toolsCache.delete(key);
-    disposed++;
+    try {
+      await disposeToolCacheEntry(entry, reason);
+    } catch (error) {
+      logger.error(`Failed to dispose cache entry for ${entry.serverName}`, {
+        serverName: entry.serverName,
+        reason,
+        error: error instanceof Error ? error.message : error
+      });
+    } finally {
+      // Always delete from cache to prevent memory leaks
+      toolsCache.delete(key);
+      disposed++;
+    }
   }
   return disposed;
 }
@@ -702,7 +736,7 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
     transport: serverConfig.transport
   });
 
-  const clientRef: ClientRef = { current: null };
+  const clientRef: ClientRef = { current: null, reconnecting: null };
   let cacheEntry: ToolCacheEntry | null = null;
 
   try {
@@ -710,32 +744,50 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
     clientRef.current = await connectMCPServer(serverConfig);
 
     const reconnectClient: ReconnectClient = async (reason: string) => {
-      logger.warn(`Reconnecting MCP client after failure`, {
-        serverName: serverConfig.name,
-        reason
-      });
+      // Prevent concurrent reconnection attempts
+      if (clientRef.reconnecting) {
+        logger.debug(`Reconnection already in progress, waiting...`, {
+          serverName: serverConfig.name,
+          reason
+        });
+        await clientRef.reconnecting;
+        return;
+      }
 
-      const previousClient = clientRef.current;
-      clientRef.current = null;
-      await safelyCloseClient(previousClient, {
-        serverName: serverConfig.name,
-        reason: `${reason}-reconnect`
-      });
+      clientRef.reconnecting = (async () => {
+        logger.warn(`Reconnecting MCP client after failure`, {
+          serverName: serverConfig.name,
+          reason
+        });
+
+        const previousClient = clientRef.current;
+        clientRef.current = null;
+        await safelyCloseClient(previousClient, {
+          serverName: serverConfig.name,
+          reason: `${reason}-reconnect`
+        });
+
+        try {
+          const newClient = await connectMCPServer(serverConfig);
+          clientRef.current = newClient;
+
+          if (cacheEntry) {
+            cacheEntry.cachedAt = new Date();
+          }
+        } catch (reconnectError) {
+          logger.error(`Failed to reconnect MCP client`, {
+            serverName: serverConfig.name,
+            reason,
+            error: reconnectError instanceof Error ? reconnectError.message : reconnectError
+          });
+          throw reconnectError;
+        }
+      })();
 
       try {
-        const newClient = await connectMCPServer(serverConfig);
-        clientRef.current = newClient;
-
-        if (cacheEntry) {
-          cacheEntry.cachedAt = new Date();
-        }
-      } catch (reconnectError) {
-        logger.error(`Failed to reconnect MCP client`, {
-          serverName: serverConfig.name,
-          reason,
-          error: reconnectError instanceof Error ? reconnectError.message : reconnectError
-        });
-        throw reconnectError;
+        await clientRef.reconnecting;
+      } finally {
+        clientRef.reconnecting = null;
       }
     };
 
@@ -906,10 +958,9 @@ export async function mcpToolsToAiTools(
           requestPayload: JSON.stringify(requestPayload, null, 2)
         });
 
-        let attempt = 0;
         const maxAttempts = 2;
 
-        while (attempt < maxAttempts) {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
           try {
             const res = await ensureClient().callTool(requestPayload);
 
@@ -985,15 +1036,18 @@ export async function mcpToolsToAiTools(
           } catch (error) {
             const duration = performance.now() - startTime;
             const errorMessage = error instanceof Error ? error.message : String(error);
+            const isLastAttempt = attempt === maxAttempts - 1;
+            const shouldRetry = !isLastAttempt && isConnectionLevelError(error);
 
-            if (attempt === 0 && isConnectionLevelError(error)) {
-              attempt++;
+            if (shouldRetry) {
               logger.warn(`MCP tool execution detected transport issue - attempting reconnect`, {
                 executionId,
                 serverName,
                 toolName: t.name,
                 toolKey: key,
                 status: 'retrying',
+                attempt: attempt + 1,
+                maxAttempts,
                 duration: Math.round(duration * 100) / 100,
                 error: errorMessage,
                 transport
@@ -1662,10 +1716,9 @@ export async function executeMCPTool(
     requestPayload: JSON.stringify(requestPayload, null, 2)
   });
 
-  let attempt = 0;
   const maxAttempts = 2;
 
-  while (attempt < maxAttempts) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (!serverInstance.client) {
       throw new Error(`MCP server not available: ${serverInstance.config.name} (client disconnected)`);
     }
@@ -1721,15 +1774,18 @@ export async function executeMCPTool(
     } catch (error) {
       const duration = performance.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const isLastAttempt = attempt === maxAttempts - 1;
+      const shouldRetry = !isLastAttempt && isConnectionLevelError(error);
 
-      if (attempt === 0 && isConnectionLevelError(error)) {
-        attempt++;
+      if (shouldRetry) {
         logger.warn(`MCP tool execution detected transport issue - attempting direct reconnect`, {
           executionId,
           serverId: serverId.slice(0, 8),
           toolName,
           serverName: serverInstance.config.name,
           status: 'retrying',
+          attempt: attempt + 1,
+          maxAttempts,
           duration: Math.round(duration * 100) / 100,
           error: errorMessage
         });
