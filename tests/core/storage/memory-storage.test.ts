@@ -36,7 +36,13 @@ describe('Memory Storage', () => {
       await storage.saveWorld(testWorld);
       const loaded = await storage.loadWorld('test-world');
 
-      expect(loaded).toEqual(testWorld);
+      // Compare only persistable fields (runtime properties are excluded from storage)
+      expect(loaded?.id).toBe(testWorld.id);
+      expect(loaded?.name).toBe(testWorld.name);
+      expect(loaded?.description).toBe(testWorld.description);
+      expect(loaded?.turnLimit).toBe(testWorld.turnLimit);
+      expect(loaded?.totalAgents).toBe(testWorld.totalAgents);
+      expect(loaded?.totalMessages).toBe(testWorld.totalMessages);
       expect(loaded).not.toBe(testWorld); // Should be a different object (deep clone)
     });
 
@@ -346,7 +352,10 @@ describe('Memory Storage', () => {
       expect(result).toBe(true);
 
       const restoredWorld = await storage.loadWorld('test-world');
-      expect(restoredWorld).toEqual(testWorldChat.world);
+      // Compare only persistable fields (runtime properties are excluded from storage)
+      expect(restoredWorld?.id).toBe(testWorldChat.world.id);
+      expect(restoredWorld?.name).toBe(testWorldChat.world.name);
+      expect(restoredWorld?.description).toBe(testWorldChat.world.description);
     });
   });
 

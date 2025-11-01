@@ -62,14 +62,14 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events by chatId
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['sse'] }
-      )) as StoredEvent[];
+      ) as StoredEvent[];
 
       expect(events.length).toBeGreaterThan(0);
-      const sseEvent = events.find(e => e.id === 'sse-chatid-1');
+      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-chatid-1');
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBe(chatId);
       expect(sseEvent!.type).toBe('sse');
@@ -87,6 +87,10 @@ describe('Event ChatId Defaults', () => {
         content: 'Chat 1 content'
       });
 
+      // Update chat name to prevent reuse by newChat
+      const { updateChat } = await import('../../core/managers.js');
+      await updateChat(worldId, chat1Id, { name: 'Chat 1' });
+
       // Create new chat
       world = await newChat(worldId);
       const chat2Id = world!.currentChatId!;
@@ -103,20 +107,20 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events for each chat
-      const chat1Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat1Id,
         { types: ['sse'] }
       );
-      const chat2Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat2Id,
         { types: ['sse'] }
       );
 
       // Verify events are in correct chats
-      const chat1Event = chat1Events.find((e) => e.id === 'sse-chat1');
-      const chat2Event = chat2Events.find((e) => e.id === 'sse-chat2');
+      const chat1Event = chat1Events.find((e: StoredEvent) => e.id === 'sse-chat1');
+      const chat2Event = chat2Events.find((e: StoredEvent) => e.id === 'sse-chat2');
 
       expect(chat1Event).toBeDefined();
       expect(chat1Event!.chatId).toBe(chat1Id);
@@ -124,8 +128,8 @@ describe('Event ChatId Defaults', () => {
       expect(chat2Event!.chatId).toBe(chat2Id);
 
       // Verify events don't leak across chats
-      expect(chat1Events.find((e) => e.id === 'sse-chat2')).toBeUndefined();
-      expect(chat2Events.find((e) => e.id === 'sse-chat1')).toBeUndefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'sse-chat2')).toBeUndefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'sse-chat1')).toBeUndefined();
     });
   });
 
@@ -150,14 +154,14 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events by chatId
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['tool'] }
       );
 
       expect(events.length).toBeGreaterThan(0);
-      const toolEvent = events.find((e) => e.id === 'tool-chatid-1');
+      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-chatid-1');
       expect(toolEvent).toBeDefined();
       expect(toolEvent!.chatId).toBe(chatId);
       expect(toolEvent!.type).toBe('tool');
@@ -178,6 +182,10 @@ describe('Event ChatId Defaults', () => {
         }
       });
 
+      // Update chat name to prevent reuse by newChat
+      const { updateChat } = await import('../../core/managers.js');
+      await updateChat(worldId, chat1Id, { name: 'Chat 1' });
+
       // Create new chat
       world = await newChat(worldId);
       const chat2Id = world!.currentChatId!;
@@ -196,21 +204,21 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Verify events are isolated by chat
-      const chat1Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat1Id,
         { types: ['tool'] }
       );
-      const chat2Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat2Id,
         { types: ['tool'] }
       );
 
-      expect(chat1Events.find((e) => e.id === 'tool-chat1')).toBeDefined();
-      expect(chat1Events.find((e) => e.id === 'tool-chat2')).toBeUndefined();
-      expect(chat2Events.find((e) => e.id === 'tool-chat2')).toBeDefined();
-      expect(chat2Events.find((e) => e.id === 'tool-chat1')).toBeUndefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat1')).toBeDefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat2')).toBeUndefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat2')).toBeDefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat1')).toBeUndefined();
     });
   });
 
@@ -226,7 +234,7 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events by chatId
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['system'] }
@@ -253,12 +261,12 @@ describe('Event ChatId Defaults', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const chat1Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat1Id,
         { types: ['system'] }
       );
-      const chat2Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat2Id,
         { types: ['system'] }
@@ -269,8 +277,8 @@ describe('Event ChatId Defaults', () => {
       expect(chat2Events.length).toBeGreaterThan(0);
 
       // Verify chatId is correct
-      expect(chat1Events.every((e) => e.chatId === chat1Id)).toBe(true);
-      expect(chat2Events.every((e) => e.chatId === chat2Id)).toBe(true);
+      expect(chat1Events.every((e: StoredEvent) => e.chatId === chat1Id)).toBe(true);
+      expect(chat2Events.every((e: StoredEvent) => e.chatId === chat2Id)).toBe(true);
     });
   });
 
@@ -285,13 +293,13 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['message'] }
       );
 
-      const msgEvent = events.find((e) => e.id === messageEvent.messageId);
+      const msgEvent = events.find((e: StoredEvent) => e.id === messageEvent.messageId);
       expect(msgEvent).toBeDefined();
       expect(msgEvent!.chatId).toBe(chatId);
     });
@@ -305,13 +313,13 @@ describe('Event ChatId Defaults', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['message'] }
       );
 
-      const msgEvent = events.find((e) => e.id === messageEvent.messageId);
+      const msgEvent = events.find((e: StoredEvent) => e.id === messageEvent.messageId);
       expect(msgEvent).toBeDefined();
       expect(msgEvent!.chatId).toBe(chatId);
     });
@@ -340,16 +348,16 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query all events for this chat
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId
       );
 
       // Should have all event types
-      const hasMessage = events.some((e) => e.type === 'message');
-      const hasSSE = events.some((e) => e.type === 'sse');
-      const hasTool = events.some((e) => e.type === 'tool');
-      const hasSystem = events.some((e) => e.type === 'system');
+      const hasMessage = events.some((e: StoredEvent) => e.type === 'message');
+      const hasSSE = events.some((e: StoredEvent) => e.type === 'sse');
+      const hasTool = events.some((e: StoredEvent) => e.type === 'tool');
+      const hasSystem = events.some((e: StoredEvent) => e.type === 'system');
 
       expect(hasMessage).toBe(true);
       expect(hasSSE).toBe(true);
@@ -357,7 +365,7 @@ describe('Event ChatId Defaults', () => {
       expect(hasSystem).toBe(true);
 
       // All events should have the correct chatId
-      expect(events.every((e) => e.chatId === chatId)).toBe(true);
+      expect(events.every((e: StoredEvent) => e.chatId === chatId)).toBe(true);
     });
 
     test('should filter events by type and chatId', async () => {
@@ -373,21 +381,21 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query only messages
-      const messageEvents = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const messageEvents = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['message'] }
       );
 
       // Query only SSE
-      const sseEvents = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const sseEvents = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chatId,
         { types: ['sse'] }
       );
 
-      expect(messageEvents.every((e) => e.type === 'message')).toBe(true);
-      expect(sseEvents.every((e) => e.type === 'sse')).toBe(true);
+      expect(messageEvents.every((e: StoredEvent) => e.type === 'message')).toBe(true);
+      expect(sseEvents.every((e: StoredEvent) => e.type === 'sse')).toBe(true);
       expect(messageEvents.length).toBeGreaterThanOrEqual(2);
       expect(sseEvents.length).toBeGreaterThanOrEqual(2);
     });
@@ -413,14 +421,14 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Query events with null chatId
-      const events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         null
       );
 
       // Should find events with null chatId
-      const sseEvent = events.find((e) => e.id === 'sse-no-chat');
-      const toolEvent = events.find((e) => e.id === 'tool-no-chat');
+      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-no-chat');
+      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-no-chat');
 
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBeNull();
@@ -448,23 +456,23 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Verify events are in correct chats
-      const chat1Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat1Id,
         { types: ['message'] }
       );
-      const chat2Events = (await world!.eventStorage!.getEventsByWorldAndChat(
+      const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
         worldId,
         chat2Id,
         { types: ['message'] }
       );
 
       // Chat 1 should have 2 messages
-      const chat1MessageCount = chat1Events.filter((e) => e.type === 'message').length;
+      const chat1MessageCount = chat1Events.filter((e: StoredEvent) => e.type === 'message').length;
       expect(chat1MessageCount).toBeGreaterThanOrEqual(2);
 
       // Chat 2 should have 1 message
-      const chat2MessageCount = chat2Events.filter((e) => e.type === 'message').length;
+      const chat2MessageCount = chat2Events.filter((e: StoredEvent) => e.type === 'message').length;
       expect(chat2MessageCount).toBeGreaterThanOrEqual(1);
     });
   });
