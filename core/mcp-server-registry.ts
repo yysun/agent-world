@@ -279,6 +279,9 @@ export type MCPServerConfig = {
   headers?: Record<string, string>;
 };
 
+type ClientRef = { current: Client | null };
+type ReconnectClient = (reason: string) => Promise<void>;
+
 export interface MCPServerInstance {
   id: string; // Hash of configuration for sharing
   config: MCPServerConfig;
@@ -301,6 +304,9 @@ export interface ToolCacheEntry {
   serverConfigHash: string;        // Hash of server config to detect changes
   serverName: string;              // Server name for debugging
   ttl?: number;                    // Optional TTL in milliseconds
+  clientRef: ClientRef;            // Reference to active MCP client used by cached executors
+  reconnectClient: ReconnectClient;// Reconnect handler for dropped transports
+  serverConfig: MCPServerConfig;   // Original server configuration for refresh logic
 }
 
 // === UTILITY FUNCTIONS ===
@@ -308,6 +314,93 @@ export interface ToolCacheEntry {
 // Azure OpenAI requires function names: ^[a-zA-Z0-9_\.-]+$
 const sanitize = (s: string) => s.replace(/[^\w\-\.]/g, '_');
 const nsName = (server: string, tool: string) => `${sanitize(server)}_${sanitize(tool)}`;
+
+function isMCPErrorResponse(response: any): Error | null {
+  if (!response || typeof response !== 'object') {
+    return null;
+  }
+
+  if ('isError' in response && response.isError) {
+    const err = (response as any).error;
+    const message = typeof err === 'string'
+      ? err
+      : err?.message ?? 'Unknown MCP tool error';
+    const code = typeof err === 'object' && err?.code ? ` (code: ${err.code})` : '';
+    return new Error(`MCP tool error${code}: ${message}`);
+  }
+
+  if ('type' in response && response.type === 'error') {
+    const err = (response as any).error;
+    const message = typeof err === 'string'
+      ? err
+      : err?.message ?? 'Unknown MCP tool error';
+    return new Error(`MCP tool error: ${message}`);
+  }
+
+  return null;
+}
+
+function isConnectionLevelError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  const errorCode = (error as any)?.code ? String((error as any).code).toLowerCase() : '';
+
+  const CONNECTION_KEYWORDS = [
+    'connection closed',
+    'connection reset',
+    'socket hang up',
+    'broken pipe',
+    'transport error',
+    'cannot call write after a stream was destroyed',
+    'econnreset',
+    'econnrefused',
+    'network connection lost',
+    'read epipe'
+  ];
+
+  return CONNECTION_KEYWORDS.some(keyword => lower.includes(keyword) || errorCode.includes(keyword));
+}
+
+async function safelyCloseClient(client: Client | null, context: { serverName: string; reason: string }): Promise<void> {
+  if (!client) {
+    return;
+  }
+
+  try {
+    await client.close();
+    logger.debug(`Closed MCP client`, {
+      serverName: context.serverName,
+      reason: context.reason
+    });
+  } catch (error) {
+    logger.warn(`Failed to close MCP client for ${context.serverName}`, {
+      reason: context.reason,
+      error: error instanceof Error ? error.message : error
+    });
+  }
+}
+
+async function disposeToolCacheEntry(entry: ToolCacheEntry, reason: string): Promise<void> {
+  await safelyCloseClient(entry.clientRef.current, {
+    serverName: entry.serverName,
+    reason
+  });
+  entry.clientRef.current = null;
+}
+
+async function disposeAllToolCacheEntries(reason: string): Promise<number> {
+  let disposed = 0;
+  for (const [key, entry] of Array.from(toolsCache.entries())) {
+    await disposeToolCacheEntry(entry, reason);
+    toolsCache.delete(key);
+    disposed++;
+  }
+  return disposed;
+}
 
 // === TOOL CACHE KEY FUNCTIONS ===
 
@@ -363,21 +456,22 @@ function isCacheValid(cached: ToolCacheEntry, currentConfig: MCPServerConfig): b
 /**
  * Evict oldest cache entries when cache size exceeds limit
  */
-function evictOldestCacheEntries(): void {
+async function evictOldestCacheEntries(): Promise<void> {
   if (toolsCache.size <= MAX_CACHE_ENTRIES) return;
 
   const entries = Array.from(toolsCache.entries())
     .sort(([, a], [, b]) => a.cachedAt.getTime() - b.cachedAt.getTime());
 
   const toEvict = entries.slice(0, entries.length - MAX_CACHE_ENTRIES);
-  toEvict.forEach(([key, entry]) => {
+  for (const [key, entry] of toEvict) {
+    await disposeToolCacheEntry(entry, 'cache-eviction');
     toolsCache.delete(key);
     logger.debug(`Evicted old tools cache entry: ${entry.serverName}`, {
       serverName: entry.serverName,
       cachedAt: entry.cachedAt.toISOString(),
       age: Date.now() - entry.cachedAt.getTime()
     });
-  });
+  }
 }
 
 // === AZURE OPENAI COMPATIBILITY ===
@@ -608,26 +702,68 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
     transport: serverConfig.transport
   });
 
+  const clientRef: ClientRef = { current: null };
+  let cacheEntry: ToolCacheEntry | null = null;
+
   try {
     // Create ephemeral connection
-    const client = await connectMCPServer(serverConfig);
+    clientRef.current = await connectMCPServer(serverConfig);
+
+    const reconnectClient: ReconnectClient = async (reason: string) => {
+      logger.warn(`Reconnecting MCP client after failure`, {
+        serverName: serverConfig.name,
+        reason
+      });
+
+      const previousClient = clientRef.current;
+      clientRef.current = null;
+      await safelyCloseClient(previousClient, {
+        serverName: serverConfig.name,
+        reason: `${reason}-reconnect`
+      });
+
+      try {
+        const newClient = await connectMCPServer(serverConfig);
+        clientRef.current = newClient;
+
+        if (cacheEntry) {
+          cacheEntry.cachedAt = new Date();
+        }
+      } catch (reconnectError) {
+        logger.error(`Failed to reconnect MCP client`, {
+          serverName: serverConfig.name,
+          reason,
+          error: reconnectError instanceof Error ? reconnectError.message : reconnectError
+        });
+        throw reconnectError;
+      }
+    };
 
     // Fetch and convert tools
-    const tools = await mcpToolsToAiTools(client, serverConfig.name, serverConfig.transport || 'stdio');
+    const tools = await mcpToolsToAiTools(clientRef, serverConfig, reconnectClient);
 
     // Cache the results
-    const cacheEntry: ToolCacheEntry = {
+    cacheEntry = {
       tools,
       cachedAt: new Date(),
       serverConfigHash: generateServerId(serverConfig),
       serverName: serverConfig.name,
-      ttl: DEFAULT_TTL
+      ttl: DEFAULT_TTL,
+      clientRef,
+      reconnectClient,
+      serverConfig
     };
+
+    const existingEntry = toolsCache.get(cacheKey);
+    if (existingEntry) {
+      await disposeToolCacheEntry(existingEntry, 'cache-refresh');
+      toolsCache.delete(cacheKey);
+    }
 
     toolsCache.set(cacheKey, cacheEntry);
 
     // Evict old entries if needed
-    evictOldestCacheEntries();
+    await evictOldestCacheEntries();
 
     const duration = performance.now() - startTime;
     const toolCount = Object.keys(tools).length;
@@ -644,6 +780,12 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
     const duration = performance.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : String(error);
 
+    await safelyCloseClient(clientRef.current, {
+      serverName: serverConfig.name,
+      reason: 'fetch-failed'
+    });
+    clientRef.current = null;
+
     logger.warn(`Failed to fetch and cache tools for server: ${serverConfig.name}`, {
       serverName: serverConfig.name,
       error: errorMessage,
@@ -658,7 +800,21 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
 /**
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
-export async function mcpToolsToAiTools(client: Client, serverName: string, transport: string = 'sdk') {
+export async function mcpToolsToAiTools(
+  clientRef: ClientRef,
+  serverConfig: MCPServerConfig,
+  reconnectClient: ReconnectClient
+) {
+  const serverName = serverConfig.name;
+  const transport = serverConfig.transport || 'stdio';
+
+  const ensureClient = (): Client => {
+    if (!clientRef.current) {
+      throw new Error(`MCP client not connected for server: ${serverName}`);
+    }
+    return clientRef.current;
+  };
+
   logger.debug(`MCP tools list request starting`, {
     serverName,
     operation: 'listTools',
@@ -668,7 +824,7 @@ export async function mcpToolsToAiTools(client: Client, serverName: string, tran
   let toolsResponse: { tools: Tool[] };
 
   // Use MCP SDK client with timeout
-  const listToolsPromise = client.listTools();
+  const listToolsPromise = ensureClient().listTools();
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error('Timeout waiting for tools list')), 5000);
   });
@@ -750,84 +906,131 @@ export async function mcpToolsToAiTools(client: Client, serverName: string, tran
           requestPayload: JSON.stringify(requestPayload, null, 2)
         });
 
-        try {
-          const res = await client.callTool(requestPayload);
+        let attempt = 0;
+        const maxAttempts = 2;
 
-          // Debug log: Raw response data received from MCP server
-          logger.debug(`MCP server response payload`, {
-            executionId,
-            serverName,
-            toolName: t.name,
-            responsePayload: JSON.stringify(res, null, 2),
-            responseType: typeof res,
-            hasContent: !!(res?.content),
-            contentLength: Array.isArray(res?.content) ? res.content.length : 0
-          });
+        while (attempt < maxAttempts) {
+          try {
+            const res = await ensureClient().callTool(requestPayload);
 
-          const duration = performance.now() - startTime;
+            const mcpError = isMCPErrorResponse(res);
+            if (mcpError) {
+              logger.error(`MCP tool execution returned error payload`, {
+                executionId,
+                serverName,
+                toolName: t.name,
+                toolKey: key,
+                error: mcpError.message,
+                transport
+              });
+              throw mcpError;
+            }
 
-          // Handle result content - prefer text > json > fallback
-          let processedResult: any;
-          let resultType = 'unknown';
+            // Debug log: Raw response data received from MCP server
+            logger.debug(`MCP server response payload`, {
+              executionId,
+              serverName,
+              toolName: t.name,
+              responsePayload: JSON.stringify(res, null, 2),
+              responseType: typeof res,
+              hasContent: !!(res?.content),
+              contentLength: Array.isArray(res?.content) ? res.content.length : 0
+            });
 
-          if (res?.content && Array.isArray(res.content)) {
-            const textPart = res.content.find((p: any) => p?.type === 'text');
-            if (textPart?.text) {
-              processedResult = textPart.text;
-              resultType = 'text';
-            } else {
-              const jsonPart = res.content.find((p: any) => p?.type === 'json');
-              if (jsonPart?.json) {
-                processedResult = jsonPart.json;
-                resultType = 'json';
+            const duration = performance.now() - startTime;
+
+            // Handle result content - prefer text > json > fallback
+            let processedResult: any;
+            let resultType = 'unknown';
+
+            if (res?.content && Array.isArray(res.content)) {
+              const textPart = res.content.find((p: any) => p?.type === 'text');
+              if (textPart?.text) {
+                processedResult = textPart.text;
+                resultType = 'text';
+              } else {
+                const jsonPart = res.content.find((p: any) => p?.type === 'json');
+                if (jsonPart?.json) {
+                  processedResult = jsonPart.json;
+                  resultType = 'json';
+                }
               }
             }
+
+            if (!processedResult) {
+              processedResult = JSON.stringify(res);
+              resultType = 'serialized';
+            }
+
+            const resultSize = typeof processedResult === 'string' ? processedResult.length : JSON.stringify(processedResult).length;
+
+            logger.debug(`MCP tool execution completed via AI conversion`, {
+              executionId,
+              serverName,
+              toolName: t.name,
+              toolKey: key,
+              sequenceId,
+              parentToolCall,
+              status: 'success',
+              duration: Math.round(duration * 100) / 100,
+              resultType,
+              resultSize,
+              resultPreview: typeof processedResult === 'string'
+                ? processedResult.slice(0, 200) + (resultSize > 200 ? '...' : '')
+                : JSON.stringify(processedResult).slice(0, 200) + '...',
+              transport
+            });
+
+            return processedResult;
+          } catch (error) {
+            const duration = performance.now() - startTime;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            if (attempt === 0 && isConnectionLevelError(error)) {
+              attempt++;
+              logger.warn(`MCP tool execution detected transport issue - attempting reconnect`, {
+                executionId,
+                serverName,
+                toolName: t.name,
+                toolKey: key,
+                status: 'retrying',
+                duration: Math.round(duration * 100) / 100,
+                error: errorMessage,
+                transport
+              });
+
+              try {
+                await reconnectClient('call-tool-failure');
+                continue;
+              } catch (reconnectError) {
+                logger.error(`MCP tool execution reconnect failed`, {
+                  executionId,
+                  serverName,
+                  toolName: t.name,
+                  toolKey: key,
+                  error: reconnectError instanceof Error ? reconnectError.message : reconnectError,
+                  transport
+                });
+                throw reconnectError;
+              }
+            }
+
+            logger.error(`MCP tool execution failed via AI conversion: ${errorMessage}`, {
+              executionId,
+              serverName,
+              toolName: t.name,
+              toolKey: key,
+              sequenceId,
+              parentToolCall,
+              status: 'error',
+              duration: Math.round(duration * 100) / 100,
+              error: errorMessage,
+              errorStack: error instanceof Error ? error.stack : undefined,
+              transport
+            });
+
+            throw error;
           }
-
-          if (!processedResult) {
-            processedResult = JSON.stringify(res);
-            resultType = 'serialized';
-          }
-
-          const resultSize = typeof processedResult === 'string' ? processedResult.length : JSON.stringify(processedResult).length;
-
-          logger.debug(`MCP tool execution completed via AI conversion`, {
-            executionId,
-            serverName,
-            toolName: t.name,
-            toolKey: key,
-            sequenceId,
-            parentToolCall,
-            status: 'success',
-            duration: Math.round(duration * 100) / 100,
-            resultType,
-            resultSize,
-            resultPreview: typeof processedResult === 'string'
-              ? processedResult.slice(0, 200) + (resultSize > 200 ? '...' : '')
-              : JSON.stringify(processedResult).slice(0, 200) + '...',
-            transport
-          });
-
-          return processedResult;
-        } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          logger.error(`MCP tool execution failed via AI conversion: ${errorMessage}`, {
-            executionId,
-            serverName,
-            toolName: t.name,
-            toolKey: key,
-            sequenceId,
-            parentToolCall,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined,
-            transport
-          });
-
-          throw error;
         }
       },
     };
@@ -1056,8 +1259,7 @@ export async function shutdownAllMCPServers(): Promise<void> {
   worldServerMapping.clear();
 
   // Clear tools cache during shutdown
-  const cacheEntriesCleared = toolsCache.size;
-  toolsCache.clear();
+  const cacheEntriesCleared = await disposeAllToolCacheEntries('shutdown');
 
   isInitialized = false;
   shutdownInProgress = false;
@@ -1100,7 +1302,10 @@ async function stopServer(serverInstance: MCPServerInstance): Promise<void> {
 
   if (serverInstance.client) {
     try {
-      // MCP Client cleanup handled by transport layer
+      await safelyCloseClient(serverInstance.client, {
+        serverName: serverInstance.config.name,
+        reason: 'stop-server'
+      });
       serverInstance.client = null;
 
       logger.info(`MCP server stopped: ${serverInstance.config.name}`, {
@@ -1311,9 +1516,10 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
       try {
         const cacheKey = getToolCacheKey(serverConfig.name);
         const cached = toolsCache.get(cacheKey);
+        const cacheIsValid = cached ? isCacheValid(cached, serverConfig) : false;
 
         // Check cache first
-        if (cached && isCacheValid(cached, serverConfig)) {
+        if (cached && cacheIsValid) {
           // Cache hit
           cacheHits++;
           Object.assign(allTools, cached.tools);
@@ -1326,13 +1532,18 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
           return;
         }
 
+        if (cached && !cacheIsValid) {
+          await disposeToolCacheEntry(cached, 'stale-cache-entry');
+          toolsCache.delete(cacheKey);
+        }
+
         // Cache miss - fetch and cache tools
         cacheMisses++;
 
         if (cached) {
           logger.debug(`Tools cache miss (invalid) for server: ${serverConfig.name}`, {
             serverName: serverConfig.name,
-            reason: isCacheValid(cached, serverConfig) ? 'unknown' : 'invalid'
+            reason: cacheIsValid ? 'unknown' : 'invalid'
           });
         } else {
           logger.debug(`Tools cache miss (not found) for server: ${serverConfig.name}`, {
@@ -1451,60 +1662,119 @@ export async function executeMCPTool(
     requestPayload: JSON.stringify(requestPayload, null, 2)
   });
 
-  try {
-    const result = await serverInstance.client.callTool(requestPayload);
+  let attempt = 0;
+  const maxAttempts = 2;
 
-    // Debug log: Raw response data received from MCP server
-    logger.debug(`MCP server direct response payload`, {
-      executionId,
-      serverId: serverId.slice(0, 8),
-      toolName,
-      serverName: serverInstance.config.name,
-      responsePayload: JSON.stringify(result, null, 2),
-      responseType: typeof result,
-      hasContent: !!(result?.content),
-      contentLength: Array.isArray(result?.content) ? result.content.length : 0
-    });
+  while (attempt < maxAttempts) {
+    if (!serverInstance.client) {
+      throw new Error(`MCP server not available: ${serverInstance.config.name} (client disconnected)`);
+    }
 
-    const duration = performance.now() - startTime;
-    const hasContent = result?.content && Array.isArray(result.content) && result.content.length > 0;
-    const contentTypes = hasContent ? (result.content as any[]).map((c: any) => c?.type).filter(Boolean) : [];
-    const resultSize = hasContent ? JSON.stringify(result).length : 0;
+    try {
+      const result = await serverInstance.client.callTool(requestPayload);
 
-    logger.debug(`MCP tool execution completed`, {
-      executionId,
-      serverId: serverId.slice(0, 8),
-      toolName,
-      serverName: serverInstance.config.name,
-      sequenceId,
-      parentToolCall,
-      status: 'success',
-      duration: Math.round(duration * 100) / 100, // Round to 2 decimal places
-      hasContent,
-      contentTypes,
-      resultSize,
-      resultPreview: hasContent ? JSON.stringify(result).slice(0, 200) + (resultSize > 200 ? '...' : '') : null
-    });
+      const mcpError = isMCPErrorResponse(result);
+      if (mcpError) {
+        logger.error(`MCP tool execution returned error payload`, {
+          executionId,
+          serverId: serverId.slice(0, 8),
+          toolName,
+          serverName: serverInstance.config.name,
+          error: mcpError.message
+        });
+        throw mcpError;
+      }
 
-    return result;
-  } catch (error) {
-    const duration = performance.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
+      // Debug log: Raw response data received from MCP server
+      logger.debug(`MCP server direct response payload`, {
+        executionId,
+        serverId: serverId.slice(0, 8),
+        toolName,
+        serverName: serverInstance.config.name,
+        responsePayload: JSON.stringify(result, null, 2),
+        responseType: typeof result,
+        hasContent: !!(result?.content),
+        contentLength: Array.isArray(result?.content) ? result.content.length : 0
+      });
 
-    logger.error(`MCP tool execution failed: ${errorMessage}`, {
-      executionId,
-      serverId: serverId.slice(0, 8),
-      toolName,
-      serverName: serverInstance.config.name,
-      sequenceId,
-      parentToolCall,
-      status: 'error',
-      duration: Math.round(duration * 100) / 100,
-      error: errorMessage,
-      errorStack: error instanceof Error ? error.stack : undefined
-    });
+      const duration = performance.now() - startTime;
+      const hasContent = result?.content && Array.isArray(result.content) && result.content.length > 0;
+      const contentTypes = hasContent ? (result.content as any[]).map((c: any) => c?.type).filter(Boolean) : [];
+      const resultSize = hasContent ? JSON.stringify(result).length : 0;
 
-    throw error;
+      logger.debug(`MCP tool execution completed`, {
+        executionId,
+        serverId: serverId.slice(0, 8),
+        toolName,
+        serverName: serverInstance.config.name,
+        sequenceId,
+        parentToolCall,
+        status: 'success',
+        duration: Math.round(duration * 100) / 100, // Round to 2 decimal places
+        hasContent,
+        contentTypes,
+        resultSize,
+        resultPreview: hasContent ? JSON.stringify(result).slice(0, 200) + (resultSize > 200 ? '...' : '') : null
+      });
+
+      return result;
+    } catch (error) {
+      const duration = performance.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (attempt === 0 && isConnectionLevelError(error)) {
+        attempt++;
+        logger.warn(`MCP tool execution detected transport issue - attempting direct reconnect`, {
+          executionId,
+          serverId: serverId.slice(0, 8),
+          toolName,
+          serverName: serverInstance.config.name,
+          status: 'retrying',
+          duration: Math.round(duration * 100) / 100,
+          error: errorMessage
+        });
+
+        await safelyCloseClient(serverInstance.client, {
+          serverName: serverInstance.config.name,
+          reason: 'direct-call-reconnect'
+        });
+        serverInstance.client = null;
+
+        try {
+          serverInstance.client = await connectMCPServer(serverInstance.config);
+          serverInstance.status = 'running';
+          serverInstance.lastHealthCheck = new Date();
+          continue;
+        } catch (reconnectError) {
+          const reconnectMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
+          logger.error(`MCP direct tool execution reconnect failed`, {
+            executionId,
+            serverId: serverId.slice(0, 8),
+            toolName,
+            serverName: serverInstance.config.name,
+            error: reconnectMessage
+          });
+          serverInstance.status = 'error';
+          serverInstance.error = reconnectError instanceof Error ? reconnectError : new Error(reconnectMessage);
+          throw reconnectError;
+        }
+      }
+
+      logger.error(`MCP tool execution failed: ${errorMessage}`, {
+        executionId,
+        serverId: serverId.slice(0, 8),
+        toolName,
+        serverName: serverInstance.config.name,
+        sequenceId,
+        parentToolCall,
+        status: 'error',
+        duration: Math.round(duration * 100) / 100,
+        error: errorMessage,
+        errorStack: error instanceof Error ? error.stack : undefined
+      });
+
+      throw error;
+    }
   }
 }
 
@@ -1541,10 +1811,16 @@ export async function restartMCPServer(serverId: string): Promise<boolean> {
  * Clear cached tools for specific server or all servers
  * Useful for forcing cache refresh when server tools change
  */
-export function clearToolsCache(serverName?: string): void {
+export async function clearToolsCache(serverName?: string): Promise<void> {
   if (serverName) {
     const cacheKey = getToolCacheKey(serverName);
-    const deleted = toolsCache.delete(cacheKey);
+    const entry = toolsCache.get(cacheKey);
+    let deleted = false;
+
+    if (entry) {
+      await disposeToolCacheEntry(entry, 'manual-clear');
+      deleted = toolsCache.delete(cacheKey);
+    }
 
     logger.info(`Cleared tools cache for server: ${serverName}`, {
       serverName,
@@ -1552,8 +1828,7 @@ export function clearToolsCache(serverName?: string): void {
       remainingEntries: toolsCache.size
     });
   } else {
-    const entriesCleared = toolsCache.size;
-    toolsCache.clear();
+    const entriesCleared = await disposeAllToolCacheEntries('manual-clear-all');
 
     logger.info(`Cleared all tools cache entries`, {
       entriesCleared
@@ -1586,8 +1861,13 @@ export function getToolsCacheStats(): {
   const sortedByDate = entries.sort((a, b) => a.cachedAt.getTime() - b.cachedAt.getTime());
   const totalTools = entries.reduce((sum, entry) => sum + Object.keys(entry.tools).length, 0);
 
-  // Rough memory usage estimate
-  const approximateSize = JSON.stringify(Array.from(toolsCache.values())).length;
+  // Rough memory usage estimate (ignore non-serializable client references)
+  const approximateSize = JSON.stringify(entries.map(entry => ({
+    serverName: entry.serverName,
+    cachedAt: entry.cachedAt.toISOString(),
+    toolCount: Object.keys(entry.tools).length,
+    transport: entry.serverConfig.transport
+  }))).length;
   const formatSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -1613,23 +1893,25 @@ export function getToolsCacheStats(): {
 /**
  * Refresh cached tools for a specific server (force cache miss on next access)
  */
-export function refreshServerToolsCache(serverName: string): boolean {
+export async function refreshServerToolsCache(serverName: string): Promise<boolean> {
   const cacheKey = getToolCacheKey(serverName);
-  const found = toolsCache.has(cacheKey);
+  const entry = toolsCache.get(cacheKey);
 
-  if (found) {
+  if (entry) {
+    await disposeToolCacheEntry(entry, 'manual-refresh');
     toolsCache.delete(cacheKey);
     logger.info(`Marked tools cache for refresh: ${serverName}`, {
       serverName,
       remainingEntries: toolsCache.size
     });
-  } else {
-    logger.debug(`Tools cache not found for server: ${serverName}`, {
-      serverName
-    });
+    return true;
   }
 
-  return found;
+  logger.debug(`Tools cache not found for server: ${serverName}`, {
+    serverName
+  });
+
+  return false;
 }
 
 /** Get MCP system health status */
