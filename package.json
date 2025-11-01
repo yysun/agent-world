@@ -18,7 +18,8 @@
   "workspaces": [
     "core",
     "next",
-    "web"
+    "web",
+    "ws"
   ],
   "bin": {
     "agent-world": "dist/cli/index.js",
@@ -30,6 +31,8 @@
     "cli": "npx tsx cli/index.ts",
     "cli:watch": "npx tsx --watch cli/index.ts",
     "server": "npx tsx server/index.ts",
+    "ws": "npm run dev --workspace=ws",
+    "ws:watch": "npx tsx --watch ws/index.ts",
     "dev": "npm-run-all --parallel server:watch web:dev",
     "server:watch": "npx tsx --watch server/index.ts",
     "web:dev": "npm-run-all --sequential web:wait web:start",

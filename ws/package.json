@@ -1,0 +1,37 @@
+{
+  "name": "@agent-world/ws",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "../dist/ws/index.js",
+  "types": "../dist/ws/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "clean": "rm -rf ../dist/ws",
+    "dev": "tsx --watch index.ts",
+    "start": "node ../dist/ws/index.js"
+  },
+  "description": "WebSocket server for Agent World - async message processing with real-time updates",
+  "keywords": [
+    "agents",
+    "ai",
+    "websocket",
+    "async",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.0",
+    "express": "^4.21.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "@types/express": "^4.17.23",
+    "@types/cors": "^2.8.19",
+    "@types/node": "^24.9.1",
+    "typescript": "^5.8.3",
+    "tsx": "^4.20.3"
+  }
+}
