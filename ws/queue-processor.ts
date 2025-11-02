@@ -18,18 +18,21 @@
  * - Integrates with World class for agent processing
  * - Broadcasts events through WebSocket server
  * - Updates queue status via QueueStorage
+ * - World instance reused across all messages for efficiency
  * 
  * Processing Flow:
  * 1. Poll queue for pending messages
- * 2. Dequeue message (atomic per-world lock)
- * 3. Load world instance
+ * 2. Load world instance ONCE per world
+ * 3. Process all queued messages for that world
  * 4. Update heartbeat during processing
- * 5. Process message through world.sendMessage()
+ * 5. Process each message through world.sendMessage()
  * 6. Capture and broadcast all events
  * 7. Mark completed or failed with retry logic
- * 8. Broadcast final status
+ * 8. Destroy world instance after all messages processed
+ * 9. Broadcast final status
  * 
  * Changes:
+ * - 2025-11-02: Fix message processing - reuse world instance across all messages instead of loading/destroying per message
  * - 2025-11-02: Update event broadcasting to use clean format (type + payload structure)
  * - 2025-11-01: Initial queue processor implementation
  * - 2025-11-01: Replace console.log with structured logger
@@ -145,9 +148,7 @@ export class QueueProcessor {
     }
 
     // Get queue statistics to find worlds with pending messages
-    const stats = await this.config.queueStorage.getQueueStats();
-
-    // stats is an array of WorldQueueStats, not an object
+    const stats = await this.config.queueStorage.getQueueStats();    // stats is an array of WorldQueueStats, not an object
     for (const worldStats of stats) {
       const worldId = worldStats.worldId;
 
@@ -167,7 +168,7 @@ export class QueueProcessor {
       }
 
       // Start processing this world
-      logger.info(`Starting to process world: ${worldId}`);
+      logger.info(`📨 Poll detected ${worldStats.pending} pending message(s) for world: ${worldId}`);
       this.processWorld(worldId).catch((error) => {
         logger.error(`Error processing world ${worldId}:`, error);
       });
@@ -180,27 +181,60 @@ export class QueueProcessor {
   private async processWorld(worldId: string): Promise<void> {
     this.processingWorlds.add(worldId);
 
+    // Load world instance ONCE for all messages
+    let subscription: WorldSubscription | null = null;
+
     try {
+      logger.info(`Loading world instance: ${worldId}`);
+      const world = await getWorld(worldId);
+      if (!world) {
+        throw new Error(`World ${worldId} not found`);
+      }
+      logger.info(`World loaded: ${worldId} with ${world.agents.size} agents`);
+
+      // Create a minimal ClientConnection for startWorld (no event forwarding needed)
+      const dummyClient: ClientConnection = {
+        isOpen: true
+      };
+
+      // Use startWorld to properly initialize world with agent subscriptions
+      subscription = await startWorld(world, dummyClient);
+
+      // Process messages one at a time until queue is empty
       while (this.running) {
         // Dequeue next message for this world
         const message = await this.config.queueStorage.dequeue(worldId);
 
         if (!message) {
-          // No more messages for this world
-          logger.info(`No more messages for world: ${worldId}`);
+          // No more messages for this world right now
+          logger.info(`✓ No more messages for world: ${worldId} - exiting batch processing`);
           break;
         }
 
-        logger.info(`Dequeued message for world: ${worldId}`, {
+        logger.info(`📬 Dequeued message for world: ${worldId}`, {
           messageId: message.messageId,
-          queueId: message.id
+          queueId: message.id,
+          content: message.content.substring(0, 50)
         });
 
-        // Process the message
-        await this.processMessage(message);
+        // Process the message using the loaded world instance
+        await this.processMessage(message, subscription.world);
+        logger.info(`✓ Finished processing message ${message.messageId}`);
       }
+    } catch (error) {
+      logger.error(`Error processing world ${worldId}:`, error);
     } finally {
+      // Clean up world subscription after ALL messages are processed
+      if (subscription) {
+        logger.info(`🧹 Destroying world subscription for: ${worldId}`);
+        await subscription.destroy();
+      }
+
+      // IMPORTANT: Remove from processing BEFORE checking if there are more messages
+      // This allows the next poll to pick up any new messages that arrived
       this.processingWorlds.delete(worldId);
+
+      logger.info(`✅ Finished processing batch for world: ${worldId}`);
 
       // If shutting down and all processing complete, resolve shutdown promise
       if (!this.running && this.processingWorlds.size === 0 && this.shutdownResolve) {
@@ -210,9 +244,9 @@ export class QueueProcessor {
   }
 
   /**
-   * Process a single message
+   * Process a single message with a loaded world instance
    */
-  private async processMessage(message: QueueMessage): Promise<void> {
+  private async processMessage(message: QueueMessage, world: World): Promise<void> {
     const { worldId, messageId, chatId, content, sender } = message;
 
     logger.info(`Processing message ${messageId} for world ${worldId}`, { content, sender });
@@ -230,10 +264,6 @@ export class QueueProcessor {
     }, this.config.heartbeatInterval);
 
     try {
-      // Load world instance with agent subscriptions
-      const subscription = await this.loadWorldInstance(worldId);
-      const world = subscription.world;
-
       // Set up event listeners to broadcast events in real-time
       const messageListener = (event: any) => {
         // Broadcast regular message events
@@ -288,9 +318,6 @@ export class QueueProcessor {
         world.eventEmitter.off(EventType.WORLD, worldListener);
         world.eventEmitter.off(EventType.SSE, sseListener);
         world.eventEmitter.off(EventType.CRUD, crudListener);
-
-        // Clean up world subscription
-        await subscription.destroy();
       }
     } catch (error) {
       logger.error(`Failed to process message ${messageId}:`, error);
@@ -305,32 +332,6 @@ export class QueueProcessor {
     } finally {
       // Stop heartbeat updates
       clearInterval(heartbeatTimer);
-    }
-  }
-
-  /**
-   * Load world instance from storage and subscribe agents
-   */
-  private async loadWorldInstance(worldId: string): Promise<WorldSubscription> {
-    try {
-      logger.info(`Loading world instance: ${worldId}`);
-      const world = await getWorld(worldId);
-      if (!world) {
-        throw new Error(`World ${worldId} not found`);
-      }
-      logger.info(`World loaded: ${worldId} with ${world.agents.size} agents`);
-
-      // Create a minimal ClientConnection for startWorld (no event forwarding needed)
-      const dummyClient: ClientConnection = {
-        isOpen: true
-      };
-
-      // Use startWorld to properly initialize world with agent subscriptions
-      const subscription = await startWorld(world, dummyClient);
-
-      return subscription;
-    } catch (error) {
-      throw new Error(`Failed to load world ${worldId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

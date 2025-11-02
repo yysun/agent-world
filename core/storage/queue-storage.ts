@@ -262,7 +262,7 @@ export function createMemoryQueueStorage(): QueueStorage {
   async function markCompleted(messageId: string): Promise<void> {
     // Find and remove from processing
     for (const [worldId, message] of processing) {
-      if (message.messageId === messageId) {
+      if (message.id === messageId) {
         message.status = 'completed';
         message.completedAt = new Date();
         processing.delete(worldId);
@@ -270,16 +270,14 @@ export function createMemoryQueueStorage(): QueueStorage {
         return;
       }
     }
-  }
-
-  /**
+  }  /**
    * Mark a message as failed with error details
    * Automatically retries if retryCount < maxRetries
    */
   async function markFailed(messageId: string, error: string): Promise<void> {
     // Find message in processing
     for (const [worldId, message] of processing) {
-      if (message.messageId === messageId) {
+      if (message.id === messageId) {
         message.error = error;
         message.retryCount++;
 

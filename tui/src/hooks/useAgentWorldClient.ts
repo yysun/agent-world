@@ -6,17 +6,19 @@
  * Features:
  * - Subscribe to world events
  * - Enqueue messages for processing
- * - Execute CLI commands
+ * - Execute CLI commands (with automatic parsing)
  * - Unsubscribe from world
  * - Ping/heartbeat
  * 
  * Responsibilities:
  * - Protocol operations only
+ * - Command parsing and mapping
  * - Depends on WebSocketClient instance
  * - No state management
  * - No event processing
  * 
  * Created: 2025-11-02 - Phase 1: Implement focused hooks
+ * Updated: 2025-11-02 - Fix command execution - parse command strings and map to server format
  */
 
 import { useCallback, useEffect } from 'react';
@@ -29,10 +31,10 @@ export interface UseAgentWorldClientOptions {
 }
 
 export interface UseAgentWorldClientReturn {
-  subscribe: (worldId: string, chatId: string | null, replayFrom: 'beginning' | number) => void;
-  enqueue: (worldId: string, chatId: string | null, content: string, sender?: string) => void;
-  executeCommand: (worldId: string, command: string) => void;
-  unsubscribe: (worldId: string, chatId?: string | null) => void;
+  subscribe: (worldId: string, chatId: string | null, replayFrom: 'beginning' | number) => Promise<void>;
+  enqueue: (worldId: string, chatId: string | null, content: string, sender?: string) => Promise<void>;
+  executeCommand: (worldId: string, command: string) => Promise<void>;
+  unsubscribe: (worldId: string, chatId?: string | null) => Promise<void>;
 }
 
 /**
@@ -67,7 +69,7 @@ export function useAgentWorldClient(
     };
   }, [ws, onEvent, onStatus]);
 
-  const subscribe = useCallback((
+  const subscribe = useCallback(async (
     worldId: string,
     chatId: string | null,
     replayFrom: 'beginning' | number = 'beginning'
@@ -77,10 +79,14 @@ export function useAgentWorldClient(
       return;
     }
     const fromSeq = replayFrom === 'beginning' ? 0 : replayFrom;
-    ws.subscribe(worldId, chatId, fromSeq);
+    try {
+      await ws.subscribe(worldId, chatId, fromSeq);
+    } catch (error) {
+      console.error('Subscribe failed:', error instanceof Error ? error.message : error);
+    }
   }, [ws, connected]);
 
-  const enqueue = useCallback((
+  const enqueue = useCallback(async (
     worldId: string,
     chatId: string | null,
     content: string,
@@ -90,23 +96,108 @@ export function useAgentWorldClient(
       console.warn('Cannot enqueue: not connected');
       return;
     }
-    ws.sendMessage(worldId, content, chatId ?? undefined, sender);
+    try {
+      await ws.sendMessage(worldId, content, chatId ?? undefined, sender);
+    } catch (error) {
+      console.error('Enqueue failed:', error instanceof Error ? error.message : error);
+    }
   }, [ws, connected]);
 
-  const executeCommand = useCallback((worldId: string, command: string) => {
+  const executeCommand = useCallback(async (worldId: string, commandInput: string) => {
     if (!ws || !connected) {
       console.warn('Cannot execute command: not connected');
       return;
     }
-    ws.sendCommand(worldId, command);
+
+    // Parse command input (e.g., "/help" or "/agent agent-id")
+    // Remove leading slash if present
+    const input = commandInput.startsWith('/') ? commandInput.substring(1) : commandInput;
+    const parts = input.split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1);
+
+    // Handle client-side commands that don't need server interaction
+    if (command === 'help') {
+      console.log('\n=== Available Commands ===');
+      console.log('World: /list-worlds, /world');
+      console.log('Agents: /list-agents, /agent <id>, /create-agent <name>, /delete-agent <id>');
+      console.log('Chats: /list-chats, /new-chat, /delete-chat <id>');
+      console.log('Export: /export');
+      console.log('');
+      return;
+    }
+
+    // Map command to server command format
+    let serverCommand = command;
+    let params: any = {};
+
+    // Handle command-specific mappings
+    switch (command) {
+      case 'list-worlds':
+      case 'worlds':
+        serverCommand = 'list-worlds';
+        break;
+      case 'world':
+        serverCommand = 'get-world';
+        break;
+      case 'list-agents':
+      case 'agents':
+        serverCommand = 'list-agents';
+        break;
+      case 'agent':
+        serverCommand = 'get-agent';
+        if (args[0]) {
+          params.agentId = args[0];
+        }
+        break;
+      case 'list-chats':
+      case 'chats':
+        serverCommand = 'list-chats';
+        break;
+      case 'new-chat':
+        serverCommand = 'new-chat';
+        break;
+      case 'delete-chat':
+        serverCommand = 'delete-chat';
+        if (args[0]) {
+          params.chatId = args[0];
+        }
+        break;
+      case 'export':
+        serverCommand = 'export-world';
+        break;
+      case 'create-agent':
+        serverCommand = 'create-agent';
+        if (args[0]) {
+          params.name = args[0];
+        }
+        break;
+      case 'delete-agent':
+        serverCommand = 'delete-agent';
+        if (args[0]) {
+          params.agentId = args[0];
+        }
+        break;
+    }
+
+    // Send command to server and await response
+    try {
+      await ws.sendCommand(worldId, serverCommand, params);
+    } catch (error) {
+      console.error('Command failed:', error instanceof Error ? error.message : error);
+    }
   }, [ws, connected]);
 
-  const unsubscribe = useCallback((worldId: string, chatId?: string | null) => {
+  const unsubscribe = useCallback(async (worldId: string, chatId?: string | null) => {
     if (!ws || !connected) {
       console.warn('Cannot unsubscribe: not connected');
       return;
     }
-    ws.unsubscribe(worldId, chatId);
+    try {
+      await ws.unsubscribe(worldId, chatId);
+    } catch (error) {
+      console.error('Unsubscribe failed:', error instanceof Error ? error.message : error);
+    }
   }, [ws, connected]);
 
   return {

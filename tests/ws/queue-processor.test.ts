@@ -4,15 +4,41 @@
  * Tests for async message queue processing with WebSocket integration
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { QueueProcessor, createQueueProcessor } from '../../ws/queue-processor.js';
 import type { QueueStorage, QueueMessage } from '../../core/storage/queue-storage.js';
+import { createMemoryQueueStorage } from '../../core/storage/queue-storage.js';
 import type { AgentWorldWSServer } from '../../ws/ws-server.js';
 import type { World } from '../../core/types.js';
 import { EventEmitter } from 'events';
 
+// Mock the managers module
+vi.mock('../../core/managers.js', () => ({
+  getWorld: vi.fn()
+}));
+
+// Mock the events module
+vi.mock('../../core/events.js', () => ({
+  publishMessageWithId: vi.fn(),
+  EventType: {
+    MESSAGE: 'message',
+    WORLD: 'world',
+    SSE: 'sse',
+    CRUD: 'crud'
+  }
+}));
+
+// Mock the subscription module
+vi.mock('../../core/subscription.js', () => ({
+  startWorld: vi.fn()
+}));
+
+import { getWorld } from '../../core/managers.js';
+import { publishMessageWithId } from '../../core/events.js';
+import { startWorld } from '../../core/subscription.js';
+
 describe('Queue Processor', () => {
-  let mockQueueStorage: QueueStorage;
+  let queueStorage: QueueStorage;
   let mockWSServer: AgentWorldWSServer;
   let mockWorld: World;
   let processor: QueueProcessor;
@@ -21,20 +47,8 @@ describe('Queue Processor', () => {
     // Reset mocks
     vi.clearAllMocks();
 
-    // Mock QueueStorage
-    mockQueueStorage = {
-      enqueue: vi.fn(),
-      dequeue: vi.fn(),
-      updateHeartbeat: vi.fn(),
-      markCompleted: vi.fn(),
-      markFailed: vi.fn(),
-      retryMessage: vi.fn(),
-      getQueueDepth: vi.fn(),
-      getQueueStats: vi.fn().mockResolvedValue([]),
-      detectStuckMessages: vi.fn(),
-      cleanup: vi.fn(),
-      getMessage: vi.fn()
-    } as any;
+    // Use REAL queue storage instead of mocking to test actual behavior
+    queueStorage = createMemoryQueueStorage();
 
     // Mock WebSocket Server
     mockWSServer = {
@@ -50,12 +64,39 @@ describe('Queue Processor', () => {
       agents: new Map(),
       chats: new Map()
     } as any;
+
+    // Reset and configure getWorld mock to return our mock world by default
+    (getWorld as any).mockReset();
+    (getWorld as any).mockResolvedValue(mockWorld);
+
+    // Mock startWorld to return a subscription
+    (startWorld as any).mockResolvedValue({
+      world: mockWorld,
+      destroy: vi.fn().mockResolvedValue(undefined),
+      unsubscribe: vi.fn().mockResolvedValue(undefined),
+      refresh: vi.fn().mockResolvedValue(mockWorld)
+    });
+
+    // Mock publishMessageWithId to simulate message publishing
+    (publishMessageWithId as any).mockImplementation(() => {
+      // Simulate immediate idle event
+      setImmediate(() => {
+        mockWorld.eventEmitter.emit('world', { type: 'idle' });
+      });
+    });
+  });
+
+  afterEach(async () => {
+    // Clean up processor if running
+    if (processor && processor.getStats().running) {
+      await processor.stop();
+    }
   });
 
   describe('Lifecycle', () => {
     it('should start and stop gracefully', async () => {
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         pollInterval: 100,
         worldsBasePath: './test-data'
@@ -70,7 +111,7 @@ describe('Queue Processor', () => {
 
     it('should not start twice', () => {
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         worldsBasePath: './test-data'
       });
@@ -89,34 +130,20 @@ describe('Queue Processor', () => {
 
   describe('Message Processing', () => {
     it('should poll for messages and process them', async () => {
-      const queueMessage: QueueMessage = {
-        id: '1',
+      // Enqueue a message using the REAL queue storage
+      await queueStorage.enqueue({
         worldId: 'test-world',
         messageId: 'msg-1',
         content: 'Hello',
         sender: 'human',
         chatId: null,
         priority: 0,
-        status: 'pending',
-        retryCount: 0,
         maxRetries: 3,
-        timeoutSeconds: 300,
-        createdAt: new Date(),
-        scheduledAt: new Date(),
-        processingStartedAt: null,
-        lastHeartbeat: null,
-        completedAt: undefined,
-        failedAt: null,
-        error: undefined
-      };
-
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
-        { worldId: 'test-world', pending: 1, processing: 0, completed: 0, failed: 0 }
-      ]);
-      (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
+        timeoutSeconds: 300
+      });
 
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         pollInterval: 100,
         worldsBasePath: './test-data'
@@ -129,39 +156,98 @@ describe('Queue Processor', () => {
 
       await processor.stop();
 
-      // Should have called dequeue
-      expect(mockQueueStorage.dequeue).toHaveBeenCalledWith('test-world');
+      // Should have processed the message (moved from pending to completed)
+      const stats = await queueStorage.getQueueStats('test-world');
+      expect(stats[0].pending).toBe(0);
+      expect(stats[0].completed).toBe(1);
+    });
+
+    it('should process multiple messages for the same world without restarting', async () => {
+      // Enqueue 3 messages using the REAL queue storage
+      await queueStorage.enqueue({
+        worldId: 'test-world',
+        messageId: 'msg-1',
+        content: 'First message',
+        sender: 'human',
+        chatId: null,
+        priority: 0,
+        maxRetries: 3,
+        timeoutSeconds: 300
+      });
+
+      await queueStorage.enqueue({
+        worldId: 'test-world',
+        messageId: 'msg-2',
+        content: 'Second message',
+        sender: 'human',
+        chatId: null,
+        priority: 0,
+        maxRetries: 3,
+        timeoutSeconds: 300
+      });
+
+      await queueStorage.enqueue({
+        worldId: 'test-world',
+        messageId: 'msg-3',
+        content: 'Third message',
+        sender: 'human',
+        chatId: null,
+        priority: 0,
+        maxRetries: 3,
+        timeoutSeconds: 300
+      });
+
+      // Verify messages are enqueued
+      const statsBeforeProcessing = await queueStorage.getQueueStats('test-world');
+      expect(statsBeforeProcessing[0].pending).toBe(3);
+      expect(statsBeforeProcessing[0].processing).toBe(0);
+
+      processor = createQueueProcessor({
+        queueStorage: queueStorage,
+        wsServer: mockWSServer,
+        pollInterval: 100,
+        worldsBasePath: './test-data'
+      });
+
+      processor.start();
+
+      // Wait for all messages to be processed
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      await processor.stop();
+
+      // Verify all messages were processed (should be completed)
+      const statsAfterProcessing = await queueStorage.getQueueStats('test-world');
+      expect(statsAfterProcessing[0].pending).toBe(0);
+      expect(statsAfterProcessing[0].processing).toBe(0);
+      expect(statsAfterProcessing[0].completed).toBe(3);
+
+      // Verify processing status was broadcast for all messages
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-1', 'processing');
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-2', 'processing');
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-3', 'processing');
+
+      // Verify completion status was broadcast for all messages
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-1', 'completed');
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-2', 'completed');
+      expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith('test-world', 'msg-3', 'completed');
     });
 
     it('should broadcast processing status', async () => {
-      const queueMessage: QueueMessage = {
-        id: '1',
+      // Enqueue a message using the REAL queue storage
+      await queueStorage.enqueue({
         worldId: 'test-world',
         messageId: 'msg-1',
         content: 'Hello',
         sender: 'human',
         chatId: null,
         priority: 0,
-        status: 'pending',
-        retryCount: 0,
         maxRetries: 3,
-        timeoutSeconds: 300,
-        createdAt: new Date(),
-        scheduledAt: new Date(),
-        processingStartedAt: null,
-        lastHeartbeat: null,
-        completedAt: undefined,
-        failedAt: null,
-        error: undefined
-      };
-
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
-        { worldId: 'test-world', pending: 1, processing: 0, completed: 0, failed: 0 }
-      ]);
-      (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
+        timeoutSeconds: 300
+      });
 
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         pollInterval: 100,
         worldsBasePath: './test-data'
@@ -179,17 +265,22 @@ describe('Queue Processor', () => {
     });
 
     it('should respect max concurrent worlds limit', async () => {
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
-        { worldId: 'world-1', pending: 1, processing: 0, completed: 0, failed: 0 },
-        { worldId: 'world-2', pending: 1, processing: 0, completed: 0, failed: 0 },
-        { worldId: 'world-3', pending: 1, processing: 0, completed: 0, failed: 0 },
-        { worldId: 'world-4', pending: 1, processing: 0, completed: 0, failed: 0 },
-        { worldId: 'world-5', pending: 1, processing: 0, completed: 0, failed: 0 },
-        { worldId: 'world-6', pending: 1, processing: 0, completed: 0, failed: 0 }
-      ]);
+      // Enqueue messages for 6 different worlds
+      for (let i = 1; i <= 6; i++) {
+        await queueStorage.enqueue({
+          worldId: `world-${i}`,
+          messageId: `msg-${i}`,
+          content: 'Test message',
+          sender: 'human',
+          chatId: null,
+          priority: 0,
+          maxRetries: 3,
+          timeoutSeconds: 300
+        });
+      }
 
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         pollInterval: 100,
         maxConcurrent: 3,
@@ -209,35 +300,24 @@ describe('Queue Processor', () => {
   });
 
   describe('Error Handling', () => {
-    it('should mark message as failed on processing error', async () => {
-      const queueMessage: QueueMessage = {
-        id: '1',
+    it('should handle world loading errors gracefully', async () => {
+      // Enqueue a message for a non-existent world
+      await queueStorage.enqueue({
         worldId: 'non-existent-world',
         messageId: 'msg-1',
         content: 'Hello',
         sender: 'human',
         chatId: null,
         priority: 0,
-        status: 'pending',
-        retryCount: 0,
         maxRetries: 3,
-        timeoutSeconds: 300,
-        createdAt: new Date(),
-        scheduledAt: new Date(),
-        processingStartedAt: null,
-        lastHeartbeat: null,
-        completedAt: undefined,
-        failedAt: null,
-        error: undefined
-      };
+        timeoutSeconds: 300
+      });
 
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
-        { worldId: 'non-existent-world', pending: 1, processing: 0, completed: 0, failed: 0 }
-      ]);
-      (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
+      // Mock getWorld to return null for non-existent world
+      (getWorld as any).mockResolvedValue(null);
 
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         pollInterval: 100,
         worldsBasePath: './test-data'
@@ -250,10 +330,51 @@ describe('Queue Processor', () => {
 
       await processor.stop();
 
-      // Should mark as failed
-      expect(mockQueueStorage.markFailed).toHaveBeenCalled();
+      // World loading failed, message should still be in pending state
+      const stats = await queueStorage.getQueueStats('non-existent-world');
+      expect(stats[0].pending).toBe(1);
+      expect(stats[0].completed).toBe(0);
+    });
+
+    it('should mark message as failed when message processing throws error', async () => {
+      // Enqueue a message
+      await queueStorage.enqueue({
+        worldId: 'test-world',
+        messageId: 'msg-1',
+        content: 'Hello',
+        sender: 'human',
+        chatId: null,
+        priority: 0,
+        maxRetries: 3,
+        timeoutSeconds: 300
+      });
+
+      // Mock publishMessageWithId to throw an error
+      (publishMessageWithId as any).mockImplementation(() => {
+        throw new Error('Processing failed');
+      });
+
+      processor = createQueueProcessor({
+        queueStorage: queueStorage,
+        wsServer: mockWSServer,
+        pollInterval: 100,
+        worldsBasePath: './test-data'
+      });
+
+      processor.start();
+
+      // Wait for processing
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      await processor.stop();
+
+      // Should mark as failed (or pending for retry)
+      const stats = await queueStorage.getQueueStats('test-world');
+      expect(stats[0].completed).toBe(0);
+      // Message should be either in pending (retry) or failed state
+      expect(stats[0].pending + stats[0].failed).toBeGreaterThan(0);
       expect(mockWSServer.broadcastStatus).toHaveBeenCalledWith(
-        'non-existent-world',
+        'test-world',
         'msg-1',
         'failed',
         expect.any(String)
@@ -264,7 +385,7 @@ describe('Queue Processor', () => {
   describe('Statistics', () => {
     it('should provide accurate statistics', () => {
       processor = createQueueProcessor({
-        queueStorage: mockQueueStorage,
+        queueStorage: queueStorage,
         wsServer: mockWSServer,
         worldsBasePath: './test-data'
       });
