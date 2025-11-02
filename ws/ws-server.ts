@@ -9,23 +9,29 @@
  * - Message queue integration for async processing
  * - Heartbeat monitoring and automatic reconnection
  * - Per-world client management
+ * - Structured logging with ws.server category
  * 
  * Implementation:
  * - Express HTTP server with WebSocket upgrade
  * - ws library for WebSocket handling
  * - Event-driven architecture with EventStorage integration
  * - Queue-based message processing with status updates
+ * - Pino-based structured logging
  * 
  * Changes:
  * - 2025-11-01: Initial WebSocket server implementation
+ * - 2025-11-01: Replace console.log with structured logger
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import express from 'express';
 import cors from 'cors';
+import { createCategoryLogger } from '../core/logger.js';
 import type { EventStorage } from '../core/storage/eventStorage/types.js';
 import type { QueueStorage } from '../core/storage/queue-storage.js';
+
+const logger = createCategoryLogger('ws.server');
 
 /**
  * WebSocket message types
@@ -123,7 +129,7 @@ export class AgentWorldWSServer {
    */
   private setupWebSocketHandlers(): void {
     this.wss.on('connection', (ws: WebSocket) => {
-      console.log('New WebSocket connection');
+      logger.debug('New WebSocket connection');
 
       // Initialize client connection
       const client: ClientConnection = {
@@ -152,7 +158,7 @@ export class AgentWorldWSServer {
 
       // Handle errors
       ws.on('error', (error: Error) => {
-        console.error('WebSocket error:', error);
+        logger.error('WebSocket error:', error);
         this.handleDisconnect(ws);
       });
     });
@@ -232,7 +238,7 @@ export class AgentWorldWSServer {
       await this.sendMissedEvents(ws, message.worldId, message.chatId ?? null, message.seq, latestSeq);
     }
 
-    console.log(`Client subscribed to world: ${message.worldId}, chat: ${message.chatId ?? 'all'}, seq: ${client.subscribedSeq}`);
+    logger.info(`Client subscribed to world: ${message.worldId}, chat: ${message.chatId ?? 'all'}, seq: ${client.subscribedSeq}`);
   }
 
   /**
@@ -265,9 +271,9 @@ export class AgentWorldWSServer {
         });
       }
 
-      console.log(`Sent ${events.length} missed events to client (seq ${fromSeq}-${toSeq})`);
+      logger.info(`Sent ${events.length} missed events to client (seq ${fromSeq}-${toSeq})`);
     } catch (error) {
-      console.error('Error sending missed events:', error);
+      logger.error('Error sending missed events:', error);
       this.sendError(ws, 'Failed to retrieve missed events');
     }
   }
@@ -298,7 +304,7 @@ export class AgentWorldWSServer {
       timestamp: Date.now()
     });
 
-    console.log('Client unsubscribed');
+    logger.debug('Client unsubscribed');
   }
 
   /**
@@ -333,9 +339,9 @@ export class AgentWorldWSServer {
         timestamp: Date.now()
       });
 
-      console.log(`Message queued: ${message.messageId} for world: ${message.worldId}`);
+      logger.info(`Message queued: ${message.messageId} for world: ${message.worldId}`);
     } catch (error) {
-      console.error('Error enqueueing message:', error);
+      logger.error('Error enqueueing message:', error);
       this.sendError(ws, 'Failed to queue message');
     }
   }
@@ -356,7 +362,7 @@ export class AgentWorldWSServer {
     }
 
     this.clients.delete(ws);
-    console.log('Client disconnected');
+    logger.debug('Client disconnected');
   }
 
   /**
@@ -442,7 +448,7 @@ export class AgentWorldWSServer {
       for (const [ws, client] of this.clients.entries()) {
         // Check if client is still alive
         if (now - client.lastHeartbeat > this.config.heartbeatTimeout) {
-          console.log('Client heartbeat timeout, closing connection');
+          logger.warn('Client heartbeat timeout, closing connection');
           ws.terminate();
           this.handleDisconnect(ws);
         } else {
@@ -459,7 +465,7 @@ export class AgentWorldWSServer {
   public start(): Promise<void> {
     return new Promise((resolve) => {
       this.server.listen(this.config.port, () => {
-        console.log(`WebSocket server listening on port ${this.config.port}`);
+        logger.info(`WebSocket server listening on port ${this.config.port}`);
         resolve();
       });
     });
@@ -488,6 +494,6 @@ export class AgentWorldWSServer {
       this.server.close(() => resolve());
     });
 
-    console.log('WebSocket server stopped');
+    logger.info('WebSocket server stopped');
   }
 }

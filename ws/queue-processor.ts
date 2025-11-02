@@ -10,6 +10,7 @@
  * - Real-time event broadcasting via WebSocket
  * - Status updates (processing/completed/failed)
  * - Graceful shutdown with in-flight message handling
+ * - Structured logging with ws.processor category
  * 
  * Architecture:
  * - Polling loop with configurable interval
@@ -30,6 +31,7 @@
  * 
  * Changes:
  * - 2025-11-01: Initial queue processor implementation
+ * - 2025-11-01: Replace console.log with structured logger
  */
 
 import type { QueueStorage, QueueMessage } from '../core/storage/queue-storage.js';
@@ -38,6 +40,9 @@ import type { World } from '../core/types.js';
 import { getWorld } from '../core/managers.js';
 import { publishMessageWithId } from '../core/events.js';
 import { EventType } from '../core/types.js';
+import { createCategoryLogger } from '../core/logger.js';
+
+const logger = createCategoryLogger('ws.processor');
 
 /**
  * Queue processor configuration
@@ -77,12 +82,12 @@ export class QueueProcessor {
    */
   public start(): void {
     if (this.running) {
-      console.log('[QueueProcessor] Already running');
+      logger.debug('Already running');
       return;
     }
 
     this.running = true;
-    console.log('[QueueProcessor] Starting...');
+    logger.info('Starting queue processor...');
     this.schedulePoll();
   }
 
@@ -92,7 +97,7 @@ export class QueueProcessor {
   public async stop(): Promise<void> {
     if (!this.running) return;
 
-    console.log('[QueueProcessor] Stopping...');
+    logger.info('Stopping queue processor...');
     this.running = false;
 
     // Clear poll timer
@@ -103,14 +108,14 @@ export class QueueProcessor {
 
     // Wait for in-flight processing to complete
     if (this.processingWorlds.size > 0) {
-      console.log(`[QueueProcessor] Waiting for ${this.processingWorlds.size} worlds to finish processing...`);
+      logger.info(`Waiting for ${this.processingWorlds.size} worlds to finish processing...`);
       this.shutdownPromise = new Promise((resolve) => {
         this.shutdownResolve = resolve;
       });
       await this.shutdownPromise;
     }
 
-    console.log('[QueueProcessor] Stopped');
+    logger.info('Queue processor stopped');
   }
 
   /**
@@ -121,7 +126,7 @@ export class QueueProcessor {
 
     this.pollTimer = setTimeout(() => {
       this.poll().catch((error) => {
-        console.error('[QueueProcessor] Poll error:', error);
+        logger.error('Poll error:', error);
       }).finally(() => {
         this.schedulePoll();
       });
@@ -158,7 +163,7 @@ export class QueueProcessor {
 
       // Start processing this world
       this.processWorld(worldId).catch((error) => {
-        console.error(`[QueueProcessor] Error processing world ${worldId}:`, error);
+        logger.error(`Error processing world ${worldId}:`, error);
       });
     }
   }
@@ -198,7 +203,7 @@ export class QueueProcessor {
   private async processMessage(message: QueueMessage): Promise<void> {
     const { worldId, messageId, chatId, content, sender } = message;
 
-    console.log(`[QueueProcessor] Processing message ${messageId} for world ${worldId}`);
+    logger.info(`Processing message ${messageId} for world ${worldId}`);
 
     // Broadcast processing status
     this.config.wsServer.broadcastStatus(worldId, messageId, 'processing');
@@ -208,7 +213,7 @@ export class QueueProcessor {
       try {
         await this.config.queueStorage.updateHeartbeat(message.id);
       } catch (error) {
-        console.error('[QueueProcessor] Heartbeat update failed:', error);
+        logger.error('Heartbeat update failed:', error);
       }
     }, this.config.heartbeatInterval);
 
@@ -238,13 +243,13 @@ export class QueueProcessor {
         await this.config.queueStorage.markCompleted(message.id);
         this.config.wsServer.broadcastStatus(worldId, messageId, 'completed');
 
-        console.log(`[QueueProcessor] Completed message ${messageId} for world ${worldId}`);
+        logger.info(`Completed message ${messageId} for world ${worldId}`);
       } finally {
         // Unsubscribe from events
         world.eventEmitter.off('event', eventListener);
       }
     } catch (error) {
-      console.error(`[QueueProcessor] Failed to process message ${messageId}:`, error);
+      logger.error(`Failed to process message ${messageId}:`, error);
 
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -252,7 +257,7 @@ export class QueueProcessor {
       await this.config.queueStorage.markFailed(message.id, errorMessage);
       this.config.wsServer.broadcastStatus(worldId, messageId, 'failed', errorMessage);
 
-      console.log(`[QueueProcessor] Failed message ${messageId} for world ${worldId}: ${errorMessage}`);
+      logger.info(`Failed message ${messageId} for world ${worldId}: ${errorMessage}`);
     } finally {
       // Stop heartbeat updates
       clearInterval(heartbeatTimer);
