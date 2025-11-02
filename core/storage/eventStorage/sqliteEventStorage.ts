@@ -101,13 +101,18 @@ export async function createSQLiteEventStorage(db: Database): Promise<EventStora
 async function ensureInitialized(ctx: SQLiteEventStorageContext): Promise<void> {
   if (ctx.isInitialized) return;
 
-  // Check if events table exists
-  const tableCheck = await dbGet(
+  // Check if both events and event_sequences tables exist
+  const eventsTableCheck = await dbGet(
     ctx.db,
     "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
   );
 
-  if (!tableCheck) {
+  const sequencesTableCheck = await dbGet(
+    ctx.db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='event_sequences'"
+  );
+
+  if (!eventsTableCheck) {
     // Table doesn't exist, create it
     // This is a fallback - normally the migration should create this table
     // Note: Foreign keys are omitted here because parent tables may not exist yet
@@ -145,7 +150,9 @@ async function ensureInitialized(ctx: SQLiteEventStorageContext): Promise<void> 
       CREATE INDEX IF NOT EXISTS idx_events_world_id 
         ON events(world_id)
     `);
+  }
 
+  if (!sequencesTableCheck) {
     // Create event_sequences table for atomic sequence generation
     await dbRun(ctx.db, `
       CREATE TABLE IF NOT EXISTS event_sequences (

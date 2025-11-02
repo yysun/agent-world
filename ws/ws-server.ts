@@ -6,6 +6,7 @@
  * Features:
  * - WebSocket connections per world with authentication
  * - Real-time event streaming using event sequences
+ * - Real-time CRUD event broadcasting (agent/chat/world changes)
  * - Message queue integration for async processing
  * - Heartbeat monitoring and automatic reconnection
  * - Per-world client management
@@ -16,9 +17,11 @@
  * - ws library for WebSocket handling
  * - Event-driven architecture with EventStorage integration
  * - Queue-based message processing with status updates
+ * - CRUD event broadcasting for configuration changes
  * - Pino-based structured logging
  * 
  * Changes:
+ * - 2025-11-01: Add CRUD event broadcasting for agent/chat/world changes
  * - 2025-11-01: Initial WebSocket server implementation
  * - 2025-11-01: Replace console.log with structured logger
  */
@@ -40,7 +43,9 @@ export type WSMessageType =
   | 'subscribe'      // Client subscribes to world events
   | 'unsubscribe'    // Client unsubscribes from world
   | 'message'        // Client sends message to world
+  | 'command'        // Client sends CLI command
   | 'event'          // Server sends event update to client
+  | 'crud'           // Server sends CRUD update to client (agent/chat/world changes)
   | 'status'         // Server sends processing status update
   | 'error'          // Server sends error message
   | 'ping'           // Heartbeat ping
@@ -129,6 +134,7 @@ export class AgentWorldWSServer {
    */
   private setupWebSocketHandlers(): void {
     this.wss.on('connection', (ws: WebSocket) => {
+      logger.info('✓ New client connected');
       logger.debug('New WebSocket connection');
 
       // Initialize client connection
@@ -184,6 +190,10 @@ export class AgentWorldWSServer {
         await this.handleMessage(ws, message);
         break;
 
+      case 'command':
+        await this.handleCommand(ws, message);
+        break;
+
       case 'ping':
         client.lastHeartbeat = Date.now();
         this.send(ws, { type: 'pong', timestamp: Date.now() });
@@ -207,6 +217,8 @@ export class AgentWorldWSServer {
     // Update client info
     client.worldId = message.worldId;
     client.chatId = message.chatId ?? null;
+
+    logger.info(`✓ Client subscribed to world: ${message.worldId}`, { chatId: message.chatId });
 
     // Get latest sequence number for this world/chat
     const latestSeq = await this.config.eventStorage.getLatestSeq(
@@ -285,6 +297,8 @@ export class AgentWorldWSServer {
     const client = this.clients.get(ws);
     if (!client || !client.worldId) return;
 
+    logger.info(`Client unsubscribing from world: ${client.worldId}`);
+
     // Remove from world subscriptions
     const subscribers = this.worldSubscriptions.get(client.worldId);
     if (subscribers) {
@@ -318,6 +332,12 @@ export class AgentWorldWSServer {
     }
 
     try {
+      logger.info(`Enqueuing message for world: ${message.worldId}`, {
+        messageId: message.messageId,
+        sender: message.payload?.sender,
+        contentPreview: message.payload?.content?.substring(0, 30)
+      });
+
       // Enqueue message for processing
       await this.config.queueStorage.enqueue({
         worldId: message.worldId,
@@ -343,6 +363,173 @@ export class AgentWorldWSServer {
     } catch (error) {
       logger.error('Error enqueueing message:', error);
       this.sendError(ws, 'Failed to queue message');
+    }
+  }
+
+  /**
+   * Handle CLI command from client
+   */
+  private async handleCommand(ws: WebSocket, message: WSMessage): Promise<void> {
+    try {
+      const {
+        createWorld, getWorld, listWorlds, deleteWorld,
+        createAgent, getAgent, listAgents, deleteAgent,
+        newChat, listChats, deleteChat,
+        exportWorldToMarkdown
+      } = await import('../core/index.js');
+
+      const command = message.payload?.command;
+      const params = message.payload?.params || {};
+      const worldId = message.worldId;
+
+      if (!command) {
+        this.sendError(ws, 'No command specified');
+        return;
+      }
+
+      let result: any = null;
+      let responseMessage = '';
+
+      // Execute command
+      switch (command) {
+        // World commands
+        case 'create-world':
+          result = await createWorld(params);
+          responseMessage = `World '${params.name}' created successfully`;
+          break;
+
+        case 'get-world':
+          result = await getWorld(worldId || params.worldId);
+          if (result) {
+            // Convert agents Map to array for JSON serialization
+            result = {
+              ...result,
+              agents: result.agents ? Array.from(result.agents.values()) : [],
+              chats: result.chats ? Array.from(result.chats.values()) : [],
+              eventEmitter: undefined, // Remove non-serializable objects
+              eventStorage: undefined,
+              _eventPersistenceCleanup: undefined,
+              _activityListenerCleanup: undefined
+            };
+          }
+          responseMessage = result ? `World '${result.name}' retrieved` : 'World not found';
+          break;
+
+        case 'list-worlds':
+          result = await listWorlds();
+          responseMessage = `Found ${result.length} world(s)`;
+          break;
+
+        case 'delete-world':
+          result = await deleteWorld(worldId || params.worldId);
+          responseMessage = `World deleted`;
+          break;
+
+        // Agent commands
+        case 'create-agent':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for create-agent');
+            return;
+          }
+          result = await createAgent(worldId, params);
+          responseMessage = `Agent '${params.name}' created successfully`;
+          break;
+
+        case 'get-agent':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for get-agent');
+            return;
+          }
+          result = await getAgent(worldId, params.agentId);
+          responseMessage = result ? `Agent '${result.name}' retrieved` : 'Agent not found';
+          break;
+
+        case 'list-agents':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for list-agents');
+            return;
+          }
+          result = await listAgents(worldId);
+          responseMessage = `Found ${result.length} agent(s)`;
+          break;
+
+        case 'delete-agent':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for delete-agent');
+            return;
+          }
+          result = await deleteAgent(worldId, params.agentId);
+          responseMessage = `Agent deleted`;
+          break;
+
+        // Chat commands
+        case 'new-chat':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for new-chat');
+            return;
+          }
+          result = await newChat(worldId);
+          responseMessage = `Chat '${result.name}' created successfully`;
+          break;
+
+        case 'list-chats':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for list-chats');
+            return;
+          }
+          result = await listChats(worldId);
+          responseMessage = `Found ${result.length} chat(s)`;
+          break;
+
+        case 'delete-chat':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for delete-chat');
+            return;
+          }
+          result = await deleteChat(worldId, params.chatId);
+          responseMessage = `Chat deleted`;
+          break;
+
+        // Export command
+        case 'export-world':
+          if (!worldId) {
+            this.sendError(ws, 'worldId required for export-world');
+            return;
+          }
+          result = await exportWorldToMarkdown(worldId);
+          responseMessage = `World exported (${result.length} characters)`;
+          break;
+
+        default:
+          this.sendError(ws, `Unknown command: ${command}`);
+          return;
+      }
+
+      // Send response
+      this.send(ws, {
+        type: 'status',
+        worldId,
+        payload: {
+          status: 'success',
+          command,
+          message: responseMessage,
+          data: result
+        },
+        timestamp: Date.now()
+      });
+
+      logger.info(`Command executed: ${command} for world: ${worldId || 'none'}`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      logger.error('Error executing command:', {
+        command: message.payload?.command,
+        worldId: message.worldId,
+        params: message.payload?.params,
+        error: errorMessage,
+        stack: errorStack
+      });
+      this.sendError(ws, `Command execution failed: ${errorMessage}`);
     }
   }
 
@@ -392,6 +579,11 @@ export class AgentWorldWSServer {
     const subscribers = this.worldSubscriptions.get(worldId);
     if (!subscribers || subscribers.size === 0) return;
 
+    logger.info(`Broadcasting ${event.type} event to ${subscribers.size} clients`, {
+      worldId,
+      chatId
+    });
+
     const message: WSMessage = {
       type: 'event',
       worldId,
@@ -419,6 +611,33 @@ export class AgentWorldWSServer {
   }
 
   /**
+   * Broadcast CRUD event to all subscribers of a world
+   */
+  public broadcastCRUDEvent(worldId: string, crudEvent: any): void {
+    const subscribers = this.worldSubscriptions.get(worldId);
+    if (!subscribers) return;
+
+    const message: WSMessage = {
+      type: 'crud',
+      worldId,
+      payload: crudEvent,
+      timestamp: Date.now()
+    };
+
+    const messageStr = JSON.stringify(message);
+    subscribers.forEach(ws => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(messageStr);
+      }
+    });
+
+    logger.debug(`Broadcast CRUD event to ${subscribers.size} subscribers`, {
+      worldId,
+      operation: crudEvent.operation,
+      entityType: crudEvent.entityType,
+      entityId: crudEvent.entityId
+    });
+  }  /**
    * Broadcast processing status update
    */
   public broadcastStatus(worldId: string, messageId: string, status: string, error?: string): void {

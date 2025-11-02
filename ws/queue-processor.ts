@@ -41,6 +41,7 @@ import { getWorld } from '../core/managers.js';
 import { publishMessageWithId } from '../core/events.js';
 import { EventType } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
+import { startWorld, type ClientConnection, type WorldSubscription } from '../core/subscription.js';
 
 const logger = createCategoryLogger('ws.processor');
 
@@ -145,7 +146,10 @@ export class QueueProcessor {
     // Get queue statistics to find worlds with pending messages
     const stats = await this.config.queueStorage.getQueueStats();
 
-    for (const [worldId, worldStats] of Object.entries(stats)) {
+    // stats is an array of WorldQueueStats, not an object
+    for (const worldStats of stats) {
+      const worldId = worldStats.worldId;
+
       // Skip if world is already processing
       if (this.processingWorlds.has(worldId)) {
         continue;
@@ -162,6 +166,7 @@ export class QueueProcessor {
       }
 
       // Start processing this world
+      logger.info(`Starting to process world: ${worldId}`);
       this.processWorld(worldId).catch((error) => {
         logger.error(`Error processing world ${worldId}:`, error);
       });
@@ -181,8 +186,14 @@ export class QueueProcessor {
 
         if (!message) {
           // No more messages for this world
+          logger.info(`No more messages for world: ${worldId}`);
           break;
         }
+
+        logger.info(`Dequeued message for world: ${worldId}`, {
+          messageId: message.messageId,
+          queueId: message.id
+        });
 
         // Process the message
         await this.processMessage(message);
@@ -203,7 +214,7 @@ export class QueueProcessor {
   private async processMessage(message: QueueMessage): Promise<void> {
     const { worldId, messageId, chatId, content, sender } = message;
 
-    logger.info(`Processing message ${messageId} for world ${worldId}`);
+    logger.info(`Processing message ${messageId} for world ${worldId}`, { content, sender });
 
     // Broadcast processing status
     this.config.wsServer.broadcastStatus(worldId, messageId, 'processing');
@@ -218,35 +229,60 @@ export class QueueProcessor {
     }, this.config.heartbeatInterval);
 
     try {
-      // Load world instance
-      const world = await this.loadWorldInstance(worldId);
+      // Load world instance with agent subscriptions
+      const subscription = await this.loadWorldInstance(worldId);
+      const world = subscription.world;
 
-      // Set up event listener to broadcast events in real-time
-      const eventListener = (event: any) => {
-        // Only broadcast persisted events that have seq numbers
-        if (event.seq !== undefined) {
-          this.config.wsServer.broadcastEvent(worldId, chatId, event);
-        }
+      // Set up event listeners to broadcast events in real-time
+      const messageListener = (event: any) => {
+        // Broadcast message events (user/agent messages)
+        this.config.wsServer.broadcastEvent(worldId, chatId, event);
       };
 
-      // Subscribe to persisted event broadcasts
-      world.eventEmitter.on('event', eventListener);
+      const worldListener = (event: any) => {
+        // Broadcast world events (system, tools, etc)
+        this.config.wsServer.broadcastEvent(worldId, chatId, event);
+      };
+
+      const sseListener = (event: any) => {
+        // Broadcast SSE events (streaming LLM responses)
+        this.config.wsServer.broadcastEvent(worldId, chatId, event);
+      };
+
+      const crudListener = (event: any) => {
+        // Broadcast CRUD events (config changes)
+        this.config.wsServer.broadcastCRUDEvent(worldId, event);
+      };
+
+      // Subscribe to event broadcasts
+      world.eventEmitter.on(EventType.MESSAGE, messageListener);
+      world.eventEmitter.on(EventType.WORLD, worldListener);
+      world.eventEmitter.on(EventType.SSE, sseListener);
+      world.eventEmitter.on(EventType.CRUD, crudListener);
 
       try {
         // Process message through world by publishing it
+        logger.info(`Publishing message to world: ${worldId}`, { messageId, sender });
         publishMessageWithId(world, content, sender, messageId, chatId ?? null);
 
         // Wait for world to become idle (processing complete)
+        logger.info(`Waiting for world ${worldId} to become idle`);
         await this.waitForWorldIdle(world);
 
         // Mark as completed
         await this.config.queueStorage.markCompleted(message.id);
         this.config.wsServer.broadcastStatus(worldId, messageId, 'completed');
 
-        logger.info(`Completed message ${messageId} for world ${worldId}`);
+        logger.info(`✓ Completed message ${messageId} for world ${worldId}`);
       } finally {
         // Unsubscribe from events
-        world.eventEmitter.off('event', eventListener);
+        world.eventEmitter.off(EventType.MESSAGE, messageListener);
+        world.eventEmitter.off(EventType.WORLD, worldListener);
+        world.eventEmitter.off(EventType.SSE, sseListener);
+        world.eventEmitter.off(EventType.CRUD, crudListener);
+
+        // Clean up world subscription
+        await subscription.destroy();
       }
     } catch (error) {
       logger.error(`Failed to process message ${messageId}:`, error);
@@ -265,15 +301,26 @@ export class QueueProcessor {
   }
 
   /**
-   * Load world instance from storage
+   * Load world instance from storage and subscribe agents
    */
-  private async loadWorldInstance(worldId: string): Promise<World> {
+  private async loadWorldInstance(worldId: string): Promise<WorldSubscription> {
     try {
+      logger.info(`Loading world instance: ${worldId}`);
       const world = await getWorld(worldId);
       if (!world) {
         throw new Error(`World ${worldId} not found`);
       }
-      return world;
+      logger.info(`World loaded: ${worldId} with ${world.agents.size} agents`);
+
+      // Create a minimal ClientConnection for startWorld (no event forwarding needed)
+      const dummyClient: ClientConnection = {
+        isOpen: true
+      };
+
+      // Use startWorld to properly initialize world with agent subscriptions
+      const subscription = await startWorld(world, dummyClient);
+
+      return subscription;
     } catch (error) {
       throw new Error(`Failed to load world ${worldId}: ${error instanceof Error ? error.message : String(error)}`);
     }

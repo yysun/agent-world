@@ -39,6 +39,7 @@ export type WSClientMessage =
   | { type: 'subscribe'; worldId: string; chatId?: string; fromSeq?: number }
   | { type: 'unsubscribe'; worldId: string; chatId?: string }
   | { type: 'message'; worldId: string; messageId: string; chatId?: string; payload: any }
+  | { type: 'command'; worldId?: string; payload: any }
   | { type: 'ping' };
 
 export type WSServerMessage =
@@ -180,19 +181,46 @@ export class AgentWorldWSClient extends EventEmitter {
   /**
    * Disconnect from server
    */
-  public disconnect(): void {
-    if (this.state === ConnectionState.DISCONNECTED) {
+  public async disconnect(): Promise<void> {
+    if (this.state === 'disconnected') {
       return;
     }
 
-    this.config.autoReconnect = false; // Disable auto-reconnect on manual disconnect
+    // Stop reconnection attempts
+    this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+
+    // Unsubscribe from world if subscribed
+    if (this.subscribedWorldId) {
+      try {
+        // Send unsubscribe message but don't wait for response during disconnect
+        const message: WSClientMessage = {
+          type: 'unsubscribe',
+          worldId: this.subscribedWorldId
+        };
+        if (this.ws && this.ws.readyState === this.ws.OPEN) {
+          this.send(message);
+        }
+        this.subscribedWorldId = undefined;
+      } catch (error) {
+        // Ignore unsubscribe errors during disconnect
+      }
+    }
+
+    // Close the WebSocket connection
     this.state = ConnectionState.CLOSING;
     this.stopPing();
-    this.stopReconnect();
 
     if (this.ws) {
       this.ws.close();
+      this.ws = undefined;
     }
+
+    this.state = ConnectionState.DISCONNECTED;
+    this.emit('disconnected');
   }
 
   /**
@@ -254,7 +282,7 @@ export class AgentWorldWSClient extends EventEmitter {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Unsubscribe timeout'));
-      }, 5000);
+      }, 5000); // 5 second timeout
 
       const statusHandler = (status: any) => {
         if (status.payload?.status === 'unsubscribed' && status.worldId === worldId) {
@@ -303,6 +331,53 @@ export class AgentWorldWSClient extends EventEmitter {
       };
 
       this.on('status', statusHandler);
+    });
+  }
+
+  /**
+   * Send command to server (execute immediately)
+   */
+  public async sendCommand(worldId: string | undefined, command: string, params: any = {}): Promise<any> {
+    await this.ensureConnected();
+
+    const message = {
+      type: 'command',
+      worldId,
+      payload: {
+        command,
+        params
+      }
+    };
+
+    this.send(message);
+
+    return new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Command timeout'));
+      }, 10000);
+
+      const statusHandler = (status: any) => {
+        if (status.payload?.command === command) {
+          clearTimeout(timeout);
+          this.off('status', statusHandler);
+
+          if (status.payload.status === 'success') {
+            resolve(status.payload.data);
+          } else {
+            reject(new Error(status.payload.message || 'Command failed'));
+          }
+        }
+      };
+
+      const errorHandler = (error: any) => {
+        clearTimeout(timeout);
+        this.off('status', statusHandler);
+        this.off('error', errorHandler);
+        reject(new Error(error.error || 'Command error'));
+      };
+
+      this.on('status', statusHandler);
+      this.on('error', errorHandler);
     });
   }
 

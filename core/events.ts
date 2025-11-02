@@ -199,28 +199,11 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
-  // SSE event persistence
-  const sseHandler = (event: WorldSSEEvent): void | Promise<void> => {
-    const eventData = {
-      id: event.messageId, // Use messageId directly as the event ID
-      worldId: world.id,
-      chatId: world.currentChatId || null, // Default to current chat
-      type: 'sse',
-      payload: {
-        agentName: event.agentName,
-        type: event.type,
-        content: event.content,
-        error: event.error,
-        usage: event.usage
-      },
-      meta: {
-        agentName: event.agentName,
-        sseType: event.type
-      },
-      createdAt: new Date()
-    };
-
-    return persistEvent(eventData);
+  // SSE event handler - do not persist (transient streaming data)
+  const sseHandler = (event: WorldSSEEvent): void => {
+    // SSE events are transient streaming data and should not be persisted
+    // They are broadcast in real-time but not stored
+    return;
   };
 
   // Tool event persistence (world channel)

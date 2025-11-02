@@ -128,9 +128,9 @@ let providerConfigs: LLMProviderConfigs = {};
 function initializeDefaultConfiguration(): void {
   // Only initialize if no providers are configured yet
   if (Object.keys(providerConfigs).length === 0) {
-    // Configure Ollama with default URL as fallback
+    // Configure Ollama with default URL as fallback (OpenAI-compatible endpoint)
     configureLLMProvider(LLMProvider.OLLAMA, {
-      baseUrl: 'http://localhost:11434/api'
+      baseUrl: 'http://localhost:11434/v1'
     });
   }
 }

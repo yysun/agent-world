@@ -13,7 +13,7 @@
  * 
  * Environment Variables:
  * - WS_PORT: WebSocket server port (default: 3001)
- * - AGENT_WORLD_STORAGE_TYPE: Storage backend type - 'sqlite' or 'memory' (default: memory)
+ * - AGENT_WORLD_STORAGE_TYPE: Storage backend type - 'sqlite' or 'memory' (default: sqlite)
  * - AGENT_WORLD_SQLITE_DATABASE: SQLite database path (default: ~/agent-world/database.db)
  * - AGENT_WORLD_DATA_PATH: Base path for world data (default: ~/agent-world)
  * - WS_HEARTBEAT_INTERVAL: Client heartbeat interval in ms (default: 30000)
@@ -23,6 +23,9 @@
  * - WS_MAX_CONCURRENT: Max concurrent world processing (default: 5)
  * - LOG_LEVEL: Global log level - trace, debug, info, warn, error (default: error)
  * - LOG_WS: WS-specific log level (overrides LOG_LEVEL for ws.* categories)
+ * - LOG_WS_PROCESSOR: Processor-specific log level
+ * - LOG_WS_SERVER: Server-specific log level
+ * - LOG_WS_STORAGE: Storage-specific log level
  * 
  * Changes:
  * - 2025-11-01: Initial WebSocket server implementation
@@ -30,6 +33,7 @@
  * - 2025-11-01: Fix startup visibility - use console.log for config/status messages since default log level is 'error'
  * - 2025-11-01: Fix database path consistency - use getDefaultRootPath() to match API server (~/agent-world instead of ./data)
  * - 2025-11-01: Replace SQL queue with in-memory queue storage (simpler, no persistence needed)
+ * - 2025-11-02: Fix default storage type from 'memory' to 'sqlite' to match API server
  */
 
 import { AgentWorldWSServer } from './ws-server.js';
@@ -43,7 +47,7 @@ import path from 'path';
 import type { EventStorage } from '../core/storage/eventStorage/types.js';
 import type { QueueStorage } from '../core/storage/queue-storage.js';
 
-// Initialize logger with environment variables
+// Initialize logger (picks up LOG_* env vars from .env file)
 initializeLogger();
 
 const logger = createCategoryLogger('ws.server');
@@ -55,7 +59,7 @@ const rootPath = getDefaultRootPath();
 // Read configuration from environment variables
 const config = {
   port: parseInt(process.env.WS_PORT || '3001', 10),
-  storageType: (process.env.AGENT_WORLD_STORAGE_TYPE || 'memory') as 'sqlite' | 'memory',
+  storageType: (process.env.AGENT_WORLD_STORAGE_TYPE || 'sqlite') as 'sqlite' | 'memory',
   dbPath: process.env.AGENT_WORLD_SQLITE_DATABASE || path.join(rootPath, 'database.db'),
   worldsBasePath: process.env.AGENT_WORLD_DATA_PATH || rootPath,
   heartbeatInterval: parseInt(process.env.WS_HEARTBEAT_INTERVAL || '30000', 10),
@@ -73,6 +77,17 @@ async function initializeStorage(): Promise<{
   queueStorage: QueueStorage;
 }> {
   const storageLogger = createCategoryLogger('ws.storage');
+  console.log(`\n=== Storage Configuration ===`);
+  console.log(`Storage Type: ${config.storageType}`);
+
+  if (config.storageType === 'sqlite') {
+    console.log(`Database Path: ${config.dbPath}`);
+  } else {
+    console.log(`Database: In-Memory (no persistence)`);
+  }
+  console.log(`Worlds Base Path: ${config.worldsBasePath}`);
+  console.log(`============================\n`);
+
   storageLogger.info(`Initializing ${config.storageType} storage...`);
 
   // Queue storage is always in-memory (simple and sufficient)
@@ -119,6 +134,7 @@ async function main() {
 
     await server.start();
     console.log(`✓ WebSocket server started on port ${config.port}`);
+    console.log(`✓ Storage: ${config.storageType.toUpperCase()}${config.storageType === 'sqlite' ? ` (${config.dbPath})` : ' (in-memory)'}`);
     logger.info(`WebSocket server started successfully on port ${config.port}`);
 
     // Create and start queue processor
