@@ -9,16 +9,19 @@
  * 
  * Created: 2025-11-01 - Phase 1: Core Infrastructure
  * Updated: 2025-11-01 - Phase 2: UI Components Integration
+ * Updated: 2025-11-01 - Phase 3: Command Result Integration
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import { useWebSocket } from './hooks/useWebSocket.js';
-import { useWorldState, useEventProcessor } from './hooks/useWorldState.js';
+import { useWorldState } from './hooks/useWorldState.js';
 import ChatView from './components/ChatView.js';
 import AgentSidebar from './components/AgentSidebar.js';
 import InputBox from './components/InputBox.js';
+import ConnectionStatus from './components/ConnectionStatus.js';
+import CommandResult from './components/CommandResult.js';
 
 interface AppProps {
   serverUrl: string;
@@ -29,36 +32,20 @@ interface AppProps {
 
 const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => {
   const { exit } = useApp();
-  const [hasSubscribed, setHasSubscribed] = useState(false);
-
-  const worldState = useWorldState();
-  const processEvent = useEventProcessor(worldState);
-
+  
+  const { messages, agents, isReplayComplete, replayProgress, lastCommandResult, processEvent } = useWorldState();
+  
   const ws = useWebSocket(serverUrl, {
     onEvent: processEvent,
     onConnected: () => {
-      worldState.setError(null);
-    },
-    onDisconnected: () => {
-      worldState.setError('Disconnected from server');
-    },
-    onError: (error) => {
-      worldState.setError(error.message);
+      // Subscribe to world on connection
+      ws.subscribe(worldId, chatId, replayFrom);
     }
   });
-
-  // Subscribe to world on connection
-  useEffect(() => {
-    if (ws.connected && !hasSubscribed) {
-      ws.subscribe(worldId, chatId, replayFrom);
-      setHasSubscribed(true);
-    }
-  }, [ws.connected, hasSubscribed, worldId, chatId, replayFrom, ws]);
 
   // Handle Ctrl+C to exit
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
-      ws.disconnect();
       exit();
     }
   });
@@ -71,48 +58,35 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
     }
   };
 
-  // Loading state
-  if (ws.connecting) {
+  // Loading/connecting state
+  if (ws.connecting || !isReplayComplete) {
+    const statusText = ws.connecting 
+      ? `Connecting to ${serverUrl}...`
+      : replayProgress 
+        ? `Replaying events... ${replayProgress.current} / ${replayProgress.total}`
+        : 'Loading...';
+
     return (
       <Box flexDirection="column" padding={1}>
         <Box>
           <Text color="cyan">
             <Spinner type="dots" />
           </Text>
-          <Text color="cyan"> Connecting to {serverUrl}...</Text>
+          <Text color="cyan"> {statusText}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color="gray" dimColor>Press Ctrl+C to exit</Text>
         </Box>
       </Box>
     );
   }
 
   // Connection error
-  if (!ws.connected && worldState.error) {
+  if (!ws.connected && ws.lastError) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">✗ {worldState.error}</Text>
+        <Text color="red">✗ {ws.lastError}</Text>
         <Text color="gray" dimColor>Press Ctrl+C to exit</Text>
-      </Box>
-    );
-  }
-
-  // Replay progress
-  if (worldState.isReplaying && worldState.replayProgress) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Box>
-          <Text color="cyan">
-            <Spinner type="dots" />
-          </Text>
-          <Text color="cyan"> Replaying events...</Text>
-        </Box>
-        <Box marginTop={1}>
-          <Text>
-            {worldState.replayProgress.current} / {worldState.replayProgress.total} ({worldState.replayProgress.percentage}%)
-          </Text>
-        </Box>
-        <Box marginTop={1}>
-          <Text color="gray" dimColor>Press Ctrl+C to exit</Text>
-        </Box>
       </Box>
     );
   }
@@ -123,28 +97,29 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       {/* Header */}
       <Box borderStyle="single" borderColor="cyan" paddingX={1}>
         <Text color="cyan" bold>Agent World - {worldId}</Text>
-        {ws.connected && <Text color="green"> ●</Text>}
+        <Text> | </Text>
+        <ConnectionStatus connected={ws.connected} connecting={ws.connecting} error={ws.lastError} />
       </Box>
 
       {/* Main content: sidebar + chat */}
       <Box flexGrow={1} flexDirection="row">
         {/* Agent Sidebar */}
         <Box width="25%" borderStyle="single" borderColor="gray">
-          <AgentSidebar agents={worldState.agents} />
+          <AgentSidebar agents={agents} />
         </Box>
 
         {/* Chat View */}
         <Box width="75%" flexDirection="column">
           <Box flexGrow={1}>
-            <ChatView messages={worldState.messages} />
+            <ChatView messages={messages} />
           </Box>
         </Box>
       </Box>
 
-      {/* Error bar */}
-      {worldState.error && (
+      {/* Command Result */}
+      {lastCommandResult && (
         <Box paddingX={1}>
-          <Text color="red" bold>Error: {worldState.error}</Text>
+          <CommandResult result={lastCommandResult} />
         </Box>
       )}
 
@@ -158,7 +133,7 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       {/* Footer */}
       <Box paddingX={1}>
         <Text color="gray" dimColor>
-          Ctrl+C to exit | Messages: {worldState.messages.length} | Agents: {worldState.agents.size}
+          Ctrl+C to exit | Messages: {messages.length} | Agents: {agents.length}
         </Text>
       </Box>
     </Box>

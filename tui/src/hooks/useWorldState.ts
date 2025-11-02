@@ -1,149 +1,101 @@
 /**
- * World State Management Hook
+ * useWorldState - World state management from WebSocket events
  * 
- * Manages world state derived from WebSocket events:
- * - Message history
- * - Agent activity status
- * - Streaming state
- * - Event replay progress
+ * Features:
+ * - Message state (messages, addMessage)
+ * - Agent state (agents, updateAgentStatus)
+ * - Replay state (isReplayComplete, replayProgress)
+ * - Command results (lastCommandResult)
+ * - Event processor
  * 
- * Provides filtered and formatted data for UI components.
+ * Implementation:
+ * - Returns state and processor function
+ * - Processor handles WebSocketEvent and updates state
+ * - Tracks agent streaming status
+ * - Manages replay progress
  * 
- * Created: 2025-11-01 - Phase 1: Core Infrastructure
+ * Changes:
+ * - Changed from subscription model to processor model
+ * - Added lastCommandResult state for command execution feedback
+ * - Added result event handling in processor
  */
 
 import { useState, useCallback } from 'react';
-import type { WebSocketEvent } from './useWebSocket.js';
-import type { Message } from '../types/index.ts';
 
-export interface AgentStatus {
+// Simplified types for TUI (no dependency on core/)
+export interface Message {
+  messageId: string;
+  sender: string;
+  content: string;
+  timestamp: Date;
+  isHistorical?: boolean;
+}
+
+export interface Agent {
+  id: string;
   name: string;
-  isActive: boolean;
-  isStreaming: boolean;
-  currentMessage?: string;
-  lastActivity?: Date;
+  status: 'active' | 'inactive';
+  streaming: boolean;
 }
 
-export interface WorldState {
+export interface CommandResult {
+  timestamp: Date;
+  success: boolean;
+  result: any;
+}
+
+export interface WebSocketEvent {
+  type: string;
+  event?: any;
+  eventType?: string;
+  isHistorical?: boolean;
+  data?: any;
+  success?: boolean;
+  message?: string;
+}
+
+export interface UseWorldStateReturn {
   messages: Message[];
-  agents: Map<string, AgentStatus>;
-  isReplaying: boolean;
-  replayProgress?: {
-    current: number;
-    total: number;
-    percentage: number;
-  };
-  error: string | null;
+  agents: Agent[];
+  isReplayComplete: boolean;
+  replayProgress: { current: number; total: number } | null;
+  lastCommandResult: CommandResult | null;
+  processEvent: (event: WebSocketEvent) => void;
 }
-
-export interface UseWorldStateReturn extends WorldState {
-  addMessage: (message: Message) => void;
-  updateAgentStatus: (agentName: string, status: Partial<AgentStatus>) => void;
-  setReplayProgress: (current: number, total: number) => void;
-  setError: (error: string | null) => void;
-  clearMessages: () => void;
-  reset: () => void;
-}
-
-const MAX_MESSAGES = 1000; // Keep last 1000 messages in memory
 
 export function useWorldState(): UseWorldStateReturn {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [agents, setAgents] = useState<Map<string, AgentStatus>>(new Map());
-  const [isReplaying, setIsReplaying] = useState(false);
-  const [replayProgress, setReplayProgressState] = useState<{ current: number; total: number; percentage: number } | undefined>();
-  const [error, setError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isReplayComplete, setIsReplayComplete] = useState(false);
+  const [replayProgress, setReplayProgress] = useState<{ current: number; total: number } | null>(null);
+  const [lastCommandResult, setLastCommandResult] = useState<CommandResult | null>(null);
 
   const addMessage = useCallback((message: Message) => {
-    setMessages(prev => {
-      const newMessages = [...prev, message];
-      // Keep only last MAX_MESSAGES
-      if (newMessages.length > MAX_MESSAGES) {
-        return newMessages.slice(newMessages.length - MAX_MESSAGES);
-      }
-      return newMessages;
-    });
+    setMessages(prev => [...prev, message]);
   }, []);
 
-  const updateAgentStatus = useCallback((agentName: string, status: Partial<AgentStatus>) => {
+  const updateAgentStatus = useCallback((agentId: string, status: 'active' | 'inactive', streaming: boolean = false) => {
     setAgents(prev => {
-      const newAgents = new Map(prev);
-      const current = newAgents.get(agentName) || {
-        name: agentName,
-        isActive: false,
-        isStreaming: false
-      };
-      newAgents.set(agentName, { ...current, ...status });
-      return newAgents;
+      const existing = prev.find(a => a.id === agentId);
+      if (existing) {
+        return prev.map(a => 
+          a.id === agentId 
+            ? { ...a, status, streaming }
+            : a
+        );
+      } else {
+        return [...prev, { id: agentId, name: agentId, status, streaming }];
+      }
     });
   }, []);
 
-  const setReplayProgress = useCallback((current: number, total: number) => {
-    if (total > 0) {
-      setIsReplaying(true);
-      setReplayProgressState({
-        current,
-        total,
-        percentage: Math.round((current / total) * 100)
-      });
-    } else {
-      setIsReplaying(false);
-      setReplayProgressState(undefined);
-    }
-  }, []);
-
-  const clearMessages = useCallback(() => {
-    setMessages([]);
-  }, []);
-
-  const reset = useCallback(() => {
-    setMessages([]);
-    setAgents(new Map());
-    setIsReplaying(false);
-    setReplayProgressState(undefined);
-    setError(null);
-  }, []);
-
-  return {
-    messages,
-    agents,
-    isReplaying,
-    replayProgress,
-    error,
-    addMessage,
-    updateAgentStatus,
-    setReplayProgress,
-    setError,
-    clearMessages,
-    reset
-  };
-}
-
-/**
- * Hook to process WebSocket events and update world state
- */
-export function useEventProcessor(worldState: UseWorldStateReturn) {
-  return useCallback((event: WebSocketEvent) => {
+  const processEvent = useCallback((event: WebSocketEvent) => {
     switch (event.type) {
-      case 'subscribed':
-        if (event.historicalEventCount && event.historicalEventCount > 0) {
-          worldState.setReplayProgress(0, event.historicalEventCount);
-        }
-        break;
-
       case 'event':
-        // Update replay progress for historical events
-        if (event.isHistorical && worldState.replayProgress) {
-          worldState.setReplayProgress(
-            worldState.replayProgress.current + 1,
-            worldState.replayProgress.total
-          );
-        }
-
-        // Process event by type
+        // Handle different event types
         if (event.eventType === 'message' && event.event) {
           const msg = event.event;
-          worldState.addMessage({
+          addMessage({
             messageId: msg.messageId || `${Date.now()}-${Math.random()}`,
             sender: msg.sender || 'unknown',
             content: msg.content || '',
@@ -155,64 +107,56 @@ export function useEventProcessor(worldState: UseWorldStateReturn) {
           const agentName = sseEvent.agentName;
 
           if (sseEvent.type === 'start') {
-            worldState.updateAgentStatus(agentName, {
-              isStreaming: true,
-              isActive: true,
-              currentMessage: ''
-            });
-          } else if (sseEvent.type === 'chunk') {
-            worldState.updateAgentStatus(agentName, {
-              currentMessage: (worldState.agents.get(agentName)?.currentMessage || '') + (sseEvent.content || '')
-            });
+            updateAgentStatus(agentName, 'active', true);
           } else if (sseEvent.type === 'end') {
-            const finalMessage = worldState.agents.get(agentName)?.currentMessage;
-            if (finalMessage) {
-              worldState.addMessage({
-                messageId: sseEvent.messageId || `${Date.now()}-${Math.random()}`,
-                sender: agentName,
-                content: finalMessage,
-                timestamp: new Date(),
-                isHistorical: event.isHistorical
-              });
-            }
-            worldState.updateAgentStatus(agentName, {
-              isStreaming: false,
-              isActive: false,
-              currentMessage: undefined,
-              lastActivity: new Date()
-            });
+            updateAgentStatus(agentName, 'inactive', false);
           }
         } else if (event.eventType === 'world' && event.event) {
           const worldEvent = event.event;
-
-          // Track agent activity
+          
           if (worldEvent.type === 'response-start' && worldEvent.source?.startsWith('agent:')) {
             const agentName = worldEvent.source.replace('agent:', '');
-            worldState.updateAgentStatus(agentName, {
-              isActive: true,
-              lastActivity: new Date()
-            });
+            updateAgentStatus(agentName, 'active');
           } else if (worldEvent.type === 'response-end' && worldEvent.source?.startsWith('agent:')) {
             const agentName = worldEvent.source.replace('agent:', '');
-            worldState.updateAgentStatus(agentName, {
-              isActive: false,
-              lastActivity: new Date()
-            });
+            updateAgentStatus(agentName, 'inactive');
           }
         }
         break;
 
+      case 'subscribed':
+        // Could track agents from world data here if provided
+        break;
+
       case 'replay-complete':
-        worldState.setReplayProgress(0, 0);
+        setIsReplayComplete(true);
+        setReplayProgress(null);
+        break;
+
+      case 'result':
+        setLastCommandResult({
+          timestamp: new Date(),
+          success: event.success ?? true,
+          result: event.data
+        });
         break;
 
       case 'error':
-        worldState.setError(event.message || 'Unknown error');
+        // Could track errors here
         break;
 
       default:
-        // Ignore other message types
+        // Ignore other event types
         break;
     }
-  }, [worldState]);
+  }, [addMessage, updateAgentStatus]);
+
+  return {
+    messages,
+    agents,
+    isReplayComplete,
+    replayProgress,
+    lastCommandResult,
+    processEvent
+  };
 }

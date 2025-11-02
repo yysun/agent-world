@@ -4,25 +4,30 @@
  * Displays agent status with:
  * - Active/inactive indicators
  * - Streaming status with spinner
- * - Last activity timestamp
+ * - Agent name and status
  * - Real-time updates
  * 
  * Created: 2025-11-01 - Phase 2: UI Components
+ * Updated: 2025-11-01 - Phase 3: Simplified interface to match Agent[] type
  */
 
 import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
-import type { AgentStatus } from '../hooks/useWorldState.js';
+
+export interface Agent {
+  id: string;
+  name: string;
+  status: 'active' | 'inactive';
+  streaming: boolean;
+}
 
 interface AgentSidebarProps {
-  agents: Map<string, AgentStatus>;
+  agents: Agent[];
 }
 
 const AgentSidebar: React.FC<AgentSidebarProps> = ({ agents }) => {
-  const agentList = Array.from(agents.values());
-
-  if (agentList.length === 0) {
+  if (agents.length === 0) {
     return (
       <Box flexDirection="column" padding={1}>
         <Text color="gray" dimColor>No agents</Text>
@@ -32,27 +37,21 @@ const AgentSidebar: React.FC<AgentSidebarProps> = ({ agents }) => {
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text color="cyan" bold>Agents ({agentList.length})</Text>
+      <Text color="cyan" bold>Agents ({agents.length})</Text>
       <Box marginTop={1} flexDirection="column">
-        {agentList.map((agent) => {
-          const statusColor = agent.isActive ? 'green' : 'gray';
-          const statusText = agent.isActive ? '●' : '○';
-          const lastActivityText = agent.lastActivity
-            ? agent.lastActivity.toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })
-            : '-';
+        {agents.map((agent) => {
+          const statusColor = agent.status === 'active' ? 'green' : 'gray';
+          const statusText = agent.status === 'active' ? '●' : '○';
 
           return (
-            <Box key={agent.name} flexDirection="column" marginBottom={1}>
+            <Box key={agent.id} flexDirection="column" marginBottom={1}>
               <Box>
                 <Text color={statusColor}>{statusText}</Text>
                 <Text> </Text>
                 <Text bold>{agent.name}</Text>
               </Box>
 
-              {agent.isStreaming && (
+              {agent.streaming && (
                 <Box paddingLeft={2}>
                   <Text color="blue">
                     <Spinner type="dots" />
@@ -60,19 +59,6 @@ const AgentSidebar: React.FC<AgentSidebarProps> = ({ agents }) => {
                   <Text color="blue"> Streaming...</Text>
                 </Box>
               )}
-
-              {agent.currentMessage && (
-                <Box paddingLeft={2}>
-                  <Text color="gray" dimColor>
-                    {agent.currentMessage.substring(0, 30)}
-                    {agent.currentMessage.length > 30 ? '...' : ''}
-                  </Text>
-                </Box>
-              )}
-
-              <Box paddingLeft={2}>
-                <Text color="gray" dimColor>Last: {lastActivityText}</Text>
-              </Box>
             </Box>
           );
         })}
