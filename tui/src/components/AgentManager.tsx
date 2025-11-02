@@ -13,7 +13,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import Popup from './Popup.js';
-import type { AgentActivityStatus } from '../../ws/types.js';
+import type { AgentActivityStatus } from '../../../ws/types.js';
 
 interface AgentManagerProps {
   agents: AgentActivityStatus[];

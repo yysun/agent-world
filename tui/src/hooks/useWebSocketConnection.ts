@@ -17,9 +17,9 @@
  * Created: 2025-11-02 - Phase 1: Refactor to use shared ws/ws-client.ts
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { WebSocketClient } from '../../ws/ws-client.js';
-import type { ConnectionState } from '../../ws/ws-client.js';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { WebSocketClient } from '../../../ws/ws-client.js';
+import type { ConnectionState } from '../../../ws/ws-client.js';
 
 export interface UseWebSocketConnectionOptions {
   onConnected?: () => void;

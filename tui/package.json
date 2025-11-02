@@ -19,7 +19,7 @@
     "ink-text-input": "^5.0.1",
     "react": "^18.2.0",
     "ws": "^8.16.0",
-    "meow": "^13.0.0"
+    "commander": "^12.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

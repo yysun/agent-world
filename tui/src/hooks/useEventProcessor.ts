@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useRef } from 'react';
-import type { WSMessage, Message } from '../../ws/types.js';
+import type { WSMessage, Message } from '../../../ws/types.js';
 import type { UseWorldStateReturn, CommandResult } from './useWorldState.js';
 
 export interface UseEventProcessorOptions {

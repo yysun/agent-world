@@ -13,7 +13,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
-import type { AgentActivityStatus } from '../../ws/types.js';
+import type { AgentActivityStatus } from '../../../ws/types.js';
 
 interface AgentBarProps {
   agents: AgentActivityStatus[];
@@ -36,13 +36,12 @@ const AgentBar: React.FC<AgentBarProps> = ({ agents, maxWidth = 80 }) => {
 
   for (let i = 0; i < agents.length; i++) {
     const agent = agents[i];
-    const isStreaming = agent.phase === 'streaming' || agent.phase === 'responding';
-    const isActive = agent.phase !== 'idle';
+    // Check if agent is actively working (any phase other than thinking is activity)
+    const isStreaming = agent.phase === 'tool-progress';
+    const isActive = agent.phase !== 'thinking';
 
     // Estimate: "● AgentName " = ~15 chars average
-    const agentWidth = agent.agentId.length + 4;
-
-    if (estimatedWidth + agentWidth > maxWidth - 10 && i < agents.length - 1) {
+    const agentWidth = agent.agentId.length + 4; if (estimatedWidth + agentWidth > maxWidth - 10 && i < agents.length - 1) {
       truncatedCount = agents.length - i;
       break;
     }

@@ -20,8 +20,8 @@
  */
 
 import { useCallback } from 'react';
-import type { WebSocketClient } from '../../ws/ws-client.js';
-import type { WSMessage, WSEvent } from '../../ws/types.js';
+import type { WebSocketClient } from '../../../ws/ws-client.js';
+import type { WSMessage } from '../../../ws/types.js';
 
 export interface UseAgentWorldClientOptions {
   onEvent?: (event: WSEvent) => void;

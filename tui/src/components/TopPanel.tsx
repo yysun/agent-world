@@ -15,7 +15,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import AgentBar from './AgentBar.js';
 import ConnectionStatus from './ConnectionStatus.js';
-import type { AgentActivityStatus } from '../../ws/types.js';
+import type { AgentActivityStatus } from '../../../ws/types.js';
 
 interface TopPanelProps {
   worldId: string;

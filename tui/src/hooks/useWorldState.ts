@@ -21,7 +21,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import type { Message, AgentActivityStatus } from '../../ws/types.js';
+import type { Message, AgentActivityStatus } from '../../../ws/types.js';
 
 export interface CommandResult {
   timestamp: Date;

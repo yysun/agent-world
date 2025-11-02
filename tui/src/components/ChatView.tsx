@@ -15,7 +15,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Message } from '../../ws/types.js';
+import type { Message } from '../../../ws/types.js';
 
 interface ChatViewProps {
   messages: Message[];

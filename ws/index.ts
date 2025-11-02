@@ -66,7 +66,8 @@ export { AgentWorldWSServer } from './ws-server.js';
 export type { WSServerConfig, WSMessage, WSMessageType } from './ws-server.js';
 
 // Re-export queue processor
-export { startQueueProcessor, createQueueProcessor } from './queue-processor.js';
+export { createQueueProcessor } from './queue-processor.js';
+export type { QueueProcessor, QueueProcessorConfig } from './queue-processor.js';
 
 // ========================================
 // MAIN SERVER ENTRY POINT
