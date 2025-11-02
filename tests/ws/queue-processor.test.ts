@@ -30,7 +30,7 @@ describe('Queue Processor', () => {
       markFailed: vi.fn(),
       retryMessage: vi.fn(),
       getQueueDepth: vi.fn(),
-      getQueueStats: vi.fn().mockResolvedValue({}),
+      getQueueStats: vi.fn().mockResolvedValue([]),
       detectStuckMessages: vi.fn(),
       cleanup: vi.fn(),
       getMessage: vi.fn()
@@ -110,9 +110,9 @@ describe('Queue Processor', () => {
         error: undefined
       };
 
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue({
-        'test-world': { pending: 1, processing: 0, completed: 0, failed: 0 }
-      });
+      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
+        { worldId: 'test-world', pending: 1, processing: 0, completed: 0, failed: 0 }
+      ]);
       (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
 
       processor = createQueueProcessor({
@@ -155,9 +155,9 @@ describe('Queue Processor', () => {
         error: undefined
       };
 
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue({
-        'test-world': { pending: 1, processing: 0, completed: 0, failed: 0 }
-      });
+      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
+        { worldId: 'test-world', pending: 1, processing: 0, completed: 0, failed: 0 }
+      ]);
       (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
 
       processor = createQueueProcessor({
@@ -179,14 +179,14 @@ describe('Queue Processor', () => {
     });
 
     it('should respect max concurrent worlds limit', async () => {
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue({
-        'world-1': { pending: 1, processing: 0, completed: 0, failed: 0 },
-        'world-2': { pending: 1, processing: 0, completed: 0, failed: 0 },
-        'world-3': { pending: 1, processing: 0, completed: 0, failed: 0 },
-        'world-4': { pending: 1, processing: 0, completed: 0, failed: 0 },
-        'world-5': { pending: 1, processing: 0, completed: 0, failed: 0 },
-        'world-6': { pending: 1, processing: 0, completed: 0, failed: 0 }
-      });
+      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
+        { worldId: 'world-1', pending: 1, processing: 0, completed: 0, failed: 0 },
+        { worldId: 'world-2', pending: 1, processing: 0, completed: 0, failed: 0 },
+        { worldId: 'world-3', pending: 1, processing: 0, completed: 0, failed: 0 },
+        { worldId: 'world-4', pending: 1, processing: 0, completed: 0, failed: 0 },
+        { worldId: 'world-5', pending: 1, processing: 0, completed: 0, failed: 0 },
+        { worldId: 'world-6', pending: 1, processing: 0, completed: 0, failed: 0 }
+      ]);
 
       processor = createQueueProcessor({
         queueStorage: mockQueueStorage,
@@ -231,9 +231,9 @@ describe('Queue Processor', () => {
         error: undefined
       };
 
-      (mockQueueStorage.getQueueStats as any).mockResolvedValue({
-        'non-existent-world': { pending: 1, processing: 0, completed: 0, failed: 0 }
-      });
+      (mockQueueStorage.getQueueStats as any).mockResolvedValue([
+        { worldId: 'non-existent-world', pending: 1, processing: 0, completed: 0, failed: 0 }
+      ]);
       (mockQueueStorage.dequeue as any).mockResolvedValueOnce(queueMessage).mockResolvedValue(null);
 
       processor = createQueueProcessor({

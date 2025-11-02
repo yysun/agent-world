@@ -78,7 +78,7 @@ describe('Event Persistence Integration', () => {
     );
 
     expect(events.length).toBeGreaterThan(0);
-    const sseEvent = events.find((e: any) => e.id === 'msg-sse-123');
+    const sseEvent = events.find((e: any) => e.id === 'msg-sse-123-sse-start');
     expect(sseEvent).toBeDefined();
     expect(sseEvent!.type).toBe('sse');
     expect(sseEvent!.chatId).toBe(world!.currentChatId);
@@ -342,12 +342,12 @@ describe('Event Persistence Integration', () => {
 
       publishSSE(world!, {
         agentName: 'agent',
-        type: 'chunk',
+        type: 'start',
         messageId: 'sse-default-chatid'
       });
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['sse'] });
-      const sseEvent = events.find((e: any) => e.id === 'sse-default-chatid');
+      const sseEvent = events.find((e: any) => e.id === 'sse-default-chatid-sse-start');
 
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBe(chatId);
@@ -387,7 +387,7 @@ describe('Event Persistence Integration', () => {
       const world = await getWorld(worldId);
       world!.currentChatId = null;
 
-      publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-null-chatid' });
+      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-null-chatid' });
       publishToolEvent(world!, {
         agentName: 'agent',
         type: 'tool-start',
@@ -397,7 +397,7 @@ describe('Event Persistence Integration', () => {
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, null);
 
-      const sseEvent = events.find((e: any) => e.id === 'sse-null-chatid');
+      const sseEvent = events.find((e: any) => e.id === 'sse-null-chatid-sse-end');
       const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid');
 
       expect(sseEvent).toBeDefined();

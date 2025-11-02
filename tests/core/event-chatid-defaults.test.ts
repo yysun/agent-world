@@ -69,7 +69,7 @@ describe('Event ChatId Defaults', () => {
       ) as StoredEvent[];
 
       expect(events.length).toBeGreaterThan(0);
-      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-chatid-1');
+      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-chatid-1-sse-start');
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBe(chatId);
       expect(sseEvent!.type).toBe('sse');
@@ -82,7 +82,7 @@ describe('Event ChatId Defaults', () => {
       // Emit SSE event in first chat
       publishSSE(world!, {
         agentName: 'agent1',
-        type: 'chunk',
+        type: 'start',
         messageId: 'sse-chat1',
         content: 'Chat 1 content'
       });
@@ -99,7 +99,7 @@ describe('Event ChatId Defaults', () => {
       // Emit SSE event in second chat
       publishSSE(world!, {
         agentName: 'agent2',
-        type: 'chunk',
+        type: 'end',
         messageId: 'sse-chat2',
         content: 'Chat 2 content'
       });
@@ -119,8 +119,8 @@ describe('Event ChatId Defaults', () => {
       );
 
       // Verify events are in correct chats
-      const chat1Event = chat1Events.find((e: StoredEvent) => e.id === 'sse-chat1');
-      const chat2Event = chat2Events.find((e: StoredEvent) => e.id === 'sse-chat2');
+      const chat1Event = chat1Events.find((e: StoredEvent) => e.id === 'sse-chat1-sse-start');
+      const chat2Event = chat2Events.find((e: StoredEvent) => e.id === 'sse-chat2-sse-end');
 
       expect(chat1Event).toBeDefined();
       expect(chat1Event!.chatId).toBe(chat1Id);
@@ -128,8 +128,8 @@ describe('Event ChatId Defaults', () => {
       expect(chat2Event!.chatId).toBe(chat2Id);
 
       // Verify events don't leak across chats
-      expect(chat1Events.find((e: StoredEvent) => e.id === 'sse-chat2')).toBeUndefined();
-      expect(chat2Events.find((e: StoredEvent) => e.id === 'sse-chat1')).toBeUndefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'sse-chat2-sse-end')).toBeUndefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'sse-chat1-sse-start')).toBeUndefined();
     });
   });
 
@@ -376,7 +376,7 @@ describe('Event ChatId Defaults', () => {
       publishMessage(world!, 'Message 1', 'human');
       publishMessage(world!, 'Message 2', 'human');
       publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-1' });
-      publishSSE(world!, { agentName: 'agent', type: 'chunk', messageId: 'sse-2' });
+      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-2' });
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -409,7 +409,7 @@ describe('Event ChatId Defaults', () => {
       world!.currentChatId = null;
 
       // Emit events
-      publishSSE(world!, { agentName: 'agent', type: 'start', messageId: 'sse-no-chat' });
+      publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-no-chat' });
       publishToolEvent(world!, {
         agentName: 'agent',
         type: 'tool-start',
@@ -427,7 +427,7 @@ describe('Event ChatId Defaults', () => {
       );
 
       // Should find events with null chatId
-      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-no-chat');
+      const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-no-chat-sse-end');
       const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-no-chat');
 
       expect(sseEvent).toBeDefined();

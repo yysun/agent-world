@@ -96,11 +96,18 @@ vi.mock('fs', () => ({
     rename: vi.fn<any>().mockResolvedValue(undefined),
     unlink: vi.fn<any>().mockResolvedValue(undefined)
   },
-  // Sync methods for storage-factory
+  // Sync methods for storage-factory and migration-runner
   existsSync: vi.fn(() => true),
   mkdirSync: vi.fn(() => undefined),
   readFileSync: vi.fn(() => '{}'),
-  writeFileSync: vi.fn(() => undefined)
+  writeFileSync: vi.fn(() => undefined),
+  readdirSync: vi.fn(() => []),
+  statSync: vi.fn(() => ({
+    isDirectory: () => false,
+    isFile: () => true
+  })),
+  unlinkSync: vi.fn(() => undefined),
+  rmdirSync: vi.fn(() => undefined)
 }));
 
 // Mock agent-storage module globally to prevent actual disk I/O

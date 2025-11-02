@@ -62,9 +62,20 @@ export async function getCurrentVersion(db: Database): Promise<number> {
  * Set schema version in database
  */
 export async function setVersion(db: Database, version: number): Promise<void> {
-  const run = promisify(db.run.bind(db));
-  await run(`PRAGMA user_version = ${version}`);
-  logger.info('Schema version updated', { version });
+  // Ensure version is an integer
+  const intVersion = Math.floor(version);
+
+  // PRAGMA statements work with db.run but need to be handled in serialize mode
+  await new Promise<void>((resolve, reject) => {
+    db.serialize(() => {
+      db.run(`PRAGMA user_version = ${intVersion}`, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  });
+
+  logger.info('Schema version updated', { version: intVersion });
 }
 
 /**
@@ -72,14 +83,18 @@ export async function setVersion(db: Database, version: number): Promise<void> {
  * This provides better migration history than just PRAGMA user_version
  */
 export async function ensureMigrationTable(db: Database): Promise<void> {
-  const run = promisify(db.run.bind(db));
-  await run(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  return new Promise<void>((resolve, reject) => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
 }
 
 /**
@@ -88,6 +103,8 @@ export async function ensureMigrationTable(db: Database): Promise<void> {
 export async function getAppliedMigrations(db: Database): Promise<MigrationRecord[]> {
   const all = promisify(db.all.bind(db));
   try {
+    // Ensure table exists before querying
+    await ensureMigrationTable(db);
     const rows = await all("SELECT version, name, applied_at FROM schema_migrations ORDER BY version") as MigrationRecord[];
     return rows || [];
   } catch {
@@ -99,6 +116,9 @@ export async function getAppliedMigrations(db: Database): Promise<MigrationRecor
  * Record a migration in the tracking table
  */
 export async function recordMigration(db: Database, version: number, name: string): Promise<void> {
+  // Ensure table exists before inserting
+  await ensureMigrationTable(db);
+
   const run = (sql: string, params?: any[]): Promise<void> => {
     return new Promise((resolve, reject) => {
       db.run(sql, params || [], (err) => {
@@ -156,7 +176,8 @@ export function readMigrationFile(filePath: string): string {
  * Execute a single migration file
  */
 export async function executeMigration(db: Database, migration: MigrationFile): Promise<void> {
-  const exec = promisify(db.exec.bind(db));
+  // Split SQL by semicolons and execute each statement
+  const run = promisify(db.run.bind(db));
 
   logger.info('Executing migration', {
     version: migration.version,
@@ -166,8 +187,16 @@ export async function executeMigration(db: Database, migration: MigrationFile): 
   const sql = readMigrationFile(migration.filePath);
 
   try {
-    // Use exec() instead of run() to execute multiple SQL statements in migration files
-    await exec(sql);
+    // Split SQL into statements and execute each one
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    for (const statement of statements) {
+      await run(statement);
+    }
+
     await recordMigration(db, migration.version, migration.name);
     await setVersion(db, migration.version);
 
