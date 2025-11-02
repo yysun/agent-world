@@ -45,23 +45,56 @@ expect ">"
 puts "\n=== Sending test message: 'hello' ==="
 send "hello\r"
 
-# Wait for agent response (SSE streaming)
+# First, wait for the "Sent" confirmation
 expect {
-    -re {\[a[0-9]+\]:} {
-        puts "\n=== ✓ Agent response detected ==="
-        # Continue to check for more responses
-        exp_continue
-    }
-    -re {\[Agent\]:} {
-        puts "\n=== ✓ Agent response detected ==="
-        exp_continue
-    }
-    ">" {
-        puts "\n=== Ready for next command ==="
+    -re {\[Sent\] Message ID:} {
+        puts "\n=== Message sent successfully ==="
     }
     timeout {
-        puts "\n=== ERROR: No agent response within 30 seconds ==="
+        puts "\n=== ERROR: Message send timeout ==="
         exit 1
+    }
+}
+
+# Now wait for agent responses (they come asynchronously through WebSocket events)
+# Don't look for the prompt - look for agent messages
+set agent_responded 0
+set timeout 60
+
+# Agent responses will appear as text on stdout from the event handlers
+expect {
+    -re {\[a1\]:} {
+        puts "\n=== ✓ Agent a1 response detected ==="
+        set agent_responded 1
+        exp_continue
+    }
+    -re {\[a2\]:} {
+        puts "\n=== ✓ Agent a2 response detected ==="
+        set agent_responded 1
+        exp_continue
+    }
+    -re {\[PROCESSING\]} {
+        puts "\n=== Message being processed ==="
+        exp_continue
+    }
+    -re {\[COMPLETED\]} {
+        puts "\n=== ✓ Processing completed ==="
+        # Wait a bit more for any remaining output
+        sleep 1
+        if {$agent_responded == 1} {
+            puts "\n=== Test passed - agents responded ==="
+        } else {
+            puts "\n=== ERROR: Processing completed but no agent response seen ==="
+            exit 1
+        }
+    }
+    timeout {
+        if {$agent_responded == 1} {
+            puts "\n=== Test passed - at least one agent responded (timeout waiting for more) ==="
+        } else {
+            puts "\n=== ERROR: No agent response within 60 seconds ==="
+            exit 1
+        }
     }
 }
 

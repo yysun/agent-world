@@ -11,6 +11,10 @@
  * - Run demo: npm run demo [worldId] [chatId]
  * - Type messages at prompt, press Enter to send
  * - Type 'exit' or 'quit' to disconnect and exit
+ * 
+ * Changes:
+ * - 2025-11-02: Update to handle consolidated event structure (all events wrapped consistently)
+ * - 2025-11-02: Update event handler to properly access SSE event fields (agentName, content) from payload
  */
 
 import { createWSClient, AgentWorldWSClient } from './client.js';
@@ -202,23 +206,72 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
   });
 
   client.on('event', (event) => {
-    // Event payload structure varies by event type
-    const payload = event.payload;
-
-    // Determine event type - could be at top level or nested
-    const eventType = payload?.type || event.type;
+    // All events now have consistent structure: { type: 'event', payload: { type, payload, ... } }
+    const eventData = event.payload;
+    const eventType = eventData?.type;
+    const payload = eventData?.payload;
 
     // Handle different event types
     if (eventType === 'message') {
-      // Agent or human message
+      // Message event from world (agent or human)
       const sender = payload?.sender || 'unknown';
       const content = payload?.content || '';
 
       console.log(`\n[${sender}]: ${content}\n`);
     }
+    else if (eventType === 'world') {
+      // World event (system, tool execution, activity tracking)
+      const subType = payload?.type;
+
+      // Handle tool events
+      if (subType === 'tool-start' && payload.toolExecution) {
+        const toolName = payload.toolExecution.toolName;
+        const agentName = payload.agentName || payload.sender || 'agent';
+        console.log(`\n${agentName} calling tool - ${toolName} ...`);
+      }
+      else if (subType === 'tool-progress' && payload.toolExecution) {
+        const toolName = payload.toolExecution.toolName;
+        const agentName = payload.agentName || payload.sender || 'agent';
+        console.log(`${agentName} continuing tool - ${toolName} ...`);
+      }
+      else if (subType === 'tool-result' && payload.toolExecution) {
+        const { toolName, duration, resultSize } = payload.toolExecution;
+        const durationText = duration ? `${Math.round(duration)}ms` : 'completed';
+        const sizeText = resultSize ? `, ${resultSize} chars` : '';
+        const agentName = payload.agentName || payload.sender || 'agent';
+        console.log(`${agentName} tool finished - ${toolName} (${durationText}${sizeText})`);
+      }
+      else if (subType === 'tool-error' && payload.toolExecution) {
+        const { toolName, error: toolError } = payload.toolExecution;
+        const agentName = payload.agentName || payload.sender || 'agent';
+        console.log(`${agentName} tool failed - ${toolName}: ${toolError}`);
+      }
+      // Handle activity events
+      else if (subType === 'response-start' || subType === 'response-end' || subType === 'idle') {
+        const source = payload.source || '';
+        const pending = payload.pendingOperations || 0;
+        const activityId = payload.activityId || 0;
+        const activeSources = payload.activeSources || [];
+        const sourceName = source.startsWith('agent:') ? source.slice('agent:'.length) : source;
+
+        if (subType === 'response-start') {
+          const message = sourceName ? `${sourceName} started processing` : 'started';
+          console.log(`[World] ${message} | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+        } else if (subType === 'idle' && pending === 0) {
+          console.log(`[World] All processing complete | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+        } else if (subType === 'response-end' && pending > 0) {
+          if (activeSources.length > 0) {
+            const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
+            console.log(`[World] Active: ${activeList} (${pending} pending) | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+          }
+        }
+      }
+      else if (process.env.DEBUG_EVENTS) {
+        console.log(`[World Event: ${subType}]`, payload);
+      }
+    }
     else if (eventType === 'chunk') {
       // SSE streaming chunk
-      const agentName = payload?.agentName || 'Agent';
       const content = payload?.content || '';
 
       // Print chunk without newline to accumulate
@@ -240,14 +293,11 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
       const error = payload?.error || 'Unknown error';
       console.log(`\n[Error]: ${error}\n`);
     }
-    else if (eventType === 'response-start' || eventType === 'response-end' || eventType === 'idle') {
-      // Activity tracking events - suppress for cleaner output
-    }
-    else if (eventType === 'event') {
-      // Generic event wrapper - suppress
-    }
     else {
-      // Other unknown events - suppress for cleaner output
+      // Other events - log for debugging
+      if (process.env.DEBUG_EVENTS) {
+        console.log(`[DEBUG] Unknown event type: ${eventType}`, payload);
+      }
     }
   });
 

@@ -26,6 +26,8 @@
  * ```
  * 
  * Changes:
+ * - 2025-11-02: Fix disconnect() to use stopReconnect() and subscriptions map
+ * - 2025-11-02: Fix sendCommand() type casting for WSClientMessage
  * - 2025-11-01: Initial WebSocket client implementation
  */
 
@@ -187,28 +189,24 @@ export class AgentWorldWSClient extends EventEmitter {
     }
 
     // Stop reconnection attempts
-    this.shouldReconnect = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
-    }
+    this.stopReconnect();
 
-    // Unsubscribe from world if subscribed
-    if (this.subscribedWorldId) {
+    // Unsubscribe from all worlds
+    for (const worldId of this.subscriptions.keys()) {
       try {
         // Send unsubscribe message but don't wait for response during disconnect
         const message: WSClientMessage = {
           type: 'unsubscribe',
-          worldId: this.subscribedWorldId
+          worldId
         };
         if (this.ws && this.ws.readyState === this.ws.OPEN) {
           this.send(message);
         }
-        this.subscribedWorldId = undefined;
       } catch (error) {
         // Ignore unsubscribe errors during disconnect
       }
     }
+    this.subscriptions.clear();
 
     // Close the WebSocket connection
     this.state = ConnectionState.CLOSING;
@@ -340,8 +338,8 @@ export class AgentWorldWSClient extends EventEmitter {
   public async sendCommand(worldId: string | undefined, command: string, params: any = {}): Promise<any> {
     await this.ensureConnected();
 
-    const message = {
-      type: 'command',
+    const message: WSClientMessage = {
+      type: 'command' as const,
       worldId,
       payload: {
         command,

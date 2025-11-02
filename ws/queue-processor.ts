@@ -236,21 +236,25 @@ export class QueueProcessor {
       // Set up event listeners to broadcast events in real-time
       const messageListener = (event: any) => {
         // Broadcast message events (user/agent messages)
-        this.config.wsServer.broadcastEvent(worldId, chatId, event);
+        logger.debug(`[EVENT] Message event received`, { worldId, messageId, sender: event.sender });
+        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'message', ...event });
       };
 
       const worldListener = (event: any) => {
         // Broadcast world events (system, tools, etc)
-        this.config.wsServer.broadcastEvent(worldId, chatId, event);
+        logger.debug(`[EVENT] World event received`, { worldId, messageId, eventType: event.type });
+        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'world', ...event });
       };
 
       const sseListener = (event: any) => {
         // Broadcast SSE events (streaming LLM responses)
+        logger.debug(`[EVENT] SSE event received`, { worldId, messageId, eventType: event.type, agentName: event.agentName });
         this.config.wsServer.broadcastEvent(worldId, chatId, event);
       };
 
       const crudListener = (event: any) => {
         // Broadcast CRUD events (config changes)
+        logger.debug(`[EVENT] CRUD event received`, { worldId, operation: event.operation });
         this.config.wsServer.broadcastCRUDEvent(worldId, event);
       };
 

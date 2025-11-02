@@ -21,6 +21,8 @@
  * - Pino-based structured logging
  * 
  * Changes:
+ * - 2025-11-02: Consolidate all events to consistent structure (SSE and message events both wrapped)
+ * - 2025-11-02: Fix SSE event broadcasting - pass event data directly for SSE events (start, chunk, end, error, log)
  * - 2025-11-01: Add CRUD event broadcasting for agent/chat/world changes
  * - 2025-11-01: Initial WebSocket server implementation
  * - 2025-11-01: Replace console.log with structured logger
@@ -158,13 +160,14 @@ export class AgentWorldWSServer {
       });
 
       // Handle connection close
-      ws.on('close', () => {
+      ws.on('close', (code, reason) => {
+        logger.info(`WebSocket closed`, { code, reason: reason?.toString(), hasClient: !!this.clients.get(ws) });
         this.handleDisconnect(ws);
       });
 
       // Handle errors
       ws.on('error', (error: Error) => {
-        logger.error('WebSocket error:', error);
+        logger.error('WebSocket error:', { error: error.message, stack: error.stack });
         this.handleDisconnect(ws);
       });
     });
@@ -584,6 +587,7 @@ export class AgentWorldWSServer {
       chatId
     });
 
+    // Wrap all events consistently with the same structure
     const message: WSMessage = {
       type: 'event',
       worldId,
@@ -592,7 +596,7 @@ export class AgentWorldWSServer {
       payload: {
         id: event.id,
         type: event.type,
-        payload: event.payload,
+        payload: event.payload || event, // For SSE events, payload is the event itself
         meta: event.meta,
         createdAt: event.createdAt
       },
