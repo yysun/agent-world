@@ -133,6 +133,44 @@ echo "hi" | npx agent-world -w default-world
 
 See [Project Structure Documentation](project.md)
 
+## Development Scripts Convention
+
+Agent World follows a consistent naming convention for all npm scripts:
+
+| Script Pattern | Description | Example |
+|---------------|-------------|---------|
+| `<module>` | Shorthand for `<module>:start` | `npm run server` |
+| `<module>:start` | Run compiled code from `dist/` | `npm run server:start` |
+| `<module>:dev` | Run with tsx (no build needed) | `npm run server:dev` |
+| `<module>:watch` | Run with tsx in watch mode | `npm run server:watch` |
+
+**Available modules:** `server`, `cli`, `ws`, `tui`
+
+**Module Dependencies:**
+- `web:dev` / `web:watch` → Depends on `server` (waits for server to be ready)
+- `tui:dev` / `tui:watch` → Depends on `ws` (waits for WebSocket server)
+
+**Examples:**
+```bash
+# Production execution (requires build)
+npm run server        # Runs: node dist/server/index.js
+npm run cli           # Runs: node dist/cli/index.js
+
+# Development (no build needed)
+npm run server:dev    # Runs: npx tsx server/index.ts
+npm run ws:dev        # Runs: npx tsx ws/index.ts
+
+# Watch mode (auto-restart on changes)
+npm run server:watch  # Runs: npx tsx --watch server/index.ts
+npm run cli:watch     # Runs: npx tsx --watch cli/index.ts
+
+# With dependencies (auto-start required services)
+npm run web:dev       # Waits for server, then starts web
+npm run web:watch     # Runs server:watch + web in parallel
+npm run tui:dev       # Waits for ws, then starts tui
+npm run tui:watch     # Runs ws:watch + tui in parallel
+```
+
 ### Environment Setup
 
 Export your API keys as environment variables 

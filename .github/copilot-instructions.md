@@ -20,9 +20,28 @@ This is a monorepo (npm workspaces) with key packages:
 - `web/` — legacy AppRun UI
 
 ## Development Commands  
+
+**Script Naming Convention:**
+- `<module>` → Shorthand for `<module>:start` (runs from `dist/`)
+- `<module>:start` → Production execution from compiled code
+- `<module>:dev` → Development mode with tsx (no build)
+- `<module>:watch` → Watch mode with auto-restart on changes
+
+**Available modules:** `server`, `cli`, `ws`, `tui`
+
+**Module Dependencies:**
+- `web:dev` / `web:watch` → Depends on `server` (waits/runs with server)
+- `tui:dev` / `tui:watch` → Depends on `ws` (waits/runs with ws)
+
+**Common Commands:**
 - `npm run test` — Run the full test suite  
+- `npm run test:watch` — Run tests in watch mode
 - `npm run check` — Syntax, linting & formatting check  
-- `npm run cli:watch` — Start CLI development mode  
+- `npm run server:watch` — Start API server with auto-reload
+- `npm run cli:watch` — Start CLI with auto-reload
+- `npm run ws:watch` — Start WebSocket server with auto-reload
+- `npm run web:watch` — Start server + web with auto-reload
+- `npm run tui:watch` — Start ws + tui with auto-reload
 - `npm run dev` — Start API + frontend dev mode  
 
 **Important:** DO NOT run `npm run server` and then test in the **same terminal**. Always ask the user (developer) to start the server first before testing.

@@ -28,10 +28,35 @@ The project is a monorepo using npm workspaces. Key packages include:
 
 ## Key Development Tasks & Commands
 
-- **Running Tests:** `npm run test`
-- **Linting and Syntax Check:** `npm run check`
-- **Running the Server (API):** `npm run server`
-- **Running the Next.js Frontend (Dev Mode):** `npm run dev`
+**Script Naming Convention:**
+
+Agent World follows a consistent pattern for all module scripts:
+- `<module>` → Shorthand for `<module>:start` (runs compiled code)
+- `<module>:start` → Run from `dist/` directory (production)
+- `<module>:dev` → Run with tsx (development, no build)
+- `<module>:watch` → Run with tsx in watch mode (auto-restart)
+
+**Available modules:** `server`, `cli`, `ws`, `tui`
+
+**Module Dependencies:**
+- `web` depends on `server` (web:dev waits for server, web:watch runs both)
+- `tui` depends on `ws` (tui:dev waits for ws, tui:watch runs both)
+
+**Testing:**
+- `npm run test` — Run all unit tests
+- `npm run test:watch` — Run tests in watch mode
+- `npm run test:coverage` — Generate coverage report
+
+**Development:**
+- `npm run server:watch` — Start API server with auto-reload
+- `npm run cli:watch` — Start CLI with auto-reload
+- `npm run ws:watch` — Start WebSocket server with auto-reload
+- `npm run web:watch` — Start server + web with auto-reload
+- `npm run tui:watch` — Start ws + tui with auto-reload
+- `npm run dev` — Start API + frontend dev mode
+
+**Quality Checks:**
+- `npm run check` — Linting, syntax & formatting check across all packages
 
 ## How to Contribute
 
