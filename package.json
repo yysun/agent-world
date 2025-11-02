@@ -18,6 +18,7 @@
   "workspaces": [
     "core",
     "next",
+    "tui",
     "web",
     "ws"
   ],
@@ -31,8 +32,15 @@
     "dev": "npm-run-all --parallel server:watch web:dev",
     "cli": "npx tsx cli/index.ts",
     "cli:watch": "npx tsx --watch cli/index.ts",
+    "tui": "npm-run-all --sequential ws:wait tui:start",
+    "tui:watch": "npm-run-all --parallel ws:start tui:dev",
+    "tui:start": "npm run dev --workspace=tui",
+    "tui:dev": "npm-run-all --sequential ws:wait tui:start:watch",
+    "tui:start:watch": "npx tsx --watch tui/src/index.tsx",
     "ws": "npm run dev --workspace=ws",
+    "ws:start": "npm run dev --workspace=ws",
     "ws:watch": "npx tsx --watch ws/index.ts",
+    "ws:wait": "wait-on tcp:3001",
     "server": "npx tsx server/index.ts",
     "server:watch": "npx tsx --watch server/index.ts",
     "web:dev": "npm-run-all --sequential web:wait web:start",
@@ -44,7 +52,7 @@
     "test:coverage": "vitest run --coverage",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=ws && npm run check --workspace=web && npm run check --workspace=cli",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=ws && npm run check --workspace=tui && npm run check --workspace=web && npm run check --workspace=cli",
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=ws && npm run build --workspace=web",
     "pkill": "pkill -f tsx",
     "dev-next": "cd next && npm run dev"
