@@ -13,11 +13,13 @@
  * - Type 'exit' or 'quit' to disconnect and exit
  * 
  * Changes:
+ * - 2025-11-02: Update to handle clean event structure (eventType at top level, payload contains data directly)
+ * - 2025-11-02: Add color-coded world event display matching CLI format
  * - 2025-11-02: Update to handle consolidated event structure (all events wrapped consistently)
  * - 2025-11-02: Update event handler to properly access SSE event fields (agentName, content) from payload
  */
 
-import { createWSClient, AgentWorldWSClient } from './client.js';
+import { createWSClient, AgentWorldWSClient } from './ws-client.js';
 import * as readline from 'readline';
 
 /**
@@ -206,10 +208,16 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
   });
 
   client.on('event', (event) => {
-    // All events now have consistent structure: { type: 'event', payload: { type, payload, ... } }
-    const eventData = event.payload;
-    const eventType = eventData?.type;
-    const payload = eventData?.payload;
+    // Flattened structure: { type: 'event', eventType: 'world'|'message'|etc, payload: <data> }
+    const eventType = event.eventType;
+    const payload = event.payload;
+
+    // Debug logging
+    if (process.env.DEBUG_EVENTS) {
+      console.log('[DEBUG] Raw event:', JSON.stringify(event, null, 2));
+      console.log('[DEBUG] eventType:', eventType);
+      console.log('[DEBUG] payload:', JSON.stringify(payload, null, 2));
+    }
 
     // Handle different event types
     if (eventType === 'message') {
@@ -221,32 +229,33 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
     }
     else if (eventType === 'world') {
       // World event (system, tool execution, activity tracking)
+      // For world events, payload.type tells us the specific world event type
       const subType = payload?.type;
 
-      // Handle tool events
+      // Handle tool events with color formatting
       if (subType === 'tool-start' && payload.toolExecution) {
         const toolName = payload.toolExecution.toolName;
         const agentName = payload.agentName || payload.sender || 'agent';
-        console.log(`\n${agentName} calling tool - ${toolName} ...`);
+        console.log(`\n\x1b[36m${agentName}\x1b[0m \x1b[90mcalling tool -\x1b[0m \x1b[33m${toolName}\x1b[0m \x1b[90m...\x1b[0m`);
       }
       else if (subType === 'tool-progress' && payload.toolExecution) {
         const toolName = payload.toolExecution.toolName;
         const agentName = payload.agentName || payload.sender || 'agent';
-        console.log(`${agentName} continuing tool - ${toolName} ...`);
+        console.log(`\x1b[36m${agentName}\x1b[0m \x1b[90mcontinuing tool -\x1b[0m \x1b[33m${toolName}\x1b[0m \x1b[90m...\x1b[0m`);
       }
       else if (subType === 'tool-result' && payload.toolExecution) {
         const { toolName, duration, resultSize } = payload.toolExecution;
         const durationText = duration ? `${Math.round(duration)}ms` : 'completed';
         const sizeText = resultSize ? `, ${resultSize} chars` : '';
         const agentName = payload.agentName || payload.sender || 'agent';
-        console.log(`${agentName} tool finished - ${toolName} (${durationText}${sizeText})`);
+        console.log(`\x1b[36m${agentName}\x1b[0m \x1b[90mtool finished -\x1b[0m \x1b[33m${toolName}\x1b[0m \x1b[90m(${durationText}${sizeText})\x1b[0m`);
       }
       else if (subType === 'tool-error' && payload.toolExecution) {
         const { toolName, error: toolError } = payload.toolExecution;
         const agentName = payload.agentName || payload.sender || 'agent';
-        console.log(`${agentName} tool failed - ${toolName}: ${toolError}`);
+        console.log(`\x1b[1m\x1b[31m✗\x1b[0m ${agentName} tool failed - ${toolName}: ${toolError}`);
       }
-      // Handle activity events
+      // Handle activity events with same format as CLI
       else if (subType === 'response-start' || subType === 'response-end' || subType === 'idle') {
         const source = payload.source || '';
         const pending = payload.pendingOperations || 0;
@@ -256,13 +265,13 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
 
         if (subType === 'response-start') {
           const message = sourceName ? `${sourceName} started processing` : 'started';
-          console.log(`[World] ${message} | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+          console.log(`\x1b[90m[World]\x1b[0m ${message} \x1b[90m| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}\x1b[0m`);
         } else if (subType === 'idle' && pending === 0) {
-          console.log(`[World] All processing complete | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+          console.log(`\x1b[90m[World]\x1b[0m All processing complete \x1b[90m| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}\x1b[0m`);
         } else if (subType === 'response-end' && pending > 0) {
           if (activeSources.length > 0) {
             const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
-            console.log(`[World] Active: ${activeList} (${pending} pending) | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+            console.log(`\x1b[90m[World]\x1b[0m Active: ${activeList} (${pending} pending) \x1b[90m| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}\x1b[0m`);
           }
         }
       }
@@ -270,26 +279,52 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
         console.log(`[World Event: ${subType}]`, payload);
       }
     }
-    else if (eventType === 'chunk') {
-      // SSE streaming chunk
-      const content = payload?.content || '';
+    else if (eventType === 'sse') {
+      // SSE streaming events - payload contains the SSE event (start, chunk, end, error)
+      const sseType = payload?.type;
 
-      // Print chunk without newline to accumulate
+      if (sseType === 'start') {
+        // Stream start - print agent name
+        const agentName = payload?.agentName || 'Agent';
+        process.stdout.write(`\n[${agentName}]: `);
+      }
+      else if (sseType === 'chunk') {
+        // SSE streaming chunk
+        const content = payload?.content || '';
+        // Print chunk without newline to accumulate
+        if (content) {
+          process.stdout.write(content);
+        }
+      }
+      else if (sseType === 'end') {
+        // Stream end - add newline
+        console.log('\n');
+      }
+      else if (sseType === 'error') {
+        // Stream error
+        const error = payload?.error || 'Unknown error';
+        console.log(`\n[Error]: ${error}\n`);
+      }
+    }
+    else if (eventType === 'chunk') {
+      // DEPRECATED: Legacy SSE chunk event (for backward compatibility)
+      // New format uses eventType='sse' with payload.type='chunk'
+      const content = payload?.content || '';
       if (content) {
         process.stdout.write(content);
       }
     }
     else if (eventType === 'start') {
-      // Stream start - print agent name
+      // DEPRECATED: Legacy SSE start event (for backward compatibility)
       const agentName = payload?.agentName || 'Agent';
       process.stdout.write(`\n[${agentName}]: `);
     }
     else if (eventType === 'end') {
-      // Stream end - add newline
+      // DEPRECATED: Legacy SSE end event (for backward compatibility)
       console.log('\n');
     }
     else if (eventType === 'error') {
-      // Stream error
+      // DEPRECATED: Legacy SSE error event (for backward compatibility)
       const error = payload?.error || 'Unknown error';
       console.log(`\n[Error]: ${error}\n`);
     }
@@ -302,12 +337,10 @@ function setupClientEventListeners(client: AgentWorldWSClient): void {
   });
 
   client.on('status', (status) => {
-    // Only show important status updates
-    if (status.payload.status === 'processing' || status.payload.status === 'completed' || status.payload.status === 'failed') {
-      console.log(`[${status.payload.status.toUpperCase()}]${status.messageId ? ` Message: ${status.messageId}` : ''}`);
-      if (status.payload.error) {
-        console.log(`  Error: ${status.payload.error}`);
-      }
+    // Show all status updates for debugging
+    console.log(`[STATUS: ${status.payload.status.toUpperCase()}]${status.messageId ? ` Message: ${status.messageId}` : ''}`);
+    if (status.payload.error) {
+      console.log(`  Error: ${status.payload.error}`);
     }
   });
 }

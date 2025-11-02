@@ -30,6 +30,7 @@
  * 8. Broadcast final status
  * 
  * Changes:
+ * - 2025-11-02: Update event broadcasting to use clean format (type + payload structure)
  * - 2025-11-01: Initial queue processor implementation
  * - 2025-11-01: Replace console.log with structured logger
  */
@@ -235,21 +236,24 @@ export class QueueProcessor {
 
       // Set up event listeners to broadcast events in real-time
       const messageListener = (event: any) => {
-        // Broadcast message events (user/agent messages)
+        // Broadcast regular message events
         logger.debug(`[EVENT] Message event received`, { worldId, messageId, sender: event.sender });
-        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'message', ...event });
+        // Wrap message event - payload contains the message data
+        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'message', payload: event });
       };
 
       const worldListener = (event: any) => {
         // Broadcast world events (system, tools, etc)
         logger.debug(`[EVENT] World event received`, { worldId, messageId, eventType: event.type });
-        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'world', ...event });
+        // Wrap world event - payload contains the actual world event data
+        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'world', payload: event });
       };
 
       const sseListener = (event: any) => {
         // Broadcast SSE events (streaming LLM responses)
         logger.debug(`[EVENT] SSE event received`, { worldId, messageId, eventType: event.type, agentName: event.agentName });
-        this.config.wsServer.broadcastEvent(worldId, chatId, event);
+        // SSE events (start, chunk, end, error) - keep original type in payload
+        this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'sse', payload: event });
       };
 
       const crudListener = (event: any) => {

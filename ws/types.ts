@@ -181,6 +181,10 @@ export interface Message {
   toolExecution?: ToolExecution;
   expandable?: boolean;
   resultPreview?: string;
+  isSystemEvent?: boolean;
+  isHistorical?: boolean;
+  timestamp?: number;
+  content?: string;
 }
 
 /**
