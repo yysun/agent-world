@@ -10,6 +10,7 @@
  * - Graceful shutdown handling
  * - Health check endpoint
  * - Uses same default paths as API server (~/agent-world)
+ * - Exports shared code for TUI and web clients
  * 
  * Environment Variables:
  * - WS_PORT: WebSocket server port (default: 3001)
@@ -27,7 +28,13 @@
  * - LOG_WS_SERVER: Server-specific log level
  * - LOG_WS_STORAGE: Storage-specific log level
  * 
+ * Shared Code Exports:
+ * - types.ts: All type definitions (Message, Agent, World, WSMessage, etc.)
+ * - domain.ts: Business logic functions (validation, message utils, etc.)
+ * - ws-client.ts: WebSocket client for browser and Node.js
+ * 
  * Changes:
+ * - 2025-11-02: Add shared code exports for TUI and web
  * - 2025-11-01: Initial WebSocket server implementation
  * - 2025-11-01: Add comprehensive environment variable configuration
  * - 2025-11-01: Fix startup visibility - use console.log for config/status messages since default log level is 'error'
@@ -35,6 +42,35 @@
  * - 2025-11-01: Replace SQL queue with in-memory queue storage (simpler, no persistence needed)
  * - 2025-11-02: Fix default storage type from 'memory' to 'sqlite' to match API server
  */
+
+// ========================================
+// SHARED CODE EXPORTS (for TUI and web)
+// ========================================
+
+// Re-export all types
+export type * from './types.js';
+
+// Re-export WebSocket client
+export { WebSocketClient } from './ws-client.js';
+export type { ConnectionState, WebSocketClientConfig } from './ws-client.js';
+
+// Re-export domain logic
+export * from './domain.js';
+
+// ========================================
+// SERVER EXPORTS
+// ========================================
+
+// Re-export WebSocket server
+export { AgentWorldWSServer } from './ws-server.js';
+export type { WSServerConfig, WSMessage, WSMessageType } from './ws-server.js';
+
+// Re-export queue processor
+export { startQueueProcessor, createQueueProcessor } from './queue-processor.js';
+
+// ========================================
+// MAIN SERVER ENTRY POINT
+// ========================================
 
 import { AgentWorldWSServer } from './ws-server.js';
 import { QueueProcessor, createQueueProcessor } from './queue-processor.js';
