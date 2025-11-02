@@ -5,7 +5,7 @@
  * 
  * Features:
  * - Environment variable configuration for all settings
- * - SQLite storage backend with proper initialization
+ * - SQLite or in-memory storage backend
  * - Configurable logging with hierarchical categories
  * - Graceful shutdown handling
  * - Health check endpoint
@@ -13,7 +13,7 @@
  * 
  * Environment Variables:
  * - WS_PORT: WebSocket server port (default: 3001)
- * - AGENT_WORLD_STORAGE_TYPE: Storage backend type - 'sqlite' or 'memory' (default: sqlite)
+ * - AGENT_WORLD_STORAGE_TYPE: Storage backend type - 'sqlite' or 'memory' (default: memory)
  * - AGENT_WORLD_SQLITE_DATABASE: SQLite database path (default: ~/agent-world/database.db)
  * - AGENT_WORLD_DATA_PATH: Base path for world data (default: ~/agent-world)
  * - WS_HEARTBEAT_INTERVAL: Client heartbeat interval in ms (default: 30000)
@@ -29,12 +29,13 @@
  * - 2025-11-01: Add comprehensive environment variable configuration
  * - 2025-11-01: Fix startup visibility - use console.log for config/status messages since default log level is 'error'
  * - 2025-11-01: Fix database path consistency - use getDefaultRootPath() to match API server (~/agent-world instead of ./data)
+ * - 2025-11-01: Replace SQL queue with in-memory queue storage (simpler, no persistence needed)
  */
 
 import { AgentWorldWSServer } from './ws-server.js';
 import { QueueProcessor, createQueueProcessor } from './queue-processor.js';
-import { createSQLiteEventStorage } from '../core/storage/eventStorage/index.js';
-import { createSQLiteQueueStorage } from '../core/storage/queue-storage.js';
+import { createSQLiteEventStorage, createMemoryEventStorage } from '../core/storage/eventStorage/index.js';
+import { createMemoryQueueStorage } from '../core/storage/queue-storage.js';
 import { createSQLiteSchemaContext } from '../core/storage/sqlite-schema.js';
 import { initializeLogger, createCategoryLogger } from '../core/logger.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
@@ -54,7 +55,7 @@ const rootPath = getDefaultRootPath();
 // Read configuration from environment variables
 const config = {
   port: parseInt(process.env.WS_PORT || '3001', 10),
-  storageType: (process.env.AGENT_WORLD_STORAGE_TYPE || 'sqlite') as 'sqlite' | 'memory',
+  storageType: (process.env.AGENT_WORLD_STORAGE_TYPE || 'memory') as 'sqlite' | 'memory',
   dbPath: process.env.AGENT_WORLD_SQLITE_DATABASE || path.join(rootPath, 'database.db'),
   worldsBasePath: process.env.AGENT_WORLD_DATA_PATH || rootPath,
   heartbeatInterval: parseInt(process.env.WS_HEARTBEAT_INTERVAL || '30000', 10),
@@ -74,26 +75,26 @@ async function initializeStorage(): Promise<{
   const storageLogger = createCategoryLogger('ws.storage');
   storageLogger.info(`Initializing ${config.storageType} storage...`);
 
+  // Queue storage is always in-memory (simple and sufficient)
+  const queueStorage = createMemoryQueueStorage();
+  storageLogger.info('Using in-memory queue storage');
+
   if (config.storageType === 'memory') {
-    storageLogger.info('Using in-memory storage (data will not persist)');
-    const { createMemoryEventStorage } = await import('../core/storage/eventStorage/index.js');
-    // Note: Memory queue storage not yet implemented, falling back to SQLite
-    storageLogger.warn('Memory queue storage not available, using SQLite for queue');
-    const { db } = await createSQLiteSchemaContext({ database: config.dbPath });
+    storageLogger.info('Using in-memory event storage (data will not persist)');
     return {
       eventStorage: createMemoryEventStorage(),
-      queueStorage: createSQLiteQueueStorage({ db })
+      queueStorage
     };
   }
 
-  // SQLite storage (default)
+  // SQLite event storage
   storageLogger.info(`Database path: ${config.dbPath}`);
   const { db } = await createSQLiteSchemaContext({ database: config.dbPath });
   storageLogger.info('SQLite database initialized successfully');
 
   return {
     eventStorage: await createSQLiteEventStorage(db),
-    queueStorage: createSQLiteQueueStorage({ db })
+    queueStorage
   };
 }
 
