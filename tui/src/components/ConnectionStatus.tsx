@@ -31,7 +31,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
       </Box>
     );
   }
-  
+
   if (connecting) {
     return (
       <Box>
@@ -42,7 +42,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
       </Box>
     );
   }
-  
+
   if (error) {
     return (
       <Box>
@@ -51,7 +51,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
       </Box>
     );
   }
-  
+
   return (
     <Box>
       <Text color="gray" dimColor>● Disconnected</Text>

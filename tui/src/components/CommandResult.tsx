@@ -25,13 +25,13 @@ interface CommandResultProps {
 
 const CommandResult: React.FC<CommandResultProps> = ({ result }) => {
   const { timestamp, success, result: data } = result;
-  
+
   const time = timestamp.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   });
-  
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={success ? "green" : "red"} padding={1} marginBottom={1}>
       <Box>
@@ -39,7 +39,7 @@ const CommandResult: React.FC<CommandResultProps> = ({ result }) => {
         <Text> </Text>
         <Text color={success ? "green" : "red"} bold>{success ? '✓ Command executed' : '✗ Command failed'}</Text>
       </Box>
-      
+
       {data && (
         <Box flexDirection="column" paddingLeft={2} marginTop={1}>
           {typeof data === 'string' ? (

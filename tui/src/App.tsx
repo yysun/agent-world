@@ -32,9 +32,9 @@ interface AppProps {
 
 const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => {
   const { exit } = useApp();
-  
+
   const { messages, agents, isReplayComplete, replayProgress, lastCommandResult, processEvent } = useWorldState();
-  
+
   const ws = useWebSocket(serverUrl, {
     onEvent: processEvent,
     onConnected: () => {
@@ -60,9 +60,9 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
 
   // Loading/connecting state
   if (ws.connecting || !isReplayComplete) {
-    const statusText = ws.connecting 
+    const statusText = ws.connecting
       ? `Connecting to ${serverUrl}...`
-      : replayProgress 
+      : replayProgress
         ? `Replaying events... ${replayProgress.current} / ${replayProgress.total}`
         : 'Loading...';
 

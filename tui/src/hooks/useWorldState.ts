@@ -78,8 +78,8 @@ export function useWorldState(): UseWorldStateReturn {
     setAgents(prev => {
       const existing = prev.find(a => a.id === agentId);
       if (existing) {
-        return prev.map(a => 
-          a.id === agentId 
+        return prev.map(a =>
+          a.id === agentId
             ? { ...a, status, streaming }
             : a
         );
@@ -113,7 +113,7 @@ export function useWorldState(): UseWorldStateReturn {
           }
         } else if (event.eventType === 'world' && event.event) {
           const worldEvent = event.event;
-          
+
           if (worldEvent.type === 'response-start' && worldEvent.source?.startsWith('agent:')) {
             const agentName = worldEvent.source.replace('agent:', '');
             updateAgentStatus(agentName, 'active');
