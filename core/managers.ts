@@ -51,6 +51,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
+import { publishCRUDEvent } from './events.js';
 
 // Type imports
 import type {
@@ -286,6 +287,14 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
   };
 
   await storageWrappers!.saveAgent(worldId, agent);
+
+  // Emit CRUD event for real-time updates
+  const world = await getWorld(worldId);
+  if (world) {
+    world.agents.set(agent.id, agent);
+    publishCRUDEvent(world, 'create', 'agent', agent.id, agent);
+  }
+
   return agent;
 }
 
@@ -327,6 +336,14 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
   };
 
   await storageWrappers!.saveAgent(worldId, updatedAgent);
+
+  // Emit CRUD event for real-time updates
+  const world = await getWorld(worldId);
+  if (world) {
+    world.agents.set(agentId, updatedAgent);
+    publishCRUDEvent(world, 'update', 'agent', agentId, updatedAgent);
+  }
+
   return updatedAgent;
 }
 
@@ -335,7 +352,19 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
  */
 export async function deleteAgent(worldId: string, agentId: string): Promise<boolean> {
   await ensureInitialization();
-  return await storageWrappers!.deleteAgent(worldId, agentId);
+
+  const success = await storageWrappers!.deleteAgent(worldId, agentId);
+
+  // Emit CRUD event for real-time updates
+  if (success) {
+    const world = await getWorld(worldId);
+    if (world) {
+      world.agents.delete(agentId);
+      publishCRUDEvent(world, 'delete', 'agent', agentId);
+    }
+  }
+
+  return success;
 }
 
 /**
@@ -446,6 +475,14 @@ async function createChat(worldId: string, params: CreateChatParams): Promise<Ch
   };
 
   await storageWrappers!.saveChatData(worldId, chatData);
+
+  // Emit CRUD event for real-time updates
+  const world = await getWorld(worldId);
+  if (world) {
+    world.chats.set(chatData.id, chatData);
+    publishCRUDEvent(world, 'create', 'chat', chatData.id, chatData);
+  }
+
   return chatData;
 }
 
@@ -518,6 +555,12 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 
   // Then delete the chat itself
   const chatDeleted = await storageWrappers!.deleteChatData(worldId, chatId);
+
+  // Emit CRUD event for real-time updates
+  if (chatDeleted && world) {
+    world.chats.delete(chatId);
+    publishCRUDEvent(world, 'delete', 'chat', chatId);
+  }
 
   // If this was the current chat, set a fallback current chat
   if (shouldSetNewCurrentChat && chatDeleted) {

@@ -74,8 +74,8 @@
  */
 
 import {
-  World, Agent, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent,
-  AgentMessage, MessageData, SenderType, Chat, WorldChat
+  World, Agent, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent, WorldCRUDEvent,
+  AgentMessage, MessageData, SenderType, Chat, WorldChat, EventType
 } from './types.js';
 import { generateId } from './utils.js';
 import { generateAgentResponse } from './llm-manager.js';
@@ -97,6 +97,36 @@ const loggerChatTitle = createCategoryLogger('events.chattitle');
 let globalStreamingEnabled = true;
 export function enableStreaming(): void { globalStreamingEnabled = true; }
 export function disableStreaming(): void { globalStreamingEnabled = false; }
+
+/**
+ * Publish CRUD event for agent, chat, or world configuration changes
+ * Allows subscribed clients to receive real-time updates for all CRUD operations
+ */
+export function publishCRUDEvent(
+  world: World,
+  operation: 'create' | 'update' | 'delete',
+  entityType: 'agent' | 'chat' | 'world',
+  entityId: string,
+  entityData?: any
+): void {
+  const event: WorldCRUDEvent = {
+    operation,
+    entityType,
+    entityId,
+    entityData: operation === 'delete' ? null : entityData,
+    timestamp: new Date(),
+    chatId: world.currentChatId ?? null
+  };
+
+  world.eventEmitter.emit(EventType.CRUD, event);
+
+  loggerPublish.debug('CRUD event published', {
+    worldId: world.id,
+    operation,
+    entityType,
+    entityId
+  });
+}
 
 
 
@@ -244,11 +274,37 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
+  // CRUD event persistence
+  const crudHandler = (event: WorldCRUDEvent): void | Promise<void> => {
+    const eventData = {
+      id: `crud-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      worldId: world.id,
+      chatId: event.chatId || null,
+      type: 'crud',
+      payload: {
+        operation: event.operation,
+        entityType: event.entityType,
+        entityId: event.entityId,
+        entityData: event.entityData,
+        timestamp: event.timestamp
+      },
+      meta: {
+        operation: event.operation,
+        entityType: event.entityType,
+        entityId: event.entityId
+      },
+      createdAt: event.timestamp
+    };
+
+    return persistEvent(eventData);
+  };
+
   // Attach listeners
   world.eventEmitter.on('message', messageHandler);
   world.eventEmitter.on('sse', sseHandler);
   world.eventEmitter.on('world', toolHandler);
   world.eventEmitter.on('system', systemHandler);
+  world.eventEmitter.on(EventType.CRUD, crudHandler);
 
   loggerPublish.debug('Event persistence setup complete', {
     worldId: world.id
@@ -260,6 +316,7 @@ export function setupEventPersistence(world: World): () => void {
     world.eventEmitter.off('sse', sseHandler);
     world.eventEmitter.off('world', toolHandler);
     world.eventEmitter.off('system', systemHandler);
+    world.eventEmitter.off(EventType.CRUD, crudHandler);
     loggerPublish.debug('Event persistence listeners cleaned up', { worldId: world.id });
   };
 }

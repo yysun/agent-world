@@ -165,6 +165,9 @@ export type EventPayloadMap = {
 
   /** World/tool events use WorldToolEvent for agent behavioral tracking */
   [EventType.WORLD]: WorldToolEvent;
+
+  /** CRUD events use WorldCRUDEvent for configuration changes */
+  [EventType.CRUD]: WorldCRUDEvent;
 };
 
 /**
@@ -188,17 +191,16 @@ export type EventPayloadMap = {
  * @since 2025-10-30
  */
 export enum EventType {
-  /** Message events for agent communication and user input */
-  MESSAGE = 'message',
-
-  /** World/tool events for agent behavioral tracking (tool execution) */
+  /** World channel - general world events, tool usage, and system messages */
   WORLD = 'world',
-
-  /** Server-Sent Events for real-time streaming */
+  /** Message channel - user and agent messages */
+  MESSAGE = 'message',
+  /** SSE channel - streaming LLM responses */
   SSE = 'sse',
-
   /** System events for internal notifications */
-  SYSTEM = 'system'
+  SYSTEM = 'system',
+  /** CRUD events - agent, chat, and world configuration changes */
+  CRUD = 'crud'
 }
 
 export enum SenderType {
@@ -448,6 +450,19 @@ export interface WorldSSEEvent {
     timestamp: string;
     data?: any;
   };
+}
+
+/**
+ * World CRUD event data structure for World.eventEmitter
+ * Used to broadcast agent, chat, and world configuration changes to subscribed clients
+ */
+export interface WorldCRUDEvent {
+  operation: 'create' | 'update' | 'delete';
+  entityType: 'agent' | 'chat' | 'world';
+  entityId: string;
+  entityData?: any; // Full entity data for create/update, null for delete
+  timestamp: Date;
+  chatId?: string | null; // For chat-specific operations
 }
 
 /**
