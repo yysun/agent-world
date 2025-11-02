@@ -5,8 +5,10 @@
  * - WebSocket connection
  * - World state management
  * - Layout and routing between views
+ * - Split-pane UI with chat and agent sidebar
  * 
  * Created: 2025-11-01 - Phase 1: Core Infrastructure
+ * Updated: 2025-11-01 - Phase 2: UI Components Integration
  */
 
 import React, { useEffect, useState } from 'react';
@@ -14,6 +16,9 @@ import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { useWorldState, useEventProcessor } from './hooks/useWorldState.js';
+import ChatView from './components/ChatView.js';
+import AgentSidebar from './components/AgentSidebar.js';
+import InputBox from './components/InputBox.js';
 
 interface AppProps {
   serverUrl: string;
@@ -57,6 +62,14 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       exit();
     }
   });
+
+  const handleSubmit = (value: string, isCommand: boolean) => {
+    if (isCommand) {
+      ws.executeCommand(worldId, value);
+    } else {
+      ws.enqueue(worldId, chatId, value, 'human');
+    }
+  };
 
   // Loading state
   if (ws.connecting) {
@@ -104,30 +117,49 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
     );
   }
 
-  // Main UI (placeholder for Phase 2)
+  // Main UI with split-pane layout
   return (
-    <Box flexDirection="column" padding={1}>
+    <Box flexDirection="column" height="100%">
+      {/* Header */}
       <Box borderStyle="single" borderColor="cyan" paddingX={1}>
         <Text color="cyan" bold>Agent World - {worldId}</Text>
         {ws.connected && <Text color="green"> ●</Text>}
       </Box>
 
-      <Box marginTop={1}>
-        <Text>Messages: {worldState.messages.length}</Text>
+      {/* Main content: sidebar + chat */}
+      <Box flexGrow={1} flexDirection="row">
+        {/* Agent Sidebar */}
+        <Box width="25%" borderStyle="single" borderColor="gray">
+          <AgentSidebar agents={worldState.agents} />
+        </Box>
+
+        {/* Chat View */}
+        <Box width="75%" flexDirection="column">
+          <Box flexGrow={1}>
+            <ChatView messages={worldState.messages} />
+          </Box>
+        </Box>
       </Box>
 
-      <Box marginTop={1}>
-        <Text>Agents: {worldState.agents.size}</Text>
-      </Box>
-
+      {/* Error bar */}
       {worldState.error && (
-        <Box marginTop={1}>
-          <Text color="red">Error: {worldState.error}</Text>
+        <Box paddingX={1}>
+          <Text color="red" bold>Error: {worldState.error}</Text>
         </Box>
       )}
 
-      <Box marginTop={1}>
-        <Text color="gray" dimColor>Press Ctrl+C to exit | Phase 1 Complete</Text>
+      {/* Input */}
+      <InputBox
+        onSubmit={handleSubmit}
+        disabled={!ws.connected}
+        placeholder={ws.connected ? 'Type a message or /command...' : 'Disconnected'}
+      />
+
+      {/* Footer */}
+      <Box paddingX={1}>
+        <Text color="gray" dimColor>
+          Ctrl+C to exit | Messages: {worldState.messages.length} | Agents: {worldState.agents.size}
+        </Text>
       </Box>
     </Box>
   );
