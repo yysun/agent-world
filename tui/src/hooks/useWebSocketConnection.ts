@@ -4,10 +4,11 @@
  * Purpose: Manages WebSocket connection lifecycle
  * 
  * Features:
- * - Connection state management (connected, connecting, error)
+ * - Connection state management (connected, connecting, reconnecting, error)
  * - Automatic reconnection with exponential backoff
  * - Connection event callbacks
  * - Uses WebSocketClient from ws/ws-client.ts
+ * - Listens to ws-client events: connecting, connected, disconnected, reconnecting, error
  * 
  * Responsibilities:
  * - Connection lifecycle only (connect, disconnect, reconnect)
@@ -15,11 +16,11 @@
  * - No state management (messages, agents, etc.)
  * 
  * Created: 2025-11-02 - Phase 1: Refactor to use shared ws/ws-client.ts
+ * Updated: 2025-11-02 - Fix event listeners to match ws-client emitted events
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { WebSocketClient } from '../../../ws/ws-client.js';
-import type { ConnectionState } from '../../../ws/ws-client.js';
+import { WebSocketClient, ConnectionState } from '../../../ws/ws-client.js';
 
 export interface UseWebSocketConnectionOptions {
   onConnected?: () => void;
@@ -73,18 +74,23 @@ export function useWebSocketConnection(
       autoReconnect
     });
 
-    // Setup event listeners
-    client.on('stateChange', (newState: ConnectionState) => {
-      setState(newState);
+    // Setup event listeners matching ws-client emitted events
+    client.on('connecting', () => {
+      setState('connecting');
     });
 
     client.on('connected', () => {
+      setState('connected');
       setError(null);
       onConnected?.();
     });
 
-    client.on('disconnected', (code: number, reason: string) => {
-      onDisconnected?.(code, reason);
+    client.on('disconnected', () => {
+      setState('disconnected');
+    });
+
+    client.on('reconnecting', () => {
+      setState('reconnecting');
     });
 
     client.on('error', (err: any) => {

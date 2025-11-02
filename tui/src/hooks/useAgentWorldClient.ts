@@ -19,13 +19,13 @@
  * Created: 2025-11-02 - Phase 1: Implement focused hooks
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { WebSocketClient } from '../../../ws/ws-client.js';
 import type { WSMessage } from '../../../ws/types.js';
 
 export interface UseAgentWorldClientOptions {
-  onEvent?: (event: WSEvent) => void;
-  onMessage?: (message: WSMessage) => void;
+  onEvent?: (event: any) => void;
+  onStatus?: (status: any) => void;
 }
 
 export interface UseAgentWorldClientReturn {
@@ -33,7 +33,6 @@ export interface UseAgentWorldClientReturn {
   enqueue: (worldId: string, chatId: string | null, content: string, sender?: string) => void;
   executeCommand: (worldId: string, command: string) => void;
   unsubscribe: (worldId: string, chatId?: string | null) => void;
-  ping: () => void;
 }
 
 /**
@@ -44,16 +43,29 @@ export function useAgentWorldClient(
   connected: boolean,
   options: UseAgentWorldClientOptions = {}
 ): UseAgentWorldClientReturn {
-  const { onEvent, onMessage } = options;
+  const { onEvent, onStatus } = options;
 
-  // Setup event listeners if provided
-  if (ws && onEvent) {
-    ws.on('event', onEvent);
-  }
+  // Setup event listeners with useEffect for proper cleanup
+  useEffect(() => {
+    if (!ws) return;
 
-  if (ws && onMessage) {
-    ws.on('message', onMessage);
-  }
+    if (onEvent) {
+      ws.on('event', onEvent);
+    }
+    if (onStatus) {
+      ws.on('status', onStatus);
+    }
+
+    // Cleanup listeners on unmount or when dependencies change
+    return () => {
+      if (onEvent) {
+        ws.off('event', onEvent);
+      }
+      if (onStatus) {
+        ws.off('status', onStatus);
+      }
+    };
+  }, [ws, onEvent, onStatus]);
 
   const subscribe = useCallback((
     worldId: string,
@@ -64,7 +76,8 @@ export function useAgentWorldClient(
       console.warn('Cannot subscribe: not connected');
       return;
     }
-    ws.subscribe(worldId, chatId, replayFrom);
+    const fromSeq = replayFrom === 'beginning' ? 0 : replayFrom;
+    ws.subscribe(worldId, chatId, fromSeq);
   }, [ws, connected]);
 
   const enqueue = useCallback((
@@ -77,7 +90,7 @@ export function useAgentWorldClient(
       console.warn('Cannot enqueue: not connected');
       return;
     }
-    ws.enqueue(worldId, chatId, content, sender);
+    ws.sendMessage(worldId, content, chatId ?? undefined, sender);
   }, [ws, connected]);
 
   const executeCommand = useCallback((worldId: string, command: string) => {
@@ -85,7 +98,7 @@ export function useAgentWorldClient(
       console.warn('Cannot execute command: not connected');
       return;
     }
-    ws.executeCommand(worldId, command);
+    ws.sendCommand(worldId, command);
   }, [ws, connected]);
 
   const unsubscribe = useCallback((worldId: string, chatId?: string | null) => {
@@ -96,18 +109,10 @@ export function useAgentWorldClient(
     ws.unsubscribe(worldId, chatId);
   }, [ws, connected]);
 
-  const ping = useCallback(() => {
-    if (!ws || !connected) {
-      return;
-    }
-    ws.ping();
-  }, [ws, connected]);
-
   return {
     subscribe,
     enqueue,
     executeCommand,
-    unsubscribe,
-    ping
+    unsubscribe
   };
 }

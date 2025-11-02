@@ -15,6 +15,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import chalk from 'chalk';
 import type { Message } from '../../../ws/types.js';
 
 interface ChatViewProps {
@@ -38,7 +39,11 @@ const ChatView: React.FC<ChatViewProps> = ({ messages, maxMessages = 100 }) => {
     <Box flexDirection="column" padding={1} width="100%">
       {displayMessages.map((msg, index) => {
         const isHuman = msg.sender === 'human' || msg.sender.toLowerCase() === 'human';
-        const senderColor = isHuman ? 'yellow' : 'green';
+        const isSystem = msg.sender === 'system' || msg.isSystemEvent;
+        const isStreaming = msg.isStreaming;
+
+        // System events are gray, human is yellow, agents are green
+        const senderColor = isSystem ? 'gray' : (isHuman ? 'yellow' : 'green');
 
         // Use createdAt if available, fallback to timestamp
         const messageTime = msg.createdAt || msg.timestamp;
@@ -54,17 +59,18 @@ const ChatView: React.FC<ChatViewProps> = ({ messages, maxMessages = 100 }) => {
         return (
           <Box key={`${msg.messageId || msg.id}-${index}`} flexDirection="column" marginBottom={1}>
             <Box>
-              {timestamp && (
+              {!isSystem && timestamp && (
                 <>
                   <Text color="gray" dimColor>[{timestamp}]</Text>
                   <Text> </Text>
                 </>
               )}
-              <Text color={senderColor} bold>{msg.sender}:</Text>
+              <Text color={senderColor} bold={!isSystem} dimColor={isSystem}>{msg.sender}:</Text>
               {msg.isHistorical && <Text color="gray" dimColor> (historical)</Text>}
+              {isStreaming && <Text color="cyan"> ▌</Text>}
             </Box>
-            <Box paddingLeft={2}>
-              <Text>{content}</Text>
+            <Box paddingLeft={isSystem ? 0 : 2}>
+              <Text color={isSystem ? 'gray' : undefined} dimColor={isSystem}>{content}</Text>
             </Box>
           </Box>
         );

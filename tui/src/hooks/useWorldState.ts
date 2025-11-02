@@ -37,6 +37,7 @@ export interface UseWorldStateReturn {
   error: string | null;
   lastCommandResult: CommandResult | null;
   addMessage: (message: Message) => void;
+  updateMessage: (messageId: string, updates: Partial<Message>) => void;
   updateAgentStatus: (agentName: string, status: Partial<AgentActivityStatus>) => void;
   setReplayProgress: (current: number, total: number) => void;
   setError: (error: string | null) => void;
@@ -66,6 +67,12 @@ export function useWorldState(): UseWorldStateReturn {
       }
       return updated;
     });
+  }, []);
+
+  const updateMessage = useCallback((messageId: string, updates: Partial<Message>) => {
+    setMessages(prev => prev.map(msg =>
+      msg.id === messageId ? { ...msg, ...updates } : msg
+    ));
   }, []);
 
   const updateAgentStatus = useCallback((agentName: string, status: Partial<AgentActivityStatus>) => {
@@ -121,6 +128,7 @@ export function useWorldState(): UseWorldStateReturn {
     error,
     lastCommandResult,
     addMessage,
+    updateMessage,
     updateAgentStatus,
     setReplayProgress,
     setError,

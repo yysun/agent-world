@@ -15,7 +15,7 @@
  * Updated: 2025-11-02 - Phase 1: Vertical layout redesign
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import { useWebSocketConnection } from './hooks/useWebSocketConnection.js';
@@ -55,9 +55,21 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
     throttleMs: 16 // ~60fps
   });
 
+  // Status message handler for replay progress
+  const handleStatus = useCallback((status: any) => {
+    if (status?.replayProgress) {
+      const { current, total } = status.replayProgress;
+      worldState.setReplayProgress(current, total);
+    }
+    if (status?.replayComplete) {
+      worldState.setReplayProgress(0, 0); // Marks replay as complete
+    }
+  }, [worldState]);
+
   // 4. Agent World client operations
   const client = useAgentWorldClient(wsConnection.ws, wsConnection.connected, {
-    onMessage: processEvent
+    onEvent: processEvent,
+    onStatus: handleStatus
   });
 
   // 5. Popup management
