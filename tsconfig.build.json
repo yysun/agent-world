@@ -15,6 +15,7 @@
     "bin/**/*",
     "tests/**/*",
     "core/**/*",
+    "ws/**/*",
     "next/.next",
     "web/dist"
   ]

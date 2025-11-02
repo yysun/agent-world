@@ -28,12 +28,12 @@
   "scripts": {
     "prestart": "npm run build",
     "start": "node dist/server/index.js",
+    "dev": "npm-run-all --parallel server:watch web:dev",
     "cli": "npx tsx cli/index.ts",
     "cli:watch": "npx tsx --watch cli/index.ts",
-    "server": "npx tsx server/index.ts",
     "ws": "npm run dev --workspace=ws",
     "ws:watch": "npx tsx --watch ws/index.ts",
-    "dev": "npm-run-all --parallel server:watch web:dev",
+    "server": "npx tsx server/index.ts",
     "server:watch": "npx tsx --watch server/index.ts",
     "web:dev": "npm-run-all --sequential web:wait web:start",
     "web:wait": "wait-on http://127.0.0.1:3000/health",
@@ -44,8 +44,8 @@
     "test:coverage": "vitest run --coverage",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "check": "tsc --noEmit && npm run check --workspace=web",
-    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=ws && npm run check --workspace=web && npm run check --workspace=cli",
+    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=ws && npm run build --workspace=web",
     "pkill": "pkill -f tsx",
     "dev-next": "cd next && npm run dev"
   },
@@ -65,9 +65,8 @@
     "cors": "^2.8.5",
     "enquirer": "^2.4.1",
     "express": "^4.21.2",
-    "open": "^10.2.0",
     "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
+    "open": "^10.2.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -77,6 +76,7 @@
     "@vitest/ui": "^2.1.9",
     "commander": "^14.0.0",
     "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^2.1.9",
     "wait-on": "^9.0.1"

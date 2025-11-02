@@ -22,16 +22,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "ws": "^8.18.0",
-    "express": "^4.21.2",
-    "cors": "^2.8.5"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.13",
-    "@types/express": "^4.17.23",
-    "@types/cors": "^2.8.19",
-    "@types/node": "^24.9.1",
-    "typescript": "^5.8.3",
-    "tsx": "^4.20.3"
+    "@types/ws": "^8.5.13"
   }
 }
