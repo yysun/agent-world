@@ -46,7 +46,6 @@
 import type { Database } from 'sqlite3';
 import {
   createSQLiteSchemaContext,
-  initializeSchema,
   validateIntegrity as schemaValidateIntegrity,
   getDatabaseStats as schemaGetDatabaseStats,
   closeSchema,
@@ -55,7 +54,7 @@ import {
   SQLiteConfig,
   SQLiteSchemaContext
 } from './sqlite-schema.js';
-import { runMigrations, needsMigration as needsSQLMigration } from './migration-runner.js';
+import { runMigrations } from './migration-runner.js';
 import * as path from 'path';
 import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
 import { toKebabCase } from '../utils.js';
@@ -136,16 +135,12 @@ async function ensureInitialized(ctx: SQLiteStorageContext): Promise<void> {
   if (!ctx.isInitialized) {
     const migrationsDir = path.join(process.cwd(), 'migrations');
 
-    // Run SQL file migrations
-    if (await needsSQLMigration(ctx.schemaCtx.db, migrationsDir)) {
-      await runMigrations({
-        db: ctx.schemaCtx.db,
-        migrationsDir
-      });
-    } else {
-      // No migrations needed, just ensure schema is initialized
-      await initializeSchema(ctx.schemaCtx);
-    }
+    // Always run migrations - this handles both fresh databases (starting with 0000)
+    // and existing databases that need updates
+    await runMigrations({
+      db: ctx.schemaCtx.db,
+      migrationsDir
+    });
 
     ctx.isInitialized = true;
   }

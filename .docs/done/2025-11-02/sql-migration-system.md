@@ -9,44 +9,50 @@ Successfully implemented a pure SQL-based migration system, replacing the legacy
 
 ## Architecture
 
-### Version Strategy
+### Version Strategy (Linear Incremental)
 
-All migrations are SQL files with incremental changes:
+All migrations are SQL files following strict incremental pattern:
 
-- **0000**: Base schema (worlds, agents, agent_memory, archives)
-- **0001**: Add chat_id to agent_memory
+- **0000**: Base schema ONLY (worlds, agents, agent_memory, archives) - NO v1-v7 features
+- **0001**: First migration - Add chat_id to agent_memory
 - **0002**: Add LLM provider/model configuration to worlds
 - **0003**: Add current_chat_id to worlds
 - **0004**: Add mcp_config to worlds
 - **0005**: Add message_id to agent_memory
 - **0006**: Add reply_to_message_id to agent_memory
 - **0007**: Create world_chats table
-- **0008**: Create events table (existing)
-- **0009**: Add event sequences (existing)
+- **0008**: Create events table
+- **0009**: Add event sequences
 - **0010+**: Future feature migrations
+
+**Rule**: 0000 = initial schema, 0001 = first migration, 0002+ = subsequent migrations
 
 ### Migration Flow
 
-#### Fresh Database (No Tables)
+#### Fresh Database (Linear Path)
 ```
-No tables
+v0: No tables
   ↓
 Apply 0000 (base schema)
-  ↓ worlds, agents, agent_memory, archives
+  ↓ v0: worlds (6 cols), agents, agent_memory (6 cols), archives
 Apply 0001 (add chat_id)
-  ↓ agent_memory.chat_id
+  ↓ v1: +agent_memory.chat_id
 Apply 0002 (add LLM config)
-  ↓ worlds.chat_llm_provider, chat_llm_model
+  ↓ v2: +worlds.chat_llm_provider, +chat_llm_model
 Apply 0003 (add current_chat_id)
-  ↓ worlds.current_chat_id
+  ↓ v3: +worlds.current_chat_id
 Apply 0004 (add mcp_config)
-  ↓ worlds.mcp_config
+  ↓ v4: +worlds.mcp_config
 Apply 0005 (add message_id)
-  ↓ agent_memory.message_id
+  ↓ v5: +agent_memory.message_id
 Apply 0006 (add reply_to_message_id)
-  ↓ agent_memory.reply_to_message_id
+  ↓ v6: +agent_memory.reply_to_message_id
 Apply 0007 (create world_chats)
-  ↓ world_chats table
+  ↓ v7: +world_chats table
+Apply 0008 (create events)
+  ↓ v8: +events table
+Apply 0009 (add event_sequences)
+  ↓ v9: +event_sequences table
 Ready! 🚀
 ```
 
@@ -97,16 +103,24 @@ Ready! 🚀
 
 ### Core Changes
 1. **`core/storage/sqlite-schema.ts`**
-   - Removed 300+ lines of migration logic
-   - Reduced from 643 → ~340 lines (47% reduction)
-   - Kept only schema initialization
-   - Simplified and focused
+   - Removed ALL schema creation code (300+ lines)
+   - Removed `initializeSchema()`, `createIndexes()`, `createTriggers()` functions
+   - Reduced from 643 → ~140 lines (78% reduction)
+   - Now only provides utilities: PRAGMA config, version management, DB introspection
+   - ALL SQL now comes from migration files, not TypeScript code
 
 2. **`core/storage/sqlite-storage.ts`**
-   - Updated imports
-   - New `ensureInitialized()` implementation
-   - Integrates migration runner
+   - Removed `initializeSchema()` fallback - ALL databases use migrations
+   - Simplified `ensureInitialized()` - always calls `runMigrations()`
+   - No branching logic between fresh/existing databases
    - Automatic migration on startup
+
+3. **`core/storage/migration-runner.ts`**
+   - Removed all "skip migrations 1-7" logic
+   - Removed `detectExistingSchema()` function
+   - Simple linear execution: `version > currentVersion` (or `>= 0` for fresh DB)
+   - Migration N sets version to N (not N+7)
+   - No special cases, no branching
 
 3. **`core/index.ts`**
    - Added migration runner exports
@@ -269,13 +283,21 @@ git commit -m "feat: Add feature"
 ## Migration Files
 
 ### 0000_init_base_schema.sql
-Base schema for fresh installations:
-- `worlds` table with all columns through v4
-- `agents` table
-- `agent_memory` table with all columns through v6
-- `world_chats` table (v7)
+Base schema for fresh installations (PRE-MIGRATION state):
+- `worlds` table (6 columns: id, name, description, turn_limit, created_at, updated_at)
+- `agents` table (full schema)
+- `agent_memory` table (6 columns: id, agent_id, world_id, role, content, sender, created_at)
 - `memory_archives`, `archived_messages`, `archive_statistics` tables
-- All indexes and triggers
+- Base indexes and triggers
+
+**Important**: Does NOT include v1-v7 features:
+- ❌ No chat_id (added in 0001)
+- ❌ No LLM config columns (added in 0002)
+- ❌ No current_chat_id (added in 0003)
+- ❌ No mcp_config (added in 0004)
+- ❌ No message_id (added in 0005)
+- ❌ No reply_to_message_id (added in 0006)
+- ❌ No world_chats table (added in 0007)
 
 ### 0001_add_chat_id.sql
 Adds chat session tracking:
@@ -427,12 +449,18 @@ The pure SQL migration system provides:
 - ✅ **Complete documentation**
 - ✅ **Production ready** and deployed
 
-The system follows a clean, maintainable architecture:
-- **0000** = Base schema for fresh installations
-- **0001-0007** = Incremental features building on base
-- **0008+** = Future features (ready for expansion)
+The system follows a clean, linear architecture:
+- **0000** = Initial base schema (pre-migration state)
+- **0001** = First migration (adds chat_id)
+- **0002-0009** = Subsequent migrations (one feature per file)
+- **0010+** = Future features (ready for expansion)
 
-All migrations are SQL files with no TypeScript bridge code, making the system simple, reviewable, and reliable. ✅ 🚀
+**Simple Rule**: ALL databases follow the same path: 0→1→2→3→4→5→6→7→8→9
+- Fresh databases start at v0, apply all migrations
+- Historical databases resume from current version, apply remaining migrations
+- No special cases, no branching logic, no "fast paths"
+
+All migrations are pure SQL files. ALL schema creation comes from SQL files, not TypeScript code. Simple, reviewable, and reliable. ✅ 🚀
 
 ---
 

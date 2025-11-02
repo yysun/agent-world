@@ -153,31 +153,25 @@ export function readMigrationFile(filePath: string): string {
 }
 
 /**
- * Execute a single SQL migration
+ * Execute a single migration file
  */
-export async function executeMigration(
-  db: Database,
-  migration: MigrationFile
-): Promise<void> {
-  const sql = readMigrationFile(migration.filePath);
+export async function executeMigration(db: Database, migration: MigrationFile): Promise<void> {
   const exec = promisify(db.exec.bind(db));
 
-  logger.info('Applying migration', {
+  logger.info('Executing migration', {
     version: migration.version,
     name: migration.name
   });
 
+  const sql = readMigrationFile(migration.filePath);
+
   try {
-    // Execute the migration SQL
+    // Use exec() instead of run() to execute multiple SQL statements in migration files
     await exec(sql);
-
-    // Record in tracking table
     await recordMigration(db, migration.version, migration.name);
-
-    // Update user_version
     await setVersion(db, migration.version);
 
-    logger.info('Migration applied successfully', {
+    logger.info('Migration completed successfully', {
       version: migration.version,
       name: migration.name
     });
@@ -249,7 +243,11 @@ async function performMigrations(ctx: MigrationContext): Promise<void> {
     return;
   }
 
-  const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+  // For completely fresh databases at v0, include migration 0000
+  // For all other cases, only include migrations with version > currentVersion
+  const pendingMigrations = currentVersion === 0
+    ? migrations.filter(m => m.version >= 0)
+    : migrations.filter(m => m.version > currentVersion);
 
   if (pendingMigrations.length === 0) {
     logger.info('Database is up to date', { currentVersion });
