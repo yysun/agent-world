@@ -23,6 +23,7 @@ interface TopPanelProps {
   agents: AgentActivityStatus[];
   connected: boolean;
   connecting: boolean;
+  reconnecting: boolean;
   error: string | null;
 }
 
@@ -32,6 +33,7 @@ const TopPanel: React.FC<TopPanelProps> = ({
   agents,
   connected,
   connecting,
+  reconnecting,
   error
 }) => {
   return (
@@ -57,6 +59,7 @@ const TopPanel: React.FC<TopPanelProps> = ({
         <ConnectionStatus
           connected={connected}
           connecting={connecting}
+          reconnecting={reconnecting}
           error={error}
         />
       </Box>

@@ -13,6 +13,7 @@
  * Updated: 2025-11-01 - Phase 3: Command Result Integration
  * Updated: 2025-11-02 - Phase 1: Refactor to use focused hooks
  * Updated: 2025-11-02 - Phase 1: Vertical layout redesign
+ * Updated: 2025-11-02 - Add proper error handling for WebSocket disconnections with reconnection support
  */
 
 import React, { useEffect, useCallback } from 'react';
@@ -97,8 +98,8 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
     }
   };
 
-  // Loading/connecting state
-  if (wsConnection.connecting || worldState.isReplaying) {
+  // Initial connecting state (before first connection)
+  if ((wsConnection.connecting || worldState.isReplaying) && !wsConnection.reconnecting) {
     const statusText = wsConnection.connecting
       ? `Connecting to ${serverUrl}...`
       : worldState.replayProgress
@@ -120,15 +121,8 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
     );
   }
 
-  // Connection error
-  if (!wsConnection.connected && wsConnection.error) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Text color="red">✗ {wsConnection.error}</Text>
-        <Text color="gray" dimColor>Press Ctrl+C to exit</Text>
-      </Box>
-    );
-  }
+  // Show full UI even when disconnected/reconnecting
+  // Connection status is displayed in TopPanel
 
   // Main UI with vertical layout
   return (
@@ -140,6 +134,7 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
         agents={Array.from(worldState.agents.values())}
         connected={wsConnection.connected}
         connecting={wsConnection.connecting}
+        reconnecting={wsConnection.reconnecting}
         error={wsConnection.error}
       />
 

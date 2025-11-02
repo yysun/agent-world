@@ -9,7 +9,10 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "strict": true
+    "strict": true,
+    "paths": {
+      "react": ["./node_modules/@types/react"]
+    }
   },
   "include": [
     "src/**/*",
