@@ -450,6 +450,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'Show chat selection menu and display messages from selected chat',
     usage: '/chat select',
     parameters: [],
+    aliases: ['select-chat'],
     category: 'chat'
   },
   'chat switch': {
@@ -484,6 +485,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'name', required: true, description: 'New chat name', type: 'string' },
       { name: 'description', required: false, description: 'New chat description', type: 'string' }
     ],
+    aliases: ['rename-chat'],
     category: 'chat'
   },
   'chat export': {
@@ -495,6 +497,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'chatId', required: false, description: 'Chat ID to export (defaults to current chat)', type: 'string' },
       { name: 'file', required: false, description: 'Output file path', type: 'string' }
     ],
+    aliases: ['export-chat'],
     category: 'chat'
   },
   'help': {
