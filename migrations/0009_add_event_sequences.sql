@@ -1,5 +1,5 @@
 -- Migration: Add event sequence tracking for atomic sequence generation
--- Version: 9 (next version after events table creation)
+-- Version: 9
 -- Date: 2025-11-01
 --
 -- This migration creates the event_sequences table to support atomic sequence number

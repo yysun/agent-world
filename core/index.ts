@@ -102,4 +102,14 @@ export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers
 export { type ClientConnection, subscribeWorld } from './subscription.js';
 
 export { getDefaultRootPath } from './storage/storage-factory.js';
+
+// === MIGRATION SYSTEM (for advanced usage) ===
+export {
+  runMigrations,
+  getMigrationStatus,
+  needsMigration,
+  type MigrationContext,
+  type MigrationFile
+} from './storage/migration-runner.js';
+
 export const VERSION = '0.5.0';

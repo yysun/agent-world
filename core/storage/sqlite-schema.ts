@@ -1,32 +1,27 @@
 /**
  * SQLite Database Schema for Agent World System
  *
- * Logger Category: storage.migration
- * Purpose: Schema initialization and version migrations
+ * Logger Category: storage.schema
+ * Purpose: Schema initialization and PRAGMA configuration
  * 
- * Enable with: LOG_STORAGE_MIGRATION=info npm run server
- * 
- * What you'll see:
- * - Schema version checks
- * - Migration start/completion
- * - Column additions and modifications
- * - Index creation
- *
  * Features:
  * - Comprehensive schema supporting worlds, agents, and memory archives
  * - Foreign key constraints for data integrity
  * - Optimized indexes for performance
  * - Rich archive metadata with search capabilities
- * - Migration support from file-based storage
  * - Message identification for user message edit feature
+ * - Event storage with sequence tracking
  *
  * Schema Design:
  * - worlds: Core world configuration and metadata
  * - agents: Agent configuration with LLM settings
- * - agent_memory: Current active conversation memory (includes message_id)
+ * - agent_memory: Current active conversation memory
  * - memory_archives: Archive session metadata with rich information
  * - archived_messages: Historical conversation content linked to archives
  * - archive_statistics: Usage analytics and management data
+ * - world_chats: Chat session management
+ * - events: Event storage with sequences
+ * - event_sequences: Atomic sequence generation
  *
  * Implementation:
  * - PRAGMA settings for performance and integrity
@@ -34,10 +29,8 @@
  * - Timestamp tracking for all operations
  * - Cascading deletes for data consistency
  * - Prepared statements for security and performance
- * - 2025-07-27: Ensures parent directory for SQLite database exists before opening (prevents SQLITE_CANTOPEN)
- * - 2025-08-06: Fixed migration logic to properly handle existing databases missing chat_id column
- * - 2025-10-21: Added message_id column to agent_memory table for user message edit feature (version 6 migration)
- * - 2025-10-31: Updated to use structured scenario-based logging (storage.migration category)
+ * - 2025-11-02: Refactored to remove migration logic (now in migration-runner.ts and legacy-migrations.ts)
+ * - 2025-11-02: Schema initialization only, migrations handled by SQL files
  */
 
 // Types only import - will be stripped at runtime
@@ -48,7 +41,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createCategoryLogger } from '../logger.js';
 
-const logger = createCategoryLogger('storage.migration');
+const logger = createCategoryLogger('storage.schema');
 
 
 
@@ -337,245 +330,11 @@ export async function setSchemaVersion(ctx: SQLiteSchemaContext, version: number
   await run(`PRAGMA user_version = ${version}`);
 }
 
-export async function needsMigration(ctx: SQLiteSchemaContext): Promise<boolean> {
-  const currentVersion = await getSchemaVersion(ctx);
-  const targetVersion = 7; // Latest version includes reply_to_message_id field for message threading
-  return currentVersion < targetVersion;
-}
-
-// Global migration lock to prevent concurrent migrations on the same database
-const migrationLocks = new Map<string, Promise<void>>();
-
-export async function migrate(ctx: SQLiteSchemaContext): Promise<void> {
-  const dbPath = ctx.config.database;
-
-  // Check if there's already a migration in progress for this database
-  if (migrationLocks.has(dbPath)) {
-    await migrationLocks.get(dbPath);
-    return;
-  }
-
-  const migrationPromise = performMigration(ctx);
-  migrationLocks.set(dbPath, migrationPromise);
-
-  try {
-    await migrationPromise;
-  } finally {
-    migrationLocks.delete(dbPath);
-  }
-}
-
-async function performMigration(ctx: SQLiteSchemaContext): Promise<void> {
-  const currentVersion = await getSchemaVersion(ctx);
-  const run = promisify(ctx.db.run.bind(ctx.db));
-  const get = promisify(ctx.db.get.bind(ctx.db));
-  const all = promisify(ctx.db.all.bind(ctx.db));
-
-  logger.info('Starting schema migration', {
-    fromVersion: currentVersion,
-    toVersion: 7
-  });
-
-  if (currentVersion === 0) {
-    // Check if tables exist (existing database) or need to be created (fresh database)
-    try {
-      const tableCheck = await get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_memory'") as any;
-
-      if (!tableCheck) {
-        // Fresh database - create all tables with current schema
-        logger.info('Initializing fresh database with current schema');
-        await initializeSchema(ctx);
-        await setSchemaVersion(ctx, 6);
-      } else {
-        // Existing database with version 0 - check if chat_id column exists
-        logger.info('Migrating existing database from version 0');
-        try {
-          const columns = await all("PRAGMA table_info(agent_memory)") as any[];
-          const hasChatIdColumn = columns && Array.isArray(columns) && columns.some((col: any) => col.name === 'chat_id');
-
-          if (!hasChatIdColumn) {
-            // Add missing chat_id column
-            logger.info('Adding column to agent_memory', { column: 'chat_id' });
-            await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
-            await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
-          }
-
-          // Check and add LLM provider/model columns
-          const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
-          const hasLLMProvider = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_provider');
-          const hasLLMModel = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_model');
-          const hasCurrentChatId = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'current_chat_id');
-
-          if (!hasLLMProvider) {
-            logger.info('Adding column to worlds', { column: 'chat_llm_provider' });
-            await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
-          }
-          if (!hasLLMModel) {
-            logger.info('Adding column to worlds', { column: 'chat_llm_model' });
-            await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
-          }
-          if (!hasCurrentChatId) {
-            logger.info('Adding column to worlds', { column: 'current_chat_id' });
-            await run(`ALTER TABLE worlds ADD COLUMN current_chat_id TEXT`);
-          }
-
-          await setSchemaVersion(ctx, 4);
-        } catch (error) {
-          logger.warn('Migration warning for chat_id column', {
-            error: error instanceof Error ? error.message : String(error)
-          });
-          // Try to continue anyway
-          await setSchemaVersion(ctx, 4);
-        }
-      }
-    } catch (error) {
-      logger.error('Migration error', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw error;
-    }
-  } else if (currentVersion === 1) {
-    // Migration from version 1 to 2: Add chatId column to agent_memory
-    logger.info('Migrating from version 1 to 2', { feature: 'chat_id column' });
-    try {
-      await run(`ALTER TABLE agent_memory ADD COLUMN chat_id TEXT`);
-      await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_chat_id ON agent_memory(chat_id)`);
-      await setSchemaVersion(ctx, 2);
-    } catch (error) {
-      // Column might already exist, check and continue
-      logger.warn('Migration warning', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-
-  if (currentVersion < 3) {
-    // Migration to version 3: Add LLM provider/model columns to worlds table
-    logger.info('Migrating to version 3', { feature: 'LLM provider/model columns' });
-    try {
-      const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
-      const hasLLMProvider = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_provider');
-      const hasLLMModel = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'chat_llm_model');
-
-      if (!hasLLMProvider) {
-        logger.info('Adding column to worlds', { column: 'chat_llm_provider' });
-        await run(`ALTER TABLE worlds ADD COLUMN chat_llm_provider TEXT`);
-      }
-      if (!hasLLMModel) {
-        logger.info('Adding column to worlds', { column: 'chat_llm_model' });
-        await run(`ALTER TABLE worlds ADD COLUMN chat_llm_model TEXT`);
-      }
-
-      await setSchemaVersion(ctx, 3);
-    } catch (error) {
-      logger.warn('Migration warning for LLM columns', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // Try to continue anyway
-      await setSchemaVersion(ctx, 3);
-    }
-  }
-
-  if (currentVersion < 4) {
-    // Migration to version 4: Add current_chat_id column to worlds table
-    logger.info('Migrating to version 4', { feature: 'current_chat_id column' });
-    try {
-      const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
-      const hasCurrentChatId = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'current_chat_id');
-
-      if (!hasCurrentChatId) {
-        logger.info('Adding column to worlds', { column: 'current_chat_id' });
-        await run(`ALTER TABLE worlds ADD COLUMN current_chat_id TEXT`);
-      }
-
-      await setSchemaVersion(ctx, 4);
-    } catch (error) {
-      logger.warn('Migration warning for current_chat_id column', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // Try to continue anyway
-      await setSchemaVersion(ctx, 4);
-    }
-  }
-
-  // Migration to version 5: Add mcpConfig column to worlds table
-  if (currentVersion < 5) {
-    logger.info('Migrating to version 5', { feature: 'mcp_config column' });
-    try {
-      const worldColumns = await all("PRAGMA table_info(worlds)") as any[];
-      const hasMcpConfig = worldColumns && Array.isArray(worldColumns) && worldColumns.some((col: any) => col.name === 'mcp_config');
-
-      if (!hasMcpConfig) {
-        logger.info('Adding column to worlds', { column: 'mcp_config' });
-        await run(`ALTER TABLE worlds ADD COLUMN mcp_config TEXT`);
-      }
-
-      await setSchemaVersion(ctx, 5);
-    } catch (error) {
-      logger.warn('Migration warning for mcp_config column', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // Try to continue anyway
-      await setSchemaVersion(ctx, 5);
-    }
-  }
-
-  // Migration to version 6: Add message_id column to agent_memory table for user message edit feature
-  if (currentVersion < 6) {
-    logger.info('Migrating to version 6', { feature: 'message_id column for edit feature' });
-    try {
-      const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
-      const hasMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'message_id');
-
-      if (!hasMessageId) {
-        logger.info('Adding column to agent_memory', { column: 'message_id' });
-        await run(`ALTER TABLE agent_memory ADD COLUMN message_id TEXT`);
-        await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_message_id ON agent_memory(message_id)`);
-      }
-
-      await setSchemaVersion(ctx, 6);
-    } catch (error) {
-      logger.warn('Migration warning for message_id column', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // Try to continue anyway
-      await setSchemaVersion(ctx, 6);
-    }
-  }
-
-  // Version 7: Add reply_to_message_id for message threading
-  if (currentVersion < 7) {
-    logger.info('Migrating to version 7', { feature: 'reply_to_message_id for threading' });
-    try {
-      const memoryColumns = await all("PRAGMA table_info(agent_memory)") as any[];
-      const hasReplyToMessageId = memoryColumns && Array.isArray(memoryColumns) && memoryColumns.some((col: any) => col.name === 'reply_to_message_id');
-
-      if (!hasReplyToMessageId) {
-        logger.info('Adding column to agent_memory', { column: 'reply_to_message_id' });
-        await run(`ALTER TABLE agent_memory ADD COLUMN reply_to_message_id TEXT`);
-        await run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_reply_to_message_id ON agent_memory(reply_to_message_id)`);
-      }
-
-      await setSchemaVersion(ctx, 7);
-    } catch (error) {
-      logger.warn('Migration warning for reply_to_message_id column', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      // Try to continue anyway
-      await setSchemaVersion(ctx, 7);
-    }
-  }
-
-  // Future migrations would go here
-
-  const finalVersion = await getSchemaVersion(ctx);
-  if (finalVersion > currentVersion) {
-    logger.info('Migration completed', {
-      fromVersion: currentVersion,
-      toVersion: finalVersion
-    });
-  }
-} export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
+/**
+ * Validate database integrity
+ * Checks for corruption and foreign key constraint violations
+ */
+export async function validateIntegrity(ctx: SQLiteSchemaContext): Promise<{ isValid: boolean; errors: string[] }> {
   const get = promisify(ctx.db.get.bind(ctx.db));
   const all = promisify(ctx.db.all.bind(ctx.db));
   const errors: string[] = [];

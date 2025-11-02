@@ -39,6 +39,7 @@
  * - 2025-08-01: Implemented restoreFromSnapshot with atomic transactions
  * - 2025-08-01: Enhanced type safety removing any types
  * - 2025-08-06: Fixed initialization order - migration check before schema initialization
+ * - 2025-11-02: Integrated SQL migration runner, removed legacy migrations
  */
 
 
@@ -46,15 +47,16 @@ import type { Database } from 'sqlite3';
 import {
   createSQLiteSchemaContext,
   initializeSchema,
-  needsMigration,
-  migrate,
   validateIntegrity as schemaValidateIntegrity,
   getDatabaseStats as schemaGetDatabaseStats,
   closeSchema,
-  SQLiteConfig,
   ArchiveMetadata,
-  ArchiveStatistics
+  ArchiveStatistics,
+  SQLiteConfig,
+  SQLiteSchemaContext
 } from './sqlite-schema.js';
+import { runMigrations, needsMigration as needsSQLMigration } from './migration-runner.js';
+import * as path from 'path';
 import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
 import { toKebabCase } from '../utils.js';
 
@@ -132,14 +134,19 @@ export async function createSQLiteStorageContext(config: SQLiteConfig): Promise<
 
 async function ensureInitialized(ctx: SQLiteStorageContext): Promise<void> {
   if (!ctx.isInitialized) {
-    // Check if migration is needed first
-    if (await needsMigration(ctx.schemaCtx)) {
-      // Migration handles both fresh databases and existing ones
-      await migrate(ctx.schemaCtx);
+    const migrationsDir = path.join(process.cwd(), 'migrations');
+
+    // Run SQL file migrations
+    if (await needsSQLMigration(ctx.schemaCtx.db, migrationsDir)) {
+      await runMigrations({
+        db: ctx.schemaCtx.db,
+        migrationsDir
+      });
     } else {
-      // No migration needed, just ensure schema is initialized
+      // No migrations needed, just ensure schema is initialized
       await initializeSchema(ctx.schemaCtx);
     }
+
     ctx.isInitialized = true;
   }
 }

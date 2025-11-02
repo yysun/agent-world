@@ -48,6 +48,83 @@ These tests verify that the database migration system works correctly across all
 - ✅ Manages SQLite WAL mode conflicts during testing
 - ✅ Recovers from partial migration failures
 
+## Database Setup for Tests
+
+All tests use **temporary SQLite databases** in isolated locations to avoid conflicts with production data:
+
+| Test Type | Database Location | Migration Files | Purpose |
+|-----------|------------------|-----------------|---------|
+| **Unit Tests** | `/tmp/test-migrations-*.db` | Mock SQL (created in test) | Test migration runner logic |
+| **Integration Tests** | `/tmp/test-migration-paths-*.db` | Real production SQL files | Test actual migration paths |
+| **Standalone Tests** | `/tmp/agent-world-tests/*.db` | Real system (initializeWithDefaults) | Test complete DB initialization |
+
+### Key Characteristics
+- ✅ **Real SQLite**: All tests use actual SQLite databases (not mocked)
+- ✅ **Isolated**: Each test gets a unique temporary database
+- ✅ **Auto-cleanup**: Databases are deleted after each test
+- ✅ **Safe**: No interference with production or between tests
+
+## Migration Path Integration Tests
+
+Comprehensive migration path testing is available in `tests/integration/migration-paths.test.ts`. This test suite covers all production migration scenarios:
+
+### Coverage
+
+#### Fresh Database Migration
+- **v0 → v9**: Complete migration from empty database to latest schema
+  - Verifies all 10 migrations apply correctly (0000-0009)
+  - Validates all tables, columns, indexes, and triggers exist
+
+#### Historical Version Migrations
+Tests upgrading from each historical schema version to current:
+
+- **v1 → v9**: From `chat_id` column addition
+- **v4 → v9**: From `mcp_config` addition (critical - production schema before latest commit)
+- **v7 → v9**: From `world_chats` table creation
+
+#### Incremental Migration Steps
+Tests each individual migration in isolation:
+
+- **v4 → v5**: Add `message_id` column to `agent_memory`
+- **v5 → v6**: Add `reply_to_message_id` column for message threading
+- **v6 → v7**: Create `world_chats` table
+- **v7 → v8**: Create `events` table
+- **v8 → v9**: Add `event_sequences` table
+
+#### Data Preservation
+Tests that existing data survives migrations:
+- World data (names, descriptions, LLM configs, MCP configs)
+- Agent data (memory, messages, chat associations)
+
+#### Migration Status Tracking
+- Applied migrations tracking
+- Pending migrations identification
+- Version synchronization
+
+#### Migration Files Tested
+All 10 production migration files:
+- `0000_init_base_schema.sql` - Base schema (worlds, agents, agent_memory, archives, world_chats)
+- `0001_add_chat_id.sql` - Chat session tracking
+- `0002_add_llm_config.sql` - LLM provider configuration
+- `0003_add_current_chat_id.sql` - Active chat tracking
+- `0004_add_mcp_config.sql` - Model Context Protocol configuration
+- `0005_add_message_id.sql` - Message identification for editing
+- `0006_add_reply_to_message_id.sql` - Message threading support
+- `0007_create_world_chats.sql` - Chat session management
+- `0008_create_events_table.sql` - Event persistence system
+- `0009_add_event_sequences.sql` - Atomic sequence generation
+
+### Running Migration Path Tests
+
+```bash
+# Run all migration integration tests
+npm run integration -- migration-paths
+
+# Run specific migration test suite
+npm run integration -- migration-paths -t "Fresh Database"
+npm run integration -- migration-paths -t "Incremental Migration"
+```
+
 ## Running the Tests
 
 ### Using npm script (recommended):

@@ -1,5 +1,5 @@
 -- Migration: Create events table for persistent event storage
--- Version: 8 (next version after current schema version 7)
+-- Version: 8
 -- Date: 2025-10-30
 --
 -- This migration creates the events table to store world emitter events with proper
@@ -25,7 +25,9 @@
 -- - Foreign keys enforce referential integrity
 
 -- Create events table
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE
+IF NOT EXISTS events
+(
   id TEXT PRIMARY KEY,
   world_id TEXT NOT NULL,
   chat_id TEXT,
@@ -37,26 +39,40 @@ CREATE TABLE IF NOT EXISTS events (
   
   -- Foreign key constraints with CASCADE delete
   -- When a world is deleted, all its events are deleted
-  FOREIGN KEY (world_id) REFERENCES worlds(id) ON DELETE CASCADE,
+  FOREIGN KEY
+(world_id) REFERENCES worlds
+(id) ON
+DELETE CASCADE,
   
   -- When a chat is deleted, all its events are deleted
   -- Note: This uses a conditional foreign key - events with NULL chat_id won't be constrained
-  FOREIGN KEY (chat_id) REFERENCES world_chats(id) ON DELETE CASCADE
+  FOREIGN KEY (chat_id)
+REFERENCES world_chats
+(id) ON
+DELETE CASCADE
 );
 
 -- Create indexes for efficient queries
 -- Index for time-based queries within a world/chat context
-CREATE INDEX IF NOT EXISTS idx_events_world_chat_time 
-  ON events(world_id, chat_id, created_at);
+CREATE INDEX
+IF NOT EXISTS idx_events_world_chat_time 
+  ON events
+(world_id, chat_id, created_at);
 
 -- Index for sequence-based queries within a world/chat context
-CREATE INDEX IF NOT EXISTS idx_events_world_chat_seq 
-  ON events(world_id, chat_id, seq);
+CREATE INDEX
+IF NOT EXISTS idx_events_world_chat_seq 
+  ON events
+(world_id, chat_id, seq);
 
 -- Index for event type queries
-CREATE INDEX IF NOT EXISTS idx_events_type 
-  ON events(type);
+CREATE INDEX
+IF NOT EXISTS idx_events_type 
+  ON events
+(type);
 
 -- Index for world_id alone for efficient world-level queries
-CREATE INDEX IF NOT EXISTS idx_events_world_id 
-  ON events(world_id);
+CREATE INDEX
+IF NOT EXISTS idx_events_world_id 
+  ON events
+(world_id);
