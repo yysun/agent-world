@@ -2,26 +2,35 @@
  * Main App Component
  * 
  * Root component that orchestrates:
- * - WebSocket connection
- * - World state management
- * - Layout and routing between views
- * - Split-pane UI with chat and agent sidebar
+ * - WebSocket connection (useWebSocketConnection)
+ * - World state management (useWorldState)
+ * - Event processing (useEventProcessor)
+ * - High-level operations (useAgentWorldClient)
+ * - Vertical layout: TopPanel → Messages → Input → StatusBar
  * 
  * Created: 2025-11-01 - Phase 1: Core Infrastructure
  * Updated: 2025-11-01 - Phase 2: UI Components Integration
  * Updated: 2025-11-01 - Phase 3: Command Result Integration
+ * Updated: 2025-11-02 - Phase 1: Refactor to use focused hooks
+ * Updated: 2025-11-02 - Phase 1: Vertical layout redesign
  */
 
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import Spinner from 'ink-spinner';
-import { useWebSocket } from './hooks/useWebSocket.js';
+import { useWebSocketConnection } from './hooks/useWebSocketConnection.js';
+import { useAgentWorldClient } from './hooks/useAgentWorldClient.js';
 import { useWorldState } from './hooks/useWorldState.js';
+import { useEventProcessor } from './hooks/useEventProcessor.js';
+import { usePopup } from './hooks/usePopup.js';
+import TopPanel from './components/TopPanel.js';
 import ChatView from './components/ChatView.js';
-import AgentSidebar from './components/AgentSidebar.js';
 import InputBox from './components/InputBox.js';
-import ConnectionStatus from './components/ConnectionStatus.js';
+import StatusBar from './components/StatusBar.js';
 import CommandResult from './components/CommandResult.js';
+import WorldManager from './components/WorldManager.js';
+import AgentManager from './components/AgentManager.js';
+import ChatManager from './components/ChatManager.js';
 
 interface AppProps {
   serverUrl: string;
@@ -33,15 +42,33 @@ interface AppProps {
 const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => {
   const { exit } = useApp();
 
-  const { messages, agents, isReplayComplete, replayProgress, lastCommandResult, processEvent } = useWorldState();
+  // 1. WebSocket connection
+  const wsConnection = useWebSocketConnection(serverUrl);
 
-  const ws = useWebSocket(serverUrl, {
-    onEvent: processEvent,
-    onConnected: () => {
-      // Subscribe to world on connection
-      ws.subscribe(worldId, chatId, replayFrom);
-    }
+  // 2. World state
+  const worldState = useWorldState();
+
+  // 3. Event processor
+  const processEvent = useEventProcessor(worldState, {
+    batchDuringReplay: true,
+    batchSize: 50,
+    throttleMs: 16 // ~60fps
   });
+
+  // 4. Agent World client operations
+  const client = useAgentWorldClient(wsConnection.ws, wsConnection.connected, {
+    onMessage: processEvent
+  });
+
+  // 5. Popup management
+  const popup = usePopup(wsConnection.connected);
+
+  // Subscribe to world when connected
+  useEffect(() => {
+    if (wsConnection.connected && wsConnection.ws) {
+      client.subscribe(worldId, chatId, replayFrom);
+    }
+  }, [wsConnection.connected, worldId, chatId, replayFrom]);
 
   // Handle Ctrl+C to exit
   useInput((input, key) => {
@@ -52,18 +79,18 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
 
   const handleSubmit = (value: string, isCommand: boolean) => {
     if (isCommand) {
-      ws.executeCommand(worldId, value);
+      client.executeCommand(worldId, value);
     } else {
-      ws.enqueue(worldId, chatId, value, 'human');
+      client.enqueue(worldId, chatId, value, 'human');
     }
   };
 
   // Loading/connecting state
-  if (ws.connecting || !isReplayComplete) {
-    const statusText = ws.connecting
+  if (wsConnection.connecting || worldState.isReplaying) {
+    const statusText = wsConnection.connecting
       ? `Connecting to ${serverUrl}...`
-      : replayProgress
-        ? `Replaying events... ${replayProgress.current} / ${replayProgress.total}`
+      : worldState.replayProgress
+        ? `Replaying events... ${worldState.replayProgress.current} / ${worldState.replayProgress.total} (${worldState.replayProgress.percentage}%)`
         : 'Loading...';
 
     return (
@@ -82,60 +109,74 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
   }
 
   // Connection error
-  if (!ws.connected && ws.lastError) {
+  if (!wsConnection.connected && wsConnection.error) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">✗ {ws.lastError}</Text>
+        <Text color="red">✗ {wsConnection.error}</Text>
         <Text color="gray" dimColor>Press Ctrl+C to exit</Text>
       </Box>
     );
   }
 
-  // Main UI with split-pane layout
+  // Main UI with vertical layout
   return (
     <Box flexDirection="column" height="100%">
-      {/* Header */}
-      <Box borderStyle="single" borderColor="cyan" paddingX={1}>
-        <Text color="cyan" bold>Agent World - {worldId}</Text>
-        <Text> | </Text>
-        <ConnectionStatus connected={ws.connected} connecting={ws.connecting} error={ws.lastError} />
-      </Box>
+      {/* Top Panel: Agents + Title + Connection */}
+      <TopPanel
+        worldId={worldId}
+        chatId={chatId}
+        agents={Array.from(worldState.agents.values())}
+        connected={wsConnection.connected}
+        connecting={wsConnection.connecting}
+        error={wsConnection.error}
+      />
 
-      {/* Main content: sidebar + chat */}
-      <Box flexGrow={1} flexDirection="row">
-        {/* Agent Sidebar */}
-        <Box width="25%" borderStyle="single" borderColor="gray">
-          <AgentSidebar agents={agents} />
-        </Box>
-
-        {/* Chat View */}
-        <Box width="75%" flexDirection="column">
-          <Box flexGrow={1}>
-            <ChatView messages={messages} />
-          </Box>
-        </Box>
+      {/* Message Area (grows to fill available space) */}
+      <Box flexGrow={1}>
+        <ChatView messages={worldState.messages} />
       </Box>
 
       {/* Command Result */}
-      {lastCommandResult && (
+      {worldState.lastCommandResult && (
         <Box paddingX={1}>
-          <CommandResult result={lastCommandResult} />
+          <CommandResult result={worldState.lastCommandResult} />
         </Box>
       )}
 
-      {/* Input */}
+      {/* Input Box */}
       <InputBox
         onSubmit={handleSubmit}
-        disabled={!ws.connected}
-        placeholder={ws.connected ? 'Type a message or /command...' : 'Disconnected'}
+        disabled={!wsConnection.connected}
+        placeholder={wsConnection.connected ? 'Type a message or /command...' : 'Disconnected'}
       />
 
-      {/* Footer */}
-      <Box paddingX={1}>
-        <Text color="gray" dimColor>
-          Ctrl+C to exit | Messages: {messages.length} | Agents: {agents.length}
-        </Text>
-      </Box>
+      {/* Status Bar: Shortcuts + Counts */}
+      <StatusBar
+        messageCount={worldState.messages.length}
+        agentCount={worldState.agents.size}
+        showCrudShortcuts={true}
+      />
+
+      {/* Popups (rendered on top) */}
+      {popup.popupType === 'world' && (
+        <WorldManager
+          currentWorldId={worldId}
+          onClose={popup.closePopup}
+        />
+      )}
+      {popup.popupType === 'agent' && (
+        <AgentManager
+          agents={Array.from(worldState.agents.values())}
+          onClose={popup.closePopup}
+        />
+      )}
+      {popup.popupType === 'chat' && (
+        <ChatManager
+          currentChatId={chatId}
+          worldId={worldId}
+          onClose={popup.closePopup}
+        />
+      )}
     </Box>
   );
 };

@@ -1,42 +1,27 @@
 /**
- * useWorldState - World state management from WebSocket events
+ * useWorldState Hook - Application State Management
+ * 
+ * Purpose: Manages application state derived from WebSocket events
  * 
  * Features:
- * - Message state (messages, addMessage)
- * - Agent state (agents, updateAgentStatus)
- * - Replay state (isReplayComplete, replayProgress)
+ * - Message history (addMessage, clearMessages)
+ * - Agent status tracking (updateAgentStatus)
+ * - Replay progress (isReplaying, replayProgress)
  * - Command results (lastCommandResult)
- * - Event processor
+ * - Error state
  * 
- * Implementation:
- * - Returns state and processor function
- * - Processor handles WebSocketEvent and updates state
- * - Tracks agent streaming status
- * - Manages replay progress
+ * Responsibilities:
+ * - Pure React state management (useState, useCallback, useMemo)
+ * - No WebSocket logic
+ * - Uses types from ws/types.ts
+ * - Memory limit (keep last 1000 messages)
  * 
- * Changes:
- * - Changed from subscription model to processor model
- * - Added lastCommandResult state for command execution feedback
- * - Added result event handling in processor
+ * Created: 2025-11-01 - Phase 1: Core Infrastructure
+ * Updated: 2025-11-02 - Phase 1: Refactor to use shared types
  */
 
 import { useState, useCallback } from 'react';
-
-// Simplified types for TUI (no dependency on core/)
-export interface Message {
-  messageId: string;
-  sender: string;
-  content: string;
-  timestamp: Date;
-  isHistorical?: boolean;
-}
-
-export interface Agent {
-  id: string;
-  name: string;
-  status: 'active' | 'inactive';
-  streaming: boolean;
-}
+import type { Message, AgentActivityStatus } from '../../ws/types.js';
 
 export interface CommandResult {
   timestamp: Date;
@@ -44,119 +29,102 @@ export interface CommandResult {
   result: any;
 }
 
-export interface WebSocketEvent {
-  type: string;
-  event?: any;
-  eventType?: string;
-  isHistorical?: boolean;
-  data?: any;
-  success?: boolean;
-  message?: string;
-}
-
 export interface UseWorldStateReturn {
   messages: Message[];
-  agents: Agent[];
-  isReplayComplete: boolean;
-  replayProgress: { current: number; total: number } | null;
+  agents: Map<string, AgentActivityStatus>;
+  isReplaying: boolean;
+  replayProgress: { current: number; total: number; percentage: number } | null;
+  error: string | null;
   lastCommandResult: CommandResult | null;
-  processEvent: (event: WebSocketEvent) => void;
+  addMessage: (message: Message) => void;
+  updateAgentStatus: (agentName: string, status: Partial<AgentActivityStatus>) => void;
+  setReplayProgress: (current: number, total: number) => void;
+  setError: (error: string | null) => void;
+  clearMessages: () => void;
+  reset: () => void;
 }
 
+const MAX_MESSAGES = 1000;
+
+/**
+ * Hook for managing world state
+ */
 export function useWorldState(): UseWorldStateReturn {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [isReplayComplete, setIsReplayComplete] = useState(false);
-  const [replayProgress, setReplayProgress] = useState<{ current: number; total: number } | null>(null);
+  const [agents, setAgents] = useState<Map<string, AgentActivityStatus>>(new Map());
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [replayProgress, setReplayProgressState] = useState<{ current: number; total: number; percentage: number } | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
   const [lastCommandResult, setLastCommandResult] = useState<CommandResult | null>(null);
 
   const addMessage = useCallback((message: Message) => {
-    setMessages(prev => [...prev, message]);
-  }, []);
-
-  const updateAgentStatus = useCallback((agentId: string, status: 'active' | 'inactive', streaming: boolean = false) => {
-    setAgents(prev => {
-      const existing = prev.find(a => a.id === agentId);
-      if (existing) {
-        return prev.map(a =>
-          a.id === agentId
-            ? { ...a, status, streaming }
-            : a
-        );
-      } else {
-        return [...prev, { id: agentId, name: agentId, status, streaming }];
+    setMessages(prev => {
+      const updated = [...prev, message];
+      // Keep only last MAX_MESSAGES
+      if (updated.length > MAX_MESSAGES) {
+        return updated.slice(updated.length - MAX_MESSAGES);
       }
+      return updated;
     });
   }, []);
 
-  const processEvent = useCallback((event: WebSocketEvent) => {
-    switch (event.type) {
-      case 'event':
-        // Handle different event types
-        if (event.eventType === 'message' && event.event) {
-          const msg = event.event;
-          addMessage({
-            messageId: msg.messageId || `${Date.now()}-${Math.random()}`,
-            sender: msg.sender || 'unknown',
-            content: msg.content || '',
-            timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-            isHistorical: event.isHistorical
-          });
-        } else if (event.eventType === 'sse' && event.event) {
-          const sseEvent = event.event;
-          const agentName = sseEvent.agentName;
+  const updateAgentStatus = useCallback((agentName: string, status: Partial<AgentActivityStatus>) => {
+    setAgents(prev => {
+      const newAgents = new Map(prev);
+      const existing = newAgents.get(agentName);
 
-          if (sseEvent.type === 'start') {
-            updateAgentStatus(agentName, 'active', true);
-          } else if (sseEvent.type === 'end') {
-            updateAgentStatus(agentName, 'inactive', false);
-          }
-        } else if (event.eventType === 'world' && event.event) {
-          const worldEvent = event.event;
-
-          if (worldEvent.type === 'response-start' && worldEvent.source?.startsWith('agent:')) {
-            const agentName = worldEvent.source.replace('agent:', '');
-            updateAgentStatus(agentName, 'active');
-          } else if (worldEvent.type === 'response-end' && worldEvent.source?.startsWith('agent:')) {
-            const agentName = worldEvent.source.replace('agent:', '');
-            updateAgentStatus(agentName, 'inactive');
-          }
-        }
-        break;
-
-      case 'subscribed':
-        // Could track agents from world data here if provided
-        break;
-
-      case 'replay-complete':
-        setIsReplayComplete(true);
-        setReplayProgress(null);
-        break;
-
-      case 'result':
-        setLastCommandResult({
-          timestamp: new Date(),
-          success: event.success ?? true,
-          result: event.data
+      if (existing) {
+        newAgents.set(agentName, { ...existing, ...status });
+      } else {
+        newAgents.set(agentName, {
+          agentId: agentName,
+          message: status.message || '',
+          phase: status.phase || 'thinking',
+          activityId: status.activityId || null,
+          toolName: status.toolName,
+          updatedAt: Date.now()
         });
-        break;
+      }
 
-      case 'error':
-        // Could track errors here
-        break;
+      return newAgents;
+    });
+  }, []);
 
-      default:
-        // Ignore other event types
-        break;
-    }
-  }, [addMessage, updateAgentStatus]);
+  const setReplayProgress = useCallback((current: number, total: number) => {
+    const percentage = total > 0 ? Math.floor((current / total) * 100) : 0;
+    setReplayProgressState({ current, total, percentage });
+    setIsReplaying(current < total);
+  }, []);
+
+  const setError = useCallback((error: string | null) => {
+    setErrorState(error);
+  }, []);
+
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  const reset = useCallback(() => {
+    setMessages([]);
+    setAgents(new Map());
+    setIsReplaying(false);
+    setReplayProgressState(null);
+    setErrorState(null);
+    setLastCommandResult(null);
+  }, []);
 
   return {
     messages,
     agents,
-    isReplayComplete,
+    isReplaying,
     replayProgress,
+    error,
     lastCommandResult,
-    processEvent
+    addMessage,
+    updateAgentStatus,
+    setReplayProgress,
+    setError,
+    clearMessages,
+    reset
   };
 }

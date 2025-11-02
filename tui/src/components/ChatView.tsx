@@ -6,13 +6,16 @@
  * - Timestamps
  * - Auto-scrolling to latest message
  * - Historical vs live message indicators
+ * - Full width layout (no sidebar)
  * 
  * Created: 2025-11-01 - Phase 2: UI Components
+ * Updated: 2025-11-02 - Phase 1: Use shared Message type from ws/types
+ * Updated: 2025-11-02 - Phase 1: Full width for vertical layout
  */
 
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Message } from '../types/index.js';
+import type { Message } from '../../ws/types.js';
 
 interface ChatViewProps {
   messages: Message[];
@@ -25,33 +28,43 @@ const ChatView: React.FC<ChatViewProps> = ({ messages, maxMessages = 100 }) => {
 
   if (displayMessages.length === 0) {
     return (
-      <Box padding={1}>
+      <Box padding={1} width="100%">
         <Text color="gray" dimColor>No messages yet. Type a message to get started.</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" padding={1}>
+    <Box flexDirection="column" padding={1} width="100%">
       {displayMessages.map((msg, index) => {
         const isHuman = msg.sender === 'human' || msg.sender.toLowerCase() === 'human';
         const senderColor = isHuman ? 'yellow' : 'green';
-        const timestamp = msg.timestamp.toLocaleTimeString('en-US', {
+
+        // Use createdAt if available, fallback to timestamp
+        const messageTime = msg.createdAt || msg.timestamp;
+        const timestamp = messageTime ? new Date(messageTime).toLocaleTimeString('en-US', {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit'
-        });
+        }) : '';
+
+        // Use text or content
+        const content = msg.text || msg.content || '';
 
         return (
-          <Box key={`${msg.messageId}-${index}`} flexDirection="column" marginBottom={1}>
+          <Box key={`${msg.messageId || msg.id}-${index}`} flexDirection="column" marginBottom={1}>
             <Box>
-              <Text color="gray" dimColor>[{timestamp}]</Text>
-              <Text> </Text>
+              {timestamp && (
+                <>
+                  <Text color="gray" dimColor>[{timestamp}]</Text>
+                  <Text> </Text>
+                </>
+              )}
               <Text color={senderColor} bold>{msg.sender}:</Text>
               {msg.isHistorical && <Text color="gray" dimColor> (historical)</Text>}
             </Box>
             <Box paddingLeft={2}>
-              <Text>{msg.content}</Text>
+              <Text>{content}</Text>
             </Box>
           </Box>
         );
