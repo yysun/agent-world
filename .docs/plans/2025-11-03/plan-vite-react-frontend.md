@@ -2,9 +2,9 @@
 
 **Date:** 2025-11-03  
 **Related Requirement:** `.docs/reqs/2025-11-01/req-vite-react-frontend.md`  
-**Status:** In Progress  
+**Status:** In Progress (Phase 5 Complete - 50% Done)  
 **Started:** 2025-11-03  
-**Estimated Time:** 15-23 hours
+**Estimated Time:** 15-23 hours (8-12 hours remaining)
 
 ## Overview
 
@@ -203,13 +203,13 @@ npm run cli:dev
   ```
 - [x] Install in react workspace: `npm install eventemitter3 --workspace=react`
 - [x] Verify TypeScript compiles without errors
-- [ ] Create `src/types/index.ts`:
+- [x] Create `src/types/index.ts`:
   - Re-export types from ws-client
   - Add UI-specific types (World, Agent, Chat, Message)
   - Connection state types
 
 ### 4.2 Create WebSocket Context
-- [ ] Create `src/lib/WebSocketContext.tsx`:
+- [x] Create `src/lib/WebSocketContext.tsx`:
   - Check WebSocket browser support:
     ```typescript
     if (!('WebSocket' in window)) {
@@ -223,7 +223,7 @@ npm run cli:dev
   - Auto-reconnection handling
 
 ### 4.3 Create useWebSocket Hook
-- [ ] Create `src/hooks/useWebSocket.ts`:
+- [x] Create `src/hooks/useWebSocket.ts`:
   - Access context
   - Return client instance
   - Connection state
@@ -231,7 +231,7 @@ npm run cli:dev
   - Typed event listeners
 
 ### 4.4 Create useWorldData Hook
-- [ ] Create `src/hooks/useWorldData.ts`:
+- [x] Create `src/hooks/useWorldData.ts`:
   - List worlds
   - Get world details
   - Create/update/delete world
@@ -239,14 +239,14 @@ npm run cli:dev
   - Return loading/error states
 
 ### 4.5 Create useAgentData Hook
-- [ ] Create `src/hooks/useAgentData.ts`:
+- [x] Create `src/hooks/useAgentData.ts`:
   - List agents for world
   - Get agent details
   - Create/update/delete agent
   - Return loading/error states
 
 ### 4.6 Create useChatData Hook
-- [ ] Create `src/hooks/useChatData.ts`:
+- [x] Create `src/hooks/useChatData.ts`:
   - List chats for world
   - Create/delete chat
   - Send messages (check connection state first)
@@ -265,39 +265,39 @@ npm run cli:dev
 ## Phase 5: Port React Components (3-4 hours)
 
 ### 5.1 Port MarkdownEditor Component
-- [ ] Copy `next/src/components/MarkdownEditor.tsx` → `react/src/components/MarkdownEditor.tsx`
-- [ ] Update imports (remove Next.js specific)
-- [ ] Verify gray-matter works
-- [ ] Test in isolation with sample data
-- [ ] Update comment block
+- [x] Copy `next/src/components/MarkdownEditor.tsx` → `react/src/components/MarkdownEditor.tsx`
+- [x] Update imports (remove Next.js specific)
+- [x] Verify gray-matter works
+- [x] Test in isolation with sample data
+- [x] Update comment block
 
 ### 5.2 Port StreamChatBox Component
-- [ ] Copy `next/src/components/StreamChatBox.tsx` → `react/src/components/StreamChatBox.tsx`
-- [ ] Update to use WebSocket events instead of SSE
-- [ ] Remove fetch/streaming logic (use hooks)
-- [ ] Test with mock data
-- [ ] Update comment block
+- [x] Copy `next/src/components/StreamChatBox.tsx` → `react/src/components/StreamChatBox.tsx`
+- [x] Update to use WebSocket events instead of SSE
+- [x] Remove fetch/streaming logic (use hooks)
+- [x] Test with mock data
+- [x] Update comment block
 
 ### 5.3 Port MarkdownMemory Component
-- [ ] Copy `next/src/components/MarkdownMemory.tsx` → `react/src/components/MarkdownMemory.tsx`
-- [ ] Verify react-markdown and remark-gfm work
-- [ ] Test with sample markdown
-- [ ] Update comment block
+- [x] Copy `next/src/components/MarkdownMemory.tsx` → `react/src/components/MarkdownMemory.tsx`
+- [x] Verify react-markdown and remark-gfm work
+- [x] Test with sample markdown
+- [x] Update comment block
 
 ### 5.4 Create Common UI Components
-- [ ] Create `src/components/Layout.tsx`:
+- [x] Create `src/components/Layout.tsx`:
   - Header with navigation
   - Sidebar (if needed)
   - Main content area
   - ConnectionStatus in header
-- [ ] Create `src/components/ConnectionStatus.tsx`:
+- [x] Create `src/components/ConnectionStatus.tsx`:
   - Display: "Connected", "Connecting...", "Reconnecting...", "Disconnected"
   - Use useWebSocket hook for state
   - Visual indicator (dot with color)
-- [ ] Create `src/components/Loading.tsx`:
+- [x] Create `src/components/Loading.tsx`:
   - Spinner component
   - Loading states
-- [ ] Create `src/components/ErrorBoundary.tsx`:
+- [x] Create `src/components/ErrorBoundary.tsx`:
   - Error boundary wrapper
   - Error display
 
