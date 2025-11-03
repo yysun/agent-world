@@ -30,7 +30,7 @@ import Loading from '@/components/Loading.tsx';
 export default function HomePage() {
   const navigate = useNavigate();
   const { worlds, loading, error, createWorld, refetch } = useWorldData();
-  
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newWorldName, setNewWorldName] = useState('');
   const [newWorldDescription, setNewWorldDescription] = useState('');
@@ -47,13 +47,13 @@ export default function HomePage() {
 
     setCreating(true);
     setCreateError(null);
-    
+
     try {
       await createWorld({
         name: newWorldName,
         description: newWorldDescription || undefined,
       });
-      
+
       // Success - reset form and refresh list
       setNewWorldName('');
       setNewWorldDescription('');
@@ -136,13 +136,13 @@ export default function HomePage() {
                     disabled={creating}
                   />
                 </div>
-                
+
                 {createError && (
                   <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
                     {createError}
                   </div>
                 )}
-                
+
                 <div className="flex gap-3">
                   <button
                     type="submit"

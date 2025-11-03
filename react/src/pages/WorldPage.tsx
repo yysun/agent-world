@@ -36,30 +36,30 @@ export default function WorldPage() {
   const { worldId } = useParams<{ worldId: string }>();
   const navigate = useNavigate();
   const { state: connectionState } = useWebSocket();
-  
+
   const { getWorld } = useWorldData();
   const { agents, createAgent, updateAgent, refetch: refetchAgents } = useAgentData(worldId || '');
   const { messages, sendMessage, subscribeToChat } = useChatData(worldId || '', undefined);
-  
+
   const [world, setWorld] = useState<{ id: string; name: string; description?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [activeTab, setActiveTab] = useState<'main' | 'settings'>('main');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
-  
+
   // Agent creation
   const [showAgentForm, setShowAgentForm] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
   const [creating, setCreating] = useState(false);
-  
+
   // Settings editing
   const [editingSaving, setEditingSaving] = useState(false);
 
   // Load world on mount
   useEffect(() => {
     if (!worldId) return;
-    
+
     const loadWorld = async () => {
       try {
         const worldData = await getWorld(worldId);
@@ -75,7 +75,7 @@ export default function WorldPage() {
         setLoading(false);
       }
     };
-    
+
     loadWorld();
   }, [worldId, getWorld, navigate]);
 
@@ -130,7 +130,7 @@ export default function WorldPage() {
 
   const handleSaveWorld = async (data: Record<string, unknown>) => {
     if (!worldId || !world) return;
-    
+
     setEditingSaving(true);
     try {
       // World update via hook (needs implementation)
@@ -146,7 +146,7 @@ export default function WorldPage() {
 
   const handleSaveAgent = async (data: Record<string, unknown>) => {
     if (!selectedAgent) return;
-    
+
     setEditingSaving(true);
     try {
       await updateAgent(selectedAgent.id, data);
@@ -290,21 +290,19 @@ export default function WorldPage() {
           <div className="flex border-b border-border">
             <button
               onClick={() => setActiveTab('main')}
-              className={`px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'main'
+              className={`px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'main'
                   ? 'text-primary border-b-2 border-primary'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
             >
               {tabLabels[0]}
             </button>
             <button
               onClick={() => setActiveTab('settings')}
-              className={`px-6 py-3 text-sm font-medium transition-colors ${
-                activeTab === 'settings'
+              className={`px-6 py-3 text-sm font-medium transition-colors ${activeTab === 'settings'
                   ? 'text-primary border-b-2 border-primary'
                   : 'text-muted-foreground hover:text-foreground'
-              }`}
+                }`}
             >
               {tabLabels[1]}
             </button>
