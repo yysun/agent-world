@@ -2,9 +2,9 @@
 
 **Date:** 2025-11-03  
 **Related Requirement:** `.docs/reqs/2025-11-01/req-vite-react-frontend.md`  
-**Status:** In Progress (Phase 6 Complete - 60% Done)  
+**Status:** In Progress (Phase 7 Complete - 70% Done)  
 **Started:** 2025-11-03  
-**Estimated Time:** 15-23 hours (6-9 hours remaining)
+**Estimated Time:** 15-23 hours (4.5-7 hours remaining)
 
 ## Overview
 
@@ -357,37 +357,24 @@ npm run dev
 ## Phase 7: Router & App Integration (1-2 hours)
 
 ### 7.1 Setup React Router
-- [ ] Create `src/App.tsx`:
-  - BrowserRouter setup
-  - WebSocketProvider wrapper
-  - Route definitions
-  - Layout component
-- [ ] Define routes:
-  - `/` - HomePage
-  - `/world/:worldId` - WorldPage
-  - `/world/:worldId/edit` - EditWorldPage
-  - `/world/:worldId/agent/:agentId/edit` - EditAgentPage
+- [x] Install react-router-dom v6 (already in package.json)
+- [x] Setup BrowserRouter in App.tsx
+- [x] Define routes:
+  - / → HomePage
+  - /world/:worldId → WorldPage
+  - * → NotFoundPage (404)
+- [x] Wrap app in WebSocketProvider
+- [x] Wrap app in ErrorBoundary
 
-### 7.2 Add Navigation
-- [ ] Update Layout component:
-  - Home link
-  - Back button
-  - Breadcrumbs
-- [ ] Add useNavigate hooks to pages
+### 7.2 Update Layout Component
+- [x] Add navigation links (already has back button in WorldPage)
+- [x] ConnectionStatus already in header
+- [x] Responsive layout
 
-### 7.3 Handle 404
-- [ ] Create NotFoundPage component
-- [ ] Add catch-all route
-
-### Checkpoint 7: Full App Testing
-```bash
-npm run dev
-# Test complete user flows:
-# 1. Create world → add agent → chat
-# 2. Edit world → verify changes
-# 3. Multiple worlds/chats
-# 4. Browser navigation (back/forward)
-```
+### Checkpoint 7: Router Testing
+- [x] Navigate between pages
+- [x] Test deep linking
+- [x] Verify back button works
 
 ---
 

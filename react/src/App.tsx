@@ -4,51 +4,43 @@
  * Purpose: Main app shell with routing and global providers
  * 
  * Features:
+ * - React Router for page navigation
  * - WebSocket provider for global client access
- * - React Router setup (to be added in Phase 7)
- * - Route definitions (to be added in Phase 7)
+ * - ErrorBoundary for graceful error handling
+ * - Layout wrapper for consistent UI
+ * - Route definitions (Home, World detail)
+ * 
+ * Routes:
+ * - / → HomePage (world list)
+ * - /world/:worldId → WorldPage (world detail with agents and chat)
+ * - * → 404 Not Found
  * 
  * Changes:
- * - 2025-11-03: Added WebSocketProvider
+ * - 2025-11-03: Added WebSocketProvider (Phase 4)
+ * - 2025-11-03: Added React Router setup (Phase 7)
+ * - 2025-11-03: Added ErrorBoundary and Layout wrappers
  * - 2025-11-03: Initial setup for Phase 1
  */
 
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WebSocketProvider } from '@/lib/WebSocketContext';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import ErrorBoundary from '@/components/ErrorBoundary.tsx';
+import Layout from '@/components/Layout.tsx';
+import HomePage from '@/pages/HomePage.tsx';
+import WorldPage from '@/pages/WorldPage.tsx';
 
-function AppContent() {
-  const { state, error } = useWebSocket();
-
+function NotFoundPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-4xl font-bold">Agent World</h1>
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-3 h-3 rounded-full ${state === 'connected'
-                  ? 'bg-green-500'
-                  : state === 'connecting' || state === 'reconnecting'
-                    ? 'bg-yellow-500 animate-pulse'
-                    : 'bg-red-500'
-                }`}
-            />
-            <span className="text-sm text-muted-foreground capitalize">{state}</span>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-4 p-4 bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800 rounded-lg text-red-800 dark:text-red-200">
-            Error: {error.message}
-          </div>
-        )}
-
-        <p className="mt-4 text-muted-foreground">
-          Vite + React frontend with WebSocket integration ready.
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Phase 4 complete: WebSocket hooks implemented. Next: Port components (Phase 5).
-        </p>
+    <div className="flex items-center justify-center min-h-[50vh]">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-foreground mb-2">404</h2>
+        <p className="text-muted-foreground mb-4">Page not found</p>
+        <a
+          href="/"
+          className="text-primary hover:underline"
+        >
+          Go back home
+        </a>
       </div>
     </div>
   );
@@ -56,9 +48,19 @@ function AppContent() {
 
 function App() {
   return (
-    <WebSocketProvider>
-      <AppContent />
-    </WebSocketProvider>
+    <ErrorBoundary>
+      <WebSocketProvider>
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/world/:worldId" element={<WorldPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+      </WebSocketProvider>
+    </ErrorBoundary>
   );
 }
 
