@@ -112,7 +112,11 @@ ls: cannot access '/nonexistent-directory': No such file or directory
 ### TypeScript/JavaScript
 
 ```typescript
-import { executeShellCommand, getExecutionHistory } from 'agent-world/core';
+// Import from agent-world package
+import { executeShellCommand, getExecutionHistory } from 'agent-world';
+
+// Or from core subpackage
+// import { executeShellCommand, getExecutionHistory } from 'agent-world/core';
 
 // Execute a command
 const result = await executeShellCommand('ls', ['-la', '/tmp']);
@@ -145,7 +149,8 @@ All command executions are automatically persisted in memory. The system maintai
 ### Retrieving History
 
 ```typescript
-import { getExecutionHistory, clearExecutionHistory } from 'agent-world/core';
+// Import from agent-world package
+import { getExecutionHistory, clearExecutionHistory } from 'agent-world';
 
 // Get last 50 executions
 const history = getExecutionHistory(50);
