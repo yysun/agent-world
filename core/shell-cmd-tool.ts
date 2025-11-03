@@ -8,6 +8,8 @@
  * - Return results to LLM for further processing
  * - Error handling and exception tracking
  * - Long-running command support with 10-minute default timeout
+ * - Required directory parameter for explicit working directory control
+ * - LLM guidance to ask user for directory if not provided
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
@@ -15,8 +17,12 @@
  * - Provides MCP-compatible tool interface for LLM integration
  * - Timeout support to prevent hanging processes (default: 10 minutes)
  * - Resource cleanup on process completion
+ * - Requires explicit directory parameter for security and clarity
+ * - Tool description instructs LLM to ask user for directory if missing
  *
  * Recent Changes:
+ * - Added LLM guidance to ask user for directory when not provided
+ * - Made directory parameter required for shell command execution
  * - Increased default timeout from 30s to 10 minutes (600000ms) for long-running commands
  * - Initial implementation for shell_cmd LLM tool
  */
@@ -53,26 +59,26 @@ const MAX_HISTORY_SIZE = 1000; // Limit history size to prevent memory issues
  * 
  * @param command - The shell command to execute (e.g., 'ls', 'echo', 'cat')
  * @param parameters - Array of parameters for the command (e.g., ['-la', '/tmp'])
+ * @param directory - Working directory for command execution (required)
  * @param options - Execution options
  * @returns Promise<CommandExecutionResult> - Execution result with output and metadata
  */
 export async function executeShellCommand(
   command: string,
   parameters: string[] = [],
+  directory: string,
   options: {
     timeout?: number; // Timeout in milliseconds (default: 600000 = 10 minutes)
-    cwd?: string; // Working directory (default: process.cwd())
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
   const timeout = options.timeout || 600000; // Default 10 minute timeout for long-running commands
-  const cwd = options.cwd || process.cwd();
 
   logger.debug('Executing shell command', {
     command,
     parameters,
     timeout,
-    cwd
+    directory
   });
 
   return new Promise((resolve) => {
@@ -95,7 +101,7 @@ export async function executeShellCommand(
     try {
       // Spawn the child process
       const childProcess = spawn(command, parameters, {
-        cwd,
+        cwd: directory,
         shell: false, // Don't use shell for better security
         timeout: timeout
       });
@@ -299,7 +305,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. The command output, errors, and execution metadata are persisted for tracking.',
+    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. The command output, errors, and execution metadata are persisted for tracking. CRITICAL: This tool REQUIRES a "directory" parameter. If user says "current directory" or "here", use "./". If user specifies a path, use that. Only ask for clarification if the location is truly ambiguous.',
     parameters: {
       type: 'object',
       properties: {
@@ -312,24 +318,29 @@ export function createShellCmdToolDefinition() {
           items: { type: 'string' },
           description: 'Array of parameters/arguments for the command (e.g., ["-la", "/tmp"])'
         },
+        directory: {
+          type: 'string',
+          description: 'REQUIRED: Working directory where the command should be executed. Use "./" for current directory when user says "current", "here", or "this directory". Use "~/" for home directory. Use specified path if provided. Only ask for clarification if truly ambiguous. Examples: "./", "~/", "/tmp", "./src"'
+        },
         timeout: {
           type: 'number',
           description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
-        },
-        cwd: {
-          type: 'string',
-          description: 'Working directory for command execution (default: current directory)'
         }
       },
-      required: ['command'],
+      required: ['command', 'directory'],
       additionalProperties: false
     },
     execute: async (args: any) => {
-      const { command, parameters = [], timeout, cwd } = args;
+      const { command, parameters = [], directory, timeout } = args;
 
       // Validate command
       if (!command || typeof command !== 'string') {
         throw new Error('Command must be a non-empty string');
+      }
+
+      // Validate directory (required)
+      if (!directory || typeof directory !== 'string') {
+        throw new Error('Directory must be a non-empty string');
       }
 
       // Validate parameters
@@ -340,9 +351,8 @@ export function createShellCmdToolDefinition() {
       const validParameters = parameters.filter((p: any) => typeof p === 'string');
 
       // Execute command
-      const result = await executeShellCommand(command, validParameters, {
-        timeout,
-        cwd
+      const result = await executeShellCommand(command, validParameters, directory, {
+        timeout
       });
 
       // Return formatted result for LLM

@@ -94,6 +94,7 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - Added shell_cmd tool guidance: LLM asks user for directory when not provided
  * - Increased LLM queue timeout from 2 minutes to 15 minutes for long-running tool executions
  * - Added configurable timeout via setProcessingTimeout() and getProcessingTimeout() methods
  * - Added warning logs at 50% timeout threshold to help debug long-running operations
@@ -361,7 +362,7 @@ async function executeStreamAgentResponse(
 
     // Add tool usage instructions to system prompt when tools are available
     if (hasMCPTools && llmMessages.length > 0 && llmMessages[0].role === 'system') {
-      llmMessages[0].content += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.';
+      llmMessages[0].content += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
     }
 
     if (hasMCPTools) {
@@ -478,7 +479,7 @@ async function executeGenerateAgentResponse(
 
   // Add tool usage instructions to system prompt when tools are available
   if (hasMCPTools) {
-    systemPrompt += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.';
+    systemPrompt += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
   }
 
   llmMessages.unshift({ role: 'system', content: systemPrompt });

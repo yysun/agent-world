@@ -44,9 +44,10 @@ describe('shell_cmd integration with worlds', () => {
     expect(shellCmdTool.parameters.type).toBe('object');
     expect(shellCmdTool.parameters.properties).toHaveProperty('command');
     expect(shellCmdTool.parameters.properties).toHaveProperty('parameters');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('directory');
     expect(shellCmdTool.parameters.properties).toHaveProperty('timeout');
-    expect(shellCmdTool.parameters.properties).toHaveProperty('cwd');
     expect(shellCmdTool.parameters.required).toContain('command');
+    expect(shellCmdTool.parameters.required).toContain('directory');
   });
 
   test('should execute shell_cmd tool through tool interface', async () => {
@@ -56,7 +57,8 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a simple command through the tool
     const result = await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['Hello from test']
+      parameters: ['Hello from test'],
+      directory: '/tmp'
     });
 
     // Verify result format
@@ -79,7 +81,7 @@ describe('shell_cmd integration with worlds', () => {
     // Note: This test just verifies the built-in tool doesn't break
     // when MCP config is present (without actually configuring an MCP server)
     const tools = await getMCPToolsForWorld(worldId);
-    
+
     // Should have at least the built-in shell_cmd tool
     const toolCount = Object.keys(tools).length;
     expect(toolCount).toBeGreaterThanOrEqual(1);
@@ -93,7 +95,8 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a command that will fail
     const result = await shellCmdTool.execute({
       command: 'ls',
-      parameters: ['/this-directory-does-not-exist-xyz']
+      parameters: ['/this-directory-does-not-exist-xyz'],
+      directory: '/tmp'
     });
 
     // Verify error is captured in result
@@ -109,12 +112,14 @@ describe('shell_cmd integration with worlds', () => {
     // Execute multiple commands
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test1']
+      parameters: ['test1'],
+      directory: '/tmp'
     });
 
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test2']
+      parameters: ['test2'],
+      directory: '/tmp'
     });
 
     // History should be available via the API
@@ -123,7 +128,7 @@ describe('shell_cmd integration with worlds', () => {
 
     // Should have at least the 2 commands we just ran
     expect(history.length).toBeGreaterThanOrEqual(2);
-    
+
     // Most recent first
     expect(history[0].parameters).toContain('test2');
     expect(history[1].parameters).toContain('test1');
