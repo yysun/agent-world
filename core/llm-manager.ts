@@ -64,12 +64,14 @@
  * - Global singleton queue prevents concurrent LLM calls across all agents and worlds
  * - FIFO (First In, First Out) processing ensures fair agent response ordering
  * - Maximum queue size of 100 items prevents memory overflow issues
- * - 2-minute timeout per LLM call prevents stuck queue conditions
+ * - 15-minute timeout per LLM call supports long-running tool executions (configurable)
+ * - Warning logs at 50% timeout threshold for debugging long-running operations
  * - Queue status monitoring available for debugging and performance analysis
  * - Emergency clear function allows administrative queue reset when needed
  * - Proper error handling with promise rejection for failed calls
  * - Automatic queue processing with safety measures for edge cases
  * - Timeout cleanup on promise resolution prevents resource leaks and Jest hanging
+ * - Configurable timeout via setProcessingTimeout() for different use cases
  *
  * Browser Safety Implementation:
  * - Zero process.env dependencies for browser compatibility
@@ -92,6 +94,9 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - Increased LLM queue timeout from 2 minutes to 15 minutes for long-running tool executions
+ * - Added configurable timeout via setProcessingTimeout() and getProcessingTimeout() methods
+ * - Added warning logs at 50% timeout threshold to help debug long-running operations
  * - Removed all process.env dependencies for browser compatibility
  * - Added configuration injection using llm-config module
  * - Updated loadLLMProvider to use injected configuration instead of environment variables
@@ -172,7 +177,7 @@ class LLMQueue {
   private queue: QueuedLLMCall[] = [];
   private processing = false;
   private maxQueueSize = 100; // Prevent memory issues
-  private processingTimeoutMs = 120000; // 2 minute max processing time per call
+  private processingTimeoutMs = 900000; // 15 minute max processing time per call (for long-running tools)
 
   async add<T>(agentId: string, worldId: string, task: () => Promise<T>): Promise<T> {
     // Prevent queue overflow
@@ -208,12 +213,28 @@ class LLMQueue {
       const item = this.queue.shift()!;
 
       try {
+        const taskStartTime = Date.now();
         loggerQueue.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
         // Add processing timeout to prevent stuck queue
         const processPromise = item.execute();
 
         // Store timeout ID so we can cancel it if process completes first
         let timeoutId: NodeJS.Timeout;
+        let warningTimeoutId: NodeJS.Timeout;
+
+        // Warn if processing takes more than 50% of timeout
+        const warningThreshold = this.processingTimeoutMs * 0.5;
+        warningTimeoutId = setTimeout(() => {
+          const elapsed = Date.now() - taskStartTime;
+          loggerQueue.warn(`LLM task is taking longer than expected`, {
+            agentId: item.agentId,
+            worldId: item.worldId,
+            elapsed,
+            timeoutMs: this.processingTimeoutMs,
+            percentComplete: Math.round((elapsed / this.processingTimeoutMs) * 100)
+          });
+        }, warningThreshold);
+
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
             reject(new Error(`LLM call timeout after ${this.processingTimeoutMs}ms for agent ${item.agentId}`));
@@ -222,8 +243,9 @@ class LLMQueue {
 
         const result = await Promise.race([processPromise, timeoutPromise]);
 
-        // Clear the timeout to prevent Jest from hanging
+        // Clear both timeouts to prevent Jest from hanging
         clearTimeout(timeoutId!);
+        clearTimeout(warningTimeoutId!);
 
         item.resolve(result);
         loggerQueue.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
@@ -256,17 +278,24 @@ class LLMQueue {
 
   // Emergency method to clear stuck queue (for debugging/admin use)
   clearQueue(): number {
-    const count = this.queue.length;
+    const clearedCount = this.queue.length;
+    this.queue.length = 0;
+    loggerQueue.info('LLM queue cleared', { clearedCount });
+    return clearedCount;
+  }
 
-    // Reject all pending promises
-    for (const item of this.queue) {
-      item.reject(new Error('Queue cleared by administrator'));
+  // Set processing timeout (useful for testing or adjusting for long-running operations)
+  setProcessingTimeout(timeoutMs: number): void {
+    if (timeoutMs < 1000) {
+      throw new Error('Processing timeout must be at least 1000ms');
     }
+    this.processingTimeoutMs = timeoutMs;
+    loggerQueue.info('LLM queue processing timeout updated', { timeoutMs });
+  }
 
-    this.queue = [];
-    this.processing = false;
-
-    return count;
+  // Get current processing timeout
+  getProcessingTimeout(): number {
+    return this.processingTimeoutMs;
   }
 }
 

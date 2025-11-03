@@ -7,15 +7,17 @@
  * - Persist command execution history (command, parameters, results, exceptions)
  * - Return results to LLM for further processing
  * - Error handling and exception tracking
+ * - Long-running command support with 10-minute default timeout
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
  * - Stores execution history in-memory (can be extended to persistent storage)
  * - Provides MCP-compatible tool interface for LLM integration
- * - Timeout support to prevent hanging processes
+ * - Timeout support to prevent hanging processes (default: 10 minutes)
  * - Resource cleanup on process completion
  *
  * Recent Changes:
+ * - Increased default timeout from 30s to 10 minutes (600000ms) for long-running commands
  * - Initial implementation for shell_cmd LLM tool
  */
 
@@ -58,12 +60,12 @@ export async function executeShellCommand(
   command: string,
   parameters: string[] = [],
   options: {
-    timeout?: number; // Timeout in milliseconds (default: 30000)
+    timeout?: number; // Timeout in milliseconds (default: 600000 = 10 minutes)
     cwd?: string; // Working directory (default: process.cwd())
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
-  const timeout = options.timeout || 30000; // Default 30 second timeout
+  const timeout = options.timeout || 600000; // Default 10 minute timeout for long-running commands
   const cwd = options.cwd || process.cwd();
 
   logger.debug('Executing shell command', {
@@ -123,7 +125,7 @@ export async function executeShellCommand(
         clearTimeout(timeoutHandle);
 
         const duration = Date.now() - startTime;
-        
+
         result.stdout = stdout;
         result.stderr = stderr;
         result.exitCode = code;
@@ -159,7 +161,7 @@ export async function executeShellCommand(
         clearTimeout(timeoutHandle);
 
         const duration = Date.now() - startTime;
-        
+
         result.stdout = stdout;
         result.stderr = stderr;
         result.duration = duration;
@@ -180,7 +182,7 @@ export async function executeShellCommand(
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      
+
       result.duration = duration;
       result.error = error instanceof Error ? error.message : String(error);
 
@@ -312,7 +314,7 @@ export function createShellCmdToolDefinition() {
         },
         timeout: {
           type: 'number',
-          description: 'Timeout in milliseconds (default: 30000). Command will be terminated if it exceeds this time.'
+          description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
         },
         cwd: {
           type: 'string',
