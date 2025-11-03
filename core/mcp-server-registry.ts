@@ -112,6 +112,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
+import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -1537,29 +1538,51 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 }
 
 /**
+ * Get built-in tools that are always available to all worlds
+ * These tools don't require MCP server configuration
+ * 
+ * @returns Record of built-in tool definitions
+ */
+function getBuiltInTools(): Record<string, any> {
+  return {
+    'shell_cmd': createShellCmdToolDefinition()
+  };
+}
+
+/**
  * Get MCP tools available for a world with on-demand server startup
  */
 /**
  * Get MCP tools available for a world with registry-level caching
  * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
+ * Includes built-in tools (shell_cmd) in addition to MCP server tools
  */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
   const startTime = performance.now();
 
   const world = await getWorld(worldId);
+  
+  // Start with built-in tools
+  const allTools: Record<string, any> = getBuiltInTools();
+
   if (!world?.mcpConfig) {
-    logger.debug(`No MCP config for world: ${worldId}`);
-    return {};
+    logger.debug(`No MCP config for world: ${worldId}, returning built-in tools only`, {
+      worldId,
+      builtInToolCount: Object.keys(allTools).length
+    });
+    return allTools;
   }
 
   const config = parseMCPConfig(world.mcpConfig);
   if (!config) {
-    logger.error(`Invalid MCP config for world: ${worldId}`);
-    return {};
+    logger.error(`Invalid MCP config for world: ${worldId}, returning built-in tools only`, {
+      worldId,
+      builtInToolCount: Object.keys(allTools).length
+    });
+    return allTools;
   }
 
   const serverConfigs = parseServersFromConfig(config);
-  const allTools: Record<string, any> = {};
   const serverPromises: Promise<void>[] = [];
 
   let cacheHits = 0;
@@ -1621,11 +1644,15 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   await Promise.allSettled(serverPromises);
 
   const totalTools = Object.keys(allTools).length;
+  const builtInToolCount = Object.keys(getBuiltInTools()).length;
+  const mcpToolCount = totalTools - builtInToolCount;
   const duration = performance.now() - startTime;
 
-  logger.info(`Retrieved ${totalTools} total MCP tools for world: ${worldId}`, {
+  logger.info(`Retrieved ${totalTools} total tools for world: ${worldId} (${builtInToolCount} built-in, ${mcpToolCount} from MCP)`, {
     worldId,
     totalTools,
+    builtInToolCount,
+    mcpToolCount,
     cacheHits,
     cacheMisses,
     cacheHitRate: cacheHits + cacheMisses > 0 ? Math.round((cacheHits / (cacheHits + cacheMisses)) * 100) : 0,

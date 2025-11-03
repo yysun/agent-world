@@ -68,6 +68,14 @@ export {
   clearToolsCache
 } from './mcp-server-registry.js';
 
+// === SHELL COMMAND TOOL ===
+export {
+  executeShellCommand,
+  getExecutionHistory,
+  clearExecutionHistory,
+  type CommandExecutionResult
+} from './shell-cmd-tool.js';
+
 // === CHAT MANAGEMENT ===
 export {
   newChat,

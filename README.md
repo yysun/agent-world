@@ -246,7 +246,25 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 ## Learn More
 
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
+- **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
 
+
+## Built-in Tools
+
+Agent World includes built-in tools that are automatically available to all agents:
+
+### shell_cmd
+Execute shell commands with full output capture and execution history. Perfect for file operations, system information, and automation tasks.
+
+```typescript
+// Available to LLMs as 'shell_cmd' tool
+{
+  "command": "ls",
+  "parameters": ["-la", "/tmp"]
+}
+```
+
+See [Shell Command Tool Documentation](docs/shell-cmd-tool.md) for complete details.
 
 ## Experimental Features
 
