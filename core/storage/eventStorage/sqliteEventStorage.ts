@@ -11,6 +11,7 @@
  * - Cascade delete via foreign keys to worlds/chats tables
  * - Efficient querying with indexed columns
  * - JSON storage for payload and metadata
+ * - Duplicate event ID handling with INSERT OR IGNORE
  * 
  * Cascade Delete Behavior:
  * - Foreign keys ensure events are deleted when their parent world is deleted
@@ -22,6 +23,11 @@
  * - Follows the promisify pattern used in sqlite-storage.ts
  * - Supports both time-based and sequence-based pagination
  * - Auto-increments sequence number within each world/chat context
+ * - Uses INSERT OR IGNORE to prevent UNIQUE constraint violations from duplicate event IDs
+ *   (can occur due to retries, multiple listeners, or error recovery)
+ * 
+ * Changes:
+ * - 2025-11-03: Added INSERT OR IGNORE to handle duplicate event IDs gracefully
  */
 
 import type { Database } from 'sqlite3';
@@ -212,7 +218,7 @@ async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Pr
 
   await dbRun(
     ctx.db,
-    `INSERT INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
+    `INSERT OR IGNORE INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     event.id,
     event.worldId,
@@ -243,7 +249,7 @@ async function saveEvents(ctx: SQLiteEventStorageContext, events: StoredEvent[])
 
       await dbRun(
         ctx.db,
-        `INSERT INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
+        `INSERT OR IGNORE INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         event.worldId,

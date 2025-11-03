@@ -1,26 +1,32 @@
 /**
- * File-Backed Event Storage Implementation
+ * File-based Event Storage Implementation
  * 
- * JSON array storage for events with simple read/write methods.
- * Each world/chat combination gets its own JSON file.
+ * JSON Lines (JSONL) based event storage suitable for serverless environments and low-overhead persistence.
+ * Each world/chat combination is stored in a separate JSONL file for efficient access patterns.
  * 
  * Features:
- * - JSON array format for easy reading and editing
- * - One file per world/chat combination
- * - Simple read/write operations
- * - File-based persistence suitable for single-server deployments
+ * - JSONL format for efficient append operations
+ * - One file per world/chat combination for easy cleanup
+ * - Automatic sequence number generation per world/chat
+ * - Support for time-based and sequence-based pagination
+ * - Event type filtering
+ * - Duplicate event ID handling (silently ignores duplicates)
+ * - No database dependencies
+ * - Suitable for serverless and file-based deployments
  * 
- * File Structure:
- * - Base directory: specified in config (e.g., ./data)
- * - File naming: {worldId}/events/{chatId}.json (or {worldId}/events/null.json for null chatId)
- * - Each file contains a JSON array of StoredEvent objects
- * - Events folder is at the same level as agents and chats folders within each world
+ * Implementation:
+ * - Uses JSONL format (one JSON object per line) for efficient append operations
+ * - Maintains sequence counter files per world/chat context
+ * - File structure: baseDir/worldId/events/chatId.jsonl
+ * - Sequence files: baseDir/worldId/events/.seq-chatId
+ * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
  * 
- * Implementation Notes:
- * - Uses Node.js fs/promises for async file operations
- * - Creates directories as needed
- * - Note: This implementation is NOT thread-safe for concurrent writes
- * - For production with high concurrency, consider using SQLite storage instead
+ * Cascade Delete Behavior:
+ * - Deleting a world directory removes all events for that world
+ * - Deleting a chat file removes all events for that chat
+ * 
+ * Changes:
+ * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
 
 import * as fs from 'fs/promises';
@@ -148,6 +154,18 @@ export class FileEventStorage implements EventStorage {
     const eventsDir = getWorldEventsDir(worldDir);
     await ensureDir(eventsDir);
 
+    const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
+
+    // Read existing events
+    const existingEvents = await readEventsFromFile(filePath);
+
+    // Check for duplicate ID - skip if already exists
+    const existingEvent = existingEvents.find(e => e.id === event.id);
+    if (existingEvent) {
+      // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
+      return;
+    }
+
     // Auto-generate sequence number if not provided
     const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
 
@@ -156,10 +174,6 @@ export class FileEventStorage implements EventStorage {
       seq
     };
 
-    const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
-
-    // Read existing events, append new one, and write back
-    const existingEvents = await readEventsFromFile(filePath);
     existingEvents.push(storedEvent);
     await writeEventsToFile(filePath, existingEvents);
   }
@@ -191,15 +205,23 @@ export class FileEventStorage implements EventStorage {
 
       const filePath = getEventFilePath(worldDir, worldId, chatId);
 
-      // Generate seq numbers sequentially to avoid duplicates
+      // Read existing events
+      const existingEvents = await readEventsFromFile(filePath);
+      const existingIds = new Set(existingEvents.map(e => e.id));
+
+      // Generate seq numbers sequentially and filter out duplicates
       const eventsWithSeq: StoredEvent[] = [];
       for (const event of groupEvents) {
+        // Skip if duplicate ID exists
+        if (existingIds.has(event.id)) {
+          continue; // Silently ignore duplicate
+        }
+
         const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
         eventsWithSeq.push({ ...event, seq });
       }
 
-      // Read existing events, append new ones, and write back
-      const existingEvents = await readEventsFromFile(filePath);
+      // Append new events and write back
       existingEvents.push(...eventsWithSeq);
       await writeEventsToFile(filePath, existingEvents);
     }

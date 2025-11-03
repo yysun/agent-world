@@ -109,7 +109,7 @@ describe('Event Persistence Integration', () => {
     );
 
     expect(events.length).toBeGreaterThan(0);
-    const toolEvent = events.find((e: any) => e.id === 'msg-tool-456');
+    const toolEvent = events.find((e: any) => e.id === 'msg-tool-456-tool-tool-start');
     expect(toolEvent).toBeDefined();
     expect(toolEvent!.chatId).toBe(world!.currentChatId);
     expect(toolEvent!.type).toBe('tool');
@@ -365,7 +365,7 @@ describe('Event Persistence Integration', () => {
       });
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['tool'] });
-      const toolEvent = events.find((e: any) => e.id === 'tool-default-chatid');
+      const toolEvent = events.find((e: any) => e.id === 'tool-default-chatid-tool-tool-result');
 
       expect(toolEvent).toBeDefined();
       expect(toolEvent!.chatId).toBe(chatId);
@@ -398,7 +398,7 @@ describe('Event Persistence Integration', () => {
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, null);
 
       const sseEvent = events.find((e: any) => e.id === 'sse-null-chatid-sse-end');
-      const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid');
+      const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid-tool-tool-start');
 
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBeNull();

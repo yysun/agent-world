@@ -37,6 +37,9 @@
  * - Enables proper chat-based event filtering and history retrieval
  * - Events with world.currentChatId = null persist with null chatId (for global/session-less events)
  * - System events can override chatId by setting it explicitly in the event payload
+ * - SSE events use pattern `${messageId}-sse-${type}` for unique IDs
+ * - Tool events use pattern `${messageId}-tool-${type}` for unique IDs (prevents duplicate conflicts)
+ * - Activity events generate unique messageIds per event
  *
  * Consolidation Changes (CC):
  * - Condensed verbose header documentation from 60+ lines to 15 lines
@@ -62,6 +65,8 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-11-03: Tool events now use `${messageId}-tool-${type}` pattern to prevent UNIQUE constraint 
+ *   violations when multiple tool events (tool-start, tool-result, tool-error) share the same messageId
  * - 2025-11-01: Chat title updates moved from SSE end to world idle event (prevents duplicate updates with multiple agents)
  * - 2025-11-01: Removed SYNC_EVENT_PERSISTENCE flag - event persistence now always synchronous/awaitable
  * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
@@ -236,8 +241,15 @@ export function setupEventPersistence(world: World): () => void {
     // Check if this is an activity event or tool event
     const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
 
+    // Generate unique ID for tool events by combining messageId with tool type
+    // This prevents duplicate ID conflicts when multiple tool events (tool-start, tool-result, tool-error)
+    // share the same messageId
+    const eventId = isActivityEvent
+      ? event.messageId  // Activity events already have unique messageIds
+      : `${event.messageId}-tool-${event.type}`;  // Tool events need type suffix for uniqueness
+
     const eventData = {
-      id: event.messageId || null,
+      id: eventId,
       worldId: world.id,
       chatId: world.currentChatId || null, // Default to current chat
       type: isActivityEvent ? 'world' : 'tool',

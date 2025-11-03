@@ -9,6 +9,7 @@
  * - Automatic sequence number generation per world/chat
  * - Support for time-based and sequence-based pagination
  * - Event type filtering
+ * - Duplicate event ID handling (silently ignores duplicates)
  * - No external dependencies
  * - Suitable for unit tests and browser environments
  * 
@@ -17,6 +18,10 @@
  * - Maintains sequence counters per world/chat combination
  * - Deep cloning for data isolation
  * - Efficient queries with Array methods
+ * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
+ * 
+ * Changes:
+ * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
 
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
@@ -90,6 +95,13 @@ export class MemoryEventStorage implements EventStorage {
    */
   async saveEvent(event: StoredEvent): Promise<void> {
     const eventsArray = this.getEventsArray(event.worldId, event.chatId);
+
+    // Check for duplicate ID - skip if already exists
+    const existingEvent = eventsArray.find(e => e.id === event.id);
+    if (existingEvent) {
+      // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
+      return;
+    }
 
     // Auto-generate sequence number if not provided
     const seq = event.seq ?? this.getNextSeq(event.worldId, event.chatId);

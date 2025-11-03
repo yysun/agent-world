@@ -161,7 +161,7 @@ describe('Event ChatId Defaults', () => {
       );
 
       expect(events.length).toBeGreaterThan(0);
-      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-chatid-1');
+      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-chatid-1-tool-tool-result');
       expect(toolEvent).toBeDefined();
       expect(toolEvent!.chatId).toBe(chatId);
       expect(toolEvent!.type).toBe('tool');
@@ -215,10 +215,10 @@ describe('Event ChatId Defaults', () => {
         { types: ['tool'] }
       );
 
-      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat1')).toBeDefined();
-      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat2')).toBeUndefined();
-      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat2')).toBeDefined();
-      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat1')).toBeUndefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat1-tool-tool-start')).toBeDefined();
+      expect(chat1Events.find((e: StoredEvent) => e.id === 'tool-chat2-tool-tool-start')).toBeUndefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat2-tool-tool-start')).toBeDefined();
+      expect(chat2Events.find((e: StoredEvent) => e.id === 'tool-chat1-tool-tool-start')).toBeUndefined();
     });
   });
 
@@ -428,7 +428,7 @@ describe('Event ChatId Defaults', () => {
 
       // Should find events with null chatId
       const sseEvent = events.find((e: StoredEvent) => e.id === 'sse-no-chat-sse-end');
-      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-no-chat');
+      const toolEvent = events.find((e: StoredEvent) => e.id === 'tool-no-chat-tool-tool-start');
 
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBeNull();
