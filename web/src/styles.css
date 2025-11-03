@@ -7,6 +7,7 @@
  * - Responsive design with mobile-first approach
  * - Interactive controls and navigation indicators
  * - Memory-only message styling (gray border for agent→agent messages)
+ * - Agent activity display with fade-in animation
  * 
  * Implementation:
  * - CSS Grid and Flexbox for layout
@@ -15,6 +16,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Added activity indicator styles for world events (response-start, tool-start)
  * - Added .memory-only-message class for agent messages saved to other agents' memory (gray border)
  * - Removed @import for Google Fonts to prevent flickering during route changes
  * - Font is now preloaded in HTML head for better performance
@@ -1707,6 +1709,7 @@ legend {
 }
 
 @keyframes prompt-waiting-pulse {
+
   0%,
   100% {
     opacity: 0.4;
@@ -1780,6 +1783,36 @@ legend {
   color: var(--text-tertiary);
   font-style: italic;
   font-size: 0.9rem;
+}
+
+/* Activity indicator styles */
+.activity-message {
+  opacity: 0.8;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.activity-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.activity-text {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 0.8;
+    transform: translateY(0);
+  }
 }
 
 .source-agent-indicator {

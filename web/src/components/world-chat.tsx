@@ -10,9 +10,11 @@
  * - Message deletion with confirmation dialog (deletes message and all after it)
  * - Message deduplication by messageId for multi-agent scenarios
  * - Displays only the first/intended recipient agent, not all who received it
+ * - Agent activity display for world events (response-start, tool-start)
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
  * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
  * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
  * - 2025-10-26: Fixed agent filter to check sender first (whose memory) for in-memory messages
@@ -58,6 +60,12 @@ export default function WorldChat(props: WorldChatProps) {
   const inputDisabled = isSending || isWaiting;
   const disableSend = !userInput.trim() || isSending || isWaiting;
   const showWaitingDots = isWaiting && agentActivities.length === 0;
+
+  // Helper to get agent activity message for a specific agent
+  const getAgentActivityMessage = (agentId: string): string | null => {
+    const activity = agentActivities.find(a => a.agentId === agentId);
+    return activity ? activity.message : null;
+  };
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -414,7 +422,7 @@ export default function WorldChat(props: WorldChatProps) {
                     <div className="streaming-indicator">
                       <div className="streaming-content">
                         <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                        <span>responding ...</span>
+                        <span>{getAgentActivityMessage(message.sender) || 'responding ...'}</span>
                       </div>
                     </div>
                   )}
@@ -432,6 +440,7 @@ export default function WorldChat(props: WorldChatProps) {
             })
           )}
 
+          {/* Show waiting dots only when no specific activity info */}
           {showWaitingDots && (
             <div className="message user-message waiting-message">
               <div className="message-content">
