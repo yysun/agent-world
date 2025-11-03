@@ -2,9 +2,9 @@
 
 **Date:** 2025-11-03  
 **Related Requirement:** `.docs/reqs/2025-11-01/req-vite-react-frontend.md`  
-**Status:** In Progress (Phase 5 Complete - 50% Done)  
+**Status:** In Progress (Phase 6 Complete - 60% Done)  
 **Started:** 2025-11-03  
-**Estimated Time:** 15-23 hours (8-12 hours remaining)
+**Estimated Time:** 15-23 hours (6-9 hours remaining)
 
 ## Overview
 
@@ -312,40 +312,34 @@ npm run cli:dev
 ## Phase 6: Build Page Components (3-4 hours)
 
 ### 6.1 Create HomePage
-- [ ] Create `src/pages/HomePage.tsx`:
+- [x] Create `src/pages/HomePage.tsx`:
   - World list display
   - Create world button
   - World selection/navigation
   - Empty state
-- [ ] Integrate useWorldData hook
-- [ ] Add loading/error states
-- [ ] Test CRUD operations
+- [x] Integrate useWorldData hook
+- [x] Add loading/error states
+- [x] Test CRUD operations
 
 ### 6.2 Create WorldPage
-- [ ] Create `src/pages/WorldPage.tsx`:
+- [x] Create `src/pages/WorldPage.tsx`:
   - World details header
   - Agent list sidebar
   - Chat interface (StreamChatBox)
   - Agent management
   - Edit world button
-- [ ] Integrate useWorldData, useAgentData, useChatData hooks
-- [ ] Add WebSocket event subscriptions
-- [ ] Handle real-time updates
-- [ ] Test chat streaming
+- [x] Integrate useWorldData, useAgentData, useChatData hooks
+- [x] Add WebSocket event subscriptions
+- [x] Handle real-time updates
+- [x] Test chat streaming
 
 ### 6.3 Create EditWorldPage
-- [ ] Create `src/pages/EditWorldPage.tsx`:
-  - MarkdownEditor integration
-  - Save/cancel handling
-  - Navigation back to world
-- [ ] Test world update
+- [x] SKIPPED: Edit functionality integrated into WorldPage tabs (Settings tab)
+- [x] MarkdownEditor used for inline editing in WorldPage
 
 ### 6.4 Create EditAgentPage
-- [ ] Create `src/pages/EditAgentPage.tsx`:
-  - MarkdownEditor integration
-  - Agent-specific fields
-  - Save/cancel handling
-- [ ] Test agent update
+- [x] SKIPPED: Edit functionality integrated into WorldPage tabs (Agent Settings tab)
+- [x] MarkdownEditor used for inline editing in WorldPage
 
 ### Checkpoint 6: Page Navigation
 ```bash
