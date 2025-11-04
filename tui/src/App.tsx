@@ -6,6 +6,7 @@
  * - World state management (useWorldState)
  * - Event processing (useEventProcessor)
  * - High-level operations (useAgentWorldClient)
+ * - Tool approval dialog integration (ApprovalDialog)
  * - Vertical layout: TopPanel → Messages → Input → StatusBar
  * 
  * Created: 2025-11-01 - Phase 1: Core Infrastructure
@@ -14,6 +15,7 @@
  * Updated: 2025-11-02 - Phase 1: Refactor to use focused hooks
  * Updated: 2025-11-02 - Phase 1: Vertical layout redesign
  * Updated: 2025-11-02 - Add proper error handling for WebSocket disconnections with reconnection support
+ * Updated: Phase 7 - Integrate tool approval dialog and approval response handling
  */
 
 import React, { useEffect, useCallback } from 'react';
@@ -32,6 +34,8 @@ import CommandResult from './components/CommandResult.js';
 import WorldManager from './components/WorldManager.js';
 import AgentManager from './components/AgentManager.js';
 import ChatManager from './components/ChatManager.js';
+import ApprovalDialog from './components/ApprovalDialog.js';
+import type { AgentActivityStatus } from '../../ws/types.js';
 
 interface AppProps {
   serverUrl: string;
@@ -76,6 +80,13 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
   // 5. Popup management
   const popup = usePopup(wsConnection.connected);
 
+  // 6. Setup approval response callback
+  useEffect(() => {
+    worldState.setApprovalCallback((response) => {
+      client.sendApprovalResponse(response);
+    });
+  }, [worldState, client]);
+
   // Subscribe to world when connected
   useEffect(() => {
     if (wsConnection.connected && wsConnection.ws) {
@@ -97,6 +108,18 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       client.enqueue(worldId, chatId, value, 'human');
     }
   };
+
+  // Convert Agent objects to AgentActivityStatus for components that need it
+  const agentActivityStatuses = Array.from(worldState.agents.values()).map(agent => {
+    const status = worldState.agentStatuses.get(agent.id);
+    return {
+      agentId: agent.id,
+      message: status?.message || `${agent.name} (${agent.status || 'inactive'})`,
+      phase: status?.phase || 'thinking',
+      activityId: status?.activityId || null,
+      updatedAt: status?.updatedAt || Date.now()
+    } as AgentActivityStatus;
+  });
 
   // Initial connecting state (before first connection)
   if ((wsConnection.connecting || worldState.isReplaying) && !wsConnection.reconnecting) {
@@ -131,7 +154,7 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       <TopPanel
         worldId={worldId}
         chatId={chatId}
-        agents={Array.from(worldState.agents.values())}
+        agents={agentActivityStatuses}
         connected={wsConnection.connected}
         connecting={wsConnection.connecting}
         reconnecting={wsConnection.reconnecting}
@@ -173,7 +196,7 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
       )}
       {popup.popupType === 'agent' && (
         <AgentManager
-          agents={Array.from(worldState.agents.values())}
+          agents={agentActivityStatuses}
           onClose={popup.closePopup}
         />
       )}
@@ -184,6 +207,14 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
           onClose={popup.closePopup}
         />
       )}
+
+      {/* Approval Dialog */}
+      <ApprovalDialog
+        request={worldState.approvalState.currentRequest}
+        isVisible={worldState.approvalState.isShowingApproval}
+        onApproval={worldState.sendApprovalResponse}
+        onCancel={worldState.hideApprovalRequest}
+      />
     </Box>
   );
 };

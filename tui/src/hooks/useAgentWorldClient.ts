@@ -7,23 +7,27 @@
  * - Subscribe to world events
  * - Enqueue messages for processing
  * - Execute CLI commands (with automatic parsing)
+ * - Send approval responses for tool approval system
  * - Unsubscribe from world
  * - Ping/heartbeat
  * 
  * Responsibilities:
  * - Protocol operations only
  * - Command parsing and mapping
+ * - Tool approval response communication
  * - Depends on WebSocketClient instance
  * - No state management
  * - No event processing
  * 
  * Created: 2025-11-02 - Phase 1: Implement focused hooks
  * Updated: 2025-11-02 - Fix command execution - parse command strings and map to server format
+ * Updated: Phase 7 - Add tool approval response functionality
  */
 
 import { useCallback, useEffect } from 'react';
 import type { WebSocketClient } from '../../../ws/ws-client.js';
 import type { WSMessage } from '../../../ws/types.js';
+import type { ApprovalResponse } from '../types/index.js';
 
 export interface UseAgentWorldClientOptions {
   onEvent?: (event: any) => void;
@@ -35,6 +39,7 @@ export interface UseAgentWorldClientReturn {
   enqueue: (worldId: string, chatId: string | null, content: string, sender?: string) => Promise<void>;
   executeCommand: (worldId: string, command: string) => Promise<void>;
   unsubscribe: (worldId: string, chatId?: string | null) => Promise<void>;
+  sendApprovalResponse: (response: ApprovalResponse) => Promise<void>;
 }
 
 /**
@@ -200,10 +205,23 @@ export function useAgentWorldClient(
     }
   }, [ws, connected]);
 
+  const sendApprovalResponse = useCallback(async (response: ApprovalResponse) => {
+    if (!ws || !connected) {
+      console.warn('Cannot send approval response: not connected');
+      return;
+    }
+    try {
+      await ws.sendCommand(undefined, 'approval-response', response);
+    } catch (error) {
+      console.error('Send approval response failed:', error instanceof Error ? error.message : error);
+    }
+  }, [ws, connected]);
+
   return {
     subscribe,
     enqueue,
     executeCommand,
-    unsubscribe
+    unsubscribe,
+    sendApprovalResponse
   };
 }

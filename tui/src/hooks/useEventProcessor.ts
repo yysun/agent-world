@@ -4,11 +4,12 @@
  * Purpose: Process WebSocket events and update world state
  * 
  * Features:
- * - Event type routing (message, sse, world) matching demo.ts structure
+ * - Event type routing (message, sse, world, approval) matching demo.ts structure
  * - Flattened event structure: { type: 'event', eventType: '...', payload: {...} }
  * - SSE streaming support - accumulate chunks in streaming messages
  * - Duplicate message prevention - skip final messages already shown via streaming
  * - World event display - tool execution and activity tracking (always shown)
+ * - Tool approval event processing - show approval requests in UI
  * - Batching updates during replay for performance
  * - Throttling UI updates (max 60fps)
  * - Backward compatibility for legacy event types (chunk, start, end)
@@ -16,15 +17,17 @@
  * Responsibilities:
  * - Process events from ws-client (same structure as demo.ts)
  * - Update world state via callbacks
- * - Handle all event types from protocol
+ * - Handle all event types from protocol including approval requests
  * - Display streaming responses in real-time
  * - Show world events (tool calls, activity) as system messages
+ * - Route approval requests to ApprovalDialog via state management
  * - Performance optimizations (batching, throttling)
  * 
  * Created: 2025-11-02 - Phase 1: Implement event processing
  * Updated: 2025-11-02 - Add SSE streaming and world event display
  * Updated: 2025-11-02 - Prevent duplicate messages, always show world events
  * Updated: 2025-11-02 - Fix event structure to match demo.ts (eventType at top level)
+ * Updated: Phase 7 - Add tool approval event processing
  */
 
 import { useCallback, useRef } from 'react';
@@ -250,6 +253,15 @@ export function useEventProcessor(
             });
             streamingMessageRef.current = null;
           }
+        }
+        break;
+      }
+
+      case 'approval': {
+        // Tool approval request event
+        const approvalRequest = payload;
+        if (approvalRequest) {
+          worldState.showApprovalRequest(approvalRequest);
         }
         break;
       }

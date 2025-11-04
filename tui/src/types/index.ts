@@ -4,6 +4,7 @@
  * Features:
  * - Core data structures for TUI (Message, Agent, World, Chat)
  * - WebSocket event types for real-time communication
+ * - Tool approval system types (ApprovalRequest, ApprovalResponse, ApprovalState)
  * - Removed UI-specific fields from web frontend (spriteIndex, messageCount, etc.)
  * - Focused on data and communication types only
  * 
@@ -13,8 +14,10 @@
  * - Removed UI-specific Message fields: expandable, resultPreview
  * - Kept core data structures and event types
  * - Added WebSocket-specific types
+ * - Phase 7: Added tool approval system types (ApprovalRequest, ApprovalResponse, ApprovalState)
  * 
  * Created: 2025-11-01 - Phase 0: Code Extraction from Web Frontend
+ * Updated: Phase 7 - Tool approval system integration
  */
 
 // ========================================
@@ -153,13 +156,44 @@ export type EventType =
   | 'sse'
   | 'world'
   | 'log'
-  | 'system';
+  | 'system'
+  | 'approval';
 
 // Sender Type Enum
 export type SenderType =
   | 'human'
   | 'agent'
   | 'system';
+
+// ========================================
+// APPROVAL INTERFACES
+// ========================================
+
+// Approval decision types
+export type ApprovalDecision = 'approve' | 'deny';
+export type ApprovalScope = 'once' | 'session';
+
+// Tool approval request data
+export interface ApprovalRequest {
+  toolName: string;
+  toolArgs: object;
+  message: string;
+  options: string[];
+  requestId: string;
+}
+
+// Approval decision response
+export interface ApprovalResponse {
+  requestId: string;
+  decision: ApprovalDecision;
+  scope: ApprovalScope;
+}
+
+// Approval state for UI
+export interface ApprovalState {
+  isShowingApproval: boolean;
+  currentRequest: ApprovalRequest | null;
+}
 
 // ========================================
 // STREAMING EVENT INTERFACES

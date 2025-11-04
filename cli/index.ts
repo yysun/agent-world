@@ -145,11 +145,11 @@ const bullet = (text: string) => `${gray('•')} ${text}`;
 // Simplified approval handler for pipeline mode (non-interactive)
 async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
   const { toolName } = approvalException;
-  
+
   console.error(`${boldRed('Tool approval required in pipeline mode:')}`);
   console.error(`${gray('Tool:')} ${yellow(toolName)}`);
   console.error(`${gray('Pipeline mode: Denying tool execution (use interactive mode for approvals)')}`);
-  
+
   return { decision: 'deny', scope: 'once' };
 }
 
@@ -159,24 +159,24 @@ async function handleApprovalRequest(
   rl: readline.Interface
 ): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
   const { toolName, toolArgs, message, options } = approvalException;
-  
+
   console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
   console.log(`${gray('Tool:')} ${yellow(toolName)}`);
-  
+
   if (toolArgs && Object.keys(toolArgs).length > 0) {
     console.log(`${gray('Arguments:')}`);
     for (const [key, value] of Object.entries(toolArgs)) {
-      const displayValue = typeof value === 'string' && value.length > 100 
-        ? `${value.substring(0, 100)}...` 
+      const displayValue = typeof value === 'string' && value.length > 100
+        ? `${value.substring(0, 100)}...`
         : String(value);
       console.log(`  ${gray(key + ':')} ${displayValue}`);
     }
   }
-  
+
   if (message) {
     console.log(`${gray('Details:')} ${message}`);
   }
-  
+
   // Use enquirer for consistent CLI prompting
   const { decision } = await enquirer.prompt({
     type: 'select',
@@ -188,7 +188,7 @@ async function handleApprovalRequest(
       { name: 'Allow Always (this session)', value: 'always' }
     ]
   }) as { decision: string };
-  
+
   if (decision === 'cancel') {
     return { decision: 'deny', scope: 'once' };
   } else if (decision === 'once') {

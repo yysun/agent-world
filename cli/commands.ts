@@ -2221,7 +2221,7 @@ export async function processCLIInput(
     if (error instanceof ApprovalRequiredException && approvalHandler) {
       try {
         const { decision, scope } = await approvalHandler(error);
-        
+
         if (decision === 'deny') {
           return {
             success: false,
@@ -2229,15 +2229,15 @@ export async function processCLIInput(
             technicalDetails: `Approval denied for tool: ${error.toolName}`
           };
         }
-        
+
         // Update approval cache
         const chatId = world.currentChatId || null;
         const approved = decision === 'approve';
-        
+
         // Create cache key for the specific chatId context
         const cacheKey = chatId ? chatId : 'global';
         approvalCache.set(cacheKey, error.toolName, approved);
-        
+
         // Retry the message
         publishMessage(world as any, input, sender);
         return {
@@ -2255,7 +2255,7 @@ export async function processCLIInput(
         };
       }
     }
-    
+
     return {
       success: false,
       message: 'Failed to send message',

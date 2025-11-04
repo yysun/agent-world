@@ -4,12 +4,12 @@
   "description": "Terminal User Interface for Agent World using Ink",
   "type": "module",
   "bin": {
-    "agent-world-tui": "./dist/index.js"
+    "agent-world-tui": "./dist/tui/src/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.tsx --server ws://localhost:3001 --world default-world",
-    "build": "tsc && chmod +x dist/index.js",
-    "start": "node dist/index.js",
+    "build": "tsc && chmod +x dist/tui/src/index.js",
+    "start": "node dist/tui/src/index.js",
     "check": "tsc --noEmit",
     "test": "vitest"
   },
