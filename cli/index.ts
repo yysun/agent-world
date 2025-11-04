@@ -544,7 +544,9 @@ function attachCLIListeners(
 
   // Message events
   const messageListener = (eventData: MessageEventPayload) => {
-    if (eventData.content && eventData.content.includes('Success message sent')) return;
+    if (eventData.content &&
+      typeof eventData.content === 'string' &&
+      eventData.content.includes('Success message sent')) return;
 
     if (streaming && globalState && rl) {
       handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
@@ -572,7 +574,9 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
-    if (eventData.content && eventData.content.includes('Success message sent')) return;
+    if (eventData.content &&
+      typeof eventData.content === 'string' &&
+      eventData.content.includes('Success message sent')) return;
     if (streaming && globalState && rl) {
       handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
     } else if (eventData.message || eventData.content) {
@@ -828,7 +832,9 @@ function handleWorldEvent(
     return;
   }
 
-  if (eventData.content && eventData.content.includes('Success message sent')) return;
+  if (eventData.content &&
+    typeof eventData.content === 'string' &&
+    eventData.content.includes('Success message sent')) return;
 
   // Handle regular message events from agents (non-streaming or after streaming ends)
   if (eventType === 'message' && eventData.sender && eventData.content) {

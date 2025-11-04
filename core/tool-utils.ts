@@ -6,14 +6,18 @@
  * - Filters out calls with empty or missing names
  * - Creates error tool results for malformed calls
  * - Emits SSE events for tool errors
+ * - Universal parameter validation for all tool types
  *
  * Implementation Details:
  * - Uses minimal fallback ID generator to avoid external dependencies
  * - Creates role='tool' messages for conversation history
  * - Publishes tool-error SSE events to surface problems
  * - Best-effort error reporting to avoid cascading failures
+ * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - Added universal parameter validation for consistent tool execution
+ * - Enhanced validation to work with both MCP and built-in tools
  * - Initial implementation for empty/missing name validation
  */
 
@@ -95,4 +99,147 @@ export function filterAndHandleEmptyNamedFunctionCalls(
   }
 
   return { validCalls, toolResults };
+}
+
+/**
+ * Validate tool parameters against schema before execution
+ * Provides consistent validation for both MCP and built-in tools
+ * 
+ * @param args - Tool arguments to validate
+ * @param toolSchema - Tool parameter schema with type and required information
+ * @param toolName - Name of the tool (for logging)
+ * @returns Validation result with corrected args or error details
+ */
+export function validateToolParameters(args: any, toolSchema: any, toolName: string): {
+  valid: boolean;
+  correctedArgs?: any;
+  error?: string;
+} {
+  if (!toolSchema || !toolSchema.properties) {
+    console.debug(`No schema validation for tool: ${toolName}`);
+    return { valid: true, correctedArgs: args };
+  }
+
+  if (!args || typeof args !== 'object') {
+    return {
+      valid: false,
+      error: `Tool arguments must be an object, got: ${typeof args}`
+    };
+  }
+
+  const corrected: any = {};
+  const corrections: string[] = [];
+  const requiredParams = toolSchema.required || [];
+  const errors: string[] = [];
+
+  // Check required parameters
+  for (const requiredParam of requiredParams) {
+    if (args[requiredParam] === undefined || args[requiredParam] === null || args[requiredParam] === '') {
+      errors.push(`Required parameter '${requiredParam}' is missing or empty`);
+    }
+  }
+
+  // Validate and correct parameter types
+  for (const [key, value] of Object.entries(args)) {
+    const propSchema = toolSchema.properties[key];
+    if (!propSchema) {
+      // Property not in schema - pass through as-is
+      corrected[key] = value;
+      continue;
+    }
+
+    // Skip null/undefined values for optional parameters
+    if ((value === null || value === undefined) && !requiredParams.includes(key)) {
+      corrections.push(`${key}: null/undefined omitted (optional parameter)`);
+      continue;
+    }
+
+    // Type correction: string to array
+    if (propSchema.type === 'array' && typeof value === 'string' && value !== '') {
+      corrected[key] = [value];
+      corrections.push(`${key}: string -> array`);
+      continue;
+    }
+
+    // Type validation: array
+    if (propSchema.type === 'array' && !Array.isArray(value)) {
+      if (requiredParams.includes(key)) {
+        errors.push(`Parameter '${key}' must be an array, got: ${typeof value}`);
+        continue;
+      }
+    }
+
+    // Type correction: string to number
+    if (propSchema.type === 'number' && typeof value === 'string') {
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue)) {
+        corrected[key] = numValue;
+        corrections.push(`${key}: "${value}" -> ${numValue}`);
+        continue;
+      }
+    }
+
+    // Type validation: string
+    if (propSchema.type === 'string' && typeof value !== 'string') {
+      if (requiredParams.includes(key)) {
+        errors.push(`Parameter '${key}' must be a string, got: ${typeof value}`);
+        continue;
+      }
+    }
+
+    // Pass through valid values
+    corrected[key] = value;
+  }
+
+  if (corrections.length > 0) {
+    console.debug(`Tool parameter corrections for ${toolName}:`, corrections);
+  }
+
+  if (errors.length > 0) {
+    console.debug(`Tool parameter validation errors for ${toolName}:`, errors);
+    return {
+      valid: false,
+      error: errors.join('; ')
+    };
+  }
+
+  return {
+    valid: true,
+    correctedArgs: corrected
+  };
+}
+
+/**
+ * Wrap tool execution with universal parameter validation
+ * Provides a standardized validation layer for all tools
+ * 
+ * @param tool - Tool object with execute function and parameters schema
+ * @param toolName - Name of the tool (for logging and error reporting)
+ * @returns Wrapped tool with validation
+ */
+export function wrapToolWithValidation(tool: any, toolName: string): any {
+  if (!tool || !tool.execute) {
+    return tool;
+  }
+
+  const originalExecute = tool.execute;
+
+  return {
+    ...tool,
+    execute: async (args: any, ...otherArgs: any[]) => {
+      // Apply validation if tool has parameters schema
+      if (tool.parameters) {
+        const validation = validateToolParameters(args, tool.parameters, toolName);
+        if (!validation.valid) {
+          // Return a standardized error result
+          return `Error: Tool parameter validation failed for ${toolName}: ${validation.error}`;
+        }
+        // Use corrected args
+        return originalExecute(validation.correctedArgs, ...otherArgs);
+      }
+
+      // No schema available, proceed with original args
+      return originalExecute(args, ...otherArgs);
+    }
+  };
 }

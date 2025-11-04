@@ -113,6 +113,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
+import { wrapToolWithValidation } from './tool-utils.js';
 import { approvalCache } from './approval-cache.js';
 import { ApprovalRequiredException, type ApprovalPolicy, type World } from './types.js';
 
@@ -1655,12 +1656,15 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 /**
  * Get built-in tools that are always available to all worlds
  * These tools don't require MCP server configuration
+ * Each tool is wrapped with universal parameter validation
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
+  const shellCmdTool = createShellCmdToolDefinition();
+
   return {
-    'shell_cmd': createShellCmdToolDefinition()
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd')
   };
 }
 

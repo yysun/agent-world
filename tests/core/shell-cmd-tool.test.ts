@@ -222,34 +222,50 @@ describe('Shell Command Tool', () => {
     test('should handle command validation in tool execute', async () => {
       const toolDef = createShellCmdToolDefinition();
 
-      await expect(toolDef.execute({ command: '', directory: '/tmp' }))
-        .rejects.toThrow('Command must be a non-empty string');
+      const emptyResult = await toolDef.execute({ command: '', directory: '/tmp' });
+      expect(emptyResult).toContain('Required parameter \'command\' is missing or empty');
+      expect(emptyResult).toContain('Error:');
 
-      await expect(toolDef.execute({ command: null, directory: '/tmp' }))
-        .rejects.toThrow('Command must be a non-empty string');
+      const nullResult = await toolDef.execute({ command: null, directory: '/tmp' });
+      expect(nullResult).toContain('Required parameter \'command\' is missing or empty');
+      expect(nullResult).toContain('Error:');
     });
 
     test('should handle directory validation in tool execute', async () => {
       const toolDef = createShellCmdToolDefinition();
 
-      await expect(toolDef.execute({ command: 'echo', directory: '' }))
-        .rejects.toThrow('Directory must be a non-empty string');
+      const emptyDirResult = await toolDef.execute({ command: 'echo', directory: '' });
+      expect(emptyDirResult).toContain('Required parameter \'directory\' is missing or empty');
+      expect(emptyDirResult).toContain('Error:');
 
-      await expect(toolDef.execute({ command: 'echo', directory: null }))
-        .rejects.toThrow('Directory must be a non-empty string');
+      const nullDirResult = await toolDef.execute({ command: 'echo', directory: null });
+      expect(nullDirResult).toContain('Required parameter \'directory\' is missing or empty');
+      expect(nullDirResult).toContain('Error:');
 
-      await expect(toolDef.execute({ command: 'echo' }))
-        .rejects.toThrow('Directory must be a non-empty string');
+      const missingDirResult = await toolDef.execute({ command: 'echo' });
+      expect(missingDirResult).toContain('Required parameter \'directory\' is missing or empty');
+      expect(missingDirResult).toContain('Error:');
     });
 
     test('should handle parameters validation in tool execute', async () => {
       const toolDef = createShellCmdToolDefinition();
 
-      await expect(toolDef.execute({
+      // Test that invalid parameters are filtered out but don't cause errors (since optional)
+      const invalidParamsResult = await toolDef.execute({
         command: 'echo',
         directory: '/tmp',
-        parameters: 'not-an-array'
-      })).rejects.toThrow('Parameters must be an array');
+        parameters: { invalid: 'object' }
+      });
+      expect(invalidParamsResult).toContain('Exit code: 0'); // Should succeed with empty params
+
+      // Test that string parameters are auto-corrected to arrays (this should succeed)
+      const stringParamsResult = await toolDef.execute({
+        command: 'echo',
+        directory: '/tmp',
+        parameters: 'test'
+      });
+      expect(stringParamsResult).toContain('test'); // Should execute successfully
+      expect(stringParamsResult).toContain('Exit code: 0');
     });
 
     test('should filter non-string parameters', async () => {

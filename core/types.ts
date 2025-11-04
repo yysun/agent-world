@@ -528,7 +528,7 @@ export interface WorldToolEvent {
 }
 
 export interface WorldSystemEvent {
-  content: string;
+  content: any; // Can be string or object depending on usage
   timestamp: Date;
   messageId: string;
   chatId?: string | null; // Optional chat context for system events

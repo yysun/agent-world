@@ -10,6 +10,8 @@
  * - Long-running command support with 10-minute default timeout
  * - Required directory parameter for explicit working directory control
  * - LLM guidance to ask user for directory if not provided
+ * - Graceful error handling for invalid tool calls
+ * - Universal parameter validation for consistent execution
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
@@ -19,8 +21,16 @@
  * - Resource cleanup on process completion
  * - Requires explicit directory parameter for security and clarity
  * - Tool description instructs LLM to ask user for directory if missing
+ * - Returns error results instead of throwing to prevent agent crashes
+ * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - Integrated universal parameter validation for consistent tool execution
+ * - Enhanced validation to check required parameters and auto-correct types
+ * - Replaced custom validation with standardized validation framework
+ * - Added graceful error handling for empty commands to prevent agent crashes
+ * - Changed validation to return error results instead of throwing exceptions
+ * - Updated tests to expect error results rather than thrown errors
  * - Added LLM guidance to ask user for directory when not provided
  * - Made directory parameter required for shell command execution
  * - Increased default timeout from 30s to 10 minutes (600000ms) for long-running commands
@@ -29,6 +39,7 @@
 
 import { spawn } from 'child_process';
 import { createCategoryLogger } from './logger.js';
+import { validateToolParameters } from './tool-utils.js';
 
 const logger = createCategoryLogger('shell-cmd');
 
@@ -331,24 +342,52 @@ export function createShellCmdToolDefinition() {
       additionalProperties: false
     },
     execute: async (args: any) => {
-      const { command, parameters = [], directory, timeout } = args;
+      // Universal parameter validation
+      const toolSchema = {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description: 'The shell command to execute (e.g., "ls", "echo", "cat", "grep")'
+          },
+          parameters: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of parameters/arguments for the command (e.g., ["-la", "/tmp"])'
+          },
+          directory: {
+            type: 'string',
+            description: 'REQUIRED: Working directory where the command should be executed. Use "./" for current directory when user says "current", "here", or "this directory". Use "~/" for home directory. Use specified path if provided. Only ask for clarification if truly ambiguous. Examples: "./", "~/", "/tmp", "./src"'
+          },
+          timeout: {
+            type: 'number',
+            description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
+          }
+        },
+        required: ['command', 'directory']
+      };
 
-      // Validate command
-      if (!command || typeof command !== 'string') {
-        throw new Error('Command must be a non-empty string');
+      const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
+      if (!validation.valid) {
+        return formatResultForLLM({
+          command: args?.command || '<invalid>',
+          parameters: [],
+          exitCode: 1,
+          signal: null,
+          error: validation.error,
+          stdout: '',
+          stderr: '',
+          executedAt: new Date(),
+          duration: 0
+        });
       }
 
-      // Validate directory (required)
-      if (!directory || typeof directory !== 'string') {
-        throw new Error('Directory must be a non-empty string');
-      }
+      const { command, parameters = [], directory, timeout } = validation.correctedArgs;
 
-      // Validate parameters
-      if (parameters && !Array.isArray(parameters)) {
-        throw new Error('Parameters must be an array of strings');
-      }
-
-      const validParameters = parameters.filter((p: any) => typeof p === 'string');
+      // Ensure parameters is always an array
+      const validParameters = Array.isArray(parameters) ?
+        parameters.filter((p: any) => typeof p === 'string') :
+        [];
 
       // Execute command
       const result = await executeShellCommand(command, validParameters, directory, {
