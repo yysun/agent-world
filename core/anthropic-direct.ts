@@ -24,7 +24,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, WorldSSEEvent, ApprovalRequiredException } from './types.js';
 import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
@@ -242,51 +242,142 @@ export async function streamAnthropicResponse(
               argsPresent: !!toolUse.input
             });
 
-            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`);
-            const duration = performance.now() - startTime;
-            const resultString = JSON.stringify(result);
+            try {
+              const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`, world.id);
+              const duration = performance.now() - startTime;
+              const resultString = JSON.stringify(result);
 
-            mcpLogger.debug(`MCP tool execution completed (Anthropic streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolUse.name,
-              toolUseId: toolUse.id,
-              agentId: agent.id,
-              messageId,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            // Publish tool result event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-result',
-              messageId,
-              toolExecution: {
-                toolName: toolUse.name,
-                toolCallId: toolUse.id,
+              mcpLogger.debug(`MCP tool execution completed (Anthropic streaming)`, {
                 sequenceId,
+                toolIndex: i,
+                toolName: toolUse.name,
+                toolUseId: toolUse.id,
+                agentId: agent.id,
+                messageId,
+                status: 'success',
                 duration: Math.round(duration * 100) / 100,
-                input: JSON.stringify(toolUse.input),
-                result: result,
-                resultType: typeof result as any,
-                resultSize: resultString.length
-              }
-            });
+                resultSize: resultString.length,
+                resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+              });
 
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolUse.id,
-            });
+              // Publish tool result event to world channel (agent behavioral event)
+              publishToolEvent(world, {
+                agentName: agent.id,
+                type: 'tool-result',
+                messageId,
+                toolExecution: {
+                  toolName: toolUse.name,
+                  toolCallId: toolUse.id,
+                  sequenceId,
+                  duration: Math.round(duration * 100) / 100,
+                  input: JSON.stringify(toolUse.input),
+                  result: result,
+                  resultType: typeof result as any,
+                  resultSize: resultString.length
+                }
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: resultString,
+                tool_call_id: toolUse.id,
+              });
+            } catch (innerError) {
+              // Phase 3: Handle approval required exception
+              if (innerError instanceof ApprovalRequiredException) {
+                logger.info(`Tool approval required for ${toolUse.name} (Anthropic streaming)`, {
+                  toolName: innerError.toolName,
+                  agentId: agent.id,
+                  messageId
+                });
+
+                // Create approval tool call
+                const approvalToolCall = {
+                  id: `approval_${generateId()}`,
+                  type: 'function' as const,
+                  function: {
+                    name: 'client.requestApproval',
+                    arguments: JSON.stringify({
+                      originalToolCall: {
+                        name: innerError.toolName,
+                        args: innerError.toolArgs
+                      },
+                      message: innerError.approvalMessage,
+                      options: innerError.options
+                    })
+                  }
+                };
+
+                // Stream to client
+                publishSSE(world, {
+                  agentName: agent.id,
+                  type: 'chunk',
+                  messageId,
+                  tool_calls: [approvalToolCall]
+                });
+
+                // Save to agent.memory
+                const assistantMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: '',
+                  tool_calls: [approvalToolCall]
+                };
+                agent.memory.push(assistantMessage);
+
+                // End streaming
+                publishSSE(world, {
+                  agentName: agent.id,
+                  type: 'end',
+                  messageId
+                });
+
+                return fullResponse;
+              }
+
+              // Handle other errors
+              const duration = performance.now() - startTime;
+              const errorMessage = innerError instanceof Error ? innerError.message : String(innerError);
+
+              mcpLogger.error(`MCP tool execution failed (Anthropic streaming inner): ${errorMessage}`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolUse.name,
+                toolUseId: toolUse.id,
+                agentId: agent.id,
+                messageId,
+                status: 'error',
+                duration: Math.round(duration * 100) / 100,
+                error: errorMessage,
+                errorStack: innerError instanceof Error ? innerError.stack : undefined
+              });
+
+              // Publish tool error event
+              publishToolEvent(world, {
+                agentName: agent.id,
+                type: 'tool-error',
+                messageId,
+                toolExecution: {
+                  toolName: toolUse.name,
+                  toolCallId: toolUse.id,
+                  sequenceId,
+                  error: errorMessage,
+                  duration: Math.round(duration * 100) / 100
+                }
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: `Error: ${errorMessage}`,
+                tool_call_id: toolUse.id,
+              });
+            }
           }
         } catch (error) {
+          // Outer catch for other errors
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
-          mcpLogger.error(`MCP tool execution failed (Anthropic streaming): ${errorMessage}`, {
+          mcpLogger.error(`MCP tool execution outer error (Anthropic streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
             toolName: toolUse.name,
@@ -297,20 +388,6 @@ export async function streamAnthropicResponse(
             duration: Math.round(duration * 100) / 100,
             error: errorMessage,
             errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          // Publish tool error event to world channel (agent behavioral event)
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-error',
-            messageId,
-            toolExecution: {
-              toolName: toolUse.name,
-              toolCallId: toolUse.id,
-              sequenceId,
-              error: errorMessage,
-              duration: Math.round(duration * 100) / 100
-            }
           });
 
           toolResults.push({

@@ -42,7 +42,7 @@
  */
 
 import OpenAI from 'openai';
-import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, WorldSSEEvent, ApprovalRequiredException } from './types.js';
 import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
@@ -317,51 +317,142 @@ export async function streamOpenAIResponse(
               continue;
             }
 
-            const result = await tool.execute(args, sequenceId, `streaming-${messageId}`);
-            const duration = performance.now() - startTime;
-            const resultString = JSON.stringify(result);
+            try {
+              const result = await tool.execute(args, sequenceId, `streaming-${messageId}`, world.id);
+              const duration = performance.now() - startTime;
+              const resultString = JSON.stringify(result);
 
-            mcpLogger.debug(`MCP tool execution completed (streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function!.name!,
-              toolCallId: toolCall.id!,
-              agentId: agent.id,
-              messageId,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            // Publish tool result event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-result',
-              messageId,
-              toolExecution: {
+              mcpLogger.debug(`MCP tool execution completed (streaming)`, {
+                sequenceId,
+                toolIndex: i,
                 toolName: toolCall.function!.name!,
                 toolCallId: toolCall.id!,
-                sequenceId,
+                agentId: agent.id,
+                messageId,
+                status: 'success',
                 duration: Math.round(duration * 100) / 100,
-                input: toolCall.function!.arguments,
-                result: result,
-                resultType: typeof result as any,
-                resultSize: resultString.length
-              }
-            });
+                resultSize: resultString.length,
+                resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
+              });
 
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolCall.id!,
-            });
+              // Publish tool result event to world channel (agent behavioral event)
+              publishToolEvent(world, {
+                agentName: agent.id,
+                type: 'tool-result',
+                messageId,
+                toolExecution: {
+                  toolName: toolCall.function!.name!,
+                  toolCallId: toolCall.id!,
+                  sequenceId,
+                  duration: Math.round(duration * 100) / 100,
+                  input: toolCall.function!.arguments,
+                  result: result,
+                  resultType: typeof result as any,
+                  resultSize: resultString.length
+                }
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: resultString,
+                tool_call_id: toolCall.id!,
+              });
+            } catch (error) {
+              // Phase 3: Handle approval required exception
+              if (error instanceof ApprovalRequiredException) {
+                logger.info(`Tool approval required for ${toolCall.function!.name!}`, {
+                  toolName: error.toolName,
+                  agentId: agent.id,
+                  messageId
+                });
+
+                // Create approval tool call
+                const approvalToolCall = {
+                  id: `approval_${generateId()}`,
+                  type: 'function' as const,
+                  function: {
+                    name: 'client.requestApproval',
+                    arguments: JSON.stringify({
+                      originalToolCall: {
+                        name: error.toolName,
+                        args: error.toolArgs
+                      },
+                      message: error.approvalMessage,
+                      options: error.options
+                    })
+                  }
+                };
+
+                // Stream to client
+                publishSSE(world, {
+                  agentName: agent.id,
+                  type: 'chunk',
+                  messageId,
+                  tool_calls: [approvalToolCall]
+                });
+
+                // CRITICAL: Save to agent.memory for conversation continuity
+                const assistantMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: '',
+                  tool_calls: [approvalToolCall]
+                };
+                agent.memory.push(assistantMessage);
+
+                // End streaming - user needs to approve
+                publishSSE(world, {
+                  agentName: agent.id,
+                  type: 'end',
+                  messageId
+                });
+
+                return fullResponse;
+              }
+
+              // Handle other errors
+              const duration = performance.now() - startTime;
+              const errorMessage = error instanceof Error ? error.message : String(error);
+
+              mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function!.name!,
+                toolCallId: toolCall.id!,
+                agentId: agent.id,
+                messageId,
+                status: 'error',
+                duration: Math.round(duration * 100) / 100,
+                error: errorMessage,
+                errorStack: error instanceof Error ? error.stack : undefined
+              });
+
+              // Publish tool error event to world channel (agent behavioral event)
+              publishToolEvent(world, {
+                agentName: agent.id,
+                type: 'tool-error',
+                messageId,
+                toolExecution: {
+                  toolName: toolCall.function!.name!,
+                  toolCallId: toolCall.id!,
+                  sequenceId,
+                  error: errorMessage,
+                  duration: Math.round(duration * 100) / 100
+                }
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: `Error: ${(error as Error).message}`,
+                tool_call_id: toolCall.id!,
+              });
+            }
           }
         } catch (error) {
+          // Outer catch for tool argument parsing errors
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
-          mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
+          mcpLogger.error(`MCP tool execution outer error (streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
             toolName: toolCall.function!.name!,
@@ -374,23 +465,9 @@ export async function streamOpenAIResponse(
             errorStack: error instanceof Error ? error.stack : undefined
           });
 
-          // Publish tool error event to world channel (agent behavioral event)
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-error',
-            messageId,
-            toolExecution: {
-              toolName: toolCall.function!.name!,
-              toolCallId: toolCall.id!,
-              sequenceId,
-              error: errorMessage,
-              duration: Math.round(duration * 100) / 100
-            }
-          });
-
           toolResults.push({
             role: 'tool',
-            content: `Error: ${(error as Error).message}`,
+            content: `Error: ${errorMessage}`,
             tool_call_id: toolCall.id!,
           });
         }
@@ -547,15 +624,16 @@ export async function generateOpenAIResponse(
               continue;
             }
 
-            const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`);
-            const duration = performance.now() - startTime;
-            const resultString = JSON.stringify(result);
+            try {
+              const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`, world.id);
+              const duration = performance.now() - startTime;
+              const resultString = JSON.stringify(result);
 
-            mcpLogger.debug(`MCP tool execution completed (non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
+              mcpLogger.debug(`MCP tool execution completed (non-streaming)`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
               agentId: agent.id,
               status: 'success',
               duration: Math.round(duration * 100) / 100,
@@ -568,6 +646,65 @@ export async function generateOpenAIResponse(
               content: resultString,
               tool_call_id: toolCall.id,
             });
+            } catch (innerError) {
+              // Phase 3: Handle approval required exception
+              if (innerError instanceof ApprovalRequiredException) {
+                logger.info(`Tool approval required for ${toolCall.function.name} (non-streaming)`, {
+                  toolName: innerError.toolName,
+                  agentId: agent.id
+                });
+
+                // Create approval tool call and add to agent memory
+                const approvalToolCall = {
+                  id: `approval_${generateId()}`,
+                  type: 'function' as const,
+                  function: {
+                    name: 'client.requestApproval',
+                    arguments: JSON.stringify({
+                      originalToolCall: {
+                        name: innerError.toolName,
+                        args: innerError.toolArgs
+                      },
+                      message: innerError.approvalMessage,
+                      options: innerError.options
+                    })
+                  }
+                };
+
+                // Save to agent.memory
+                const assistantMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: '',
+                  tool_calls: [approvalToolCall]
+                };
+                agent.memory.push(assistantMessage);
+
+                // Return approval request message
+                return `Approval required for tool: ${innerError.toolName}\n\n${innerError.approvalMessage}`;
+              }
+
+              // Handle other errors
+              const duration = performance.now() - startTime;
+              const errorMessage = innerError instanceof Error ? innerError.message : String(innerError);
+
+              mcpLogger.error(`MCP tool execution failed (non-streaming inner): ${errorMessage}`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                agentId: agent.id,
+                status: 'error',
+                duration: Math.round(duration * 100) / 100,
+                error: errorMessage,
+                errorStack: innerError instanceof Error ? innerError.stack : undefined
+              });
+
+              toolResults.push({
+                role: 'tool',
+                content: `Error: ${errorMessage}`,
+                tool_call_id: toolCall.id,
+              });
+            }
           }
         } catch (error) {
           const duration = performance.now() - startTime;
