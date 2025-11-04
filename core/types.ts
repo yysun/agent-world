@@ -671,5 +671,41 @@ export function validateMessageThreading(
   }
 }
 
+// Tool Approval Types (Phase 1)
+
+/**
+ * Approval decision for tool execution
+ */
+export type ApprovalDecision = 'approve' | 'deny';
+
+/**
+ * Approval scope determines caching behavior
+ */
+export type ApprovalScope = 'once' | 'session';
+
+/**
+ * Approval policy configuration for a tool
+ */
+export interface ApprovalPolicy {
+  required: boolean;
+  message?: string;  // User-facing description
+  options: string[]; // ['Cancel', 'Once', 'Always']
+}
+
+/**
+ * Exception thrown when a tool requires approval
+ */
+export class ApprovalRequiredException extends Error {
+  constructor(
+    public toolName: string,
+    public toolArgs: object,
+    public approvalMessage: string,  // User-facing approval message (not Error.message)
+    public options: string[]
+  ) {
+    super(`Approval required for ${toolName}`);
+    this.name = 'ApprovalRequiredException';
+  }
+}
+
 
 
