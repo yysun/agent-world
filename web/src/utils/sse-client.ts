@@ -115,6 +115,14 @@ interface StreamingState {
   currentWorldName: string | null;
 }
 
+interface SendChatMessageOptions {
+  sender?: string;
+  historyMessages?: Array<Record<string, any>>;
+  onMessage?: (data: SSEData) => void;
+  onError?: (error: Error) => void;
+  onComplete?: (data: any) => void;
+}
+
 
 // Utility functions
 const publishEvent = (eventName: string, data?: any): void => {
@@ -185,14 +193,20 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           : stream.content + (eventData.content || '');
 
         stream.content = newContent;
+        const toolCalls = eventData.tool_calls;
 
         publishEvent('handleStreamChunk', {
           messageId,
           sender: agentName,
           content: newContent,
           isAccumulated: eventData.accumulatedContent !== undefined,
-          worldName: eventData.worldName || streamingState.currentWorldName
+          worldName: eventData.worldName || streamingState.currentWorldName,
+          tool_calls: toolCalls
         });
+
+        if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+          publishApprovalRequests(toolCalls);
+        }
       }
       break;
 
@@ -288,6 +302,36 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   }
 };
 
+const publishApprovalRequests = (toolCalls: any[]): void => {
+  for (const toolCall of toolCalls) {
+    const toolName = toolCall?.function?.name;
+    if (toolName !== 'client.requestApproval') {
+      continue;
+    }
+
+    let parsedArgs: any = {};
+    try {
+      parsedArgs = toolCall.function?.arguments
+        ? JSON.parse(toolCall.function.arguments)
+        : {};
+    } catch (error) {
+      console.warn('Failed to parse approval request arguments:', error);
+    }
+
+    const approvalRequest = {
+      toolCallId: toolCall.id || `approval-${Date.now()}`,
+      toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
+      toolArgs: parsedArgs?.originalToolCall?.args ?? {},
+      message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
+      options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
+        ? parsedArgs.options
+        : ['Cancel', 'Once', 'Always']
+    };
+
+    publishEvent('show-approval-request', approvalRequest);
+  }
+};
+
 /**
  * Send chat message with SSE streaming response
  * @param worldName - Target world name
@@ -301,20 +345,41 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 export async function sendChatMessage(
   worldName: string,
   message: string,
-  sender: string = 'HUMAN',
-  onMessage?: (data: SSEData) => void,
-  onError?: (error: Error) => void,
-  onComplete?: (data: any) => void
+  senderOrOptions?: string | SendChatMessageOptions,
+  legacyOnMessage?: (data: SSEData) => void,
+  legacyOnError?: (error: Error) => void,
+  legacyOnComplete?: (data: any) => void
 ): Promise<() => void> {
+  let sender = 'HUMAN';
+  let historyMessages: Array<Record<string, any>> | undefined;
+  let onMessage = legacyOnMessage;
+  let onError = legacyOnError;
+  let onComplete = legacyOnComplete;
+
+  if (typeof senderOrOptions === 'string' || senderOrOptions === undefined) {
+    sender = senderOrOptions ?? 'HUMAN';
+  } else {
+    sender = senderOrOptions.sender ?? 'HUMAN';
+    historyMessages = senderOrOptions.historyMessages;
+    onMessage = senderOrOptions.onMessage ?? onMessage;
+    onError = senderOrOptions.onError ?? onError;
+    onComplete = senderOrOptions.onComplete ?? onComplete;
+  }
+
   if (!worldName || !message?.trim()) {
     throw new Error('World name and non-empty message are required');
   }
 
   streamingState.currentWorldName = worldName;
 
+  const requestPayload: Record<string, any> = { message, sender };
+  if (historyMessages && historyMessages.length > 0) {
+    requestPayload.messages = historyMessages;
+  }
+
   const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ message, sender }),
+    body: JSON.stringify(requestPayload),
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',

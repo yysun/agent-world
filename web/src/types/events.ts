@@ -28,7 +28,7 @@
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
+import type { Agent, ApprovalRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -192,6 +192,19 @@ export type WorldEvents =
 
   /** Handle world activity event */
   | { name: 'handleWorldActivity'; payload: any }
+
+  // ========================================
+  // APPROVAL FLOW EVENTS
+  // ========================================
+
+  /** Display approval request dialog */
+  | { name: 'show-approval-request'; payload: ApprovalRequest }
+
+  /** Hide approval request dialog */
+  | { name: 'hide-approval-request'; payload: void }
+
+  /** Submit approval decision */
+  | { name: 'submit-approval-decision'; payload: { decision: 'approve' | 'deny'; scope: 'once' | 'session' | 'none'; toolCallId: string } }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

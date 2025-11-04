@@ -414,6 +414,42 @@ export enum LLMProvider {
   OPENAI_COMPATIBLE = 'openai-compatible',
   OLLAMA = 'ollama'
 };
+
+// Tool Approval Types
+
+/**
+ * Approval decision for tool execution
+ */
+export type ApprovalDecision = 'approve' | 'deny';
+
+/**
+ * Approval scope for caching behavior
+ */
+export type ApprovalScope = 'once' | 'session';
+
+/**
+ * Tool approval policy configuration
+ */
+export interface ApprovalPolicy {
+  required: boolean;
+  message?: string;  // User-facing description
+  options: string[]; // ['Cancel', 'Once', 'Always']
+}
+
+/**
+ * Exception thrown when tool execution requires approval
+ */
+export class ApprovalRequiredException extends Error {
+  constructor(
+    public toolName: string,
+    public toolArgs: object,
+    public override message: string,
+    public options: string[]
+  ) {
+    super(`Approval required for ${toolName}`);
+    this.name = 'ApprovalRequiredException';
+  }
+}
 // World EventEmitter Types
 
 /**

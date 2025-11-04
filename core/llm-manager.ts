@@ -119,7 +119,7 @@
  * - Fixed broken tool calling for Anthropic and Google providers by using official SDKs
  */
 
-import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
+import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage, ApprovalRequiredException } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
 import {
   createClientForProvider,
@@ -139,6 +139,9 @@ import {
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
+import { prepareMessagesForLLM } from './message-prep.js';
+import { createStorageWithWrappers } from './storage/storage-factory.js';
+import type { StorageAPI } from './storage/storage-factory.js';
 // Granular function-specific loggers for detailed debugging control
 const loggerQueue = createCategoryLogger('llm.queue');
 const loggerStreaming = createCategoryLogger('llm.streaming');
@@ -159,6 +162,92 @@ function stripCustomFields(message: AgentMessage): ChatMessage {
 function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
   loggerUtil.debug(`Stripping custom fields from ${messages.length} messages`);
   return messages.map(stripCustomFields);
+}
+
+// Storage wrapper for approval handling
+let storageWrappersPromise: Promise<StorageAPI> | null = null;
+
+async function getStorageWrappers(): Promise<StorageAPI> {
+  if (!storageWrappersPromise) {
+    storageWrappersPromise = createStorageWithWrappers();
+  }
+  return storageWrappersPromise;
+}
+
+/**
+ * Handle ApprovalRequiredException by creating approval tool call, saving agent state, and publishing SSE events
+ */
+async function handleApprovalException(
+  error: ApprovalRequiredException,
+  agent: Agent,
+  world: World,
+  publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
+  messageId?: string
+): Promise<string> {
+  loggerStreaming.debug(`Tool execution requires approval`, {
+    toolName: error.toolName,
+    agentId: agent.id,
+    worldId: world.id,
+    messageId
+  });
+
+  // Create approval tool call
+  const approvalToolCall = {
+    id: `approval_${generateId()}`,
+    type: 'function' as const,
+    function: {
+      name: 'client.requestApproval',
+      arguments: JSON.stringify({
+        originalToolCall: { name: error.toolName, args: error.toolArgs },
+        message: error.message,
+        options: error.options
+      })
+    }
+  };
+
+  // Create assistant message with approval request
+  const assistantMessage: ChatMessage = {
+    role: 'assistant',
+    content: '',
+    tool_calls: [approvalToolCall]
+  };
+
+  // Save to agent memory
+  agent.memory.push(assistantMessage);
+
+  // Persist agent state
+  try {
+    const storage = await getStorageWrappers();
+    await storage.saveAgent(world.id, agent);
+  } catch (storageError) {
+    loggerGeneration.error(`Failed to persist approval request`, {
+      agentId: agent.id,
+      worldId: world.id,
+      error: storageError instanceof Error ? storageError.message : storageError
+    });
+  }
+
+  // For streaming: publish SSE events
+  if (publishSSE && messageId) {
+    // Note: We don't include tool_calls in SSE event as it's not part of WorldSSEEvent type
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'chunk',
+      messageId,
+      content: ''
+    });
+
+    publishSSE(world, {
+      agentName: agent.id,
+      type: 'end',
+      messageId
+    });
+
+    return ''; // Streaming returns empty response
+  }
+
+  // For non-streaming: return placeholder (not used but required for type consistency)
+  return '[APPROVAL_REQUEST]';
 }
 
 
@@ -356,13 +445,16 @@ async function executeStreamAgentResponse(
     // Convert messages for LLM (strip custom fields)
     const llmMessages = stripCustomFieldsFromMessages(messages);
 
+    // Prepare messages for LLM by filtering client.* tools and approval_ results
+    const preparedMessages = prepareMessagesForLLM(llmMessages);
+
     // Get MCP tools for this world
     const mcpTools = await getMCPToolsForWorld(world.id);
     const hasMCPTools = Object.keys(mcpTools).length > 0;
 
     // Add tool usage instructions to system prompt when tools are available
-    if (hasMCPTools && llmMessages.length > 0 && llmMessages[0].role === 'system') {
-      llmMessages[0].content += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
+    if (hasMCPTools && preparedMessages.length > 0 && preparedMessages[0].role === 'system') {
+      preparedMessages[0].content += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
     }
 
     if (hasMCPTools) {
@@ -382,49 +474,73 @@ async function executeStreamAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      const response = await streamOpenAIResponse(
-        client,
-        agent.model,
-        llmMessages,
-        agent,
-        mcpTools,
-        world,
-        publishSSE,
-        messageId
-      );
-      return { response, messageId };
+      try {
+        const response = await streamOpenAIResponse(
+          client,
+          agent.model,
+          preparedMessages,
+          agent,
+          mcpTools,
+          world,
+          publishSSE,
+          messageId
+        );
+        return { response, messageId };
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
+          return { response: approvalResponse, messageId };
+        }
+        throw error;
+      }
     }
 
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      const response = await streamAnthropicResponse(
-        client,
-        agent.model,
-        llmMessages,
-        agent,
-        mcpTools,
-        world,
-        publishSSE,
-        messageId
-      );
-      return { response, messageId };
+      try {
+        const response = await streamAnthropicResponse(
+          client,
+          agent.model,
+          preparedMessages,
+          agent,
+          mcpTools,
+          world,
+          publishSSE,
+          messageId
+        );
+        return { response, messageId };
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
+          return { response: approvalResponse, messageId };
+        }
+        throw error;
+      }
     }
 
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      const response = await streamGoogleResponse(
-        client,
-        agent.model,
-        llmMessages,
-        agent,
-        mcpTools,
-        world,
-        publishSSE,
-        messageId
-      );
-      return { response, messageId };
+      try {
+        const response = await streamGoogleResponse(
+          client,
+          agent.model,
+          preparedMessages,
+          agent,
+          mcpTools,
+          world,
+          publishSSE,
+          messageId
+        );
+        return { response, messageId };
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
+          return { response: approvalResponse, messageId };
+        }
+        throw error;
+      }
     }
 
     // All providers now use direct integrations - no AI SDK needed
@@ -471,6 +587,10 @@ async function executeGenerateAgentResponse(
   skipTools?: boolean
 ): Promise<string> {
   const llmMessages = stripCustomFieldsFromMessages(messages);
+
+  // Prepare messages for LLM by filtering client.* tools and approval_ results
+  const preparedMessages = prepareMessagesForLLM(llmMessages);
+
   let systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
 
   // Get MCP tools for this world (skip if requested, e.g., for title generation)
@@ -482,7 +602,7 @@ async function executeGenerateAgentResponse(
     systemPrompt += '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON\'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
   }
 
-  llmMessages.unshift({ role: 'system', content: systemPrompt });
+  preparedMessages.unshift({ role: 'system', content: systemPrompt });
 
   if (hasMCPTools) {
     loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
@@ -504,43 +624,64 @@ async function executeGenerateAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      const response = await generateOpenAIResponse(client, agent.model, llmMessages, agent, mcpTools);
+      try {
+        const response = await generateOpenAIResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-      // Update agent activity and LLM call count
-      agent.lastActive = new Date();
-      agent.llmCallCount++;
-      agent.lastLLMCall = new Date();
+        // Update agent activity and LLM call count
+        agent.lastActive = new Date();
+        agent.llmCallCount++;
+        agent.lastLLMCall = new Date();
 
-      loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
-      return response;
+        loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+        return response;
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          return await handleApprovalException(error, agent, world);
+        }
+        throw error;
+      }
     }
 
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      const response = await generateAnthropicResponse(client, agent.model, llmMessages, agent, mcpTools);
+      try {
+        const response = await generateAnthropicResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-      // Update agent activity and LLM call count
-      agent.lastActive = new Date();
-      agent.llmCallCount++;
-      agent.lastLLMCall = new Date();
+        // Update agent activity and LLM call count
+        agent.lastActive = new Date();
+        agent.llmCallCount++;
+        agent.lastLLMCall = new Date();
 
-      loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`);
-      return response;
+        loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`);
+        return response;
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          return await handleApprovalException(error, agent, world);
+        }
+        throw error;
+      }
     }
 
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      const response = await generateGoogleResponse(client, agent.model, llmMessages, agent, mcpTools);
+      try {
+        const response = await generateGoogleResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-      // Update agent activity and LLM call count
-      agent.lastActive = new Date();
-      agent.llmCallCount++;
-      agent.lastLLMCall = new Date();
+        // Update agent activity and LLM call count
+        agent.lastActive = new Date();
+        agent.llmCallCount++;
+        agent.lastLLMCall = new Date();
 
-      loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`);
-      return response;
+        loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`);
+        return response;
+      } catch (error) {
+        if (error instanceof ApprovalRequiredException) {
+          return await handleApprovalException(error, agent, world);
+        }
+        throw error;
+      }
     }
 
     // All providers now use direct integrations - no AI SDK needed

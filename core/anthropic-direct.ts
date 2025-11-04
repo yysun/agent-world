@@ -24,14 +24,14 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
-import { publishToolEvent } from './events.js';
+import { publishToolEvent, publishSSE } from './events.js';
 
-const logger = createCategoryLogger('llm.anthropic');
+const logger = createCategoryLogger('anthropic');
 const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**
@@ -242,7 +242,12 @@ export async function streamAnthropicResponse(
               argsPresent: !!toolUse.input
             });
 
-            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`);
+            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -286,6 +291,9 @@ export async function streamAnthropicResponse(
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
+
           mcpLogger.error(`MCP tool execution failed (Anthropic streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
@@ -295,8 +303,7 @@ export async function streamAnthropicResponse(
             messageId,
             status: 'error',
             duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
+            error: errorMessage
           });
 
           // Publish tool error event to world channel (agent behavioral event)
@@ -373,7 +380,8 @@ export async function generateAnthropicResponse(
   model: string,
   messages: ChatMessage[],
   agent: Agent,
-  mcpTools: Record<string, any>
+  mcpTools: Record<string, any>,
+  world: World
 ): Promise<string> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
@@ -464,7 +472,12 @@ export async function generateAnthropicResponse(
               argsPresent: !!toolUse.input
             });
 
-            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-non-streaming-${agent.id}`);
+            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-non-streaming-${agent.id}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -490,6 +503,9 @@ export async function generateAnthropicResponse(
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
+
           mcpLogger.error(`MCP tool execution failed (Anthropic non-streaming): ${errorMessage}`, {
             sequenceId,
             toolIndex: i,
@@ -498,8 +514,7 @@ export async function generateAnthropicResponse(
             agentId: agent.id,
             status: 'error',
             duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
+            error: errorMessage
           });
 
           toolResults.push({
@@ -527,7 +542,7 @@ export async function generateAnthropicResponse(
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateAnthropicResponse(client, model, followUpMessages, agent, mcpTools);
+        const followUpResponse = await generateAnthropicResponse(client, model, followUpMessages, agent, mcpTools, world);
         return followUpResponse;
       }
     }

@@ -113,6 +113,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
+import { approvalCache } from './approval-cache.js';
+import { ApprovalRequiredException, type ApprovalPolicy, type World } from './types.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -122,6 +124,62 @@ const executionLogger = createCategoryLogger('mcp.execution');
 
 // Legacy logger for backward compatibility and general debug logs
 const logger = createCategoryLogger('llm.mcp');
+
+// === TOOL APPROVAL HELPERS ===
+
+/**
+ * Determines if a tool should require user approval based on heuristics.
+ * Checks tool name and description for dangerous keywords.
+ * 
+ * @param toolName - Name of the tool
+ * @param description - Tool description
+ * @returns true if approval should be required
+ */
+function shouldRequireApproval(toolName: string, description: string): boolean {
+  const dangerousKeywords = ['execute', 'command', 'delete', 'remove', 'write', 'shell', 'run', 'modify', 'create', 'drop'];
+  const nameLower = toolName.toLowerCase();
+  const descLower = (description || '').toLowerCase();
+
+  return dangerousKeywords.some(keyword =>
+    nameLower.includes(keyword) || descLower.includes(keyword)
+  );
+}
+
+/**
+ * Generates a user-facing approval message for a tool.
+ * 
+ * @param toolName - Name of the tool
+ * @param description - Tool description
+ * @returns User-friendly approval message
+ */
+function generateApprovalMessage(toolName: string, description: string): string {
+  return `${description || toolName}\n\nThis tool requires your approval to execute.`;
+}
+
+/**
+ * Sanitizes tool arguments by redacting sensitive information.
+ * Protects passwords, keys, tokens, and other sensitive data.
+ * 
+ * @param args - Tool arguments object
+ * @returns Sanitized copy of arguments
+ */
+function sanitizeArgs(args: any): any {
+  if (!args || typeof args !== 'object') {
+    return args;
+  }
+
+  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'auth', 'apikey', 'api_key', 'authorization'];
+  const sanitized = { ...args };
+
+  for (const key in sanitized) {
+    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      sanitized[key] = '[REDACTED]';
+    }
+  }
+
+  return sanitized;
+}
+
 
 
 /**
@@ -306,6 +364,13 @@ type ClientRef = {
   reconnecting: Promise<void> | null;
 };
 type ReconnectClient = (reason: string) => Promise<void>;
+
+interface ToolExecutionContext {
+  world?: World | null;
+  worldId?: string;
+  chatId?: string | null;
+  agentId?: string;
+}
 
 export interface MCPServerInstance {
   id: string; // Hash of configuration for sharing
@@ -927,12 +992,27 @@ export async function mcpToolsToAiTools(
       });
     }
 
+    // Check if tool requires approval
+    const requiresApproval = shouldRequireApproval(t.name, t.description ?? '');
+
     aiTools[key] = {
       description: enhancedDescription,
       parameters: finalSchema,
-      execute: async (args: any, sequenceId?: string, parentToolCall?: string) => {
+
+      // NEW: Tool metadata
+      location: 'server' as const,
+      approval: requiresApproval ? {
+        required: true,
+        message: generateApprovalMessage(t.name, t.description ?? ''),
+        options: ['Cancel', 'Once', 'Always']
+      } : undefined,
+
+      execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: ToolExecutionContext) => {
         const startTime = performance.now();
         const executionId = `${serverName}-${t.name}-${Date.now()}`;
+        const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+        const worldId = context?.worldId ?? context?.world?.id ?? null;
+        const agentId = context?.agentId ?? null;
 
         logger.debug(`MCP tool execution starting via AI conversion`, {
           executionId,
@@ -943,8 +1023,43 @@ export async function mcpToolsToAiTools(
           parentToolCall,
           argsPresent: !!args,
           argsKeys: args ? Object.keys(args) : [],
-          transport
+          transport,
+          worldId,
+          chatId,
+          agentId
         });
+
+        // NEW: Check approval before execution
+        if (requiresApproval) {
+          const approved = chatId ? approvalCache.get(chatId, key) : undefined;
+
+          if (!approved) {
+            logger.debug(`Tool execution requires approval`, {
+              executionId,
+              serverName,
+              toolName: t.name,
+              toolKey: key,
+              chatId,
+              worldId,
+              agentId
+            });
+
+            throw new ApprovalRequiredException(
+              key,
+              sanitizeArgs(args ?? {}),
+              generateApprovalMessage(t.name, t.description ?? ''),
+              ['Cancel', 'Once', 'Always']
+            );
+          }
+
+          logger.debug(`Tool execution approved from cache`, {
+            executionId,
+            serverName,
+            toolName: t.name,
+            toolKey: key,
+            chatId
+          });
+        }
 
         // Debug log: Request data being sent to MCP server
         // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names
@@ -1561,7 +1676,7 @@ export async function getMCPToolsForWorld(worldId: string): Promise<Record<strin
   const startTime = performance.now();
 
   const world = await getWorld(worldId);
-  
+
   // Start with built-in tools
   const allTools: Record<string, any> = getBuiltInTools();
 

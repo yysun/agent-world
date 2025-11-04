@@ -15,6 +15,7 @@ import WorldChat from '../components/world-chat';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
+import ApprovalDialog from '../components/approval-dialog';
 import { worldUpdateHandlers } from './World.update';
 
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
@@ -48,7 +49,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
     editingText: '',
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
-    agentActivities: {}
+    agentActivities: {},
+    pendingApproval: null
   };
 
   override view = (state: WorldComponentState) => {
@@ -301,6 +303,11 @@ export default class WorldComponent extends Component<WorldComponentState, World
               </div>
             </div>
           </div>
+        )}
+
+        {/* Approval Dialog */}
+        {state.pendingApproval && (
+          <ApprovalDialog approval={state.pendingApproval} />
         )}
       </div>
     );

@@ -164,6 +164,14 @@ export interface AgentActivityStatus {
   updatedAt: number;
 }
 
+export interface ApprovalRequest {
+  toolCallId: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  message: string;
+  options: string[];
+}
+
 // ========================================
 // COMPONENT PROP INTERFACES  
 // ========================================
@@ -185,6 +193,7 @@ export interface WorldChatProps {
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
+  approvalRequest?: ApprovalRequest | null;
 }
 
 // World Settings Component Props
@@ -301,6 +310,8 @@ export interface WorldComponentState extends SSEComponentState {
   // SSE state (required overrides)
   connectionStatus: string;
   needScroll: boolean;
+  approvalRequest: ApprovalRequest | null;
+  lastUserMessageText?: string | null;
 }
 
 // ========================================
@@ -318,6 +329,13 @@ export interface StreamChunkData {
   sender: string;
   content: string;
   isAccumulated: boolean;
+  tool_calls?: Array<{
+    id: string;
+    function?: {
+      name: string;
+      arguments?: string;
+    };
+  }>;
   worldName?: string;
 }
 

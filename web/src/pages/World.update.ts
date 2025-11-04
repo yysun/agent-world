@@ -89,7 +89,7 @@ import {
   handleToolProgress as handleToolProgressBase,
   handleToolResult as handleToolResultBase,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message, AgentActivityStatus } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message, AgentActivityStatus, ApprovalRequest } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -345,6 +345,95 @@ function clearAllAgentActivities(state: WorldComponentState, pendingOperations: 
   };
 }
 
+const showApprovalRequestDialog = (
+  state: WorldComponentState,
+  request: ApprovalRequest
+): WorldComponentState => {
+  if (state.approvalRequest && state.approvalRequest.toolCallId === request.toolCallId) {
+    return state;
+  }
+
+  return {
+    ...state,
+    approvalRequest: request,
+    isWaiting: false,
+    activeAgent: null,
+    needScroll: true
+  };
+};
+
+const hideApprovalRequestDialog = (state: WorldComponentState): WorldComponentState => {
+  if (!state.approvalRequest) {
+    return state;
+  }
+
+  return {
+    ...state,
+    approvalRequest: null
+  };
+};
+
+const submitApprovalDecision = async (
+  state: WorldComponentState,
+  payload: WorldEventPayload<'submit-approval-decision'>
+): Promise<WorldComponentState> => {
+  const { decision, scope, toolCallId } = payload;
+  const request = state.approvalRequest;
+
+  if (!request || request.toolCallId !== toolCallId) {
+    return state;
+  }
+
+  const baseState: WorldComponentState = {
+    ...state,
+    approvalRequest: null,
+    needScroll: true
+  };
+
+  if (decision !== 'approve') {
+    return baseState;
+  }
+
+  const approvalMessage = {
+    role: 'tool',
+    tool_call_id: request.toolCallId,
+    content: JSON.stringify({
+      decision,
+      scope,
+      toolName: request.toolName
+    })
+  };
+
+  const fallbackMessage = state.lastUserMessageText
+    || [...(state.messages ?? [])].reverse().find(msg => (msg.sender === 'human' || msg.sender === 'user') && typeof (msg as any).text === 'string')?.text
+    || '';
+
+  if (!fallbackMessage || !fallbackMessage.trim()) {
+    return {
+      ...baseState,
+      isWaiting: false,
+      error: 'Unable to determine the original message to resubmit for approval.'
+    };
+  }
+
+  try {
+    await sendChatMessage(state.worldName, fallbackMessage, {
+      historyMessages: [approvalMessage]
+    });
+
+    return {
+      ...baseState,
+      isWaiting: true
+    };
+  } catch (error) {
+    return {
+      ...baseState,
+      isWaiting: false,
+      error: (error as Error).message || 'Failed to submit approval decision'
+    };
+  }
+};
+
 function formatThinkingMessage(agentIdRaw: string | null | undefined): string {
   return `${normalizeAgentId(agentIdRaw)} thinking ...`;
 }
@@ -583,6 +672,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       needScroll: true,
       agentActivities: {},
       isWaiting: false,
+      approvalRequest: null,
+      lastUserMessageText: null,
     };
 
   } catch (error: any) {
@@ -593,6 +684,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       needScroll: false,
       agentActivities: {},
       isWaiting: false,
+      approvalRequest: null,
+      lastUserMessageText: state.lastUserMessageText ?? null,
     };
   }
 }
@@ -817,12 +910,15 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     const sendingState = InputDomain.createSendingState(state, prepared.message);
     const newState: WorldComponentState = {
       ...sendingState,
-      agentActivities: {}
+      agentActivities: {},
+      lastUserMessageText: prepared.text
     };
 
     try {
       // Send the message via SSE stream
-      await sendChatMessage(state.worldName, prepared.text, 'HUMAN');
+      await sendChatMessage(state.worldName, prepared.text, {
+        sender: 'HUMAN'
+      });
 
       // Note: isWaiting will be set to false by handleStreamEnd when the stream completes or by handleStreamError/handleError on errors
       return InputDomain.createSentState(newState);
@@ -851,6 +947,10 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     return handleWorldActivity(state, activity);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
+
+  'show-approval-request': showApprovalRequestDialog,
+  'hide-approval-request': hideApprovalRequestDialog,
+  'submit-approval-decision': submitApprovalDecision,
 
   // ========================================
   // MESSAGE DISPLAY
@@ -1026,7 +1126,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       editingText: '',
       isSending: true,
       isWaiting: true,
-      needScroll: true
+      needScroll: true,
+      lastUserMessageText: editedText
     };
 
     try {
@@ -1051,7 +1152,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
       // PHASE 2: Call POST to resubmit edited message (reuses existing SSE streaming)
       try {
-        const cleanup = await sendChatMessage(state.worldName, editedText, 'human');
+        await sendChatMessage(state.worldName, editedText, {
+          sender: 'human'
+        });
 
         // Clear localStorage backup on successful resubmission
         try {

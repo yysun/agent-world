@@ -42,14 +42,14 @@
  */
 
 import OpenAI from 'openai';
-import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
-import { publishToolEvent } from './events.js';
+import { publishToolEvent, publishSSE } from './events.js';
 
-const logger = createCategoryLogger('llm.openai');
+const logger = createCategoryLogger('openai');
 const mcpLogger = createCategoryLogger('mcp.execution');
 
 /**
@@ -317,7 +317,12 @@ export async function streamOpenAIResponse(
               continue;
             }
 
-            const result = await tool.execute(args, sequenceId, `streaming-${messageId}`);
+            const result = await tool.execute(args, sequenceId, `streaming-${messageId}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -361,38 +366,8 @@ export async function streamOpenAIResponse(
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
-          mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: toolCall.function!.name!,
-            toolCallId: toolCall.id!,
-            agentId: agent.id,
-            messageId,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          // Publish tool error event to world channel (agent behavioral event)
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-error',
-            messageId,
-            toolExecution: {
-              toolName: toolCall.function!.name!,
-              toolCallId: toolCall.id!,
-              sequenceId,
-              error: errorMessage,
-              duration: Math.round(duration * 100) / 100
-            }
-          });
-
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${(error as Error).message}`,
-            tool_call_id: toolCall.id!,
-          });
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
         }
       }
 
@@ -448,7 +423,8 @@ export async function generateOpenAIResponse(
   model: string,
   messages: ChatMessage[],
   agent: Agent,
-  mcpTools: Record<string, any>
+  mcpTools: Record<string, any>,
+  world: World
 ): Promise<string> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
@@ -547,7 +523,12 @@ export async function generateOpenAIResponse(
               continue;
             }
 
-            const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`);
+            const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -585,11 +566,8 @@ export async function generateOpenAIResponse(
             errorStack: error instanceof Error ? error.stack : undefined
           });
 
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${(error as Error).message}`,
-            tool_call_id: toolCall.id,
-          });
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
         }
       }
 
@@ -610,7 +588,7 @@ export async function generateOpenAIResponse(
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, mcpTools);
+        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, mcpTools, world);
         return followUpResponse;
       }
     }

@@ -33,7 +33,7 @@
  */
 
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
 import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
@@ -258,7 +258,12 @@ export async function streamGoogleResponse(
             });
 
             const args = JSON.parse(functionCall.function!.arguments || '{}');
-            const result = await tool.execute(args, sequenceId, `google-streaming-${messageId}`);
+            const result = await tool.execute(args, sequenceId, `google-streaming-${messageId}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -299,41 +304,8 @@ export async function streamGoogleResponse(
             });
           }
         } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          mcpLogger.error(`MCP tool execution failed (Google streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: functionCall.function!.name!,
-            toolCallId: functionCall.id!,
-            agentId: agent.id,
-            messageId,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          // Publish tool error event to world channel (agent behavioral event)
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-error',
-            messageId,
-            toolExecution: {
-              toolName: functionCall.function!.name!,
-              toolCallId: functionCall.id!,
-              sequenceId,
-              error: errorMessage,
-              duration: Math.round(duration * 100) / 100
-            }
-          });
-
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${errorMessage}`,
-            tool_call_id: functionCall.id!,
-          });
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
         }
       }
 
@@ -389,7 +361,8 @@ export async function generateGoogleResponse(
   model: string,
   messages: ChatMessage[],
   agent: Agent,
-  mcpTools: Record<string, any>
+  mcpTools: Record<string, any>,
+  world: World
 ): Promise<string> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
@@ -477,8 +450,13 @@ export async function generateGoogleResponse(
               argsPresent: !!functionCall.function.arguments
             });
 
-            const args = JSON.parse(functionCall.function.arguments || '{}');
-            const result = await tool.execute(args, sequenceId, `google-non-streaming-${agent.id}`);
+            const args = JSON.parse(functionCall.function!.arguments || '{}');
+            const result = await tool.execute(args, sequenceId, `google-non-streaming-${agent.id}`, {
+              world,
+              worldId: world.id,
+              chatId: world.currentChatId ?? null,
+              agentId: agent.id
+            });
             const duration = performance.now() - startTime;
             const resultString = JSON.stringify(result);
 
@@ -501,26 +479,8 @@ export async function generateGoogleResponse(
             });
           }
         } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          mcpLogger.error(`MCP tool execution failed (Google non-streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: functionCall.function.name,
-            toolCallId: functionCall.id,
-            agentId: agent.id,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${errorMessage}`,
-            tool_call_id: functionCall.id,
-          });
+          // Let ApprovalRequiredException bubble up to llm-manager
+          throw error;
         }
       }
 
@@ -541,7 +501,7 @@ export async function generateGoogleResponse(
         };
 
         const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateGoogleResponse(client, model, followUpMessages, agent, mcpTools);
+        const followUpResponse = await generateGoogleResponse(client, model, followUpMessages, agent, mcpTools, world);
         return followUpResponse;
       }
     }

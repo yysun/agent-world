@@ -74,6 +74,7 @@ import {
   getMCPRegistryStats,
   MCPServerInstance
 } from '../core/mcp-server-registry.js';
+import { approvalCache } from '../core/approval-cache.js';
 
 // Function-specific loggers for granular debugging control
 const loggerWorld = createCategoryLogger('api.world');
@@ -274,7 +275,8 @@ const AgentCreateSchema = z.object({
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
   sender: z.string().default("human"),
-  stream: z.boolean().optional().default(true)
+  stream: z.boolean().optional().default(true),
+  messages: z.array(z.any()).optional()
 });
 
 const AgentUpdateSchema = z.object({
@@ -912,13 +914,64 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const world = (req as any).world as World | undefined;
     const validation = ChatMessageSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
 
-    const { message, sender, stream } = validation.data;
+    const { message, sender, stream, messages: historyMessages } = validation.data;
+
+    // Process approval messages from history to update cache
+    if (Array.isArray(historyMessages) && world) {
+      const approvalMessages = historyMessages.filter(msg =>
+        msg && msg.role === 'tool' && typeof msg.tool_call_id === 'string' && msg.tool_call_id.startsWith('approval_')
+      );
+
+      const chatId = world.currentChatId ?? null;
+
+      for (const approvalMessage of approvalMessages) {
+        try {
+          const parsedContent = typeof approvalMessage.content === 'string'
+            ? JSON.parse(approvalMessage.content)
+            : approvalMessage.content;
+
+          const decision = parsedContent?.decision;
+          const scope = parsedContent?.scope;
+          const toolName = parsedContent?.toolName;
+
+          if (!chatId || !toolName) {
+            loggerChat.warn('Approval result missing chatId or toolName', {
+              chatId,
+              toolName,
+              decision,
+              scope
+            });
+            continue;
+          }
+
+          if (decision === 'approve') {
+            if (scope === 'session') {
+              approvalCache.set(chatId, toolName, true);
+              loggerChat.debug('Cached session approval', { chatId, toolName });
+            } else if (scope === 'once') {
+              approvalCache.set(chatId, toolName, true);
+              loggerChat.debug('Cached once approval', { chatId, toolName });
+            } else {
+              approvalCache.set(chatId, toolName, true);
+              loggerChat.debug('Cached approval with default scope', { chatId, toolName });
+            }
+          }
+        } catch (error) {
+          loggerChat.warn('Failed to parse approval result content', {
+            error: error instanceof Error ? error.message : error,
+            content: approvalMessage.content
+          });
+        }
+      }
+    }
+
     if (stream === false) {
       await handleNonStreamingChat(res, worldCtx.id, message, sender);
     } else {
