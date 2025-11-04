@@ -113,6 +113,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
+import { ApprovalRequiredException } from './types.js';
+import { approvalCache } from './approval-cache.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -850,6 +852,48 @@ async function fetchAndCacheTools(serverConfig: MCPServerConfig): Promise<Record
   }
 }
 
+// === TOOL APPROVAL HELPER FUNCTIONS (Phase 2) ===
+
+/**
+ * Determine if a tool requires approval based on its name and description
+ */
+function shouldRequireApproval(toolName: string, description: string): boolean {
+  const dangerousKeywords = ['execute', 'command', 'delete', 'remove', 'write', 'shell', 'run', 'kill', 'modify', 'change'];
+  const nameLower = toolName.toLowerCase();
+  const descLower = (description || '').toLowerCase();
+  
+  return dangerousKeywords.some(keyword => 
+    nameLower.includes(keyword) || descLower.includes(keyword)
+  );
+}
+
+/**
+ * Generate user-facing approval message for a tool
+ */
+function generateApprovalMessage(toolName: string, description: string): string {
+  return `${description || toolName}\n\nThis tool requires your approval to execute.`;
+}
+
+/**
+ * Sanitize tool arguments to hide sensitive information
+ */
+function sanitizeArgs(args: any): any {
+  if (!args || typeof args !== 'object') {
+    return args;
+  }
+  
+  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'auth', 'credential', 'apikey'];
+  const sanitized = Array.isArray(args) ? [...args] : { ...args };
+  
+  for (const key in sanitized) {
+    if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      sanitized[key] = '[REDACTED]';
+    }
+  }
+  
+  return sanitized;
+}
+
 /**
  * Convert MCP tools to AI-compatible tool format with bulletproof schema protection
  */
@@ -927,12 +971,54 @@ export async function mcpToolsToAiTools(
       });
     }
 
+    // Phase 2: Check if tool requires approval
+    const requiresApproval = shouldRequireApproval(t.name, t.description || '');
+    
     aiTools[key] = {
       description: enhancedDescription,
       parameters: finalSchema,
-      execute: async (args: any, sequenceId?: string, parentToolCall?: string) => {
+      // Phase 2: Add tool metadata
+      location: 'server',
+      approval: requiresApproval ? {
+        required: true,
+        message: generateApprovalMessage(t.name, t.description || ''),
+        options: ['Cancel', 'Once', 'Always']
+      } : undefined,
+      execute: async (args: any, sequenceId?: string, parentToolCall?: string, worldId?: string) => {
         const startTime = performance.now();
         const executionId = `${serverName}-${t.name}-${Date.now()}`;
+
+        // Phase 2: Check approval if required
+        if (requiresApproval && worldId) {
+          try {
+            const world = await getWorld(worldId);
+            const currentChatId = world?.currentChatId;
+            
+            if (currentChatId) {
+              const approved = approvalCache.get(currentChatId, key);
+              
+              if (!approved) {
+                // Throw approval required exception
+                throw new ApprovalRequiredException(
+                  key,
+                  sanitizeArgs(args),
+                  aiTools[key].approval.message,
+                  aiTools[key].approval.options
+                );
+              }
+            }
+          } catch (error) {
+            // Re-throw ApprovalRequiredException
+            if (error instanceof ApprovalRequiredException) {
+              throw error;
+            }
+            // Log other errors but continue (don't block tool execution if world lookup fails)
+            logger.warn(`Failed to check approval for tool ${key}`, {
+              error: error instanceof Error ? error.message : String(error),
+              worldId
+            });
+          }
+        }
 
         logger.debug(`MCP tool execution starting via AI conversion`, {
           executionId,
