@@ -68,6 +68,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { program } from 'commander';
 import readline from 'readline';
+import enquirer from 'enquirer';
 import {
   listWorlds,
   subscribeWorld,
@@ -79,7 +80,7 @@ import {
   type WorldActivityEventPayload,
   type WorldActivityEventType
 } from '../core/index.js';
-import { World, EventType } from '../core/types.js';
+import { World, EventType, ApprovalRequiredException, type ApprovalDecision, type ApprovalScope } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput, displayChatMessages } from './commands.js';
 import {
@@ -140,6 +141,62 @@ const boldCyan = (text: string) => `\x1b[1m\x1b[36m${text}\x1b[0m`;
 const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
+
+// Simplified approval handler for pipeline mode (non-interactive)
+async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
+  const { toolName } = approvalException;
+  
+  console.error(`${boldRed('Tool approval required in pipeline mode:')}`);
+  console.error(`${gray('Tool:')} ${yellow(toolName)}`);
+  console.error(`${gray('Pipeline mode: Denying tool execution (use interactive mode for approvals)')}`);
+  
+  return { decision: 'deny', scope: 'once' };
+}
+
+// CLI approval handling for tool execution
+async function handleApprovalRequest(
+  approvalException: ApprovalRequiredException,
+  rl: readline.Interface
+): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
+  const { toolName, toolArgs, message, options } = approvalException;
+  
+  console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
+  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
+  
+  if (toolArgs && Object.keys(toolArgs).length > 0) {
+    console.log(`${gray('Arguments:')}`);
+    for (const [key, value] of Object.entries(toolArgs)) {
+      const displayValue = typeof value === 'string' && value.length > 100 
+        ? `${value.substring(0, 100)}...` 
+        : String(value);
+      console.log(`  ${gray(key + ':')} ${displayValue}`);
+    }
+  }
+  
+  if (message) {
+    console.log(`${gray('Details:')} ${message}`);
+  }
+  
+  // Use enquirer for consistent CLI prompting
+  const { decision } = await enquirer.prompt({
+    type: 'select',
+    name: 'decision',
+    message: 'Allow this tool execution?',
+    choices: [
+      { name: 'Cancel (deny)', value: 'cancel' },
+      { name: 'Allow Once', value: 'once' },
+      { name: 'Allow Always (this session)', value: 'always' }
+    ]
+  }) as { decision: string };
+  
+  if (decision === 'cancel') {
+    return { decision: 'deny', scope: 'once' };
+  } else if (decision === 'once') {
+    return { decision: 'approve', scope: 'once' };
+  } else {
+    return { decision: 'approve', scope: 'session' };
+  }
+}
 
 
 type ActivityEventState = WorldActivityEventType;
@@ -577,7 +634,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(options.command, world, 'human');
+      const result = await processCLIInput(options.command, world, 'human', handlePipelineApproval);
       printCLIResult(result);
 
       if (!options.command.startsWith('/') && world) {
@@ -610,7 +667,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(messageFromArgs, world, 'human');
+      const result = await processCLIInput(messageFromArgs, world, 'human', handlePipelineApproval);
       printCLIResult(result);
 
       try {
@@ -643,7 +700,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           process.exit(1);
         }
         const snapshot = activityMonitor.captureSnapshot();
-        const result = await processCLIInput(input.trim(), world, 'HUMAN');
+        const result = await processCLIInput(input.trim(), world, 'HUMAN', handlePipelineApproval);
         printCLIResult(result);
 
         try {
@@ -1314,7 +1371,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
 
       try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN', (error) => handleApprovalRequest(error, rl));
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {

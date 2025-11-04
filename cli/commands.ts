@@ -51,6 +51,9 @@ import {
   getWorld,
   updateWorld,
   publishMessage,
+  ApprovalRequiredException,
+  type ApprovalDecision,
+  type ApprovalScope,
   listWorlds,
   deleteWorld,
   listAgents,
@@ -69,6 +72,7 @@ import {
   getMemory
 } from '../core/index.js';
 import { createStorage, getDefaultRootPath } from '../core/storage/storage-factory.js';
+import { approvalCache } from '../core/approval-cache.js';
 import type { StorageConfig } from '../core/storage/storage-factory.js';
 import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
@@ -109,6 +113,9 @@ export interface CLIContext {
 }
 
 export type PromptFunction = (question: string, options?: string[]) => Promise<string>;
+
+// CLI approval handler type
+export type CLIApprovalHandler = (approvalException: ApprovalRequiredException) => Promise<{ decision: ApprovalDecision; scope: ApprovalScope }>;
 
 // Enquirer prompt response interfaces
 interface WorldCreateAnswers {
@@ -2150,7 +2157,8 @@ export async function processCLICommand(
 export async function processCLIInput(
   input: string,
   world: World | null,
-  sender: string = 'human'
+  sender: string = 'human',
+  approvalHandler?: CLIApprovalHandler
 ): Promise<CLIResponse> {
   const context: CLIContext = {
     currentWorld: world,
@@ -2209,6 +2217,45 @@ export async function processCLIInput(
       technicalDetails: `Message published to world '${world.name}'`
     };
   } catch (error) {
+    // Handle approval requirements
+    if (error instanceof ApprovalRequiredException && approvalHandler) {
+      try {
+        const { decision, scope } = await approvalHandler(error);
+        
+        if (decision === 'deny') {
+          return {
+            success: false,
+            message: 'Tool execution denied by user',
+            technicalDetails: `Approval denied for tool: ${error.toolName}`
+          };
+        }
+        
+        // Update approval cache
+        const chatId = world.currentChatId || null;
+        const approved = decision === 'approve';
+        
+        // Create cache key for the specific chatId context
+        const cacheKey = chatId ? chatId : 'global';
+        approvalCache.set(cacheKey, error.toolName, approved);
+        
+        // Retry the message
+        publishMessage(world as any, input, sender);
+        return {
+          success: true,
+          message: '',
+          data: { sender, approvalGranted: true },
+          technicalDetails: `Message published to world '${world.name}' after approval`
+        };
+      } catch (approvalError) {
+        return {
+          success: false,
+          message: 'Failed to handle tool approval',
+          error: approvalError instanceof Error ? approvalError.message : String(approvalError),
+          technicalDetails: `Approval handling failed for tool: ${error.toolName}`
+        };
+      }
+    }
+    
     return {
       success: false,
       message: 'Failed to send message',
