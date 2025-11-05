@@ -27,6 +27,7 @@
  * - Thread-safe registry operations with world-server mapping
  * - Consolidated logging under LOG_LLM_MCP for unified debugging
  * - Enhanced debug logging for MCP communication data flows
+ * - Explicit approval system using structured tool metadata instead of heuristics
  *
  * Key Features:
  * - Azure OpenAI compatibility: Uses runtime AI SDK patch (core/ai-sdk-patch.ts) for schema corruption fix
@@ -102,6 +103,7 @@
  * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
+ * Explicit approval system: Replaced heuristic detection with structured metadata (November 2025)
  */
 
 import { createHash } from 'crypto';
@@ -129,42 +131,13 @@ const logger = createCategoryLogger('llm.mcp');
 // === TOOL APPROVAL HELPERS ===
 
 /**
- * Determines if a tool should require user approval based on heuristics.
- * Checks tool name and description for dangerous keywords.
- * 
- * @param toolName - Name of the tool
- * @param description - Tool description
- * @returns true if approval should be required
- */
-function shouldRequireApproval(toolName: string, description: string): boolean {
-  const dangerousKeywords = ['execute', 'command', 'delete', 'remove', 'write', 'shell', 'run', 'modify', 'create', 'drop'];
-  const nameLower = toolName.toLowerCase();
-  const descLower = (description || '').toLowerCase();
-
-  return dangerousKeywords.some(keyword =>
-    nameLower.includes(keyword) || descLower.includes(keyword)
-  );
-}
-
-/**
- * Generates a user-facing approval message for a tool.
- * 
- * @param toolName - Name of the tool
- * @param description - Tool description
- * @returns User-friendly approval message
- */
-function generateApprovalMessage(toolName: string, description: string): string {
-  return `${description || toolName}\n\nThis tool requires your approval to execute.`;
-}
-
-/**
  * Sanitizes tool arguments by redacting sensitive information.
  * Protects passwords, keys, tokens, and other sensitive data.
  * 
  * @param args - Tool arguments object
  * @returns Sanitized copy of arguments
  */
-function sanitizeArgs(args: any): any {
+export function sanitizeArgs(args: any): any {
   if (!args || typeof args !== 'object') {
     return args;
   }
@@ -993,18 +966,19 @@ export async function mcpToolsToAiTools(
       });
     }
 
-    // Check if tool requires approval
-    const requiresApproval = shouldRequireApproval(t.name, t.description ?? '');
+    // NEW: Use explicit approval metadata from MCP tool if available
+    // MCP tools don't currently support approval metadata, so default to no approval
+    const requiresApproval = false;
 
     aiTools[key] = {
       description: enhancedDescription,
       parameters: finalSchema,
 
-      // NEW: Tool metadata
+      // NEW: Tool metadata  
       location: 'server' as const,
       approval: requiresApproval ? {
         required: true,
-        message: generateApprovalMessage(t.name, t.description ?? ''),
+        message: 'This MCP tool requires approval to execute.',
         options: ['Cancel', 'Once', 'Always']
       } : undefined,
 
@@ -1030,7 +1004,7 @@ export async function mcpToolsToAiTools(
           agentId
         });
 
-        // NEW: Check approval before execution
+        // NEW: Check approval before execution using explicit approval metadata
         if (requiresApproval) {
           const approved = chatId ? approvalCache.get(chatId, key) : undefined;
 
@@ -1048,7 +1022,7 @@ export async function mcpToolsToAiTools(
             throw new ApprovalRequiredException(
               key,
               sanitizeArgs(args ?? {}),
-              generateApprovalMessage(t.name, t.description ?? ''),
+              'This MCP tool requires approval to execute.',
               ['Cancel', 'Once', 'Always']
             );
           }

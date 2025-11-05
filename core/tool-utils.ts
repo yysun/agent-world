@@ -7,6 +7,7 @@
  * - Creates error tool results for malformed calls
  * - Emits SSE events for tool errors
  * - Universal parameter validation for all tool types
+ * - Explicit approval checking using structured tool metadata
  *
  * Implementation Details:
  * - Uses minimal fallback ID generator to avoid external dependencies
@@ -14,8 +15,14 @@
  * - Publishes tool-error SSE events to surface problems
  * - Best-effort error reporting to avoid cascading failures
  * - Consistent parameter validation for both MCP and built-in tools
+ * - Approval checking using explicit tool.approval metadata instead of heuristics
+ * - Dynamic imports to avoid circular dependencies with approval cache
  *
  * Recent Changes:
+ * - 2025-11-04: Added explicit approval flag checking in wrapToolWithValidation
+ * - Replaced heuristic-based approval detection with explicit tool.approval metadata
+ * - Enhanced wrapToolWithValidation to handle approval flow before parameter validation
+ * - Added dynamic imports to prevent circular dependencies with approval modules
  * - Added universal parameter validation for consistent tool execution
  * - Enhanced validation to work with both MCP and built-in tools
  * - Initial implementation for empty/missing name validation
@@ -210,12 +217,12 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
 }
 
 /**
- * Wrap tool execution with universal parameter validation
- * Provides a standardized validation layer for all tools
+ * Wrap tool execution with universal parameter validation and approval checking
+ * Provides a standardized validation and approval layer for all tools
  * 
- * @param tool - Tool object with execute function and parameters schema
+ * @param tool - Tool object with execute function, parameters schema, and optional approval metadata
  * @param toolName - Name of the tool (for logging and error reporting)
- * @returns Wrapped tool with validation
+ * @returns Wrapped tool with validation and approval checking
  */
 export function wrapToolWithValidation(tool: any, toolName: string): any {
   if (!tool || !tool.execute) {
@@ -226,7 +233,32 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
 
   return {
     ...tool,
-    execute: async (args: any, ...otherArgs: any[]) => {
+    execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
+      // Check explicit approval flag before execution
+      if (tool.approval?.required) {
+        const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+
+        if (chatId) {
+          // Import modules dynamically to avoid circular dependencies
+          const [{ approvalCache }, { ApprovalRequiredException }, { sanitizeArgs }] = await Promise.all([
+            import('./approval-cache.js'),
+            import('./types.js'),
+            import('./mcp-server-registry.js')
+          ]);
+
+          const approved = approvalCache.get(chatId, toolName);
+
+          if (!approved) {
+            throw new ApprovalRequiredException(
+              toolName,
+              sanitizeArgs(args ?? {}),
+              tool.approval.message || 'This tool requires approval to execute.',
+              tool.approval.options || ['Cancel', 'Once', 'Always']
+            );
+          }
+        }
+      }
+
       // Apply validation if tool has parameters schema
       if (tool.parameters) {
         const validation = validateToolParameters(args, tool.parameters, toolName);
@@ -235,11 +267,11 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
           return `Error: Tool parameter validation failed for ${toolName}: ${validation.error}`;
         }
         // Use corrected args
-        return originalExecute(validation.correctedArgs, ...otherArgs);
+        return originalExecute(validation.correctedArgs, sequenceId, parentToolCall, context);
       }
 
       // No schema available, proceed with original args
-      return originalExecute(args, ...otherArgs);
+      return originalExecute(args, sequenceId, parentToolCall, context);
     }
   };
 }

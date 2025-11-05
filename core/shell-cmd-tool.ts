@@ -12,6 +12,7 @@
  * - LLM guidance to ask user for directory if not provided
  * - Graceful error handling for invalid tool calls
  * - Universal parameter validation for consistent execution
+ * - Explicit approval configuration using structured metadata
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
@@ -23,8 +24,12 @@
  * - Tool description instructs LLM to ask user for directory if missing
  * - Returns error results instead of throwing to prevent agent crashes
  * - Uses universal validation framework for consistent parameter checking
+ * - Features explicit approval metadata with structured configuration
  *
  * Recent Changes:
+ * - 2025-11-04: Added explicit approval flag with structured metadata (required, message, options)
+ * - Replaced heuristic-based approval detection with explicit configuration
+ * - Approval message explains shell command risks and provides clear user options
  * - Integrated universal parameter validation for consistent tool execution
  * - Enhanced validation to check required parameters and auto-correct types
  * - Replaced custom validation with standardized validation framework
@@ -317,6 +322,14 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
 export function createShellCmdToolDefinition() {
   return {
     description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. The command output, errors, and execution metadata are persisted for tracking. CRITICAL: This tool REQUIRES a "directory" parameter. If user says "current directory" or "here", use "./". If user specifies a path, use that. Only ask for clarification if the location is truly ambiguous.',
+
+    // NEW: Explicit approval configuration
+    approval: {
+      required: true,
+      message: 'This tool will execute a shell command on the system. Shell commands can modify files, run programs, and access system resources. Do you want to allow this execution?',
+      options: ['Cancel', 'Once', 'Always']
+    },
+
     parameters: {
       type: 'object',
       properties: {
