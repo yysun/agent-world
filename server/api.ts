@@ -75,6 +75,8 @@ import {
   MCPServerInstance
 } from '../core/mcp-server-registry.js';
 import { approvalCache } from '../core/approval-cache.js';
+import { serverContext } from './index.js';
+import type { StoredEvent } from '../core/storage/eventStorage/types.js';
 
 // Function-specific loggers for granular debugging control
 const loggerWorld = createCategoryLogger('api.world');
@@ -606,6 +608,267 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
 // Chat Helper Functions
 
 /**
+ * Generate UUID v4
+ */
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * Handles non-streaming chat via queue - enqueues message and polls EventStorage for completion
+ */
+async function handleNonStreamingChatViaQueue(
+  res: Response,
+  worldId: string,
+  chatId: string | null,
+  message: string,
+  sender: string
+): Promise<void> {
+  if (!serverContext.queueStorage || !serverContext.eventStorage) {
+    throw new Error('Queue or event storage not initialized');
+  }
+
+  const queueStorage = serverContext.queueStorage;
+  const eventStorage = serverContext.eventStorage;
+
+  try {
+    // Generate messageId for this request
+    const messageId = generateUUID();
+
+    // Get current seq before enqueuing
+    const startSeq = await eventStorage.getLatestSeq(worldId, chatId);
+
+    loggerChat.info('Enqueuing message (non-streaming)', { worldId, chatId, messageId, startSeq });
+
+    // Enqueue the message
+    await queueStorage.enqueue({
+      worldId,
+      chatId: chatId ?? null,
+      messageId,
+      content: message,
+      sender,
+      priority: 0,
+      maxRetries: 3,
+      timeoutSeconds: 300
+    });
+
+    // Poll EventStorage for events until we see idle
+    const pollInterval = serverContext.apiSSEPollInterval;
+    const maxWaitTime = 60000; // 60 seconds
+    const startTime = Date.now();
+    let responseContent = '';
+    let lastSeq = startSeq;
+
+    while (Date.now() - startTime < maxWaitTime) {
+      // Get new events since last check
+      const events = await eventStorage.getEventsByWorldAndChat(
+        worldId,
+        chatId,
+        { sinceSeq: lastSeq, order: 'asc' }
+      );
+
+      // Process new events
+      for (const event of events) {
+        if (event.seq) {
+          lastSeq = event.seq;
+        }
+
+        // Check for completion (idle event)
+        if (event.type === 'world' && event.payload?.type === 'idle') {
+          // Collect the last message event for response
+          const messageEvents = events.filter(e => e.type === 'message');
+          if (messageEvents.length > 0) {
+            const lastMessage = messageEvents[messageEvents.length - 1];
+            responseContent = JSON.stringify({ type: 'message', data: lastMessage.payload });
+          }
+
+          loggerChat.info('Non-streaming chat completed via queue', { worldId, chatId, messageId, lastSeq });
+
+          res.json({
+            success: true,
+            message: 'Message processed successfully',
+            data: {
+              content: responseContent || 'No response received',
+              timestamp: new Date().toISOString()
+            }
+          });
+          return;
+        }
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    // Timeout
+    loggerChat.warn('Non-streaming chat timeout via queue', { worldId, chatId, messageId });
+    sendError(res, 500, 'Request timeout - no response received within 60 seconds', 'CHAT_TIMEOUT');
+  } catch (error) {
+    loggerChat.error('Error in non-streaming queue handler', {
+      error: error instanceof Error ? error.message : error,
+      worldId,
+      chatId
+    });
+    throw error;
+  }
+}
+
+/**
+ * Handles streaming chat via queue - enqueues message and streams from EventStorage
+ */
+async function handleStreamingChatViaQueue(
+  req: Request,
+  res: Response,
+  worldId: string,
+  chatId: string | null,
+  message: string,
+  sender: string
+): Promise<void> {
+  if (!serverContext.queueStorage || !serverContext.eventStorage) {
+    throw new Error('Queue or event storage not initialized');
+  }
+
+  const queueStorage = serverContext.queueStorage;
+  const eventStorage = serverContext.eventStorage;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
+
+  let isResponseEnded = false;
+
+  const sendSSE = (data: string) => {
+    if (isResponseEnded || res.destroyed) return;
+    try {
+      res.write(`data: ${data}\n\n`);
+    } catch (error) {
+      loggerStream.debug('Error writing SSE data:', error);
+      isResponseEnded = true;
+    }
+  };
+
+  const endResponse = () => {
+    if (isResponseEnded) return;
+    isResponseEnded = true;
+    try {
+      if (!res.destroyed) {
+        res.end();
+      }
+    } catch (error) {
+      loggerStream.debug('Error ending response (likely already closed):', error);
+    }
+  };
+
+  try {
+    // Generate messageId for this request
+    const messageId = generateUUID();
+
+    // Get current seq before enqueuing
+    const startSeq = await eventStorage.getLatestSeq(worldId, chatId);
+
+    loggerChat.info('Enqueuing message (streaming)', { worldId, chatId, messageId, startSeq });
+
+    // Enqueue the message
+    await queueStorage.enqueue({
+      worldId,
+      chatId: chatId ?? null,
+      messageId,
+      content: message,
+      sender,
+      priority: 0,
+      maxRetries: 3,
+      timeoutSeconds: 300
+    });
+
+    // Poll EventStorage and stream events to client
+    const pollInterval = serverContext.apiSSEPollInterval;
+    const maxWaitTime = 60000; // 60 seconds
+    const startTime = Date.now();
+    let lastSeq = startSeq;
+    let awaitingIdle = false;
+
+    const pollLoop = async () => {
+      while (!isResponseEnded && Date.now() - startTime < maxWaitTime) {
+        // Get new events since last check
+        const events = await eventStorage.getEventsByWorldAndChat(
+          worldId,
+          chatId,
+          { sinceSeq: lastSeq, order: 'asc' }
+        );
+
+        // Stream new events
+        for (const event of events) {
+          if (event.seq) {
+            lastSeq = event.seq;
+          }
+
+          // Map event type to SSE format
+          let sseEventType = event.type;
+          let sseData: any = event.payload;
+
+          // Check for activity events to detect processing state
+          if (event.type === 'world' && event.payload?.type === 'response-start') {
+            awaitingIdle = true;
+          }
+
+          // Check for completion (idle event after we started processing)
+          if (event.type === 'world' && event.payload?.type === 'idle' && awaitingIdle) {
+            sendSSE(JSON.stringify({ type: event.type, data: event.payload, seq: event.seq }));
+            loggerChat.info('Streaming chat completed via queue', { worldId, chatId, messageId, lastSeq });
+            endResponse();
+            return;
+          }
+
+          // Stream the event
+          sendSSE(JSON.stringify({ type: event.type, data: event.payload, seq: event.seq }));
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+
+      // Timeout
+      if (!isResponseEnded) {
+        loggerChat.warn('Streaming chat timeout via queue', { worldId, chatId, messageId });
+        sendSSE(JSON.stringify({ type: 'error', message: 'Request timeout' }));
+        endResponse();
+      }
+    };
+
+    // Start polling
+    pollLoop().catch(error => {
+      loggerStream.error('Error in poll loop', { error: error instanceof Error ? error.message : error });
+      if (!isResponseEnded) {
+        sendSSE(JSON.stringify({ type: 'error', message: 'Internal error' }));
+        endResponse();
+      }
+    });
+
+    // Handle client disconnect
+    req.on('close', () => {
+      loggerStream.debug('Client disconnected from streaming queue handler');
+      endResponse();
+    });
+  } catch (error) {
+    loggerChat.error('Error in streaming queue handler', {
+      error: error instanceof Error ? error.message : error,
+      worldId,
+      chatId
+    });
+    if (!isResponseEnded) {
+      sendSSE(JSON.stringify({ type: 'error', message: 'Failed to enqueue message' }));
+      endResponse();
+    }
+  }
+}
+
+/**
  * Handles non-streaming chat requests by subscribing to world events and collecting all messages.
  * Disables streaming, subscribes to world events, publishes the message, and waits for world idle
  * event (with timeout fallback) before returning the aggregated response.
@@ -976,10 +1239,23 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
       }
     }
 
-    if (stream === false) {
-      await handleNonStreamingChat(res, worldCtx.id, message, sender);
+    const chatId = world?.currentChatId ?? null;
+
+    // Choose handler based on API_USE_QUEUE flag
+    if (serverContext.apiUseQueue && serverContext.queueStorage && serverContext.eventStorage) {
+      loggerChat.debug('Using queue-based chat handler', { worldId: worldCtx.id, chatId, useQueue: true });
+      if (stream === false) {
+        await handleNonStreamingChatViaQueue(res, worldCtx.id, chatId, message, sender);
+      } else {
+        await handleStreamingChatViaQueue(req, res, worldCtx.id, chatId, message, sender);
+      }
     } else {
-      await handleStreamingChat(req, res, worldCtx.id, message, sender);
+      loggerChat.debug('Using direct chat handler', { worldId: worldCtx.id, chatId, useQueue: false });
+      if (stream === false) {
+        await handleNonStreamingChat(res, worldCtx.id, message, sender);
+      } else {
+        await handleStreamingChat(req, res, worldCtx.id, message, sender);
+      }
     }
   } catch (error) {
     loggerChat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
