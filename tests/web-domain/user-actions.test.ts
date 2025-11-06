@@ -151,7 +151,7 @@ describe('User Actions Domain', () => {
 
         const result = InputDomain.createSendingState(mockState, userMessage);
 
-        expect(result.messages).toHaveLength(2); // Already has one message
+        expect(result.messages).toHaveLength(2); // mockState has 1 existing message + userMessage = 2
         expect(result.messages[1]).toBe(userMessage);
         expect(result.userInput).toBe('');
         expect(result.isSending).toBe(true);
