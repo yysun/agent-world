@@ -7,7 +7,7 @@
  * - Per-world sequential message processing
  * - Heartbeat updates during long-running operations
  * - Automatic retry on failures with exponential backoff
- * - Real-time event broadcasting via WebSocket
+ * - Real-time event broadcasting via WebSocket (preserves all event fields)
  * - Status updates (processing/completed/failed)
  * - Graceful shutdown with in-flight message handling
  * - Structured logging with ws.processor category
@@ -26,12 +26,13 @@
  * 3. Process all queued messages for that world
  * 4. Update heartbeat during processing
  * 5. Process each message through world.sendMessage()
- * 6. Capture and broadcast all events
+ * 6. Capture and broadcast all events (preserves role, tool_calls, etc.)
  * 7. Mark completed or failed with retry logic
  * 8. Destroy world instance after all messages processed
  * 9. Broadcast final status
  * 
  * Changes:
+ * - 2025-11-06: Clarify that event broadcasting preserves ALL fields (role, tool_calls, etc.)
  * - 2025-11-02: Fix message processing - reuse world instance across all messages instead of loading/destroying per message
  * - 2025-11-02: Update event broadcasting to use clean format (type + payload structure)
  * - 2025-11-01: Initial queue processor implementation
@@ -267,8 +268,9 @@ export class QueueProcessor {
       // Set up event listeners to broadcast events in real-time
       const messageListener = (event: any) => {
         // Broadcast regular message events
+        // Wrapping preserves ALL event fields (role, tool_calls, content, sender, etc.)
         logger.debug(`[EVENT] Message event received`, { worldId, messageId, sender: event.sender });
-        // Wrap message event - payload contains the message data
+        // Wrap message event - payload contains the complete message data with all fields
         this.config.wsServer.broadcastEvent(worldId, chatId, { type: 'message', payload: event });
       };
 

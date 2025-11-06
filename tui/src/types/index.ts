@@ -180,6 +180,8 @@ export interface ApprovalRequest {
   message: string;
   options: string[];
   requestId: string;
+  toolCallId: string; // Original tool_call.id from OpenAI protocol (for tool result response)
+  agentId?: string;
 }
 
 // Approval decision response

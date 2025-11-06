@@ -11,6 +11,7 @@
  * - Heartbeat monitoring and automatic reconnection
  * - Per-world client management
  * - Structured logging with ws.server category
+ * - Complete event forwarding (preserves all fields including role, tool_calls)
  * 
  * Implementation:
  * - Express HTTP server with WebSocket upgrade
@@ -19,8 +20,10 @@
  * - Queue-based message processing with status updates
  * - CRUD event broadcasting for configuration changes
  * - Pino-based structured logging
+ * - Event forwarding via broadcastEvent() preserves all original fields
  * 
  * Changes:
+ * - 2025-11-06: Confirm complete event forwarding - all fields (role, tool_calls, etc.) preserved in payload
  * - 2025-11-02: Flatten event structure - remove nested payload.payload, put event data directly in payload
  * - 2025-11-02: Consolidate all events to consistent structure (SSE and message events both wrapped)
  * - 2025-11-02: Fix SSE event broadcasting - pass event data directly for SSE events (start, chunk, end, error, log)
@@ -579,6 +582,9 @@ export class AgentWorldWSServer {
 
   /**
    * Broadcast event to all subscribers of a world
+   * 
+   * Preserves ALL fields from the original event (including role, tool_calls, etc.)
+   * by extracting event.payload which contains the complete original event data
    */
   public broadcastEvent(worldId: string, chatId: string | null, event: any): void {
     const subscribers = this.worldSubscriptions.get(worldId);
@@ -590,13 +596,14 @@ export class AgentWorldWSServer {
     });
 
     // Flatten event structure - eventType at top level, payload contains data directly
+    // payload will contain ALL original event fields (role, tool_calls, content, etc.)
     const message: WSMessage = {
       type: 'event',
       worldId,
       chatId: chatId ?? undefined,
       seq: event.seq ?? undefined,
       eventType: event.type,
-      payload: event.payload || event, // Event data directly
+      payload: event.payload || event, // Event data directly (all fields preserved)
       timestamp: Date.now()
     };
 

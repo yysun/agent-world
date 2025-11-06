@@ -1,34 +1,35 @@
 /**
- * useEventProcessor Hook
+ * Event Processor Hook - Handles incoming WebSocket events
  * 
- * Purpose: Process WebSocket events and update world state
+ * Purpose: Process all events from WebSocket and update world state
  * 
  * Features:
- * - Event type routing (message, sse, world, approval) matching demo.ts structure
- * - Flattened event structure: { type: 'event', eventType: '...', payload: {...} }
- * - SSE streaming support - accumulate chunks in streaming messages
- * - Duplicate message prevention - skip final messages already shown via streaming
- * - World event display - tool execution and activity tracking (always shown)
- * - Tool approval event processing - show approval requests in UI
- * - Batching updates during replay for performance
- * - Throttling UI updates (max 60fps)
- * - Backward compatibility for legacy event types (chunk, start, end)
+ * - Message processing (user, agent, system)
+ * - SSE streaming support (start, chunk, end, error)
+ * - Tool call detection and approval request handling (OpenAI protocol)
+ * - Agent activity tracking
+ * - Command result handling
+ * - Chat updates
+ * - Replay batching and throttling for performance
+ * - Agent @mention support in approval responses
  * 
- * Responsibilities:
- * - Process events from ws-client (same structure as demo.ts)
- * - Update world state via callbacks
- * - Handle all event types from protocol including approval requests
- * - Display streaming responses in real-time
- * - Show world events (tool calls, activity) as system messages
- * - Route approval requests to ApprovalDialog via state management
- * - Performance optimizations (batching, throttling)
+ * Implementation:
+ * - Uses WorldState hook for state management
+ * - Handles streaming messages with dedicated ref
+ * - Supports batching for replay mode
+ * - Throttles updates for smooth rendering
+ * - Detects client.requestApproval tool calls in message events
+ * - Captures agentId from message events for approval requests
  * 
- * Created: 2025-11-02 - Phase 1: Implement event processing
- * Updated: 2025-11-02 - Add SSE streaming and world event display
- * Updated: 2025-11-02 - Prevent duplicate messages, always show world events
- * Updated: 2025-11-02 - Fix event structure to match demo.ts (eventType at top level)
- * Updated: Phase 7 - Add tool approval event processing
+ * Created: 2025-11-02 - Phase 1: Event processing infrastructure
+ * Updated: 2025-11-05 - Added tool call handling for approval system
+ * Updated: 2025-11-05 - Added agentId extraction for @mention support in approval responses
  */
+
+import { useCallback, useRef } from 'react';
+import type { WorldState } from './useWorldState.js';
+import type { Message } from '../types/index.js';
+import { handleToolCallEvents } from '../utils/tool-call-handler.js';
 
 import { useCallback, useRef } from 'react';
 import type { WSMessage, Message } from '../../../ws/types.js';
@@ -101,6 +102,41 @@ export function useEventProcessor(
         const sender = payload?.sender || 'unknown';
         const content = payload?.content || '';
         const messageId = payload?.messageId;
+        const agentId = payload?.agentId || payload?.sender; // Use agentId if available, fallback to sender
+
+        // PHASE 1: Check for tool_calls and handle approval requests (OpenAI protocol)
+        // This must happen before message display to show approval dialog immediately
+        if (payload?.tool_calls) {
+          const approvalRequest = handleToolCallEvents(payload, agentId);
+          if (approvalRequest) {
+            // Show approval dialog
+            worldState.showApprovalRequest(approvalRequest);
+
+            // Add a placeholder message for the approval request
+            const placeholderMessage: Message = {
+              id: messageId || `approval-${Date.now()}`,
+              type: 'system',
+              sender: 'system',
+              text: `[Tool approval request: ${approvalRequest.toolName}] - ${approvalRequest.message}`,
+              createdAt: new Date(),
+              messageId: messageId,
+              isSystemEvent: true
+            };
+            worldState.addMessage(placeholderMessage);
+
+            // Return early - don't display the message with tool_calls JSON
+            return;
+          }
+
+          // If there are tool_calls but no approval request, and no real content,
+          // skip displaying this message (it's likely just function call JSON)
+          if (!content || content.trim().startsWith('{')) {
+            if (process.env.DEBUG_EVENTS) {
+              console.log('[TUI] Skipping tool_calls message with JSON content:', messageId);
+            }
+            return;
+          }
+        }
 
         // Skip if this message was already displayed via streaming
         // Check if we have a streaming message with this messageId

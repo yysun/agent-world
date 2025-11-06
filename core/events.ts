@@ -1,91 +1,26 @@
 /**
  * Unified Events Module - World and Agent Event Functions
  *
- * Logger Categories: events.publish, events.agent, events.response, events.memory, events.automention, events.turnlimit, events.chattitle
- * Purpose: World and agent event processing
+ * Purpose: Event-driven message publishing, agent response processing, and memory persistence
  * 
- * Enable with: 
- * - LOG_EVENTS_PUBLISH=debug - Message publishing
- * - LOG_EVENTS_AGENT=debug - Agent processing
- * - LOG_EVENTS=debug - Enable all event logs
- * 
- * What you'll see:
- * - Message publishing and subscriptions
- * - Agent response generation
- * - Memory persistence operations
- * - Auto-mention detection
- * - Turn limit enforcement
- * - Chat title generation
+ * Logging: Enable with LOG_EVENTS=debug or specific categories:
+ * - LOG_EVENTS_PUBLISH, LOG_EVENTS_AGENT, LOG_EVENTS_RESPONSE, LOG_EVENTS_MEMORY
+ * - LOG_EVENTS_AUTOMENTION, LOG_EVENTS_TURNLIMIT, LOG_EVENTS_CHATTITLE
  *
- * Core Event System:
- * - Direct World.eventEmitter event publishing/subscription with type safety
- * - Natural event isolation per World instance preventing cross-world interference
- * - Auto-mention logic with loop prevention and case-insensitive matching
- * - LLM call count management with turn limits and auto-save persistence
- * - World tags: <world>STOP|DONE|PASS</world> and <world>TO: a,b,c</world>
+ * Core Features:
+ * - Event publishing/subscription via World.eventEmitter with type safety
+ * - Agent message filtering with mention detection and turn limits
+ * - Auto-mention logic with loop prevention and world tags (<world>STOP|TO:a,b</world>)
+ * - Message threading with replyToMessageId preservation
+ * - Event persistence with automatic chatId defaulting to world.currentChatId
+ * - Tool approval system with session/one-time approval tracking
+ * - Chat title generation on world idle events
  *
- * World Events: publishMessage, subscribeToMessages, publishSSE (streaming only), subscribeToSSE
- * Agent Events: subscribeAgentToMessages, processAgentMessage, shouldAgentRespond
- * Auto-Mention: Enhanced loop prevention, self-mention removal, paragraph beginning detection
- * Storage: Automatic memory persistence and agent state saving with error handling
- * Chat Title Generation: Smart title generation excluding tool messages from conversation context
- * 
- * SSE Event Usage:
- * - SSE events are ONLY for streaming LLM responses (start, chunk, end, error, log)
- * - Tool messages and approvals use message events with OpenAI protocol
- * - Tool calls must be in message events with role='assistant' and tool_calls array
- * Message ID Tracking: All messages (user and assistant) include messageId and agentId for edit feature
- * Message Threading: replyToMessageId preserved through publish->SSE->frontend pipeline
- *
- * Event Persistence:
- * - All events (message, SSE, tool, system) automatically default chatId to world.currentChatId
- * - Enables proper chat-based event filtering and history retrieval
- * - Events with world.currentChatId = null persist with null chatId (for global/session-less events)
- * - System events can override chatId by setting it explicitly in the event payload
- * - SSE events use pattern `${messageId}-sse-${type}` for unique IDs
- * - Tool events use pattern `${messageId}-tool-${type}` for unique IDs (prevents duplicate conflicts)
- * - Activity events generate unique messageIds per event
- *
- * Consolidation Changes (CC):
- * - Condensed verbose header documentation from 60+ lines to 15 lines
- * - Consolidated duplicate ID generation logic into single generateMessageId helper
- * - Removed redundant storage wrapper initialization (was duplicated)
- * - Streamlined auto-mention utility functions with clearer documentation
- * - Consolidated subscription functions with reduced comment redundancy
- * - Simplified agent message processing with step-by-step flow comments
- * - Removed verbose inline comments while preserving essential logic documentation
- * - Maintained all functionality and test compatibility (168/168 tests passing)
- * - Enhanced chat title generation to filter out tool messages for cleaner titles
- *
- * Architecture Improvements (2025-10-25):
- * - Priority 1: Pre-generate message IDs for agent responses (eliminates two-stage assignment)
- * - Priority 2: Add validation layer to prevent saving agents with missing message IDs
- * - Priority 3: Updated type documentation to clarify messageId requirement
- * - Added publishMessageWithId() for pre-generated IDs
- *
- * Activity Tracking Fix (2025-10-30):
- * - Removed premature activity completion from publishMessage/publishMessageWithId
- * - Activity tracking now managed by actual work (agent processing) not message publication
- * - Prevents world from signaling 'idle' before agents start processing
- * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
- *
- * Changes:
- * - 2025-11-05: Replaced keyword-based approval heuristics with tool execution checking
- * - Removed checkForPendingApprovals() function and keyword matching logic
- * - Added checkToolApproval() function for message-based approval checking
- * - Implemented findSessionApproval() and findRecentApproval() for message parsing
- * - Moved approval checking to tool execution time instead of message prediction
- * - 2025-11-03: Tool events now use `${messageId}-tool-${type}` pattern to prevent UNIQUE constraint 
- *   violations when multiple tool events (tool-start, tool-result, tool-error) share the same messageId
- * - 2025-11-01: Chat title updates moved from SSE end to world idle event (prevents duplicate updates with multiple agents)
- * - 2025-11-01: Removed SYNC_EVENT_PERSISTENCE flag - event persistence now always synchronous/awaitable
- * - 2025-11-01: Fixed null chatId bug - all events now default to world.currentChatId during persistence
- * - 2025-10-30: Fixed replyToMessageId missing in frontend - added parameter to publish functions
- * - 2025-10-30: Fixed premature idle signal - removed activity tracking from message publishing
- * - 2025-10-25: Architectural improvements - pre-generate IDs, add validation, clarify types
- * - 2025-10-25: Fixed agent message messageId - use messageId from publishMessage() return value
- * - 2025-10-21: Added messageId and agentId to all messages saved to agent memory
- * - 2025-10-31: Updated to scenario-based logging (events.* categories)
+ * Recent Changes (2025-11):
+ * - Consolidated redundant logging and streamlined approval checking
+ * - Added tool_calls/tool_call_id persistence for approval messages
+ * - Pre-generate message IDs for agent responses
+ * - Fixed activity tracking to prevent premature idle signals
  */
 
 import {
@@ -202,7 +137,11 @@ export function setupEventPersistence(world: World): () => void {
       payload: {
         content: event.content,
         sender: event.sender,
-        replyToMessageId: event.replyToMessageId
+        replyToMessageId: event.replyToMessageId,
+        // Preserve OpenAI protocol fields for tool calls and approvals
+        role: (event as any).role,
+        tool_calls: (event as any).tool_calls,
+        tool_call_id: (event as any).tool_call_id
       },
       meta: {
         sender: event.sender,
@@ -631,25 +570,101 @@ export function removeSelfMentions(response: string, agentId: string): string {
  * Agent subscription with automatic message processing
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
-  loggerAgent.debug('Subscribing agent to messages', { agentId: agent.id, worldId: world.id });
-
   const handler = async (messageEvent: WorldMessageEvent) => {
-    loggerAgent.debug('[subscribeAgentToMessages] Agent received message event', {
+    loggerAgent.debug('Agent received message', {
       agentId: agent.id,
       sender: messageEvent.sender,
-      content: messageEvent.content?.substring(0, 50),
-      messageId: messageEvent.messageId,
-      hasMessageId: !!messageEvent.messageId,
-      timestamp: messageEvent.timestamp
+      messageId: messageEvent.messageId
     });
 
     if (!messageEvent.messageId) {
-      loggerAgent.error('❌ [subscribeAgentToMessages] Received message WITHOUT messageId', {
+      loggerAgent.error('Received message WITHOUT messageId', {
         agentId: agent.id,
         sender: messageEvent.sender,
-        worldId: world.id,
-        currentChatId: world.currentChatId
+        worldId: world.id
       });
+    }
+
+    // Check if this is an assistant message with tool_calls (approval request)
+    // These need to be saved to agent memory even though they're from the agent
+    const messageData = messageEvent as any;
+    if (messageData.role === 'assistant' && messageData.tool_calls && messageEvent.sender === agent.id) {
+      loggerMemory.debug('Saving approval request to agent memory', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId,
+        toolCalls: messageData.tool_calls.length
+      });
+
+      const approvalMessage: AgentMessage = {
+        role: 'assistant',
+        content: messageEvent.content || '',
+        sender: agent.id,
+        createdAt: messageEvent.timestamp,
+        chatId: world.currentChatId || null,
+        messageId: messageEvent.messageId,
+        replyToMessageId: messageData.replyToMessageId,
+        tool_calls: messageData.tool_calls,
+        agentId: agent.id
+      };
+
+      agent.memory.push(approvalMessage);
+
+      // Auto-save agent memory
+      try {
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+        loggerMemory.debug('Approval request saved to agent memory', {
+          agentId: agent.id,
+          messageId: messageEvent.messageId
+        });
+      } catch (error) {
+        loggerMemory.error('Failed to save approval request to memory', {
+          agentId: agent.id,
+          error: error instanceof Error ? error.message : error
+        });
+      }
+
+      return; // Don't process this message further
+    }
+
+    // Check if this is a tool result message (approval response)
+    // These need to be saved to agent memory for persistence
+    if (messageData.role === 'tool' && messageData.tool_call_id) {
+      loggerMemory.debug('Saving approval response to agent memory', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId,
+        toolCallId: messageData.tool_call_id
+      });
+
+      const approvalResponse: AgentMessage = {
+        role: 'tool',
+        content: messageEvent.content || '',
+        sender: messageEvent.sender || 'system',
+        createdAt: messageEvent.timestamp,
+        chatId: world.currentChatId || null,
+        messageId: messageEvent.messageId,
+        tool_call_id: messageData.tool_call_id,
+        agentId: agent.id
+      };
+
+      agent.memory.push(approvalResponse);
+
+      // Auto-save agent memory
+      try {
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+        loggerMemory.debug('Approval response saved to agent memory', {
+          agentId: agent.id,
+          messageId: messageEvent.messageId
+        });
+      } catch (error) {
+        loggerMemory.error('Failed to save approval response to memory', {
+          agentId: agent.id,
+          error: error instanceof Error ? error.message : error
+        });
+      }
+
+      return; // Don't process this message further
     }
 
     // Skip messages from this agent itself
@@ -691,29 +706,20 @@ export async function saveIncomingMessageToMemory(
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   try {
-    // Skip saving agent's own messages
-    if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) {
-      return;
+    if (messageEvent.sender?.toLowerCase() === agent.id.toLowerCase()) return;
+
+    if (!messageEvent.messageId) {
+      loggerMemory.error('Message missing messageId', {
+        agentId: agent.id,
+        sender: messageEvent.sender,
+        worldId: world.id
+      });
     }
 
-    // Warn if messageId is missing but don't throw
-    if (!messageEvent.messageId) {
-      loggerMemory.error('❌ [MISSING MESSAGEID] Message missing messageId - this should not happen', {
+    if (!world.currentChatId) {
+      loggerMemory.warn('Saving message without chatId', {
         agentId: agent.id,
-        sender: messageEvent.sender,
-        content: messageEvent.content?.substring(0, 50),
-        worldId: world.id,
-        currentChatId: world.currentChatId,
-        timestamp: messageEvent.timestamp,
-        stackTrace: new Error().stack?.split('\n').slice(2, 6).join('\n')
-      });
-      // Continue anyway - message will be saved without messageId
-    } else {
-      loggerMemory.debug('[saveIncomingMessageToMemory] Saving message with messageId', {
-        agentId: agent.id,
-        messageId: messageEvent.messageId,
-        sender: messageEvent.sender,
-        chatId: world.currentChatId
+        messageId: messageEvent.messageId
       });
     }
 
@@ -724,37 +730,16 @@ export async function saveIncomingMessageToMemory(
       createdAt: messageEvent.timestamp,
       chatId: world.currentChatId || null,
       messageId: messageEvent.messageId,
-      replyToMessageId: messageEvent.replyToMessageId, // Preserve threading information
+      replyToMessageId: messageEvent.replyToMessageId,
       agentId: agent.id
     };
 
-    // Log if currentChatId is null
-    if (!world.currentChatId) {
-      loggerMemory.warn('Saving message without chatId', {
-        agentId: agent.id,
-        messageId: messageEvent.messageId,
-        sender: messageEvent.sender,
-        worldId: world.id
-      });
-    }
-
     agent.memory.push(userMessage);
 
-    // Auto-save memory using storage factory
     try {
       const storage = await getStorageWrappers();
-
-      loggerMemory.debug('[saveIncomingMessageToMemory] Saving agent to storage', {
-        agentId: agent.id,
-        worldId: world.id,
-        memoryCount: agent.memory.length,
-        lastMessageId: agent.memory[agent.memory.length - 1]?.messageId,
-        lastMessageSender: agent.memory[agent.memory.length - 1]?.sender
-      });
-
       await storage.saveAgent(world.id, agent);
-
-      loggerMemory.debug('[saveIncomingMessageToMemory] ✅ Agent saved successfully', {
+      loggerMemory.debug('Agent saved successfully', {
         agentId: agent.id,
         messageId: messageEvent.messageId
       });
@@ -838,20 +823,10 @@ export async function processAgentMessage(
       finalResponse = addAutoMention(finalResponse, messageEvent.sender);
     }
 
-    loggerMemory.debug('[processAgentMessage] Generated messageId for agent response', {
-      agentId: agent.id,
-      messageId,
-      triggeringMessageId: messageEvent.messageId,
-      chatId: world.currentChatId,
-      responsePreview: finalResponse.substring(0, 50)
-    });
-
-    // Validate triggering message has ID
     if (!messageEvent.messageId) {
-      loggerMemory.error('[processAgentMessage] messageEvent.messageId is required for threading', {
+      loggerMemory.error('messageEvent.messageId required for threading', {
         agentId: agent.id,
-        sender: messageEvent.sender,
-        content: messageEvent.content?.substring(0, 50)
+        sender: messageEvent.sender
       });
     }
 
@@ -870,36 +845,26 @@ export async function processAgentMessage(
     // Validate threading before saving
     try {
       const { validateMessageThreading } = await import('./types.js');
-
-      // Create combined context including the message we're about to add
-      // This ensures validation sees the complete picture for multi-agent scenarios
       const validationContext = [...agent.memory, assistantMessage];
-
-      // For cross-agent threading, we need to validate against the world's complete message history
-      // But for performance, we only validate critical issues that could cause infinite loops
       validateMessageThreading(assistantMessage, validationContext);
     } catch (error) {
-      loggerMemory.error('[processAgentMessage] Threading validation failed', {
+      loggerMemory.error('Threading validation failed', {
         agentId: agent.id,
         messageId: assistantMessage.messageId,
-        replyToMessageId: assistantMessage.replyToMessageId,
         error: error instanceof Error ? error.message : error
       });
 
-      // For critical errors (self-reference, circular references), clear the threading
-      // For non-critical errors (missing parent), preserve threading
+      // Clear threading for critical errors (self-reference, circular, depth exceeded)
       if (error instanceof Error &&
         (error.message.includes('cannot reply to itself') ||
           error.message.includes('Circular reference detected') ||
           error.message.includes('Thread depth exceeds maximum'))) {
-        loggerMemory.warn('[processAgentMessage] Clearing threading due to critical validation error', {
+        loggerMemory.warn('Clearing threading due to critical error', {
           agentId: agent.id,
-          originalReplyTo: assistantMessage.replyToMessageId,
           error: error.message
         });
         assistantMessage.replyToMessageId = undefined;
       }
-      // For missing parent warnings, preserve the threading - it might be valid cross-agent threading
     }
 
     agent.memory.push(assistantMessage);
@@ -996,31 +961,26 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
 
   const anyMentions = extractMentions(messageEvent.content);
   const mentions = extractParagraphBeginningMentions(messageEvent.content);
-  loggerResponse.debug('Extracted paragraph beginning mentions', { mentions, anyMentions });
+  loggerResponse.debug('Extracted mentions', { mentions, anyMentions });
 
   // For HUMAN messages
   if (senderType === SenderType.HUMAN) {
-    loggerResponse.debug('Processing HUMAN message logic', { agentId: agent.id });
     if (mentions.length === 0) {
-      // If there are ANY mentions anywhere but none at paragraph beginnings, don't respond
       if (anyMentions.length > 0) {
-        loggerResponse.debug('Has mentions but not at paragraph beginning - not responding', { agentId: agent.id, anyMentions });
+        loggerResponse.debug('Mentions exist but not at paragraph beginning', { agentId: agent.id });
         return false;
-      } else {
-        loggerResponse.debug('No agent mentions anywhere - responding as public message', { agentId: agent.id });
-        return true;
       }
-    } else {
-      const shouldRespond = mentions.includes(agent.id.toLowerCase());
-      loggerResponse.debug('Agent mentioned at paragraph beginning - responding to message', { agentId: agent.id, mentions, shouldRespond });
-      return shouldRespond;
+      loggerResponse.debug('No mentions - public message', { agentId: agent.id });
+      return true;
     }
+    const shouldRespond = mentions.includes(agent.id.toLowerCase());
+    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, shouldRespond });
+    return shouldRespond;
   }
 
   // For agent messages, only respond if this agent has a paragraph-beginning mention
-  loggerResponse.debug('Processing AGENT message logic', { agentId: agent.id });
   const shouldRespond = mentions.includes(agent.id.toLowerCase());
-  loggerResponse.debug('AGENT message - should respond: ' + shouldRespond);
+  loggerResponse.debug('AGENT message mention check', { agentId: agent.id, shouldRespond });
   return shouldRespond;
 }
 
@@ -1218,14 +1178,11 @@ export async function checkToolApproval(
  * Find session-wide approval for a tool in message history
  */
 export function findSessionApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'session'; toolName: string } | undefined {
-  // Look for messages containing session approval for this tool
-  // Patterns: "approve [toolName] for session", "approve [toolName] for this session", etc.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.content && typeof msg.content === 'string') {
       const content = msg.content.toLowerCase();
-      if ((content.includes('approve') && content.includes(toolName.toLowerCase()) &&
-        (content.includes('session') || content.includes('for this session'))) ||
+      if ((content.includes('approve') && content.includes(toolName.toLowerCase()) && content.includes('session')) ||
         (content.includes(`approve_session`) && content.includes(toolName.toLowerCase()))) {
         return { decision: 'approve', scope: 'session', toolName };
       }
@@ -1242,12 +1199,9 @@ export function findRecentApproval(messages: AgentMessage[], toolName: string): 
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
   let approvalIndex = -1;
 
-  // Look for recent one-time approval
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.createdAt && msg.createdAt < fiveMinutesAgo) {
-      break; // Stop if we've gone back more than 5 minutes
-    }
+    if (msg.createdAt && msg.createdAt < fiveMinutesAgo) break;
 
     if (msg.content && typeof msg.content === 'string') {
       const content = msg.content.toLowerCase();
@@ -1260,21 +1214,16 @@ export function findRecentApproval(messages: AgentMessage[], toolName: string): 
     }
   }
 
-  // If no approval found, return undefined
-  if (approvalIndex === -1) {
-    return undefined;
-  }
+  if (approvalIndex === -1) return undefined;
 
-  // Check if approval has been consumed by checking for tool execution messages after the approval
+  // Check if approval has been consumed by subsequent tool execution
   for (let i = approvalIndex + 1; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.content && typeof msg.content === 'string') {
       const content = msg.content.toLowerCase();
-      // Look for messages indicating tool execution
       if ((content.includes('tool') && content.includes(toolName.toLowerCase()) &&
         (content.includes('executed') || content.includes('completed') || content.includes('finished'))) ||
         (content.includes(toolName.toLowerCase()) && content.includes('successfully'))) {
-        // One-time approval has been consumed
         return undefined;
       }
     }

@@ -24,6 +24,7 @@ const logger = createCategoryLogger('llm.message-prep');
  * Prepare messages for LLM consumption by filtering client-side tool calls.
  * 
  * This function creates a clean copy of messages suitable for LLM processing:
+ * - Removes messages marked as clientOnly (approval UI messages)
  * - Removes client.* tool calls from assistant messages
  * - Removes approval_ tool results from tool messages
  * - Drops messages that become empty after filtering

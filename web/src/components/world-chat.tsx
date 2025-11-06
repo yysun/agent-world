@@ -11,9 +11,11 @@
  * - Message deduplication by messageId for multi-agent scenarios
  * - Displays only the first/intended recipient agent, not all who received it
  * - Agent activity display for world events (response-start, tool-start)
+ * - Tool call approval request/response rendering with inline action buttons
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-11-05: Added tool call request/response box rendering for inline approval flow
  * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
  * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
  * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
@@ -33,6 +35,8 @@ import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
+import ToolCallRequestBox from './tool-call-request-box';
+import ToolCallResponseBox from './tool-call-response-box';
 
 const debug = false;
 
@@ -385,9 +389,18 @@ export default function WorldChat(props: WorldChatProps) {
                     </div>
                   ) : (
                     <>
-                      <div className="message-content">
-                        {safeHTML(renderMarkdown(formatMessageText(message)))}
-                      </div>
+                      {/* Render tool call request box for approval requests */}
+                      {message.isToolCallRequest && message.toolCallData ? (
+                        <ToolCallRequestBox message={message} />
+                      ) : message.isToolCallResponse && message.toolCallData ? (
+                        /* Render tool call response box for approval results */
+                        <ToolCallResponseBox message={message} />
+                      ) : (
+                        /* Regular message content */
+                        <div className="message-content">
+                          {safeHTML(renderMarkdown(formatMessageText(message)))}
+                        </div>
+                      )}
                       {isUserMessage && !message.isStreaming && (
                         <div className="message-actions">
                           <button

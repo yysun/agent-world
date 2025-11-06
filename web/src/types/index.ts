@@ -101,6 +101,19 @@ export interface Message {
   };
   expandable?: boolean;
   resultPreview?: string;
+
+  // Tool call approval request/response properties
+  isToolCallRequest?: boolean;  // This is a tool call approval request message
+  isToolCallResponse?: boolean; // This is a tool call approval response message
+  toolCallData?: {
+    toolCallId: string;
+    toolName: string;
+    toolArgs: Record<string, unknown>;
+    approvalMessage?: string;
+    approvalOptions?: string[];
+    approvalDecision?: 'approve' | 'deny';
+    approvalScope?: 'once' | 'session' | 'none';
+  };
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
@@ -170,6 +183,7 @@ export interface ApprovalRequest {
   toolArgs: Record<string, unknown>;
   message: string;
   options: string[];
+  agentId?: string;
 }
 
 // ========================================

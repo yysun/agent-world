@@ -1,21 +1,30 @@
 /**
- * SSE Client - Server-Sent Events with AppRun Integration
+ * SSE Client Utilities - Server-Sent Events Management
+ * 
+ * Purpose: Manage SSE connections for real-time streaming responses
  * 
  * Features:
- * - Complete SSE streaming with message accumulation and error handling
- * - Automatic reconnection with exponential backoff
- * - Event-driven state management via AppRun
- * - Proper cleanup and connection lifecycle management
- * - Phase 2.2 Enhancement: MCP tool execution event streaming
- * - Message streaming with start/chunk/end/error events
- * - Tool execution tracking with progress and results
- * - Memory-only message handling (agent→agent messages saved without response)
- * - Log event processing for server-side logging display
- *
- * Bug Fixes:
- * - 2025-10-26: Fixed memory-only message display - sender=recipient, fromAgentId=original author
- *
- * Architecture:
+ * - SSE connection management with cleanup
+ * - Event parsing and routing via AppRun
+ * - Streaming message state management
+ * - Tool execution event handling (start, progress, result, error)
+ * - Tool call detection and approval request handling (OpenAI protocol)
+ * - Agent @mention support for approval responses
+ * - Log event processing
+ * 
+ * Implementation:
+ * - Uses fetch API with ReadableStream for SSE
+ * - Publishes events via app.run() for AppRun integration
+ * - Maintains active streaming messages Map
+ * - Accumulates chunks for smooth streaming display
+ * - Processes tool_calls in SSE chunks and message events
+ * - Detects client.requestApproval tool calls with agentId tracking
+ * - Passes agentId to approval requests for @mention support
+ * 
+ * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2025-11-05 - Added handleMessageToolCalls for message event tool call detection
+ * Updated: 2025-11-05 - Enhanced approval request detection for OpenAI protocol compatibility
+ * Updated: 2025-11-05 - Added agentId tracking for approval requests to support @mention in responses
  */
 
 import app from 'apprun';
@@ -205,7 +214,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         });
 
         if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-          publishApprovalRequests(toolCalls);
+          publishApprovalRequests(toolCalls, agentName);
         }
       }
       break;
@@ -302,7 +311,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   }
 };
 
-const publishApprovalRequests = (toolCalls: any[]): void => {
+const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
   for (const toolCall of toolCalls) {
     const toolName = toolCall?.function?.name;
     if (toolName !== 'client.requestApproval') {
@@ -325,12 +334,35 @@ const publishApprovalRequests = (toolCalls: any[]): void => {
       message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
       options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
         ? parsedArgs.options
-        : ['Cancel', 'Once', 'Always']
+        : ['Cancel', 'Once', 'Always'],
+      agentId
     };
 
     publishEvent('show-approval-request', approvalRequest);
   }
 };
+
+/**
+ * Handle tool_calls in message events (OpenAI protocol)
+ * Detects approval requests and publishes show-approval-request event
+ * @param message - Message event data that may contain tool_calls
+ */
+export const handleMessageToolCalls = (message: any): void => {
+  if (!message?.tool_calls || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+    return;
+  }
+
+  // Extract agentId from message
+  const agentId = message.agentId || message.sender;
+
+  // Check for approval requests in tool_calls
+  publishApprovalRequests(message.tool_calls, agentId);
+};
+
+/**
+ * Export publishApprovalRequests for testing
+ */
+export { publishApprovalRequests };
 
 /**
  * Send chat message with SSE streaming response

@@ -10,16 +10,19 @@
  * - Command results (lastCommandResult)
  * - Error state
  * - Tool approval management (showApprovalRequest, sendApprovalResponse)
+ * - Agent @mention support in approval responses
  * 
  * Responsibilities:
  * - Pure React state management (useState, useCallback, useMemo)
  * - No WebSocket logic
  * - Uses types from ws/types.ts and local types
  * - Memory limit (keep last 1000 messages)
+ * - Passes agentId from approval request to response callback
  * 
  * Created: 2025-11-01 - Phase 1: Core Infrastructure
  * Updated: 2025-11-02 - Phase 1: Refactor to use shared types
  * Updated: Phase 7 - Add tool approval system integration
+ * Updated: 2025-11-05 - Added agentId tracking for @mention support in approval responses
  */
 
 import { useState, useCallback } from 'react';
@@ -184,14 +187,20 @@ export function useWorldState(): UseWorldStateReturn {
   }, []);
 
   const sendApprovalResponse = useCallback((response: ApprovalResponse) => {
+    // Get toolName, toolCallId, and agentId from current request before hiding dialog
+    const toolName = approvalState.currentRequest?.toolName || 'unknown_tool';
+    const toolCallId = approvalState.currentRequest?.toolCallId || `approval_${response.requestId}`;
+    const agentId = approvalState.currentRequest?.agentId;
+
     // Send response via callback if available
     if (approvalResponseCallback) {
-      approvalResponseCallback(response);
+      // Pass the full approval request data along with the response, including agentId
+      approvalResponseCallback({ ...response, toolName, toolCallId, agentId } as any);
     }
 
     // Hide approval dialog
     hideApprovalRequest();
-  }, [approvalResponseCallback, hideApprovalRequest]);
+  }, [approvalResponseCallback, hideApprovalRequest, approvalState.currentRequest]);
 
   // Method to set approval response callback (called by parent)
   const setApprovalCallback = useCallback((callback: (response: ApprovalResponse) => void) => {

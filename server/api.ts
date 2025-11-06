@@ -848,13 +848,16 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   const messageListener = (eventData: MessageEventPayload) => {
     // Enhance message event data with structured format
     // CRITICAL: replyToMessageId must be included for frontend threading display
+    // CRITICAL: tool_calls must be included for approval request handling (OpenAI protocol)
     const messageData = {
       type: 'message',
       sender: eventData.sender,
       content: eventData.content,
       messageId: eventData.messageId,
       replyToMessageId: eventData.replyToMessageId,  // Threading: parent message reference
-      createdAt: eventData.timestamp || new Date().toISOString()
+      createdAt: eventData.timestamp || new Date().toISOString(),
+      role: eventData.role,  // Include role for OpenAI protocol compatibility
+      tool_calls: eventData.tool_calls  // Include tool_calls for approval requests
     };
     sendSSE(JSON.stringify({ type: EventType.MESSAGE, data: messageData }));
   };
@@ -926,7 +929,7 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
     // Process approval messages from history to update cache
     if (Array.isArray(historyMessages) && world) {
       const approvalMessages = historyMessages.filter(msg =>
-        msg && msg.role === 'tool' && typeof msg.tool_call_id === 'string' && msg.tool_call_id.startsWith('approval_')
+        msg && msg.role === 'tool' && typeof msg.tool_call_id === 'string'
       );
 
       const chatId = world.currentChatId ?? null;
@@ -951,6 +954,7 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
             continue;
           }
 
+          // Update approval cache based on decision and scope
           if (decision === 'approve') {
             if (scope === 'session') {
               approvalCache.set(chatId, toolName, true);

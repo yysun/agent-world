@@ -8,13 +8,14 @@
  * - Enqueue messages for processing
  * - Execute CLI commands (with automatic parsing)
  * - Send approval responses for tool approval system
+ * - Agent @mention support in approval responses
  * - Unsubscribe from world
  * - Ping/heartbeat
  * 
  * Responsibilities:
  * - Protocol operations only
  * - Command parsing and mapping
- * - Tool approval response communication
+ * - Tool approval response communication with @mention like CLI
  * - Depends on WebSocketClient instance
  * - No state management
  * - No event processing
@@ -22,6 +23,7 @@
  * Created: 2025-11-02 - Phase 1: Implement focused hooks
  * Updated: 2025-11-02 - Fix command execution - parse command strings and map to server format
  * Updated: Phase 7 - Add tool approval response functionality
+ * Updated: 2025-11-05 - Added agent @mention support for approval responses to match CLI behavior
  */
 
 import { useCallback, useEffect } from 'react';
@@ -205,13 +207,38 @@ export function useAgentWorldClient(
     }
   }, [ws, connected]);
 
-  const sendApprovalResponse = useCallback(async (response: ApprovalResponse) => {
+  const sendApprovalResponse = useCallback(async (response: ApprovalResponse & { toolName?: string; toolCallId?: string; worldId?: string; chatId?: string | null; agentId?: string }) => {
     if (!ws || !connected) {
       console.warn('Cannot send approval response: not connected');
       return;
     }
     try {
-      await ws.sendCommand(undefined, 'approval-response', response);
+      const { decision, scope, toolName = 'unknown_tool', toolCallId, worldId, chatId, agentId } = response;
+
+      // For WebSocket, we send approval responses as regular human messages
+      // This matches the CLI implementation in cli/index.ts
+      // The server will process the message and update the approval cache
+
+      let content: string;
+      if (decision === 'approve' && scope === 'session') {
+        content = `approve ${toolName} for session`;
+      } else if (decision === 'approve' && scope === 'once') {
+        content = `approve_once ${toolName}`;
+      } else {
+        content = `deny ${toolName}`;
+      }
+
+      // Add @mention if agentId is available (like CLI does)
+      const agentMention = agentId ? `@${agentId}, ` : '';
+      const messageContent = `${agentMention}${content}`;
+
+      // Send as regular message
+      // Note: worldId and chatId should be passed from the approval context
+      if (worldId) {
+        await ws.sendMessage(worldId, messageContent, chatId ?? undefined, 'human');
+      } else {
+        console.warn('Cannot send approval response: worldId not provided');
+      }
     } catch (error) {
       console.error('Send approval response failed:', error instanceof Error ? error.message : error);
     }

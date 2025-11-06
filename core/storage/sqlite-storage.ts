@@ -274,7 +274,8 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
   `, agentId, worldId) as any;
   if (!agentData) return null;
   const memoryData = await all(ctx, `
-    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, created_at as createdAt
+    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, 
+           tool_calls as toolCalls, tool_call_id as toolCallId, created_at as createdAt
     FROM agent_memory
     WHERE agent_id = ? AND world_id = ?
     ORDER BY created_at ASC
@@ -287,7 +288,9 @@ export async function loadAgent(ctx: SQLiteStorageContext, worldId: string, agen
     memory: memoryData.map(msg => ({
       ...msg,
       createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
-      chatId: msg.chatId // Preserve chatId field
+      chatId: msg.chatId, // Preserve chatId field
+      tool_calls: (msg as any).toolCalls ? JSON.parse((msg as any).toolCalls) : undefined,
+      tool_call_id: (msg as any).toolCallId || undefined
     })),
   } as Agent;
   return agent;
@@ -317,7 +320,8 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
   const result: Agent[] = [];
   for (const agentData of agents) {
     const memoryData = await all(ctx, `
-      SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, created_at as createdAt
+      SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId,
+             tool_calls as toolCalls, tool_call_id as toolCallId, created_at as createdAt
       FROM agent_memory
       WHERE agent_id = ? AND world_id = ?
       ORDER BY created_at ASC
@@ -344,10 +348,12 @@ export async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string
 
   for (const message of memory) {
     await run(ctx, `
-      INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, tool_calls, tool_call_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       agentId, worldId, message.role, message.content, message.sender, message.chatId, message.messageId, message.replyToMessageId,
+      message.tool_calls ? JSON.stringify(message.tool_calls) : null,
+      message.tool_call_id || null,
       message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
     );
   }
@@ -366,7 +372,8 @@ export async function deleteMemoryByChatId(ctx: SQLiteStorageContext, worldId: s
 export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chatId: string): Promise<AgentMessage[]> {
   await ensureInitialized(ctx);
   const rows = await all(ctx, `
-    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId, agent_id as agentId, created_at as createdAt
+    SELECT role, content, sender, chat_id as chatId, message_id as messageId, reply_to_message_id as replyToMessageId,
+           tool_calls as toolCalls, tool_call_id as toolCallId, agent_id as agentId, created_at as createdAt
     FROM agent_memory
     WHERE world_id = ? AND (? = '' OR chat_id = ?)
     ORDER BY datetime(created_at) ASC, rowid ASC
@@ -379,6 +386,8 @@ export async function getMemory(ctx: SQLiteStorageContext, worldId: string, chat
     chatId: r.chatId,
     messageId: r.messageId,
     replyToMessageId: r.replyToMessageId, // FIX: Include replyToMessageId from database
+    tool_calls: r.toolCalls ? JSON.parse(r.toolCalls) : undefined,
+    tool_call_id: r.toolCallId || undefined,
     agentId: r.agentId,
     createdAt: r.createdAt ? new Date(r.createdAt) : new Date()
   }));
@@ -668,9 +677,11 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
         if (agent.memory && agent.memory.length > 0) {
           for (const message of agent.memory) {
             await run(ctx, `
-              INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `, agent.id, worldId, message.role, message.content, message.sender, message.chatId,
+              INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, tool_calls, tool_call_id, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, agent.id, worldId, message.role, message.content, message.sender, message.chatId, message.messageId, message.replyToMessageId,
+              message.tool_calls ? JSON.stringify(message.tool_calls) : null,
+              message.tool_call_id || null,
               message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString()));
           }
         }

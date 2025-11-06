@@ -34,7 +34,6 @@ import CommandResult from './components/CommandResult.js';
 import WorldManager from './components/WorldManager.js';
 import AgentManager from './components/AgentManager.js';
 import ChatManager from './components/ChatManager.js';
-import ApprovalDialog from './components/ApprovalDialog.js';
 import type { AgentActivityStatus } from '../../ws/types.js';
 
 interface AppProps {
@@ -83,16 +82,21 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
   // 6. Setup approval response callback
   useEffect(() => {
     worldState.setApprovalCallback((response) => {
-      client.sendApprovalResponse(response);
+      // Pass worldId and chatId to approval response
+      client.sendApprovalResponse({
+        ...response,
+        worldId,
+        chatId
+      });
     });
-  }, [worldState, client]);
+  }, [worldState.setApprovalCallback, client.sendApprovalResponse, worldId, chatId]);
 
   // Subscribe to world when connected
   useEffect(() => {
     if (wsConnection.connected && wsConnection.ws) {
       client.subscribe(worldId, chatId, replayFrom);
     }
-  }, [wsConnection.connected, worldId, chatId, replayFrom]);
+  }, [wsConnection.connected, worldId, chatId, replayFrom, client.subscribe, wsConnection.ws]);
 
   // Handle Ctrl+C to exit
   useInput((input, key) => {
@@ -173,11 +177,46 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
         </Box>
       )}
 
+      {/* Inline Approval Display (above input) */}
+      {worldState.approvalState.isShowingApproval && worldState.approvalState.currentRequest && (
+        <Box paddingX={1} paddingY={1} borderStyle="double" borderColor="yellow">
+          <Box flexDirection="column">
+            <Text bold color="yellow">🔒 Tool Approval Required</Text>
+            <Text color="gray">Tool: <Text color="cyan">{worldState.approvalState.currentRequest.toolName}</Text></Text>
+            {worldState.approvalState.currentRequest.message && (
+              <Text color="gray">Details: {worldState.approvalState.currentRequest.message}</Text>
+            )}
+            {worldState.approvalState.currentRequest.toolArgs && Object.keys(worldState.approvalState.currentRequest.toolArgs).length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color="gray">Arguments:</Text>
+                {Object.entries(worldState.approvalState.currentRequest.toolArgs).map(([key, value]) => {
+                  const displayValue = typeof value === 'string' && value.length > 100
+                    ? `${value.substring(0, 100)}...`
+                    : String(value);
+                  return (
+                    <Text key={key} color="gray">  {key}: {displayValue}</Text>
+                  );
+                })}
+              </Box>
+            )}
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold color="magenta">How would you like to respond?</Text>
+              <Text color="cyan">  1. Deny</Text>
+              <Text color="cyan">  2. Approve Once</Text>
+              <Text color="cyan">  3. Approve for Session</Text>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
       {/* Input Box */}
       <InputBox
         onSubmit={handleSubmit}
         disabled={!wsConnection.connected}
         placeholder={wsConnection.connected ? 'Type a message or /command...' : 'Disconnected'}
+        approvalRequest={worldState.approvalState.currentRequest}
+        onApproval={worldState.sendApprovalResponse}
+        onApprovalCancel={worldState.hideApprovalRequest}
       />
 
       {/* Status Bar: Shortcuts + Counts */}
@@ -207,14 +246,6 @@ const App: React.FC<AppProps> = ({ serverUrl, worldId, chatId, replayFrom }) => 
           onClose={popup.closePopup}
         />
       )}
-
-      {/* Approval Dialog */}
-      <ApprovalDialog
-        request={worldState.approvalState.currentRequest}
-        isVisible={worldState.approvalState.isShowingApproval}
-        onApproval={worldState.sendApprovalResponse}
-        onCancel={worldState.hideApprovalRequest}
-      />
     </Box>
   );
 };
