@@ -288,7 +288,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'List all worlds with details (ID, name, description, agents count)',
     usage: '/world list',
     parameters: [],
-    aliases: ['list-worlds', 'lsw'],
+    aliases: ['list worlds', 'lsw', 'list-worlds'],
     category: 'world'
   },
   'world show': {
@@ -299,7 +299,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'World name or ID', type: 'string' }
     ],
-    aliases: ['show-world'],
+    aliases: ['show world', 'show-world'],
     category: 'world'
   },
   'world create': {
@@ -312,7 +312,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'description', required: false, description: 'World description', type: 'string' },
       { name: 'turnLimit', required: false, description: 'Turn limit for the world', type: 'number' }
     ],
-    aliases: ['create-world', 'new'],
+    aliases: ['create world', 'new', 'create-world'],
     category: 'world'
   },
   'world update': {
@@ -323,7 +323,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'World name or ID', type: 'string' }
     ],
-    aliases: ['update-world'],
+    aliases: ['update world', 'update-world'],
     category: 'world'
   },
   'world delete': {
@@ -334,7 +334,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'World name or ID', type: 'string' }
     ],
-    aliases: ['delete-world'],
+    aliases: ['delete world', 'delete-world'],
     category: 'world'
   },
   'world select': {
@@ -343,7 +343,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'Show world selection menu to pick a world',
     usage: '/world select',
     parameters: [],
-    aliases: ['select', 'sel'],
+    aliases: ['select world', 'select', 'sel'],
     category: 'world'
   },
   'world export': {
@@ -354,7 +354,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'file', required: false, description: 'Output file path (defaults to [world]-timestamp.md)', type: 'string' }
     ],
-    aliases: ['export'],
+    aliases: ['export world', 'export'],
     category: 'world'
   },
   'world save': {
@@ -363,7 +363,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'Save world data to File Storage or SQL Storage with folder selection (overwrites existing data with confirmation)',
     usage: '/world save',
     parameters: [],
-    aliases: ['save'],
+    aliases: ['save world', 'save'],
     category: 'world'
   },
   'agent list': {
@@ -372,7 +372,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'List all agents in the current world with details',
     usage: '/agent list',
     parameters: [],
-    aliases: ['list-agents', 'lsa'],
+    aliases: ['list agents', 'lsa', 'list-agents'],
     category: 'agent'
   },
   'agent show': {
@@ -383,7 +383,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'Agent name', type: 'string' }
     ],
-    aliases: ['show-agent'],
+    aliases: ['show agent', 'show-agent'],
     category: 'agent'
   },
   'agent create': {
@@ -395,7 +395,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'name', required: false, description: 'Agent name', type: 'string' },
       { name: 'prompt', required: false, description: 'Agent system prompt', type: 'string' }
     ],
-    aliases: ['add-agent', 'add'],
+    aliases: ['create agent', 'agent new', 'add agent', 'agent add', 'add', 'add-agent'],
     category: 'agent'
   },
   'agent update': {
@@ -406,7 +406,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'Agent name', type: 'string' }
     ],
-    aliases: ['update-agent'],
+    aliases: ['update agent', 'update-agent'],
     category: 'agent'
   },
   'agent delete': {
@@ -417,7 +417,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'name', required: true, description: 'Agent name', type: 'string' }
     ],
-    aliases: ['delete-agent'],
+    aliases: ['delete agent', 'delete-agent'],
     category: 'agent'
   },
   'agent clear': {
@@ -439,7 +439,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'filter', required: false, description: 'Optional filter (--active for current chat only)', type: 'string' }
     ],
-    aliases: ['list-chats'],
+    aliases: ['list chats', 'list-chats'],
     category: 'chat'
   },
   'chat create': {
@@ -448,7 +448,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'Create a new chat history entry and make it current',
     usage: '/chat create',
     parameters: [],
-    aliases: ['new-chat'],
+    aliases: ['create chat', 'chat new', 'new chat', 'new-chat'],
     category: 'chat'
   },
   'chat select': {
@@ -457,7 +457,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     description: 'Show chat selection menu and display messages from selected chat',
     usage: '/chat select',
     parameters: [],
-    aliases: ['select-chat'],
+    aliases: ['select chat', 'select-chat'],
     category: 'chat'
   },
   'chat switch': {
@@ -468,7 +468,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'chatId', required: true, description: 'Chat ID to load', type: 'string' }
     ],
-    aliases: ['load-chat'],
+    aliases: ['switch chat', 'load chat', 'load-chat'],
     category: 'chat'
   },
   'chat delete': {
@@ -479,7 +479,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
     parameters: [
       { name: 'chatId', required: true, description: 'Chat ID to delete', type: 'string' }
     ],
-    aliases: ['delete-chat'],
+    aliases: ['delete chat', 'delete-chat'],
     category: 'chat'
   },
   'chat rename': {
@@ -492,7 +492,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'name', required: true, description: 'New chat name', type: 'string' },
       { name: 'description', required: false, description: 'New chat description', type: 'string' }
     ],
-    aliases: ['rename-chat'],
+    aliases: ['rename chat', 'rename-chat'],
     category: 'chat'
   },
   'chat export': {
@@ -504,7 +504,7 @@ export const CLI_COMMAND_MAP: Record<string, CLICommandDefinition> = {
       { name: 'chatId', required: false, description: 'Chat ID to export (defaults to current chat)', type: 'string' },
       { name: 'file', required: false, description: 'Output file path', type: 'string' }
     ],
-    aliases: ['export-chat'],
+    aliases: ['export chat', 'export-chat'],
     category: 'chat'
   },
   'help': {
