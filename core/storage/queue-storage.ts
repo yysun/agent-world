@@ -97,11 +97,14 @@ export interface QueueStorage {
   enqueue(message: EnqueueMessageInput): Promise<QueueMessage>;
 
   /**
-   * Dequeue the next pending message for a specific world
+   * Dequeue the next pending message for a specific world/chat
    * Atomically marks message as 'processing' and returns it
-   * Returns null if no pending messages or world already processing
+   * Returns null if no pending messages or chat already processing
+   * 
+   * @param worldId - World to dequeue from
+   * @param chatId - Optional chat ID for per-chat locking. If null/undefined, dequeues world-level messages.
    */
-  dequeue(worldId: string): Promise<QueueMessage | null>;
+  dequeue(worldId: string, chatId?: string | null): Promise<QueueMessage | null>;
 
   /**
    * Update heartbeat timestamp for a message
@@ -127,9 +130,12 @@ export interface QueueStorage {
   retryMessage(messageId: string): Promise<boolean>;
 
   /**
-   * Get queue depth (number of pending messages) for a world
+   * Get queue depth (number of pending messages) for a world/chat
+   * 
+   * @param worldId - World to get depth for
+   * @param chatId - Optional chat ID. If null/undefined, gets world-level message count.
    */
-  getQueueDepth(worldId: string): Promise<number>;
+  getQueueDepth(worldId: string, chatId?: string | null): Promise<number>;
 
   /**
    * Get queue statistics for a specific world or all worlds
@@ -174,15 +180,22 @@ function generateUUID(): string {
  * In-Memory Queue Storage Implementation
  */
 export function createMemoryQueueStorage(): QueueStorage {
-  // Per-world pending message queues
+  // Per-(world,chat) pending message queues
   const queues = new Map<string, QueueMessage[]>();
 
-  // Currently processing messages (one per world)
+  // Currently processing messages (one per (world, chat) key)
   const processing = new Map<string, QueueMessage>();
 
   // Completed/failed messages (for stats)
   const completed = new Map<string, QueueMessage>();
   const failed = new Map<string, QueueMessage>();
+
+  /**
+   * Generate queue key for (worldId, chatId)
+   */
+  function getQueueKey(worldId: string, chatId: string | null): string {
+    return chatId === null ? `${worldId}:__world__` : `${worldId}:${chatId}`;
+  }
 
   /**
    * Enqueue a message for processing
@@ -203,41 +216,51 @@ export function createMemoryQueueStorage(): QueueStorage {
       timeoutSeconds: message.timeoutSeconds
     };
 
-    const queue = queues.get(message.worldId) || [];
+    const key = getQueueKey(message.worldId, queueMessage.chatId);
+    const queue = queues.get(key) || [];
     queue.push(queueMessage);
-    queues.set(message.worldId, queue);
+    queues.set(key, queue);
 
     return queueMessage;
   }
 
   /**
-   * Dequeue the next pending message for a specific world
-   * Returns null if world is already processing or no pending messages
+   * Dequeue the next pending message for a specific world/chat
+   * Returns null if chat is already processing or no pending messages
    */
-  async function dequeue(worldId: string): Promise<QueueMessage | null> {
-    // Check if world is already processing
-    if (processing.has(worldId)) {
+  async function dequeue(worldId: string, chatId?: string | null): Promise<QueueMessage | null> {
+    const key = getQueueKey(worldId, chatId ?? null);
+    
+    // Check if this (world, chat) is already processing
+    if (processing.has(key)) {
       return null;
     }
 
-    // Get queue for this world
-    const queue = queues.get(worldId);
+    // Get queue for this (world, chat)
+    const queue = queues.get(key);
     if (!queue || queue.length === 0) {
       return null;
     }
 
-    // Dequeue first message (FIFO)
+    // Sort by priority (desc) then createdAt (asc), then dequeue first
+    queue.sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return b.priority - a.priority;
+      }
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+
     const message = queue.shift()!;
     message.status = 'processing';
     message.processedAt = new Date();
     message.heartbeatAt = new Date();
 
     // Mark as processing
-    processing.set(worldId, message);
+    processing.set(key, message);
 
     // Update queue
     if (queue.length === 0) {
-      queues.delete(worldId);
+      queues.delete(key);
     }
 
     return message;
@@ -261,11 +284,11 @@ export function createMemoryQueueStorage(): QueueStorage {
    */
   async function markCompleted(messageId: string): Promise<void> {
     // Find and remove from processing
-    for (const [worldId, message] of processing) {
+    for (const [key, message] of processing) {
       if (message.id === messageId) {
         message.status = 'completed';
         message.completedAt = new Date();
-        processing.delete(worldId);
+        processing.delete(key);
         completed.set(message.id, message);
         return;
       }
@@ -276,7 +299,7 @@ export function createMemoryQueueStorage(): QueueStorage {
    */
   async function markFailed(messageId: string, error: string): Promise<void> {
     // Find message in processing
-    for (const [worldId, message] of processing) {
+    for (const [key, message] of processing) {
       if (message.id === messageId) {
         message.error = error;
         message.retryCount++;
@@ -286,16 +309,17 @@ export function createMemoryQueueStorage(): QueueStorage {
           message.status = 'pending';
           message.processedAt = undefined;
           message.heartbeatAt = undefined;
-          processing.delete(worldId);
+          processing.delete(key);
 
-          const queue = queues.get(worldId) || [];
+          const queueKey = getQueueKey(message.worldId, message.chatId);
+          const queue = queues.get(queueKey) || [];
           queue.push(message);
-          queues.set(worldId, queue);
+          queues.set(queueKey, queue);
         } else {
           // Max retries reached: mark as failed
           message.status = 'failed';
           message.completedAt = new Date();
-          processing.delete(worldId);
+          processing.delete(key);
           failed.set(message.id, message);
         }
         return;
@@ -318,9 +342,10 @@ export function createMemoryQueueStorage(): QueueStorage {
 
         failed.delete(id);
 
-        const queue = queues.get(message.worldId) || [];
+        const key = getQueueKey(message.worldId, message.chatId);
+        const queue = queues.get(key) || [];
         queue.push(message);
-        queues.set(message.worldId, queue);
+        queues.set(key, queue);
 
         return true;
       }
@@ -329,10 +354,11 @@ export function createMemoryQueueStorage(): QueueStorage {
   }
 
   /**
-   * Get queue depth for a world
+   * Get queue depth for a world/chat
    */
-  async function getQueueDepth(worldId: string): Promise<number> {
-    const queue = queues.get(worldId);
+  async function getQueueDepth(worldId: string, chatId?: string | null): Promise<number> {
+    const key = getQueueKey(worldId, chatId ?? null);
+    const queue = queues.get(key);
     return queue ? queue.length : 0;
   }
 
@@ -450,4 +476,24 @@ export function createMemoryQueueStorage(): QueueStorage {
   };
 }
 
+/**
+ * Create queue storage with specified backend (sqlite or memory)
+ * 
+ * @param backend - 'sqlite' or 'memory'
+ * @param db - SQLite database instance (required if backend is 'sqlite')
+ */
+export async function createQueueStorage(
+  backend: 'sqlite' | 'memory',
+  db?: any
+): Promise<QueueStorage> {
+  if (backend === 'sqlite') {
+    if (!db) {
+      throw new Error('SQLite database instance is required for sqlite backend');
+    }
+    const { createSQLiteQueueStorage } = await import('./queue-sqlite.js');
+    return createSQLiteQueueStorage(db);
+  }
+  
+  return createMemoryQueueStorage();
+}
 

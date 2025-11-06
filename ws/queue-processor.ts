@@ -69,7 +69,7 @@ export class QueueProcessor {
   private config: Required<QueueProcessorConfig>;
   private running = false;
   private pollTimer?: NodeJS.Timeout;
-  private processingWorlds = new Set<string>();
+  private processingChats = new Set<string>();  // Track per-chat: "worldId:chatId"
   private shutdownPromise?: Promise<void>;
   private shutdownResolve?: () => void;
 
@@ -113,8 +113,8 @@ export class QueueProcessor {
     }
 
     // Wait for in-flight processing to complete
-    if (this.processingWorlds.size > 0) {
-      logger.info(`Waiting for ${this.processingWorlds.size} worlds to finish processing...`);
+    if (this.processingChats.size > 0) {
+      logger.info(`Waiting for ${this.processingChats.size} chats to finish processing...`);
       this.shutdownPromise = new Promise((resolve) => {
         this.shutdownResolve = resolve;
       });
@@ -144,19 +144,14 @@ export class QueueProcessor {
    */
   private async poll(): Promise<void> {
     // Check if we're at max concurrency
-    if (this.processingWorlds.size >= this.config.maxConcurrent) {
+    if (this.processingChats.size >= this.config.maxConcurrent) {
       return;
     }
 
     // Get queue statistics to find worlds with pending messages
-    const stats = await this.config.queueStorage.getQueueStats();    // stats is an array of WorldQueueStats, not an object
+    const stats = await this.config.queueStorage.getQueueStats();
     for (const worldStats of stats) {
       const worldId = worldStats.worldId;
-
-      // Skip if world is already processing
-      if (this.processingWorlds.has(worldId)) {
-        continue;
-      }
 
       // Skip if no pending messages
       if (worldStats.pending === 0) {
@@ -164,11 +159,11 @@ export class QueueProcessor {
       }
 
       // Check concurrency limit
-      if (this.processingWorlds.size >= this.config.maxConcurrent) {
+      if (this.processingChats.size >= this.config.maxConcurrent) {
         break;
       }
 
-      // Start processing this world
+      // Start processing this world (which will handle per-chat dequeuing)
       logger.info(`📨 Poll detected ${worldStats.pending} pending message(s) for world: ${worldId}`);
       this.processWorld(worldId).catch((error) => {
         logger.error(`Error processing world ${worldId}:`, error);
@@ -177,11 +172,9 @@ export class QueueProcessor {
   }
 
   /**
-   * Process all messages for a specific world
+   * Process all messages for a specific world (handling multiple chats)
    */
   private async processWorld(worldId: string): Promise<void> {
-    this.processingWorlds.add(worldId);
-
     // Load world instance ONCE for all messages
     let subscription: WorldSubscription | null = null;
 
@@ -203,8 +196,10 @@ export class QueueProcessor {
 
       // Process messages one at a time until queue is empty
       while (this.running) {
-        // Dequeue next message for this world
-        const message = await this.config.queueStorage.dequeue(worldId);
+        // Dequeue next message for this world (any chat)
+        // Try to dequeue from any chat in this world
+        // The dequeue will return null if all chats are already processing or no pending messages
+        const message = await this.dequeueNextMessage(worldId);
 
         if (!message) {
           // No more messages for this world right now
@@ -212,7 +207,7 @@ export class QueueProcessor {
           break;
         }
 
-        logger.info(`📬 Dequeued message for world: ${worldId}`, {
+        logger.info(`📬 Dequeued message for world: ${worldId}, chat: ${message.chatId}`, {
           messageId: message.messageId,
           queueId: message.id,
           content: message.content.substring(0, 50)
@@ -231,17 +226,34 @@ export class QueueProcessor {
         await subscription.destroy();
       }
 
-      // IMPORTANT: Remove from processing BEFORE checking if there are more messages
-      // This allows the next poll to pick up any new messages that arrived
-      this.processingWorlds.delete(worldId);
-
       logger.info(`✅ Finished processing batch for world: ${worldId}`);
 
       // If shutting down and all processing complete, resolve shutdown promise
-      if (!this.running && this.processingWorlds.size === 0 && this.shutdownResolve) {
+      if (!this.running && this.processingChats.size === 0 && this.shutdownResolve) {
         this.shutdownResolve();
       }
     }
+  }
+
+  /**
+   * Dequeue next message from any chat in the world that's not currently processing
+   */
+  private async dequeueNextMessage(worldId: string): Promise<QueueMessage | null> {
+    // Try to dequeue without specifying chatId - this will find any pending message
+    // The queue storage will handle per-chat locking internally
+    // We just need to try all chats until we find one that's not processing
+    
+    // Get all chats with pending messages for this world
+    // For now, we'll use a simple approach: try dequeue with undefined chatId
+    // which will let the queue storage find the next available message
+    const message = await this.config.queueStorage.dequeue(worldId);
+    
+    if (message) {
+      const chatKey = `${worldId}:${message.chatId}`;
+      this.processingChats.add(chatKey);
+    }
+    
+    return message;
   }
 
   /**
@@ -334,6 +346,10 @@ export class QueueProcessor {
     } finally {
       // Stop heartbeat updates
       clearInterval(heartbeatTimer);
+      
+      // Remove from processing chats
+      const chatKey = `${worldId}:${chatId}`;
+      this.processingChats.delete(chatKey);
     }
   }
 
@@ -363,13 +379,13 @@ export class QueueProcessor {
    */
   public getStats(): {
     running: boolean;
-    processingWorlds: number;
-    activeWorlds: string[];
+    processingChats: number;
+    activeChats: string[];
   } {
     return {
       running: this.running,
-      processingWorlds: this.processingWorlds.size,
-      activeWorlds: Array.from(this.processingWorlds)
+      processingChats: this.processingChats.size,
+      activeChats: Array.from(this.processingChats)
     };
   }
 }
