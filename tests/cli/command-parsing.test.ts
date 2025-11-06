@@ -72,7 +72,7 @@ describe('Command Parsing', () => {
       expect(result.commandType).toBe('createWorld');
     });
 
-    it('should parse /add as agent create when world is selected', () => {
+    it('should parse /add as agent create', () => {
       const result = parseCLICommand('/add TestAgent');
       expect(result.isValid).toBe(true);
       expect(result.command).toBe('agent create');
