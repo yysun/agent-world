@@ -103,6 +103,11 @@ const logger = createCategoryLogger('core.export');
 let storageWrappers: StorageAPI | null = null;
 
 async function initializeModules() {
+  // Skip storage initialization in test environment to prevent SQLite errors
+  // Tests use mocked storage from vitest-setup.ts
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
   storageWrappers = await createStorageWithWrappers();
 }
 
