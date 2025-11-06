@@ -106,8 +106,6 @@ export class AgentWorldWSClient extends EventEmitter {
   private config: Required<WSClientConfig>;
   private ws?: any; // WebSocket type (browser or Node.js)
   private connectPromise?: Promise<void>;
-  private connectResolve?: () => void;
-  private connectReject?: (error: Error) => void;
   private state: ConnectionState = 'disconnected';
   private subscriptions: Map<string, Subscription> = new Map();
   private reconnectAttempts = 0;
@@ -154,9 +152,6 @@ export class AgentWorldWSClient extends EventEmitter {
     this.emit('connecting');
 
     this.connectPromise = new Promise<void>(async (resolve, reject) => {
-      this.connectResolve = resolve;
-      this.connectReject = reject;
-
       try {
         // Load Node.js WebSocket if needed
         if (isNode && !NodeWebSocket) {

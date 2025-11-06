@@ -8,18 +8,21 @@
  * - Text label showing current state
  * - Animated pulse for connecting/reconnecting states
  * - Compact design for header placement
+ * - shadcn Badge component integration
  * 
  * Implementation:
- * - Uses Tailwind CSS for styling
+ * - Uses shadcn Badge component for consistent design
  * - Shows all connection states including closing
  * - Can be placed in header or sidebar
  * 
  * Changes:
+ * - 2025-11-04: Updated with shadcn Badge component
  * - 2025-11-03: Created for Phase 5 (new component, not in Next.js)
  * - 2025-11-03: Added 'closing' state to match ConnectionState type
  */
 
 import type { ConnectionState } from '@/lib/ws-client';
+import { Badge } from '@/components/ui/badge';
 
 interface ConnectionStatusProps {
   state: ConnectionState;
@@ -27,25 +30,39 @@ interface ConnectionStatusProps {
 }
 
 export default function ConnectionStatus({ state, className = '' }: ConnectionStatusProps) {
-  const getStatusColor = () => {
+  const getStatusIndicator = () => {
     switch (state) {
       case 'connected':
-        return 'bg-green-500';
+        return { color: 'bg-green-500', pulse: false };
       case 'connecting':
       case 'reconnecting':
-        return 'bg-yellow-500 animate-pulse';
+        return { color: 'bg-yellow-500', pulse: true };
       case 'closing':
       case 'disconnected':
-        return 'bg-red-500';
+        return { color: 'bg-red-500', pulse: false };
       default:
-        return 'bg-gray-500';
+        return { color: 'bg-gray-500', pulse: false };
     }
   };
 
+  const getBadgeVariant = () => {
+    switch (state) {
+      case 'connected':
+        return 'default';
+      case 'connecting':
+      case 'reconnecting':
+        return 'secondary';
+      default:
+        return 'outline';
+    }
+  };
+
+  const { color, pulse } = getStatusIndicator();
+
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
-      <span className="text-sm text-muted-foreground capitalize">{state}</span>
-    </div>
+    <Badge variant={getBadgeVariant()} className={`gap-2 ${className}`}>
+      <div className={`w-2 h-2 rounded-full ${color} ${pulse ? 'animate-pulse' : ''}`} />
+      <span className="capitalize">{state}</span>
+    </Badge>
   );
 }
