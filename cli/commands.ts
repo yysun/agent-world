@@ -1,5 +1,5 @@
 /**
- * CLI Commands Implementation - Direct Core Integration with Short Aliases
+ * CLI Commands Implementation - Direct Core Integration with Space-Separated and Bidirectional Aliases
  *
  * Features:
  * - Direct command mapping system with interactive parameter collection
@@ -9,24 +9,24 @@
  * - Help message generation with command documentation
  * - Dual input handling for commands and messages
  * - World instance isolation and proper cleanup during refresh
- * - Short command aliases for improved usability
+ * - Space-separated command aliases for natural command syntax
+ * - Bidirectional aliases (e.g., /chat new and /new chat both work)
+ * - Backward compatibility with hyphenated aliases
  * - Context-sensitive commands that adapt based on world selection
  * - World data persistence to File Storage or SQLite with folder selection
  *
  * Available Commands:
- * - Legacy: new (create-world), add (create-agent), clear, select
+ * - World: list, show, create, update, delete, select, export, save
+ * - Agent: list, show, create, update, delete, clear
+ * - Chat: list, create, select, switch, delete, rename, export
  * - System: help, quit, exit
- * - Short Context-Sensitive: list, show, edit, delete, create (adapt to context)
- * - Short Explicit: lsw (list-worlds), lsa (list-agents)
- * - Full CRUD: list-worlds, create-world, show-world, update-world, delete-world
- * - Full CRUD: list-agents, add-agent, show-agent, update-agent, delete-agent
- * - World Save: save (save world to File or SQLite storage with folder selection)
+ * - Short Explicit: lsw (list worlds), lsa (list agents)
  *
- * Short Alias System:
- * - Context-sensitive aliases adapt behavior based on whether a world is selected
- * - /list shows agents if world selected, worlds if no world selected
- * - /show, /edit, /delete work on agents or worlds based on context
- * - /create creates agents if world selected, worlds if no world selected
+ * Alias System:
+ * - Space-separated format: /new chat, /add agent, /list worlds (preferred)
+ * - Bidirectional aliases: /chat new = /new chat, /agent add = /add agent
+ * - Backward compatible: /new-chat, /add-agent, /list-worlds (still work)
+ * - Context-sensitive: /new creates world, /add creates agent (when world selected)
  * - Explicit aliases like /lsw, /lsa provide unambiguous targeting
  *
  * World Refresh Mechanism:
