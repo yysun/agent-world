@@ -7,7 +7,7 @@
  * Features:
  * - Parameterized SQL queries to prevent SQL injection
  * - Transaction support for batch operations
- * - Automatic sequence number generation per world/chat
+ * - Automatic sequence number generation per world/chat using MAX(seq) + 1
  * - Cascade delete via foreign keys to worlds/chats tables
  * - Efficient querying with indexed columns
  * - JSON storage for payload and metadata
@@ -22,12 +22,14 @@
  * - Uses sqlite3 Database from the existing schema pattern
  * - Follows the promisify pattern used in sqlite-storage.ts
  * - Supports both time-based and sequence-based pagination
- * - Auto-increments sequence number within each world/chat context
+ * - Auto-increments sequence number using COALESCE(MAX(seq), 0) + 1
+ * - No separate sequence tracking table needed (removed event_sequences)
  * - Uses INSERT OR IGNORE to prevent UNIQUE constraint violations from duplicate event IDs
  *   (can occur due to retries, multiple listeners, or error recovery)
  * 
  * Changes:
  * - 2025-11-03: Added INSERT OR IGNORE to handle duplicate event IDs gracefully
+ * - 2025-11-06: Removed event_sequences table, use MAX(seq) + 1 for auto-increment
  */
 
 import type { Database } from 'sqlite3';
@@ -107,15 +109,10 @@ export async function createSQLiteEventStorage(db: Database): Promise<EventStora
 async function ensureInitialized(ctx: SQLiteEventStorageContext): Promise<void> {
   if (ctx.isInitialized) return;
 
-  // Check if both events and event_sequences tables exist
+  // Check if events table exists
   const eventsTableCheck = await dbGet(
     ctx.db,
     "SELECT name FROM sqlite_master WHERE type='table' AND name='events'"
-  );
-
-  const sequencesTableCheck = await dbGet(
-    ctx.db,
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='event_sequences'"
   );
 
   if (!eventsTableCheck) {
@@ -158,53 +155,25 @@ async function ensureInitialized(ctx: SQLiteEventStorageContext): Promise<void> 
     `);
   }
 
-  if (!sequencesTableCheck) {
-    // Create event_sequences table for atomic sequence generation
-    await dbRun(ctx.db, `
-      CREATE TABLE IF NOT EXISTS event_sequences (
-        world_id TEXT NOT NULL,
-        chat_id TEXT,
-        last_seq INTEGER DEFAULT 0,
-        PRIMARY KEY (world_id, chat_id)
-      )
-    `);
-
-    await dbRun(ctx.db, `
-      CREATE INDEX IF NOT EXISTS idx_event_sequences_world
-        ON event_sequences(world_id)
-    `);
-  }
-
   ctx.isInitialized = true;
 }
 
 /**
- * Get the next sequence number for a world/chat using atomic increment
- * Uses event_sequences table to prevent race conditions
+ * Get the next sequence number for a world/chat using MAX(seq) + 1
+ * This is calculated atomically within a transaction
  */
 async function getNextSeq(ctx: SQLiteEventStorageContext, worldId: string, chatId: string | null): Promise<number> {
-  // Atomic increment using INSERT OR REPLACE with COALESCE to handle first insert
-  await dbRun(
-    ctx.db,
-    `INSERT INTO event_sequences (world_id, chat_id, last_seq)
-     VALUES (?, ?, 1)
-     ON CONFLICT(world_id, chat_id) DO UPDATE SET
-       last_seq = last_seq + 1`,
-    worldId,
-    chatId
-  );
-
-  // Fetch the newly incremented value
   const result = await dbGet(
     ctx.db,
-    `SELECT last_seq FROM event_sequences 
+    `SELECT COALESCE(MAX(seq), 0) + 1 as next_seq 
+     FROM events 
      WHERE world_id = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))`,
     worldId,
     chatId,
     chatId
   );
 
-  return result.last_seq;
+  return result.next_seq;
 }
 
 /**
