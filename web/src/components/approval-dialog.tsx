@@ -3,16 +3,19 @@
  *
  * Features:
  * - Displays tool name, arguments, and approval message
- * - Three-button interface: Cancel (deny), Once (single approval), Always (session approval)
+ * - Three-button interface: Deny, Approve Once, Approve for Session
+ * - Supports both new format (deny/approve_once/approve_session) and legacy (Cancel/Once/Always)
  * - Sanitized argument display with syntax highlighting
  * - Modal dialog with backdrop for focus
  *
  * Implementation:
  * - AppRun JSX component with props-based state
- * - Emits approval decisions via onclick handlers
+ * - Emits approval decisions via submit-approval-decision event
  * - Responsive layout with scrollable content
  *
  * Changes:
+ * - 2025-11-05: Updated to support new three-option format with backward compatibility
+ * - 2025-11-05: Changed event from 'approve-tool' to 'submit-approval-decision'
  * - 2025-11-04: Initial implementation for tool approval flow
  */
 
@@ -29,7 +32,7 @@ export default function ApprovalDialog({ approval }: ApprovalDialogProps) {
   const { toolName, toolArgs, message, options, toolCallId } = approval;
 
   return (
-    <div className="approval-dialog-backdrop" $onclick={['dismiss-approval']}>
+    <div className="approval-dialog-backdrop" $onclick={['hide-approval-request']}>
       <div
         className="approval-dialog"
         $onclick={(e: Event) => e.stopPropagation()}
@@ -58,28 +61,28 @@ export default function ApprovalDialog({ approval }: ApprovalDialogProps) {
         </div>
 
         <div className="approval-actions">
-          {options.includes('Cancel') && (
+          {(options.includes('deny') || options.includes('Cancel')) && (
             <button
               className="btn-danger"
-              $onclick={['approve-tool', { toolCallId, decision: 'deny', scope: 'none' }]}
+              $onclick={['submit-approval-decision', { toolCallId, decision: 'deny', scope: 'none' }]}
             >
-              Cancel
+              Deny
             </button>
           )}
-          {options.includes('Once') && (
+          {(options.includes('approve_once') || options.includes('Once')) && (
             <button
               className="btn-primary"
-              $onclick={['approve-tool', { toolCallId, decision: 'approve', scope: 'once' }]}
+              $onclick={['submit-approval-decision', { toolCallId, decision: 'approve', scope: 'once' }]}
             >
               Approve Once
             </button>
           )}
-          {options.includes('Always') && (
+          {(options.includes('approve_session') || options.includes('Always')) && (
             <button
               className="btn-success"
-              $onclick={['approve-tool', { toolCallId, decision: 'approve', scope: 'session' }]}
+              $onclick={['submit-approval-decision', { toolCallId, decision: 'approve', scope: 'session' }]}
             >
-              Always (This Session)
+              Approve for Session
             </button>
           )}
         </div>

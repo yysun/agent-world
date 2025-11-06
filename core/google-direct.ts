@@ -262,9 +262,32 @@ export async function streamGoogleResponse(
               world,
               worldId: world.id,
               chatId: world.currentChatId ?? null,
-              agentId: agent.id
+              agentId: agent.id,
+              messages: messages
             });
             const duration = performance.now() - startTime;
+
+            // Check if tool execution returned stop processing marker (e.g., for approval)
+            if (result && typeof result === 'object' && result._stopProcessing) {
+              mcpLogger.debug(`Tool execution stopped - approval required (Google streaming)`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: call.functionCall!.name!,
+                agentId: agent.id,
+                messageId
+              });
+
+              // Approval request was already published as message event by wrapToolWithValidation
+              // Just end the streaming to signal completion
+              publishSSE(world, {
+                agentName: agent.id,
+                type: 'end',
+                messageId
+              });
+
+              return '';
+            }
+
             const resultString = JSON.stringify(result);
 
             mcpLogger.debug(`MCP tool execution completed (Google streaming)`, {
@@ -455,9 +478,24 @@ export async function generateGoogleResponse(
               world,
               worldId: world.id,
               chatId: world.currentChatId ?? null,
-              agentId: agent.id
+              agentId: agent.id,
+              messages: messages
             });
             const duration = performance.now() - startTime;
+
+            // Check if tool execution returned stop processing marker (e.g., for approval)
+            if (result && typeof result === 'object' && result._stopProcessing) {
+              mcpLogger.debug(`Tool execution stopped - approval required (Google non-streaming)`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: functionCall.function.name,
+                agentId: agent.id
+              });
+
+              // Return the approval message from wrapToolWithValidation
+              return result._approvalMessage;
+            }
+
             const resultString = JSON.stringify(result);
 
             mcpLogger.debug(`MCP tool execution completed (Google non-streaming)`, {

@@ -27,6 +27,9 @@
  * - World-scoped event emission for proper isolation
  *
  * Recent Changes:
+ * - 2025-11-05: Added messages to tool execution context for approval checking
+ * - Approval checking happens in wrapToolWithValidation (tool execution layer)
+ * - LLM provider passes messages to tool wrapper for approval flow
  * - Initial implementation with full OpenAI package integration
  * - Added streaming and non-streaming response handlers
  * - Implemented function calling support with MCP tools
@@ -321,9 +324,32 @@ export async function streamOpenAIResponse(
               world,
               worldId: world.id,
               chatId: world.currentChatId ?? null,
-              agentId: agent.id
+              agentId: agent.id,
+              messages: messages
             });
             const duration = performance.now() - startTime;
+
+            // Check if tool execution returned stop processing marker (e.g., for approval)
+            if (result && typeof result === 'object' && result._stopProcessing) {
+              mcpLogger.debug(`Tool execution stopped - approval required (OpenAI streaming)`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function!.name!,
+                agentId: agent.id,
+                messageId
+              });
+
+              // Approval request was already published as message event by wrapToolWithValidation
+              // Just end the streaming to signal completion
+              publishSSE(world, {
+                agentName: agent.id,
+                type: 'end',
+                messageId
+              });
+
+              return '';
+            }
+
             const resultString = JSON.stringify(result);
 
             mcpLogger.debug(`MCP tool execution completed (streaming)`, {
@@ -366,7 +392,20 @@ export async function streamOpenAIResponse(
           const duration = performance.now() - startTime;
           const errorMessage = error instanceof Error ? error.message : String(error);
 
-          // Let ApprovalRequiredException bubble up to llm-manager
+          mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
+            sequenceId,
+            toolIndex: i,
+            toolName: toolCall.function!.name!,
+            toolCallId: toolCall.id!,
+            agentId: agent.id,
+            messageId,
+            status: 'error',
+            duration: Math.round(duration * 100) / 100,
+            error: errorMessage,
+            errorStack: error instanceof Error ? error.stack : undefined
+          });
+
+          // Let all errors bubble up to higher level
           throw error;
         }
       }
@@ -527,9 +566,24 @@ export async function generateOpenAIResponse(
               world,
               worldId: world.id,
               chatId: world.currentChatId ?? null,
-              agentId: agent.id
+              agentId: agent.id,
+              messages: messages
             });
             const duration = performance.now() - startTime;
+
+            // Check if tool execution returned stop processing marker (e.g., for approval)
+            if (result && typeof result === 'object' && result._stopProcessing) {
+              mcpLogger.debug(`Tool execution stopped - approval required (OpenAI non-streaming)`, {
+                sequenceId,
+                toolIndex: i,
+                toolName: toolCall.function.name,
+                agentId: agent.id
+              });
+
+              // Return the approval message from wrapToolWithValidation
+              return result._approvalMessage;
+            }
+
             const resultString = JSON.stringify(result);
 
             mcpLogger.debug(`MCP tool execution completed (non-streaming)`, {

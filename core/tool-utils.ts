@@ -8,6 +8,7 @@
  * - Emits SSE events for tool errors
  * - Universal parameter validation for all tool types
  * - Explicit approval checking using structured tool metadata
+ * - Direct injection of client.requestApproval messages for natural approval flow
  *
  * Implementation Details:
  * - Uses minimal fallback ID generator to avoid external dependencies
@@ -19,7 +20,13 @@
  * - Dynamic imports to avoid circular dependencies with approval cache
  *
  * Recent Changes:
- * - 2025-11-04: Added explicit approval flag checking in wrapToolWithValidation
+ * - 2025-11-05: wrapToolWithValidation now directly injects client.requestApproval assistant messages
+ * - When approval is needed, creates complete message with tool_calls and publishes SSE event
+ * - Returns structured object with type='approval_request' and _stopProcessing marker
+ * - Returns simple string error message when tool execution is denied
+ * - Approval flow is completely handled in tool-utils.ts without changing LLM providers
+ * - Natural message flow without exceptions - CLI detects client.requestApproval tool call
+ * - LLM providers check for _stopProcessing marker and return _approvalMessage directly
  * - Replaced heuristic-based approval detection with explicit tool.approval metadata
  * - Enhanced wrapToolWithValidation to handle approval flow before parameter validation
  * - Added dynamic imports to prevent circular dependencies with approval modules
@@ -234,28 +241,82 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
   return {
     ...tool,
     execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
-      // Check explicit approval flag before execution
-      if (tool.approval?.required) {
-        const chatId = context?.chatId ?? context?.world?.currentChatId ?? null;
+      // Check if tool requires approval BEFORE parameter validation
+      if (tool.approval?.required && context?.world && context?.messages) {
+        // Publish world event about approval check (following activity event pattern)
+        if (context.world?.eventEmitter) {
+          context.world.eventEmitter.emit('world', {
+            type: 'info',
+            message: `Tool ${toolName} requires approval - checking...`,
+            source: context.agentId || 'system',
+            timestamp: new Date().toISOString()
+          });
+        }
 
-        if (chatId) {
-          // Import modules dynamically to avoid circular dependencies
-          const [{ approvalCache }, { ApprovalRequiredException }, { sanitizeArgs }] = await Promise.all([
-            import('./approval-cache.js'),
-            import('./types.js'),
-            import('./mcp-server-registry.js')
-          ]);
+        const { checkToolApproval } = await import('./events.js');
+        const approvalMessage = tool.approval.message || `The tool "${toolName}" requires approval to execute.`;
 
-          const approved = approvalCache.get(chatId, toolName);
+        const approvalCheck = await checkToolApproval(
+          context.world,
+          toolName,
+          args,
+          approvalMessage,
+          context.messages
+        );
 
-          if (!approved) {
-            throw new ApprovalRequiredException(
-              toolName,
-              sanitizeArgs(args ?? {}),
-              tool.approval.message || 'This tool requires approval to execute.',
-              tool.approval.options || ['Cancel', 'Once', 'Always']
-            );
+        if (approvalCheck?.needsApproval) {
+          // Inject a client.requestApproval tool call message directly
+          // This creates a natural message flow that the CLI can detect and handle
+          const approvalToolCallId = `approval_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+          const approvalResult = {
+            role: 'assistant' as const,
+            content: '',
+            tool_calls: [{
+              id: approvalToolCallId,
+              type: 'function' as const,
+              function: {
+                name: 'client.requestApproval',
+                arguments: JSON.stringify({
+                  originalToolCall: {
+                    name: toolName,
+                    args: args
+                  },
+                  message: approvalMessage,
+                  options: approvalCheck.approvalRequest?.options || ['deny', 'approve_once', 'approve_session']
+                })
+              }
+            }]
+          };
+
+          // Publish the approval request message event if world context is available
+          if (context?.world) {
+            // Emit the complete assistant message following OpenAI format
+            // Note: Use 'timestamp' field for WorldMessageEvent interface compatibility
+            context.world.eventEmitter.emit('message', {
+              sender: context.agentId || 'system',
+              agentName: context.agentId,
+              content: approvalResult.content,
+              timestamp: new Date(),
+              messageId: sequenceId || generateFallbackId(),
+              chatId: context.chatId,
+              // Additional fields for CLI handling (not part of WorldMessageEvent)
+              role: approvalResult.role,
+              tool_calls: approvalResult.tool_calls
+            });
           }
+
+          // Return the approval request in a structured format
+          return {
+            type: 'approval_request',
+            approvalRequest: approvalCheck.approvalRequest,
+            _stopProcessing: true,
+            _approvalMessage: approvalResult
+          };
+        }
+
+        if (!approvalCheck?.canExecute) {
+          // Tool execution was denied
+          return `Error: Tool execution denied - ${approvalCheck.reason || 'approval not granted'}`;
         }
       }
 

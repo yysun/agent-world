@@ -96,9 +96,7 @@ export function handleStreamingEvents(
 // PHASE 2.2 ENHANCEMENT: Handle tool execution events (from world channel)
 export function handleToolEvents(eventData: any): void {
   if (eventData.type === 'tool-start' && eventData.toolExecution) {
-    const toolName = eventData.toolExecution.toolName;
-    const agentName = eventData.agentName || eventData.sender || 'agent';
-    console.log(`\n${cyan(agentName)} ${gray('calling tool -')} ${yellow(toolName)} ${gray('...')}`);
+    // Tool start events are now implicit - no console output needed
     return;
   }
 
@@ -183,4 +181,58 @@ export function resetStreamingState(streaming: StreamingState): void {
 
 export function isStreamingActive(streaming: StreamingState): boolean {
   return streaming.isActive;
+}
+
+/**
+ * Handle tool call events in assistant messages
+ * Returns approval request data if client.requestApproval is detected
+ */
+export function handleToolCallEvents(
+  eventData: any
+): { isApprovalRequest: boolean; approvalData?: any } | null {
+  // Check for null or undefined eventData
+  if (!eventData) {
+    return null;
+  }
+
+  // Check for assistant messages with tool_calls
+  if (eventData.role === 'assistant' &&
+    eventData.tool_calls &&
+    Array.isArray(eventData.tool_calls) &&
+    eventData.tool_calls.length > 0) {
+
+    // Look for client.requestApproval calls
+    for (const toolCall of eventData.tool_calls) {
+      if (toolCall.function?.name === 'client.requestApproval') {
+        try {
+          const args = JSON.parse(toolCall.function.arguments || '{}');
+          return {
+            isApprovalRequest: true,
+            approvalData: {
+              toolCallId: toolCall.id,
+              toolName: args.originalToolCall?.name || 'Unknown tool',
+              toolArgs: args.originalToolCall?.args || {},
+              message: args.message || 'This tool requires approval to execute.',
+              options: args.options || ['deny', 'approve_once', 'approve_session'],
+              agentId: eventData.sender || eventData.agentName
+            }
+          };
+        } catch (err) {
+          console.error(`${error('Failed to parse approval request:')} ${err}`);
+          return null;
+        }
+      }
+    }
+
+    // Display other tool calls (non-approval)
+    for (const toolCall of eventData.tool_calls) {
+      if (toolCall.function?.name && toolCall.function.name !== 'client.requestApproval') {
+        console.log(`${cyan('🔧')} ${yellow('Tool:')} ${toolCall.function.name}`);
+      }
+    }
+
+    return { isApprovalRequest: false };
+  }
+
+  return null;
 }

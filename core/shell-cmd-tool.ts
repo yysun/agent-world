@@ -43,10 +43,25 @@
  */
 
 import { spawn } from 'child_process';
+import { resolve, join } from 'path';
+import { homedir } from 'os';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 
 const logger = createCategoryLogger('shell-cmd');
+
+/**
+ * Resolve directory path, handling tilde expansion and relative paths
+ */
+function resolveDirectory(directory: string): string {
+  if (directory.startsWith('~/')) {
+    return join(homedir(), directory.slice(2));
+  }
+  if (directory === '~') {
+    return homedir();
+  }
+  return resolve(directory);
+}
 
 /**
  * Command execution result
@@ -89,12 +104,14 @@ export async function executeShellCommand(
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
   const timeout = options.timeout || 600000; // Default 10 minute timeout for long-running commands
+  const resolvedDirectory = resolveDirectory(directory);
 
   logger.debug('Executing shell command', {
     command,
     parameters,
     timeout,
-    directory
+    directory,
+    resolvedDirectory
   });
 
   return new Promise((resolve) => {
@@ -117,7 +134,7 @@ export async function executeShellCommand(
     try {
       // Spawn the child process
       const childProcess = spawn(command, parameters, {
-        cwd: directory,
+        cwd: resolvedDirectory,
         shell: false, // Don't use shell for better security
         timeout: timeout
       });
@@ -127,7 +144,7 @@ export async function executeShellCommand(
         if (!processExited) {
           timedOut = true;
           childProcess.kill('SIGTERM');
-          logger.warn('Command execution timeout', { command, parameters, timeout });
+          logger.warn('Command execution timeout', { command, parameters, timeout, directory });
         }
       }, timeout);
 
@@ -166,6 +183,7 @@ export async function executeShellCommand(
         logger.debug('Command execution completed', {
           command,
           parameters,
+          directory,
           exitCode: code,
           signal,
           duration,
@@ -192,14 +210,13 @@ export async function executeShellCommand(
         // Persist to history
         persistExecutionResult(result);
 
-        logger.error('Command execution error', {
+        logger.warn('Command execution error', {
           command,
           parameters,
+          directory,
           error: error.message,
-          duration
-        });
-
-        resolve(result);
+          duration: Date.now() - startTime
+        }); resolve(result);
       });
 
     } catch (error) {
@@ -211,9 +228,10 @@ export async function executeShellCommand(
       // Persist to history
       persistExecutionResult(result);
 
-      logger.error('Failed to spawn command', {
+      logger.warn('Failed to spawn command', {
         command,
         parameters,
+        directory,
         error: result.error,
         duration
       });

@@ -1,0 +1,4 @@
+- Use the playwright tool to navigate to http://localhost:8080/World/Default%20World
+- Create a new chat 
+- Send a message: @a1, list files from '~/' directory
+- It should trigger a tool call requiring approval

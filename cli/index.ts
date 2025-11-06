@@ -14,6 +14,13 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2025-11-05: Aligned tool approval to OpenAI protocol - check tool_calls in message events
+ * - 2025-11-05: Changed approval UI from enquirer to rl.question (numbered choices)
+ * - 2025-11-05: Removed SSE-based approval handling (approvals come as message events)
+ * - 2025-11-05: Added message-based approval system support for client.requestApproval tool calls
+ * - 2025-11-05: Extended MessageEventPayload interface to include tool_calls
+ * - 2025-11-05: Added handleNewApprovalRequest function for three-option approval prompting
+ * - 2025-11-05: Made handleWorldEvent async to support approval request processing
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
  * - 2025-11-01: Allow working with external worlds without importing
  * - 2025-11-01: Changed selectWorld return type to support external path tracking
@@ -89,6 +96,7 @@ import {
   handleWorldEventWithStreaming,
   handleToolEvents,
   handleActivityEvents,
+  handleToolCallEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
@@ -101,6 +109,14 @@ const logger = createCategoryLogger('cli');
 interface MessageEventPayload {
   sender: string;
   content: string;
+  tool_calls?: Array<{
+    id: string;
+    type?: string;
+    function?: {
+      name: string;
+      arguments?: string;
+    };
+  }>;
   [key: string]: any;
 }
 
@@ -113,6 +129,7 @@ interface SystemEventPayload {
 // State management for interactive mode
 interface GlobalState {
   awaitingResponse: boolean;
+  world?: any;
 }
 
 function createGlobalState(): GlobalState {
@@ -141,6 +158,121 @@ const boldCyan = (text: string) => `\x1b[1m\x1b[36m${text}\x1b[0m`;
 const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
+
+// New approval request interface for the message-based approach
+interface ApprovalRequest {
+  toolCallId: string;
+  toolName: string;
+  toolArgs: any;
+  message: string;
+  options: string[];
+  agentId?: string;
+}
+
+// Handle new approval requests from tool calls
+async function handleNewApprovalRequest(
+  request: ApprovalRequest,
+  rl: readline.Interface,
+  world: any
+): Promise<void> {
+  const { toolName, toolArgs, message, options, agentId } = request;
+
+  // Small delay to avoid mixing with world messages
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
+  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
+
+  if (toolArgs && Object.keys(toolArgs).length > 0) {
+    console.log(`${gray('Arguments:')}`);
+    for (const [key, value] of Object.entries(toolArgs)) {
+      const displayValue = typeof value === 'string' && value.length > 100
+        ? `${value.substring(0, 100)}...`
+        : String(value);
+      console.log(`  ${gray(key + ':')} ${displayValue}`);
+    }
+  }
+
+  if (message) {
+    console.log(`${gray('Details:')} ${message}`);
+  }
+
+  // Create choices based on available options
+  const choices = [];
+  let choiceNumber = 1;
+  const choiceMap: Record<number, string> = {};
+
+  if (options.includes('deny')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Deny')}`);
+    choiceMap[choiceNumber] = 'deny';
+    choiceNumber++;
+  }
+  if (options.includes('approve_once')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve Once')}`);
+    choiceMap[choiceNumber] = 'approve_once';
+    choiceNumber++;
+  }
+  if (options.includes('approve_session')) {
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve for Session')}`);
+    choiceMap[choiceNumber] = 'approve_session';
+    choiceNumber++;
+  }
+
+  // Fallback to basic options if none match
+  if (choices.length === 0) {
+    choices.push(`  ${yellow('1.')} ${cyan('Deny')}`);
+    choices.push(`  ${yellow('2.')} ${cyan('Approve Once')}`);
+    choices.push(`  ${yellow('3.')} ${cyan('Approve for Session')}`);
+    choiceMap[1] = 'deny';
+    choiceMap[2] = 'approve_once';
+    choiceMap[3] = 'approve_session';
+  }
+
+  console.log(`\n${boldMagenta('How would you like to respond?')}`);
+  for (const choice of choices) {
+    console.log(choice);
+  }
+
+  return new Promise<void>((resolve) => {
+    function askForDecision() {
+      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (!isNaN(num) && choiceMap[num]) {
+          const decision = choiceMap[num];
+
+          // Create approval response content that matches patterns the approval checker looks for
+          let content: string;
+          if (decision === 'approve_session') {
+            content = `approve ${toolName} for session`;
+          } else if (decision === 'approve_once') {
+            content = `approve_once ${toolName}`;
+          } else {
+            content = `deny ${toolName}`;
+          }
+
+          // Send the approval response as a regular message mentioning the agent
+          // The agent will see this in the conversation and the approval checker will recognize it
+          try {
+            const { publishMessage } = await import('../core/events.js');
+            const agentMention = agentId ? `@${agentId}, ` : '';
+            publishMessage(world, `${agentMention}${content}`, 'human');
+            resolve();
+          } catch (err) {
+            console.error(`${error('Failed to send approval response:')} ${err}`);
+            resolve();
+          }
+        } else {
+          console.log(boldRed('Invalid selection. Please try again.'));
+          askForDecision();
+        }
+      });
+    }
+
+    askForDecision();
+  });
+}
 
 // Simplified approval handler for pipeline mode (non-interactive)
 async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
@@ -177,25 +309,33 @@ async function handleApprovalRequest(
     console.log(`${gray('Details:')} ${message}`);
   }
 
-  // Use enquirer for consistent CLI prompting
-  const { decision } = await enquirer.prompt({
-    type: 'select',
-    name: 'decision',
-    message: 'Allow this tool execution?',
-    choices: [
-      { name: 'Cancel (deny)', value: 'cancel' },
-      { name: 'Allow Once', value: 'once' },
-      { name: 'Allow Always (this session)', value: 'always' }
-    ]
-  }) as { decision: string };
+  // Display options
+  console.log(`\n${boldMagenta('How would you like to respond?')}`);
+  console.log(`  ${yellow('1.')} ${cyan('Cancel (deny)')}`);
+  console.log(`  ${yellow('2.')} ${cyan('Allow Once')}`);
+  console.log(`  ${yellow('3.')} ${cyan('Allow Always (this session)')}`);
 
-  if (decision === 'cancel') {
-    return { decision: 'deny', scope: 'once' };
-  } else if (decision === 'once') {
-    return { decision: 'approve', scope: 'once' };
-  } else {
-    return { decision: 'approve', scope: 'session' };
-  }
+  return new Promise<{ decision: ApprovalDecision; scope: ApprovalScope }>((resolve) => {
+    function askForDecision() {
+      rl.question(`\n${boldMagenta('Select an option (number):')} `, (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (num === 1) {
+          resolve({ decision: 'deny', scope: 'once' });
+        } else if (num === 2) {
+          resolve({ decision: 'approve', scope: 'once' });
+        } else if (num === 3) {
+          resolve({ decision: 'approve', scope: 'session' });
+        } else {
+          console.log(boldRed('Invalid selection. Please try again.'));
+          askForDecision();
+        }
+      });
+    }
+
+    askForDecision();
+  });
 }
 
 
@@ -535,7 +675,8 @@ function attachCLIListeners(
     // Only render activity progress in interactive mode
     if (streaming && globalState && rl) {
       progressRenderer.handle(eventData);
-      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+        .catch(err => console.error('Error handling world event:', err));
     }
     // Pipeline mode: silently track events for completion detection
   };
@@ -549,7 +690,8 @@ function attachCLIListeners(
       eventData.content.includes('Success message sent')) return;
 
     if (streaming && globalState && rl) {
-      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+        .catch(err => console.error('Error handling message event:', err));
     } else {
       // Pipeline mode: simple console output
       if (eventData.sender === 'system') {
@@ -566,7 +708,8 @@ function attachCLIListeners(
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl) {
     const sseListener = (eventData: any) => {
-      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+        .catch(err => console.error('Error handling SSE event:', err));
     };
     world.eventEmitter.on(EventType.SSE, sseListener);
     listeners.set(EventType.SSE, sseListener);
@@ -578,7 +721,8 @@ function attachCLIListeners(
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
     if (streaming && globalState && rl) {
-      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl);
+      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+        .catch(err => console.error('Error handling system event:', err));
     } else if (eventData.message || eventData.content) {
       // Pipeline mode: system messages are handled by message listener
     }
@@ -788,6 +932,11 @@ async function handleSubscribe(
 
   const world = subscription.world as World;
 
+  // Store world in globalState for access in event handlers (e.g., approval handling)
+  if (globalState) {
+    globalState.world = world;
+  }
+
   // Attach direct listeners to the world.eventEmitter for CLI handling
   // Interactive mode needs all event types including SSE for streaming responses
   attachCLIListeners(world, streaming, globalState, activityMonitor, progressRenderer, rl);
@@ -796,7 +945,7 @@ async function handleSubscribe(
 }
 
 // Handle world events with streaming support
-function handleWorldEvent(
+async function handleWorldEvent(
   eventType: string,
   eventData: any,
   streaming: StreamingState,
@@ -804,7 +953,7 @@ function handleWorldEvent(
   activityMonitor: WorldActivityMonitor,
   progressRenderer: ActivityProgressRenderer,
   rl?: readline.Interface
-): void {
+): Promise<void> {
   if (eventType === 'world') {
     const payload = eventData as any;
     // Handle activity events (new format: type = 'response-start' | 'response-end' | 'idle')
@@ -820,6 +969,10 @@ function handleWorldEvent(
         console.log(); // Empty line before prompt
         rl.prompt();
       }
+    }
+    // Handle info messages (e.g., approval checking)
+    else if (payload.type === 'info' && payload.message) {
+      console.log(`${gray('[World]')} ${payload.message}`);
     }
     // Handle tool events (migrated from sse channel)
     else if (payload.type === 'tool-start' || payload.type === 'tool-result' || payload.type === 'tool-error' || payload.type === 'tool-progress') {
@@ -837,7 +990,16 @@ function handleWorldEvent(
     eventData.content.includes('Success message sent')) return;
 
   // Handle regular message events from agents (non-streaming or after streaming ends)
-  if (eventType === 'message' && eventData.sender && eventData.content) {
+  if (eventType === 'message' && eventData.sender && (eventData.content || eventData.tool_calls)) {
+    // Check for tool calls FIRST (including approval requests) - following OpenAI protocol
+    if (rl && eventData.tool_calls) {
+      const toolCallResult = handleToolCallEvents(eventData);
+      if (toolCallResult?.isApprovalRequest && toolCallResult.approvalData) {
+        await handleNewApprovalRequest(toolCallResult.approvalData, rl, globalState.world);
+        return;
+      }
+    }
+
     // Skip user messages to prevent echo
     if (eventData.sender === 'human' || eventData.sender.startsWith('user')) {
       return;
@@ -855,7 +1017,9 @@ function handleWorldEvent(
     }
 
     // Display agent messages (fallback for non-streaming or missed messages)
-    console.log(`\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
+    if (eventData.content) {
+      console.log(`\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
+    }
     return;
   }
 

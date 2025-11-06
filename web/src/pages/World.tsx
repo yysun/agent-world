@@ -50,7 +50,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
     agentActivities: {},
-    pendingApproval: null
+    approvalRequest: null
   };
 
   override view = (state: WorldComponentState) => {
@@ -306,8 +306,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
         )}
 
         {/* Approval Dialog */}
-        {state.pendingApproval && (
-          <ApprovalDialog approval={state.pendingApproval} />
+        {state.approvalRequest && (
+          <ApprovalDialog approval={state.approvalRequest} />
         )}
       </div>
     );

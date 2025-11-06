@@ -24,11 +24,16 @@
  * - LLM call count management with turn limits and auto-save persistence
  * - World tags: <world>STOP|DONE|PASS</world> and <world>TO: a,b,c</world>
  *
- * World Events: publishMessage, subscribeToMessages, publishSSE, subscribeToSSE
+ * World Events: publishMessage, subscribeToMessages, publishSSE (streaming only), subscribeToSSE
  * Agent Events: subscribeAgentToMessages, processAgentMessage, shouldAgentRespond
  * Auto-Mention: Enhanced loop prevention, self-mention removal, paragraph beginning detection
  * Storage: Automatic memory persistence and agent state saving with error handling
  * Chat Title Generation: Smart title generation excluding tool messages from conversation context
+ * 
+ * SSE Event Usage:
+ * - SSE events are ONLY for streaming LLM responses (start, chunk, end, error, log)
+ * - Tool messages and approvals use message events with OpenAI protocol
+ * - Tool calls must be in message events with role='assistant' and tool_calls array
  * Message ID Tracking: All messages (user and assistant) include messageId and agentId for edit feature
  * Message Threading: replyToMessageId preserved through publish->SSE->frontend pipeline
  *
@@ -65,6 +70,11 @@
  * - Fixes race condition where CLI/HTTP handlers exit with "No response received"
  *
  * Changes:
+ * - 2025-11-05: Replaced keyword-based approval heuristics with tool execution checking
+ * - Removed checkForPendingApprovals() function and keyword matching logic
+ * - Added checkToolApproval() function for message-based approval checking
+ * - Implemented findSessionApproval() and findRecentApproval() for message parsing
+ * - Moved approval checking to tool execution time instead of message prediction
  * - 2025-11-03: Tool events now use `${messageId}-tool-${type}` pattern to prevent UNIQUE constraint 
  *   violations when multiple tool events (tool-start, tool-result, tool-error) share the same messageId
  * - 2025-11-01: Chat title updates moved from SSE end to world idle event (prevents duplicate updates with multiple agents)
@@ -443,6 +453,26 @@ export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): v
 }
 
 /**
+ * Publish approval request event
+ * Used when a tool requires approval before execution
+ * Note: This function is legacy - approval requests now use direct message events
+ * with OpenAI tool call protocol (see tool-utils.ts)
+ */
+export function publishApprovalRequest(world: World, approvalRequest: any, agentId: string, messageId: string): void {
+  const approvalEvent = {
+    type: 'approval_request',
+    agentId,
+    messageId,
+    approvalRequest,
+    timestamp: new Date().toISOString()
+  };
+  // Emit as approval event for legacy compatibility
+  world.eventEmitter.emit('approval', approvalEvent);
+  // Note: SSE events are for streaming only, not for tool messages
+  // Approval requests should use message events with OpenAI tool call format
+}
+
+/**
  * SSE subscription using World.eventEmitter
  */
 export function subscribeToSSE(
@@ -796,8 +826,9 @@ export async function processAgentMessage(
     }
 
     if (!response) {
-      loggerAgent.error('LLM response is empty', { agentId: agent.id });
-      // publishEvent(world, 'system', { message: `[Error] LLM response is empty`, type: 'error' });
+      // Empty response could mean approval request was sent or actual error
+      // For approval requests, this is normal behavior - just return silently
+      loggerAgent.debug('LLM response is empty - could be approval request or error', { agentId: agent.id });
       return;
     }
 
@@ -1105,4 +1136,172 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
   loggerChatTitle.debug('Final processed title', { title, originalLength: title.length });
 
   return title;
+}
+
+/**
+ * Check if a specific tool requires approval based on message history
+ * This replaces the keyword-based heuristic approach with actual tool execution checking
+ */
+export async function checkToolApproval(
+  world: World,
+  toolName: string,
+  toolArgs: any,
+  message: string,
+  messages: AgentMessage[]
+): Promise<{
+  needsApproval: boolean;
+  canExecute: boolean;
+  approvalRequest?: any;
+  reason?: string;
+}> {
+  try {
+    // Check for session-wide approval first
+    const sessionApproval = findSessionApproval(messages, toolName);
+    if (sessionApproval) {
+      return {
+        needsApproval: false,
+        canExecute: true
+      };
+    }
+
+    // Check for recent denial
+    const recentDenial = findRecentDenial(messages, toolName);
+    if (recentDenial) {
+      return {
+        needsApproval: false,
+        canExecute: false,
+        reason: 'Tool execution was recently denied'
+      };
+    }
+
+    // Check for recent one-time approval
+    const recentApproval = findRecentApproval(messages, toolName);
+    if (recentApproval) {
+      return {
+        needsApproval: false,
+        canExecute: true
+      };
+    }
+
+    // No approval found - need to request approval
+    return {
+      needsApproval: true,
+      canExecute: false,
+      approvalRequest: {
+        toolName,
+        toolArgs,
+        message,
+        requestId: `approval-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        options: ['deny', 'approve_once', 'approve_session']
+      }
+    };
+  } catch (error) {
+    loggerAgent.error('Error checking tool approval', {
+      toolName,
+      error: error instanceof Error ? error.message : error
+    });
+    return {
+      needsApproval: true,
+      canExecute: false,
+      approvalRequest: {
+        toolName,
+        toolArgs,
+        message,
+        requestId: `approval-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        options: ['deny', 'approve_once', 'approve_session']
+      }
+    };
+  }
+}
+
+/**
+ * Find session-wide approval for a tool in message history
+ */
+export function findSessionApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'session'; toolName: string } | undefined {
+  // Look for messages containing session approval for this tool
+  // Patterns: "approve [toolName] for session", "approve [toolName] for this session", etc.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.content && typeof msg.content === 'string') {
+      const content = msg.content.toLowerCase();
+      if ((content.includes('approve') && content.includes(toolName.toLowerCase()) &&
+        (content.includes('session') || content.includes('for this session'))) ||
+        (content.includes(`approve_session`) && content.includes(toolName.toLowerCase()))) {
+        return { decision: 'approve', scope: 'session', toolName };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find recent one-time approval for a tool in message history (within 5 minutes)
+ * Also checks if the approval has been "consumed" by a subsequent tool execution
+ */
+export function findRecentApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'once'; toolName: string } | undefined {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  let approvalIndex = -1;
+
+  // Look for recent one-time approval
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.createdAt && msg.createdAt < fiveMinutesAgo) {
+      break; // Stop if we've gone back more than 5 minutes
+    }
+
+    if (msg.content && typeof msg.content === 'string') {
+      const content = msg.content.toLowerCase();
+      if ((content.includes('approve') && content.includes(toolName.toLowerCase()) &&
+        (content.includes('once') || (!content.includes('session')))) ||
+        (content.includes(`approve_once`) && content.includes(toolName.toLowerCase()))) {
+        approvalIndex = i;
+        break;
+      }
+    }
+  }
+
+  // If no approval found, return undefined
+  if (approvalIndex === -1) {
+    return undefined;
+  }
+
+  // Check if approval has been consumed by checking for tool execution messages after the approval
+  for (let i = approvalIndex + 1; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.content && typeof msg.content === 'string') {
+      const content = msg.content.toLowerCase();
+      // Look for messages indicating tool execution
+      if ((content.includes('tool') && content.includes(toolName.toLowerCase()) &&
+        (content.includes('executed') || content.includes('completed') || content.includes('finished'))) ||
+        (content.includes(toolName.toLowerCase()) && content.includes('successfully'))) {
+        // One-time approval has been consumed
+        return undefined;
+      }
+    }
+  }
+
+  return { decision: 'approve', scope: 'once', toolName };
+}
+
+/**
+ * Find recent denial for a tool in message history (within 5 minutes)
+ */
+export function findRecentDenial(messages: AgentMessage[], toolName: string): { decision: 'deny'; toolName: string } | undefined {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+  // Look for recent denial
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.createdAt && msg.createdAt < fiveMinutesAgo) {
+      break; // Stop if we've gone back more than 5 minutes
+    }
+
+    if (msg.content && typeof msg.content === 'string') {
+      const content = msg.content.toLowerCase();
+      if (content.includes('deny') && content.includes(toolName.toLowerCase())) {
+        return { decision: 'deny', toolName };
+      }
+    }
+  }
+  return undefined;
 }

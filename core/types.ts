@@ -450,6 +450,25 @@ export class ApprovalRequiredException extends Error {
     this.name = 'ApprovalRequiredException';
   }
 }
+
+/**
+ * Result object returned when tool execution requires approval
+ * Used instead of exceptions for better control flow
+ */
+export interface ApprovalRequest {
+  __requiresApproval: true;
+  toolName: string;
+  toolArgs: object;
+  message: string;
+  options: string[];
+}
+
+/**
+ * Type guard to check if a tool result is an approval request
+ */
+export function isApprovalRequest(result: any): result is ApprovalRequest {
+  return result && typeof result === 'object' && result.__requiresApproval === true;
+}
 // World EventEmitter Types
 
 /**

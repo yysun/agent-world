@@ -119,7 +119,7 @@
  * - Fixed broken tool calling for Anthropic and Google providers by using official SDKs
  */
 
-import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage, ApprovalRequiredException } from './types.js';
+import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
 import {
   createClientForProvider,
@@ -173,83 +173,6 @@ async function getStorageWrappers(): Promise<StorageAPI> {
   }
   return storageWrappersPromise;
 }
-
-/**
- * Handle ApprovalRequiredException by creating approval tool call, saving agent state, and publishing SSE events
- */
-async function handleApprovalException(
-  error: ApprovalRequiredException,
-  agent: Agent,
-  world: World,
-  publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
-  messageId?: string
-): Promise<string> {
-  loggerStreaming.debug(`Tool execution requires approval`, {
-    toolName: error.toolName,
-    agentId: agent.id,
-    worldId: world.id,
-    messageId
-  });
-
-  // Create approval tool call
-  const approvalToolCall = {
-    id: `approval_${generateId()}`,
-    type: 'function' as const,
-    function: {
-      name: 'client.requestApproval',
-      arguments: JSON.stringify({
-        originalToolCall: { name: error.toolName, args: error.toolArgs },
-        message: error.message,
-        options: error.options
-      })
-    }
-  };
-
-  // Create assistant message with approval request
-  const assistantMessage: ChatMessage = {
-    role: 'assistant',
-    content: '',
-    tool_calls: [approvalToolCall]
-  };
-
-  // Save to agent memory
-  agent.memory.push(assistantMessage);
-
-  // Persist agent state
-  try {
-    const storage = await getStorageWrappers();
-    await storage.saveAgent(world.id, agent);
-  } catch (storageError) {
-    loggerGeneration.error(`Failed to persist approval request`, {
-      agentId: agent.id,
-      worldId: world.id,
-      error: storageError instanceof Error ? storageError.message : storageError
-    });
-  }
-
-  // For streaming: publish SSE events
-  if (publishSSE && messageId) {
-    // Note: We don't include tool_calls in SSE event as it's not part of WorldSSEEvent type
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'chunk',
-      messageId,
-      content: ''
-    });
-
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'end',
-      messageId
-    });
-
-    return ''; // Streaming returns empty response
-  }
-
-  // For non-streaming: return placeholder (not used but required for type consistency)
-  return '[APPROVAL_REQUEST]';
-}
-
 
 /**
  * Global LLM call queue to ensure serialized execution
@@ -474,73 +397,49 @@ async function executeStreamAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      try {
-        const response = await streamOpenAIResponse(
-          client,
-          agent.model,
-          preparedMessages,
-          agent,
-          mcpTools,
-          world,
-          publishSSE,
-          messageId
-        );
-        return { response, messageId };
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
-          return { response: approvalResponse, messageId };
-        }
-        throw error;
-      }
+      const response = await streamOpenAIResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        publishSSE,
+        messageId
+      );
+      return { response, messageId };
     }
 
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      try {
-        const response = await streamAnthropicResponse(
-          client,
-          agent.model,
-          preparedMessages,
-          agent,
-          mcpTools,
-          world,
-          publishSSE,
-          messageId
-        );
-        return { response, messageId };
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
-          return { response: approvalResponse, messageId };
-        }
-        throw error;
-      }
+      const response = await streamAnthropicResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        publishSSE,
+        messageId
+      );
+      return { response, messageId };
     }
 
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      try {
-        const response = await streamGoogleResponse(
-          client,
-          agent.model,
-          preparedMessages,
-          agent,
-          mcpTools,
-          world,
-          publishSSE,
-          messageId
-        );
-        return { response, messageId };
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          const approvalResponse = await handleApprovalException(error, agent, world, publishSSE, messageId);
-          return { response: approvalResponse, messageId };
-        }
-        throw error;
-      }
+      const response = await streamGoogleResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        publishSSE,
+        messageId
+      );
+      return { response, messageId };
     }
 
     // All providers now use direct integrations - no AI SDK needed
@@ -624,64 +523,43 @@ async function executeGenerateAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      try {
-        const response = await generateOpenAIResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateOpenAIResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-        // Update agent activity and LLM call count
-        agent.lastActive = new Date();
-        agent.llmCallCount++;
-        agent.lastLLMCall = new Date();
+      // Update agent activity and LLM call count
+      agent.lastActive = new Date();
+      agent.llmCallCount++;
+      agent.lastLLMCall = new Date();
 
-        loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
-        return response;
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          return await handleApprovalException(error, agent, world);
-        }
-        throw error;
-      }
+      loggerGeneration.debug(`LLM: Finished non-streaming response for agent=${agent.id}, world=${world.id}`);
+      return response;
     }
 
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      try {
-        const response = await generateAnthropicResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateAnthropicResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-        // Update agent activity and LLM call count
-        agent.lastActive = new Date();
-        agent.llmCallCount++;
-        agent.lastLLMCall = new Date();
+      // Update agent activity and LLM call count
+      agent.lastActive = new Date();
+      agent.llmCallCount++;
+      agent.lastLLMCall = new Date();
 
-        loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`);
-        return response;
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          return await handleApprovalException(error, agent, world);
-        }
-        throw error;
-      }
+      loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`);
+      return response;
     }
 
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      try {
-        const response = await generateGoogleResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateGoogleResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
 
-        // Update agent activity and LLM call count
-        agent.lastActive = new Date();
-        agent.llmCallCount++;
-        agent.lastLLMCall = new Date();
+      // Update agent activity and LLM call count
+      agent.lastActive = new Date();
+      agent.llmCallCount++;
+      agent.lastLLMCall = new Date();
 
-        loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`);
-        return response;
-      } catch (error) {
-        if (error instanceof ApprovalRequiredException) {
-          return await handleApprovalException(error, agent, world);
-        }
-        throw error;
-      }
+      loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`);
+      return response;
     }
 
     // All providers now use direct integrations - no AI SDK needed
