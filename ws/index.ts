@@ -127,22 +127,24 @@ async function initializeStorage(): Promise<{
 
   storageLogger.info(`Initializing ${config.storageType} storage...`);
 
-  // Queue storage is always in-memory (simple and sufficient)
-  const queueStorage = createMemoryQueueStorage();
-  storageLogger.info('Using in-memory queue storage');
-
   if (config.storageType === 'memory') {
     storageLogger.info('Using in-memory event storage (data will not persist)');
+    storageLogger.info('Using in-memory queue storage (data will not persist)');
     return {
       eventStorage: createMemoryEventStorage(),
-      queueStorage
+      queueStorage: createMemoryQueueStorage()
     };
   }
 
-  // SQLite event storage
+  // SQLite storage for both events and queue
   storageLogger.info(`Database path: ${config.dbPath}`);
   const { db } = await createSQLiteSchemaContext({ database: config.dbPath });
   storageLogger.info('SQLite database initialized successfully');
+
+  // Import and create SQLite queue storage
+  const { createQueueStorage } = await import('../core/storage/queue-storage.js');
+  const queueStorage = await createQueueStorage('sqlite', db);
+  storageLogger.info('SQLite queue storage initialized');
 
   return {
     eventStorage: await createSQLiteEventStorage(db),
