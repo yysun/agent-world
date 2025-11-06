@@ -32,6 +32,7 @@ import { generateAgentResponse } from './llm-manager.js';
 import { beginWorldActivity } from './activity-tracker.js';
 import { type StorageAPI, createStorageWithWrappers } from './storage/storage-factory.js'
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
+import { parseMessageContent } from './message-prep.js';
 import { createCategoryLogger } from './logger.js';
 
 // Function-specific loggers for granular debugging control
@@ -723,9 +724,11 @@ export async function saveIncomingMessageToMemory(
       });
     }
 
+    // Parse message content to detect enhanced format (e.g., tool results)
+    const parsedMessage = parseMessageContent(messageEvent.content, 'user');
+
     const userMessage: AgentMessage = {
-      role: 'user',
-      content: messageEvent.content,
+      ...parsedMessage,
       sender: messageEvent.sender,
       createdAt: messageEvent.timestamp,
       chatId: world.currentChatId || null,
@@ -1176,8 +1179,14 @@ export async function checkToolApproval(
 
 /**
  * Find session-wide approval for a tool in message history
+ * @deprecated Use enhanced string protocol with tool results instead of text parsing
  */
 export function findSessionApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'session'; toolName: string } | undefined {
+  loggerMemory.warn('DEPRECATED: findSessionApproval() uses text parsing. Migrate to enhanced string protocol with __type: "tool_result"', {
+    toolName,
+    hint: 'Send JSON.stringify({__type:"tool_result",tool_call_id:"...",content:"..."})'
+  });
+
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.content && typeof msg.content === 'string') {
@@ -1194,8 +1203,14 @@ export function findSessionApproval(messages: AgentMessage[], toolName: string):
 /**
  * Find recent one-time approval for a tool in message history (within 5 minutes)
  * Also checks if the approval has been "consumed" by a subsequent tool execution
+ * @deprecated Use enhanced string protocol with tool results instead of text parsing
  */
 export function findRecentApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'once'; toolName: string } | undefined {
+  loggerMemory.warn('DEPRECATED: findRecentApproval() uses text parsing. Migrate to enhanced string protocol with __type: "tool_result"', {
+    toolName,
+    hint: 'Send JSON.stringify({__type:"tool_result",tool_call_id:"...",content:"..."})'
+  });
+
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
   let approvalIndex = -1;
 

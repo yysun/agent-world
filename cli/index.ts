@@ -242,22 +242,40 @@ async function handleNewApprovalRequest(
         if (!isNaN(num) && choiceMap[num]) {
           const decision = choiceMap[num];
 
-          // Create approval response content that matches patterns the approval checker looks for
-          let content: string;
+          // Enhanced String Protocol: Send tool result as JSON string with __type marker
+          // Transport layer uses strings, but storage layer will convert to OpenAI format
+          // Server will parse this into: {role: 'tool', tool_call_id: '...', content: '...'}
+
+          let approvalDecision: 'approve' | 'deny';
+          let approvalScope: 'session' | 'once' | undefined;
+
           if (decision === 'approve_session') {
-            content = `approve ${toolName} for session`;
+            approvalDecision = 'approve';
+            approvalScope = 'session';
           } else if (decision === 'approve_once') {
-            content = `approve_once ${toolName}`;
+            approvalDecision = 'approve';
+            approvalScope = 'once';
           } else {
-            content = `deny ${toolName}`;
+            approvalDecision = 'deny';
+            approvalScope = undefined;
           }
+
+          const enhancedMessage = JSON.stringify({
+            __type: 'tool_result',
+            tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
+            content: JSON.stringify({
+              decision: approvalDecision,
+              scope: approvalScope,
+              toolName: toolName
+            })
+          });
 
           // Send the approval response as a regular message mentioning the agent
           // The agent will see this in the conversation and the approval checker will recognize it
           try {
             const { publishMessage } = await import('../core/events.js');
             const agentMention = agentId ? `@${agentId}, ` : '';
-            publishMessage(world, `${agentMention}${content}`, 'human');
+            publishMessage(world, `${agentMention}${enhancedMessage}`, 'human');
             resolve();
           } catch (err) {
             console.error(`${error('Failed to send approval response:')} ${err}`);

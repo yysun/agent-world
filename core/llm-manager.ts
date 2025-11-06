@@ -139,7 +139,6 @@ import {
 
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
-import { prepareMessagesForLLM } from './message-prep.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
 import type { StorageAPI } from './storage/storage-factory.js';
 // Granular function-specific loggers for detailed debugging control
@@ -366,10 +365,8 @@ async function executeStreamAgentResponse(
     loggerStreaming.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
     // Convert messages for LLM (strip custom fields)
-    const llmMessages = stripCustomFieldsFromMessages(messages);
-
-    // Prepare messages for LLM by filtering client.* tools and approval_ results
-    const preparedMessages = prepareMessagesForLLM(llmMessages);
+    // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
+    const preparedMessages = stripCustomFieldsFromMessages(messages);
 
     // Get MCP tools for this world
     const mcpTools = await getMCPToolsForWorld(world.id);
@@ -485,10 +482,9 @@ async function executeGenerateAgentResponse(
   messages: AgentMessage[],
   skipTools?: boolean
 ): Promise<string> {
-  const llmMessages = stripCustomFieldsFromMessages(messages);
-
-  // Prepare messages for LLM by filtering client.* tools and approval_ results
-  const preparedMessages = prepareMessagesForLLM(llmMessages);
+  // Convert messages for LLM (strip custom fields)
+  // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
+  const preparedMessages = stripCustomFieldsFromMessages(messages);
 
   let systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
 

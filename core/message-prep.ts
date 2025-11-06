@@ -2,17 +2,22 @@
  * Message Preparation Utilities for LLM Processing
  *
  * Features:
- * - Prepares messages by filtering client.* tool calls and approval_ tool results
+ * - Filters client.* tool calls and approval_ tool results from messages
  * - Two-layer architecture: storage (agent.memory) vs processing (LLM input)
  * - Maintains complete message history while providing clean LLM context
+ * - Enhanced string protocol: Parses JSON strings with __type markers into OpenAI format
  *
  * Implementation:
- * - Shared function used by all LLM providers (OpenAI, Anthropic, Google)
  * - Removes client.* tool calls and approval_ tool results from LLM context
  * - No approval cache updates (handled by server API layer)
+ * - parseMessageContent() converts enhanced string format to OpenAI ChatMessage
+ * - Used by utils.ts prepareMessagesForLLM() - high-level function applies this filter
+ * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
  * - 2025-11-04: Simplified from message-filter.ts, removed approval cache logic
+ * - 2025-11-06: Added parseMessageContent() for enhanced string protocol support
+ * - 2025-11-06: Consolidated with utils.ts - renamed to filterClientSideMessages, added alias
  */
 
 import { createCategoryLogger } from './logger.js';
@@ -21,7 +26,83 @@ import type { ChatMessage } from './types.js';
 const logger = createCategoryLogger('llm.message-prep');
 
 /**
- * Prepare messages for LLM consumption by filtering client-side tool calls.
+ * Parse message content to detect enhanced string format and convert to OpenAI ChatMessage.
+ * 
+ * Enhanced String Protocol:
+ * - Transport Layer: JSON strings with __type markers (e.g., {"__type": "tool_result", ...})
+ * - Storage Layer: OpenAI ChatMessage format (e.g., {role: "tool", tool_call_id: "...", ...})
+ * 
+ * Supported __type values:
+ * - "tool_result": Converts to OpenAI tool message with role: "tool"
+ * 
+ * Backward Compatibility:
+ * - Regular text strings pass through unchanged
+ * - Invalid JSON strings pass through unchanged
+ * - Missing __type passes through unchanged
+ * 
+ * @param content - String content (may be plain text or JSON with __type marker)
+ * @param defaultRole - Role to use if content is not enhanced format (default: "user")
+ * @returns ChatMessage in OpenAI format
+ * 
+ * @example
+ * // Tool result (enhanced format)
+ * parseMessageContent('{"__type":"tool_result","tool_call_id":"approval_123","content":"..."}')
+ * // → {role: "tool", tool_call_id: "approval_123", content: "...", createdAt: Date}
+ * 
+ * // Regular text (backward compatible)
+ * parseMessageContent("Hello world")
+ * // → {role: "user", content: "Hello world", createdAt: Date}
+ */
+export function parseMessageContent(
+  content: string,
+  defaultRole: 'user' | 'assistant' = 'user'
+): ChatMessage {
+  try {
+    const parsed = JSON.parse(content);
+
+    // Enhanced format: tool_result
+    if (parsed.__type === 'tool_result') {
+      if (!parsed.tool_call_id) {
+        logger.warn('Enhanced format missing tool_call_id, falling back to default role', {
+          parsed
+        });
+        return {
+          role: defaultRole,
+          content: content,
+          createdAt: new Date()
+        };
+      }
+
+      logger.debug('Parsed enhanced tool_result format', {
+        toolCallId: parsed.tool_call_id,
+        contentLength: parsed.content?.length || 0
+      });
+
+      return {
+        role: 'tool',
+        tool_call_id: parsed.tool_call_id,
+        content: parsed.content || '',
+        createdAt: new Date()
+      };
+    }
+
+    // JSON without __type marker - treat as regular text
+    logger.debug('JSON without __type marker, treating as regular content');
+  } catch {
+    // Not JSON - regular text
+    logger.debug('Non-JSON content, using default role', { role: defaultRole });
+  }
+
+  // Default: regular text message
+  return {
+    role: defaultRole,
+    content: content,
+    createdAt: new Date()
+  };
+}
+
+/**
+ * Filter client-side messages and tool calls from message array.
  * 
  * This function creates a clean copy of messages suitable for LLM processing:
  * - Removes messages marked as clientOnly (approval UI messages)
@@ -32,7 +113,7 @@ const logger = createCategoryLogger('llm.message-prep');
  * @param messages - All messages from agent memory
  * @returns Filtered messages ready for LLM
  */
-export function prepareMessagesForLLM(messages: ChatMessage[]): ChatMessage[] {
+export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[] {
   const prepared: ChatMessage[] = [];
 
   for (const message of messages) {

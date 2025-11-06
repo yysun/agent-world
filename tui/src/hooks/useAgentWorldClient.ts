@@ -215,24 +215,25 @@ export function useAgentWorldClient(
     try {
       const { decision, scope, toolName = 'unknown_tool', toolCallId, worldId, chatId, agentId } = response;
 
-      // For WebSocket, we send approval responses as regular human messages
-      // This matches the CLI implementation in cli/index.ts
-      // The server will process the message and update the approval cache
+      // Enhanced String Protocol: Send tool result as JSON string with __type marker
+      // Transport layer uses strings, but storage layer will convert to OpenAI format
+      // Server will parse this into: {role: 'tool', tool_call_id: '...', content: '...'}
 
-      let content: string;
-      if (decision === 'approve' && scope === 'session') {
-        content = `approve ${toolName} for session`;
-      } else if (decision === 'approve' && scope === 'once') {
-        content = `approve_once ${toolName}`;
-      } else {
-        content = `deny ${toolName}`;
-      }
+      const enhancedMessage = JSON.stringify({
+        __type: 'tool_result',
+        tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
+        content: JSON.stringify({
+          decision: decision,
+          scope: decision === 'approve' ? scope : undefined,
+          toolName: toolName
+        })
+      });
 
       // Add @mention if agentId is available (like CLI does)
       const agentMention = agentId ? `@${agentId}, ` : '';
-      const messageContent = `${agentMention}${content}`;
+      const messageContent = `${agentMention}${enhancedMessage}`;
 
-      // Send as regular message
+      // Send as regular message (string protocol)
       // Note: worldId and chatId should be passed from the approval context
       if (worldId) {
         await ws.sendMessage(worldId, messageContent, chatId ?? undefined, 'human');
