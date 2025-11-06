@@ -272,7 +272,7 @@ export async function streamGoogleResponse(
               mcpLogger.debug(`Tool execution stopped - approval required (Google streaming)`, {
                 sequenceId,
                 toolIndex: i,
-                toolName: call.functionCall!.name!,
+                toolName: functionCall.function!.name!,
                 agentId: agent.id,
                 messageId
               });

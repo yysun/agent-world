@@ -175,7 +175,7 @@ async function handleNewApprovalRequest(
   rl: readline.Interface,
   world: any
 ): Promise<void> {
-  const { toolName, toolArgs, message, options, agentId } = request;
+  const { toolCallId, toolName, toolArgs, message, options, agentId } = request;
 
   // Small delay to avoid mixing with world messages
   await new Promise(resolve => setTimeout(resolve, 100));
