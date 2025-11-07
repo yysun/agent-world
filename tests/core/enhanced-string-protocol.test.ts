@@ -46,7 +46,7 @@ describe('Enhanced String Protocol - Integration', () => {
         })
       });
 
-      const parsedMessage = parseMessageContent(enhancedMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(enhancedMessage, 'user');
 
       expect(parsedMessage.role).toBe('tool');
       expect(parsedMessage.tool_call_id).toBe('approval_shell_cmd_123');
@@ -59,7 +59,7 @@ describe('Enhanced String Protocol - Integration', () => {
 
     it('should handle backward compatibility with regular text messages', () => {
       const textMessage = 'Hello, agent!';
-      const parsedMessage = parseMessageContent(textMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(textMessage, 'user');
 
       expect(parsedMessage.role).toBe('user');
       expect(parsedMessage.content).toBe('Hello, agent!');
@@ -67,7 +67,7 @@ describe('Enhanced String Protocol - Integration', () => {
 
     it('should handle legacy approval text format (deprecated)', () => {
       const legacyMessage = 'approve shell_cmd for session';
-      const parsedMessage = parseMessageContent(legacyMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(legacyMessage, 'user');
 
       // Should be treated as regular user message
       expect(parsedMessage.role).toBe('user');
@@ -80,7 +80,7 @@ describe('Enhanced String Protocol - Integration', () => {
         content: 'some content'
       });
 
-      const parsedMessage = parseMessageContent(invalidMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(invalidMessage, 'user');
 
       // Should fall back to regular user message
       expect(parsedMessage.role).toBe('user');
@@ -89,7 +89,7 @@ describe('Enhanced String Protocol - Integration', () => {
 
     it('should handle JSON without __type marker', () => {
       const jsonMessage = JSON.stringify({ foo: 'bar', value: 123 });
-      const parsedMessage = parseMessageContent(jsonMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(jsonMessage, 'user');
 
       // Should be treated as regular text content
       expect(parsedMessage.role).toBe('user');
@@ -103,11 +103,48 @@ describe('Enhanced String Protocol - Integration', () => {
         content: ''
       });
 
-      const parsedMessage = parseMessageContent(emptyMessage, 'user');
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(emptyMessage, 'user');
 
       expect(parsedMessage.role).toBe('tool');
       expect(parsedMessage.tool_call_id).toBe('test_empty');
       expect(parsedMessage.content).toBe('');
+    });
+
+    it('should extract agentId from enhanced string format', () => {
+      const enhancedMessage = JSON.stringify({
+        __type: 'tool_result',
+        agentId: 'a1',
+        tool_call_id: 'approval_test_789',
+        content: JSON.stringify({ decision: 'approve', scope: 'session' })
+      });
+
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(enhancedMessage, 'user');
+
+      expect(parsedMessage.role).toBe('tool');
+      expect(parsedMessage.tool_call_id).toBe('approval_test_789');
+      expect(targetAgentId).toBe('a1');
+    });
+
+    it('should return undefined targetAgentId when agentId is not present', () => {
+      const enhancedMessage = JSON.stringify({
+        __type: 'tool_result',
+        tool_call_id: 'test_no_agent',
+        content: 'test content'
+      });
+
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(enhancedMessage, 'user');
+
+      expect(parsedMessage.role).toBe('tool');
+      expect(targetAgentId).toBeUndefined();
+    });
+
+    it('should not extract agentId from regular text messages', () => {
+      const textMessage = 'Hello, agent!';
+      const { message: parsedMessage, targetAgentId } = parseMessageContent(textMessage, 'user');
+
+      expect(parsedMessage.role).toBe('user');
+      expect(parsedMessage.content).toBe('Hello, agent!');
+      expect(targetAgentId).toBeUndefined();
     });
   });
 

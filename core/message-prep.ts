@@ -35,6 +35,10 @@ const logger = createCategoryLogger('llm.message-prep');
  * Supported __type values:
  * - "tool_result": Converts to OpenAI tool message with role: "tool"
  * 
+ * AgentId Handling:
+ * - If agentId is present in JSON, returns { message, targetAgentId }
+ * - Caller should prepend @mention before publishing
+ * 
  * Backward Compatibility:
  * - Regular text strings pass through unchanged
  * - Invalid JSON strings pass through unchanged
@@ -42,21 +46,21 @@ const logger = createCategoryLogger('llm.message-prep');
  * 
  * @param content - String content (may be plain text or JSON with __type marker)
  * @param defaultRole - Role to use if content is not enhanced format (default: "user")
- * @returns ChatMessage in OpenAI format
+ * @returns Object with ChatMessage and optional targetAgentId
  * 
  * @example
- * // Tool result (enhanced format)
- * parseMessageContent('{"__type":"tool_result","tool_call_id":"approval_123","content":"..."}')
- * // → {role: "tool", tool_call_id: "approval_123", content: "...", createdAt: Date}
+ * // Tool result with agentId (enhanced format)
+ * parseMessageContent('{"__type":"tool_result","tool_call_id":"approval_123","agentId":"a1","content":"..."}')
+ * // → {message: {role: "tool", ...}, targetAgentId: "a1"}
  * 
  * // Regular text (backward compatible)
  * parseMessageContent("Hello world")
- * // → {role: "user", content: "Hello world", createdAt: Date}
+ * // → {message: {role: "user", content: "Hello world", ...}, targetAgentId: undefined}
  */
 export function parseMessageContent(
   content: string,
   defaultRole: 'user' | 'assistant' = 'user'
-): ChatMessage {
+): { message: ChatMessage; targetAgentId?: string } {
   try {
     const parsed = JSON.parse(content);
 
@@ -67,22 +71,28 @@ export function parseMessageContent(
           parsed
         });
         return {
-          role: defaultRole,
-          content: content,
-          createdAt: new Date()
+          message: {
+            role: defaultRole,
+            content: content,
+            createdAt: new Date()
+          }
         };
       }
 
       logger.debug('Parsed enhanced tool_result format', {
         toolCallId: parsed.tool_call_id,
+        agentId: parsed.agentId,
         contentLength: parsed.content?.length || 0
       });
 
       return {
-        role: 'tool',
-        tool_call_id: parsed.tool_call_id,
-        content: parsed.content || '',
-        createdAt: new Date()
+        message: {
+          role: 'tool',
+          tool_call_id: parsed.tool_call_id,
+          content: parsed.content || '',
+          createdAt: new Date()
+        },
+        targetAgentId: parsed.agentId // Extract agentId for @mention routing
       };
     }
 
@@ -95,9 +105,11 @@ export function parseMessageContent(
 
   // Default: regular text message
   return {
-    role: defaultRole,
-    content: content,
-    createdAt: new Date()
+    message: {
+      role: defaultRole,
+      content: content,
+      createdAt: new Date()
+    }
   };
 }
 

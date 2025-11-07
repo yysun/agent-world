@@ -25,7 +25,7 @@ describe('parseMessageContent', () => {
         })
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
       expect(result.tool_call_id).toBe('approval_abc123');
@@ -44,7 +44,7 @@ describe('parseMessageContent', () => {
         content: ''
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
       expect(result.tool_call_id).toBe('approval_xyz');
@@ -57,7 +57,7 @@ describe('parseMessageContent', () => {
         tool_call_id: 'approval_xyz'
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
       expect(result.tool_call_id).toBe('approval_xyz');
@@ -70,7 +70,7 @@ describe('parseMessageContent', () => {
         content: 'some content'
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe(content);
@@ -82,7 +82,7 @@ describe('parseMessageContent', () => {
         content: 'some content'
       });
 
-      const result = parseMessageContent(content, 'assistant');
+      const { message: result, targetAgentId } = parseMessageContent(content, 'assistant');
 
       expect(result.role).toBe('assistant');
       expect(result.content).toBe(content);
@@ -93,7 +93,7 @@ describe('parseMessageContent', () => {
     it('should handle regular text as user message', () => {
       const content = 'Hello world';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('Hello world');
@@ -103,7 +103,7 @@ describe('parseMessageContent', () => {
     it('should handle regular text with assistant role', () => {
       const content = 'Assistant response';
 
-      const result = parseMessageContent(content, 'assistant');
+      const { message: result, targetAgentId } = parseMessageContent(content, 'assistant');
 
       expect(result.role).toBe('assistant');
       expect(result.content).toBe('Assistant response');
@@ -112,7 +112,7 @@ describe('parseMessageContent', () => {
     it('should handle approval text format (legacy)', () => {
       const content = 'approve shell_cmd for session';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('approve shell_cmd for session');
@@ -121,7 +121,7 @@ describe('parseMessageContent', () => {
     it('should handle deny text format (legacy)', () => {
       const content = 'deny file_write';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('deny file_write');
@@ -135,7 +135,7 @@ describe('parseMessageContent', () => {
         value: 123
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe(content);
@@ -144,7 +144,7 @@ describe('parseMessageContent', () => {
     it('should handle empty JSON object', () => {
       const content = '{}';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('{}');
@@ -155,7 +155,7 @@ describe('parseMessageContent', () => {
     it('should handle invalid JSON', () => {
       const content = '{invalid json';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('{invalid json');
@@ -164,7 +164,7 @@ describe('parseMessageContent', () => {
     it('should handle empty string', () => {
       const content = '';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('');
@@ -173,7 +173,7 @@ describe('parseMessageContent', () => {
     it('should handle non-JSON with special characters', () => {
       const content = 'This is {not] valid JSON';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('This is {not] valid JSON');
@@ -184,7 +184,7 @@ describe('parseMessageContent', () => {
     it('should handle JSON array', () => {
       const content = '[1, 2, 3]';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('[1, 2, 3]');
@@ -193,7 +193,7 @@ describe('parseMessageContent', () => {
     it('should handle JSON string primitive', () => {
       const content = '"just a string"';
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe('"just a string"');
@@ -205,7 +205,7 @@ describe('parseMessageContent', () => {
         data: 'some data'
       });
 
-      const result = parseMessageContent(content);
+      const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
       expect(result.content).toBe(content);

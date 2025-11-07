@@ -113,6 +113,7 @@ export interface Message {
     approvalOptions?: string[];
     approvalDecision?: 'approve' | 'deny';
     approvalScope?: 'once' | 'session' | 'none';
+    agentId?: string; // Agent that requested the approval
   };
 }
 

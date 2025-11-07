@@ -8,14 +8,14 @@
  * - Enqueue messages for processing
  * - Execute CLI commands (with automatic parsing)
  * - Send approval responses for tool approval system
- * - Agent @mention support in approval responses
+ * - Enhanced protocol: agentId embedded in JSON (server auto-prepends @mention)
  * - Unsubscribe from world
  * - Ping/heartbeat
  * 
  * Responsibilities:
  * - Protocol operations only
  * - Command parsing and mapping
- * - Tool approval response communication with @mention like CLI
+ * - Tool approval response communication using enhanced protocol
  * - Depends on WebSocketClient instance
  * - No state management
  * - No event processing
@@ -23,7 +23,7 @@
  * Created: 2025-11-02 - Phase 1: Implement focused hooks
  * Updated: 2025-11-02 - Fix command execution - parse command strings and map to server format
  * Updated: Phase 7 - Add tool approval response functionality
- * Updated: 2025-11-05 - Added agent @mention support for approval responses to match CLI behavior
+ * Updated: 2025-11-06 - Updated approval protocol - agentId now embedded in JSON (matches CLI/Web)
  */
 
 import { useCallback, useEffect } from 'react';
@@ -218,10 +218,12 @@ export function useAgentWorldClient(
       // Enhanced String Protocol: Send tool result as JSON string with __type marker
       // Transport layer uses strings, but storage layer will convert to OpenAI format
       // Server will parse this into: {role: 'tool', tool_call_id: '...', content: '...'}
+      // AgentId is embedded in JSON; server will automatically prepend @mention
 
       const enhancedMessage = JSON.stringify({
         __type: 'tool_result',
         tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
+        agentId: agentId, // Include agentId in JSON structure (server will auto-prepend @mention)
         content: JSON.stringify({
           decision: decision,
           scope: decision === 'approve' ? scope : undefined,
@@ -229,9 +231,7 @@ export function useAgentWorldClient(
         })
       });
 
-      // Add @mention if agentId is available (like CLI does)
-      const agentMention = agentId ? `@${agentId}, ` : '';
-      const messageContent = `${agentMention}${enhancedMessage}`;
+      const messageContent = enhancedMessage;
 
       // Send as regular message (string protocol)
       // Note: worldId and chatId should be passed from the approval context

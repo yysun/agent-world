@@ -56,9 +56,14 @@
  * - Flags responses with isToolCallResponse and approval decision
  * - Renders ToolCallResponseBox showing approval result
  * - Captures agentId from approval requests and includes it in responses
- * - Sends approval responses with @agentId mention like CLI does
+ * - Sends approval responses using enhanced string protocol with agentId in JSON
+ * - Enhanced protocol format: JSON.stringify({__type:'tool_result',tool_call_id,agentId,content})
+ * - Server automatically prepends @mention based on agentId in JSON
+ * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
  *
  * Changes:
+ * - 2025-11-06: Moved agentId into JSON structure (cleaner than @mention prefix)
+ * - 2025-11-06: Updated approval response to use enhanced string protocol (OpenAI format)
  * - 2025-11-05: Added agent @mention support for approval responses to match CLI behavior
  * - 2025-11-05: Added tool call request/response detection and inline display
  * - 2025-10-26: Phase 1 - Converted to AppRun native typed events with Update<State, Events> tuple pattern
@@ -93,7 +98,6 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import {
   sendChatMessage,
-  sendApprovalDecision,
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
@@ -240,7 +244,8 @@ const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null
         approvalMessage: parsedArgs?.message ?? 'This tool requires your approval to continue.',
         approvalOptions: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
           ? parsedArgs.options
-          : ['deny', 'approve_once', 'approve_session']
+          : ['deny', 'approve_once', 'approve_session'],
+        agentId: messageData?.sender || messageData?.agentId // Capture agent that made the request
       };
     }
   }
@@ -519,7 +524,8 @@ const submitApprovalDecision = async (
         toolName: message.toolCallData.toolName,
         toolArgs: message.toolCallData.toolArgs,
         message: message.toolCallData.approvalMessage || '',
-        options: message.toolCallData.approvalOptions || []
+        options: message.toolCallData.approvalOptions || [],
+        agentId: message.toolCallData.agentId // Preserve agentId from toolCallData
       };
     } else {
       // No matching request found
@@ -533,26 +539,34 @@ const submitApprovalDecision = async (
     needScroll: true
   };
 
-  // Create approval message content like CLI does
-  let approvalContent: string;
+  // Create approval decision for enhanced string protocol
+  let approvalDecision: 'approve' | 'deny';
+  let approvalScope: 'session' | 'once' | undefined;
+
   if (decision === 'approve') {
-    if (scope === 'session') {
-      approvalContent = `approve ${request.toolName} for session`;
-    } else if (scope === 'once') {
-      approvalContent = `approve_once ${request.toolName}`;
-    } else {
-      approvalContent = `approve ${request.toolName}`;
-    }
+    approvalDecision = 'approve';
+    approvalScope = scope === 'session' ? 'session' : 'once';
   } else {
-    approvalContent = `deny ${request.toolName}`;
+    approvalDecision = 'deny';
+    approvalScope = undefined;
   }
 
-  // Add @mention if agentId is available (like CLI does)
-  const agentMention = request.agentId ? `@${request.agentId}, ` : '';
-  const messageContent = `${agentMention}${approvalContent}`;
+  // Use enhanced string protocol with agentId inside JSON (cleaner than @mention)
+  const enhancedMessage = JSON.stringify({
+    __type: 'tool_result',
+    tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
+    agentId: request.agentId, // Include agentId in JSON structure
+    content: JSON.stringify({
+      decision: approvalDecision,
+      scope: approvalScope,
+      toolName: request.toolName
+    })
+  });
+
+  const messageContent = enhancedMessage;
 
   try {
-    // Send as regular message via SSE (like CLI does)
+    // Send using enhanced string protocol
     await sendChatMessage(state.worldName, messageContent, {
       sender: 'HUMAN'
     });

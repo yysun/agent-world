@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2025-11-06: Updated approval protocol - agentId now embedded in JSON (server auto-prepends @mention)
  * - 2025-11-05: Aligned tool approval to OpenAI protocol - check tool_calls in message events
  * - 2025-11-05: Changed approval UI from enquirer to rl.question (numbered choices)
  * - 2025-11-05: Removed SSE-based approval handling (approvals come as message events)
@@ -263,6 +264,7 @@ async function handleNewApprovalRequest(
           const enhancedMessage = JSON.stringify({
             __type: 'tool_result',
             tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
+            agentId: agentId, // Include agentId in JSON structure (server will auto-prepend @mention)
             content: JSON.stringify({
               decision: approvalDecision,
               scope: approvalScope,
@@ -270,12 +272,11 @@ async function handleNewApprovalRequest(
             })
           });
 
-          // Send the approval response as a regular message mentioning the agent
-          // The agent will see this in the conversation and the approval checker will recognize it
+          // Send the approval response using enhanced protocol
+          // Server will automatically prepend @mention based on agentId in JSON
           try {
             const { publishMessage } = await import('../core/events.js');
-            const agentMention = agentId ? `@${agentId}, ` : '';
-            publishMessage(world, `${agentMention}${enhancedMessage}`, 'human');
+            publishMessage(world, enhancedMessage, 'human');
             resolve();
           } catch (err) {
             console.error(`${error('Failed to send approval response:')} ${err}`);

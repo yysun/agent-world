@@ -17,6 +17,9 @@
  * - Chat title generation on world idle events
  *
  * Recent Changes (2025-11):
+ * - Fixed approval response broadcast bug: Removed HUMAN check from shouldAutoMention to ensure
+ *   agent responses to HUMAN approval messages include proper targeting mentions (@HUMAN),
+ *   preventing unintended broadcast to all agents
  * - Consolidated redundant logging and streamlined approval checking
  * - Added tool_calls/tool_call_id persistence for approval messages
  * - Pre-generate message IDs for agent responses
@@ -305,6 +308,7 @@ export function publishEvent(world: World, type: string, content: any): void {
 
 /**
  * Message publishing using World.eventEmitter with chat session management
+ * Parses enhanced string protocol and automatically prepends @mention if agentId detected
  * Returns the messageEvent so callers can access the generated messageId
  * 
  * @param chatId - Optional chat ID. If not provided, uses world.currentChatId
@@ -313,8 +317,22 @@ export function publishEvent(world: World, type: string, content: any): void {
 export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+
+  // Parse enhanced string protocol to extract targetAgentId
+  const { targetAgentId } = parseMessageContent(content, 'user');
+
+  // Prepend @mention if agentId is present in enhanced protocol
+  let finalContent = content;
+  if (targetAgentId) {
+    finalContent = `@${targetAgentId}, ${content}`;
+    loggerMemory.debug('[publishMessage] Prepended @mention from enhanced protocol', {
+      agentId: targetAgentId,
+      messageId
+    });
+  }
+
   const messageEvent: WorldMessageEvent = {
-    content,
+    content: finalContent,
     sender,
     timestamp: new Date(),
     messageId,
@@ -327,7 +345,8 @@ export function publishMessage(world: World, content: string, sender: string, ch
     sender,
     worldId: world.id,
     chatId: targetChatId,
-    contentPreview: content.substring(0, 50)
+    hasAgentId: !!targetAgentId,
+    contentPreview: finalContent.substring(0, 50)
   });
 
   world.eventEmitter.emit('message', messageEvent);
@@ -536,11 +555,13 @@ export function getValidMentions(response: string, agentId: string): string[] {
     .filter(mention => mention.toLowerCase() !== agentId.toLowerCase());
 }
 
-// Determine if agent should auto-mention sender (agents only, no valid mentions)
+// Determine if agent should auto-mention sender (no valid mentions in response)
+// Auto-mention is used to target responses and prevent unintended broadcasting
 export function shouldAutoMention(response: string, sender: string, agentId: string): boolean {
   if (!response?.trim() || !sender || !agentId) return false;
-  if (sender.toLowerCase() === agentId.toLowerCase()) return false;
   if (determineSenderType(sender) === SenderType.HUMAN) return false;
+  if (sender.toLowerCase() === agentId.toLowerCase()) return false;
+  // Check if response already has valid mentions (excluding self)
   return getValidMentions(response, agentId).length === 0;
 }
 
@@ -725,7 +746,7 @@ export async function saveIncomingMessageToMemory(
     }
 
     // Parse message content to detect enhanced format (e.g., tool results)
-    const parsedMessage = parseMessageContent(messageEvent.content, 'user');
+    const { message: parsedMessage } = parseMessageContent(messageEvent.content, 'user');
 
     const userMessage: AgentMessage = {
       ...parsedMessage,
