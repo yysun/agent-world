@@ -37,6 +37,15 @@ import { type StorageAPI, createStorageWithWrappers } from './storage/storage-fa
 import { getWorldTurnLimit, extractMentions, extractParagraphBeginningMentions, determineSenderType, prepareMessagesForLLM } from './utils.js';
 import { parseMessageContent } from './message-prep.js';
 import { createCategoryLogger } from './logger.js';
+import {
+  calculateOwnerAgentIds,
+  calculateRecipientAgentId,
+  calculateIsMemoryOnly,
+  calculateIsCrossAgentMessage,
+  calculateMessageDirection,
+  calculateThreadMetadata
+} from './events-metadata.js';
+import { createDefaultMessageMetadata } from './storage/eventStorage/validation.js';
 
 // Function-specific loggers for granular debugging control
 const loggerPublish = createCategoryLogger('events.publish');
@@ -133,6 +142,24 @@ export function setupEventPersistence(world: World): () => void {
 
   // Message event persistence
   const messageHandler = (event: WorldMessageEvent): void | Promise<void> => {
+    // Calculate enhanced metadata using helper functions
+    const ownerAgentIds = calculateOwnerAgentIds(world, event);
+    const recipientAgentId = calculateRecipientAgentId(world, event);
+    const messageDirection = calculateMessageDirection(world, event);
+    const isMemoryOnly = calculateIsMemoryOnly(world, event);
+    const isCrossAgentMessage = calculateIsCrossAgentMessage(world, event);
+    const isHumanMessage = event.sender === 'human' || event.sender === 'user';
+
+    // Calculate thread metadata (requires loading messages for accurate depth calculation)
+    // For now, use simplified version - can enhance later with full message history
+    const threadMetadata = event.replyToMessageId
+      ? { threadRootId: event.replyToMessageId, threadDepth: 1, isReply: true }
+      : { threadRootId: null, threadDepth: 0, isReply: false };
+
+    // Get tool call information if present
+    const hasToolCalls = !!((event as any).tool_calls?.length);
+    const toolCallCount = (event as any).tool_calls?.length || 0;
+
     const eventData = {
       id: event.messageId,
       worldId: world.id,
@@ -148,8 +175,46 @@ export function setupEventPersistence(world: World): () => void {
         tool_call_id: (event as any).tool_call_id
       },
       meta: {
+        // Core fields
         sender: event.sender,
-        chatId: event.chatId
+        chatId: event.chatId || null,
+
+        // Agent Context
+        ownerAgentIds,
+        recipientAgentId,
+        originalSender: null, // Will be set for cross-agent forwarding in future
+        deliveredToAgents: ownerAgentIds, // Same as owner for now
+
+        // Message Classification
+        messageDirection,
+        isMemoryOnly,
+        isCrossAgentMessage,
+        isHumanMessage,
+
+        // Threading
+        threadRootId: threadMetadata.threadRootId,
+        threadDepth: threadMetadata.threadDepth,
+        isReply: threadMetadata.isReply,
+        hasReplies: false, // Will be updated async in future
+
+        // Tool Approval
+        requiresApproval: (event as any).requiresApproval || false,
+        approvalScope: null, // Set when approval is granted
+        approvedAt: null,
+        approvedBy: null,
+        deniedAt: null,
+        denialReason: null,
+
+        // Performance (for agent messages with LLM usage)
+        llmTokensInput: (event as any).usage?.inputTokens || null,
+        llmTokensOutput: (event as any).usage?.outputTokens || null,
+        llmLatency: null, // Can be calculated from SSE start/end events
+        llmProvider: null, // Not available in message event
+        llmModel: null,
+
+        // UI State
+        hasToolCalls,
+        toolCallCount
       },
       createdAt: event.timestamp
     };

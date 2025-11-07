@@ -32,6 +32,91 @@ export interface StoredEvent {
   createdAt: Date;
 }
 
+/**
+ * Enhanced metadata for message events
+ * All fields REQUIRED - no legacy support
+ */
+export interface MessageEventMetadata {
+  // Core fields (REQUIRED)
+  sender: string;
+  chatId: string | null;
+
+  // Agent Context (REQUIRED)
+  ownerAgentIds: string[];         // Which agents have this in memory
+  recipientAgentId: string | null; // Intended recipient (null = broadcast)
+  originalSender: string | null;   // For cross-agent messages
+  deliveredToAgents: string[];     // Who received it
+
+  // Message Classification (REQUIRED)
+  messageDirection: 'outgoing' | 'incoming' | 'broadcast';
+  isMemoryOnly: boolean;           // Saved but no response triggered
+  isCrossAgentMessage: boolean;    // Agent→agent communication
+  isHumanMessage: boolean;         // Human→agents communication
+
+  // Threading (REQUIRED for structure, null if not applicable)
+  threadRootId: string | null;     // Root of conversation thread
+  threadDepth: number;             // 0=root, 1=reply, etc.
+  isReply: boolean;                // Has replyToMessageId
+  hasReplies: boolean;             // Other messages reply to this (updated async)
+
+  // Tool Approval (REQUIRED for tool calls)
+  requiresApproval: boolean;
+  approvalScope: 'once' | 'session' | 'always' | null;
+  approvedAt: string | null;       // ISO timestamp
+  approvedBy: string | null;
+  deniedAt: string | null;         // ISO timestamp
+  denialReason: string | null;
+
+  // Performance (REQUIRED for agent messages, null for human)
+  llmTokensInput: number | null;
+  llmTokensOutput: number | null;
+  llmLatency: number | null;
+  llmProvider: string | null;
+  llmModel: string | null;
+
+  // UI State (REQUIRED)
+  hasToolCalls: boolean;
+  toolCallCount: number;
+}
+
+/**
+ * Enhanced metadata for tool events
+ */
+export interface ToolEventMetadata {
+  agentName: string;
+  toolType: string;
+
+  // Agent Context (REQUIRED)
+  ownerAgentId: string;            // Which agent executed this
+  triggeredByMessageId: string;    // What message caused this
+
+  // Performance (REQUIRED)
+  executionDuration: number;       // milliseconds
+  resultSize: number;              // bytes
+  wasApproved: boolean;
+}
+
+/**
+ * Validation: All message events must have complete metadata
+ */
+export function validateMessageEventMetadata(meta: any): meta is MessageEventMetadata {
+  return !!(
+    meta &&
+    typeof meta.sender === 'string' &&
+    Array.isArray(meta.ownerAgentIds) &&
+    typeof meta.messageDirection === 'string' &&
+    typeof meta.isMemoryOnly === 'boolean' &&
+    typeof meta.isCrossAgentMessage === 'boolean' &&
+    typeof meta.isHumanMessage === 'boolean' &&
+    typeof meta.threadDepth === 'number' &&
+    typeof meta.isReply === 'boolean' &&
+    typeof meta.hasReplies === 'boolean' &&
+    typeof meta.requiresApproval === 'boolean' &&
+    typeof meta.hasToolCalls === 'boolean' &&
+    typeof meta.toolCallCount === 'number'
+  );
+}
+
 export interface GetEventsOptions {
   /**
    * Get events with sequence number greater than this value
@@ -58,6 +143,14 @@ export interface GetEventsOptions {
    * Filter by event types
    */
   types?: string[];
+
+  // Enhanced filtering (all events have this metadata)
+  ownerAgentId?: string;        // Filter by agent ownership
+  recipientAgentId?: string;    // Filter by recipient
+  isMemoryOnly?: boolean;       // Only memory-only messages
+  isCrossAgent?: boolean;       // Only cross-agent messages
+  threadRootId?: string;        // Messages in specific thread
+  hasToolCalls?: boolean;       // Only messages with tool calls
 }
 
 export interface EventStorage {

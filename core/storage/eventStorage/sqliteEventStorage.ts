@@ -35,6 +35,7 @@
 import type { Database } from 'sqlite3';
 import { promisify } from 'util';
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
+import { validateEventForPersistence } from './validation.js';
 
 export interface SQLiteEventStorageContext {
   db: Database;
@@ -182,6 +183,9 @@ async function getNextSeq(ctx: SQLiteEventStorageContext, worldId: string, chatI
 async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Promise<void> {
   await ensureInitialized(ctx);
 
+  // Validate event metadata before persistence
+  validateEventForPersistence(event);
+
   // Auto-generate sequence number if not provided
   const seq = event.seq ?? await getNextSeq(ctx, event.worldId, event.chatId);
 
@@ -213,6 +217,9 @@ async function saveEvents(ctx: SQLiteEventStorageContext, events: StoredEvent[])
 
   try {
     for (const event of events) {
+      // Validate event metadata before persistence
+      validateEventForPersistence(event);
+
       // Auto-generate sequence number if not provided
       const seq = event.seq ?? await getNextSeq(ctx, event.worldId, event.chatId);
 

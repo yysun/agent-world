@@ -33,6 +33,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { existsSync } from 'fs';
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
+import { validateEventForPersistence } from './validation.js';
 
 /**
  * File storage configuration
@@ -150,6 +151,9 @@ export class FileEventStorage implements EventStorage {
    * Save a single event
    */
   async saveEvent(event: StoredEvent): Promise<void> {
+    // Validate event metadata before persistence
+    validateEventForPersistence(event);
+
     const worldDir = path.join(this.baseDir, event.worldId);
     const eventsDir = getWorldEventsDir(worldDir);
     await ensureDir(eventsDir);
@@ -212,6 +216,9 @@ export class FileEventStorage implements EventStorage {
       // Generate seq numbers sequentially and filter out duplicates
       const eventsWithSeq: StoredEvent[] = [];
       for (const event of groupEvents) {
+        // Validate event metadata before persistence
+        validateEventForPersistence(event);
+
         // Skip if duplicate ID exists
         if (existingIds.has(event.id)) {
           continue; // Silently ignore duplicate
