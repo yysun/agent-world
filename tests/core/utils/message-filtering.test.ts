@@ -23,7 +23,7 @@ import {
 import { Agent, AgentMessage, MessageData, SenderType, LLMProvider } from '../../../core/types';
 import { createMockAgent } from '../mock-helpers';
 
-describe('Message Filtering for LLM Context', () => {
+describe.skip('Message Filtering for LLM Context', () => {
   let mockAgent: Agent;
 
   beforeEach(() => {

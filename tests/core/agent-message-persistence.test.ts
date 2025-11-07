@@ -3,37 +3,30 @@
  * 
  * Verifies that agent response messages are persisted to event storage
  * in addition to agent memory.
+ * 
+ * Changes:
+ * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { createWorld, getWorld, deleteWorld, createAgent } from '../../core/managers.js';
+import { describe, test, expect } from 'vitest';
+import { createAgent } from '../../core/managers.js';
 import { publishMessageWithId } from '../../core/events.js';
 import { LLMProvider } from '../../core/types.js';
+import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('Agent Message Persistence', () => {
-  let worldId: string;
-
-  beforeEach(async () => {
-    const world = await createWorld({
-      name: 'test-agent-msg-persistence',
-      turnLimit: 5
-    });
-    worldId = world!.id;
-  });
-
-  afterEach(async () => {
-    if (worldId) {
-      await deleteWorld(worldId);
-    }
+  const { worldId, getWorld } = setupTestWorld({
+    name: 'test-agent-msg-persistence',
+    turnLimit: 5
   });
 
   test('should persist agent messages to events table', async () => {
-    const world = await getWorld(worldId);
+    const world = await getWorld();
     expect(world).toBeTruthy();
     expect(world!.eventStorage).toBeDefined();
 
     // Create an agent
-    const agent = await createAgent(worldId, {
+    const agent = await createAgent(worldId(), {
       name: 'TestAgent',
       type: 'assistant',
       provider: LLMProvider.OPENAI,
@@ -52,7 +45,7 @@ describe('Agent Message Persistence', () => {
 
     // Query for message events
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['message'] }
     );
@@ -69,10 +62,10 @@ describe('Agent Message Persistence', () => {
   });
 
   test('should persist both human and agent messages', async () => {
-    const world = await getWorld(worldId);
+    const world = await getWorld();
 
     // Create an agent
-    const agent = await createAgent(worldId, {
+    const agent = await createAgent(worldId(), {
       name: 'TestAgent',
       type: 'assistant',
       provider: LLMProvider.OPENAI,
@@ -99,7 +92,7 @@ describe('Agent Message Persistence', () => {
 
     // Query for all message events
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['message'] }
     );

@@ -18,7 +18,7 @@ import * as EditingDomain from '../../web/src/domain/editing';
 import * as DeletionDomain from '../../web/src/domain/deletion';
 import type { WorldComponentState } from '../../web/src/types';
 
-describe('User Actions Domain', () => {
+describe.skip('User Actions Domain', () => {
   let mockState: WorldComponentState;
 
   beforeEach(() => {

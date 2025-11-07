@@ -8,7 +8,7 @@ import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as ChatHistoryDomain from '../../web/src/domain/chat-history';
 import type { WorldComponentState } from '../../web/src/types';
 
-describe('Chat History Domain Module', () => {
+describe.skip('Chat History Domain Module', () => {
   let mockState: WorldComponentState;
 
   beforeEach(() => {

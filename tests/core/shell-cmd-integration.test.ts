@@ -1,32 +1,35 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { createWorld, deleteWorld, getWorld } from '../../core/managers.js';
+/**
+ * Shell Command Tool Integration Tests
+ * Tests for shell_cmd built-in tool integration with worlds
+ * 
+ * Features tested:
+ * - shell_cmd tool availability in all worlds
+ * - Tool schema and parameter validation
+ * - Command execution through tool interface
+ * - Error handling and reporting
+ * - Execution history persistence
+ * 
+ * Changes:
+ * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
+ */
+
+import { describe, test, expect } from 'vitest';
+import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
+import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('shell_cmd integration with worlds', () => {
-  let worldId: string;
-
-  beforeEach(async () => {
-    // Create a test world
-    const world = await createWorld({
-      name: 'test-world-shell-cmd',
-      description: 'Test world for shell_cmd tool',
-      turnLimit: 5,
-      chatLLMProvider: LLMProvider.OPENAI,
-      chatLLMModel: 'gpt-4'
-    });
-    worldId = world.id;
-  });
-
-  afterEach(async () => {
-    // Clean up
-    if (worldId) {
-      await deleteWorld(worldId);
-    }
+  const { worldId, getWorld: getTestWorld } = setupTestWorld({
+    name: 'test-world-shell-cmd',
+    description: 'Test world for shell_cmd tool',
+    turnLimit: 5,
+    chatLLMProvider: LLMProvider.OPENAI,
+    chatLLMModel: 'gpt-4'
   });
 
   test('should include shell_cmd tool in all worlds', async () => {
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
 
     // Verify shell_cmd tool is present
     expect(tools).toHaveProperty('shell_cmd');
@@ -37,7 +40,7 @@ describe('shell_cmd integration with worlds', () => {
   });
 
   test('should have correct tool schema', async () => {
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
     // Verify schema structure
@@ -51,7 +54,7 @@ describe('shell_cmd integration with worlds', () => {
   });
 
   test('should execute shell_cmd tool through tool interface', async () => {
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
     // Execute a simple command through the tool
@@ -69,18 +72,18 @@ describe('shell_cmd integration with worlds', () => {
 
   test('should be available even without MCP config', async () => {
     // Verify world has no MCP config
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
     expect(world.mcpConfig).toBeUndefined();
 
     // shell_cmd should still be available
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
     expect(tools).toHaveProperty('shell_cmd');
   });
 
   test('should work alongside MCP server tools if configured', async () => {
     // Note: This test just verifies the built-in tool doesn't break
     // when MCP config is present (without actually configuring an MCP server)
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
 
     // Should have at least the built-in shell_cmd tool
     const toolCount = Object.keys(tools).length;
@@ -89,7 +92,7 @@ describe('shell_cmd integration with worlds', () => {
   });
 
   test('should handle errors through tool interface', async () => {
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
     // Execute a command that will fail
@@ -106,7 +109,7 @@ describe('shell_cmd integration with worlds', () => {
   });
 
   test('should persist execution history across tool calls', async () => {
-    const tools = await getMCPToolsForWorld(worldId);
+    const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
     // Execute multiple commands

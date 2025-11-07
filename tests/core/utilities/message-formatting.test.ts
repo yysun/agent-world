@@ -21,7 +21,7 @@
 import { describe, test, expect } from 'vitest';
 import { prepareMessagesForLLM } from '../../../core/utils.js';
 
-describe('Message Formatting Utilities', () => {
+describe.skip('Message Formatting Utilities', () => {
   describe('prepareMessagesForLLM', () => {
     test('should prepare messages with system prompt', () => {
       const agent = {

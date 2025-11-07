@@ -17,6 +17,10 @@
  * - Chat title generation on world idle events
  *
  * Recent Changes (2025-11):
+ * - Fixed tool event metadata validation errors: Added required ownerAgentId and 
+ *   triggeredByMessageId fields to toolHandler, added validation guards to reject
+ *   tool events missing messageId or agentName
+ * - Removed unnecessary 'info' event emission from tool-utils.ts to prevent validation errors
  * - Fixed approval response broadcast bug: Removed HUMAN check from shouldAutoMention to ensure
  *   agent responses to HUMAN approval messages include proper targeting mentions (@HUMAN),
  *   preventing unintended broadcast to all agents
@@ -254,10 +258,31 @@ export function setupEventPersistence(world: World): () => void {
   };
 
   // Tool event persistence (world channel)
-  // Handles both WorldToolEvent (tool execution) and WorldActivityEventPayload (activity tracking)
+  // Handles WorldToolEvent (tool execution) and WorldActivityEventPayload (activity tracking)
   const toolHandler = (event: any): void | Promise<void> => {
-    // Check if this is an activity event or tool event
+    // Check event type category
     const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
+    const isToolEvent = event.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(event.type);
+
+    // Validate required fields for tool events only
+    if (isToolEvent) {
+      if (!event.messageId) {
+        loggerPublish.error('Tool event missing required messageId', {
+          worldId: world.id,
+          eventType: event.type,
+          agentName: event.agentName
+        });
+        return; // Skip persistence for invalid events
+      }
+      if (!event.agentName) {
+        loggerPublish.error('Tool event missing required agentName', {
+          worldId: world.id,
+          eventType: event.type,
+          messageId: event.messageId
+        });
+        return; // Skip persistence for invalid events
+      }
+    }
 
     // Generate unique ID for tool events by combining messageId with tool type
     // This prevents duplicate ID conflicts when multiple tool events (tool-start, tool-result, tool-error)
@@ -288,7 +313,13 @@ export function setupEventPersistence(world: World): () => void {
         source: event.source
       } : {
         agentName: event.agentName,
-        toolType: event.type
+        toolType: event.type,
+        // Required metadata for tool events
+        ownerAgentId: event.agentName,
+        triggeredByMessageId: event.messageId,
+        executionDuration: event.toolExecution?.duration ?? 0,
+        resultSize: event.toolExecution?.resultSize ?? 0,
+        wasApproved: false // Default, should be updated if approval tracking is needed
       },
       createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };

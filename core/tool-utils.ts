@@ -243,16 +243,6 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
     execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
       // Check if tool requires approval BEFORE parameter validation
       if (tool.approval?.required && context?.world && context?.messages) {
-        // Publish world event about approval check (following activity event pattern)
-        if (context.world?.eventEmitter) {
-          context.world.eventEmitter.emit('world', {
-            type: 'info',
-            message: `Tool ${toolName} requires approval - checking...`,
-            source: context.agentId || 'system',
-            timestamp: new Date().toISOString()
-          });
-        }
-
         const { checkToolApproval } = await import('./events.js');
         const approvalMessage = tool.approval.message || `The tool "${toolName}" requires approval to execute.`;
 

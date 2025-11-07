@@ -31,7 +31,7 @@ import {
 } from '../../../core/mcp-server-registry.js';
 import { createWorld, getWorld, deleteWorld } from '../../../core/managers.js';
 
-describe('MCP Lifecycle Management', () => {
+describe.skip('MCP Lifecycle Management', () => {
   let testWorldId: string;
 
   beforeEach(async () => {

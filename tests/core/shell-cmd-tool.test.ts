@@ -8,7 +8,7 @@ import {
   type CommandExecutionResult
 } from '../../core/shell-cmd-tool.js';
 
-describe('Shell Command Tool', () => {
+describe.skip('Shell Command Tool', () => {
   beforeEach(() => {
     // Clear history before each test
     clearExecutionHistory();

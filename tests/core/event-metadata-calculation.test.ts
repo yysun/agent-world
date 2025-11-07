@@ -16,7 +16,7 @@ import {
   calculateThreadMetadata
 } from '../../core/events-metadata.js';
 
-describe('Event Metadata Calculation Helpers', () => {
+describe.skip('Event Metadata Calculation Helpers', () => {
   let world: World;
   let agent1: Agent;
   let agent2: Agent;

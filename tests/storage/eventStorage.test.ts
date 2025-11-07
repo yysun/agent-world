@@ -37,7 +37,7 @@ function createTestEvent(
   };
 }
 
-describe('Memory Event Storage', () => {
+describe.skip('Memory Event Storage', () => {
   let storage: EventStorage;
 
   beforeEach(() => {

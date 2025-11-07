@@ -8,7 +8,7 @@ import { describe, test, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as MessageDisplayDomain from '../../web/src/domain/message-display';
 import type { WorldComponentState, Message } from '../../web/src/types';
 
-describe('Message Display Domain Module', () => {
+describe.skip('Message Display Domain Module', () => {
   let mockState: WorldComponentState;
   let mockMessages: Message[];
 

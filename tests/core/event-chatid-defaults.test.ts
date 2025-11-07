@@ -13,39 +13,28 @@
  * - Querying events by chatId returns all event types
  * 
  * Implementation: Tests both memory and SQLite storage backends
+ * 
+ * Changes:
+ * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { createWorld, getWorld, deleteWorld, newChat } from '../../core/managers.js';
+import { describe, test, expect } from 'vitest';
+import { newChat } from '../../core/managers.js';
 import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events.js';
 import type { World } from '../../core/types.js';
 import type { StoredEvent } from '../../core/storage/eventStorage/types.js';
-
-const TEST_WORLD = 'event-chatid-test';
+import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('Event ChatId Defaults', () => {
-  let worldId: string;
-  let world: World | null;
-
-  beforeEach(async () => {
-    // Create world and get initial state
-    const createdWorld = await createWorld({
-      name: TEST_WORLD,
-      description: 'Testing event chatId defaults',
-      turnLimit: 5
-    });
-    worldId = createdWorld!.id;
-    world = await getWorld(worldId);
-  });
-
-  afterEach(async () => {
-    if (worldId) {
-      await deleteWorld(worldId);
-    }
+  const { worldId, getWorld } = setupTestWorld({
+    name: 'event-chatid-test',
+    description: 'Testing event chatId defaults',
+    turnLimit: 5
   });
 
   describe('SSE Events', () => {
     test('should default chatId to world.currentChatId', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
       const chatId = world!.currentChatId!;
@@ -63,7 +52,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query events by chatId
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['sse'] }
       ) as StoredEvent[];
@@ -76,6 +65,7 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should persist SSE events across multiple chats', async () => {
+      let world = await getWorld();
       expect(world).toBeTruthy();
       const chat1Id = world!.currentChatId!;
 
@@ -89,10 +79,10 @@ describe('Event ChatId Defaults', () => {
 
       // Update chat name to prevent reuse by newChat
       const { updateChat } = await import('../../core/managers.js');
-      await updateChat(worldId, chat1Id, { name: 'Chat 1' });
+      await updateChat(worldId(), chat1Id, { name: 'Chat 1' });
 
       // Create new chat
-      world = await newChat(worldId);
+      world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
       expect(chat2Id).not.toBe(chat1Id);
 
@@ -108,12 +98,12 @@ describe('Event ChatId Defaults', () => {
 
       // Query events for each chat
       const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat1Id,
         { types: ['sse'] }
       );
       const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat2Id,
         { types: ['sse'] }
       );
@@ -135,6 +125,7 @@ describe('Event ChatId Defaults', () => {
 
   describe('Tool Events', () => {
     test('should default chatId to world.currentChatId', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
       const chatId = world!.currentChatId!;
@@ -155,7 +146,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query events by chatId
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['tool'] }
       );
@@ -168,6 +159,7 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should persist tool events in correct chat context', async () => {
+      let world = await getWorld();
       expect(world).toBeTruthy();
       const chat1Id = world!.currentChatId!;
 
@@ -184,10 +176,10 @@ describe('Event ChatId Defaults', () => {
 
       // Update chat name to prevent reuse by newChat
       const { updateChat } = await import('../../core/managers.js');
-      await updateChat(worldId, chat1Id, { name: 'Chat 1' });
+      await updateChat(worldId(), chat1Id, { name: 'Chat 1' });
 
       // Create new chat
-      world = await newChat(worldId);
+      world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
 
       // Emit tool event in second chat
@@ -205,12 +197,12 @@ describe('Event ChatId Defaults', () => {
 
       // Verify events are isolated by chat
       const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat1Id,
         { types: ['tool'] }
       );
       const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat2Id,
         { types: ['tool'] }
       );
@@ -224,6 +216,7 @@ describe('Event ChatId Defaults', () => {
 
   describe('System Events', () => {
     test('should default chatId to world.currentChatId', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       expect(world!.currentChatId).toBeTruthy();
       const chatId = world!.currentChatId!;
@@ -235,7 +228,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query events by chatId
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['system'] }
       );
@@ -247,13 +240,14 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should persist system events across different chats', async () => {
+      let world = await getWorld();
       expect(world).toBeTruthy();
       const chat1Id = world!.currentChatId!;
 
       // System event in first chat
       publishEvent(world!, 'system', 'Chat 1 initialized');
 
-      world = await newChat(worldId);
+      world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
 
       // System event in second chat
@@ -262,12 +256,12 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat1Id,
         { types: ['system'] }
       );
       const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat2Id,
         { types: ['system'] }
       );
@@ -284,6 +278,7 @@ describe('Event ChatId Defaults', () => {
 
   describe('Message Events', () => {
     test('should use explicit chatId from publishMessage', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       const chatId = world!.currentChatId!;
 
@@ -294,7 +289,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query events
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['message'] }
       );
@@ -305,6 +300,7 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should default to world.currentChatId when chatId not provided', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       const chatId = world!.currentChatId!;
 
@@ -314,7 +310,7 @@ describe('Event ChatId Defaults', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['message'] }
       );
@@ -327,6 +323,7 @@ describe('Event ChatId Defaults', () => {
 
   describe('Mixed Event Types Query', () => {
     test('should retrieve all event types for a chat', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       const chatId = world!.currentChatId!;
 
@@ -349,7 +346,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query all events for this chat
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId
       );
 
@@ -369,6 +366,7 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should filter events by type and chatId', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
       const chatId = world!.currentChatId!;
 
@@ -382,14 +380,14 @@ describe('Event ChatId Defaults', () => {
 
       // Query only messages
       const messageEvents = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['message'] }
       );
 
       // Query only SSE
       const sseEvents = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chatId,
         { types: ['sse'] }
       );
@@ -403,6 +401,7 @@ describe('Event ChatId Defaults', () => {
 
   describe('Edge Cases', () => {
     test('should handle world with no currentChatId (session mode off)', async () => {
+      const world = await getWorld();
       expect(world).toBeTruthy();
 
       // Manually clear currentChatId to simulate session mode OFF
@@ -422,7 +421,7 @@ describe('Event ChatId Defaults', () => {
 
       // Query events with null chatId
       const events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         null
       );
 
@@ -437,13 +436,14 @@ describe('Event ChatId Defaults', () => {
     });
 
     test('should handle rapid chat switching', async () => {
+      let world = await getWorld();
       expect(world).toBeTruthy();
       const chat1Id = world!.currentChatId!;
 
       publishMessage(world!, 'Message in chat 1', 'human');
 
       // Switch to new chat
-      world = await newChat(worldId);
+      world = await newChat(worldId());
       const chat2Id = world!.currentChatId!;
 
       publishMessage(world!, 'Message in chat 2', 'human');
@@ -457,12 +457,12 @@ describe('Event ChatId Defaults', () => {
 
       // Verify events are in correct chats
       const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat1Id,
         { types: ['message'] }
       );
       const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
-        worldId,
+        worldId(),
         chat2Id,
         { types: ['message'] }
       );

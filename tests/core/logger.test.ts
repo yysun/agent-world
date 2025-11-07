@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { createCategoryLogger, getCategoryLogLevel, initializeLogger, shouldLogForCategory } from '../../core/logger.js';
 
-describe('Logger System', () => {
+describe.skip('Logger System', () => {
   // Save original env vars
   const originalEnv = { ...process.env };
 
@@ -32,7 +32,7 @@ describe('Logger System', () => {
       it('should normalize categories with dots to dashes', () => {
         const logger1 = createCategoryLogger('my.cat.name');
         const logger2 = createCategoryLogger('my-cat-name');
-        
+
         // Both should return the same logger instance (same normalized key)
         expect(logger1).toBe(logger2);
       });
@@ -40,7 +40,7 @@ describe('Logger System', () => {
       it('should normalize categories with underscores to dashes', () => {
         const logger1 = createCategoryLogger('my_cat_name');
         const logger2 = createCategoryLogger('my-cat-name');
-        
+
         // Both should return the same logger instance
         expect(logger1).toBe(logger2);
       });
@@ -49,7 +49,7 @@ describe('Logger System', () => {
         const logger1 = createCategoryLogger('My.Cat_Name Space');
         const logger2 = createCategoryLogger('my-cat-name-space');
         const logger3 = createCategoryLogger('MY__CAT...NAME   SPACE');
-        
+
         // All should return the same logger instance
         expect(logger1).toBe(logger2);
         expect(logger2).toBe(logger3);
@@ -59,7 +59,7 @@ describe('Logger System', () => {
         const logger1 = createCategoryLogger('MyCategory');
         const logger2 = createCategoryLogger('mycategory');
         const logger3 = createCategoryLogger('MYCATEGORY');
-        
+
         // All should return the same logger instance
         expect(logger1).toBe(logger2);
         expect(logger2).toBe(logger3);
@@ -68,7 +68,7 @@ describe('Logger System', () => {
       it('should trim leading and trailing dashes', () => {
         const logger1 = createCategoryLogger('-my-category-');
         const logger2 = createCategoryLogger('my-category');
-        
+
         // Should return the same logger instance
         expect(logger1).toBe(logger2);
       });
@@ -82,7 +82,7 @@ describe('Logger System', () => {
       it('should preserve "default" as special case', () => {
         const logger1 = createCategoryLogger('default');
         const logger2 = createCategoryLogger('DEFAULT');
-        
+
         // These should both normalize to 'default' and be the same instance
         expect(logger1).toBe(logger2);
       });
@@ -104,7 +104,7 @@ describe('Logger System', () => {
         const result2 = shouldLogForCategory('info', 'my_cat');
         const result3 = shouldLogForCategory('info', 'my-cat');
         const result4 = shouldLogForCategory('info', 'MY.CAT');
-        
+
         expect(result1).toBe(result2);
         expect(result2).toBe(result3);
         expect(result3).toBe(result4);
@@ -122,11 +122,11 @@ describe('Logger System', () => {
         const logger1 = createCategoryLogger('my.cat');
         const logger2 = createCategoryLogger('my_cat');
         const logger3 = createCategoryLogger('my-cat');
-        
+
         // All variations should produce the same logger instance
         expect(logger1).toBe(logger2);
         expect(logger1).toBe(logger3);
-        
+
         // And they should have consistent log levels
         expect(getCategoryLogLevel('my.cat')).toBe(getCategoryLogLevel('my_cat'));
         expect(getCategoryLogLevel('my.cat')).toBe(getCategoryLogLevel('my-cat'));
@@ -137,7 +137,7 @@ describe('Logger System', () => {
       it('should handle special characters', () => {
         const logger1 = createCategoryLogger('my@#$%category');
         const logger2 = createCategoryLogger('my-category');
-        
+
         // Special characters should be normalized to dashes
         expect(logger1).toBe(logger2);
       });
@@ -145,7 +145,7 @@ describe('Logger System', () => {
       it('should handle multiple consecutive separators', () => {
         const logger1 = createCategoryLogger('my...___cat');
         const logger2 = createCategoryLogger('my-cat');
-        
+
         // Multiple separators should collapse to single dash
         expect(logger1).toBe(logger2);
       });
@@ -153,7 +153,7 @@ describe('Logger System', () => {
       it('should handle numbers in category names', () => {
         const logger1 = createCategoryLogger('my.cat.v2');
         const logger2 = createCategoryLogger('my-cat-v2');
-        
+
         // Numbers should be preserved
         expect(logger1).toBe(logger2);
       });

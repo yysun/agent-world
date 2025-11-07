@@ -9,31 +9,24 @@
  * - Event persistence is always synchronous/awaitable for reliability
  * - Tests all event types (message, SSE, tool, system)
  * - Verifies event data integrity and sequence ordering
+ * 
+ * Changes:
+ * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
  */
 
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { createWorld, getWorld, deleteWorld } from '../../core/managers.js';
+import { describe, test, expect } from 'vitest';
+import { getWorld, createWorld, deleteWorld } from '../../core/managers.js';
 import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events.js';
+import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('Event Persistence Integration', () => {
-  let worldId: string;
-
-  beforeEach(async () => {
-    const world = await createWorld({
-      name: 'test-event-persistence',
-      turnLimit: 5
-    });
-    worldId = world!.id;
-  });
-
-  afterEach(async () => {
-    if (worldId) {
-      await deleteWorld(worldId);
-    }
+  const { worldId, getWorld: getTestWorld } = setupTestWorld({
+    name: 'test-event-persistence',
+    turnLimit: 5
   });
 
   test('should persist message events when emitted', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
     expect(world).toBeTruthy();
     expect(world!.eventStorage).toBeDefined();
 
@@ -45,7 +38,7 @@ describe('Event Persistence Integration', () => {
 
     // Verify event was persisted
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId
     );
 
@@ -54,12 +47,12 @@ describe('Event Persistence Integration', () => {
     expect(events[0].type).toBe('message');
     expect(events[0].payload.content).toBe('Hello World');
     expect(events[0].payload.sender).toBe('user-1');
-    expect(events[0].worldId).toBe(worldId);
+    expect(events[0].worldId).toBe(worldId());
     expect(events[0].chatId).toBe(world!.currentChatId);
   });
 
   test('should persist SSE events when emitted', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
     expect(world).toBeTruthy();
 
     // Emit SSE event
@@ -72,7 +65,7 @@ describe('Event Persistence Integration', () => {
 
     // Query for SSE events (now use currentChatId since they default to it)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['sse'] }
     );
@@ -87,7 +80,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should persist tool events when emitted', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit tool event
     publishToolEvent(world!, {
@@ -103,7 +96,7 @@ describe('Event Persistence Integration', () => {
 
     // Query for tool events (now use currentChatId)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['tool'] }
     );
@@ -118,7 +111,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should persist system events when emitted', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit system event
     publishEvent(world!, 'system', { message: 'System initialized', type: 'info' });
@@ -128,7 +121,7 @@ describe('Event Persistence Integration', () => {
 
     // Query for system events (now use currentChatId)
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['system'] }
     );
@@ -141,7 +134,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should persist multiple events in sequence', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit multiple messages
     publishMessage(world!, 'First', 'user-1', world!.currentChatId);
@@ -150,7 +143,7 @@ describe('Event Persistence Integration', () => {
 
     // Query all events for this chat
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId
     );
 
@@ -166,7 +159,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should retrieve events by sequence number', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit 5 messages
     for (let i = 1; i <= 5; i++) {
@@ -175,7 +168,7 @@ describe('Event Persistence Integration', () => {
 
     // Query events after sequence 2
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { sinceSeq: 2 }
     );
@@ -185,7 +178,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should filter events by type', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit mix of event types
     publishMessage(world!, 'Message 1', 'user-1', world!.currentChatId);
@@ -197,7 +190,7 @@ describe('Event Persistence Integration', () => {
 
     // Query only message events
     const messageEvents = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['message'] }
     );
@@ -207,7 +200,7 @@ describe('Event Persistence Integration', () => {
 
     // Query for SSE events only (now use currentChatId)
     const sseEvents = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { types: ['sse'] }
     );
@@ -217,7 +210,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should handle persistence errors gracefully', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Mock storage to throw error
     const originalSave = world!.eventStorage!.saveEvent;
@@ -239,7 +232,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should apply event limit correctly', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
 
     // Emit 10 messages
     for (let i = 1; i <= 10; i++) {
@@ -248,7 +241,7 @@ describe('Event Persistence Integration', () => {
 
     // Query with limit
     const events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       world!.currentChatId,
       { limit: 5 }
     );
@@ -259,7 +252,7 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should isolate events by chat ID', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
     const originalChatId = world!.currentChatId;
 
     // Emit messages in first chat
@@ -272,7 +265,7 @@ describe('Event Persistence Integration', () => {
 
     // Query first chat
     const chat1Events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       originalChatId
     );
 
@@ -281,7 +274,7 @@ describe('Event Persistence Integration', () => {
 
     // Query second chat
     const chat2Events = await world!.eventStorage!.getEventsByWorldAndChat(
-      worldId,
+      worldId(),
       mockChatId
     );
 
@@ -290,11 +283,11 @@ describe('Event Persistence Integration', () => {
   });
 
   test('should clean up event listeners on world deletion', async () => {
-    const world = await getWorld(worldId);
+    const world = await getTestWorld();
     expect(world!._eventPersistenceCleanup).toBeDefined();
 
     // Delete world (should call cleanup)
-    const deleted = await deleteWorld(worldId);
+    const deleted = await deleteWorld(worldId());
     expect(deleted).toBe(true);
 
     // Trying to emit after cleanup should not crash
@@ -337,7 +330,7 @@ describe('Event Persistence Integration', () => {
   // ChatId defaults tests
   describe('ChatId Defaults', () => {
     test('SSE events default to world.currentChatId', async () => {
-      const world = await getWorld(worldId);
+      const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
       publishSSE(world!, {
@@ -346,7 +339,7 @@ describe('Event Persistence Integration', () => {
         messageId: 'sse-default-chatid'
       });
 
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['sse'] });
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['sse'] });
       const sseEvent = events.find((e: any) => e.id === 'sse-default-chatid-sse-start');
 
       expect(sseEvent).toBeDefined();
@@ -354,7 +347,7 @@ describe('Event Persistence Integration', () => {
     });
 
     test('Tool events default to world.currentChatId', async () => {
-      const world = await getWorld(worldId);
+      const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
       publishToolEvent(world!, {
@@ -364,7 +357,7 @@ describe('Event Persistence Integration', () => {
         toolExecution: { toolName: 'test', toolCallId: 'call-1', result: {} }
       });
 
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['tool'] });
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['tool'] });
       const toolEvent = events.find((e: any) => e.id === 'tool-default-chatid-tool-tool-result');
 
       expect(toolEvent).toBeDefined();
@@ -372,19 +365,19 @@ describe('Event Persistence Integration', () => {
     });
 
     test('System events default to world.currentChatId', async () => {
-      const world = await getWorld(worldId);
+      const world = await getTestWorld();
       const chatId = world!.currentChatId!;
 
       publishEvent(world!, 'system', 'test-message');
 
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, chatId, { types: ['system'] });
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['system'] });
 
       expect(events.length).toBeGreaterThan(0);
       expect(events[0].chatId).toBe(chatId);
     });
 
     test('Events with null currentChatId persist as null', async () => {
-      const world = await getWorld(worldId);
+      const world = await getTestWorld();
       world!.currentChatId = null;
 
       publishSSE(world!, { agentName: 'agent', type: 'end', messageId: 'sse-null-chatid' });
@@ -395,7 +388,7 @@ describe('Event Persistence Integration', () => {
         toolExecution: { toolName: 'test', toolCallId: 'call-1' }
       });
 
-      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId, null);
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), null);
 
       const sseEvent = events.find((e: any) => e.id === 'sse-null-chatid-sse-end');
       const toolEvent = events.find((e: any) => e.id === 'tool-null-chatid-tool-tool-start');
@@ -404,6 +397,149 @@ describe('Event Persistence Integration', () => {
       expect(sseEvent!.chatId).toBeNull();
       expect(toolEvent).toBeDefined();
       expect(toolEvent!.chatId).toBeNull();
+    });
+  });
+
+  describe('Tool Event Metadata Validation', () => {
+    test('should persist tool event with required metadata fields', async () => {
+      const world = await getTestWorld();
+
+      publishToolEvent(world!, {
+        agentName: 'test-agent',
+        type: 'tool-start',
+        messageId: 'msg-metadata-test',
+        toolExecution: {
+          toolName: 'test-tool',
+          toolCallId: 'call-123',
+          input: { arg: 'value' }
+        }
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
+        worldId(),
+        world!.currentChatId,
+        { types: ['tool'] }
+      );
+
+      const toolEvent = events.find((e: any) => e.id === 'msg-metadata-test-tool-tool-start');
+      expect(toolEvent).toBeDefined();
+      expect(toolEvent!.meta.ownerAgentId).toBe('test-agent');
+      expect(toolEvent!.meta.triggeredByMessageId).toBe('msg-metadata-test');
+      expect(toolEvent!.meta.executionDuration).toBeDefined();
+      expect(toolEvent!.meta.resultSize).toBeDefined();
+      expect(toolEvent!.meta.wasApproved).toBe(false);
+    });
+
+    test('should not persist tool event without messageId', async () => {
+      const world = await getTestWorld();
+
+      // Attempt to publish tool event without messageId
+      publishToolEvent(world!, {
+        agentName: 'test-agent',
+        type: 'tool-start',
+        messageId: undefined as any,
+        toolExecution: {
+          toolName: 'test-tool',
+          toolCallId: 'call-456'
+        }
+      });
+
+      // Wait a bit to ensure persistence attempt completed
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
+        worldId(),
+        world!.currentChatId,
+        { types: ['tool'] }
+      );
+
+      // Should not find an event with undefined messageId
+      const undefinedEvent = events.find((e: any) => e.id.includes('undefined'));
+      expect(undefinedEvent).toBeUndefined();
+    });
+
+    test('should not persist tool event without agentName', async () => {
+      const world = await getTestWorld();
+
+      // Attempt to publish tool event without agentName
+      publishToolEvent(world!, {
+        agentName: undefined as any,
+        type: 'tool-result',
+        messageId: 'msg-no-agent',
+        toolExecution: {
+          toolName: 'test-tool',
+          toolCallId: 'call-789',
+          result: 'success'
+        }
+      });
+
+      // Wait a bit to ensure persistence attempt completed
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
+        worldId(),
+        world!.currentChatId,
+        { types: ['tool'] }
+      );
+
+      // Should not find the specific event we tried to create
+      const noAgentEvent = events.find((e: any) => e.id === 'msg-no-agent-tool-tool-result');
+      expect(noAgentEvent).toBeUndefined();
+    });
+
+    test('should persist tool-result event with duration and resultSize', async () => {
+      const world = await getTestWorld();
+
+      publishToolEvent(world!, {
+        agentName: 'test-agent',
+        type: 'tool-result',
+        messageId: 'msg-result-test',
+        toolExecution: {
+          toolName: 'test-tool',
+          toolCallId: 'call-result',
+          duration: 125.5,
+          resultSize: 2048,
+          result: { data: 'test result' }
+        }
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
+        worldId(),
+        world!.currentChatId,
+        { types: ['tool'] }
+      );
+
+      const toolEvent = events.find((e: any) => e.id === 'msg-result-test-tool-tool-result');
+      expect(toolEvent).toBeDefined();
+      expect(toolEvent!.meta.executionDuration).toBe(125.5);
+      expect(toolEvent!.meta.resultSize).toBe(2048);
+      expect(toolEvent!.payload.toolExecution.duration).toBe(125.5);
+      expect(toolEvent!.payload.toolExecution.resultSize).toBe(2048);
+    });
+
+    test('should use default values when duration and resultSize not provided', async () => {
+      const world = await getTestWorld();
+
+      publishToolEvent(world!, {
+        agentName: 'test-agent',
+        type: 'tool-start',
+        messageId: 'msg-defaults-test',
+        toolExecution: {
+          toolName: 'test-tool',
+          toolCallId: 'call-defaults'
+        }
+      });
+
+      const events = await world!.eventStorage!.getEventsByWorldAndChat(
+        worldId(),
+        world!.currentChatId,
+        { types: ['tool'] }
+      );
+
+      const toolEvent = events.find((e: any) => e.id === 'msg-defaults-test-tool-tool-start');
+      expect(toolEvent).toBeDefined();
+      expect(toolEvent!.meta.executionDuration).toBe(0);
+      expect(toolEvent!.meta.resultSize).toBe(0);
     });
   });
 });
