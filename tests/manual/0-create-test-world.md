@@ -1,0 +1,8 @@
+- Use the playwright tool to navigate to http://localhost:8080
+- Find "Test Worlds" using the arrows
+- If found, delete it
+- Create a new world
+- Name it "Test World"
+- Create three agents: a1, a2, a3, all using ollama/llama3.1:8b
+- Send a message: hello
+- All agents should respond appropriately
