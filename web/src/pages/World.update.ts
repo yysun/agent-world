@@ -988,9 +988,19 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
         return msg;
       });
 
+      // Phase 4: Check for approval changes (user messages won't be approval-related typically, but be consistent)
+      let pendingApproval = state.approvalRequest;
+      const isApprovalRequest = newMessage.isToolCallRequest && newMessage.toolCallData;
+      const isApprovalResponse = newMessage.role === 'tool' && newMessage.messageId;
+      
+      if (isApprovalRequest || isApprovalResponse) {
+        pendingApproval = findPendingApproval(updatedMessages, state.dismissedApprovals);
+      }
+
       return {
         ...state,
         messages: updatedMessages,
+        approvalRequest: pendingApproval,
         needScroll: false // Don't scroll for user message update
       };
     }
@@ -1018,9 +1028,19 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
       })
       .filter(msg => !!msg && !msg.userEntered);
 
+    // Phase 4: Check for approval changes when streaming completes
+    let pendingApproval = state.approvalRequest;
+    const isApprovalRequest = newMessage.isToolCallRequest && newMessage.toolCallData;
+    const isApprovalResponse = newMessage.role === 'tool' && newMessage.messageId;
+    
+    if (isApprovalRequest || isApprovalResponse) {
+      pendingApproval = findPendingApproval(updatedMessages, state.dismissedApprovals);
+    }
+
     return {
       ...state,
       messages: updatedMessages,
+      approvalRequest: pendingApproval,
       needScroll: true
     };
   }
@@ -1032,8 +1052,20 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   );
   state.messages.push(newMessage);
 
+  // Phase 4: Incremental approval detection - only scan when relevant message arrives
+  let pendingApproval = state.approvalRequest;
+  
+  const isApprovalRequest = newMessage.isToolCallRequest && newMessage.toolCallData;
+  const isApprovalResponse = newMessage.role === 'tool' && newMessage.messageId;
+  
+  if (isApprovalRequest || isApprovalResponse) {
+    // Re-scan only when approval state might have changed
+    pendingApproval = findPendingApproval(state.messages, state.dismissedApprovals);
+  }
+
   return {
     ...state,
+    approvalRequest: pendingApproval, // Update from memory, not event flag
     needScroll: true
   };
 };
