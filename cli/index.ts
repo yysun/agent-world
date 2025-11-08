@@ -14,6 +14,8 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
+ * - 2025-11-08: Improved approval UI - "Approval Required" instead of "Tool Approval Required"
  * - 2025-11-06: Updated approval protocol - agentId now embedded in JSON (server auto-prepends @mention)
  * - 2025-11-05: Aligned tool approval to OpenAI protocol - check tool_calls in message events
  * - 2025-11-05: Changed approval UI from enquirer to rl.question (numbered choices)
@@ -181,7 +183,7 @@ async function handleNewApprovalRequest(
   // Small delay to avoid mixing with world messages
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
+  console.log(`\n${boldYellow('🔒 Approval Required')}`);
   console.log(`${gray('Tool:')} ${yellow(toolName)}`);
 
   if (toolArgs && Object.keys(toolArgs).length > 0) {
@@ -195,7 +197,7 @@ async function handleNewApprovalRequest(
   }
 
   if (message) {
-    console.log(`${gray('Details:')} ${message}`);
+    console.log(`${gray('Reason:')} ${message}`);
   }
 
   // Create choices based on available options
@@ -1016,6 +1018,19 @@ async function handleWorldEvent(
       if (toolCallResult?.isApprovalRequest && toolCallResult.approvalData) {
         await handleNewApprovalRequest(toolCallResult.approvalData, rl, globalState.world);
         return;
+      }
+    }
+
+    // Display tool call completion status (approval results)
+    if (eventData.toolCallStatus) {
+      for (const [toolCallId, status] of Object.entries(eventData.toolCallStatus)) {
+        if (status && typeof status === 'object' && 'complete' in status && status.complete && status.result) {
+          const result = status.result as { decision: string; scope?: string; toolName?: string; timestamp?: string };
+          const decision = result.decision === 'approve' ? green('✓ Approved') : boldRed('✗ Denied');
+          const scope = result.scope === 'session' ? gray('(for session)') : result.scope === 'once' ? gray('(once)') : '';
+          const toolName = result.toolName || 'unknown';
+          console.log(`${gray('[Approval]')} ${decision} ${scope} - ${yellow(toolName)}`);
+        }
       }
     }
 
