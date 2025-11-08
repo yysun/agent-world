@@ -211,6 +211,7 @@ export interface WorldChatProps {
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
   approvalRequest?: ApprovalRequest | null;
+  dismissedApprovals?: Set<string>;  // Phase 6: Track dismissed approvals for indicator
 }
 
 // World Settings Component Props

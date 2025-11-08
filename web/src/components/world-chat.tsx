@@ -39,6 +39,7 @@ import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 import ToolCallRequestBox from './tool-call-request-box';
 import ToolCallResponseBox from './tool-call-response-box';
+import PendingApprovalsIndicator from './PendingApprovalsIndicator';
 
 const debug = false;
 
@@ -57,7 +58,8 @@ export default function WorldChat(props: WorldChatProps) {
     currentChat,
     editingMessageId = null,
     editingText = '',
-    agentFilters = []  // Agent IDs to filter by
+    agentFilters = [],  // Agent IDs to filter by
+    dismissedApprovals = new Set()  // Phase 6: Track dismissed approvals
   } = props;
 
   const promptReady = !isWaiting;
@@ -510,6 +512,9 @@ export default function WorldChat(props: WorldChatProps) {
             </div>
           )}
         </div>
+
+        {/* Phase 6: Pending Approvals Indicator */}
+        {PendingApprovalsIndicator({ messages, dismissedApprovals })}
 
         {/* User Input Area */}
         <div className="input-area">

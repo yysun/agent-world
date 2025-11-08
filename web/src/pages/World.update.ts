@@ -1176,6 +1176,18 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'show-approval-request': showApprovalRequestDialog,
   'hide-approval-request': hideApprovalRequestDialog,
   'submit-approval-decision': submitApprovalDecision,
+  
+  // Phase 6: Show next pending approval from dismissed list
+  'show-next-approval': (state: WorldComponentState): WorldComponentState => {
+    // Re-scan with empty dismissed set to get first pending
+    const pendingApproval = findPendingApproval(state.messages, new Set());
+    
+    return {
+      ...state,
+      approvalRequest: pendingApproval
+      // Don't clear dismissedApprovals - just override display
+    };
+  },
 
   // ========================================
   // MESSAGE DISPLAY

@@ -206,6 +206,9 @@ export type WorldEvents =
   /** Submit approval decision */
   | { name: 'submit-approval-decision'; payload: { decision: 'approve' | 'deny'; scope: 'once' | 'session' | 'none'; toolCallId: string } }
 
+  /** Phase 6: Show next pending approval from dismissed list */
+  | { name: 'show-next-approval'; payload: void }
+
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
   // ========================================
