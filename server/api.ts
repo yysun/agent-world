@@ -74,7 +74,6 @@ import {
   getMCPRegistryStats,
   MCPServerInstance
 } from '../core/mcp-server-registry.js';
-import { approvalCache } from '../core/approval-cache.js';
 
 // Function-specific loggers for granular debugging control
 const loggerWorld = createCategoryLogger('api.world');
@@ -952,20 +951,6 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
               scope
             });
             continue;
-          }
-
-          // Update approval cache based on decision and scope
-          if (decision === 'approve') {
-            if (scope === 'session') {
-              approvalCache.set(chatId, toolName, true);
-              loggerChat.debug('Cached session approval', { chatId, toolName });
-            } else if (scope === 'once') {
-              approvalCache.set(chatId, toolName, true);
-              loggerChat.debug('Cached once approval', { chatId, toolName });
-            } else {
-              approvalCache.set(chatId, toolName, true);
-              loggerChat.debug('Cached approval with default scope', { chatId, toolName });
-            }
           }
         } catch (error) {
           loggerChat.warn('Failed to parse approval result content', {
