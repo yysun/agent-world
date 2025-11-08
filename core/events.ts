@@ -1222,12 +1222,23 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
  * Check if a specific tool requires approval based on message history
  * This replaces the keyword-based heuristic approach with actual tool execution checking
  */
+/**
+ * Check if a specific tool requires approval based on message history
+ * Simplified: Only checks for session-wide approval, not one-time or denials
+ * 
+ * Logic:
+ * 1. Search for session approval → Execute immediately
+ * 2. No session approval → Request approval
+ * 
+ * @param context - Execution context with workingDirectory (CRITICAL FIX: AR Issue #1)
+ */
 export async function checkToolApproval(
   world: World,
   toolName: string,
   toolArgs: any,
   message: string,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  context?: { workingDirectory?: string; [key: string]: any }
 ): Promise<{
   needsApproval: boolean;
   canExecute: boolean;
@@ -1235,8 +1246,9 @@ export async function checkToolApproval(
   reason?: string;
 }> {
   try {
-    // Check for session-wide approval first
-    const sessionApproval = findSessionApproval(messages, toolName);
+    // Check for session-wide approval ONLY (matches name + directory + params)
+    const workingDirectory = context?.workingDirectory || process.cwd();
+    const sessionApproval = findSessionApproval(messages, toolName, toolArgs, workingDirectory);
     if (sessionApproval) {
       return {
         needsApproval: false,
@@ -1244,26 +1256,7 @@ export async function checkToolApproval(
       };
     }
 
-    // Check for recent denial
-    const recentDenial = findRecentDenial(messages, toolName);
-    if (recentDenial) {
-      return {
-        needsApproval: false,
-        canExecute: false,
-        reason: 'Tool execution was recently denied'
-      };
-    }
-
-    // Check for recent one-time approval
-    const recentApproval = findRecentApproval(messages, toolName);
-    if (recentApproval) {
-      return {
-        needsApproval: false,
-        canExecute: true
-      };
-    }
-
-    // No approval found - need to request approval
+    // No session approval found - need to request approval
     return {
       needsApproval: true,
       canExecute: false,
@@ -1271,6 +1264,7 @@ export async function checkToolApproval(
         toolName,
         toolArgs,
         message,
+        workingDirectory, // Include for session approval matching
         requestId: `approval-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         options: ['deny', 'approve_once', 'approve_session']
       }
@@ -1287,6 +1281,7 @@ export async function checkToolApproval(
         toolName,
         toolArgs,
         message,
+        workingDirectory: context?.workingDirectory || process.cwd(), // Include even in error case
         requestId: `approval-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         options: ['deny', 'approve_once', 'approve_session']
       }
@@ -1296,20 +1291,74 @@ export async function checkToolApproval(
 
 /**
  * Find session-wide approval for a tool in message history
- * @deprecated Use enhanced string protocol with tool results instead of text parsing
+ * Supports both enhanced string protocol (JSON) and legacy text parsing
+ * 
+ * Session approval matches on:
+ * - Tool name (required)
+ * - Working directory (if provided)
+ * - Parameters (exact match)
+ * 
+ * Enhanced protocol format:
+ * {
+ *   role: 'tool',
+ *   tool_call_id: 'approval_...',
+ *   content: '{"__type":"tool_result","content":"{\"decision\":\"approve\",\"scope\":\"session\",\"toolName\":\"...\",\"toolArgs\":{...},\"workingDirectory\":\"...\"}"}'
+ * }
  */
-export function findSessionApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'session'; toolName: string } | undefined {
-  loggerMemory.warn('DEPRECATED: findSessionApproval() uses text parsing. Migrate to enhanced string protocol with __type: "tool_result"', {
-    toolName,
-    hint: 'Send JSON.stringify({__type:"tool_result",tool_call_id:"...",content:"..."})'
-  });
-
+export function findSessionApproval(
+  messages: AgentMessage[], 
+  toolName: string, 
+  toolArgs?: any,
+  workingDirectory?: string
+): { decision: 'approve'; scope: 'session'; toolName: string } | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
+    
+    // Primary: Enhanced string protocol (JSON tool result)
+    if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed.__type === 'tool_result' && parsed.content) {
+          const result = JSON.parse(parsed.content);
+          if (result.decision === 'approve' && 
+              result.scope === 'session' && 
+              result.toolName?.toLowerCase() === toolName.toLowerCase()) {
+            
+            // Match working directory if provided in approval
+            if (result.workingDirectory && workingDirectory) {
+              if (result.workingDirectory !== workingDirectory) {
+                continue; // Directory mismatch, keep searching
+              }
+            }
+            
+            // Match parameters (exact deep equality)
+            if (result.toolArgs && toolArgs) {
+              const argsMatch = JSON.stringify(result.toolArgs) === JSON.stringify(toolArgs);
+              if (!argsMatch) {
+                continue; // Parameters mismatch, keep searching
+              }
+            }
+            
+            return { decision: 'approve', scope: 'session', toolName };
+          }
+        }
+      } catch (e) {
+        // Not JSON or malformed, continue to fallback
+      }
+    }
+    
+    // Fallback: Legacy text parsing (backwards compatibility)
     if (msg.content && typeof msg.content === 'string') {
       const content = msg.content.toLowerCase();
       if ((content.includes('approve') && content.includes(toolName.toLowerCase()) && content.includes('session')) ||
-        (content.includes(`approve_session`) && content.includes(toolName.toLowerCase()))) {
+          (content.includes(`approve_session`) && content.includes(toolName.toLowerCase()))) {
+        
+        // ⚠️ Security warning: Legacy approvals don't check parameters
+        loggerMemory.warn('Using legacy text-based approval (no parameter/directory check)', {
+          toolName,
+          security: 'UNSCOPED - all parameters and directories allowed for this tool'
+        });
+        
         return { decision: 'approve', scope: 'session', toolName };
       }
     }
@@ -1318,9 +1367,12 @@ export function findSessionApproval(messages: AgentMessage[], toolName: string):
 }
 
 /**
+ * @deprecated This function is no longer used in approval checking logic.
+ * One-time approvals are consumed after tool execution, checking for them is redundant.
+ * Kept for backwards compatibility only.
+ * 
  * Find recent one-time approval for a tool in message history (within 5 minutes)
  * Also checks if the approval has been "consumed" by a subsequent tool execution
- * @deprecated Use enhanced string protocol with tool results instead of text parsing
  */
 export function findRecentApproval(messages: AgentMessage[], toolName: string): { decision: 'approve' | 'deny'; scope: 'once'; toolName: string } | undefined {
   loggerMemory.warn('DEPRECATED: findRecentApproval() uses text parsing. Migrate to enhanced string protocol with __type: "tool_result"', {
@@ -1365,6 +1417,10 @@ export function findRecentApproval(messages: AgentMessage[], toolName: string): 
 }
 
 /**
+ * @deprecated This function is no longer used in approval checking logic.
+ * Users should be allowed to change their mind about denials.
+ * Kept for backwards compatibility only.
+ * 
  * Find recent denial for a tool in message history (within 5 minutes)
  */
 export function findRecentDenial(messages: AgentMessage[], toolName: string): { decision: 'deny'; toolName: string } | undefined {

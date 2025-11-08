@@ -59,8 +59,11 @@ describe('Client Approval Message Handling', () => {
       expect(recentApproval).toBeUndefined();
     });
 
-    it('should block execution after user denies (denial cached for 5 minutes)', async () => {
-      // Arrange: Messages with previous denial - denial IS cached for prevention
+    it('should request approval again after denial (denial not cached)', async () => {
+      // Note: In the new simplified logic, denials are no longer cached.
+      // Users should be allowed to change their mind.
+      
+      // Arrange: Messages with previous denial
       const messages: AgentMessage[] = [
         {
           role: 'user',
@@ -70,13 +73,13 @@ describe('Client Approval Message Handling', () => {
         }
       ];
 
-      // Act: Check if tool needs approval (should block execution due to recent denial)
+      // Act: Check if tool needs approval
       const result = await checkToolApproval(mockWorld, 'dangerous-tool', { command: 'rm -rf /' }, 'Execute dangerous command', messages);
 
-      // Assert: Should block execution due to recent denial
-      expect(result.needsApproval).toBe(false); // No approval needed because already denied
-      expect(result.canExecute).toBe(false); // Cannot execute due to denial
-      expect(result.reason).toContain('recently denied');
+      // Assert: Should request approval again (denial not cached)
+      expect(result.needsApproval).toBe(true); // Need approval
+      expect(result.canExecute).toBe(false); // Cannot execute yet
+      expect(result.approvalRequest).toBeDefined();
     });
 
     it('should simulate deny response without saving approval tool message', () => {
@@ -101,9 +104,12 @@ describe('Client Approval Message Handling', () => {
     });
   });
 
-  describe('One-Time Approval Decision - Tool Message Sent but No Session Persistence', () => {
-    it('should find recent approval for once decision but not persist for future', async () => {
-      // Arrange: Messages with one-time approval
+  describe('One-Time Approval Decision (Deprecated - No Longer Cached)', () => {
+    it('should NOT cache one-time approval (simplified logic)', async () => {
+      // Note: One-time approvals are no longer cached in the simplified logic.
+      // Only session approvals are recognized.
+      
+      // Arrange: Messages with one-time approval text
       const messages: AgentMessage[] = [
         {
           role: 'user',
@@ -113,18 +119,18 @@ describe('Client Approval Message Handling', () => {
         }
       ];
 
-      // Act: Check for one-time approval
+      // Act: Check for approval
       const result = await checkToolApproval(mockWorld, 'dangerous-tool', { command: 'rm -rf /' }, 'Execute command', messages);
 
-      // Assert: Should allow execution once but not create session approval
-      expect(result.needsApproval).toBe(false);
-      expect(result.canExecute).toBe(true);
+      // Assert: Should request approval (one-time not cached)
+      expect(result.needsApproval).toBe(true);
+      expect(result.canExecute).toBe(false);
+      expect(result.approvalRequest).toBeDefined();
 
       const recentApproval = findRecentApproval(messages, 'dangerous-tool');
       const sessionApproval = findSessionApproval(messages, 'dangerous-tool');
 
-      expect(recentApproval).toBeDefined();
-      expect(recentApproval?.scope).toBe('once');
+      // Both should be undefined since one-time approvals are deprecated
       expect(sessionApproval).toBeUndefined(); // No session approval
     });
 

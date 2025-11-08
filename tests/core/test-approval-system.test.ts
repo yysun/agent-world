@@ -85,9 +85,12 @@ describe('Approval System Integration Tests', () => {
     });
   });
 
-  describe('One-Time Approval Scenarios', () => {
-    it('should allow tool execution after approve_once approval', async () => {
-      // Arrange: Messages with one-time approval
+  describe('One-Time Approval Scenarios (Deprecated - No Longer Cached)', () => {
+    it('should NOT cache one-time approval (simplified logic)', async () => {
+      // Note: One-time approvals are no longer cached in the simplified logic.
+      // Only session approvals are recognized.
+      
+      // Arrange: Messages with one-time approval text
       const messages: AgentMessage[] = [
         {
           role: 'user',
@@ -97,16 +100,18 @@ describe('Approval System Integration Tests', () => {
         }
       ];
 
-      // Act: Check approval after user approved once
+      // Act: Check approval after user used "once" phrase
       const result = await checkToolApproval(mockWorld, 'test-tool', { param: 'value' }, 'Test tool execution', messages);
 
-      // Assert: Should allow execution
-      expect(result.needsApproval).toBe(false);
-      expect(result.canExecute).toBe(true);
-      expect(result.approvalRequest).toBeUndefined();
+      // Assert: Should request approval (one-time not cached)
+      expect(result.needsApproval).toBe(true);
+      expect(result.canExecute).toBe(false);
+      expect(result.approvalRequest).toBeDefined();
     });
 
-    it('should require re-approval after one-time approval is used', async () => {
+    it('should always require approval without session approval', async () => {
+      // Note: Without session approval, the system always requests approval.
+      
       // Arrange: Messages with prior one-time approval and tool execution
       const messages: AgentMessage[] = [
         {
@@ -126,7 +131,7 @@ describe('Approval System Integration Tests', () => {
       // Act: Check approval for same tool again
       const result = await checkToolApproval(mockWorld, 'test-tool', { param: 'value' }, 'Test tool execution again', messages);
 
-      // Assert: Should require new approval
+      // Assert: Should require approval (no session approval exists)
       expect(result.needsApproval).toBe(true);
       expect(result.canExecute).toBe(false);
       expect(result.approvalRequest).toBeDefined();
@@ -186,8 +191,10 @@ describe('Approval System Integration Tests', () => {
     });
   });
 
-  describe('Approval Denial Scenarios', () => {
-    it('should prevent tool execution after denial', async () => {
+  describe('Approval Denial Scenarios (No Longer Cached)', () => {
+    it('should request approval again after denial (not cached)', async () => {
+      // Note: Denials are no longer cached. Users can change their mind.
+      
       // Arrange: Messages with explicit denial
       const messages: AgentMessage[] = [
         {
@@ -201,11 +208,10 @@ describe('Approval System Integration Tests', () => {
       // Act: Check approval for denied tool
       const result = await checkToolApproval(mockWorld, 'dangerous-tool', { action: 'delete' }, 'Execute dangerous operation', messages);
 
-      // Assert: Should prevent execution
-      expect(result.needsApproval).toBe(false);
+      // Assert: Should request approval again (denial not cached)
+      expect(result.needsApproval).toBe(true);
       expect(result.canExecute).toBe(false);
-      expect(result.approvalRequest).toBeUndefined();
-      expect(result.reason).toContain('denied');
+      expect(result.approvalRequest).toBeDefined();
     });
 
     it('should require new approval after denial for different tool', async () => {

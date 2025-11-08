@@ -37,7 +37,7 @@ describe('Message-Based Approval Response Integration', () => {
       const wrappedTool = wrapToolWithValidation(mockTool, 'dangerous-command');
       const mockWorld = createMockWorld();
 
-      // Messages showing user approval flow
+      // Messages showing user approval flow (session approval)
       const messages: AgentMessage[] = [
         {
           role: 'user',
@@ -53,7 +53,7 @@ describe('Message-Based Approval Response Integration', () => {
         },
         {
           role: 'user',
-          content: 'I approve the dangerous-command execution once',
+          content: 'I approve_session for dangerous-command',
           createdAt: new Date(Date.now() - 5000),
           messageId: 'user-approval-1'
         }
@@ -134,7 +134,10 @@ describe('Message-Based Approval Response Integration', () => {
       expect(approvalArgs.options).toContain('approve_session');
     });
 
-    it('should deny execution when user denies approval', async () => {
+    it('should request approval again if no session approval exists (denial not cached)', async () => {
+      // Note: In the new simplified logic, denials are not cached.
+      // Users should be allowed to change their mind about denials.
+      
       // Arrange: Mock tool that requires approval
       const mockTool = {
         name: 'dangerous-command',
@@ -151,7 +154,7 @@ describe('Message-Based Approval Response Integration', () => {
       const wrappedTool = wrapToolWithValidation(mockTool, 'dangerous-command');
       const mockWorld = createMockWorld();
 
-      // Messages showing denial
+      // Messages showing denial (but denial is not cached)
       const messages: AgentMessage[] = [
         {
           role: 'user',
@@ -166,7 +169,7 @@ describe('Message-Based Approval Response Integration', () => {
         messages: messages
       };
 
-      // Act: Execute tool after denial
+      // Act: Execute tool after denial - should request approval again
       const result = await wrappedTool.execute(
         { command: 'rm -rf /tmp/*' },
         undefined,
@@ -174,10 +177,10 @@ describe('Message-Based Approval Response Integration', () => {
         context
       );
 
-      // Assert: Should return error string due to denial
-      expect(typeof result).toBe('string');
-      expect(result).toContain('denied');
-      expect(result).toContain('Error');
+      // Assert: Should return approval request (not cached denial)
+      expect(typeof result).toBe('object');
+      expect(result.type).toBe('approval_request');
+      expect(result.approvalRequest).toBeDefined();
     });
 
     it('should persist session approval across multiple tool calls', async () => {
@@ -242,23 +245,43 @@ describe('Message-Based Approval Response Integration', () => {
   });
 
   describe('Approval Response Processing', () => {
-    it('should integrate with natural language approval patterns', async () => {
+    it('should integrate with natural language approval patterns (session approval only)', async () => {
       const mockWorld = createMockWorld();
 
-      // Test various natural language approval patterns
-      const approvalPatterns = [
-        'I approve the test-tool execution once',
-        'Yes, approve test-tool for this session',
-        'Approve test-tool for session',
-        'Go ahead and approve_once for test-tool',
-        'I deny the test-tool execution'
+      // Test session approval patterns (one-time and denial are no longer cached)
+      const testCases = [
+        {
+          pattern: 'Yes, approve test-tool for this session',
+          expectApproval: true,
+          description: 'session approval phrase'
+        },
+        {
+          pattern: 'Approve test-tool for session',
+          expectApproval: true,
+          description: 'session approval phrase'
+        },
+        {
+          pattern: 'approve_session for test-tool',
+          expectApproval: true,
+          description: 'session approval keyword'
+        },
+        {
+          pattern: 'I approve the test-tool execution once',
+          expectApproval: false,
+          description: 'one-time approval (no longer cached)'
+        },
+        {
+          pattern: 'I deny the test-tool execution',
+          expectApproval: false,
+          description: 'denial (no longer cached)'
+        }
       ];
 
-      for (const pattern of approvalPatterns) {
+      for (const testCase of testCases) {
         const messages: AgentMessage[] = [
           {
             role: 'user',
-            content: pattern,
+            content: testCase.pattern,
             createdAt: new Date(),
             messageId: `approval-${Date.now()}`
           }
@@ -272,19 +295,15 @@ describe('Message-Based Approval Response Integration', () => {
           messages
         );
 
-        if (pattern.includes('deny')) {
-          // Should prevent execution
-          expect(result.canExecute).toBe(false);
-          expect(result.needsApproval).toBe(false);
-          expect(result.reason).toContain('denied');
-        } else if (pattern.includes('session')) {
+        if (testCase.expectApproval) {
           // Should allow execution without further approval
           expect(result.canExecute).toBe(true);
           expect(result.needsApproval).toBe(false);
-        } else if (pattern.includes('once')) {
-          // Should allow execution once
-          expect(result.canExecute).toBe(true);
-          expect(result.needsApproval).toBe(false);
+        } else {
+          // Should request approval (no caching for denials/one-time)
+          expect(result.needsApproval).toBe(true);
+          expect(result.canExecute).toBe(false);
+          expect(result.approvalRequest).toBeDefined();
         }
       }
     });
