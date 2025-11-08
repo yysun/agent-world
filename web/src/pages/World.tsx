@@ -176,6 +176,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}
+              dismissedApprovals={state.dismissedApprovals}
             />
           </div>
 

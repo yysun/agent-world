@@ -348,15 +348,14 @@ const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
  * @param message - Message event data that may contain tool_calls
  */
 export const handleMessageToolCalls = (message: any): void => {
-  if (!message?.tool_calls || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
-    return;
-  }
+  // Log for audit trail only
+  console.log('[Approval Audit] Tool call detected in SSE', {
+    toolCalls: message.tool_calls,
+    agentId: message.agentId,
+    messageId: message.messageId
+  });
 
-  // Extract agentId from message
-  const agentId = message.agentId || message.sender;
-
-  // Check for approval requests in tool_calls
-  publishApprovalRequests(message.tool_calls, agentId);
+  // UI will detect approval from memory automatically via handleMessageEvent
 };
 
 /**

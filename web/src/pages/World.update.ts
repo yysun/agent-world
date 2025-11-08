@@ -114,6 +114,45 @@ import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
 // Utility functions for message processing
+const createMessageFromSSE = (messageData: any): Message => {
+  const senderName = messageData.sender;
+
+  // Find and update agent message count
+  let fromAgentId: string | undefined;
+
+  // Check if this is a tool call approval request or response FIRST
+  const toolCallRequest = detectToolCallRequest(messageData);
+  const toolCallResponse = detectToolCallResponse(messageData);
+
+  // Set message text - use placeholder for tool call messages with empty content
+  let messageText = messageData.content || messageData.message || '';
+  if (!messageText && (toolCallRequest || toolCallResponse)) {
+    // Tool call message with empty content - use placeholder
+    if (toolCallRequest) {
+      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
+    } else if (toolCallResponse) {
+      messageText = `[Tool execution result]`;
+    }
+  }
+
+  const newMessage = {
+    id: messageData.id || `msg-${Date.now() + Math.random()}`,
+    type: messageData.type || 'message',
+    sender: senderName,
+    text: messageText,
+    createdAt: messageData.createdAt || new Date().toISOString(),
+    fromAgentId,
+    messageId: messageData.messageId,
+    replyToMessageId: messageData.replyToMessageId,
+    // Set tool call flags
+    isToolCallRequest: !!toolCallRequest,
+    isToolCallResponse: !!toolCallResponse,
+    toolCallData: toolCallRequest || toolCallResponse
+  };
+
+  return newMessage;
+};
+
 const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): Message => {
   const sender = toKebabCase(memoryItem.sender || agentName);
 
@@ -492,21 +531,23 @@ const showApprovalRequestDialog = (
   };
 };
 
-const hideApprovalRequestDialog = (state: WorldComponentState): WorldComponentState => {
-  if (!state.approvalRequest) {
-    return state;
-  }
+// Update hideApprovalRequestDialog - track dismissal
+const hideApprovalRequestDialog = (state: WorldComponentState) => {
+  if (!state.approvalRequest) return state;
+
+  // Add to dismissed set
+  const dismissed = new Set(state.dismissedApprovals);
+  dismissed.add(state.approvalRequest.toolCallId);
 
   return {
     ...state,
-    approvalRequest: null
+    approvalRequest: null,
+    dismissedApprovals: dismissed
   };
 };
 
-const submitApprovalDecision = async (
-  state: WorldComponentState,
-  payload: WorldEventPayload<'submit-approval-decision'>
-): Promise<WorldComponentState> => {
+// Update submitApprovalDecision - clear from dismissed, include full approval data
+const submitApprovalDecision = async (state: WorldComponentState, payload: any) => {
   const { decision, scope, toolCallId } = payload;
 
   // Check if this is from the approval dialog (state.approvalRequest exists)
@@ -525,7 +566,8 @@ const submitApprovalDecision = async (
         toolArgs: message.toolCallData.toolArgs,
         message: message.toolCallData.approvalMessage || '',
         options: message.toolCallData.approvalOptions || [],
-        agentId: message.toolCallData.agentId // Preserve agentId from toolCallData
+        agentId: message.toolCallData.agentId, // Preserve agentId from toolCallData
+        workingDirectory: message.toolCallData.workingDirectory
       };
     } else {
       // No matching request found
@@ -551,15 +593,17 @@ const submitApprovalDecision = async (
     approvalScope = undefined;
   }
 
-  // Use enhanced string protocol with agentId inside JSON (cleaner than @mention)
+  // Create approval response with full matching data
   const enhancedMessage = JSON.stringify({
     __type: 'tool_result',
-    tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
-    agentId: request.agentId, // Include agentId in JSON structure
+    tool_call_id: request.toolCallId,
+    agentId: request.agentId,
     content: JSON.stringify({
       decision: approvalDecision,
       scope: approvalScope,
-      toolName: request.toolName
+      toolName: request.toolName,
+      toolArgs: request.toolArgs,         // For session approval matching
+      workingDirectory: request.workingDirectory // For session approval matching
     })
   });
 
@@ -571,13 +615,23 @@ const submitApprovalDecision = async (
       sender: 'HUMAN'
     });
 
+    // Remove from dismissed set (user made decision)
+    const dismissed = new Set(state.dismissedApprovals);
+    dismissed.delete(payload.toolCallId);
+
     return {
       ...baseState,
+      dismissedApprovals: dismissed,
       isWaiting: decision === 'approve' // Only wait for streaming response if approved
     };
   } catch (error) {
+    // Remove from dismissed set (user made decision)
+    const dismissed = new Set(state.dismissedApprovals);
+    dismissed.delete(payload.toolCallId);
+
     return {
       ...baseState,
+      dismissedApprovals: dismissed,
       isWaiting: false,
       error: (error as Error).message || 'Failed to submit approval decision'
     };
@@ -766,6 +820,8 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   return newState;
 };
 
+import { findPendingApproval } from '../domain/approval-detection.js';
+
 // World initialization with core auto-restore
 async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
@@ -812,6 +868,9 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
 
+    // NEW: Always check for pending approvals in memory
+    const pendingApproval = findPendingApproval(messages, state.dismissedApprovals);
+
     yield {
       ...state,
       world,
@@ -822,7 +881,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       needScroll: true,
       agentActivities: {},
       isWaiting: false,
-      approvalRequest: null,
+      approvalRequest: pendingApproval, // Set from memory, not event
+      dismissedApprovals: new Set(), // Reset dismissed on chat load
       lastUserMessageText: null,
     };
 
@@ -879,143 +939,26 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 };
 
 const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
+  // ... existing message parsing and deduplication logic ...
 
-  const messageData = data || {};
-  const senderName = messageData.sender;
+  const newMessage = createMessageFromSSE(data);
+  const newMessages = [...state.messages, newMessage];
 
-  // PHASE 1: Check for tool_calls and handle approval requests (OpenAI protocol)
-  // This must happen before message display to show approval dialog immediately
-  if (messageData.tool_calls) {
-    handleMessageToolCalls(messageData);
+  // Incremental approval detection - only scan when relevant message arrives
+  let pendingApproval = state.approvalRequest;
+
+  const isApprovalRequest = newMessage.isToolCallRequest && newMessage.toolCallData;
+  const isApprovalResponse = newMessage.role === 'tool' && newMessage.tool_call_id;
+
+  if (isApprovalRequest || isApprovalResponse) {
+    // Re-scan only when approval state might have changed
+    pendingApproval = findPendingApproval(newMessages, state.dismissedApprovals);
   }
-
-  // Find and update agent message count
-  let fromAgentId: string | undefined;
-  if (state.world?.agents) {
-    const agent = state.world.agents.find((a: any) => a.name.toLowerCase() === senderName.toLowerCase());
-    if (agent) {
-      if (!agent.messageCount) {
-        agent.messageCount = 0;
-      }
-      agent.messageCount++;
-      fromAgentId = agent.id;
-    }
-  }
-
-  // Check if this is a tool call approval request or response FIRST
-  const toolCallRequest = detectToolCallRequest(messageData);
-  const toolCallResponse = detectToolCallResponse(messageData);
-
-  // Set message text - use placeholder for tool call messages with empty content
-  let messageText = messageData.content || messageData.message || '';
-  if (!messageText && (toolCallRequest || toolCallResponse)) {
-    // Tool call message with empty content - use placeholder
-    if (toolCallRequest) {
-      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
-    } else if (toolCallResponse) {
-      messageText = `[Tool execution result]`;
-    }
-  }
-
-  const newMessage = {
-    id: messageData.id || `msg-${Date.now() + Math.random()}`,
-    type: messageData.type || 'message',
-    sender: senderName,
-    text: messageText,
-    createdAt: messageData.createdAt || new Date().toISOString(),
-    fromAgentId,
-    messageId: messageData.messageId,
-    replyToMessageId: messageData.replyToMessageId,
-    // Set tool call flags
-    isToolCallRequest: !!toolCallRequest,
-    isToolCallResponse: !!toolCallResponse,
-    toolCallData: toolCallRequest || toolCallResponse
-  };
-
-  const existingMessages = state.messages || [];
-  const normalizedSender = (senderName || '').toLowerCase();
-
-  // Check if this is a user message that we need to deduplicate or update
-  const isUserMessage = normalizedSender === 'human' || normalizedSender === 'user';
-  if (isUserMessage && messageData.messageId) {
-    // Check for existing message (either by messageId or temp message with matching text)
-    // This prevents race conditions where multiple agents process the same temp message
-    const existingMessageIndex = existingMessages.findIndex(
-      msg => msg.messageId === messageData.messageId ||
-        (msg.userEntered && msg.text === newMessage.text)
-    );
-
-    if (existingMessageIndex !== -1) {
-      const existingMessage = existingMessages[existingMessageIndex];
-
-      // Check if this message already has the messageId
-      if (existingMessage.messageId === messageData.messageId) {
-        // Message already has messageId - this is a duplicate from another agent
-        // Don't merge - keep only the FIRST agent (intended recipient)
-        // Duplicates in other agents' memory are just copies
-        return state;
-      }
-
-      // Message is temp (userEntered=true) and needs messageId
-      const updatedMessages = existingMessages.map((msg, index) => {
-        if (index === existingMessageIndex) {
-          return {
-            ...msg,
-            messageId: messageData.messageId,
-            createdAt: messageData.createdAt || msg.createdAt,
-            userEntered: false, // No longer temporary
-            seenByAgents: fromAgentId ? [fromAgentId] : [] // Initialize with first agent or empty
-          };
-        }
-        return msg;
-      });
-
-      return {
-        ...state,
-        messages: updatedMessages,
-        needScroll: false // Don't scroll for user message update
-      };
-    }
-  }
-
-  // If a streaming placeholder exists for this sender, convert it to the final message
-  const streamingIndex = existingMessages.findIndex(
-    msg => msg?.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender
-  );
-
-  if (streamingIndex !== -1) {
-    const updatedMessages = existingMessages
-      .map((msg, index) => {
-        if (index !== streamingIndex) {
-          return msg;
-        }
-
-        return {
-          ...msg,
-          ...newMessage,
-          id: newMessage.id,
-          isStreaming: false,
-          messageId: newMessage.messageId ?? msg.messageId
-        };
-      })
-      .filter(msg => !!msg && !msg.userEntered);
-
-    return {
-      ...state,
-      messages: updatedMessages,
-      needScroll: true
-    };
-  }
-
-  // Filter out temporary placeholders and user-entered messages before adding the new one
-  state.messages = existingMessages.filter(msg =>
-    !msg.userEntered &&
-    !(msg.isStreaming && (msg.sender || '').toLowerCase() === normalizedSender)
-  );
-  state.messages.push(newMessage);
 
   return {
     ...state,
+    messages: newMessages,
+    approvalRequest: pendingApproval, // Update from memory, not event flag
     needScroll: true
   };
 };
@@ -1126,6 +1069,17 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'show-approval-request': showApprovalRequestDialog,
   'hide-approval-request': hideApprovalRequestDialog,
   'submit-approval-decision': submitApprovalDecision,
+
+  'show-next-approval': (state) => {
+    // Re-scan with empty dismissed set to get first pending
+    const pendingApproval = findPendingApproval(state.messages, new Set());
+
+    return {
+      ...state,
+      approvalRequest: pendingApproval
+      // Don't clear dismissedApprovals - just override display
+    };
+  },
 
   // ========================================
   // MESSAGE DISPLAY

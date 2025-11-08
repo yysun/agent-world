@@ -39,6 +39,7 @@ import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 import ToolCallRequestBox from './tool-call-request-box';
 import ToolCallResponseBox from './tool-call-response-box';
+import PendingApprovalsIndicator from './PendingApprovalsIndicator.tsx';
 
 const debug = false;
 
@@ -57,7 +58,8 @@ export default function WorldChat(props: WorldChatProps) {
     currentChat,
     editingMessageId = null,
     editingText = '',
-    agentFilters = []  // Agent IDs to filter by
+    agentFilters = [],  // Agent IDs to filter by
+    dismissedApprovals = new Set()
   } = props;
 
   const promptReady = !isWaiting;
@@ -513,6 +515,9 @@ export default function WorldChat(props: WorldChatProps) {
 
         {/* User Input Area */}
         <div className="input-area">
+          <div className="chat-controls">
+            <PendingApprovalsIndicator messages={messages} dismissedApprovals={dismissedApprovals} />
+          </div>
           <div className="input-container">
             <input
               type="text"

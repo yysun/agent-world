@@ -95,7 +95,7 @@ app.use((req, res, next) => {
 });
 
 // Static files and API routes
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../../dist/public')));
 app.use('/api', apiRouter);
 
 // Health check endpoint

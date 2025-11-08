@@ -209,6 +209,7 @@ export interface WorldChatProps {
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
   approvalRequest?: ApprovalRequest | null;
+  dismissedApprovals?: Set<string>;
 }
 
 // World Settings Component Props
@@ -326,6 +327,7 @@ export interface WorldComponentState extends SSEComponentState {
   connectionStatus: string;
   needScroll: boolean;
   approvalRequest: ApprovalRequest | null;
+  dismissedApprovals: Set<string>; // NEW: Track dismissed toolCallIds
   lastUserMessageText?: string | null;
 }
 
