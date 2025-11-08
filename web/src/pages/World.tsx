@@ -50,7 +50,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
     agentActivities: {},
-    approvalRequest: null
+    approvalRequest: null,
+    dismissedApprovals: new Set<string>()  // Phase 3: Track dismissed approval toolCallIds
   };
 
   override view = (state: WorldComponentState) => {

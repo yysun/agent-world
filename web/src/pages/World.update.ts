@@ -96,6 +96,7 @@ import * as SSEStreamingDomain from '../domain/sse-streaming';
 import * as AgentManagementDomain from '../domain/agent-management';
 import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
+import { findPendingApproval } from '../domain/approval-detection.js';
 import {
   sendChatMessage,
   handleStreamStart,
@@ -497,9 +498,14 @@ const hideApprovalRequestDialog = (state: WorldComponentState): WorldComponentSt
     return state;
   }
 
+  // Phase 3: Add to dismissed set
+  const dismissed = new Set(state.dismissedApprovals);
+  dismissed.add(state.approvalRequest.toolCallId);
+
   return {
     ...state,
-    approvalRequest: null
+    approvalRequest: null,
+    dismissedApprovals: dismissed
   };
 };
 
@@ -533,9 +539,14 @@ const submitApprovalDecision = async (
     }
   }
 
+  // Phase 3: Remove from dismissed set (user made decision)
+  const dismissed = new Set(state.dismissedApprovals);
+  dismissed.delete(toolCallId);
+
   const baseState: WorldComponentState = {
     ...state,
     approvalRequest: null,
+    dismissedApprovals: dismissed,
     needScroll: true
   };
 
@@ -551,7 +562,7 @@ const submitApprovalDecision = async (
     approvalScope = undefined;
   }
 
-  // Use enhanced string protocol with agentId inside JSON (cleaner than @mention)
+  // Phase 3: Use enhanced string protocol with full approval data for session matching
   const enhancedMessage = JSON.stringify({
     __type: 'tool_result',
     tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
@@ -559,7 +570,9 @@ const submitApprovalDecision = async (
     content: JSON.stringify({
       decision: approvalDecision,
       scope: approvalScope,
-      toolName: request.toolName
+      toolName: request.toolName,
+      toolArgs: request.toolArgs,         // For session approval matching
+      workingDirectory: request.workingDirectory // For session approval matching
     })
   });
 
@@ -812,6 +825,9 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
 
+    // Phase 3: Always check for pending approvals in memory (memory-driven detection)
+    const pendingApproval = findPendingApproval(messages, new Set());
+
     yield {
       ...state,
       world,
@@ -822,7 +838,8 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       needScroll: true,
       agentActivities: {},
       isWaiting: false,
-      approvalRequest: null,
+      approvalRequest: pendingApproval, // Set from memory, not event
+      dismissedApprovals: new Set(), // Reset dismissed on chat load
       lastUserMessageText: null,
     };
 
@@ -835,6 +852,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       agentActivities: {},
       isWaiting: false,
       approvalRequest: null,
+      dismissedApprovals: new Set(), // Reset on error too
       lastUserMessageText: state.lastUserMessageText ?? null,
     };
   }

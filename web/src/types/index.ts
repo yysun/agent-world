@@ -114,6 +114,7 @@ export interface Message {
     approvalDecision?: 'approve' | 'deny';
     approvalScope?: 'once' | 'session' | 'none';
     agentId?: string; // Agent that requested the approval
+    workingDirectory?: string; // For session approval matching (Phase 3)
   };
 }
 
@@ -185,6 +186,7 @@ export interface ApprovalRequest {
   message: string;
   options: string[];
   agentId?: string;
+  workingDirectory?: string; // For session approval matching (Phase 3)
 }
 
 // ========================================
@@ -327,6 +329,9 @@ export interface WorldComponentState extends SSEComponentState {
   needScroll: boolean;
   approvalRequest: ApprovalRequest | null;
   lastUserMessageText?: string | null;
+  
+  // Approval dismissal tracking (Phase 3)
+  dismissedApprovals: Set<string>; // Track dismissed toolCallIds
 }
 
 // ========================================
