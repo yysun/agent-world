@@ -311,6 +311,10 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
   }
 };
 
+/**
+ * Phase 7: Simplified to logging only - approval detection happens in handleMessageEvent via memory
+ * Events are for audit trail, not for triggering UI
+ */
 const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
   for (const toolCall of toolCalls) {
     const toolName = toolCall?.function?.name;
@@ -318,33 +322,21 @@ const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
       continue;
     }
 
-    let parsedArgs: any = {};
-    try {
-      parsedArgs = toolCall.function?.arguments
-        ? JSON.parse(toolCall.function.arguments)
-        : {};
-    } catch (error) {
-      console.warn('Failed to parse approval request arguments:', error);
-    }
+    // Log for audit trail only
+    console.log('[Approval Audit] Tool call approval request detected in SSE', {
+      toolCallId: toolCall.id,
+      agentId,
+      timestamp: new Date().toISOString()
+    });
 
-    const approvalRequest = {
-      toolCallId: toolCall.id || `approval-${Date.now()}`,
-      toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
-      toolArgs: parsedArgs?.originalToolCall?.args ?? {},
-      message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
-      options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-        ? parsedArgs.options
-        : ['Cancel', 'Once', 'Always'],
-      agentId
-    };
-
-    publishEvent('show-approval-request', approvalRequest);
+    // UI will detect approval from memory automatically via handleMessageEvent
+    // No need to publish show-approval-request event anymore
   }
 };
 
 /**
- * Handle tool_calls in message events (OpenAI protocol)
- * Detects approval requests and publishes show-approval-request event
+ * Phase 7: Handle tool_calls in message events (OpenAI protocol)
+ * Simplified to logging only - approval UI detection happens via memory in handleMessageEvent
  * @param message - Message event data that may contain tool_calls
  */
 export const handleMessageToolCalls = (message: any): void => {
@@ -355,7 +347,7 @@ export const handleMessageToolCalls = (message: any): void => {
   // Extract agentId from message
   const agentId = message.agentId || message.sender;
 
-  // Check for approval requests in tool_calls
+  // Log for audit trail only (approval detection happens in handleMessageEvent via memory)
   publishApprovalRequests(message.tool_calls, agentId);
 };
 
