@@ -116,7 +116,6 @@ import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
 import { wrapToolWithValidation } from './tool-utils.js';
-import { approvalCache } from './approval-cache.js';
 import { ApprovalRequiredException, type ApprovalPolicy, type World } from './types.js';
 
 // Scenario-based loggers for different MCP operations
@@ -1004,37 +1003,8 @@ export async function mcpToolsToAiTools(
           agentId
         });
 
-        // NEW: Check approval before execution using explicit approval metadata
-        if (requiresApproval) {
-          const approved = chatId ? approvalCache.get(chatId, key) : undefined;
-
-          if (!approved) {
-            logger.debug(`Tool execution requires approval`, {
-              executionId,
-              serverName,
-              toolName: t.name,
-              toolKey: key,
-              chatId,
-              worldId,
-              agentId
-            });
-
-            throw new ApprovalRequiredException(
-              key,
-              sanitizeArgs(args ?? {}),
-              'This MCP tool requires approval to execute.',
-              ['Cancel', 'Once', 'Always']
-            );
-          }
-
-          logger.debug(`Tool execution approved from cache`, {
-            executionId,
-            serverName,
-            toolName: t.name,
-            toolKey: key,
-            chatId
-          });
-        }
+        // NOTE: Approval now handled in tool-utils.ts wrapToolWithValidation()
+        // This ensures consistent approval flow for all tools (MCP and built-in)
 
         // Debug log: Request data being sent to MCP server
         // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names

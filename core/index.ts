@@ -68,12 +68,6 @@ export {
   clearToolsCache
 } from './mcp-server-registry.js';
 
-// === APPROVAL SYSTEM ===
-export {
-  approvalCache,
-  type ApprovalCacheEntry
-} from './approval-cache.js';
-
 // === SHELL COMMAND TOOL ===
 export {
   executeShellCommand,

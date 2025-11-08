@@ -251,7 +251,8 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
           toolName,
           args,
           approvalMessage,
-          context.messages
+          context.messages,
+          { workingDirectory: context?.workingDirectory || process.cwd() }
         );
 
         if (approvalCheck?.needsApproval) {
@@ -269,7 +270,8 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
                 arguments: JSON.stringify({
                   originalToolCall: {
                     name: toolName,
-                    args: args
+                    args: args,
+                    workingDirectory: context?.workingDirectory || process.cwd()
                   },
                   message: approvalMessage,
                   options: approvalCheck.approvalRequest?.options || ['deny', 'approve_once', 'approve_session']
