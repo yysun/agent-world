@@ -17,6 +17,10 @@
  * - Chat title generation on world idle events
  *
  * Recent Changes (2025-11):
+ * - 2025-11-08: Fixed SQLITE_BUSY race condition: Skip SSE chunk events (transient),
+ *   persist SSE start/end for metadata; skip tool-progress events (high frequency);
+ *   persist tool-start/result/error; save approval responses atomically in single
+ *   saveAgent() call to prevent concurrent DB writes
  * - Fixed tool event metadata validation errors: Added required ownerAgentId and 
  *   triggeredByMessageId fields to toolHandler, added validation guards to reject
  *   tool events missing messageId or agentName
@@ -228,18 +232,20 @@ export function setupEventPersistence(world: World): () => void {
     return persistEvent(eventData);
   };
 
-  // SSE event handler - persist only start and end events
+  // SSE event handler - persist only start and end events, skip chunk events
+  // Chunk events are for UI streaming only (high frequency, transient)
+  // Start/end events provide metadata (tokens, latency, etc.)
   const sseHandler = (event: WorldSSEEvent): void | Promise<void> => {
-    // Only persist start and end events, not chunk events
-    if (event.type !== 'start' && event.type !== 'end') {
+    // Skip chunk events - they're transient UI updates
+    if (event.type === 'chunk') {
       return;
     }
 
-    // Make ID unique by combining messageId with event type
+    // Persist start/end events for metadata tracking
     const eventData = {
       id: `${event.messageId}-sse-${event.type}`,
       worldId: world.id,
-      chatId: world.currentChatId || null, // Default to current chat
+      chatId: world.currentChatId || null,
       type: 'sse',
       payload: {
         agentName: event.agentName,
@@ -265,6 +271,12 @@ export function setupEventPersistence(world: World): () => void {
     // Check event type category
     const isActivityEvent = event.type && ['response-start', 'response-end', 'idle'].includes(event.type);
     const isToolEvent = event.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(event.type);
+
+    // OPTIMIZATION: Skip tool-progress events (high frequency status updates)
+    // Keep tool-start (marks beginning), tool-result (final result), tool-error (failures)
+    if (event.type === 'tool-progress') {
+      return; // Skip - these are transient progress updates
+    }
 
     // Validate required fields for tool events only
     if (isToolEvent) {
@@ -796,9 +808,8 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         }
       };
 
-      agent.memory.push(approvalResponse);
-
       // NEW: Update the original approval request message to mark it complete
+      // Do this BEFORE adding response to ensure atomic state
       const originalRequest = agent.memory.find(msg =>
         msg.role === 'assistant' &&
         msg.tool_calls?.some(tc => tc.id === messageData.tool_call_id)
@@ -821,13 +832,18 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         });
       }
 
-      // Auto-save agent memory
+      // Add approval response to memory
+      agent.memory.push(approvalResponse);
+
+      // OPTIMIZATION: Save agent memory ONCE at the end (atomic update)
+      // This prevents race conditions from multiple saveAgent() calls
       try {
         const storage = await getStorageWrappers();
         await storage.saveAgent(world.id, agent);
-        loggerMemory.debug('Approval response saved to agent memory', {
+        loggerMemory.debug('Approval response saved to agent memory (atomic)', {
           agentId: agent.id,
-          messageId: messageEvent.messageId
+          messageId: messageEvent.messageId,
+          toolCallId: messageData.tool_call_id
         });
       } catch (error) {
         loggerMemory.error('Failed to save approval response to memory', {

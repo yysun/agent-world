@@ -321,8 +321,9 @@ If critical issues found:
 
 ---
 
-### ⬜ Phase 2: Backend - Add Tool Call Completion Tracking
+### ✅ Phase 2: Backend - Add Tool Call Completion Tracking
 
+**Status**: COMPLETED - Commit 8400ba9  
 **Goal**: Add server-side completion status to tool call messages
 
 **Estimated Time**: 2 hours  
@@ -454,7 +455,17 @@ For existing approval messages in storage:
 
 ---
 
-### ⬜ Phase 3: Frontend - Inline Tool Call Display
+### ⬜ Phase 3a: CLI - Approval Display Improvements
+
+**Status**: COMPLETED - Commit f77bc5e  
+**Goal**: Display approval completion status in CLI interface
+
+**Implemented**:
+- Display toolCallStatus completion status with decision/scope
+- Improved approval UI labels ("Approval Required", "Reason:")
+- Preserves readline-based approval prompt functionality
+
+### ⬜ Phase 3b: Frontend - Inline Tool Call Display (Web)
 
 **Goal**: Remove approval dialog, display approvals inline in chat
 
