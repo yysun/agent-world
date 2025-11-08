@@ -176,7 +176,9 @@ export function setupEventPersistence(world: World): () => void {
         // Preserve OpenAI protocol fields for tool calls and approvals
         role: (event as any).role,
         tool_calls: (event as any).tool_calls,
-        tool_call_id: (event as any).tool_call_id
+        tool_call_id: (event as any).tool_call_id,
+        // NEW: Include tool call completion status
+        toolCallStatus: (event as any).toolCallStatus
       },
       meta: {
         // Core fields
@@ -754,6 +756,24 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         toolCallId: messageData.tool_call_id
       });
 
+      // Parse approval decision from enhanced protocol
+      let approvalDecision: 'approve' | 'deny' | undefined;
+      let approvalScope: 'once' | 'session' | undefined;
+      try {
+        const parsed = JSON.parse(messageEvent.content || '{}');
+        if (parsed.__type === 'tool_result' && parsed.content) {
+          const result = JSON.parse(parsed.content);
+          approvalDecision = result.decision;
+          approvalScope = result.scope;
+        }
+      } catch (error) {
+        loggerMemory.warn('Failed to parse approval decision from tool result', {
+          agentId: agent.id,
+          toolCallId: messageData.tool_call_id,
+          error: error instanceof Error ? error.message : error
+        });
+      }
+
       const approvalResponse: AgentMessage = {
         role: 'tool',
         content: messageEvent.content || '',
@@ -762,10 +782,44 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         chatId: world.currentChatId || null,
         messageId: messageEvent.messageId,
         tool_call_id: messageData.tool_call_id,
-        agentId: agent.id
+        agentId: agent.id,
+        // NEW: Mark tool call as complete with result
+        toolCallStatus: {
+          [messageData.tool_call_id]: {
+            complete: true,
+            result: approvalDecision ? {
+              decision: approvalDecision,
+              scope: approvalScope,
+              timestamp: new Date().toISOString()
+            } : null
+          }
+        }
       };
 
       agent.memory.push(approvalResponse);
+
+      // NEW: Update the original approval request message to mark it complete
+      const originalRequest = agent.memory.find(msg =>
+        msg.role === 'assistant' &&
+        msg.tool_calls?.some(tc => tc.id === messageData.tool_call_id)
+      );
+      if (originalRequest) {
+        if (!originalRequest.toolCallStatus) {
+          originalRequest.toolCallStatus = {};
+        }
+        originalRequest.toolCallStatus[messageData.tool_call_id] = {
+          complete: true,
+          result: approvalDecision ? {
+            decision: approvalDecision,
+            scope: approvalScope,
+            timestamp: new Date().toISOString()
+          } : null
+        };
+        loggerMemory.debug('Updated original approval request with completion status', {
+          agentId: agent.id,
+          toolCallId: messageData.tool_call_id
+        });
+      }
 
       // Auto-save agent memory
       try {

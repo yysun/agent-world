@@ -72,7 +72,6 @@ import {
   getMemory
 } from '../core/index.js';
 import { createStorage, getDefaultRootPath } from '../core/storage/storage-factory.js';
-import { approvalCache } from '../core/approval-cache.js';
 import type { StorageConfig } from '../core/storage/storage-factory.js';
 import { World } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
@@ -2230,13 +2229,9 @@ export async function processCLIInput(
           };
         }
 
-        // Update approval cache
-        const chatId = world.currentChatId || null;
-        const approved = decision === 'approve';
-
-        // Create cache key for the specific chatId context
-        const cacheKey = chatId ? chatId : 'global';
-        approvalCache.set(cacheKey, error.toolName, approved);
+        // NOTE: Approval cache removed - approvals now handled via message-based protocol
+        // The approval decision is sent as a tool result message and stored in agent memory
+        // Session approvals are detected by scanning message history
 
         // Retry the message
         publishMessage(world as any, input, sender);

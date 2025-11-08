@@ -293,7 +293,14 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
               chatId: context.chatId,
               // Additional fields for CLI handling (not part of WorldMessageEvent)
               role: approvalResult.role,
-              tool_calls: approvalResult.tool_calls
+              tool_calls: approvalResult.tool_calls,
+              // NEW: Initialize toolCallStatus as incomplete
+              toolCallStatus: {
+                [approvalToolCallId]: {
+                  complete: false,
+                  result: null
+                }
+              }
             });
           }
 

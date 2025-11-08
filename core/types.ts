@@ -70,6 +70,49 @@ export interface AgentMessage extends ChatMessage {
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
   agentId?: string; // Agent ID for identifying message source
+
+  /**
+   * Tool call completion tracking for approval requests/responses
+   * Maps tool_call_id to completion status and result
+   * 
+   * Usage:
+   * - Approval requests: Mark as incomplete when tool_calls sent
+   * - Approval responses: Mark as complete with decision/scope
+   * - Server is source of truth, client reads this status
+   * 
+   * @example
+   * // Approval request (incomplete)
+   * {
+   *   "approval_123": {
+   *     complete: false,
+   *     result: null
+   *   }
+   * }
+   * 
+   * // Approval response (complete)
+   * {
+   *   "approval_123": {
+   *     complete: true,
+   *     result: {
+   *       decision: "approve",
+   *       scope: "session",
+   *       timestamp: "2025-11-08T16:30:00.000Z"
+   *     }
+   *   }
+   * }
+   * 
+   * @since version 8 (simplified approval system)
+   */
+  toolCallStatus?: {
+    [toolCallId: string]: {
+      complete: boolean;
+      result?: {
+        decision: 'approve' | 'deny';
+        scope?: 'once' | 'session';
+        timestamp: string;
+      } | null;
+    };
+  };
 }
 
 // Agent Types
