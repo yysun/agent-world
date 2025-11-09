@@ -28,6 +28,7 @@
  *   (can occur due to retries, multiple listeners, or error recovery)
  * 
  * Changes:
+ * - 2025-11-09: CRITICAL FIX - Let AUTOINCREMENT handle seq, don't set manually (was causing INSERT failures)
  * - 2025-11-03: Added INSERT OR IGNORE to handle duplicate event IDs gracefully
  * - 2025-11-06: Removed event_sequences table, use MAX(seq) + 1 for auto-increment
  */
@@ -160,24 +161,6 @@ async function ensureInitialized(ctx: SQLiteEventStorageContext): Promise<void> 
 }
 
 /**
- * Get the next sequence number for a world/chat using MAX(seq) + 1
- * This is calculated atomically within a transaction
- */
-async function getNextSeq(ctx: SQLiteEventStorageContext, worldId: string, chatId: string | null): Promise<number> {
-  const result = await dbGet(
-    ctx.db,
-    `SELECT COALESCE(MAX(seq), 0) + 1 as next_seq 
-     FROM events 
-     WHERE world_id = ? AND (chat_id = ? OR (chat_id IS NULL AND ? IS NULL))`,
-    worldId,
-    chatId,
-    chatId
-  );
-
-  return result.next_seq;
-}
-
-/**
  * Save a single event
  */
 async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Promise<void> {
@@ -186,17 +169,14 @@ async function saveEvent(ctx: SQLiteEventStorageContext, event: StoredEvent): Pr
   // Validate event metadata before persistence
   validateEventForPersistence(event);
 
-  // Auto-generate sequence number if not provided
-  const seq = event.seq ?? await getNextSeq(ctx, event.worldId, event.chatId);
-
+  // seq is AUTOINCREMENT - don't specify it, let SQLite handle it
   await dbRun(
     ctx.db,
-    `INSERT OR IGNORE INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     event.id,
     event.worldId,
     event.chatId,
-    seq,
     event.type,
     JSON.stringify(event.payload),
     event.meta ? JSON.stringify(event.meta) : null,
@@ -220,17 +200,14 @@ async function saveEvents(ctx: SQLiteEventStorageContext, events: StoredEvent[])
       // Validate event metadata before persistence
       validateEventForPersistence(event);
 
-      // Auto-generate sequence number if not provided
-      const seq = event.seq ?? await getNextSeq(ctx, event.worldId, event.chatId);
-
+      // seq is AUTOINCREMENT - let SQLite handle it
       await dbRun(
         ctx.db,
-        `INSERT OR IGNORE INTO events (id, world_id, chat_id, seq, type, payload, meta, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO events (id, world_id, chat_id, type, payload, meta, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         event.worldId,
         event.chatId,
-        seq,
         event.type,
         JSON.stringify(event.payload),
         event.meta ? JSON.stringify(event.meta) : null,

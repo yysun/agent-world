@@ -13,6 +13,7 @@
  * - Automatic metadata calculation (agent context, threading, tool calls)
  * - Error handling with graceful degradation
  * - Environment-based disable flag
+ * - Uses world.eventStorage directly (no separate storage instance)
  * 
  * Dependencies (Layer 4):
  * - types.ts (Layer 1)
@@ -21,6 +22,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2025-11-09: Fixed event persistence - use world.eventStorage directly instead of creating separate instance
  * - 2025-01-09: Extracted from events.ts for modular architecture
  */
 
@@ -29,11 +31,9 @@ import type {
   WorldMessageEvent,
   WorldSSEEvent,
   WorldSystemEvent,
-  WorldCRUDEvent,
-  StorageAPI
+  WorldCRUDEvent
 } from '../types.js';
 import { EventType } from '../types.js';
-import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { createCategoryLogger } from '../logger.js';
 import {
   calculateOwnerAgentIds,
@@ -44,15 +44,6 @@ import {
 } from '../events-metadata.js';
 
 const loggerPublish = createCategoryLogger('publish');
-
-// Storage wrapper instance - initialized lazily
-let storageWrappers: StorageAPI | null = null;
-async function getStorageWrappers(): Promise<StorageAPI> {
-  if (!storageWrappers) {
-    storageWrappers = await createStorageWithWrappers();
-  }
-  return storageWrappers!;
-}
 
 /**
  * Setup automatic event persistence listeners on World event emitter.
@@ -94,6 +85,13 @@ export function setupEventPersistence(world: World): () => void {
 
   // Message event persistence
   const messageHandler = (event: WorldMessageEvent): void | Promise<void> => {
+    loggerPublish.debug('Message event received for persistence', {
+      worldId: world.id,
+      messageId: event.messageId,
+      sender: event.sender,
+      chatId: event.chatId
+    });
+
     // Calculate enhanced metadata using helper functions
     const ownerAgentIds = calculateOwnerAgentIds(world, event);
     const recipientAgentId = calculateRecipientAgentId(world, event);

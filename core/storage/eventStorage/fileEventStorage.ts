@@ -1,11 +1,11 @@
 /**
  * File-based Event Storage Implementation
  * 
- * JSON Lines (JSONL) based event storage suitable for serverless environments and low-overhead persistence.
- * Each world/chat combination is stored in a separate JSONL file for efficient access patterns.
+ * JSON-based event storage suitable for serverless environments and low-overhead persistence.
+ * Each world/chat combination is stored in a separate JSON file for efficient access patterns.
  * 
  * Features:
- * - JSONL format for efficient append operations
+ * - JSON format for readable event storage
  * - One file per world/chat combination for easy cleanup
  * - Automatic sequence number generation per world/chat
  * - Support for time-based and sequence-based pagination
@@ -15,10 +15,10 @@
  * - Suitable for serverless and file-based deployments
  * 
  * Implementation:
- * - Uses JSONL format (one JSON object per line) for efficient append operations
- * - Maintains sequence counter files per world/chat context
- * - File structure: baseDir/worldId/events/chatId.jsonl
- * - Sequence files: baseDir/worldId/events/.seq-chatId
+ * - Uses JSON format for human-readable event storage
+ * - Maintains sequence counters in memory with file-based initialization
+ * - File structure: baseDir/worldId/events/chatId.json
+ * - World-scoped storage: events stored within each world's directory
  * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
  * 
  * Cascade Delete Behavior:
@@ -26,6 +26,7 @@
  * - Deleting a chat file removes all events for that chat
  * 
  * Changes:
+ * - 2025-11-09: Fixed file paths to be world-scoped (baseDir/worldId/events/) instead of storage root
  * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
 
@@ -47,14 +48,14 @@ export interface FileEventStorageConfig {
  */
 function getEventFilePath(baseDir: string, worldId: string, chatId: string | null): string {
   const chatIdStr = chatId ?? 'null';
-  return path.join(baseDir, 'events', `${chatIdStr}.json`);
+  return path.join(baseDir, worldId, 'events', `${chatIdStr}.json`);
 }
 
 /**
  * Get directory path for a world's events
  */
-function getWorldEventsDir(baseDir: string): string {
-  return path.join(baseDir, 'events');
+function getWorldEventsDir(baseDir: string, worldId: string): string {
+  return path.join(baseDir, worldId, 'events');
 }
 
 /**
@@ -138,8 +139,7 @@ export class FileEventStorage implements EventStorage {
     }
 
     // Load from file to find max seq
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
     const events = await readEventsFromFile(filePath);
     const maxSeq = events.reduce((max, e) => Math.max(max, e.seq ?? 0), 0);
     const next = maxSeq + 1;
@@ -154,8 +154,7 @@ export class FileEventStorage implements EventStorage {
     // Validate event metadata before persistence
     validateEventForPersistence(event);
 
-    const worldDir = path.join(this.baseDir, event.worldId);
-    const eventsDir = getWorldEventsDir(worldDir);
+    const eventsDir = getWorldEventsDir(this.baseDir, event.worldId);
     await ensureDir(eventsDir);
 
     const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
@@ -203,11 +202,10 @@ export class FileEventStorage implements EventStorage {
       const [worldId, chatIdStr] = key.split(':');
       const chatId = chatIdStr === 'null' ? null : chatIdStr;
 
-      const worldDir = path.join(this.baseDir, worldId);
-      const eventsDir = getWorldEventsDir(worldDir);
+      const eventsDir = getWorldEventsDir(this.baseDir, worldId);
       await ensureDir(eventsDir);
 
-      const filePath = getEventFilePath(worldDir, worldId, chatId);
+      const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
       // Read existing events
       const existingEvents = await readEventsFromFile(filePath);
@@ -242,8 +240,7 @@ export class FileEventStorage implements EventStorage {
     chatId: string | null,
     options: GetEventsOptions = {}
   ): Promise<StoredEvent[]> {
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
     let events = await readEventsFromFile(filePath);
 
     // Apply filters
@@ -287,8 +284,7 @@ export class FileEventStorage implements EventStorage {
    * Delete all events for a specific world and chat
    */
   async deleteEventsByWorldAndChat(worldId: string, chatId: string | null): Promise<number> {
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
     if (!existsSync(filePath)) {
       return 0;
@@ -311,8 +307,7 @@ export class FileEventStorage implements EventStorage {
    * Delete all events for a specific world (all chats)
    */
   async deleteEventsByWorld(worldId: string): Promise<number> {
-    const worldDir = path.join(this.baseDir, worldId);
-    const eventsDir = getWorldEventsDir(worldDir);
+    const eventsDir = getWorldEventsDir(this.baseDir, worldId);
 
     if (!existsSync(eventsDir)) {
       return 0;
@@ -370,8 +365,7 @@ export class FileEventStorage implements EventStorage {
     }
 
     // Load from file to find max seq
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
     const events = await readEventsFromFile(filePath);
     const maxSeq = events.reduce((max, e) => Math.max(max, e.seq ?? 0), 0);
 
@@ -392,8 +386,7 @@ export class FileEventStorage implements EventStorage {
     fromSeq: number,
     toSeq: number
   ): Promise<StoredEvent[]> {
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
     let events = await readEventsFromFile(filePath);
 
     // Filter by sequence range
@@ -420,8 +413,7 @@ export class FileEventStorage implements EventStorage {
    * This is useful after bulk deletions to reclaim space
    */
   async compact(worldId: string, chatId: string | null): Promise<void> {
-    const worldDir = path.join(this.baseDir, worldId);
-    const filePath = getEventFilePath(worldDir, worldId, chatId);
+    const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
     if (!existsSync(filePath)) {
       return;
