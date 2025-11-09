@@ -20,18 +20,17 @@
  * - Dynamic imports to avoid circular dependencies with approval cache
  *
  * Recent Changes:
- * - 2025-11-05: wrapToolWithValidation now directly injects client.requestApproval assistant messages
- * - When approval is needed, creates complete message with tool_calls and publishes SSE event
+ * - 2025-11-08: Removed event emission from wrapToolWithValidation
+ * - Tool wrapper only creates approval request structure, no event emission
+ * - Upper layer (LLM providers → events.ts) handles storage and event emission
+ * - 2025-11-05: wrapToolWithValidation creates client.requestApproval messages for approval
  * - Returns structured object with type='approval_request' and _stopProcessing marker
  * - Returns simple string error message when tool execution is denied
- * - Approval flow is completely handled in tool-utils.ts without changing LLM providers
  * - Natural message flow without exceptions - CLI detects client.requestApproval tool call
- * - LLM providers check for _stopProcessing marker and return _approvalMessage directly
+ * - LLM providers check for _stopProcessing marker and return _approvalMessage
  * - Replaced heuristic-based approval detection with explicit tool.approval metadata
  * - Enhanced wrapToolWithValidation to handle approval flow before parameter validation
- * - Added dynamic imports to prevent circular dependencies with approval modules
  * - Added universal parameter validation for consistent tool execution
- * - Enhanced validation to work with both MCP and built-in tools
  * - Initial implementation for empty/missing name validation
  */
 
@@ -256,8 +255,8 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
         );
 
         if (approvalCheck?.needsApproval) {
-          // Inject a client.requestApproval tool call message directly
-          // This creates a natural message flow that the CLI can detect and handle
+          // Create a client.requestApproval tool call for the approval request
+          // Upper layer (events.ts via LLM provider) will handle storage and event emission
           const approvalToolCallId = `approval_${Date.now()}_${Math.random().toString(36).substring(7)}`;
           const approvalResult = {
             role: 'assistant' as const,
@@ -277,34 +276,18 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
                   options: approvalCheck.approvalRequest?.options || ['deny', 'approve_once', 'approve_session']
                 })
               }
-            }]
+            }],
+            // Initialize toolCallStatus as incomplete
+            toolCallStatus: {
+              [approvalToolCallId]: {
+                complete: false,
+                result: null
+              }
+            }
           };
 
-          // Publish the approval request message event if world context is available
-          if (context?.world) {
-            // Emit the complete assistant message following OpenAI format
-            // Note: Use 'timestamp' field for WorldMessageEvent interface compatibility
-            context.world.eventEmitter.emit('message', {
-              sender: context.agentId || 'system',
-              agentName: context.agentId,
-              content: approvalResult.content,
-              timestamp: new Date(),
-              messageId: sequenceId || generateFallbackId(),
-              chatId: context.chatId,
-              // Additional fields for CLI handling (not part of WorldMessageEvent)
-              role: approvalResult.role,
-              tool_calls: approvalResult.tool_calls,
-              // NEW: Initialize toolCallStatus as incomplete
-              toolCallStatus: {
-                [approvalToolCallId]: {
-                  complete: false,
-                  result: null
-                }
-              }
-            });
-          }
-
           // Return the approval request in a structured format
+          // No event emission here - that's the upper layer's responsibility
           return {
             type: 'approval_request',
             approvalRequest: approvalCheck.approvalRequest,
@@ -315,7 +298,7 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
 
         if (!approvalCheck?.canExecute) {
           // Tool execution was denied
-          return `Error: Tool execution denied - ${approvalCheck.reason || 'approval not granted'}`;
+          return `Error: Tool execution denied - approval not granted`;
         }
       }
 

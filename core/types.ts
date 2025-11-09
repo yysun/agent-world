@@ -512,6 +512,18 @@ export interface ApprovalRequest {
 export function isApprovalRequest(result: any): result is ApprovalRequest {
   return result && typeof result === 'object' && result.__requiresApproval === true;
 }
+
+/**
+ * Tool result data for publishToolResult() API
+ */
+export interface ToolResultData {
+  tool_call_id: string;
+  decision: ApprovalDecision;
+  scope?: ApprovalScope;
+  toolName: string;
+  toolArgs?: object;
+  workingDirectory?: string;
+}
 // World EventEmitter Types
 
 /**

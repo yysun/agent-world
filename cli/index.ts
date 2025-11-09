@@ -162,7 +162,6 @@ const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
 
-// New approval request interface for the message-based approach
 interface ApprovalRequest {
   toolCallId: string;
   toolName: string;
@@ -172,7 +171,7 @@ interface ApprovalRequest {
   agentId?: string;
 }
 
-// Handle new approval requests from tool calls
+// Handle approval requests from tool calls
 async function handleNewApprovalRequest(
   request: ApprovalRequest,
   rl: readline.Interface,
@@ -245,10 +244,6 @@ async function handleNewApprovalRequest(
         if (!isNaN(num) && choiceMap[num]) {
           const decision = choiceMap[num];
 
-          // Enhanced String Protocol: Send tool result as JSON string with __type marker
-          // Transport layer uses strings, but storage layer will convert to OpenAI format
-          // Server will parse this into: {role: 'tool', tool_call_id: '...', content: '...'}
-
           let approvalDecision: 'approve' | 'deny';
           let approvalScope: 'session' | 'once' | undefined;
 
@@ -263,22 +258,22 @@ async function handleNewApprovalRequest(
             approvalScope = undefined;
           }
 
-          const enhancedMessage = JSON.stringify({
-            __type: 'tool_result',
-            tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
-            agentId: agentId, // Include agentId in JSON structure (server will auto-prepend @mention)
-            content: JSON.stringify({
+          try {
+            if (!agentId) {
+              console.error(`${error('Cannot send approval: agentId is missing')}`);
+              resolve();
+              return;
+            }
+
+            const { publishToolResult } = await import('../core/events.js');
+            publishToolResult(world, agentId, {
+              tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
               decision: approvalDecision,
               scope: approvalScope,
-              toolName: toolName
-            })
-          });
-
-          // Send the approval response using enhanced protocol
-          // Server will automatically prepend @mention based on agentId in JSON
-          try {
-            const { publishMessage } = await import('../core/events.js');
-            publishMessage(world, enhancedMessage, 'human');
+              toolName: toolName,
+              toolArgs: toolArgs,
+              workingDirectory: toolArgs?.directory || process.cwd()
+            });
             resolve();
           } catch (err) {
             console.error(`${error('Failed to send approval response:')} ${err}`);
@@ -1024,7 +1019,7 @@ async function handleWorldEvent(
     // Display tool call completion status (approval results)
     if (eventData.toolCallStatus) {
       for (const [toolCallId, status] of Object.entries(eventData.toolCallStatus)) {
-        if (status && typeof status === 'object' && 'complete' in status && status.complete && status.result) {
+        if (status && typeof status === 'object' && 'complete' in status && status.complete && 'result' in status && status.result) {
           const result = status.result as { decision: string; scope?: string; toolName?: string; timestamp?: string };
           const decision = result.decision === 'approve' ? green('✓ Approved') : boldRed('✗ Denied');
           const scope = result.scope === 'session' ? gray('(for session)') : result.scope === 'once' ? gray('(once)') : '';

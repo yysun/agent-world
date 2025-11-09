@@ -199,6 +199,19 @@ export class MemoryStorage implements StorageAPI {
       throw new Error('Agent ID is required');
     }
 
+    // CRITICAL: Filter out system messages - they should NEVER be saved to memory
+    // System messages are generated dynamically during LLM preparation
+    const originalMemoryLength = agent.memory.length;
+    agent.memory = agent.memory.filter(msg => msg.role !== 'system');
+    if (agent.memory.length < originalMemoryLength) {
+      logger.warn('Filtered out system messages from agent memory before saving', {
+        agentId: agent.id,
+        worldId,
+        removedCount: originalMemoryLength - agent.memory.length,
+        remainingCount: agent.memory.length
+      });
+    }
+
     // Auto-migrate legacy messages without messageId
     const migrated = validateAgentMessageIds(agent);
     if (migrated) {

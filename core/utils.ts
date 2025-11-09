@@ -258,28 +258,67 @@ export function messageDataToAgentMessage(messageData: MessageData): AgentMessag
  * Filters conversation history by chatId if provided and excludes messages
  * the agent would not have responded to (prevents irrelevant context pollution)
  */
-export function prepareMessagesForLLM(
+export async function prepareMessagesForLLM(
+  worldId: string,
   agent: Agent,
-  messageData: MessageData,
-  conversationHistory: AgentMessage[] = [],
-  chatId?: string | null
-): AgentMessage[] {
+  chatId: string | null,
+  includeCurrentMessage?: MessageData
+): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
 
-  // Add system message if available
-  if (agent.systemPrompt) {
+  // Load FRESH agent from storage to get original system prompt (not patched)
+  // This ensures we always use the clean system prompt from storage
+  let freshSystemPrompt: string | undefined;
+  try {
+    const { createStorageWithWrappers } = await import('./storage/storage-factory.js');
+    const storage = await createStorageWithWrappers();
+    const freshAgent = await storage.loadAgent(worldId, agent.id);
+    freshSystemPrompt = freshAgent?.systemPrompt;
+  } catch (error) {
+    const { logger } = await import('./logger.js');
+    logger.error('Could not load agent from storage for system prompt', {
+      agentId: agent.id,
+      worldId,
+      error: error instanceof Error ? error.message : error
+    });
+    // Fallback to in-memory agent's system prompt
+    freshSystemPrompt = agent.systemPrompt;
+  }
+
+  // IDEMPOTENCE: Always add system message first (if available)
+  // System messages are NEVER saved to storage
+  if (freshSystemPrompt) {
     messages.push({
       role: 'system',
-      content: agent.systemPrompt,
+      content: freshSystemPrompt,
       createdAt: new Date()
     });
   }
 
-  // Filter conversation history by chatId if provided
-  let filteredHistory = conversationHistory;
-  if (chatId !== undefined) {
-    filteredHistory = conversationHistory.filter(msg => msg.chatId === chatId);
+  // Load FRESH conversation history from storage (not from in-memory agent)
+  // This ensures we always have the latest messages
+  let conversationHistory: AgentMessage[] = [];
+  try {
+    const { createStorageWithWrappers } = await import('./storage/storage-factory.js');
+    const storage = await createStorageWithWrappers();
+    conversationHistory = await storage.getMemory(worldId, chatId);
+  } catch (error) {
+    const { logger } = await import('./logger.js');
+    logger.error('Could not load conversation history from storage', {
+      agentId: agent.id,
+      worldId,
+      chatId,
+      error: error instanceof Error ? error.message : error
+    });
   }
+
+  // Filter to only include messages from THIS specific agent
+  // getMemory returns messages from ALL agents, but we only want this agent's memory
+  const agentMessages = conversationHistory.filter(msg => msg.agentId === agent.id);
+
+  // IDEMPOTENCE: Always filter out system messages from history
+  // System message should only come from agent.systemPrompt above, never from storage
+  const filteredHistory = agentMessages.filter(msg => msg.role !== 'system');
 
   // Filter to only include messages this agent would have responded to
   // This prevents irrelevant "not mentioned" messages from polluting LLM context
@@ -290,9 +329,12 @@ export function prepareMessagesForLLM(
   // Add filtered conversation history
   messages.push(...relevantHistory);
 
-  // Add current message as user input
-  messages.push(messageDataToAgentMessage(messageData));
+  // Add current message if provided
+  if (includeCurrentMessage) {
+    messages.push(messageDataToAgentMessage(includeCurrentMessage));
+  }
 
   // Filter out client-side tool calls and approval results
+  const { filterClientSideMessages } = await import('./message-prep.js');
   return filterClientSideMessages(messages);
 }

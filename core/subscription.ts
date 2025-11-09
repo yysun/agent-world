@@ -1,14 +1,15 @@
 /*
  * core/subscription.ts
- * Summary: World subscription management and event forwarding.
- * Implementation: Provides startWorld/subscribeWorld APIs that manage world lifecycle, agent subscriptions, and event listener setup.
- * Change: Only set up forwarding listeners when a client provides callbacks (onWorldEvent/onLog). This allows callers (like the CLI) to attach direct listeners to world.eventEmitter without redundant no-op forwarding listeners being registered.
+ * 
+ * World subscription management and event forwarding.
+ * Manages world lifecycle, agent subscriptions (messages + tool results), and event listeners.
+ * Sets up forwarding listeners only when client provides callbacks (onWorldEvent/onLog).
  */
 
 import { World } from './types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
-import { subscribeAgentToMessages, subscribeWorldToMessages } from './events.js';
+import { subscribeAgentToMessages, subscribeAgentToToolMessages, subscribeWorldToMessages } from './events.js';
 
 function toKebabCase(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -54,8 +55,10 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   let currentWorld: World | null = world;
 
   // Subscribe all loaded agents to world messages (moved from getFullWorld)
+  // Both handlers subscribe independently to 'message' events and filter their own messages
   for (const agent of currentWorld.agents.values()) {
     subscribeAgentToMessages(currentWorld, agent);
+    subscribeAgentToToolMessages(currentWorld, agent);
   }
 
   subscribeWorldToMessages(currentWorld);

@@ -346,7 +346,20 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
 export async function saveAgentMemory(ctx: SQLiteStorageContext, worldId: string, agentId: string, memory: AgentMessage[]): Promise<void> {
   await run(ctx, `DELETE FROM agent_memory WHERE agent_id = ? AND world_id = ?`, agentId, worldId);
 
-  for (const message of memory) {
+  // CRITICAL: Filter out system messages - they should NEVER be saved to storage
+  // System messages are generated dynamically during LLM preparation
+  const filteredMemory = memory.filter(msg => msg.role !== 'system');
+  if (filteredMemory.length < memory.length) {
+    const logger = await import('../logger.js').then(m => m.logger);
+    logger.warn('Filtered out system messages from agent memory before saving to SQLite', {
+      agentId,
+      worldId,
+      removedCount: memory.length - filteredMemory.length,
+      remainingCount: filteredMemory.length
+    });
+  }
+
+  for (const message of filteredMemory) {
     await run(ctx, `
       INSERT INTO agent_memory (agent_id, world_id, role, content, sender, chat_id, message_id, reply_to_message_id, tool_calls, tool_call_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

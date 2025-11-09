@@ -13,25 +13,19 @@
  * - Auto-mention logic with loop prevention and world tags (<world>STOP|TO:a,b</world>)
  * - Message threading with replyToMessageId preservation
  * - Event persistence with automatic chatId defaulting to world.currentChatId
- * - Tool approval system with session/one-time approval tracking
+ * - Tool approval system: publishToolResult() constructs role='tool' messages
+ * - Dedicated tool handler: subscribeAgentToToolMessages() with security checks
  * - Chat title generation on world idle events
  *
- * Recent Changes (2025-11):
- * - 2025-11-08: Fixed SQLITE_BUSY race condition: Skip SSE chunk events (transient),
- *   persist SSE start/end for metadata; skip tool-progress events (high frequency);
- *   persist tool-start/result/error; save approval responses atomically in single
- *   saveAgent() call to prevent concurrent DB writes
- * - Fixed tool event metadata validation errors: Added required ownerAgentId and 
- *   triggeredByMessageId fields to toolHandler, added validation guards to reject
- *   tool events missing messageId or agentName
- * - Removed unnecessary 'info' event emission from tool-utils.ts to prevent validation errors
- * - Fixed approval response broadcast bug: Removed HUMAN check from shouldAutoMention to ensure
- *   agent responses to HUMAN approval messages include proper targeting mentions (@HUMAN),
- *   preventing unintended broadcast to all agents
- * - Consolidated redundant logging and streamlined approval checking
- * - Added tool_calls/tool_call_id persistence for approval messages
- * - Pre-generate message IDs for agent responses
- * - Fixed activity tracking to prevent premature idle signals
+ * Recent Changes (2025-11-09):
+ * - Refactored approval flow: Added publishToolResult() API and subscribeAgentToToolMessages()
+ *   handler for structured tool result processing with security verification
+ * - Simplified subscribeAgentToMessages(): Removed ~210 lines of approval logic, now skips
+ *   role='tool' messages (processed by dedicated handler)
+ * - Enhanced protocol: Uses __type='tool_result' marker for parseMessageContent() integration
+ * - Security: tool_call_id ownership verification prevents unauthorized execution
+ * - Fixed SQLITE_BUSY: Atomic saveAgent() calls, skip transient SSE/tool-progress events
+ * - Fixed approval tracking: findOnceApproval() prevents duplicate requests after "Approve Once"
  */
 
 import {
@@ -428,12 +422,34 @@ export function publishMessage(world: World, content: string, sender: string, ch
   const messageId = generateId();
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
 
-  // Parse enhanced string protocol to extract targetAgentId
-  const { targetAgentId } = parseMessageContent(content, 'user');
+  loggerMemory.debug('[publishMessage] ENTRY', {
+    sender,
+    chatId,
+    contentPreview: content.substring(0, 200),
+    messageId
+  });
 
-  // Prepend @mention if agentId is present in enhanced protocol
+  // Parse enhanced string protocol to extract targetAgentId
+  const { message: parsedMsg, targetAgentId } = parseMessageContent(content, 'user');
+
+  loggerMemory.debug('[publishMessage] After parseMessageContent', {
+    parsedRole: parsedMsg.role,
+    targetAgentId,
+    toolCallId: parsedMsg.role === 'tool' ? (parsedMsg as any).tool_call_id : undefined
+  });
+
+  // For tool messages, don't prepend @mention - send the parsed content directly
   let finalContent = content;
-  if (targetAgentId) {
+  if (targetAgentId && parsedMsg.role === 'tool') {
+    // Tool messages: Use the tool_call_id to route, not @mentions
+    // Keep the enhanced protocol format for agent handler to parse
+    loggerMemory.debug('[publishMessage] Tool result message detected', {
+      agentId: targetAgentId,
+      toolCallId: parsedMsg.tool_call_id,
+      messageId
+    });
+  } else if (targetAgentId) {
+    // Regular messages: Prepend @mention
     finalContent = `@${targetAgentId}, ${content}`;
     loggerMemory.debug('[publishMessage] Prepended @mention from enhanced protocol', {
       agentId: targetAgentId,
@@ -459,7 +475,17 @@ export function publishMessage(world: World, content: string, sender: string, ch
     contentPreview: finalContent.substring(0, 50)
   });
 
+  loggerMemory.debug('[publishMessage] Emitting message event', {
+    messageId,
+    sender,
+    chatId: targetChatId,
+    contentPreview: finalContent.substring(0, 100)
+  });
+
   world.eventEmitter.emit('message', messageEvent);
+
+  loggerMemory.debug('[publishMessage] Message event emitted', { messageId });
+
   return messageEvent;
 }
 
@@ -482,6 +508,45 @@ export function publishMessageWithId(world: World, content: string, sender: stri
   };
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;
+}
+
+/**
+ * Publish a tool result message using structured API
+ * Constructs a proper role='tool' message using enhanced string protocol and publishes via publishMessage()
+ * 
+ * This is the primary API for approval responses and tool results.
+ * Uses the __type: 'tool_result' enhanced protocol which is automatically parsed by parseMessageContent()
+ * and converted to OpenAI role='tool' format.
+ * 
+ * @param world - World instance
+ * @param agentId - Target agent ID
+ * @param data - Tool result data (decision, scope, tool_call_id, etc.)
+ * @returns WorldMessageEvent with generated messageId
+ * 
+ * @example
+ * publishToolResult(world, 'assistant-1', {
+ *   tool_call_id: 'call_123',
+ *   decision: 'approve',
+ *   scope: 'session',
+ *   toolName: 'shell_cmd',
+ *   toolArgs: { command: 'ls -la' },
+ *   workingDirectory: '/home/user'
+ * });
+ */
+export function publishToolResult(world: World, agentId: string, data: import('./types').ToolResultData): WorldMessageEvent {
+  const enhancedMessage = JSON.stringify({
+    __type: 'tool_result',
+    tool_call_id: data.tool_call_id,
+    agentId: agentId,
+    content: JSON.stringify({
+      decision: data.decision,
+      scope: data.scope,
+      toolName: data.toolName,
+      toolArgs: data.toolArgs,
+      workingDirectory: data.workingDirectory
+    })
+  });
+  return publishMessage(world, enhancedMessage, 'human');
 }
 
 export function subscribeToMessages(
@@ -703,10 +768,11 @@ export function removeSelfMentions(response: string, agentId: string): string {
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
   const handler = async (messageEvent: WorldMessageEvent) => {
-    loggerAgent.debug('Agent received message', {
+    loggerAgent.debug('[subscribeAgentToMessages] ENTRY - Agent received message', {
       agentId: agent.id,
       sender: messageEvent.sender,
-      messageId: messageEvent.messageId
+      messageId: messageEvent.messageId,
+      contentPreview: messageEvent.content?.substring(0, 200)
     });
 
     if (!messageEvent.messageId) {
@@ -720,11 +786,20 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     // Check if this is an assistant message with tool_calls (approval request)
     // These need to be saved to agent memory even though they're from the agent
     const messageData = messageEvent as any;
-    if (messageData.role === 'assistant' && messageData.tool_calls && messageEvent.sender === agent.id) {
+    const hasApprovalRequest = messageData.tool_calls?.some((tc: any) =>
+      tc.function?.name === 'client.requestApproval'
+    );
+
+    // CRITICAL: Must check agent ID to prevent cross-agent approval contamination
+    const isForThisAgent = messageEvent.sender === agent.id ||
+      (messageData as any).agentName === agent.id;
+
+    if (messageData.role === 'assistant' && hasApprovalRequest && isForThisAgent) {
       loggerMemory.debug('Saving approval request to agent memory', {
         agentId: agent.id,
         messageId: messageEvent.messageId,
-        toolCalls: messageData.tool_calls.length
+        toolCalls: messageData.tool_calls.length,
+        sender: messageEvent.sender
       });
 
       const approvalMessage: AgentMessage = {
@@ -736,7 +811,9 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         messageId: messageEvent.messageId,
         replyToMessageId: messageData.replyToMessageId,
         tool_calls: messageData.tool_calls,
-        agentId: agent.id
+        agentId: agent.id,
+        // CRITICAL: Include toolCallStatus from event (marks as incomplete)
+        toolCallStatus: messageData.toolCallStatus
       };
 
       agent.memory.push(approvalMessage);
@@ -760,99 +837,25 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     }
 
     // Check if this is a tool result message (approval response)
-    // These need to be saved to agent memory for persistence
-    if (messageData.role === 'tool' && messageData.tool_call_id) {
-      loggerMemory.debug('Saving approval response to agent memory', {
+    // Parse enhanced format first to detect tool messages
+    const { message: parsedMessage, targetAgentId } = parseMessageContent(messageEvent.content, 'user');
+
+    loggerAgent.debug('[subscribeAgentToMessages] After parseMessageContent', {
+      agentId: agent.id,
+      parsedRole: parsedMessage.role,
+      targetAgentId,
+      toolCallId: parsedMessage.role === 'tool' ? parsedMessage.tool_call_id : undefined,
+      isToolMessage: parsedMessage.role === 'tool' && !!parsedMessage.tool_call_id
+    });
+
+    // Tool messages are now handled by subscribeAgentToToolMessages (separate handler)
+    // This keeps the message handler focused on user/assistant/system messages only
+    if (parsedMessage.role === 'tool') {
+      loggerAgent.debug('[subscribeAgentToMessages] Skipping tool message - handled by tool handler', {
         agentId: agent.id,
-        messageId: messageEvent.messageId,
-        toolCallId: messageData.tool_call_id
+        toolCallId: parsedMessage.tool_call_id
       });
-
-      // Parse approval decision from enhanced protocol
-      let approvalDecision: 'approve' | 'deny' | undefined;
-      let approvalScope: 'once' | 'session' | undefined;
-      try {
-        const parsed = JSON.parse(messageEvent.content || '{}');
-        if (parsed.__type === 'tool_result' && parsed.content) {
-          const result = JSON.parse(parsed.content);
-          approvalDecision = result.decision;
-          approvalScope = result.scope;
-        }
-      } catch (error) {
-        loggerMemory.warn('Failed to parse approval decision from tool result', {
-          agentId: agent.id,
-          toolCallId: messageData.tool_call_id,
-          error: error instanceof Error ? error.message : error
-        });
-      }
-
-      const approvalResponse: AgentMessage = {
-        role: 'tool',
-        content: messageEvent.content || '',
-        sender: messageEvent.sender || 'system',
-        createdAt: messageEvent.timestamp,
-        chatId: world.currentChatId || null,
-        messageId: messageEvent.messageId,
-        tool_call_id: messageData.tool_call_id,
-        agentId: agent.id,
-        // NEW: Mark tool call as complete with result
-        toolCallStatus: {
-          [messageData.tool_call_id]: {
-            complete: true,
-            result: approvalDecision ? {
-              decision: approvalDecision,
-              scope: approvalScope,
-              timestamp: new Date().toISOString()
-            } : null
-          }
-        }
-      };
-
-      // NEW: Update the original approval request message to mark it complete
-      // Do this BEFORE adding response to ensure atomic state
-      const originalRequest = agent.memory.find(msg =>
-        msg.role === 'assistant' &&
-        msg.tool_calls?.some(tc => tc.id === messageData.tool_call_id)
-      );
-      if (originalRequest) {
-        if (!originalRequest.toolCallStatus) {
-          originalRequest.toolCallStatus = {};
-        }
-        originalRequest.toolCallStatus[messageData.tool_call_id] = {
-          complete: true,
-          result: approvalDecision ? {
-            decision: approvalDecision,
-            scope: approvalScope,
-            timestamp: new Date().toISOString()
-          } : null
-        };
-        loggerMemory.debug('Updated original approval request with completion status', {
-          agentId: agent.id,
-          toolCallId: messageData.tool_call_id
-        });
-      }
-
-      // Add approval response to memory
-      agent.memory.push(approvalResponse);
-
-      // OPTIMIZATION: Save agent memory ONCE at the end (atomic update)
-      // This prevents race conditions from multiple saveAgent() calls
-      try {
-        const storage = await getStorageWrappers();
-        await storage.saveAgent(world.id, agent);
-        loggerMemory.debug('Approval response saved to agent memory (atomic)', {
-          agentId: agent.id,
-          messageId: messageEvent.messageId,
-          toolCallId: messageData.tool_call_id
-        });
-      } catch (error) {
-        loggerMemory.error('Failed to save approval response to memory', {
-          agentId: agent.id,
-          error: error instanceof Error ? error.message : error
-        });
-      }
-
-      return; // Don't process this message further
+      return;
     }
 
     // Skip messages from this agent itself
@@ -880,6 +883,226 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         sender: messageEvent.sender
       });
     }
+  };
+
+  return subscribeToMessages(world, handler);
+}
+
+/**
+ * Subscribe agent to tool result messages (approval responses)
+ * Filters role='tool', verifies tool_call_id ownership, executes approved tools
+ */
+export function subscribeAgentToToolMessages(world: World, agent: Agent): () => void {
+  const handler = async (messageEvent: WorldMessageEvent) => {
+    // Parse message to detect tool results
+    const { message: parsedMessage, targetAgentId } = parseMessageContent(messageEvent.content, 'user');
+
+    // Filter: Only process role='tool' messages
+    if (parsedMessage.role !== 'tool' || !parsedMessage.tool_call_id) {
+      return;
+    }
+
+    // Filter: Only process messages for this agent
+    if (targetAgentId !== agent.id) {
+      loggerAgent.debug('[subscribeAgentToToolMessages] Skipping - not for this agent', {
+        agentId: agent.id,
+        targetAgentId
+      });
+      return;
+    }
+
+    loggerAgent.debug('[subscribeAgentToToolMessages] Processing tool result', {
+      agentId: agent.id,
+      toolCallId: parsedMessage.tool_call_id,
+      messageId: messageEvent.messageId
+    });
+
+    // Security check: Verify tool_call_id ownership
+    // Check if this tool call exists in agent's memory (prevents unauthorized execution)
+    const hasToolCall = agent.memory.some(msg =>
+      msg.tool_calls?.some(tc => tc.id === parsedMessage.tool_call_id)
+    );
+
+    if (!hasToolCall) {
+      loggerAgent.warn('[subscribeAgentToToolMessages] Security: Unknown tool_call_id - rejecting', {
+        agentId: agent.id,
+        toolCallId: parsedMessage.tool_call_id
+      });
+      return;
+    }
+
+    // Parse approval decision from content
+    let approvalDecision: 'approve' | 'deny' | undefined;
+    let approvalScope: 'once' | 'session' | undefined;
+    let approvalData: any = {};
+
+    try {
+      approvalData = JSON.parse(parsedMessage.content || '{}');
+      approvalDecision = approvalData.decision;
+      approvalScope = approvalData.scope;
+    } catch (error) {
+      loggerMemory.warn('[subscribeAgentToToolMessages] Failed to parse approval data', {
+        agentId: agent.id,
+        toolCallId: parsedMessage.tool_call_id,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+
+    // Find the original approval request to get the REAL tool call ID
+    const approvalRequestMsg = agent.memory.find(msg =>
+      msg.role === 'assistant' &&
+      msg.tool_calls?.some(tc => tc.id === parsedMessage.tool_call_id)
+    );
+
+    let originalToolCallId = parsedMessage.tool_call_id;
+
+    if (approvalRequestMsg) {
+      const approvalCall = approvalRequestMsg.tool_calls?.find(tc => tc.id === parsedMessage.tool_call_id);
+      if (approvalCall) {
+        try {
+          const approvalArgs = JSON.parse(approvalCall.function.arguments || '{}');
+          if (approvalArgs.originalToolCall?.id) {
+            originalToolCallId = approvalArgs.originalToolCall.id;
+            loggerMemory.debug('[subscribeAgentToToolMessages] Found original tool call ID', {
+              agentId: agent.id,
+              approvalToolCallId: parsedMessage.tool_call_id,
+              originalToolCallId
+            });
+          }
+        } catch (error) {
+          loggerMemory.warn('[subscribeAgentToToolMessages] Failed to extract original tool call ID', {
+            agentId: agent.id,
+            error: error instanceof Error ? error.message : error
+          });
+        }
+      }
+    }
+
+    // Execute the tool if approved
+    let actualToolResult = '';
+
+    if (approvalDecision === 'approve' && approvalData.toolName) {
+      loggerAgent.debug('[subscribeAgentToToolMessages] Executing approved tool', {
+        agentId: agent.id,
+        toolName: approvalData.toolName,
+        scope: approvalScope
+      });
+
+      if (approvalData.toolName === 'shell_cmd') {
+        const { executeShellCommand } = await import('./shell-cmd-tool.js');
+        const args = approvalData.toolArgs || {};
+        const command = args.command || '';
+        const parameters = args.parameters || [];
+        const directory = args.directory || approvalData.workingDirectory || './';
+
+        const toolResult = await executeShellCommand(command, parameters, directory);
+
+        if (toolResult.exitCode === 0) {
+          actualToolResult = toolResult.stdout || '(command completed successfully with no output)';
+        } else {
+          actualToolResult = `Command failed (exit code ${toolResult.exitCode}):\n${toolResult.stderr || toolResult.stdout}`;
+        }
+
+        loggerAgent.debug('[subscribeAgentToToolMessages] Tool executed', {
+          agentId: agent.id,
+          exitCode: toolResult.exitCode,
+          resultLength: actualToolResult.length
+        });
+
+        // Emit tool-execution event
+        publishEvent(world, 'tool-execution', {
+          agentId: agent.id,
+          toolName: approvalData.toolName,
+          command,
+          parameters,
+          directory,
+          exitCode: toolResult.exitCode,
+          chatId: messageEvent.chatId
+        });
+      } else {
+        loggerAgent.warn('[subscribeAgentToToolMessages] Unknown tool type', {
+          agentId: agent.id,
+          toolName: approvalData.toolName
+        });
+        actualToolResult = `Error: Unknown tool type '${approvalData.toolName}'`;
+      }
+    } else if (approvalDecision === 'deny') {
+      loggerAgent.debug('[subscribeAgentToToolMessages] Tool denied by user', {
+        agentId: agent.id,
+        toolName: approvalData.toolName
+      });
+      actualToolResult = 'Tool execution was denied by the user.';
+    }
+
+    // Create tool result message with execution result
+    const approvalResponse: AgentMessage = {
+      role: 'tool',
+      content: actualToolResult,
+      sender: messageEvent.sender || 'system',
+      createdAt: messageEvent.timestamp,
+      chatId: messageEvent.chatId || world.currentChatId || null,
+      messageId: messageEvent.messageId,
+      tool_call_id: originalToolCallId,
+      agentId: agent.id,
+      toolCallStatus: {
+        [originalToolCallId!]: {
+          complete: true,
+          result: approvalDecision ? {
+            decision: approvalDecision,
+            scope: approvalScope,
+            timestamp: new Date().toISOString()
+          } : null
+        }
+      }
+    };
+
+    // Update original tool call status
+    const originalToolCallMsg = agent.memory.find(msg =>
+      msg.role === 'assistant' &&
+      msg.tool_calls?.some(tc => tc.id === originalToolCallId)
+    );
+    if (originalToolCallMsg) {
+      if (!originalToolCallMsg.toolCallStatus) {
+        originalToolCallMsg.toolCallStatus = {};
+      }
+      originalToolCallMsg.toolCallStatus[originalToolCallId!] = {
+        complete: true,
+        result: approvalDecision ? {
+          decision: approvalDecision,
+          scope: approvalScope,
+          timestamp: new Date().toISOString()
+        } : null
+      };
+    }
+
+    // Add to memory
+    agent.memory.push(approvalResponse);
+
+    // Save agent (atomic update)
+    try {
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
+      loggerMemory.debug('[subscribeAgentToToolMessages] Tool result saved to memory', {
+        agentId: agent.id,
+        messageId: messageEvent.messageId,
+        toolCallId: parsedMessage.tool_call_id,
+        decision: approvalDecision
+      });
+    } catch (error) {
+      loggerMemory.error('[subscribeAgentToToolMessages] Failed to save tool result', {
+        agentId: agent.id,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+
+    // Resume LLM after approval
+    loggerAgent.debug('[subscribeAgentToToolMessages] Resuming LLM after approval', {
+      agentId: agent.id,
+      chatId: messageEvent.chatId,
+      decision: approvalDecision
+    });
+
+    await resumeLLMAfterApproval(world, agent, messageEvent.chatId);
   };
 
   return subscribeToMessages(world, handler);
@@ -942,6 +1165,176 @@ export async function saveIncomingMessageToMemory(
 }
 
 /**
+ * Resume LLM after approval response
+ * Calls the LLM with the updated memory (including tool result) to continue execution
+ */
+async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?: string | null): Promise<void> {
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  try {
+    // Use the chatId from the approval message event, fallback to world.currentChatId
+    const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+
+    // Filter memory to current chat only
+    const currentChatMessages = agent.memory.filter(m => m.chatId === targetChatId);
+
+    loggerAgent.debug('Resuming LLM with approval result in memory', {
+      agentId: agent.id,
+      targetChatId,
+      worldCurrentChatId: world.currentChatId,
+      totalMemoryLength: agent.memory.length,
+      currentChatLength: currentChatMessages.length,
+      lastFewMessages: currentChatMessages.slice(-5).map(m => ({
+        role: m.role,
+        hasContent: !!m.content,
+        hasToolCalls: !!m.tool_calls,
+        toolCallId: m.tool_call_id
+      }))
+    });
+
+    // Tool execution already happened before this function was called
+    // The tool result is already in memory with the actual stdout/stderr
+    // Now prepare messages for LLM - loads fresh data from storage
+
+    // Prepare messages with system prompt and complete conversation history
+    const messages = await prepareMessagesForLLM(
+      world.id,
+      agent,
+      targetChatId ?? null
+    );
+
+    loggerAgent.debug('Calling LLM with memory after tool execution', {
+      agentId: agent.id,
+      targetChatId,
+      preparedMessageCount: messages.length,
+      systemMessagesInPrepared: messages.filter(m => m.role === 'system').length,
+      userMessages: messages.filter(m => m.role === 'user').length,
+      assistantMessages: messages.filter(m => m.role === 'assistant').length,
+      toolMessages: messages.filter(m => m.role === 'tool').length,
+      lastThreeMessages: messages.slice(-3).map(m => ({
+        role: m.role,
+        hasContent: !!m.content,
+        contentPreview: m.content?.substring(0, 100),
+        hasToolCalls: !!m.tool_calls,
+        toolCallId: m.tool_call_id
+      }))
+    });
+
+    // Increment LLM call count
+    agent.llmCallCount++;
+    agent.lastLLMCall = new Date();
+
+    try {
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
+    } catch (error) {
+      loggerAgent.error('Failed to save agent after LLM call increment', {
+        agentId: agent.id,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+
+    // Generate LLM response (streaming or non-streaming)
+    let response: string | { type: string; originalMessage: any; approvalMessage: any };
+    let messageId: string;
+
+    if (globalStreamingEnabled) {
+      const { streamAgentResponse } = await import('./llm-manager.js');
+      const result = await streamAgentResponse(world, agent, messages as any, publishSSE);
+      response = result.response;
+      messageId = result.messageId;
+
+      loggerAgent.debug('LLM streaming response received after approval', {
+        agentId: agent.id,
+        hasResponse: !!response,
+        responseLength: typeof response === 'string' ? response.length : 0,
+        responseType: typeof response,
+        responsePreview: typeof response === 'string' ? response.substring(0, 200) : JSON.stringify(response).substring(0, 200),
+        lastMemoryMessage: agent.memory[agent.memory.length - 1]
+      });
+    } else {
+      const { generateAgentResponse } = await import('./llm-manager.js');
+      response = await generateAgentResponse(world, agent, messages as any);
+      messageId = generateId();
+    }
+
+    loggerAgent.debug('LLM response received after approval', {
+      agentId: agent.id,
+      hasResponse: !!response,
+      responseType: typeof response,
+      responseLength: typeof response === 'string' ? response.length : 0,
+      responsePreview: typeof response === 'string' ? response.substring(0, 100) : JSON.stringify(response).substring(0, 100)
+    });
+
+    if (!response) {
+      loggerAgent.debug('LLM response is empty after approval', { agentId: agent.id });
+      return;
+    }
+
+    // Check if response is an object (another approval request) instead of a string
+    if (typeof response !== 'string') {
+      loggerAgent.debug('Response is not a string after approval - likely another approval request', {
+        agentId: agent.id,
+        responseType: typeof response
+      });
+      // This shouldn't happen in normal flow, but handle it gracefully
+      return;
+    }
+
+    // Save response to memory
+    const assistantMessage: AgentMessage = {
+      role: 'assistant',
+      content: response,
+      createdAt: new Date(),
+      chatId: world.currentChatId || null,
+      messageId: messageId,
+      sender: agent.id,
+      agentId: agent.id
+    };
+
+    agent.memory.push(assistantMessage);
+
+    loggerAgent.debug('Publishing LLM response as message event', {
+      agentId: agent.id,
+      messageId,
+      chatId: world.currentChatId
+    });
+
+    // Publish response
+    if (response && typeof response === 'string') {
+      publishMessageWithId(world, response, agent.id, messageId, world.currentChatId, undefined);
+    }
+
+    loggerAgent.debug('LLM response published', {
+      agentId: agent.id,
+      messageId
+    });
+
+    // Save memory
+    try {
+      const storage = await getStorageWrappers();
+      await storage.saveAgent(world.id, agent);
+    } catch (error) {
+      loggerMemory.error('Failed to save memory after approval resume', {
+        agentId: agent.id,
+        error: error instanceof Error ? error.message : error
+      });
+    }
+
+  } catch (error) {
+    loggerAgent.error('Failed to resume LLM after approval', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : error
+    });
+    publishEvent(world, 'system', {
+      message: `[Error] ${(error as Error).message}`,
+      type: 'error'
+    });
+  } finally {
+    completeActivity();
+  }
+}
+
+/**
  * Agent message processing with LLM response generation and auto-mention logic
  */
 export async function processAgentMessage(
@@ -951,28 +1344,24 @@ export async function processAgentMessage(
 ): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
-    // Load conversation history from storage for current chat (last 10 messages)
-    // NOTE: Don't save incoming message yet to avoid duplication in prepareMessagesForLLM
-    let conversationHistory: AgentMessage[] = [];
-    try {
-      const storage = await getStorageWrappers();
-      const allMessages = await storage.getMemory(world.id, world.currentChatId);
-      conversationHistory = allMessages.slice(-10); // Get last 10 messages for current chat
-    } catch (error) {
-      loggerMemory.error('Could not load conversation history from storage', { agentId: agent.id, chatId: world.currentChatId, error: error instanceof Error ? error.message : error });
-    }
+    // Prepare messages for LLM - loads fresh data from storage
+    // The user message is already saved in subscribeAgentToMessages, so it's in storage
+    const filteredMessages = await prepareMessagesForLLM(
+      world.id,
+      agent,
+      world.currentChatId ?? null
+    );
 
-    // Prepare messages for LLM with history + current message
-    const messageData: MessageData = {
-      id: messageEvent.messageId || generateId(),
-      name: 'message',
-      sender: messageEvent.sender,
-      content: messageEvent.content,
-      payload: {}
-    };
-    const messages = prepareMessagesForLLM(agent, messageData, conversationHistory);
-
-    // Note: Incoming message already saved in subscribeAgentToMessages handler
+    // Log prepared messages for debugging
+    loggerAgent.debug('Prepared messages for LLM', {
+      agentId: agent.id,
+      chatId: world.currentChatId,
+      totalMessages: filteredMessages.length,
+      systemMessages: filteredMessages.filter(m => m.role === 'system').length,
+      userMessages: filteredMessages.filter(m => m.role === 'user').length,
+      assistantMessages: filteredMessages.filter(m => m.role === 'assistant').length,
+      toolMessages: filteredMessages.filter(m => m.role === 'tool').length
+    });
 
     // Increment LLM call count and save agent state
     agent.llmCallCount++;
@@ -986,17 +1375,17 @@ export async function processAgentMessage(
     }
 
     // Generate LLM response (streaming or non-streaming)
-    let response: string;
+    let response: string | { type: string; originalMessage: any; approvalMessage: any };
     let messageId: string;
 
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
-      const result = await streamAgentResponse(world, agent, messages, publishSSE);
+      const result = await streamAgentResponse(world, agent, filteredMessages, publishSSE);
       response = result.response;
       messageId = result.messageId; // Use the same messageId from streaming
     } else {
       const { generateAgentResponse } = await import('./llm-manager.js');
-      response = await generateAgentResponse(world, agent, messages);
+      response = await generateAgentResponse(world, agent, filteredMessages);
       messageId = generateId(); // Generate new ID for non-streaming
     }
 
@@ -1004,6 +1393,90 @@ export async function processAgentMessage(
       // Empty response could mean approval request was sent or actual error
       // For approval requests, this is normal behavior - just return silently
       loggerAgent.debug('LLM response is empty - could be approval request or error', { agentId: agent.id });
+      return;
+    }
+
+    // Check if response is an object (approval flow) instead of a string
+    if (typeof response !== 'string') {
+      loggerAgent.debug('Response is not a string - likely approval flow', {
+        agentId: agent.id,
+        responseType: typeof response
+      });
+
+      // Handle approval flow: save BOTH original and approval messages
+      if (response && typeof response === 'object' && (response as any).type === 'approval_flow') {
+        const approvalFlow = response as any;
+
+        // 1. Save the ORIGINAL LLM response with the original tool call (e.g., shell_cmd)
+        const originalMessageId = generateId();
+        const originalMessage: AgentMessage = {
+          role: 'assistant',
+          content: approvalFlow.originalMessage.content || '',
+          tool_calls: approvalFlow.originalMessage.tool_calls,
+          createdAt: new Date(),
+          chatId: world.currentChatId || null,
+          messageId: originalMessageId,
+          replyToMessageId: messageEvent.messageId,
+          sender: agent.id,
+          agentId: agent.id
+        };
+        agent.memory.push(originalMessage);
+
+        // Emit the original message event
+        world.eventEmitter.emit('message', {
+          sender: agent.id,
+          agentName: agent.id,
+          content: originalMessage.content,
+          timestamp: new Date(),
+          messageId: originalMessageId,
+          chatId: world.currentChatId,
+          role: originalMessage.role,
+          tool_calls: originalMessage.tool_calls
+        });
+
+        loggerMemory.debug('Saved original LLM response before approval', {
+          agentId: agent.id,
+          originalMessageId,
+          toolCalls: originalMessage.tool_calls?.map((tc: any) => tc.function?.name)
+        });
+
+        // 2. Save the APPROVAL request message with client.requestApproval
+        const approvalMsg = approvalFlow.approvalMessage;
+        const approvalMessageId = generateId();
+        const approvalMessage: AgentMessage = {
+          role: 'assistant',
+          content: approvalMsg.content || '',
+          tool_calls: approvalMsg.tool_calls,
+          createdAt: new Date(),
+          chatId: world.currentChatId || null,
+          messageId: approvalMessageId,
+          replyToMessageId: originalMessageId, // Link to original message
+          sender: agent.id,
+          agentId: agent.id,
+          toolCallStatus: approvalMsg.toolCallStatus
+        };
+        // Don't save approval message directly here - emit event instead
+        // The message event handler will save it to avoid duplication logic
+        world.eventEmitter.emit('message', {
+          sender: agent.id,
+          agentName: agent.id,
+          content: approvalMessage.content,
+          timestamp: approvalMessage.createdAt,
+          messageId: approvalMessageId,
+          chatId: world.currentChatId,
+          role: approvalMessage.role,
+          tool_calls: approvalMessage.tool_calls,
+          toolCallStatus: approvalMessage.toolCallStatus,
+          replyToMessageId: approvalMessage.replyToMessageId
+        });
+
+        loggerMemory.debug('Emitted approval request message event', {
+          agentId: agent.id,
+          approvalMessageId,
+          toolCalls: approvalMessage.tool_calls?.map((tc: any) => tc.function?.name)
+        });
+      }
+
       return;
     }
 
@@ -1255,7 +1728,9 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
       `
     };
 
-    title = await generateAgentResponse(world, tempAgent, [userPrompt], undefined, true); // skipTools = true for title generation
+    const titleResponse = await generateAgentResponse(world, tempAgent, [userPrompt], undefined, true); // skipTools = true for title generation
+    // Title generation should never return approval flow (skipTools=true), but add guard just in case
+    title = typeof titleResponse === 'string' ? titleResponse : '';
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 
   } catch (error) {
@@ -1290,11 +1765,11 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
 
 /**
  * Check if a specific tool requires approval based on message history
- * Simplified: Only checks for session-wide approval, not one-time or denials
  * 
  * Logic:
  * 1. Search for session approval → Execute immediately
- * 2. No session approval → Request approval
+ * 2. Search for one-time approval (not consumed) → Execute immediately
+ * 3. No approval found → Request approval
  * 
  * @param context - Required execution context (workingDirectory optional within)
  */
@@ -1322,7 +1797,16 @@ export async function checkToolApproval(
       };
     }
 
-    // No session approval found - need to request approval
+    // Check for one-time approval (not yet consumed)
+    const onceApproval = findOnceApproval(messages, toolName, toolArgs, workingDirectory);
+    if (onceApproval) {
+      return {
+        needsApproval: false,
+        canExecute: true
+      };
+    }
+
+    // No approval found - need to request approval
     return {
       needsApproval: true,
       canExecute: false,
@@ -1353,6 +1837,100 @@ export async function checkToolApproval(
       }
     };
   }
+}
+
+/**
+ * Find one-time approval that hasn't been consumed yet
+ * 
+ * One-time approval is valid if:
+ * - scope: 'once'
+ * - Matches tool name, directory, and parameters
+ * - NOT followed by a tool execution result (not consumed)
+ * 
+ * Once found and used, it should be "consumed" by checking for subsequent tool results
+ */
+export function findOnceApproval(
+  messages: AgentMessage[],
+  toolName: string,
+  toolArgs?: any,
+  workingDirectory?: string
+): { decision: 'approve'; scope: 'once'; toolName: string } | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+
+    // Look for tool result with scope: 'once'
+    if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
+      try {
+        const outerParsed = JSON.parse(msg.content);
+
+        if (outerParsed.__type === 'tool_result' && outerParsed.content) {
+          try {
+            const result = JSON.parse(outerParsed.content);
+            if (result.decision === 'approve' &&
+              result.scope === 'once' &&
+              result.toolName?.toLowerCase() === toolName.toLowerCase()) {
+
+              // Match working directory if provided
+              if (result.workingDirectory && workingDirectory) {
+                if (result.workingDirectory !== workingDirectory) {
+                  continue;
+                }
+              }
+
+              // Match parameters
+              if (result.toolArgs && toolArgs) {
+                const argsMatch = JSON.stringify(result.toolArgs) === JSON.stringify(toolArgs);
+                if (!argsMatch) {
+                  continue;
+                }
+              }
+
+              // Found a matching one-time approval
+              // Check if it's been consumed by looking for a subsequent tool execution
+              const toolCallId = msg.tool_call_id;
+
+              // Look for messages AFTER this approval to see if tool was executed
+              for (let j = i + 1; j < messages.length; j++) {
+                const laterMsg = messages[j];
+
+                // Check if there's a tool result that consumed this approval
+                // Tool results have role='tool' but are NOT approval responses
+                if (laterMsg.role === 'tool' && laterMsg.tool_call_id === toolCallId) {
+                  // Check if this is NOT another approval response (check for __type)
+                  try {
+                    const laterParsed = JSON.parse(laterMsg.content || '{}');
+                    if (laterParsed.__type !== 'tool_result') {
+                      // This is an actual tool execution result, approval was consumed
+                      loggerMemory.debug('One-time approval already consumed', {
+                        toolName,
+                        toolCallId
+                      });
+                      return undefined; // Approval consumed, don't reuse
+                    }
+                  } catch {
+                    // If parse fails, assume it's a tool execution result
+                    return undefined; // Approval consumed
+                  }
+                }
+              }
+
+              // Approval found and not consumed
+              loggerMemory.debug('Found valid one-time approval', {
+                toolName,
+                toolCallId: msg.tool_call_id
+              });
+              return { decision: 'approve', scope: 'once', toolName };
+            }
+          } catch (innerError) {
+            continue;
+          }
+        }
+      } catch (outerError) {
+        continue;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

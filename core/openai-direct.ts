@@ -4,11 +4,11 @@
  * Features:
  * - Direct OpenAI API integration bypassing AI SDK schema corruption bug
  * - Support for OpenAI, Azure OpenAI, and OpenAI-compatible providers
- * - Streaming and non-streaming responses with SSE events
+ * - Streaming and non-streaming responses (providers return data only)
  * - Function/tool calling support with MCP tool integration
  * - Proper error handling and retry logic
  * - Browser-safe configuration injection
- * - World-aware event publishing using world.eventEmitter
+ * - Clean separation: providers return data, upper layer handles events/storage
  *
  * Provider Support:
  * - OpenAI: Direct integration with OpenAI API
@@ -27,20 +27,16 @@
  * - World-scoped event emission for proper isolation
  *
  * Recent Changes:
+ * - 2025-11-08: Removed ALL event emission from provider (publishToolEvent, publishSSE)
+ * - Streaming uses onChunk callback instead of publishSSE - llm-manager emits SSE events
+ * - Provider is now completely event-free and storage-free
+ * - Returns structured approval_flow object with both original and approval messages
+ * - Pure data transformation and LLM API calls only
  * - 2025-11-05: Added messages to tool execution context for approval checking
  * - Approval checking happens in wrapToolWithValidation (tool execution layer)
- * - LLM provider passes messages to tool wrapper for approval flow
  * - Initial implementation with full OpenAI package integration
  * - Added streaming and non-streaming response handlers
  * - Implemented function calling support with MCP tools
- * - Added configuration injection for browser compatibility
- * - Created OpenAI client factory functions for all supported providers
- * - Consolidated MCP tool logging under LOG_LLM_MCP category
- * - Added comprehensive tool execution tracking with performance metrics
- * - Implemented tool call sequence tracking and dependency relationships
- * - Enhanced logging with result content analysis and execution status
- * - Fixed MCP tool result display: Follow-up responses now stream properly to UI
- * - Added 'end' event emission after streaming completion to signal CLI properly
  * - Added validation and handling for tool calls with empty or missing names
  */
 
@@ -50,7 +46,6 @@ import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
-import { publishToolEvent, publishSSE } from './events.js';
 
 const logger = createCategoryLogger('openai');
 const mcpLogger = createCategoryLogger('mcp.execution');
@@ -165,9 +160,9 @@ export async function streamOpenAIResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World,
-  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  onChunk: (content: string) => void,
   messageId: string
-): Promise<string> {
+): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
 
@@ -196,12 +191,7 @@ export async function streamOpenAIResponse(
 
       if (delta?.content) {
         fullResponse += delta.content;
-        publishSSE(world, {
-          agentName: agent.id,
-          type: 'chunk',
-          content: delta.content,
-          messageId,
-        });
+        onChunk(delta.content);
       }
 
       // Handle function calls
@@ -260,18 +250,6 @@ export async function streamOpenAIResponse(
         try {
           const tool = mcpTools[toolCall.function!.name!];
           if (tool && tool.execute) {
-            // Publish tool start event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-start',
-              messageId,
-              toolExecution: {
-                toolName: toolCall.function!.name!,
-                toolCallId: toolCall.id!,
-                sequenceId,
-                input: toolCall.function!.arguments
-              }
-            });
 
             mcpLogger.debug(`MCP tool execution starting (streaming)`, {
               sequenceId,
@@ -295,20 +273,6 @@ export async function streamOpenAIResponse(
                 toolCallId: toolCall.id!,
                 agentId: agent.id,
                 messageId
-              });
-
-              // Publish tool error event for argument parsing errors (world channel)
-              publishToolEvent(world, {
-                agentName: agent.id,
-                type: 'tool-error',
-                messageId,
-                toolExecution: {
-                  toolName: toolCall.function!.name!,
-                  toolCallId: toolCall.id!,
-                  sequenceId,
-                  error: `Tool arguments parse error: ${parseErr}`,
-                  duration: 0
-                }
               });
 
               toolResults.push({
@@ -339,15 +303,17 @@ export async function streamOpenAIResponse(
                 messageId
               });
 
-              // Approval request was already published as message event by wrapToolWithValidation
-              // Just end the streaming to signal completion
-              publishSSE(world, {
-                agentName: agent.id,
-                type: 'end',
-                messageId
-              });
-
-              return '';
+              // Return structured object with BOTH original and approval messages
+              // Upper layer (events.ts) will handle storage and event emission
+              return {
+                type: 'approval_flow',
+                originalMessage: {
+                  role: 'assistant' as const,
+                  content: fullResponse,
+                  tool_calls: functionCalls as any // Original tool calls (e.g., shell_cmd)
+                },
+                approvalMessage: result._approvalMessage
+              };
             }
 
             const resultString = JSON.stringify(result);
@@ -363,23 +329,6 @@ export async function streamOpenAIResponse(
               duration: Math.round(duration * 100) / 100,
               resultSize: resultString.length,
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            // Publish tool result event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-result',
-              messageId,
-              toolExecution: {
-                toolName: toolCall.function!.name!,
-                toolCallId: toolCall.id!,
-                sequenceId,
-                duration: Math.round(duration * 100) / 100,
-                input: toolCall.function!.arguments,
-                result: result,
-                resultType: typeof result as any,
-                resultSize: resultString.length
-              }
             });
 
             toolResults.push({
@@ -431,19 +380,12 @@ export async function streamOpenAIResponse(
           agent,
           {}, // Do not include tools for follow-up to prevent infinite recursion
           world,
-          publishSSE,
+          onChunk,
           messageId
         );
         return followUpResponse;
       }
     }
-
-    // Emit 'end' event only when there are no tool calls (if there are tool calls, the recursive call will emit the 'end' event)
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'end',
-      messageId,
-    });
 
     logger.debug(`OpenAI Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
     return fullResponse;
@@ -464,7 +406,7 @@ export async function generateOpenAIResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World
-): Promise<string> {
+): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
 
@@ -580,8 +522,17 @@ export async function generateOpenAIResponse(
                 agentId: agent.id
               });
 
-              // Return the approval message from wrapToolWithValidation
-              return result._approvalMessage;
+              // Return structured object with BOTH original and approval messages
+              // Upper layer (events.ts) will handle storage and event emission
+              return {
+                type: 'approval_flow',
+                originalMessage: {
+                  role: 'assistant' as const,
+                  content: content,
+                  tool_calls: message.tool_calls as any // Original tool calls (e.g., shell_cmd)
+                },
+                approvalMessage: result._approvalMessage
+              };
             }
 
             const resultString = JSON.stringify(result);

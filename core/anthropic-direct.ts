@@ -3,11 +3,13 @@
  *
  * Features:
  * - Direct Anthropic API integration bypassing AI SDK tool calling issues
- * - Streaming and non-streaming responses with SSE events
+ * - Streaming and non-streaming responses (providers return data only)
  * - Function/tool calling support with MCP tool integration
  * - Proper error handling and retry logic
  * - Browser-safe configuration injection
- * - World-aware event publishing using world.eventEmitter
+ * - Clean separation: providers return data via callbacks, llm-manager handles events/storage
+ * - Uses onChunk callback for streaming instead of direct event emission
+ * - Providers are completely event-free and storage-free
  *
  * Implementation Details:
  * - Uses official @anthropic-ai/sdk package for reliable API access
@@ -19,7 +21,11 @@
  * - World-scoped event emission for proper isolation
  *
  * Recent Changes:
- * - Added 'end' event emission after streaming completion to signal CLI properly
+ * - 2025-11-08: Removed ALL event emission from provider (publishToolEvent, publishSSE)
+ * - Streaming uses onChunk callback instead of publishSSE - llm-manager emits SSE events
+ * - Provider is now completely event-free and storage-free
+ * - Returns structured approval_flow object with both original and approval messages
+ * - Pure data transformation and LLM API calls only
  * - Added validation and handling for tool calls with empty or missing names
  */
 
@@ -29,7 +35,6 @@ import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
 import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
-import { publishToolEvent, publishSSE } from './events.js';
 
 const logger = createCategoryLogger('anthropic');
 const mcpLogger = createCategoryLogger('mcp.execution');
@@ -124,9 +129,9 @@ export async function streamAnthropicResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World,
-  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  onChunk: (content: string) => void,
   messageId: string
-): Promise<string> {
+): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
   const systemPrompt = extractSystemPrompt(messages);
@@ -157,12 +162,7 @@ export async function streamAnthropicResponse(
         if (chunk.delta.type === 'text_delta') {
           const textDelta = chunk.delta.text;
           fullResponse += textDelta;
-          publishSSE(world, {
-            agentName: agent.id,
-            type: 'chunk',
-            content: textDelta,
-            messageId,
-          });
+          onChunk(textDelta);
         }
       } else if (chunk.type === 'content_block_start') {
         if (chunk.content_block.type === 'tool_use') {
@@ -219,19 +219,6 @@ export async function streamAnthropicResponse(
         try {
           const tool = mcpTools[toolUse.name];
           if (tool && tool.execute) {
-            // Publish tool start event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-start',
-              messageId,
-              toolExecution: {
-                toolName: toolUse.name,
-                toolCallId: toolUse.id,
-                sequenceId,
-                input: JSON.stringify(toolUse.input)
-              }
-            });
-
             mcpLogger.debug(`MCP tool execution starting (Anthropic streaming)`, {
               sequenceId,
               toolIndex: i,
@@ -261,15 +248,26 @@ export async function streamAnthropicResponse(
                 messageId
               });
 
-              // Approval request was already published as message event by wrapToolWithValidation
-              // Just end the streaming to signal completion
-              publishSSE(world, {
-                agentName: agent.id,
-                type: 'end',
-                messageId
-              });
+              // Return structured object with BOTH original and approval messages
+              // Upper layer (events.ts) will handle storage and event emission
+              const originalToolCalls = toolUses.map(tu => ({
+                id: tu.id,
+                type: 'function' as const,
+                function: {
+                  name: tu.name,
+                  arguments: JSON.stringify(tu.input)
+                }
+              }));
 
-              return '';
+              return {
+                type: 'approval_flow',
+                originalMessage: {
+                  role: 'assistant' as const,
+                  content: fullResponse,
+                  tool_calls: originalToolCalls as any // Original tool calls (e.g., shell_cmd)
+                },
+                approvalMessage: result._approvalMessage
+              };
             }
 
             const resultString = JSON.stringify(result);
@@ -285,23 +283,6 @@ export async function streamAnthropicResponse(
               duration: Math.round(duration * 100) / 100,
               resultSize: resultString.length,
               resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            // Publish tool result event to world channel (agent behavioral event)
-            publishToolEvent(world, {
-              agentName: agent.id,
-              type: 'tool-result',
-              messageId,
-              toolExecution: {
-                toolName: toolUse.name,
-                toolCallId: toolUse.id,
-                sequenceId,
-                duration: Math.round(duration * 100) / 100,
-                input: JSON.stringify(toolUse.input),
-                result: result,
-                resultType: typeof result as any,
-                resultSize: resultString.length
-              }
             });
 
             toolResults.push({
@@ -327,20 +308,6 @@ export async function streamAnthropicResponse(
             status: 'error',
             duration: Math.round(duration * 100) / 100,
             error: errorMessage
-          });
-
-          // Publish tool error event to world channel (agent behavioral event)
-          publishToolEvent(world, {
-            agentName: agent.id,
-            type: 'tool-error',
-            messageId,
-            toolExecution: {
-              toolName: toolUse.name,
-              toolCallId: toolUse.id,
-              sequenceId,
-              error: errorMessage,
-              duration: Math.round(duration * 100) / 100
-            }
           });
 
           toolResults.push({
@@ -372,19 +339,12 @@ export async function streamAnthropicResponse(
           agent,
           {}, // Do not include tools for follow-up to prevent infinite recursion
           world,
-          publishSSE,
+          onChunk,
           messageId
         );
         return followUpResponse;
       }
     }
-
-    // Emit 'end' event only when there are no tool calls (if there are tool calls, the recursive call will emit the 'end' event)
-    publishSSE(world, {
-      agentName: agent.id,
-      type: 'end',
-      messageId,
-    });
 
     logger.debug(`Anthropic Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
     return fullResponse;
@@ -405,7 +365,7 @@ export async function generateAnthropicResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World
-): Promise<string> {
+): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
   const systemPrompt = extractSystemPrompt(messages);
@@ -513,8 +473,26 @@ export async function generateAnthropicResponse(
                 agentId: agent.id
               });
 
-              // Return the approval message from wrapToolWithValidation
-              return result._approvalMessage;
+              // Return structured object with BOTH original and approval messages
+              // Upper layer (events.ts) will handle storage and event emission
+              const originalToolCalls = toolUses.map(tu => ({
+                id: tu.id,
+                type: 'function' as const,
+                function: {
+                  name: tu.name,
+                  arguments: JSON.stringify(tu.input)
+                }
+              }));
+
+              return {
+                type: 'approval_flow',
+                originalMessage: {
+                  role: 'assistant' as const,
+                  content: content,
+                  tool_calls: originalToolCalls as any // Original tool calls (e.g., shell_cmd)
+                },
+                approvalMessage: result._approvalMessage
+              };
             }
 
             const resultString = JSON.stringify(result);
