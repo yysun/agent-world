@@ -21,7 +21,7 @@ import {
   hasAnyMentionAtBeginning,
   addAutoMention,
   removeSelfMentions
-} from '../../../core/events.js';
+} from '../../../core/events/index.js';
 
 describe('Agent Auto-Mention Utilities', () => {
   describe('hasAnyMentionAtBeginning', () => {

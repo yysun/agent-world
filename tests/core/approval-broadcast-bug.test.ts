@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createMockWorld, createMockAgent } from '../__mocks__/mock-world.js';
 import { World, Agent } from '../../core/types.js';
-import { shouldAutoMention, addAutoMention, shouldAgentRespond } from '../../core/events.js';
+import { shouldAutoMention, addAutoMention, shouldAgentRespond } from '../../core/events/index.js';
 import { extractParagraphBeginningMentions } from '../../core/utils.js';
 
 describe('Approval Response Broadcast Bug Fix', () => {

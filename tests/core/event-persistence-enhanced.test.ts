@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { setupEventPersistence } from '../../core/events.js';
-import { publishMessage } from '../../core/events.js';
+import { setupEventPersistence } from '../../core/events/index.js';
+import { publishMessage } from '../../core/events/index.js';
 import type { World, Agent, WorldMessageEvent } from '../../core/types.js';
 import type { StoredEvent } from '../../core/storage/eventStorage/types.js';
 import { EventEmitter } from 'events';

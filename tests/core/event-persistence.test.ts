@@ -16,7 +16,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { getWorld, createWorld, deleteWorld } from '../../core/managers.js';
-import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events.js';
+import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events/index.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('Event Persistence Integration', () => {

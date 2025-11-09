@@ -43,7 +43,7 @@ import type { QueueStorage, QueueMessage } from '../core/storage/queue-storage.j
 import type { AgentWorldWSServer } from './ws-server.js';
 import type { World } from '../core/types.js';
 import { getWorld } from '../core/managers.js';
-import { publishMessageWithId } from '../core/events.js';
+import { publishMessageWithId } from '../core/events/index.js';
 import { EventType } from '../core/types.js';
 import { createCategoryLogger } from '../core/logger.js';
 import { startWorld, type ClientConnection, type WorldSubscription } from '../core/subscription.js';

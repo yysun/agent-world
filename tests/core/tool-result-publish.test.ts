@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { publishToolResult } from '../../core/events.js';
+import { publishToolResult } from '../../core/events/index.js';
 import { parseMessageContent } from '../../core/message-prep.js';
 import type { World, ToolResultData } from '../../core/types.js';
 import { EventEmitter } from 'events';

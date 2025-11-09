@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { subscribeAgentToToolMessages, publishToolResult } from '../../core/events.js';
+import { subscribeAgentToToolMessages, publishToolResult } from '../../core/events/index.js';
 import type { World, Agent, ToolResultData } from '../../core/types.js';
 import { EventEmitter } from 'events';
 

@@ -265,7 +265,7 @@ async function handleNewApprovalRequest(
               return;
             }
 
-            const { publishToolResult } = await import('../core/events.js');
+            const { publishToolResult } = await import('../core/events/index.js');
             publishToolResult(world, agentId, {
               tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
               decision: approvalDecision,

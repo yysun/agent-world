@@ -101,10 +101,11 @@
  * - Providers are now pure clients - no tool execution, only API calls
  * - NO type checking for string vs object - always LLMResponse
  * - Tool orchestration will be handled by events.ts (Phase 6)
- * - Added shell_cmd tool guidance: LLM asks user for directory when not provided
+ * - Simplified tool usage guidance: minimal system prompt patch for tool availability
  * - Increased LLM queue timeout from 2 minutes to 15 minutes for long-running tool executions
  * - Replaced AI SDK with direct OpenAI, Anthropic, and Google integrations
  * - Implemented granular function-based logging for detailed debugging control
+ * - Tool-specific guidance moved to individual tool descriptions (proper separation)
  */
 
 import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage, LLMResponse } from './types.js';
@@ -160,7 +161,7 @@ function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] 
 }
 
 /**
- * Append CRITICAL TOOL USAGE RULES to system message when tools are available
+ * Append tool usage guidance to system message when tools are available
  * Returns a new array with updated system message (doesn't mutate original)
  */
 function appendToolRulesToSystemMessage(messages: AgentMessage[], hasMCPTools: boolean): AgentMessage[] {
@@ -169,7 +170,8 @@ function appendToolRulesToSystemMessage(messages: AgentMessage[], hasMCPTools: b
   }
 
   const systemMessage = messages[0];
-  const toolRules = '\n\nCRITICAL TOOL USAGE RULES:\n1. Use tools ONLY when explicitly requested with action words like: "run", "execute", "list files", "show files", "check"\n2. For greetings (hi, hello) or general conversation: Respond naturally WITHOUT mentioning commands, files, or directories\n3. NEVER suggest what commands the user could run\n4. NEVER mention tool names like ls, cat, execute_command in conversational responses\n5. NEVER output JSON or tool call examples in your responses\nIf unsure whether to use a tool, DON' + 'T use it.\n\nSHELL COMMAND TOOL (shell_cmd) REQUIREMENTS:\n- The shell_cmd tool REQUIRES a "directory" parameter\n- If user says "current directory", "here", "this directory", or similar: use "./"\n- If user specifies a path (absolute or relative): use that path\n- Only ask "In which directory should I run this command?" if the location is truly ambiguous\n- Common patterns: "current" → "./", "home" → "~/", "tmp" → "/tmp"';
+  // Simple guidance: Only use tools when user explicitly requests an action
+  const toolRules = '\n\nYou have access to tools. Use them only when the user explicitly requests an action.';
 
   return [
     { ...systemMessage, content: systemMessage.content + toolRules },
@@ -490,7 +492,7 @@ export async function generateAgentResponse(
   messages: AgentMessage[],
   _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
   skipTools?: boolean
-): Promise<LLMResponse> {
+): Promise<{ response: LLMResponse; messageId: string }> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
     return await executeGenerateAgentResponse(world, agent, messages, skipTools);
@@ -505,7 +507,8 @@ async function executeGenerateAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   skipTools?: boolean
-): Promise<LLMResponse> {
+): Promise<{ response: LLMResponse; messageId: string }> {
+  const messageId = generateId();
   // Convert messages for LLM (strip custom fields)
   // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
   let preparedMessages = stripCustomFieldsFromMessages(messages);
@@ -559,9 +562,10 @@ async function executeGenerateAgentResponse(
         responseType: response.type,
         contentLength: response.content?.length || 0,
         hasToolCalls: response.type === 'tool_calls',
-        toolCallCount: response.tool_calls?.length || 0
+        toolCallCount: response.tool_calls?.length || 0,
+        messageId
       });
-      return response;
+      return { response, messageId };
     }
 
     // Use direct Anthropic integration for Anthropic provider
@@ -578,9 +582,10 @@ async function executeGenerateAgentResponse(
         responseType: response.type,
         contentLength: response.content?.length || 0,
         hasToolCalls: response.type === 'tool_calls',
-        toolCallCount: response.tool_calls?.length || 0
+        toolCallCount: response.tool_calls?.length || 0,
+        messageId
       });
-      return response;
+      return { response, messageId };
     }
 
     // Use direct Google integration for Google provider
@@ -597,9 +602,10 @@ async function executeGenerateAgentResponse(
         responseType: response.type,
         contentLength: response.content?.length || 0,
         hasToolCalls: response.type === 'tool_calls',
-        toolCallCount: response.tool_calls?.length || 0
+        toolCallCount: response.tool_calls?.length || 0,
+        messageId
       });
-      return response;
+      return { response, messageId };
     }
 
     // All providers now use direct integrations - no AI SDK needed

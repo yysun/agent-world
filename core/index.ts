@@ -92,7 +92,7 @@ export {
   publishMessage,
   publishMessageWithId,
   publishToolResult,
-} from './events.js';
+} from './events/index.js';
 
 export {
   beginWorldActivity,

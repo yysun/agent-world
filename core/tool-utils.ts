@@ -35,7 +35,7 @@
  */
 
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
-import { publishToolEvent } from './events.js';
+import { publishToolEvent } from './events/index.js';
 
 /**
  * Minimal fallback ID generator
@@ -242,7 +242,7 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
     execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
       // Check if tool requires approval BEFORE parameter validation
       if (tool.approval?.required && context?.world && context?.messages) {
-        const { checkToolApproval } = await import('./events.js');
+        const { checkToolApproval } = await import('./events/index.js');
         const approvalMessage = tool.approval.message || `The tool "${toolName}" requires approval to execute.`;
 
         const approvalCheck = await checkToolApproval(

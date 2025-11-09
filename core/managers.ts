@@ -51,7 +51,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
-import { publishCRUDEvent } from './events.js';
+import { publishCRUDEvent } from './events/index.js';
 
 // Type imports
 import type {
@@ -119,7 +119,7 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
 
   // Setup event persistence
   if (worldData.eventStorage) {
-    const { setupEventPersistence, setupWorldActivityListener } = await import('./events.js');
+    const { setupEventPersistence, setupWorldActivityListener } = await import('./events/index.js');
     worldData._eventPersistenceCleanup = setupEventPersistence(worldData);
     worldData._activityListenerCleanup = setupWorldActivityListener(worldData);
   }
@@ -248,7 +248,7 @@ export async function getWorld(worldId: string): Promise<World | null> {
 
   // Setup event persistence and activity listener
   if (world.eventStorage) {
-    const { setupEventPersistence, setupWorldActivityListener } = await import('./events.js');
+    const { setupEventPersistence, setupWorldActivityListener } = await import('./events/index.js');
     world._eventPersistenceCleanup = setupEventPersistence(world);
     world._activityListenerCleanup = setupWorldActivityListener(world);
   }
@@ -893,7 +893,7 @@ export async function editUserMessage(
 
   // Step 4: Attempt resubmission using publishMessage directly
   try {
-    const { publishMessage } = await import('./events.js');
+    const { publishMessage } = await import('./events/index.js');
     const messageEvent = publishMessage(world, newContent, 'human', chatId);
 
     logger.info(`Resubmitted edited message to world '${worldId}' with new messageId '${messageEvent.messageId}'`);

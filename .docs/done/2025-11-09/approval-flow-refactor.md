@@ -28,7 +28,7 @@ interface ToolResultData {
 }
 ```
 
-**New Function:** `publishToolResult()` (core/events.ts, line 547)
+**New Function:** `publishToolResult()` (core/events/publishers.ts)
 - Constructs proper LLM tool messages with `role: 'tool'`
 - Uses enhanced protocol with `__type: 'tool_result'` marker
 - Integrates with existing `parseMessageContent()` pipeline
@@ -36,7 +36,7 @@ interface ToolResultData {
 
 ### 2. Dedicated Tool Message Handler
 
-**New Function:** `subscribeAgentToToolMessages()` (core/events.ts, line 927)
+**New Function:** `subscribeAgentToToolMessages()` (core/events/subscribers.ts)
 - Independent subscription to 'message' events
 - Filters messages by `role === 'tool'`
 - Security: Verifies tool_call_id ownership before execution
@@ -266,6 +266,31 @@ sequenceDiagram
 
 ---
 
+## Modular Architecture
+
+The approval flow refactoring is part of a larger modularization effort that split the monolithic `core/events.ts` (1000+ lines) into focused modules:
+
+**Layer 3 (Event Emission):**
+- `core/events/publishers.ts` - publishMessage(), publishToolResult(), publishSSE()
+
+**Layer 4 (Storage & State):**
+- `core/events/memory-manager.ts` - saveIncomingMessageToMemory(), resumeLLMAfterApproval()
+- `core/events/persistence.ts` - Auto-save event listeners
+
+**Layer 5 (Orchestration):**
+- `core/events/orchestrator.ts` - processAgentMessage(), shouldAgentRespond()
+
+**Layer 6 (Event Handlers):**
+- `core/events/subscribers.ts` - subscribeAgentToMessages(), subscribeAgentToToolMessages()
+
+**Benefits:**
+- Clear dependency flow (bottom-up)
+- Each module has single responsibility
+- Easy to test in isolation
+- Better code discoverability
+
+---
+
 ## Architecture Benefits
 
 ### 1. Separation of Concerns
@@ -358,28 +383,30 @@ addMessage(world, agentId, {
 
 **Added:**
 - `core/types.ts`: +9 lines (ToolResultData interface)
-- `core/events.ts`: +150 lines (publishToolResult + subscribeAgentToToolMessages)
+- `core/events/publishers.ts`: +50 lines (publishToolResult function)
+- `core/events/subscribers.ts`: +150 lines (subscribeAgentToToolMessages function)
 - `core/index.ts`: +2 lines (exports)
 - `core/subscription.ts`: +1 line (handler subscription)
 - `tests/core/tool-result-publish.test.ts`: +145 lines (new file)
 - `tests/core/tool-message-handler.test.ts`: +178 lines (new file)
 
 **Removed:**
-- `core/events.ts`: -210 lines (old approval logic)
+- `core/events/subscribers.ts`: -210 lines (old approval logic from subscribeAgentToMessages)
 - `cli/index.ts`: -20 lines (manual JSON construction)
 
 **Net Change:** +255 lines (with +323 test lines)
 
 ### Complexity Reduction
 
-**Before:**
+**Before (Monolithic events.ts):**
 - `subscribeAgentToMessages()`: ~300 lines
 - Complex nested approval logic
 - Tool execution mixed with message handling
 - Hard to test in isolation
 
-**After:**
+**After (Modular events/subscribers.ts):**
 - `subscribeAgentToMessages()`: ~141 lines (-53% reduction)
+- `subscribeAgentToToolMessages()`: ~150 lines (dedicated handler)
 - Simple role-based skip (11 lines)
 - Clean separation of concerns
 - Easy to test (19 tests covering all scenarios)
@@ -392,36 +419,48 @@ addMessage(world, agentId, {
 1. `core/types.ts` (lines 518-527)
    - Added ToolResultData interface
    
-2. `core/events.ts`
-   - Line 547: Added publishToolResult()
-   - Line 927: Added subscribeAgentToToolMessages()
-   - Lines 869-879: Simplified tool message skip in subscribeAgentToMessages()
+2. `core/events/publishers.ts`
+   - Added publishToolResult() function
+   - Enhanced protocol integration with parseMessageContent()
    
-3. `core/index.ts`
+3. `core/events/subscribers.ts`
+   - Added subscribeAgentToToolMessages() function
+   - Simplified subscribeAgentToMessages() with tool message skip block
+   - Independent event subscriptions for messages and tool results
+   
+4. `core/events/orchestrator.ts`
+   - Tool execution in processAgentMessage()
+   - Approval request creation and publishing
+   
+5. `core/events/memory-manager.ts`
+   - resumeLLMAfterApproval() for continuing LLM after approval
+   - handleTextResponse() with chatId
+   
+6. `core/index.ts`
    - Added exports: publishToolResult, ToolResultData
    
-4. `core/subscription.ts` (line 60)
-   - Added subscribeAgentToToolMessages() call
+7. `core/subscription.ts`
+   - Added subscribeAgentToToolMessages() call in startWorld()
 
 ### CLI Files
-5. `cli/index.ts` (line 269)
+8. `cli/index.ts`
    - Updated handleNewApprovalRequest to use publishToolResult()
    - Added agentId validation guard
 
 ### Test Files
-6. `tests/core/tool-result-publish.test.ts` (new)
+9. `tests/core/tool-result-publish.test.ts` (new)
    - 10 comprehensive tests for publishToolResult API
    
-7. `tests/core/tool-message-handler.test.ts` (new)
+10. `tests/core/tool-message-handler.test.ts` (new)
    - 9 comprehensive tests for tool message handler
 
 ### Documentation
-8. `.docs/plans/2025-11-08/plan-approval-refactor-simple.md`
+11. `.docs/plans/2025-11-08/plan-approval-refactor-simple.md`
    - Updated phases 1-5 with completion status
    - Added actual implementation details
    - Marked with ✅ checkmarks
 
-9. `.docs/done/2025-11-09/approval-flow-refactor.md` (new)
+12. `.docs/done/2025-11-09/approval-flow-refactor.md` (new)
    - This documentation file
 
 ---

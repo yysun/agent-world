@@ -10,7 +10,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { createAgent } from '../../core/managers.js';
-import { publishMessageWithId } from '../../core/events.js';
+import { publishMessageWithId } from '../../core/events/index.js';
 import { LLMProvider } from '../../core/types.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 

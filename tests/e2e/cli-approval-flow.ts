@@ -14,7 +14,7 @@
 
 import { config } from 'dotenv';
 import { subscribeWorld } from '../../core/subscription.js';
-import { publishMessage } from '../../core/events.js';
+import { publishMessage } from '../../core/events/index.js';
 import { newChat, clearAgentMemory } from '../../core/index.js';
 import type { WorldSubscription } from '../../core/subscription.js';
 import type { World, Agent } from '../../core/types.js';
@@ -59,7 +59,7 @@ async function setup() {
 
   try {
     // IMPORTANT: Disable streaming for E2E tests to simplify message handling
-    const { disableStreaming } = await import('../../core/events.js');
+    const { disableStreaming } = await import('../../core/events');
     disableStreaming();
     console.log('✅ Streaming disabled for E2E tests\n');
 

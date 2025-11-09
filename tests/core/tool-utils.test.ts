@@ -19,10 +19,10 @@ import { filterAndHandleEmptyNamedFunctionCalls } from '../../core/tool-utils.js
 import type { World, Agent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
-import * as events from '../../core/events.js';
+import * as events from '../../core/events/index.js';
 
 // Mock publishToolEvent
-vi.mock('../../core/events.js', () => ({
+vi.mock('../../core/events/index.js', () => ({
   publishToolEvent: vi.fn(),
 }));
 

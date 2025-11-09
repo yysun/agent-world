@@ -20,7 +20,7 @@
 
 import { describe, test, expect } from 'vitest';
 import { newChat } from '../../core/managers.js';
-import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events.js';
+import { publishMessage, publishSSE, publishToolEvent, publishEvent } from '../../core/events/index.js';
 import type { World } from '../../core/types.js';
 import type { StoredEvent } from '../../core/storage/eventStorage/types.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
