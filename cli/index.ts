@@ -164,6 +164,7 @@ const bullet = (text: string) => `${gray('•')} ${text}`;
 
 interface ApprovalRequest {
   toolCallId: string;
+  originalToolCall?: any;
   toolName: string;
   toolArgs: any;
   message: string;
@@ -266,13 +267,14 @@ async function handleNewApprovalRequest(
             }
 
             const { publishToolResult } = await import('../core/events/index.js');
+            const { originalToolCall } = request;
             publishToolResult(world, agentId, {
-              tool_call_id: toolCallId || `approval_${toolName}_${Date.now()}`,
+              tool_call_id: toolCallId,
               decision: approvalDecision,
               scope: approvalScope,
-              toolName: toolName,
-              toolArgs: toolArgs,
-              workingDirectory: toolArgs?.directory || process.cwd()
+              toolName: originalToolCall?.name || toolName,
+              toolArgs: originalToolCall?.args || toolArgs,
+              workingDirectory: originalToolCall?.workingDirectory
             });
             resolve();
           } catch (err) {

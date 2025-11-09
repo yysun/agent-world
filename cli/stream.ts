@@ -210,6 +210,7 @@ export function handleToolCallEvents(
             isApprovalRequest: true,
             approvalData: {
               toolCallId: toolCall.id,
+              originalToolCall: args.originalToolCall,
               toolName: args.originalToolCall?.name || 'Unknown tool',
               toolArgs: args.originalToolCall?.args || {},
               message: args.message || 'This tool requires approval to execute.',

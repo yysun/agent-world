@@ -14,7 +14,7 @@
 
 import { config } from 'dotenv';
 import { subscribeWorld } from '../../core/subscription.js';
-import { publishMessage } from '../../core/events/index.js';
+import { publishMessage, publishToolResult, disableStreaming } from '../../core/events/index.js';
 import { newChat, clearAgentMemory } from '../../core/index.js';
 import type { WorldSubscription } from '../../core/subscription.js';
 import type { World, Agent } from '../../core/types.js';
@@ -58,8 +58,7 @@ async function setup() {
   console.log('\n🚀 Setting up E2E tests...\n');
 
   try {
-    // IMPORTANT: Disable streaming for E2E tests to simplify message handling
-    const { disableStreaming } = await import('../../core/events');
+    // Disable streaming for E2E tests to simplify message handling
     disableStreaming();
     console.log('✅ Streaming disabled for E2E tests\n');
 
@@ -173,23 +172,14 @@ async function testDeny() {
               // Send DENY response
               setTimeout(() => {
                 console.log('   🚫 Sending DENY response');
-                publishMessage(
-                  world,
-                  JSON.stringify({
-                    __type: 'tool_result',
-                    tool_call_id: toolCall.id,
-                    agentId: agent.id,
-                    content: JSON.stringify({
-                      decision: 'deny',
-                      scope: undefined,
-                      toolName: originalToolCall.name,
-                      toolArgs: originalToolCall.args,
-                      workingDirectory: originalToolCall.workingDirectory
-                    })
-                  }),
-                  'human',
-                  chatId
-                );
+                publishToolResult(world, agent.id, {
+                  tool_call_id: toolCall.id,
+                  decision: 'deny',
+                  scope: undefined,
+                  toolName: originalToolCall.name,
+                  toolArgs: originalToolCall.args,
+                  workingDirectory: originalToolCall.workingDirectory
+                });
               }, 500);
             } else {
               console.log('   📨 Second approval request received (expected after deny)');
@@ -202,8 +192,9 @@ async function testDeny() {
 
     // Listen for tool executions
     const toolHandler = (event: any) => {
-      console.log(`   🔍 Tool event received: chatId=${event.chatId}, expected=${chatId}`);
-      if (event.chatId === chatId) {
+      // publishEvent wraps content in WorldSystemEvent with content property
+      const toolData = event.content || event;
+      if (toolData.chatId === chatId) {
         console.log('   ⚠️  Tool execution attempted (should not happen after deny)');
         toolExecutionAttempted = true;
       }
@@ -310,23 +301,14 @@ async function testApproveOnce() {
               // Send APPROVE_ONCE response
               setTimeout(() => {
                 console.log('   ✅ Sending APPROVE_ONCE response');
-                publishMessage(
-                  world,
-                  JSON.stringify({
-                    __type: 'tool_result',
-                    tool_call_id: toolCall.id,
-                    agentId: agent.id,
-                    content: JSON.stringify({
-                      decision: 'approve',
-                      scope: 'once',
-                      toolName: originalToolCall.name,
-                      toolArgs: originalToolCall.args,
-                      workingDirectory: originalToolCall.workingDirectory
-                    })
-                  }),
-                  'human',
-                  chatId
-                );
+                publishToolResult(world, agent.id, {
+                  tool_call_id: toolCall.id,
+                  decision: 'approve',
+                  scope: 'once',
+                  toolName: originalToolCall.name,
+                  toolArgs: originalToolCall.args,
+                  workingDirectory: originalToolCall.workingDirectory
+                });
               }, 500);
             } else {
               console.log('   📨 Second approval request received (expected - one-time approval consumed)');
@@ -339,7 +321,9 @@ async function testApproveOnce() {
 
     // Listen for tool executions
     const toolHandler = (event: any) => {
-      if (event.chatId === chatId) {
+      // publishEvent wraps content in WorldSystemEvent with content property
+      const toolData = event.content || event;
+      if (toolData.chatId === chatId) {
         if (!firstToolExecuted) {
           console.log('   🔧 First tool execution (expected)');
           firstToolExecuted = true;
@@ -448,23 +432,14 @@ async function testApproveSession() {
               // Send APPROVE_SESSION response
               setTimeout(() => {
                 console.log('   ✅ Sending APPROVE_SESSION response');
-                publishMessage(
-                  world,
-                  JSON.stringify({
-                    __type: 'tool_result',
-                    tool_call_id: toolCall.id,
-                    agentId: agent.id,
-                    content: JSON.stringify({
-                      decision: 'approve',
-                      scope: 'session',
-                      toolName: originalToolCall.name,
-                      toolArgs: originalToolCall.args,
-                      workingDirectory: originalToolCall.workingDirectory
-                    })
-                  }),
-                  'human',
-                  chatId
-                );
+                publishToolResult(world, agent.id, {
+                  tool_call_id: toolCall.id,
+                  decision: 'approve',
+                  scope: 'session',
+                  toolName: originalToolCall.name,
+                  toolArgs: originalToolCall.args,
+                  workingDirectory: originalToolCall.workingDirectory
+                });
               }, 500);
             } else {
               console.log('   ⚠️  Second approval request (should NOT happen with session approval)');
@@ -477,7 +452,9 @@ async function testApproveSession() {
 
     // Listen for tool executions
     const toolHandler = (event: any) => {
-      if (event.chatId === chatId) {
+      // publishEvent wraps content in WorldSystemEvent with content property
+      const toolData = event.content || event;
+      if (toolData.chatId === chatId) {
         if (!firstToolExecuted) {
           console.log('   🔧 First tool execution (expected)');
           firstToolExecuted = true;

@@ -16,7 +16,7 @@
 import { config } from 'dotenv';
 import * as readline from 'readline';
 import { subscribeWorld } from '../../core/subscription.js';
-import { publishMessage, publishToolResult, disableStreaming, enableStreaming } from '../../core/events/index.js';
+import { publishMessage, publishToolResult, disableStreaming } from '../../core/events/index.js';
 import { newChat, clearAgentMemory, deleteChat } from '../../core/index.js';
 import type { WorldSubscription } from '../../core/subscription.js';
 import type { World, Agent } from '../../core/types.js';
@@ -27,7 +27,6 @@ config();
 // Parse command line arguments
 const args = process.argv.slice(2);
 const interactiveMode = args.includes('--interactive') || args.includes('-i');
-const streamingEnabled = args.includes('--stream') || args.includes('-s');
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
@@ -35,13 +34,11 @@ Usage: npx tsx tests/e2e/test-approve-once.ts [options]
 
 Options:
   -i, --interactive    Enable interactive mode (press Enter to continue at each step)
-  -s, --stream        Enable streaming mode (default: disabled)
   -h, --help          Show this help message
 
 Examples:
   npx tsx tests/e2e/test-approve-once.ts                    # Run in auto mode
   npx tsx tests/e2e/test-approve-once.ts -i                 # Interactive mode
-  npx tsx tests/e2e/test-approve-once.ts -i -s             # Interactive + streaming
 `);
   process.exit(0);
 }
@@ -98,18 +95,12 @@ function waitForEnter(prompt: string): Promise<void> {
 // Setup: Load Default World (mimicking CLI behavior)
 async function setup() {
   console.log('\n🚀 Setting up E2E test...\n');
-  console.log(`   Mode: ${interactiveMode ? 'Interactive' : 'Auto'}`);
-  console.log(`   Streaming: ${streamingEnabled ? 'Enabled' : 'Disabled'}\n`);
+  console.log(`   Mode: ${interactiveMode ? 'Interactive' : 'Auto'}\n`);
 
   try {
-    // Configure streaming based on command line option
-    if (streamingEnabled) {
-      enableStreaming();
-      console.log('✅ Streaming enabled for E2E test\n');
-    } else {
-      disableStreaming();
-      console.log('✅ Streaming disabled for E2E test\n');
-    }
+    // Disable streaming for E2E tests to simplify message handling
+    disableStreaming();
+    console.log('✅ Streaming disabled for E2E test\n');
 
     // Subscribe to world with ClientConnection interface (like CLI does)
     // This internally calls startWorld() which sets up agent subscriptions

@@ -240,6 +240,7 @@ const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null
 
       return {
         toolCallId: toolCall.id || `approval-${Date.now()}`,
+        originalToolCall: parsedArgs?.originalToolCall,
         toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
         toolArgs: parsedArgs?.originalToolCall?.args ?? {},
         approvalMessage: parsedArgs?.message ?? 'This tool requires your approval to continue.',
@@ -547,12 +548,14 @@ const submitApprovalDecision = async (
 
   try {
     // Submit using structured API endpoint
+    const { originalToolCall } = request;
     await submitToolResult(state.worldName, request.agentId, {
-      tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
+      tool_call_id: request.toolCallId,
       decision: approvalDecision,
       scope: approvalScope,
-      toolName: request.toolName,
-      toolArgs: request.toolArgs
+      toolName: originalToolCall?.name || request.toolName,
+      toolArgs: originalToolCall?.args || request.toolArgs,
+      workingDirectory: originalToolCall?.workingDirectory
     });
 
     return {

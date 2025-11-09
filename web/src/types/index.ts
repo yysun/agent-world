@@ -180,6 +180,7 @@ export interface AgentActivityStatus {
 
 export interface ApprovalRequest {
   toolCallId: string;
+  originalToolCall?: any;
   toolName: string;
   toolArgs: Record<string, unknown>;
   message: string;
