@@ -1,40 +1,37 @@
 /**
- * Anthropic Direct Integration Module - Direct Anthropic SDK Integration  
+ * Anthropic Direct Integration Module - Pure Client (LLM Provider Refactoring Phase 3)
  *
  * Features:
  * - Direct Anthropic API integration bypassing AI SDK tool calling issues
- * - Streaming and non-streaming responses (providers return data only)
- * - Function/tool calling support with MCP tool integration
+ * - Streaming and non-streaming responses returning LLMResponse
+ * - Function/tool calling detection (NO execution)
  * - Proper error handling and retry logic
  * - Browser-safe configuration injection
- * - Clean separation: providers return data via callbacks, llm-manager handles events/storage
- * - Uses onChunk callback for streaming instead of direct event emission
- * - Providers are completely event-free and storage-free
+ * - Pure client: only calls APIs and returns structured data
  *
  * Implementation Details:
  * - Uses official @anthropic-ai/sdk package for reliable API access
  * - Converts AI SDK message format to Anthropic format
- * - Handles tool calling with proper tool result processing
- * - Streaming support with chunk-by-chunk processing
+ * - Returns LLMResponse with type='text' or type='tool_calls'
+ * - Streaming support with chunk-by-chunk processing via onChunk callback
  * - Error handling with descriptive messages
  * - Configuration injection from llm-config module
- * - World-scoped event emission for proper isolation
+ * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
- * - 2025-11-08: Removed ALL event emission from provider (publishToolEvent, publishSSE)
- * - Streaming uses onChunk callback instead of publishSSE - llm-manager emits SSE events
- * - Provider is now completely event-free and storage-free
- * - Returns structured approval_flow object with both original and approval messages
- * - Pure data transformation and LLM API calls only
- * - Added validation and handling for tool calls with empty or missing names
+ * - 2025-11-09: Phase 3 - Removed ALL tool execution logic (~200 lines)
+ * - Provider is now a pure client - only API calls and data transformation
+ * - Returns LLMResponse interface with type discriminator
+ * - Filters invalid tool calls (empty/missing names) and logs warnings
+ * - Includes usage tracking (input_tokens, output_tokens) for non-streaming
+ * - 2025-11-08: Removed ALL event emission from provider
+ * - Streaming uses onChunk callback instead of direct SSE emission
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, AnthropicConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
-import { generateId } from './utils.js';
-import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('anthropic');
 const mcpLogger = createCategoryLogger('mcp.execution');
@@ -120,7 +117,8 @@ function extractSystemPrompt(messages: ChatMessage[]): string {
 }
 
 /**
- * Streaming Anthropic response handler
+ * Streaming Anthropic response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function streamAnthropicResponse(
   client: Anthropic,
@@ -131,7 +129,7 @@ export async function streamAnthropicResponse(
   world: World,
   onChunk: (content: string) => void,
   messageId: string
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
   const systemPrompt = extractSystemPrompt(messages);
@@ -171,183 +169,56 @@ export async function streamAnthropicResponse(
       }
     }
 
-    // Process tool calls if any
-    // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
+    // Return LLMResponse based on whether we have tool calls or text
     if (toolUses.length > 0) {
-      // Normalize toolUses to function call format for filtering
-      const functionCalls = toolUses.map(toolUse => ({
-        id: toolUse.id,
-        type: 'function' as const,
-        function: {
-          name: toolUse.name,
-          arguments: JSON.stringify(toolUse.input),
+      // Normalize toolUses to function call format
+      const toolCalls = toolUses
+        .filter(tu => tu.name && tu.name.trim() !== '')
+        .map(toolUse => ({
+          id: toolUse.id,
+          type: 'function' as const,
+          function: {
+            name: toolUse.name,
+            arguments: JSON.stringify(toolUse.input),
+          },
+        }));
+
+      const invalidCount = toolUses.length - toolCalls.length;
+      if (invalidCount > 0) {
+        logger.warn(`Anthropic Direct: Filtered ${invalidCount} invalid tool calls (streaming)`, {
+          agentId: agent.id,
+          totalToolUses: toolUses.length
+        });
+      }
+
+      logger.debug(`Anthropic Direct: Completed streaming request with tool calls for agent=${agent.id}`, {
+        toolCount: toolCalls.length,
+        toolNames: toolCalls.map(tc => tc.function.name)
+      });
+
+      return {
+        type: 'tool_calls',
+        content: fullResponse,
+        tool_calls: toolCalls,
+        assistantMessage: {
+          role: 'assistant',
+          content: fullResponse || '',
+          tool_calls: toolCalls,
         },
-      }));
-
-      // Filter and handle function calls with empty or missing names
-      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
-        functionCalls,
-        world,
-        agent,
-        messageId
-      );
-
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (Anthropic streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
-        toolCount: validCalls.length,
-        toolNames: validCalls.map(fc => fc.function!.name!)
-      });
-
-      // Add assistant message with tool uses (include all calls, even invalid ones)
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: fullResponse || '',
-        tool_calls: functionCalls,
+        usage: undefined, // Anthropic streaming doesn't provide usage in final chunk
       };
-
-      // Execute tool calls and get results
-      const toolResults: ChatMessage[] = [...emptyNameToolResults];
-
-      for (let i = 0; i < validCalls.length; i++) {
-        const toolCall = validCalls[i];
-        const toolUse = { id: toolCall.id!, name: toolCall.function!.name!, input: JSON.parse(toolCall.function!.arguments || '{}') };
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[toolUse.name];
-          if (tool && tool.execute) {
-            mcpLogger.debug(`MCP tool execution starting (Anthropic streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolUse.name,
-              toolUseId: toolUse.id,
-              agentId: agent.id,
-              messageId,
-              argsPresent: !!toolUse.input
-            });
-
-            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-streaming-${messageId}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (Anthropic streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolUse.name,
-                agentId: agent.id,
-                messageId
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              const originalToolCalls = toolUses.map(tu => ({
-                id: tu.id,
-                type: 'function' as const,
-                function: {
-                  name: tu.name,
-                  arguments: JSON.stringify(tu.input)
-                }
-              }));
-
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: fullResponse,
-                  tool_calls: originalToolCalls as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (Anthropic streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolUse.name,
-              toolUseId: toolUse.id,
-              agentId: agent.id,
-              messageId,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolUse.id,
-            });
-          }
-        } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          // Let ApprovalRequiredException bubble up to llm-manager
-          throw error;
-
-          mcpLogger.error(`MCP tool execution failed (Anthropic streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: toolUse.name,
-            toolUseId: toolUse.id,
-            agentId: agent.id,
-            messageId,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage
-          });
-
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${errorMessage}`,
-            tool_call_id: toolUse.id,
-          });
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (Anthropic streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
-        toolCount: toolUses.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
-      });
-
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-
-        // Use streaming for the follow-up response to ensure it gets displayed
-        const followUpResponse = await streamAnthropicResponse(
-          client,
-          model,
-          followUpMessages,
-          agent,
-          {}, // Do not include tools for follow-up to prevent infinite recursion
-          world,
-          onChunk,
-          messageId
-        );
-        return followUpResponse;
-      }
     }
 
     logger.debug(`Anthropic Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
-    return fullResponse;
+    return {
+      type: 'text',
+      content: fullResponse,
+      assistantMessage: {
+        role: 'assistant',
+        content: fullResponse,
+      },
+      usage: undefined, // Anthropic streaming doesn't provide usage in final chunk
+    };
 
   } catch (error) {
     logger.error(`Anthropic Direct: Streaming error for agent=${agent.id}:`, error);
@@ -356,7 +227,8 @@ export async function streamAnthropicResponse(
 }
 
 /**
- * Non-streaming Anthropic response handler
+ * Non-streaming Anthropic response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function generateAnthropicResponse(
   client: Anthropic,
@@ -365,7 +237,7 @@ export async function generateAnthropicResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
   const systemPrompt = extractSystemPrompt(messages);
@@ -400,171 +272,62 @@ export async function generateAnthropicResponse(
       }
     });
 
-    // Handle tool calls if any
+    // Return LLMResponse based on whether we have tool calls or text
     if (toolUses.length > 0) {
-      // Normalize toolUses to function call format for filtering
-      const functionCalls = toolUses.map(toolUse => ({
-        id: toolUse.id,
-        type: 'function' as const,
-        function: {
-          name: toolUse.name,
-          arguments: JSON.stringify(toolUse.input),
-        },
-      }));
+      // Normalize toolUses to function call format
+      const toolCalls = toolUses
+        .filter(tu => tu.name && tu.name.trim() !== '')
+        .map(toolUse => ({
+          id: toolUse.id,
+          type: 'function' as const,
+          function: {
+            name: toolUse.name,
+            arguments: JSON.stringify(toolUse.input),
+          },
+        }));
 
-      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
-      const validFunctionCalls = functionCalls.filter(fc => fc.function?.name && fc.function.name.trim() !== '');
-      const invalidFunctionCalls = functionCalls.filter(fc => !fc.function?.name || fc.function.name.trim() === '');
-
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (Anthropic non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: validFunctionCalls.length,
-        invalidToolCount: invalidFunctionCalls.length,
-        toolNames: validFunctionCalls.map(fc => fc.function.name)
-      });
-
-      // Execute tool calls
-      const toolResults: ChatMessage[] = [];
-
-      // Add tool results for invalid calls (empty or missing names)
-      for (const invalidCall of invalidFunctionCalls) {
-        const toolCallId = invalidCall.id || generateFallbackId();
-        toolResults.push({
-          role: 'tool',
-          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
-          tool_call_id: toolCallId,
+      const invalidCount = toolUses.length - toolCalls.length;
+      if (invalidCount > 0) {
+        logger.warn(`Anthropic Direct: Filtered ${invalidCount} invalid tool calls (non-streaming)`, {
+          agentId: agent.id,
+          totalToolUses: toolUses.length
         });
       }
 
-      for (let i = 0; i < validFunctionCalls.length; i++) {
-        const toolCall = validFunctionCalls[i];
-        const toolUse = { id: toolCall.id, name: toolCall.function.name, input: JSON.parse(toolCall.function.arguments || '{}') };
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[toolUse.name];
-          if (tool && tool.execute) {
-            mcpLogger.debug(`MCP tool execution starting (Anthropic non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolUse.name,
-              toolUseId: toolUse.id,
-              agentId: agent.id,
-              argsPresent: !!toolUse.input
-            });
-
-            const result = await tool.execute(toolUse.input, sequenceId, `anthropic-non-streaming-${agent.id}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (Anthropic non-streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolUse.name,
-                agentId: agent.id
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              const originalToolCalls = toolUses.map(tu => ({
-                id: tu.id,
-                type: 'function' as const,
-                function: {
-                  name: tu.name,
-                  arguments: JSON.stringify(tu.input)
-                }
-              }));
-
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: content,
-                  tool_calls: originalToolCalls as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (Anthropic non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolUse.name,
-              toolUseId: toolUse.id,
-              agentId: agent.id,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolUse.id,
-            });
-          }
-        } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          // Let ApprovalRequiredException bubble up to llm-manager
-          throw error;
-
-          mcpLogger.error(`MCP tool execution failed (Anthropic non-streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: toolUse.name,
-            toolUseId: toolUse.id,
-            agentId: agent.id,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage
-          });
-
-          toolResults.push({
-            role: 'tool',
-            content: `Error: ${errorMessage}`,
-            tool_call_id: toolUse.id,
-          });
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (Anthropic non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: validFunctionCalls.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      logger.debug(`Anthropic Direct: Completed non-streaming request with tool calls for agent=${agent.id}`, {
+        toolCount: toolCalls.length,
+        toolNames: toolCalls.map(tc => tc.function.name)
       });
 
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const assistantMessage: ChatMessage = {
+      return {
+        type: 'tool_calls',
+        content: content,
+        tool_calls: toolCalls,
+        assistantMessage: {
           role: 'assistant',
           content: content,
-          tool_calls: functionCalls,
-        };
-
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateAnthropicResponse(client, model, followUpMessages, agent, mcpTools, world);
-        return followUpResponse;
-      }
+          tool_calls: toolCalls,
+        },
+        usage: response.usage ? {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+        } : undefined,
+      };
     }
 
     logger.debug(`Anthropic Direct: Completed non-streaming request for agent=${agent.id}, responseLength=${content.length}`);
-    return content;
+    return {
+      type: 'text',
+      content: content,
+      assistantMessage: {
+        role: 'assistant',
+        content: content,
+      },
+      usage: response.usage ? {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      } : undefined,
+    };
 
   } catch (error) {
     logger.error(`Anthropic Direct: Generation error for agent=${agent.id}:`, error);

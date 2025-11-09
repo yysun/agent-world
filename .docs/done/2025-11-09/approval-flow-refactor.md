@@ -459,11 +459,49 @@ publishToolResult(world, agentId, data);
 
 ## Next Steps (Remaining Phases)
 
-### Phase 6: Web UI/Server Integration
-- Update `server/api.ts` POST /worlds/:worldName/messages
-- Update web UI approval handling in `web/src/`
-- Use publishToolResult() instead of manual JSON
-- Test end-to-end web approval flow
+### Phase 6: Web UI/Server Integration ✅
+
+**Completed:** 2025-11-09
+
+**Changes Made:**
+
+1. **New API Endpoint:** `POST /worlds/:worldName/tool-results`
+   - Location: `server/api.ts` (line ~1002)
+   - Accepts structured `ToolResultData` with `agentId`
+   - Validation via Zod schema (`ToolResultSchema`)
+   - Calls `publishToolResult()` internally
+   - Returns success/error response
+
+2. **Web Client Helper:** `submitToolResult()`
+   - Location: `web/src/utils/sse-client.ts` (line ~370)
+   - Type-safe function for submitting tool results
+   - Simplifies API calls from UI components
+
+3. **Updated Approval Handler:** `submitApprovalDecision()`
+   - Location: `web/src/pages/World.update.ts` (line ~540)
+   - Replaced manual JSON string construction
+   - Now uses `submitToolResult()` API call
+   - Cleaner, more maintainable code (~15 lines removed)
+
+**Benefits:**
+- ✅ Type-safe approval submissions
+- ✅ No manual JSON encoding in UI
+- ✅ Consistent with CLI structured API
+- ✅ Better error handling
+- ✅ Simpler code maintenance
+
+**API Example:**
+```typescript
+POST /worlds/my-world/tool-results
+{
+  "tool_call_id": "call_abc123",
+  "agentId": "a1",
+  "decision": "approve",
+  "scope": "session",
+  "toolName": "shell_cmd",
+  "toolArgs": { "command": "ls" }
+}
+```
 
 ### Phase 7: Documentation
 - Add JSDoc comments to new functions

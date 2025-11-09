@@ -1,8 +1,8 @@
 /**
- * LLM Manager Module - Browser-Safe LLM Integration with Configuration Injection and MCP Tools
+ * LLM Manager Module - Pure Orchestration Layer (LLM Provider Refactoring Phase 5)
  *
  * Features:
- * - Browser-safe LLM integration using direct OpenAI package and AI SDK for other providers
+ * - Browser-safe LLM integration using direct provider SDKs (OpenAI, Anthropic, Google)
  * - Streaming responses with SSE events via World.eventEmitter specifically
  * - Support for all major LLM providers (OpenAI, Anthropic, Google, Azure, XAI, OpenAI-Compatible, Ollama)
  * - Agent activity tracking and token usage monitoring with automatic state persistence
@@ -12,7 +12,7 @@
  * - Global LLM call queue to ensure serialized execution (one LLM call at a time)
  * - Configuration injection from external sources (CLI/server) for browser compatibility
  * - Automatic MCP tool integration for worlds with mcpConfig
- * - Direct OpenAI package integration for OpenAI providers (including Ollama OpenAI-compatible endpoint)
+ * - All providers return LLMResponse with unified structure
  * - Granular function-based logging for detailed debugging control
  *
  * Core Functions:
@@ -94,32 +94,20 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2025-11-09: Phase 5 - Updated to expect LLMResponse from all providers
+ * - Removed old approval_flow return type handling
+ * - All providers now return unified LLMResponse interface with type discriminator
+ * - Updated logging to handle LLMResponse structure (type, content, tool_calls)
+ * - Providers are now pure clients - no tool execution, only API calls
+ * - NO type checking for string vs object - always LLMResponse
+ * - Tool orchestration will be handled by events.ts (Phase 6)
  * - Added shell_cmd tool guidance: LLM asks user for directory when not provided
  * - Increased LLM queue timeout from 2 minutes to 15 minutes for long-running tool executions
- * - Added configurable timeout via setProcessingTimeout() and getProcessingTimeout() methods
- * - Added warning logs at 50% timeout threshold to help debug long-running operations
- * - Removed all process.env dependencies for browser compatibility
- * - Added configuration injection using llm-config module
- * - Updated loadLLMProvider to use injected configuration instead of environment variables
- * - Enhanced error handling for missing provider configuration
- * - Maintained all existing functionality while making module browser-safe
- * - Updated comment block to reflect browser-safe implementation
- * - Integrated MCP tools: Automatically includes available MCP tools from world's mcpConfig
- * - Enhanced both streaming and non-streaming LLM calls with MCP tool support
- * - Added debug logging for MCP tool inclusion and usage tracking
- * - Updated to ollama-ai-provider-v2 for AI SDK v5 compatibility and specification v2 support
- * - Replaced AI SDK providers with direct OpenAI package for OpenAI, Azure, XAI, and OpenAI-Compatible
- * - Added direct OpenAI integration to bypass AI SDK v5.0.15 schema corruption bug
+ * - Replaced AI SDK with direct OpenAI, Anthropic, and Google integrations
  * - Implemented granular function-based logging for detailed debugging control
- * - Consolidated all MCP-related logging under LOG_LLM_MCP category for unified debugging
- * - Added comprehensive MCP tool execution tracking with performance metrics
- * - Implemented tool call sequence tracking and dependency relationships
- * - Enhanced MCP logging with result content analysis and execution status
- * - Replaced AI SDK with direct Anthropic and Google integrations for improved tool calling support
- * - Fixed broken tool calling for Anthropic and Google providers by using official SDKs
  */
 
-import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage } from './types.js';
+import { World, Agent, AgentMessage, LLMProvider, WorldSSEEvent, ChatMessage, LLMResponse } from './types.js';
 import { getMCPToolsForWorld } from './mcp-server-registry.js';
 import { filterClientSideMessages } from './message-prep.js';
 import {
@@ -362,7 +350,7 @@ export async function streamAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
-): Promise<{ response: string | { type: string; originalMessage: any; approvalMessage: any }; messageId: string }> {
+): Promise<{ response: LLMResponse; messageId: string }> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
     return await executeStreamAgentResponse(world, agent, messages, publishSSE);
@@ -377,7 +365,7 @@ async function executeStreamAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
-): Promise<{ response: string | { type: string; originalMessage: any; approvalMessage: any }; messageId: string }> {
+): Promise<{ response: LLMResponse; messageId: string }> {
   const messageId = generateId();
 
   try {
@@ -502,7 +490,7 @@ export async function generateAgentResponse(
   messages: AgentMessage[],
   _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
   skipTools?: boolean
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   // Queue the LLM call to ensure serialized execution
   return llmQueue.add(agent.id, world.id, async () => {
     return await executeGenerateAgentResponse(world, agent, messages, skipTools);
@@ -517,7 +505,7 @@ async function executeGenerateAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   skipTools?: boolean
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   // Convert messages for LLM (strip custom fields)
   // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
   let preparedMessages = stripCustomFieldsFromMessages(messages);
@@ -568,9 +556,10 @@ async function executeGenerateAgentResponse(
       agent.lastLLMCall = new Date();
 
       loggerGeneration.debug(`LLM: Finished non-streaming OpenAI response for agent=${agent.id}, world=${world.id}`, {
-        responseType: typeof response,
-        responseLength: typeof response === 'string' ? response.length : 0,
-        responsePreview: typeof response === 'string' ? response.substring(0, 200) : JSON.stringify(response).substring(0, 200)
+        responseType: response.type,
+        contentLength: response.content?.length || 0,
+        hasToolCalls: response.type === 'tool_calls',
+        toolCallCount: response.tool_calls?.length || 0
       });
       return response;
     }
@@ -586,9 +575,10 @@ async function executeGenerateAgentResponse(
       agent.lastLLMCall = new Date();
 
       loggerGeneration.debug(`LLM: Finished non-streaming Anthropic response for agent=${agent.id}, world=${world.id}`, {
-        responseType: typeof response,
-        responseLength: typeof response === 'string' ? response.length : 0,
-        responsePreview: typeof response === 'string' ? response.substring(0, 200) : JSON.stringify(response).substring(0, 200)
+        responseType: response.type,
+        contentLength: response.content?.length || 0,
+        hasToolCalls: response.type === 'tool_calls',
+        toolCallCount: response.tool_calls?.length || 0
       });
       return response;
     }
@@ -604,9 +594,10 @@ async function executeGenerateAgentResponse(
       agent.lastLLMCall = new Date();
 
       loggerGeneration.debug(`LLM: Finished non-streaming Google response for agent=${agent.id}, world=${world.id}`, {
-        responseType: typeof response,
-        responseLength: typeof response === 'string' ? response.length : 0,
-        responsePreview: typeof response === 'string' ? response.substring(0, 200) : JSON.stringify(response).substring(0, 200)
+        responseType: response.type,
+        contentLength: response.content?.length || 0,
+        hasToolCalls: response.type === 'tool_calls',
+        toolCallCount: response.tool_calls?.length || 0
       });
       return response;
     }

@@ -1237,89 +1237,66 @@ async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?: strin
     let response: string | { type: string; originalMessage: any; approvalMessage: any };
     let messageId: string;
 
+    let llmResponse: import('./types.js').LLMResponse;
+
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
       const result = await streamAgentResponse(world, agent, messages as any, publishSSE);
-      response = result.response;
+      llmResponse = result.response;
       messageId = result.messageId;
-
-      loggerAgent.debug('LLM streaming response received after approval', {
-        agentId: agent.id,
-        hasResponse: !!response,
-        responseLength: typeof response === 'string' ? response.length : 0,
-        responseType: typeof response,
-        responsePreview: typeof response === 'string' ? response.substring(0, 200) : JSON.stringify(response).substring(0, 200),
-        lastMemoryMessage: agent.memory[agent.memory.length - 1]
-      });
     } else {
       const { generateAgentResponse } = await import('./llm-manager.js');
-      response = await generateAgentResponse(world, agent, messages as any);
+      llmResponse = await generateAgentResponse(world, agent, messages as any);
       messageId = generateId();
     }
 
     loggerAgent.debug('LLM response received after approval', {
       agentId: agent.id,
-      hasResponse: !!response,
-      responseType: typeof response,
-      responseLength: typeof response === 'string' ? response.length : 0,
-      responsePreview: typeof response === 'string' ? response.substring(0, 100) : JSON.stringify(response).substring(0, 100)
+      responseType: llmResponse.type,
+      hasContent: !!llmResponse.content,
+      toolCallCount: llmResponse.tool_calls?.length || 0
     });
 
-    if (!response) {
-      loggerAgent.debug('LLM response is empty after approval', { agentId: agent.id });
-      return;
-    }
-
-    // Check if response is an object (another approval request) instead of a string
-    if (typeof response !== 'string') {
-      loggerAgent.debug('Response is not a string after approval - likely another approval request', {
+    if (llmResponse.type !== 'text' || !llmResponse.content) {
+      loggerAgent.debug('LLM response after approval is not text or empty', {
         agentId: agent.id,
-        responseType: typeof response
+        responseType: llmResponse.type
       });
-      // This shouldn't happen in normal flow, but handle it gracefully
       return;
     }
 
-    // Save response to memory
-    const assistantMessage: AgentMessage = {
+    const responseText = llmResponse.content;
+
+    // Save response to agent memory
+    agent.memory.push({
       role: 'assistant',
-      content: response,
-      createdAt: new Date(),
-      chatId: world.currentChatId || null,
-      messageId: messageId,
-      sender: agent.id,
-      agentId: agent.id
-    };
-
-    agent.memory.push(assistantMessage);
-
-    loggerAgent.debug('Publishing LLM response as message event', {
-      agentId: agent.id,
-      messageId,
-      chatId: world.currentChatId
-    });
-
-    // Publish response
-    if (response && typeof response === 'string') {
-      publishMessageWithId(world, response, agent.id, messageId, world.currentChatId, undefined);
-    }
-
-    loggerAgent.debug('LLM response published', {
-      agentId: agent.id,
+      content: responseText,
       messageId
     });
 
-    // Save memory
     try {
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
-    } catch (error) {
-      loggerMemory.error('Failed to save memory after approval resume', {
+      loggerMemory.debug('Agent response saved to memory after approval', {
         agentId: agent.id,
-        error: error instanceof Error ? error.message : error
+        messageId,
+        memorySize: agent.memory.length
+      });
+    } catch (error) {
+      loggerMemory.error('Failed to save agent response after approval', {
+        agentId: agent.id,
+        error: error instanceof Error ? error.message : String(error)
       });
     }
 
+    // Publish the response message
+    publishMessage(world, responseText, agent.id, targetChatId, undefined);
+
+    loggerAgent.debug('Agent response published after approval', {
+      agentId: agent.id,
+      messageId,
+      responseLength: responseText.length
+    });
   } catch (error) {
     loggerAgent.error('Failed to resume LLM after approval', {
       agentId: agent.id,
@@ -1374,184 +1351,122 @@ export async function processAgentMessage(
       loggerAgent.error('Failed to auto-save agent after LLM call increment', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
 
-    // Generate LLM response (streaming or non-streaming)
-    let response: string | { type: string; originalMessage: any; approvalMessage: any };
+    // Generate LLM response (streaming or non-streaming) - now returns LLMResponse
+    let llmResponse: import('./types.js').LLMResponse;
     let messageId: string;
 
     if (globalStreamingEnabled) {
       const { streamAgentResponse } = await import('./llm-manager.js');
       const result = await streamAgentResponse(world, agent, filteredMessages, publishSSE);
-      response = result.response;
+      llmResponse = result.response;
       messageId = result.messageId; // Use the same messageId from streaming
     } else {
       const { generateAgentResponse } = await import('./llm-manager.js');
-      response = await generateAgentResponse(world, agent, filteredMessages);
+      llmResponse = await generateAgentResponse(world, agent, filteredMessages);
       messageId = generateId(); // Generate new ID for non-streaming
     }
 
-    if (!response) {
-      // Empty response could mean approval request was sent or actual error
-      // For approval requests, this is normal behavior - just return silently
-      loggerAgent.debug('LLM response is empty - could be approval request or error', { agentId: agent.id });
+    loggerAgent.debug('LLM response received', {
+      agentId: agent.id,
+      responseType: llmResponse.type,
+      hasContent: !!llmResponse.content,
+      hasToolCalls: llmResponse.type === 'tool_calls',
+      toolCallCount: llmResponse.tool_calls?.length || 0
+    });
+
+    // Handle text responses
+    if (llmResponse.type === 'text') {
+      const responseText = llmResponse.content || '';
+      if (!responseText) {
+        loggerAgent.debug('LLM text response is empty', { agentId: agent.id });
+        return;
+      }
+
+      // Process text response (existing logic below)
+      await handleTextResponse(world, agent, responseText, messageId, messageEvent);
       return;
     }
 
-    // Check if response is an object (approval flow) instead of a string
-    if (typeof response !== 'string') {
-      loggerAgent.debug('Response is not a string - likely approval flow', {
+    // Handle tool calls - Phase 6 will implement full orchestration
+    if (llmResponse.type === 'tool_calls') {
+      loggerAgent.debug('LLM returned tool calls - tool orchestration not yet implemented', {
         agentId: agent.id,
-        responseType: typeof response
+        toolCallCount: llmResponse.tool_calls?.length || 0,
+        toolNames: llmResponse.tool_calls?.map(tc => tc.function.name)
       });
 
-      // Handle approval flow: save BOTH original and approval messages
-      if (response && typeof response === 'object' && (response as any).type === 'approval_flow') {
-        const approvalFlow = response as any;
-
-        // 1. Save the ORIGINAL LLM response with the original tool call (e.g., shell_cmd)
-        const originalMessageId = generateId();
-        const originalMessage: AgentMessage = {
-          role: 'assistant',
-          content: approvalFlow.originalMessage.content || '',
-          tool_calls: approvalFlow.originalMessage.tool_calls,
-          createdAt: new Date(),
-          chatId: world.currentChatId || null,
-          messageId: originalMessageId,
-          replyToMessageId: messageEvent.messageId,
-          sender: agent.id,
-          agentId: agent.id
-        };
-        agent.memory.push(originalMessage);
-
-        // Emit the original message event
-        world.eventEmitter.emit('message', {
-          sender: agent.id,
-          agentName: agent.id,
-          content: originalMessage.content,
-          timestamp: new Date(),
-          messageId: originalMessageId,
-          chatId: world.currentChatId,
-          role: originalMessage.role,
-          tool_calls: originalMessage.tool_calls
-        });
-
-        loggerMemory.debug('Saved original LLM response before approval', {
-          agentId: agent.id,
-          originalMessageId,
-          toolCalls: originalMessage.tool_calls?.map((tc: any) => tc.function?.name)
-        });
-
-        // 2. Save the APPROVAL request message with client.requestApproval
-        const approvalMsg = approvalFlow.approvalMessage;
-        const approvalMessageId = generateId();
-        const approvalMessage: AgentMessage = {
-          role: 'assistant',
-          content: approvalMsg.content || '',
-          tool_calls: approvalMsg.tool_calls,
-          createdAt: new Date(),
-          chatId: world.currentChatId || null,
-          messageId: approvalMessageId,
-          replyToMessageId: originalMessageId, // Link to original message
-          sender: agent.id,
-          agentId: agent.id,
-          toolCallStatus: approvalMsg.toolCallStatus
-        };
-        // Don't save approval message directly here - emit event instead
-        // The message event handler will save it to avoid duplication logic
-        world.eventEmitter.emit('message', {
-          sender: agent.id,
-          agentName: agent.id,
-          content: approvalMessage.content,
-          timestamp: approvalMessage.createdAt,
-          messageId: approvalMessageId,
-          chatId: world.currentChatId,
-          role: approvalMessage.role,
-          tool_calls: approvalMessage.tool_calls,
-          toolCallStatus: approvalMessage.toolCallStatus,
-          replyToMessageId: approvalMessage.replyToMessageId
-        });
-
-        loggerMemory.debug('Emitted approval request message event', {
-          agentId: agent.id,
-          approvalMessageId,
-          toolCalls: approvalMessage.tool_calls?.map((tc: any) => tc.function?.name)
-        });
-      }
-
+      // TODO Phase 6: Implement tool orchestration with iterative loop
+      // For now, log and return to avoid breaking existing approval flow
       return;
     }
-
-    // Process auto-mention logic: remove self-mentions, then add auto-mention if needed
-    let finalResponse = removeSelfMentions(response, agent.id);
-    if (shouldAutoMention(finalResponse, messageEvent.sender, agent.id)) {
-      finalResponse = addAutoMention(finalResponse, messageEvent.sender);
-    }
-
-    if (!messageEvent.messageId) {
-      loggerMemory.error('messageEvent.messageId required for threading', {
-        agentId: agent.id,
-        sender: messageEvent.sender
-      });
-    }
-
-    // Save final response to memory with pre-generated ID and parent link
-    const assistantMessage: AgentMessage = {
-      role: 'assistant',
-      content: finalResponse,
-      createdAt: new Date(),
-      chatId: world.currentChatId || null,
-      messageId: messageId,
-      replyToMessageId: messageEvent.messageId, // Link to message we're replying to
-      sender: agent.id, // Add sender field for consistency
-      agentId: agent.id
-    };
-
-    // Validate threading before saving
-    try {
-      const { validateMessageThreading } = await import('./types.js');
-      const validationContext = [...agent.memory, assistantMessage];
-      validateMessageThreading(assistantMessage, validationContext);
-    } catch (error) {
-      loggerMemory.error('Threading validation failed', {
-        agentId: agent.id,
-        messageId: assistantMessage.messageId,
-        error: error instanceof Error ? error.message : error
-      });
-
-      // Clear threading for critical errors (self-reference, circular, depth exceeded)
-      if (error instanceof Error &&
-        (error.message.includes('cannot reply to itself') ||
-          error.message.includes('Circular reference detected') ||
-          error.message.includes('Thread depth exceeds maximum'))) {
-        loggerMemory.warn('Clearing threading due to critical error', {
-          agentId: agent.id,
-          error: error.message
-        });
-        assistantMessage.replyToMessageId = undefined;
-      }
-    }
-
-    agent.memory.push(assistantMessage);
-
-    // Publish final response with pre-generated messageId and threading info
-    if (finalResponse && typeof finalResponse === 'string') {
-      publishMessageWithId(world, finalResponse, agent.id, messageId, world.currentChatId, messageEvent.messageId);
-    }
-
-    // Auto-save memory after adding response (now with correct messageId)
-    try {
-      const storage = await getStorageWrappers();
-      await storage.saveAgent(world.id, agent);
-    } catch (error) {
-      loggerMemory.error('Failed to auto-save memory after response', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-    }
-
   } catch (error) {
-    loggerAgent.error('Agent failed to process message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
-    publishEvent(world, 'system', { message: `[Error] ${(error as Error).message}`, type: 'error' });
-  }
-  finally {
+    loggerAgent.error('Error processing agent message', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    throw error;
+  } finally {
     completeActivity();
   }
+}
+
+/**
+ * Handle text response from LLM (extracted for clarity)
+ */
+async function handleTextResponse(
+  world: World,
+  agent: Agent,
+  responseText: string,
+  messageId: string,
+  messageEvent: WorldMessageEvent
+): Promise<void> {
+  // Apply auto-mention logic if needed
+  let finalResponse = responseText;
+  if (shouldAutoMention(responseText, messageEvent.sender, agent.id)) {
+    finalResponse = addAutoMention(responseText, messageEvent.sender);
+    loggerAutoMention.debug('Auto-mention applied', {
+      agentId: agent.id,
+      originalSender: messageEvent.sender,
+      responsePreview: finalResponse.substring(0, 100)
+    });
+  } else {
+    loggerAutoMention.debug('Auto-mention not needed', {
+      agentId: agent.id,
+      hasAnyMention: hasAnyMentionAtBeginning(responseText)
+    });
+  }
+
+  // Save response to agent memory
+  agent.memory.push({
+    role: 'assistant',
+    content: finalResponse,
+    messageId
+  });
+
+  try {
+    const storage = await getStorageWrappers();
+    await storage.saveAgent(world.id, agent);
+    loggerMemory.debug('Agent response saved to memory', {
+      agentId: agent.id,
+      messageId,
+      memorySize: agent.memory.length
+    });
+  } catch (error) {
+    loggerMemory.error('Failed to save agent response', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  // Publish the response message
+  publishMessage(world, finalResponse, agent.id, messageEvent.chatId, messageEvent.messageId);
+
+  loggerAgent.debug('Agent response published', {
+    agentId: agent.id,
+    messageId,
+    responseLength: finalResponse.length
+  });
 }
 
 /**

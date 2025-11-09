@@ -40,6 +40,7 @@ import {
   listWorlds,
   createCategoryLogger,
   publishMessage,
+  publishToolResult,
   enableStreaming,
   disableStreaming,
   // core managers (function-based)
@@ -62,6 +63,7 @@ import {
   type World,
   type Agent,
   type Chat,
+  type ToolResultData,
   type WorldActivityEventPayload,
   LLMProvider,
   EventType
@@ -288,6 +290,16 @@ const AgentUpdateSchema = z.object({
   temperature: z.number().min(0).max(1).optional(),
   maxTokens: z.number().min(1).optional(),
   clearMemory: z.boolean().optional()
+});
+
+const ToolResultSchema = z.object({
+  tool_call_id: z.string().min(1),
+  decision: z.enum(['approve', 'deny']),
+  scope: z.enum(['once', 'session']).optional(),
+  toolName: z.string().min(1),
+  toolArgs: z.record(z.unknown()).optional(),
+  workingDirectory: z.string().optional(),
+  agentId: z.string().min(1)
 });
 
 const router = express.Router();
@@ -970,6 +982,60 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
     loggerChat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to process chat request', 'CHAT_ERROR');
+    }
+  }
+});
+
+/**
+ * POST /worlds/:worldName/tool-results
+ * 
+ * Structured API endpoint for submitting tool approval decisions.
+ * Accepts ToolResultData and calls publishToolResult() to construct proper tool messages.
+ * 
+ * Benefits over manual JSON encoding:
+ * - Type-safe validation
+ * - Automatic message construction
+ * - Proper LLM conversation format
+ * - Security: Verifies tool_call_id ownership
+ */
+router.post('/worlds/:worldName/tool-results', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = ToolResultSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const world = (req as any).world as World;
+    const { agentId, ...toolResultData } = validation.data;
+
+    // Validate agentId exists in world
+    const agent = world.agents.get(agentId);
+    if (!agent) {
+      sendError(res, 404, 'Agent not found', 'AGENT_NOT_FOUND');
+      return;
+    }
+
+    // Publish tool result using structured API
+    publishToolResult(world, agentId, toolResultData as ToolResultData);
+
+    res.json({
+      success: true,
+      message: 'Tool result submitted successfully',
+      data: {
+        tool_call_id: toolResultData.tool_call_id,
+        agentId,
+        decision: toolResultData.decision,
+        scope: toolResultData.scope
+      }
+    });
+  } catch (error) {
+    loggerChat.error('Error submitting tool result', {
+      error: error instanceof Error ? error.message : error,
+      worldName: req.params.worldName
+    });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to submit tool result', 'TOOL_RESULT_ERROR');
     }
   }
 });

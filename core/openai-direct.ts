@@ -1,14 +1,14 @@
 /**
- * OpenAI Direct Integration Module - Direct OpenAI Package Integration
+ * OpenAI Direct Integration Module - Pure Client (LLM Provider Refactoring Phase 2)
  *
  * Features:
  * - Direct OpenAI API integration bypassing AI SDK schema corruption bug
  * - Support for OpenAI, Azure OpenAI, and OpenAI-compatible providers
- * - Streaming and non-streaming responses (providers return data only)
- * - Function/tool calling support with MCP tool integration
+ * - Streaming and non-streaming responses returning LLMResponse
+ * - Function/tool calling detection (NO execution)
  * - Proper error handling and retry logic
  * - Browser-safe configuration injection
- * - Clean separation: providers return data, upper layer handles events/storage
+ * - Pure client: only calls APIs and returns structured data
  *
  * Provider Support:
  * - OpenAI: Direct integration with OpenAI API
@@ -20,32 +20,28 @@
  * Implementation Details:
  * - Uses official OpenAI package for reliable API access
  * - Converts AI SDK message format to OpenAI format
- * - Handles function calling with proper tool result processing
- * - Streaming support with chunk-by-chunk processing
+ * - Returns LLMResponse with type='text' or type='tool_calls'
+ * - Streaming support with chunk-by-chunk processing via onChunk callback
  * - Error handling with descriptive messages
  * - Configuration injection from llm-config module
- * - World-scoped event emission for proper isolation
+ * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2025-11-09: Phase 2 - Removed ALL tool execution logic (~200 lines)
+ * - Provider is now a pure client - only API calls and data transformation
+ * - Returns LLMResponse interface with type discriminator
+ * - Filters invalid tool calls (empty/missing names) and logs warnings
+ * - Includes usage tracking (prompt_tokens, completion_tokens) for non-streaming
  * - 2025-11-08: Removed ALL event emission from provider (publishToolEvent, publishSSE)
- * - Streaming uses onChunk callback instead of publishSSE - llm-manager emits SSE events
- * - Provider is now completely event-free and storage-free
- * - Returns structured approval_flow object with both original and approval messages
- * - Pure data transformation and LLM API calls only
- * - 2025-11-05: Added messages to tool execution context for approval checking
- * - Approval checking happens in wrapToolWithValidation (tool execution layer)
+ * - Streaming uses onChunk callback instead of publishSSE
  * - Initial implementation with full OpenAI package integration
- * - Added streaming and non-streaming response handlers
- * - Implemented function calling support with MCP tools
- * - Added validation and handling for tool calls with empty or missing names
  */
 
 import OpenAI from 'openai';
-import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, OpenAIConfig, AzureConfig, OpenAICompatibleConfig, XAIConfig, OllamaConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
-import { generateId } from './utils.js';
-import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
+import { generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('openai');
 const mcpLogger = createCategoryLogger('mcp.execution');
@@ -151,7 +147,8 @@ function convertMCPToolsToOpenAI(mcpTools: Record<string, any>): OpenAI.Chat.Com
 }
 
 /**
- * Streaming OpenAI response handler
+ * Streaming OpenAI response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function streamOpenAIResponse(
   client: OpenAI,
@@ -162,7 +159,7 @@ export async function streamOpenAIResponse(
   world: World,
   onChunk: (content: string) => void,
   messageId: string
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
 
@@ -214,181 +211,60 @@ export async function streamOpenAIResponse(
       }
     }
 
-    // Process function calls if any
-    // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
+    // Return LLMResponse based on whether we have tool calls or text
     if (functionCalls.length > 0) {
-      // Filter and handle function calls with empty or missing names
-      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
-        functionCalls,
-        world,
-        agent,
-        messageId
+      // Filter out invalid tool calls (empty or missing names)
+      const validCalls = functionCalls.filter(
+        fc => fc.function?.name && fc.function.name.trim() !== ''
+      );
+      const invalidCalls = functionCalls.filter(
+        fc => !fc.function?.name || fc.function.name.trim() === ''
       );
 
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
+      if (invalidCalls.length > 0) {
+        logger.warn(`OpenAI Direct: Filtered ${invalidCalls.length} invalid tool calls (streaming)`, {
+          agentId: agent.id,
+          invalidCallIds: invalidCalls.map(fc => fc.id || 'no-id')
+        });
+      }
+
+      logger.debug(`OpenAI Direct: Completed streaming request with tool calls for agent=${agent.id}`, {
         toolCount: validCalls.length,
-        toolNames: validCalls.map(fc => fc.function!.name)
+        toolNames: validCalls.map(fc => fc.function?.name)
       });
 
-      // Add assistant message with tool calls (include all calls, even invalid ones)
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: fullResponse || '',
-        tool_calls: functionCalls,
+      const toolCallsFormatted = validCalls.map(fc => ({
+        id: fc.id!,
+        type: 'function' as const,
+        function: {
+          name: fc.function!.name!,
+          arguments: fc.function!.arguments || '{}',
+        },
+      }));
+
+      return {
+        type: 'tool_calls',
+        content: fullResponse,
+        tool_calls: toolCallsFormatted,
+        assistantMessage: {
+          role: 'assistant',
+          content: fullResponse || '',
+          tool_calls: toolCallsFormatted,
+        },
+        usage: undefined, // OpenAI streaming doesn't provide usage in final chunk
       };
-
-      // Execute function calls and get results
-      const toolResults: ChatMessage[] = [...emptyNameToolResults];
-      for (let i = 0; i < validCalls.length; i++) {
-        const toolCall = validCalls[i];
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[toolCall.function!.name!];
-          if (tool && tool.execute) {
-
-            mcpLogger.debug(`MCP tool execution starting (streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function!.name!,
-              toolCallId: toolCall.id!,
-              agentId: agent.id,
-              messageId,
-              argsPresent: !!toolCall.function!.arguments
-            });
-
-            let args: any = {};
-            try {
-              args = toolCall.function!.arguments ? JSON.parse(toolCall.function!.arguments) : {};
-            } catch (err) {
-              const parseErr = err instanceof Error ? err.message : String(err);
-              mcpLogger.error(`MCP tool arguments parse error (streaming): ${parseErr}`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolCall.function!.name!,
-                toolCallId: toolCall.id!,
-                agentId: agent.id,
-                messageId
-              });
-
-              toolResults.push({
-                role: 'tool',
-                content: `Error: Tool arguments parse error: ${parseErr}`,
-                tool_call_id: toolCall.id!,
-              });
-              // Skip executing this tool due to parse error
-              continue;
-            }
-
-            const result = await tool.execute(args, sequenceId, `streaming-${messageId}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (OpenAI streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolCall.function!.name!,
-                agentId: agent.id,
-                messageId
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: fullResponse,
-                  tool_calls: functionCalls as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function!.name!,
-              toolCallId: toolCall.id!,
-              agentId: agent.id,
-              messageId,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolCall.id!,
-            });
-          }
-        } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          mcpLogger.error(`MCP tool execution failed (streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: toolCall.function!.name!,
-            toolCallId: toolCall.id!,
-            agentId: agent.id,
-            messageId,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          // Let all errors bubble up to higher level
-          throw error;
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
-        toolCount: functionCalls.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
-      });
-
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-
-        // Use streaming for the follow-up response to ensure it gets displayed
-        const followUpResponse = await streamOpenAIResponse(
-          client,
-          model,
-          followUpMessages,
-          agent,
-          {}, // Do not include tools for follow-up to prevent infinite recursion
-          world,
-          onChunk,
-          messageId
-        );
-        return followUpResponse;
-      }
     }
 
     logger.debug(`OpenAI Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
-    return fullResponse;
+    return {
+      type: 'text',
+      content: fullResponse,
+      assistantMessage: {
+        role: 'assistant',
+        content: fullResponse,
+      },
+      usage: undefined, // OpenAI streaming doesn't provide usage in final chunk
+    };
 
   } catch (error) {
     logger.error(`OpenAI Direct: Streaming error for agent=${agent.id}:`, error);
@@ -397,7 +273,8 @@ export async function streamOpenAIResponse(
 }
 
 /**
- * Non-streaming OpenAI response handler
+ * Non-streaming OpenAI response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function generateOpenAIResponse(
   client: OpenAI,
@@ -406,7 +283,7 @@ export async function generateOpenAIResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
 
@@ -434,172 +311,69 @@ export async function generateOpenAIResponse(
 
     let content = message.content || '';
 
-    // Handle function calls
+    // Return LLMResponse based on whether we have tool calls or text
     if (message.tool_calls && message.tool_calls.length > 0) {
-      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
-      const validToolCalls = message.tool_calls.filter(tc => tc.type === 'function' && tc.function?.name && tc.function.name.trim() !== '');
-      const invalidToolCalls = message.tool_calls.filter(tc => tc.type !== 'function' || !tc.function?.name || tc.function.name.trim() === '');
+      // Filter out invalid tool calls (empty or missing names)
+      const validToolCalls = message.tool_calls.filter(
+        tc => tc.type === 'function' && tc.function?.name && tc.function.name.trim() !== ''
+      );
+      const invalidToolCalls = message.tool_calls.filter(
+        tc => tc.type !== 'function' || !tc.function?.name || tc.function.name.trim() === ''
+      );
 
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: validToolCalls.length,
-        invalidToolCount: invalidToolCalls.length,
-        toolNames: validToolCalls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
-      });
-
-      // Execute function calls
-      const toolResults: ChatMessage[] = [];
-
-      // Add tool results for invalid calls (empty or missing names)
-      for (const invalidCall of invalidToolCalls) {
-        const toolCallId = invalidCall.id || generateFallbackId();
-        toolResults.push({
-          role: 'tool',
-          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
-          tool_call_id: toolCallId,
+      if (invalidToolCalls.length > 0) {
+        logger.warn(`OpenAI Direct: Filtered ${invalidToolCalls.length} invalid tool calls (non-streaming)`, {
+          agentId: agent.id,
+          invalidCallIds: invalidToolCalls.map(tc => tc.id || 'no-id')
         });
       }
 
-      for (let i = 0; i < validToolCalls.length; i++) {
-        const toolCall = validToolCalls[i];
-
-        // Skip non-function tool calls (should already be filtered, but keep for safety)
-        if (toolCall.type !== 'function') continue;
-
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[toolCall.function.name];
-          if (tool && tool.execute) {
-            mcpLogger.debug(`MCP tool execution starting (non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
-              agentId: agent.id,
-              argsPresent: !!toolCall.function.arguments
-            });
-
-            let args: any = {};
-            try {
-              args = toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {};
-            } catch (err) {
-              const parseErr = err instanceof Error ? err.message : String(err);
-              mcpLogger.error(`MCP tool arguments parse error (non-streaming): ${parseErr}`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolCall.function.name,
-                toolCallId: toolCall.id,
-                agentId: agent.id
-              });
-
-              toolResults.push({
-                role: 'tool',
-                content: `Error: Tool arguments parse error: ${parseErr}`,
-                tool_call_id: toolCall.id,
-              });
-              // Skip executing this tool due to parse error
-              continue;
-            }
-
-            const result = await tool.execute(args, sequenceId, `non-streaming-${agent.id}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (OpenAI non-streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: toolCall.function.name,
-                agentId: agent.id
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: content,
-                  tool_calls: message.tool_calls as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: toolCall.function.name,
-              toolCallId: toolCall.id,
-              agentId: agent.id,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: toolCall.id,
-            });
-          }
-        } catch (error) {
-          const duration = performance.now() - startTime;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          mcpLogger.error(`MCP tool execution failed (non-streaming): ${errorMessage}`, {
-            sequenceId,
-            toolIndex: i,
-            toolName: toolCall.function.name,
-            toolCallId: toolCall.id,
-            agentId: agent.id,
-            status: 'error',
-            duration: Math.round(duration * 100) / 100,
-            error: errorMessage,
-            errorStack: error instanceof Error ? error.stack : undefined
-          });
-
-          // Let ApprovalRequiredException bubble up to llm-manager
-          throw error;
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: message.tool_calls.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      logger.debug(`OpenAI Direct: Completed non-streaming request with tool calls for agent=${agent.id}`, {
+        toolCount: validToolCalls.length,
+        toolNames: validToolCalls.map(tc => tc.type === 'function' ? tc.function.name : 'unknown')
       });
 
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const assistantMessage: ChatMessage = {
+      const toolCallsFormatted = validToolCalls.map(tc => {
+        const funcCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall;
+        return {
+          id: tc.id,
+          type: 'function' as const,
+          function: {
+            name: funcCall.function.name,
+            arguments: funcCall.function.arguments || '{}',
+          },
+        };
+      });
+
+      return {
+        type: 'tool_calls',
+        content: content,
+        tool_calls: toolCallsFormatted,
+        assistantMessage: {
           role: 'assistant',
           content: content,
-          tool_calls: message.tool_calls.filter(tc => tc.type === 'function') as any,
-        };
-
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateOpenAIResponse(client, model, followUpMessages, agent, mcpTools, world);
-        return followUpResponse;
-      }
+          tool_calls: toolCallsFormatted,
+        },
+        usage: response.usage ? {
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+        } : undefined,
+      };
     }
 
     logger.debug(`OpenAI Direct: Completed non-streaming request for agent=${agent.id}, responseLength=${content.length}`);
-    return content;
+    return {
+      type: 'text',
+      content: content,
+      assistantMessage: {
+        role: 'assistant',
+        content: content,
+      },
+      usage: response.usage ? {
+        inputTokens: response.usage.prompt_tokens,
+        outputTokens: response.usage.completion_tokens,
+      } : undefined,
+    };
 
   } catch (error) {
     logger.error(`OpenAI Direct: Generation error for agent=${agent.id}:`, error);

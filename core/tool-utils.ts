@@ -268,6 +268,7 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
                 name: 'client.requestApproval',
                 arguments: JSON.stringify({
                   originalToolCall: {
+                    id: context?.toolCallId,
                     name: toolName,
                     args: args,
                     workingDirectory: context?.workingDirectory || process.cwd()

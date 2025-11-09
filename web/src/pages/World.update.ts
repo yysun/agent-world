@@ -98,6 +98,7 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import {
   sendChatMessage,
+  submitToolResult,
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
@@ -539,36 +540,19 @@ const submitApprovalDecision = async (
     needScroll: true
   };
 
-  // Create approval decision for enhanced string protocol
-  let approvalDecision: 'approve' | 'deny';
-  let approvalScope: 'session' | 'once' | undefined;
-
-  if (decision === 'approve') {
-    approvalDecision = 'approve';
-    approvalScope = scope === 'session' ? 'session' : 'once';
-  } else {
-    approvalDecision = 'deny';
-    approvalScope = undefined;
-  }
-
-  // Use enhanced string protocol with agentId inside JSON (cleaner than @mention)
-  const enhancedMessage = JSON.stringify({
-    __type: 'tool_result',
-    tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
-    agentId: request.agentId, // Include agentId in JSON structure
-    content: JSON.stringify({
-      decision: approvalDecision,
-      scope: approvalScope,
-      toolName: request.toolName
-    })
-  });
-
-  const messageContent = enhancedMessage;
+  // Use structured API for tool result submission
+  const approvalDecision: 'approve' | 'deny' = decision === 'approve' ? 'approve' : 'deny';
+  const approvalScope: 'session' | 'once' | undefined =
+    decision === 'approve' ? (scope === 'session' ? 'session' : 'once') : undefined;
 
   try {
-    // Send using enhanced string protocol
-    await sendChatMessage(state.worldName, messageContent, {
-      sender: 'HUMAN'
+    // Submit using structured API endpoint
+    await submitToolResult(state.worldName, request.agentId, {
+      tool_call_id: request.toolCallId || `approval_${request.toolName}_${Date.now()}`,
+      decision: approvalDecision,
+      scope: approvalScope,
+      toolName: request.toolName,
+      toolArgs: request.toolArgs
     });
 
     return {

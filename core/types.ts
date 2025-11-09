@@ -524,6 +524,62 @@ export interface ToolResultData {
   toolArgs?: object;
   workingDirectory?: string;
 }
+
+/**
+ * Unified LLM response structure
+ * All providers return this type (never raw strings or mixed objects)
+ * 
+ * @since Phase 1 of provider refactoring (2025-11-09)
+ */
+export interface LLMResponse {
+  /**
+   * Response type discriminator
+   */
+  type: 'text' | 'tool_calls';
+
+  /**
+   * Text content (for type='text' responses)
+   */
+  content?: string;
+
+  /**
+   * Tool calls requested by LLM (for type='tool_calls' responses)
+   */
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string; // JSON string
+    };
+  }>;
+
+  /**
+   * Original assistant message for memory storage
+   * CRITICAL: Must include full tool_calls array for approval flow
+   */
+  assistantMessage: {
+    role: 'assistant';
+    content: string;
+    tool_calls?: Array<{
+      id: string;
+      type: 'function';
+      function: {
+        name: string;
+        arguments: string;
+      };
+    }>;
+  };
+
+  /**
+   * Token usage metadata (optional)
+   */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+}
+
 // World EventEmitter Types
 
 /**

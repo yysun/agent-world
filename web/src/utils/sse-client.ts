@@ -365,8 +365,47 @@ export const handleMessageToolCalls = (message: any): void => {
 export { publishApprovalRequests };
 
 /**
- * Send chat message with SSE streaming response
- * @param worldName - Target world name
+ * Submit a tool approval decision using structured API
+ * 
+ * @param worldName - Name of the world
+ * @param agentId - ID of the agent that requested approval
+ * @param toolResultData - Structured tool result data
+ * @returns Promise that resolves when submission is complete
+ */
+export async function submitToolResult(
+  worldName: string,
+  agentId: string,
+  toolResultData: {
+    tool_call_id: string;
+    decision: 'approve' | 'deny';
+    scope?: 'once' | 'session' | 'unlimited';
+    toolName: string;
+    toolArgs?: Record<string, unknown>;
+    workingDirectory?: string;
+  }
+): Promise<void> {
+  if (!worldName || !agentId) {
+    throw new Error('World name and agent ID are required');
+  }
+
+  const requestPayload = {
+    ...toolResultData,
+    agentId
+  };
+
+  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/tool-results`, {
+    method: 'POST',
+    body: JSON.stringify(requestPayload),
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+}
+
+/**
+ * Send a chat message to a world via SSE streaming
+ * 
+ * @param worldName - Name of the world to send message to
  * @param message - Message content to send
  * @param sender - Message sender identifier (default: 'HUMAN')
  * @param onMessage - Optional callback for legacy compatibility

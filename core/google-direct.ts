@@ -1,43 +1,38 @@
 /**
- * Google Direct Integration Module - Direct Google Generative AI SDK Integration
+ * Google Direct Integration Module - Pure Client (LLM Provider Refactoring Phase 4)
  *
  * Features:
  * - Direct Google Generative AI API integration
- * - Streaming and non-streaming responses (providers return data only)
- * - Function/tool calling support with MCP tool integration
+ * - Streaming and non-streaming responses returning LLMResponse
+ * - Function/tool calling detection (NO execution)
  * - Proper error handling and retry logic
  * - Browser-safe configuration injection
- * - Clean separation: providers return data via callbacks, llm-manager handles events/storage
- * - Uses onChunk callback for streaming instead of direct event emission
+ * - Pure client: only calls APIs and returns structured data
  *
  * Implementation Details:
  * - Uses official @google/generative-ai package for reliable API access
  * - Converts AI SDK message format to Google Generative AI format
- * - Handles tool calling with proper tool result processing
- * - Streaming support with chunk-by-chunk processing
+ * - Returns LLMResponse with type='text' or type='tool_calls'
+ * - Streaming support with chunk-by-chunk processing via onChunk callback
  * - Error handling with descriptive messages
  * - Configuration injection from llm-config module
- * - World-scoped event emission for proper isolation
+ * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
- * - 2025-11-08: Removed ALL event emission from provider (publishToolEvent, publishSSE)
- * - Streaming uses onChunk callback instead of publishSSE - llm-manager emits SSE events
- * - Provider is now completely event-free and storage-free
- * - Returns structured approval_flow object with both original and approval messages
- * - Pure data transformation and LLM API calls only
- * - Initial implementation with full Google Generative AI SDK integration
- * - Added streaming and non-streaming response handlers
- * - Implemented tool calling support with MCP tools
- * - Added validation and handling for tool calls with empty or missing names
- * - Added validation and handling for tool calls with empty or missing names
+ * - 2025-11-09: Phase 4 - Removed ALL tool execution logic (~200 lines)
+ * - Provider is now a pure client - only API calls and data transformation
+ * - Returns LLMResponse interface with type discriminator
+ * - Filters invalid function calls (empty/missing names) and logs warnings
+ * - Note: Google API doesn't provide usage information in response
+ * - 2025-11-08: Removed ALL event emission from provider
+ * - Streaming uses onChunk callback instead of direct SSE emission
  */
 
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { World, Agent, ChatMessage, AgentMessage, WorldSSEEvent } from './types.js';
+import { World, Agent, ChatMessage, LLMResponse } from './types.js';
 import { getLLMProviderConfig, GoogleConfig } from './llm-config.js';
 import { createCategoryLogger } from './logger.js';
 import { generateId } from './utils.js';
-import { filterAndHandleEmptyNamedFunctionCalls, generateFallbackId } from './tool-utils.js';
 
 const logger = createCategoryLogger('llm.google');
 const mcpLogger = createCategoryLogger('mcp.execution');
@@ -134,7 +129,8 @@ function convertMCPToolsToGoogle(mcpTools: Record<string, any>): any[] {
 }
 
 /**
- * Streaming Google response handler
+ * Streaming Google response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function streamGoogleResponse(
   client: GoogleGenerativeAI,
@@ -145,7 +141,7 @@ export async function streamGoogleResponse(
   world: World,
   onChunk: (content: string) => void,
   messageId: string
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
 
@@ -191,143 +187,49 @@ export async function streamGoogleResponse(
       }
     }
 
-    // Process function calls if any
-    // NOTE: Do NOT emit 'end' event yet if there are tool calls - it will be emitted after tool execution
+    // Return LLMResponse based on whether we have function calls or text
     if (functionCalls.length > 0) {
-      // Filter and handle function calls with empty or missing names
-      const { validCalls, toolResults: emptyNameToolResults } = filterAndHandleEmptyNamedFunctionCalls(
-        functionCalls,
-        world,
-        agent,
-        messageId
+      // Filter out invalid function calls (empty or missing names)
+      const validCalls = functionCalls.filter(
+        fc => fc.function?.name && fc.function.name.trim() !== ''
       );
 
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (Google streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
+      const invalidCount = functionCalls.length - validCalls.length;
+      if (invalidCount > 0) {
+        logger.warn(`Google Direct: Filtered ${invalidCount} invalid function calls (streaming)`, {
+          agentId: agent.id,
+          totalCalls: functionCalls.length
+        });
+      }
+
+      logger.debug(`Google Direct: Completed streaming request with function calls for agent=${agent.id}`, {
         toolCount: validCalls.length,
-        toolNames: validCalls.map(fc => fc.function!.name!)
+        toolNames: validCalls.map(fc => fc.function?.name)
       });
 
-      // Add assistant message with function calls (include all calls, even invalid ones)
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: fullResponse || '',
-        tool_calls: functionCalls,
+      return {
+        type: 'tool_calls',
+        content: fullResponse,
+        tool_calls: validCalls,
+        assistantMessage: {
+          role: 'assistant',
+          content: fullResponse || '',
+          tool_calls: validCalls,
+        },
+        usage: undefined, // Google streaming doesn't provide usage in final chunk
       };
-
-      // Execute function calls and get results
-      const toolResults: ChatMessage[] = [...emptyNameToolResults];
-
-      for (let i = 0; i < validCalls.length; i++) {
-        const functionCall = validCalls[i];
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[functionCall.function!.name!];
-          if (tool && tool.execute) {
-            mcpLogger.debug(`MCP tool execution starting (Google streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: functionCall.function!.name!,
-              toolCallId: functionCall.id!,
-              agentId: agent.id,
-              messageId,
-              argsPresent: !!functionCall.function!.arguments
-            });
-
-            const args = JSON.parse(functionCall.function!.arguments || '{}');
-            const result = await tool.execute(args, sequenceId, `google-streaming-${messageId}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (Google streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: functionCall.name,
-                agentId: agent.id,
-                messageId
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: fullResponse,
-                  tool_calls: functionCalls as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (Google streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: functionCall.function!.name!,
-              toolCallId: functionCall.id!,
-              agentId: agent.id,
-              messageId,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: functionCall.id!,
-            });
-          }
-        } catch (error) {
-          // Let ApprovalRequiredException bubble up to llm-manager
-          throw error;
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (Google streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        messageId,
-        toolCount: functionCalls.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
-      });
-
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-
-        // Use streaming for the follow-up response to ensure it gets displayed
-        const followUpResponse = await streamGoogleResponse(
-          client,
-          model,
-          followUpMessages,
-          agent,
-          {}, // Do not include tools for follow-up to prevent infinite recursion
-          world,
-          onChunk,
-          messageId
-        );
-        return followUpResponse;
-      }
     }
 
     logger.debug(`Google Direct: Completed streaming request for agent=${agent.id}, responseLength=${fullResponse.length}`);
-    return fullResponse;
+    return {
+      type: 'text',
+      content: fullResponse,
+      assistantMessage: {
+        role: 'assistant',
+        content: fullResponse,
+      },
+      usage: undefined, // Google streaming doesn't provide usage in final chunk
+    };
 
   } catch (error) {
     logger.error(`Google Direct: Streaming error for agent=${agent.id}:`, error);
@@ -336,7 +238,8 @@ export async function streamGoogleResponse(
 }
 
 /**
- * Non-streaming Google response handler
+ * Non-streaming Google response handler - Pure client (no tool execution)
+ * Returns LLMResponse with type='text' or type='tool_calls'
  */
 export async function generateGoogleResponse(
   client: GoogleGenerativeAI,
@@ -345,7 +248,7 @@ export async function generateGoogleResponse(
   agent: Agent,
   mcpTools: Record<string, any>,
   world: World
-): Promise<string | { type: string; originalMessage: any; approvalMessage: any }> {
+): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
 
@@ -388,139 +291,49 @@ export async function generateGoogleResponse(
       }
     }
 
-    // Handle function calls if any
+    // Return LLMResponse based on whether we have function calls or text
     if (functionCalls.length > 0) {
-      // Filter out function calls with empty or missing names (non-streaming - no SSE events)
-      const validFunctionCalls = functionCalls.filter(fc => fc.function?.name && fc.function.name.trim() !== '');
-      const invalidFunctionCalls = functionCalls.filter(fc => !fc.function?.name || fc.function.name.trim() === '');
+      // Filter out invalid function calls (empty or missing names)
+      const validCalls = functionCalls.filter(
+        fc => fc.function?.name && fc.function.name.trim() !== ''
+      );
 
-      const sequenceId = generateId();
-      mcpLogger.debug(`MCP tool call sequence starting (Google non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: validFunctionCalls.length,
-        invalidToolCount: invalidFunctionCalls.length,
-        toolNames: validFunctionCalls.map(fc => fc.function.name)
-      });
-
-      // Execute function calls
-      const toolResults: ChatMessage[] = [];
-
-      // Add tool results for invalid calls (empty or missing names)
-      for (const invalidCall of invalidFunctionCalls) {
-        const toolCallId = invalidCall.id || generateFallbackId();
-        toolResults.push({
-          role: 'tool',
-          content: `Error: Malformed tool call - empty or missing tool name. Tool call ID: ${toolCallId}`,
-          tool_call_id: toolCallId,
+      const invalidCount = functionCalls.length - validCalls.length;
+      if (invalidCount > 0) {
+        logger.warn(`Google Direct: Filtered ${invalidCount} invalid function calls (non-streaming)`, {
+          agentId: agent.id,
+          totalCalls: functionCalls.length
         });
       }
 
-      for (let i = 0; i < validFunctionCalls.length; i++) {
-        const functionCall = validFunctionCalls[i];
-        const startTime = performance.now();
-
-        try {
-          const tool = mcpTools[functionCall.function.name];
-          if (tool && tool.execute) {
-            mcpLogger.debug(`MCP tool execution starting (Google non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: functionCall.function.name,
-              toolCallId: functionCall.id,
-              agentId: agent.id,
-              argsPresent: !!functionCall.function.arguments
-            });
-
-            const args = JSON.parse(functionCall.function!.arguments || '{}');
-            const result = await tool.execute(args, sequenceId, `google-non-streaming-${agent.id}`, {
-              world,
-              worldId: world.id,
-              chatId: world.currentChatId ?? null,
-              agentId: agent.id,
-              messages: messages
-            });
-            const duration = performance.now() - startTime;
-
-            // Check if tool execution returned stop processing marker (e.g., for approval)
-            if (result && typeof result === 'object' && result._stopProcessing) {
-              mcpLogger.debug(`Tool execution stopped - approval required (Google non-streaming)`, {
-                sequenceId,
-                toolIndex: i,
-                toolName: functionCall.name,
-                agentId: agent.id
-              });
-
-              // Return structured object with BOTH original and approval messages
-              // Upper layer (events.ts) will handle storage and event emission
-              return {
-                type: 'approval_flow',
-                originalMessage: {
-                  role: 'assistant' as const,
-                  content: content,
-                  tool_calls: message.candidates[0].content.parts.filter((p: any) => p.functionCall).map((p: any) => ({
-                    id: generateId(),
-                    type: 'function' as const,
-                    function: {
-                      name: p.functionCall.name,
-                      arguments: JSON.stringify(p.functionCall.args)
-                    }
-                  })) as any // Original tool calls (e.g., shell_cmd)
-                },
-                approvalMessage: result._approvalMessage
-              };
-            }
-
-            const resultString = JSON.stringify(result);
-
-            mcpLogger.debug(`MCP tool execution completed (Google non-streaming)`, {
-              sequenceId,
-              toolIndex: i,
-              toolName: functionCall.function.name,
-              toolCallId: functionCall.id,
-              agentId: agent.id,
-              status: 'success',
-              duration: Math.round(duration * 100) / 100,
-              resultSize: resultString.length,
-              resultPreview: resultString.slice(0, 200) + (resultString.length > 200 ? '...' : '')
-            });
-
-            toolResults.push({
-              role: 'tool',
-              content: resultString,
-              tool_call_id: functionCall.id,
-            });
-          }
-        } catch (error) {
-          // Let ApprovalRequiredException bubble up to llm-manager
-          throw error;
-        }
-      }
-
-      mcpLogger.debug(`MCP tool call sequence completed (Google non-streaming)`, {
-        sequenceId,
-        agentId: agent.id,
-        toolCount: functionCalls.length,
-        successCount: toolResults.filter(tr => !tr.content.startsWith('Error:')).length,
-        errorCount: toolResults.filter(tr => tr.content.startsWith('Error:')).length
+      logger.debug(`Google Direct: Completed non-streaming request with function calls for agent=${agent.id}`, {
+        toolCount: validCalls.length,
+        toolNames: validCalls.map(fc => fc.function?.name)
       });
 
-      // If we have tool results, make another request to get the final response
-      if (toolResults.length > 0) {
-        const assistantMessage: ChatMessage = {
+      return {
+        type: 'tool_calls',
+        content: content,
+        tool_calls: validCalls,
+        assistantMessage: {
           role: 'assistant',
           content: content,
-          tool_calls: functionCalls,
-        };
-
-        const followUpMessages = [...messages, assistantMessage, ...toolResults];
-        const followUpResponse = await generateGoogleResponse(client, model, followUpMessages, agent, mcpTools, world);
-        return followUpResponse;
-      }
+          tool_calls: validCalls,
+        },
+        usage: undefined, // Google doesn't provide usage information in response
+      };
     }
 
     logger.debug(`Google Direct: Completed non-streaming request for agent=${agent.id}, responseLength=${content.length}`);
-    return content;
+    return {
+      type: 'text',
+      content: content,
+      assistantMessage: {
+        role: 'assistant',
+        content: content,
+      },
+      usage: undefined, // Google doesn't provide usage information in response
+    };
 
   } catch (error) {
     logger.error(`Google Direct: Generation error for agent=${agent.id}:`, error);
