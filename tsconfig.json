@@ -32,7 +32,6 @@
     "cli/**/*",
     "server/**/*",
     "core/**/*",
-    "ws/**/*",
     "tests/**/*"
   ],
   "exclude": [
@@ -43,7 +42,6 @@
     "tests/**/*",
     "next/.next",
     "next/out",
-    "web/dist",
-    "ws/node_modules"
+    "web/dist"
   ]
 }

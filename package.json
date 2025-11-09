@@ -17,9 +17,7 @@
   "type": "module",
   "workspaces": [
     "core",
-    "tui",
-    "web",
-    "ws"
+    "web"
   ],
   "bin": {
     "agent-world": "dist/cli/index.js",
@@ -33,16 +31,6 @@
     "cli:start": "node dist/cli/index.js",
     "cli:dev": "npx tsx cli/index.ts",
     "cli:watch": "npx tsx --watch cli/index.ts",
-    "tui": "npm run tui:start",
-    "tui:start": "npm run start --workspace=tui",
-    "tui:dev": "npm-run-all --sequential ws:wait tui:dev:direct",
-    "tui:dev:direct": "npx tsx tui/src/index.tsx",
-    "tui:watch": "npx tsx --watch tui/src/index.tsx",
-    "ws": "npm run ws:start",
-    "ws:start": "node dist/ws/index.js",
-    "ws:dev": "npx tsx ws/index.ts",
-    "ws:watch": "npx tsx --watch ws/index.ts",
-    "ws:wait": "wait-on tcp:3001",
     "server": "npm run server:start",
     "server:start": "node dist/server/index.js",
     "server:dev": "npx tsx server/index.ts",
@@ -57,8 +45,8 @@
     "test:coverage": "vitest run --coverage",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=ws && npm run check --workspace=tui && npm run check --workspace=web && npm run check --workspace=cli",
-    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=ws && npm run build --workspace=web",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --workspace=cli",
+    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "pkill": "pkill -f tsx"
   },
   "description": "World-mediated agent management system with clean API surface",
