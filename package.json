@@ -17,7 +17,6 @@
   "type": "module",
   "workspaces": [
     "core",
-    "next",
     "tui",
     "web",
     "ws"
@@ -60,8 +59,7 @@
     "integration": "vitest run --config vitest.integration.config.ts",
     "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=ws && npm run check --workspace=tui && npm run check --workspace=web && npm run check --workspace=cli",
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=ws && npm run build --workspace=web",
-    "pkill": "pkill -f tsx",
-    "dev-next": "cd next && npm run dev"
+    "pkill": "pkill -f tsx"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [
