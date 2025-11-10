@@ -178,7 +178,8 @@ export async function processAgentMessage(
         loggerAgent.debug('Assistant message with tool_calls saved to memory', {
           agentId: agent.id,
           messageId,
-          toolCallCount: llmResponse.tool_calls?.length || 0
+          toolCallCount: llmResponse.tool_calls?.length || 0,
+          toolCallIds: llmResponse.tool_calls?.map(tc => tc.id)
         });
       } catch (error) {
         loggerAgent.error('Failed to save assistant message with tool_calls', {

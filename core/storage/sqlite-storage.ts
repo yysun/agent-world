@@ -335,7 +335,8 @@ export async function listAgents(ctx: SQLiteStorageContext, worldId: string): Pr
         ...msg,
         createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date(),
         chatId: msg.chatId, // Preserve chatId field
-        replyToMessageId: msg.replyToMessageId // Preserve replyToMessageId field
+        replyToMessageId: msg.replyToMessageId, // Preserve replyToMessageId field
+        tool_calls: msg.toolCalls ? JSON.parse(msg.toolCalls as any) : undefined // Parse JSON string to object
       })),
     } as Agent;
     result.push(agent);

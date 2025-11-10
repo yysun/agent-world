@@ -107,6 +107,7 @@ export interface Message {
   isToolCallResponse?: boolean; // This is a tool call approval response message
   toolCallData?: {
     toolCallId: string;
+    originalToolCall?: any; // Store complete original tool call (including id) to match CLI
     toolName: string;
     toolArgs: Record<string, unknown>;
     approvalMessage?: string;

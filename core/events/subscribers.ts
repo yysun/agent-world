@@ -231,9 +231,15 @@ export function subscribeAgentToToolMessages(world: World, agent: Agent): () => 
     );
 
     if (!hasToolCall) {
+      // Debug: Log all tool call IDs in memory
+      const allToolCallIds = agent.memory
+        .filter(msg => msg.tool_calls && msg.tool_calls.length > 0)
+        .flatMap(msg => msg.tool_calls!.map(tc => tc.id));
+
       loggerAgent.warn('[subscribeAgentToToolMessages] Security: Unknown tool_call_id - rejecting', {
         agentId: agent.id,
-        toolCallId: parsedMessage.tool_call_id
+        toolCallId: parsedMessage.tool_call_id,
+        allToolCallIdsInMemory: allToolCallIds
       });
       return;
     }

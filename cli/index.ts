@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2025-11-10: Aligned approval submission tool_call_id to originalToolCall.id (parity with web/API)
  * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
  * - 2025-11-08: Improved approval UI - "Approval Required" instead of "Tool Approval Required"
  * - 2025-11-06: Updated approval protocol - agentId now embedded in JSON (server auto-prepends @mention)
@@ -268,8 +269,9 @@ async function handleNewApprovalRequest(
 
             const { publishToolResult } = await import('../core/events/index.js');
             const { originalToolCall } = request;
+            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
             publishToolResult(world, agentId, {
-              tool_call_id: toolCallId,
+              tool_call_id: submittedToolCallId,
               decision: approvalDecision,
               scope: approvalScope,
               toolName: originalToolCall?.name || toolName,

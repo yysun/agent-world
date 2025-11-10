@@ -343,7 +343,7 @@ export function createShellCmdToolDefinition() {
 
     // NEW: Explicit approval configuration
     approval: {
-      required: false,
+      required: true,
       message: 'This tool will execute a shell command on the system. Shell commands can modify files, run programs, and access system resources. Do you want to allow this execution?',
       options: ['Cancel', 'Once', 'Always']
     },

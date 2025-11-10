@@ -1,7 +1,7 @@
 /**
  * Agent World API Routes
  *
- * REST API with Zod validation, SSE streaming for chat, and function-based world context.
+ * REST API with Zod validation, SSE streaming for chat and tool results, and function-based world context.
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
@@ -32,9 +32,20 @@
  *   - Streaming: Ends stream when world becomes 'idle'
  *   - Removed complex timer logic (resetTimer, activeAgents tracking, tool tracking)
  *   - Timeout only used as fallback (60s) instead of primary completion mechanism
+ * - 2025-11-10: Added SSE streaming support to /tool-results endpoint
+ *   - Supports both streaming (default) and non-streaming modes via optional stream parameter
+ *   - Follows same pattern as /messages endpoint with handleStreamingToolResult and handleNonStreamingToolResult
+ *   - Real-time event streaming for tool approval responses including agent responses and tool executions
+ *   - Frontend updated to handle streaming tool results and display real-time updates
+ * - 2025-11-10: Refactored SSE event handling into reusable sse-handler.ts module
+ *   - Extracted common SSE logic (headers, listeners, cleanup, timeouts) into createSSEHandler()
+ *   - Both /messages and /tool-results endpoints now use the same SSE handler
+ *   - Eliminates code duplication and ensures consistent SSE behavior
+ *   - Simplified streaming handlers by ~150 lines each
  */
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
+import { createSSEHandler } from './sse-handler.js';
 import {
   createWorld,
   listWorlds,
@@ -86,45 +97,6 @@ const loggerValidation = createCategoryLogger('api.validation');
 const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
-
-// Event name constants - using typed EventType enum from core/types.ts
-
-// Timeout constants for streaming (fallback only)
-const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
-
-// Event payload types for API handlers
-interface MessageEventPayload {
-  sender: string;
-  content: string;
-  timestamp?: Date;
-  messageId: string;
-  replyToMessageId?: string;  // Parent message ID for threading (links replies to original messages)
-  [key: string]: any;
-}
-
-interface SSEEventPayload {
-  type: string;
-  agentName?: string;
-  [key: string]: any;
-}
-
-interface SystemEventPayload {
-  message?: string;
-  content?: string;
-  [key: string]: any;
-}
-
-interface WorldActivityPayload {
-  state?: string;
-  type?: string;
-  agentName?: string;
-  toolExecution?: {
-    toolCallId?: string;
-    toolName?: string;
-    [key: string]: any;
-  };
-  [key: string]: any;
-}
 
 type WorldContext = {
   id: string;
@@ -299,7 +271,8 @@ const ToolResultSchema = z.object({
   toolName: z.string().min(1),
   toolArgs: z.record(z.unknown()).optional(),
   workingDirectory: z.string().optional(),
-  agentId: z.string().min(1)
+  agentId: z.string().min(1),
+  stream: z.boolean().optional()
 });
 
 const router = express.Router();
@@ -627,6 +600,183 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
  * @param sender - Agent name sending the message
  * @returns Promise that resolves when chat is complete
  */
+/**
+ * Handles non-streaming tool result submissions.
+ * Submits tool result and waits for world idle event before completing response.
+ * 
+ * @param res - Express response object
+ * @param world - World instance to submit tool result to
+ * @param agentId - Agent ID that requested approval
+ * @param toolResultData - Tool result data
+ * @returns Promise that resolves when processing is complete
+ */
+async function handleNonStreamingToolResult(
+  res: Response,
+  world: World,
+  agentId: string,
+  toolResultData: ToolResultData
+): Promise<void> {
+  disableStreaming();
+  let listeners: Map<string, (...args: any[]) => void> = new Map();
+  let subscription: any = null;
+
+  try {
+    let isComplete = false;
+    let hasError = false;
+    let errorMessage = '';
+    let awaitingIdle = false;
+
+    const responsePromise = new Promise<void>((resolve, reject) => {
+      const timeoutTimer = setTimeout(() => {
+        if (!isComplete) {
+          hasError = true;
+          errorMessage = 'Request timeout - no response received within 60 seconds';
+          loggerChat.debug('Non-streaming tool result timeout', { awaitingIdle, hasError });
+          reject(new Error(errorMessage));
+        }
+      }, 60000);
+
+      // Subscribe to world to ensure agent/event wiring is active
+      subscribeWorld(world.id || (world as any).name || '', { isOpen: true })
+        .then(sub => {
+          if (!sub) {
+            hasError = true;
+            errorMessage = 'Failed to subscribe to world';
+            reject(new Error(errorMessage));
+            return;
+          }
+          subscription = sub;
+          const activeWorld = subscription.world as World;
+
+          // Listen to world activity events to detect when all processing is complete
+          const worldActivityListener = (eventData: WorldActivityEventPayload) => {
+            if (eventData.type === 'response-start') {
+              awaitingIdle = true;
+              loggerChat.debug('Non-streaming tool result: world processing started', {
+                activityId: eventData.activityId,
+                source: eventData.source
+              });
+            } else if (eventData.type === 'idle' && awaitingIdle) {
+              loggerChat.debug('Non-streaming tool result: world idle, completing response', {
+                activityId: eventData.activityId
+              });
+              clearTimeout(timeoutTimer);
+              isComplete = true;
+              resolve();
+            }
+          };
+
+          // Listen to activity events for completion detection
+          activeWorld.eventEmitter.on(EventType.WORLD, worldActivityListener);
+          listeners.set(EventType.WORLD, worldActivityListener);
+
+          // Publish tool result
+          publishToolResult(activeWorld, agentId, toolResultData);
+        })
+        .catch(error => {
+          hasError = true;
+          errorMessage = `Failed to subscribe to world: ${error instanceof Error ? error.message : error}`;
+          reject(new Error(errorMessage));
+        });
+    });
+
+    await responsePromise;
+
+    if (hasError) {
+      sendError(res, 500, errorMessage, 'TOOL_RESULT_ERROR');
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: 'Tool result submitted successfully',
+      data: {
+        tool_call_id: toolResultData.tool_call_id,
+        agentId,
+        decision: toolResultData.decision,
+        scope: toolResultData.scope
+      }
+    });
+  } catch (error) {
+    sendError(res, 500, error instanceof Error ? error.message : 'Unknown error', 'TOOL_RESULT_ERROR');
+  } finally {
+    // Cleanup listeners
+    if (subscription && listeners.size > 0) {
+      try {
+        const activeWorld = subscription.world as World;
+        for (const [eventType, listener] of listeners.entries()) {
+          activeWorld.eventEmitter.removeListener(eventType, listener);
+        }
+        listeners.clear();
+        await subscription.unsubscribe();
+      } catch (cleanupError) {
+        loggerChat.error('Error during tool result cleanup', { error: cleanupError instanceof Error ? cleanupError.message : cleanupError });
+      }
+    }
+    enableStreaming();
+  }
+}
+
+/**
+ * Handles streaming tool result submissions using Server-Sent Events (SSE).
+ * Subscribes to world events and streams them to the client in real-time.
+ * Uses world activity events to determine when to end the stream (with timeout fallback).
+ * 
+ * @param req - Express request object
+ * @param res - Express response object
+ * @param world - World instance to submit tool result to
+ * @param agentId - Agent ID that requested approval
+ * @param toolResultData - Tool result data
+ * @returns Promise that resolves when stream is complete
+ */
+async function handleStreamingToolResult(
+  req: Request,
+  res: Response,
+  world: World,
+  agentId: string,
+  toolResultData: ToolResultData
+): Promise<void> {
+  // Subscribe to world first to ensure agent/event wiring is active
+  const subscription = await subscribeWorld(world.id || (world as any).name || '', { isOpen: true });
+  if (!subscription) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write(`data: ${JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  const activeWorld = subscription.world as World;
+
+  // Create SSE handler - automatically sets up headers, listeners, and cleanup
+  const sseHandler = createSSEHandler(req, res, activeWorld, 'tool-result');
+
+  try {
+    // Publish tool result - events will be automatically streamed
+    publishToolResult(activeWorld, agentId, toolResultData);
+
+    // Send confirmation event
+    sseHandler.sendSSE({
+      type: 'tool-result-submitted',
+      data: {
+        tool_call_id: toolResultData.tool_call_id,
+        agentId,
+        decision: toolResultData.decision,
+        scope: toolResultData.scope
+      }
+    });
+  } catch (error) {
+    sseHandler.sendSSE({
+      type: 'error',
+      message: 'Failed to submit tool result',
+      data: { error: error instanceof Error ? error.message : String(error) }
+    });
+    setTimeout(() => {
+      sseHandler.endResponse();
+      subscription?.unsubscribe();
+    }, 1000);
+  }
+}
+
 async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
   disableStreaming();
   let subscription: any = null;
@@ -679,7 +829,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         };
 
         // Collect message events for response
-        const messageListener = (eventData: MessageEventPayload) => {
+        const messageListener = (eventData: any) => {
           responseContent = JSON.stringify({ type: 'message', data: eventData });
         };
 
@@ -748,180 +898,35 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
  * @returns Promise that resolves when stream is complete
  */
 async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Cache-Control');
-
-  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-  let hasReceivedEvents = false;
-  let isResponseEnded = false;
-  let lastEventTime = Date.now();
-  let awaitingWorldIdle = false;
-
-  const startTimeoutFallback = (): void => {
-    if (timeoutTimer) clearTimeout(timeoutTimer);
-    if (isResponseEnded) return;
-
-    // Fallback timeout - only used if world never becomes idle
-    timeoutTimer = setTimeout(() => {
-      if (!isResponseEnded) {
-        const timeSinceLastEvent = Date.now() - lastEventTime;
-        loggerStream.debug(`Streaming timeout fallback triggered: timeSinceLastEvent=${timeSinceLastEvent}ms, awaitingWorldIdle=${awaitingWorldIdle}`);
-
-        if (!hasReceivedEvents && timeSinceLastEvent >= STREAM_TIMEOUT_NO_EVENTS_MS) {
-          loggerStream.debug(`Ending stream: no events received within ${STREAM_TIMEOUT_NO_EVENTS_MS}ms`);
-          endResponse();
-        } else if (timeSinceLastEvent >= 60000) {
-          // 60 second absolute timeout as fallback
-          loggerStream.debug(`Ending stream: absolute timeout (60s) reached`);
-          endResponse();
-        }
-      }
-    }, 60000);
-  };
-
-  const endResponse = (): void => {
-    if (isResponseEnded) return;
-    isResponseEnded = true;
-
-    if (timeoutTimer) {
-      clearTimeout(timeoutTimer);
-      timeoutTimer = undefined;
-    }
-
-    loggerStream.debug(`Ending SSE response. Stats: events=${hasReceivedEvents}, awaitingWorldIdle=${awaitingWorldIdle}`);
-
-    try {
-      if (!res.destroyed) {
-        res.end();
-      }
-    } catch (error) {
-      loggerStream.debug('Error ending response (likely already closed):', error);
-    }
-  };
-
-  const sendSSE = (data: string) => {
-    if (isResponseEnded || res.destroyed) return;
-
-    try {
-      res.write(`data: ${data}\n\n`);
-      hasReceivedEvents = true;
-      lastEventTime = Date.now();
-    } catch (error) {
-      loggerStream.debug('Error writing SSE data:', error);
-      endResponse();
-    }
-  };
-
-  // Subscribe with minimal client (no forwarding callbacks - we'll attach direct listeners)
+  // Subscribe to world to get the world instance
   const subscription = await subscribeWorld(worldName, { isOpen: true });
   if (!subscription) {
     loggerStream.error('Unexpected: subscription is null after world existence check');
-    sendSSE(JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' }));
-    endResponse();
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write(`data: ${JSON.stringify({ type: 'error', message: 'Failed to subscribe to world' })}\n\n`);
+    res.end();
     return;
   }
 
   const world = subscription.world;
-  const listeners = new Map<string, (...args: any[]) => void>();
 
-  // Attach direct listeners to world.eventEmitter
-  const worldListener = (eventData: WorldActivityPayload) => {
-    const payload = eventData;
-
-    // Handle world activity events for stream completion
-    if (payload?.state === 'processing') {
-      awaitingWorldIdle = true;
-      loggerStream.debug('World processing started', {
-        activityId: payload.activityId,
-        source: payload.source
-      });
-    } else if (payload?.state === 'idle' && awaitingWorldIdle) {
-      loggerStream.debug('World idle detected, ending stream', {
-        activityId: payload.activityId
-      });
-      // Stream all pending events, then end
-      sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));
-      // Give a small delay for any final events to be sent
-      setTimeout(() => {
-        endResponse();
-      }, 500);
-      return;
-    }
-
-    sendSSE(JSON.stringify({ type: EventType.WORLD, data: eventData }));
-  };
-  world.eventEmitter.on(EventType.WORLD, worldListener);
-  listeners.set(EventType.WORLD, worldListener);
-
-  const messageListener = (eventData: MessageEventPayload) => {
-    // Enhance message event data with structured format
-    // CRITICAL: replyToMessageId must be included for frontend threading display
-    // CRITICAL: tool_calls must be included for approval request handling (OpenAI protocol)
-    const messageData = {
-      type: 'message',
-      sender: eventData.sender,
-      content: eventData.content,
-      messageId: eventData.messageId,
-      replyToMessageId: eventData.replyToMessageId,  // Threading: parent message reference
-      createdAt: eventData.timestamp || new Date().toISOString(),
-      role: eventData.role,  // Include role for OpenAI protocol compatibility
-      tool_calls: eventData.tool_calls  // Include tool_calls for approval requests
-    };
-    sendSSE(JSON.stringify({ type: EventType.MESSAGE, data: messageData }));
-  };
-  world.eventEmitter.on(EventType.MESSAGE, messageListener);
-  listeners.set(EventType.MESSAGE, messageListener);
-
-  const sseListener = (eventData: SSEEventPayload) => {
-    sendSSE(JSON.stringify({ type: EventType.SSE, data: eventData }));
-  };
-  world.eventEmitter.on(EventType.SSE, sseListener);
-  listeners.set(EventType.SSE, sseListener);
-
-  const systemListener = (eventData: SystemEventPayload) => {
-    sendSSE(JSON.stringify({ type: EventType.SYSTEM, data: eventData }));
-  };
-  world.eventEmitter.on(EventType.SYSTEM, systemListener);
-  listeners.set(EventType.SYSTEM, systemListener);
-
-  // Cleanup function to remove all listeners
-  const cleanupListeners = () => {
-    for (const [eventType, listener] of listeners.entries()) {
-      world.eventEmitter.removeListener(eventType, listener);
-    }
-    listeners.clear();
-  };
+  // Create SSE handler - automatically sets up headers, listeners, and cleanup
+  const sseHandler = createSSEHandler(req, res, world, 'chat');
 
   try {
-    const messageEvent = publishMessage(world, message, sender);
-
-    // Message is automatically sent via the event listener
-    // No need to send explicitly - would cause duplicate
-
-    // Start the fallback timeout
-    startTimeoutFallback();
-  }
-  catch (error) {
-    sendSSE(JSON.stringify({
+    // Publish message - events will be automatically streamed
+    publishMessage(world, message, sender);
+  } catch (error) {
+    sseHandler.sendSSE({
       type: 'error',
       message: 'Failed to send message',
       data: { error: error instanceof Error ? error.message : String(error) }
-    }));
+    });
     setTimeout(() => {
-      cleanupListeners();
-      endResponse();
+      sseHandler.endResponse();
+      subscription?.unsubscribe();
     }, 1000);
   }
-
-  req.on('close', () => {
-    loggerStream.debug('Chat client disconnected, cleaning up');
-    cleanupListeners();
-    endResponse();
-    subscription?.unsubscribe();
-  });
 }
 
 // Chat Routes
@@ -991,12 +996,14 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
  * 
  * Structured API endpoint for submitting tool approval decisions.
  * Accepts ToolResultData and calls publishToolResult() to construct proper tool messages.
+ * Supports both streaming (SSE) and non-streaming modes via optional stream parameter.
  * 
  * Benefits over manual JSON encoding:
  * - Type-safe validation
  * - Automatic message construction
  * - Proper LLM conversation format
  * - Security: Verifies tool_call_id ownership
+ * - Real-time streaming updates (when stream=true)
  */
 router.post('/worlds/:worldName/tool-results', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1007,7 +1014,7 @@ router.post('/worlds/:worldName/tool-results', validateWorld, async (req: Reques
     }
 
     const world = (req as any).world as World;
-    const { agentId, ...toolResultData } = validation.data;
+    const { agentId, stream, ...toolResultData } = validation.data;
 
     // Validate agentId exists in world
     const agent = world.agents.get(agentId);
@@ -1016,19 +1023,12 @@ router.post('/worlds/:worldName/tool-results', validateWorld, async (req: Reques
       return;
     }
 
-    // Publish tool result using structured API
-    publishToolResult(world, agentId, toolResultData as ToolResultData);
-
-    res.json({
-      success: true,
-      message: 'Tool result submitted successfully',
-      data: {
-        tool_call_id: toolResultData.tool_call_id,
-        agentId,
-        decision: toolResultData.decision,
-        scope: toolResultData.scope
-      }
-    });
+    // Handle streaming or non-streaming based on stream parameter
+    if (stream === false) {
+      await handleNonStreamingToolResult(res, world, agentId, toolResultData as ToolResultData);
+    } else {
+      await handleStreamingToolResult(req, res, world, agentId, toolResultData as ToolResultData);
+    }
   } catch (error) {
     loggerChat.error('Error submitting tool result', {
       error: error instanceof Error ? error.message : error,

@@ -62,6 +62,8 @@
  * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
  *
  * Changes:
+ * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
+ * - 2025-11-10: Added SSE streaming support to tool result submission for real-time agent responses
  * - 2025-11-06: Moved agentId into JSON structure (cleaner than @mention prefix)
  * - 2025-11-06: Updated approval response to use enhanced string protocol (OpenAI format)
  * - 2025-11-05: Added agent @mention support for approval responses to match CLI behavior
@@ -238,9 +240,14 @@ const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null
         console.warn('Failed to parse approval request arguments:', error);
       }
 
+      console.log('[detectToolCallRequest] Debug:', {
+        'toolCall.id': toolCall.id,
+        'parsedArgs': parsedArgs,
+        'parsedArgs.originalToolCall': parsedArgs?.originalToolCall
+      });
       return {
         toolCallId: toolCall.id || `approval-${Date.now()}`,
-        originalToolCall: parsedArgs?.originalToolCall,
+        originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
         toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
         toolArgs: parsedArgs?.originalToolCall?.args ?? {},
         approvalMessage: parsedArgs?.message ?? 'This tool requires your approval to continue.',
@@ -248,7 +255,7 @@ const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null
           ? parsedArgs.options
           : ['deny', 'approve_once', 'approve_session'],
         agentId: messageData?.sender || messageData?.agentId // Capture agent that made the request
-      };
+      } as Message['toolCallData'];
     }
   }
 
@@ -523,6 +530,7 @@ const submitApprovalDecision = async (
     if (message?.toolCallData) {
       request = {
         toolCallId: message.toolCallData.toolCallId,
+        originalToolCall: message.toolCallData.originalToolCall, // Preserve originalToolCall for correct tool_call_id
         toolName: message.toolCallData.toolName,
         toolArgs: message.toolCallData.toolArgs,
         message: message.toolCallData.approvalMessage || '',
@@ -541,22 +549,33 @@ const submitApprovalDecision = async (
     needScroll: true
   };
 
-  // Use structured API for tool result submission
+  // Use structured API for tool result submission with SSE streaming
   const approvalDecision: 'approve' | 'deny' = decision === 'approve' ? 'approve' : 'deny';
   const approvalScope: 'session' | 'once' | undefined =
     decision === 'approve' ? (scope === 'session' ? 'session' : 'once') : undefined;
 
   try {
-    // Submit using structured API endpoint
+    // Submit using structured API endpoint with streaming enabled
     const { originalToolCall } = request;
-    await submitToolResult(state.worldName, request.agentId, {
-      tool_call_id: request.toolCallId,
-      decision: approvalDecision,
-      scope: approvalScope,
-      toolName: originalToolCall?.name || request.toolName,
-      toolArgs: originalToolCall?.args || request.toolArgs,
-      workingDirectory: originalToolCall?.workingDirectory
+    // Always use approval request toolCallId - backend will extract originalToolCall.id itself
+    console.log('[submitApprovalDecision] Debug:', {
+      'request.toolCallId': request.toolCallId,
+      'originalToolCall': originalToolCall,
+      'originalToolCall.id': originalToolCall?.id
     });
+    await submitToolResult(
+      state.worldName,
+      request.agentId,
+      {
+        tool_call_id: request.toolCallId,
+        decision: approvalDecision,
+        scope: approvalScope,
+        toolName: originalToolCall?.name || request.toolName,
+        toolArgs: originalToolCall?.args || request.toolArgs,
+        workingDirectory: originalToolCall?.workingDirectory
+      },
+      true // Enable SSE streaming
+    );
 
     return {
       ...baseState,
@@ -870,6 +889,20 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   const messageData = data || {};
   const senderName = messageData.sender;
 
+  // Filter out internal protocol messages (tool results with __type marker)
+  // These are internal protocol messages not meant for display
+  if (messageData.content && typeof messageData.content === 'string') {
+    try {
+      const parsed = JSON.parse(messageData.content);
+      if (parsed.__type === 'tool_result') {
+        // This is an internal tool result message - don't display it
+        return state;
+      }
+    } catch (e) {
+      // Not JSON or parse error - continue normal processing
+    }
+  }
+
   // PHASE 1: Check for tool_calls and handle approval requests (OpenAI protocol)
   // This must happen before message display to show approval dialog immediately
   if (messageData.tool_calls) {
@@ -1105,6 +1138,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStart': handleToolStart,
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
+  'handleToolResultSubmitted': (state: WorldComponentState, data: any): WorldComponentState => {
+    // Tool result submitted confirmation - log for debugging
+    console.log('Tool result submitted successfully:', data);
+    return state;
+  },
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState => {
     return handleWorldActivity(state, activity);
   },
