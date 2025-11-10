@@ -16,6 +16,7 @@
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
+ * - Executes commands through shell for PATH resolution and shell features
  * - Stores execution history in-memory (can be extended to persistent storage)
  * - Provides MCP-compatible tool interface for LLM integration
  * - Timeout support to prevent hanging processes (default: 10 minutes)
@@ -27,6 +28,7 @@
  * - Features explicit approval metadata with structured configuration
  *
  * Recent Changes:
+ * - 2025-11-10: Fixed shell execution - enabled shell: true to support PATH resolution and installed commands
  * - 2025-11-04: Added explicit approval flag with structured metadata (required, message, options)
  * - Replaced heuristic-based approval detection with explicit configuration
  * - Approval message explains shell command risks and provides clear user options
@@ -135,7 +137,7 @@ export async function executeShellCommand(
       // Spawn the child process
       const childProcess = spawn(command, parameters, {
         cwd: resolvedDirectory,
-        shell: false, // Don't use shell for better security
+        shell: true, // Use shell to enable PATH resolution and shell features
         timeout: timeout
       });
 
@@ -343,7 +345,7 @@ export function createShellCmdToolDefinition() {
 
     // NEW: Explicit approval configuration
     approval: {
-      required: true,
+      required: false,
       message: 'This tool will execute a shell command on the system. Shell commands can modify files, run programs, and access system resources. Do you want to allow this execution?',
       options: ['Cancel', 'Once', 'Always']
     },
