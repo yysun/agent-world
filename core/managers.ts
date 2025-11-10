@@ -553,13 +553,17 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
     shouldSetNewCurrentChat = true;
   }
 
+  // Emit CRUD event BEFORE deletion (while chat_id still exists in DB)
+  if (world) {
+    publishCRUDEvent(world, 'delete', 'chat', chatId);
+  }
+
   // Then delete the chat itself
   const chatDeleted = await storageWrappers!.deleteChatData(worldId, chatId);
 
-  // Emit CRUD event for real-time updates
+  // Remove from world's in-memory chat map
   if (chatDeleted && world) {
     world.chats.delete(chatId);
-    publishCRUDEvent(world, 'delete', 'chat', chatId);
   }
 
   // If this was the current chat, set a fallback current chat

@@ -223,12 +223,15 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
 
     const responseText = llmResponse.content;
 
-    // Save response to agent memory
+    // Save response to agent memory with all required fields
     agent.memory.push({
       role: 'assistant',
       content: responseText,
       messageId,
-      chatId: targetChatId
+      sender: agent.id,
+      createdAt: new Date(),
+      chatId: targetChatId,
+      agentId: agent.id
     });
 
     try {
@@ -294,11 +297,16 @@ export async function handleTextResponse(
     });
   }
 
-  // Save response to agent memory
+  // Save response to agent memory with all required fields
   agent.memory.push({
     role: 'assistant',
     content: finalResponse,
-    messageId
+    messageId,
+    sender: agent.id,
+    createdAt: new Date(),
+    chatId: world.currentChatId || null,
+    replyToMessageId: messageEvent.messageId,
+    agentId: agent.id
   });
 
   try {

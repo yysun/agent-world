@@ -303,12 +303,73 @@ export async function processAgentMessage(
           }
 
           // Tool executed successfully - save result and continue LLM loop
-          // TODO: Implement tool result handling and LLM continuation
           loggerAgent.debug('Tool executed successfully', {
             agentId: agent.id,
             toolCallId: toolCall.id,
             resultLength: typeof toolResult === 'string' ? toolResult.length : 0
           });
+
+          // Publish tool-execution event
+          const { publishEvent } = await import('./publishers.js');
+          publishEvent(world, 'tool-execution', {
+            agentId: agent.id,
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            chatId: world.currentChatId || null,
+            ...(toolArgs.command && { command: toolArgs.command }),
+            ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
+            ...(toolArgs.directory && { directory: toolArgs.directory })
+          });
+
+          // Save tool result to agent memory
+          const toolResultMessage: AgentMessage = {
+            role: 'tool',
+            content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+            tool_call_id: toolCall.id,
+            sender: agent.id,
+            createdAt: new Date(),
+            chatId: world.currentChatId || null,
+            messageId: generateId(),
+            replyToMessageId: messageId,
+            agentId: agent.id
+          };
+
+          agent.memory.push(toolResultMessage);
+
+          // Update tool call status to complete
+          const toolCallMsg = agent.memory.find(
+            m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
+          );
+          if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
+            (toolCallMsg as any).toolCallStatus[toolCall.id] = { complete: true, result: toolResult };
+          }
+
+          // Save agent with tool result
+          try {
+            const storage = await getStorageWrappers();
+            await storage.saveAgent(world.id, agent);
+            loggerAgent.debug('Tool result saved to memory', {
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              messageId: toolResultMessage.messageId
+            });
+          } catch (error) {
+            loggerAgent.error('Failed to save tool result', {
+              agentId: agent.id,
+              error: error instanceof Error ? error.message : error
+            });
+          }
+
+          // Continue LLM loop with tool result - call resumeLLMAfterApproval
+          // The tool result is now in memory, so the next LLM call will see it
+          loggerAgent.debug('Continuing LLM loop with tool result', {
+            agentId: agent.id,
+            toolCallId: toolCall.id
+          });
+
+          // Use the existing resumeLLMAfterApproval function (same as approval flow)
+          const { resumeLLMAfterApproval } = await import('./memory-manager.js');
+          await resumeLLMAfterApproval(world, agent, world.currentChatId);
 
         } catch (error) {
           loggerAgent.error('Tool execution error', {
@@ -316,6 +377,31 @@ export async function processAgentMessage(
             toolCallId: toolCall.id,
             error: error instanceof Error ? error.message : error
           });
+
+          // Save error as tool result
+          const errorMessage: AgentMessage = {
+            role: 'tool',
+            content: `Error executing tool: ${error instanceof Error ? error.message : String(error)}`,
+            tool_call_id: toolCall.id,
+            sender: agent.id,
+            createdAt: new Date(),
+            chatId: world.currentChatId || null,
+            messageId: generateId(),
+            replyToMessageId: messageId,
+            agentId: agent.id
+          };
+
+          agent.memory.push(errorMessage);
+
+          try {
+            const storage = await getStorageWrappers();
+            await storage.saveAgent(world.id, agent);
+          } catch (saveError) {
+            loggerAgent.error('Failed to save error message', {
+              agentId: agent.id,
+              error: saveError instanceof Error ? saveError.message : saveError
+            });
+          }
         }
       }
 
