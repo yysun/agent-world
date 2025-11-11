@@ -5,7 +5,11 @@
  * - Execute shell commands in child processes with parameter support
  * - Capture stdout and stderr output
  * - Persist command execution history (command, parameters, results, exceptions)
- * - Return results to LLM for further processing
+ * - Return results to LLM for further processing (except AI commands)
+ * - AI command special handling (gemini, copilot, codex):
+ *   * Full tool result saved as 'tool' role message
+ *   * Command stdout saved as 'assistant' role message (bypassing LLM)
+ *   * No additional LLM call to process the output
  * - Error handling and exception tracking
  * - Long-running command support with 10-minute default timeout
  * - Required directory parameter for explicit working directory control
@@ -28,6 +32,10 @@
  * - Features explicit approval metadata with structured configuration
  *
  * Recent Changes:
+ * - 2025-11-11: AI commands (gemini, copilot, codex) bypass LLM:
+ *   * Save full tool result as 'tool' message
+ *   * Extract stdout and save as 'assistant' message
+ *   * Skip LLM processing entirely
  * - 2025-11-10: Fixed shell execution - enabled shell: true to support PATH resolution and installed commands
  * - 2025-11-04: Added explicit approval flag with structured metadata (required, message, options)
  * - Replaced heuristic-based approval detection with explicit configuration

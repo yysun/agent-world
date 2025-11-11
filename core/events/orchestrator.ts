@@ -9,6 +9,14 @@
  * - Determine if agent should respond based on mentions and turn limits
  * - Reset LLM call count for new conversation turns
  * - Turn limit enforcement with automatic handoff to human
+ * - AI command handling (gemini, copilot, codex) - results saved directly to memory
+ * 
+ * Implementation:
+ * - AI commands executed via shell_cmd bypass LLM response flow
+ * - Full tool result saved as 'tool' role message (standard flow)
+ * - Command stdout extracted and saved as 'assistant' role message (bypassing LLM)
+ * - Tool call marked complete and turn ends without LLM processing
+ * - Normal shell commands follow standard tool execution and LLM continuation
  * 
  * Dependencies (Layer 5):
  * - types.ts (Layer 1)
@@ -20,6 +28,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2025-11-11: Added AI command special handling - bypass LLM, save output to memory
  * - 2025-11-09: Extracted from events.ts for modular architecture
  */
 
@@ -257,15 +266,31 @@ export async function processAgentMessage(
 
           const formattedResult = formatResultForLLM(result);
 
-          // Create a new assistant message with the result
-          const assistantReply: AgentMessage = {
-            role: 'assistant',
+          // Save the full tool result as a tool message (standard tool flow)
+          const toolResultMessage: AgentMessage = {
+            role: 'tool',
             content: formattedResult,
+            tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
             messageId: generateId(),
             replyToMessageId: messageId,
+            agentId: agent.id
+          };
+          agent.memory.push(toolResultMessage);
+
+          // Extract stdout and save as assistant message (bypassing LLM)
+          // This is what the user sees as the AI command's response
+          const stdoutContent = result.stdout || '(No output)';
+          const assistantReply: AgentMessage = {
+            role: 'assistant',
+            content: stdoutContent,
+            sender: agent.id,
+            createdAt: new Date(),
+            chatId: world.currentChatId || null,
+            messageId: generateId(),
+            replyToMessageId: toolResultMessage.messageId,
             agentId: agent.id
           };
           agent.memory.push(assistantReply);
@@ -275,7 +300,7 @@ export async function processAgentMessage(
             m => m.role === 'assistant' && m.tool_calls?.some(tc => tc.id === toolCall.id)
           );
           if (toolCallMsg && toolCallMsg.toolCallStatus) {
-            toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: formattedResult };
+            toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: null };
           }
 
           // Save agent state
@@ -290,7 +315,7 @@ export async function processAgentMessage(
             });
           }
 
-          // Publish the new message
+          // Publish the assistant message event (what the user sees)
           const aiCommandMessageEvent: WorldMessageEvent = {
             content: assistantReply.content || '',
             sender: agent.id,
