@@ -197,7 +197,40 @@ export default function WorldChat(props: WorldChatProps) {
     // Tier 2: Check if this is a tool result message
     if (message.type === 'tool') {
       const toolCallId = (message as any).tool_call_id || 'unknown';
-      return `[Tool result for: ${toolCallId}]`;
+      
+      // Find the tool call details from previous assistant messages
+      let toolName = 'unknown';
+      let toolArgs = '';
+      const currentIndex = this.state.messages.findIndex(m => m.messageId === message.messageId);
+      if (currentIndex >= 0) {
+        for (let i = currentIndex - 1; i >= 0; i--) {
+          const prevMsg = this.state.messages[i];
+          if (prevMsg.type === 'assistant' && (prevMsg as any).tool_calls) {
+            const toolCall = (prevMsg as any).tool_calls.find((tc: any) => tc.id === toolCallId);
+            if (toolCall) {
+              toolName = toolCall.function?.name || 'unknown';
+              try {
+                const args = JSON.parse(toolCall.function?.arguments || '{}');
+                const argKeys = Object.keys(args);
+                if (argKeys.length > 0) {
+                  // Show first 2-3 arguments with truncated values
+                  const argSummary = argKeys.slice(0, 3).map((key: string) => {
+                    const val = args[key];
+                    const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                    return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
+                  }).join(', ');
+                  toolArgs = argKeys.length > 3 ? ` (${argSummary}, ...)` : ` (${argSummary})`;
+                }
+              } catch {
+                toolArgs = '';
+              }
+              break;
+            }
+          }
+        }
+      }
+      
+      return `[Tool: ${toolName}${toolArgs}]`;
     }
 
     // Tier 3: Fallback - check if message content is all JSON tool call objects

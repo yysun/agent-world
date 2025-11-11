@@ -20,16 +20,17 @@
  *   - Agent reply: "Agent: agentName (reply to targetName)"
  *   - In-memory detection: "[in-memory, no reply]" for received messages without response
  * - Chat events section for current chat only with chronological order:
- *   - Message events: ● [message] sender: content preview
- *   - SSE events: ● [sse] agent: type content (shows streaming chunks)
+ *   - Message events: ● [message] sender: full content (no truncation)
+ *   - SSE events: ● [sse] agent: type content (shows full streaming chunks)
  *   - World events: ● [world] agent: activity pending=N (activity tracking)
  *   - Tool events: ● [tool] agent type (tool execution)
- *   - System events: ● [system] content preview
+ *   - System events: ● [system] full content (no truncation)
  *   - Timestamp shown as HH:MM:SS for readability
  * - Structured markdown with clear sections and navigation
  * - Uses getMemory() for efficient message retrieval
  * - O(n) messageId-based deduplication (replaces O(n²) content-based approach)
  * - Tool call detection and summarization
+ * - Enhanced tool result display with tool name and argument details
  *
  * Message Format Examples:
  * ```
@@ -45,6 +46,11 @@
  * Agent: o1 (reply to human)
  * Time: 2025-10-25T21:24:57.105Z
  * [2 tool calls: function1, function2]
+ *
+ * Agent: a1 (tool result)
+ * Time: 2025-10-25T21:24:58.395Z
+ * [Tool: run_command
+ *  Args: command: ls -la, cwd: /home/user]
  *
  * Agent: a1 (incoming from o1) [in-memory, no reply]
  * Time: 2025-10-25T21:24:58.395Z
@@ -84,6 +90,7 @@
  * - Consistent with frontend deduplication logic for predictable behavior
  *
   * Changes:
+ * - 2025-11-11: Removed all content truncation - show full message and event content without cutting off
  * - 2025-11-01: Fixed export to show events for current chat only (not all chats)
  * - 2025-11-01: Reformatted events to show: time ● [type] agent: event-name content
  * - 2025-11-01: SSE chunk events now properly display content in export
@@ -417,7 +424,38 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           // Handle tool role messages (tool results)
           else if (message.role === 'tool') {
             const toolCallId = (message as any).tool_call_id || 'unknown';
-            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool result for: ${toolCallId}]\n    \`\`\`\n\n`;
+            
+            // Find the tool call details from previous assistant messages
+            let toolName = 'unknown';
+            let toolArgs = '';
+            for (let i = index - 1; i >= 0; i--) {
+              const prevMsg = consolidatedMessages[i];
+              if (prevMsg.role === 'assistant' && prevMsg.tool_calls) {
+                const toolCall = prevMsg.tool_calls.find((tc: any) => tc.id === toolCallId);
+                if (toolCall) {
+                  toolName = toolCall.function?.name || 'unknown';
+                  try {
+                    const args = JSON.parse(toolCall.function?.arguments || '{}');
+                    const argKeys = Object.keys(args);
+                    if (argKeys.length > 0) {
+                      // Show first 2-3 arguments with truncated values
+                      const argSummary = argKeys.slice(0, 3).map(key => {
+                        const val = args[key];
+                        const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                        return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
+                      }).join(', ');
+                      toolArgs = argKeys.length > 3 ? `${argSummary}, ...` : argSummary;
+                    }
+                  } catch {
+                    toolArgs = '';
+                  }
+                  break;
+                }
+              }
+            }
+            
+            const argsDisplay = toolArgs ? `\n    Args: ${toolArgs}` : '';
+            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool: ${toolName}${argsDisplay}]\n    \`\`\`\n\n`;
             hasToolCalls = true;
           }
           // Fallback: check content string for tool call JSON objects
@@ -480,10 +518,8 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
 
             markdown += `${index + 1}. **${label}**:\n    \`\`\`\n${indentedContent}\n    \`\`\`\n\n`;
           } else if (hasToolCalls && typeof message.content === 'string' && message.content.trim() && message.role === 'tool') {
-            // For tool messages with content, show truncated content in code block
-            const truncatedContent = message.content.substring(0, 200);
-            const suffix = message.content.length > 200 ? '...' : '';
-            let toolContent = (truncatedContent + suffix).trim();
+            // For tool messages with content, show full content in code block
+            let toolContent = message.content.trim();
 
             // Convert literal \n to actual newlines and escape backticks
             toolContent = toolContent.replace(/\\n/g, '\n').replace(/```/g, '\\`\\`\\`');
@@ -547,17 +583,17 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
           if (event.type === 'message' && event.payload) {
             const sender = event.payload.sender || 'agent';
             const content = typeof event.payload.content === 'string'
-              ? event.payload.content.substring(0, 200)
-              : JSON.stringify(event.payload.content).substring(0, 200);
-            displayLine = `● [message] ${sender}: ${content}${content.length >= 200 ? '...' : ''}`;
+              ? event.payload.content
+              : JSON.stringify(event.payload.content);
+            displayLine = `● [message] ${sender}: ${content}`;
           } else if (event.type === 'sse' && event.payload) {
             const agentName = event.payload.agentName || 'agent';
             const sseType = event.payload.type || 'unknown';
             const content = event.payload.content
-              ? (typeof event.payload.content === 'string' ? event.payload.content.substring(0, 200) : '')
+              ? (typeof event.payload.content === 'string' ? event.payload.content : '')
               : '';
             displayLine = content
-              ? `● [sse] ${agentName}: ${sseType} ${content}${content.length >= 200 ? '...' : ''}`
+              ? `● [sse] ${agentName}: ${sseType} ${content}`
               : `● [sse] ${agentName}: ${sseType}`;
           } else if (event.type === 'world' && event.payload) {
             // World activity event (response-start, response-end, idle)
@@ -573,11 +609,11 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
             displayLine = `● [tool] ${agentName} ${toolType}`;
           } else if (event.type === 'system' && event.payload) {
             const content = typeof event.payload === 'string'
-              ? event.payload.substring(0, 200)
-              : JSON.stringify(event.payload).substring(0, 200);
-            displayLine = `● [system] ${content}${content.length >= 200 ? '...' : ''}`;
+              ? event.payload
+              : JSON.stringify(event.payload);
+            displayLine = `● [system] ${content}`;
           } else {
-            displayLine = `● [${event.type}]: ${JSON.stringify(event.payload).substring(0, 200)}`;
+            displayLine = `● [${event.type}]: ${JSON.stringify(event.payload)}`;
           }
 
           markdown += `${index + 1}. \`${timestamp.substring(11, 19)}\` ${displayLine}\n`;
