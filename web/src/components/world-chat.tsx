@@ -12,10 +12,11 @@
  * - Displays only the first/intended recipient agent, not all who received it
  * - Agent activity display for world events (response-start, tool-start)
  * - Tool call approval request/response rendering with inline action buttons
- * - Approval message filtering (hides raw approval JSON from chat display)
+ * - Tool result message filtering (hides non-approval tool results, shows approval via ToolCallResponseBox)
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-11-11: Updated shouldHideMessage() to filter non-approval tool results while preserving approval flow
  * - 2025-01-08: Added shouldHideMessage() to filter approval tool result messages from display
  * - 2025-11-05: Added tool call request/response box rendering for inline approval flow
  * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
@@ -138,19 +139,22 @@ export default function WorldChat(props: WorldChatProps) {
     : messages;  // No filters = use pre-deduplicated messages
 
   // Helper function to check if message should be hidden from display
-  // Filters out approval tool result messages (client-side display filtering)
+  // Filters out tool result messages that are NOT approval responses (client-side display filtering)
+  // Approval responses have isToolCallResponse=true and are displayed via ToolCallResponseBox
   const shouldHideMessage = (message: Message): boolean => {
-    // Check if this is an approval tool result message
+    // Don't hide if this is an approval response (has toolCallData for ToolCallResponseBox)
+    if (message.isToolCallResponse && message.toolCallData) {
+      return false;
+    }
+
+    // Check if this is a non-approval tool result message
     // These are identified by:
-    // 1. Type 'tool' with tool_call_id starting with 'approval_'
-    // 2. Type 'user'/'human' with JSON containing {__type: 'tool_result', tool_call_id: 'approval_*'}
-    
-    // Case 1: OpenAI format - type='tool' with tool_call_id
+    // 1. Type 'tool' without toolCallData (regular tool execution results)
+    // 2. Type 'user'/'human' with JSON containing {__type: 'tool_result'} without decision field
+
+    // Case 1: OpenAI format - type='tool' without toolCallData
     if (message.type === 'tool') {
-      const toolCallId = (message as any).tool_call_id || '';
-      if (toolCallId.startsWith('approval_')) {
-        return true;
-      }
+      return true;
     }
 
     // Case 2: Enhanced string protocol - JSON in message.text
@@ -158,12 +162,10 @@ export default function WorldChat(props: WorldChatProps) {
       const text = message.text.trim();
       // Strip @mention if present
       const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
-      
+
       if (jsonText.startsWith('{') && jsonText.endsWith('}')) {
         const parsed = JSON.parse(jsonText);
-        if (parsed.__type === 'tool_result' && 
-            typeof parsed.tool_call_id === 'string' && 
-            parsed.tool_call_id.startsWith('approval_')) {
+        if (parsed.__type === 'tool_result' && parsed.tool_call_id) {
           return true;
         }
       }
@@ -265,7 +267,7 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             filteredMessages.map((message, index) => {
-              // Skip messages that should be hidden (approval tool results)
+              // Skip messages that should be hidden (non-approval tool result messages)
               if (shouldHideMessage(message)) {
                 return null;
               }

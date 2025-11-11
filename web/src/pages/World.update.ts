@@ -126,10 +126,14 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
   // Determine message type based on role field from backend
   // role='user' → incoming message (type='user') - saved to agent memory
   // role='assistant' → agent reply (type='agent') - agent's own response
+  // role='tool' → tool result message (type='tool') - will be filtered by shouldHideMessage
   // sender='human'/'user' → human message (type='user')
   let messageType: string;
   if (sender === 'human' || sender === 'user') {
     messageType = 'user';
+  } else if (memoryItem.role === 'tool') {
+    // Tool result message
+    messageType = 'tool';
   } else if (memoryItem.role === 'user') {
     // Agent message saved to memory as incoming (not a reply)
     messageType = 'user';
@@ -897,15 +901,28 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
     }
   }
 
+  // Determine message type based on role field
+  let messageType: string;
+  if (messageData.role === 'tool') {
+    messageType = 'tool';
+  } else if (messageData.role === 'user' || senderName === 'human' || senderName === 'user') {
+    messageType = 'user';
+  } else if (messageData.role === 'assistant') {
+    messageType = 'agent';
+  } else {
+    messageType = messageData.type || 'message';
+  }
+
   const newMessage = {
     id: messageData.id || `msg-${Date.now() + Math.random()}`,
-    type: messageData.type || 'message',
+    type: messageType,
     sender: senderName,
     text: messageText,
     createdAt: messageData.createdAt || new Date().toISOString(),
     fromAgentId,
     messageId: messageData.messageId,
     replyToMessageId: messageData.replyToMessageId,
+    role: messageData.role, // Preserve role for filtering
     // Set tool call flags
     isToolCallRequest: !!toolCallRequest,
     isToolCallResponse: !!toolCallResponse,
