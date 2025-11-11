@@ -14,7 +14,9 @@
  * Implementation:
  * - AI commands executed via shell_cmd bypass LLM response flow
  * - Full tool result saved as 'tool' role message (standard flow)
- * - Command stdout extracted and saved as 'assistant' role message (bypassing LLM)
+ * - Assistant message content based on exit code:
+ *   * Exit code 0: Save only stdout (clean output)
+ *   * Exit code != 0: Save full formatted result (includes stderr, error details)
  * - Tool call marked complete and turn ends without LLM processing
  * - Normal shell commands follow standard tool execution and LLM continuation
  * 
@@ -280,12 +282,16 @@ export async function processAgentMessage(
           };
           agent.memory.push(toolResultMessage);
 
-          // Extract stdout and save as assistant message (bypassing LLM)
-          // This is what the user sees as the AI command's response
-          const stdoutContent = result.stdout || '(No output)';
+          // Save assistant message (bypassing LLM)
+          // Exit code 0: Save only stdout (clean output)
+          // Exit code != 0: Save full formatted result (includes stderr, error details)
+          const assistantContent = result.exitCode === 0
+            ? (result.stdout || '(No output)')
+            : formattedResult;
+
           const assistantReply: AgentMessage = {
             role: 'assistant',
-            content: stdoutContent,
+            content: assistantContent,
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
