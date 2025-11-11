@@ -308,34 +308,52 @@ export function clearExecutionHistory(): number {
 
 /**
  * Format command execution result for LLM consumption
- * Provides a human-readable summary of the execution
+ * Provides a human-readable summary of the execution with improved markdown formatting
  * 
  * @param result - Command execution result
- * @returns Formatted string suitable for LLM
+ * @returns Formatted markdown string suitable for LLM and display
  */
 export function formatResultForLLM(result: CommandExecutionResult): string {
   const parts: string[] = [];
 
-  parts.push(`Command: ${result.command} ${result.parameters.join(' ')}`);
-  parts.push(`Executed at: ${result.executedAt.toISOString()}`);
-  parts.push(`Duration: ${result.duration}ms`);
+  // Command info section
+  parts.push('### Command Execution');
+  parts.push('');
+  parts.push(`**Command:** \`${result.command} ${result.parameters.join(' ')}\``);
+  parts.push(`**Duration:** ${result.duration}ms`);
+  parts.push(`**Executed at:** ${result.executedAt.toISOString()}`);
 
   if (result.error) {
-    parts.push(`Error: ${result.error}`);
+    parts.push(`**Status:** ❌ Error`);
+    parts.push(`**Error:** ${result.error}`);
   } else {
-    parts.push(`Exit code: ${result.exitCode}`);
+    parts.push(`**Status:** ${result.exitCode === 0 ? '✅' : '⚠️'} Exit code ${result.exitCode}`);
   }
 
+  // Standard output section
   if (result.stdout) {
-    parts.push(`\nStandard Output:\n${result.stdout}`);
+    parts.push('');
+    parts.push('### Standard Output');
+    parts.push('');
+    parts.push('```');
+    parts.push(result.stdout);
+    parts.push('```');
   }
 
+  // Standard error section (only show if there's content)
   if (result.stderr) {
-    parts.push(`\nStandard Error:\n${result.stderr}`);
+    parts.push('');
+    parts.push('### Standard Error');
+    parts.push('');
+    parts.push('```');
+    parts.push(result.stderr);
+    parts.push('```');
   }
 
+  // No output case
   if (!result.stdout && !result.stderr && !result.error) {
-    parts.push(`\n(No output)`);
+    parts.push('');
+    parts.push('*(No output)*');
   }
 
   return parts.join('\n');
