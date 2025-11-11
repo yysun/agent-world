@@ -62,6 +62,7 @@
  * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
  *
  * Changes:
+ * - 2025-11-10: Fixed detectToolCallResponse to properly parse enhanced protocol format
  * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
  * - 2025-11-10: Added SSE streaming support to tool result submission for real-time agent responses
  * - 2025-11-06: Moved agentId into JSON structure (cleaner than @mention prefix)
@@ -264,33 +265,75 @@ const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null
 
 /**
  * Detect if message is a tool result (approval response)
+ * ONLY detects approval responses - regular tool execution results should NOT be detected
+ * Approval responses have tool_call_id starting with 'approval_' or contain enhanced protocol
+ * Parses enhanced protocol format: {__type: 'tool_result', content: '{"decision":"approve",...}'}
  * @param messageData - Message data from SSE event
- * @returns Tool call data if this is a tool response, null otherwise
+ * @returns Tool call data if this is an approval response, null otherwise (including regular tool results)
  */
 const detectToolCallResponse = (messageData: any): Message['toolCallData'] | null => {
   // Check if this is a tool result message
   if (messageData.role === 'tool' || messageData.type === 'tool') {
-    // Try to extract tool call info from the message
     const toolCallId = messageData.tool_call_id || 'unknown';
+    const rawContent = messageData.content || messageData.message || '';
 
-    // Parse content to determine approval decision
-    const content = messageData.content || messageData.message || '';
+    // Try to parse enhanced protocol format
+    try {
+      const outerParsed = JSON.parse(rawContent);
+
+      // Check for __type: 'tool_result' (enhanced protocol for approval responses)
+      if (outerParsed.__type === 'tool_result' && outerParsed.content) {
+        try {
+          const innerContent = JSON.parse(outerParsed.content);
+
+          // Only process if it has decision field (approval response indicator)
+          if (innerContent.decision) {
+            // Extract decision and scope from structured data
+            const approvalDecision: 'approve' | 'deny' = innerContent.decision === 'approve' ? 'approve' : 'deny';
+            const approvalScope: 'once' | 'session' | 'none' =
+              innerContent.scope === 'session' ? 'session' :
+                innerContent.scope === 'once' ? 'once' : 'none';
+
+            return {
+              toolCallId: outerParsed.tool_call_id || toolCallId,
+              toolName: innerContent.toolName || 'Tool Execution',
+              toolArgs: innerContent.toolArgs || {},
+              approvalDecision,
+              approvalScope
+            };
+          }
+          // No decision field - this is a regular tool result, not an approval response
+          return null;
+        } catch (innerError) {
+          console.warn('Failed to parse tool result inner content:', innerError);
+        }
+      }
+    } catch (outerError) {
+      // Not JSON or not enhanced protocol - check if it's an approval by tool_call_id prefix
+    }
+
+    // Only detect as approval response if tool_call_id starts with 'approval_'
+    if (!toolCallId.startsWith('approval_')) {
+      return null; // Regular tool execution result - not an approval response
+    }
+
+    // Legacy approval detection for messages with 'approval_' prefix
+    const content = rawContent.toLowerCase();
     let approvalDecision: 'approve' | 'deny' = 'deny';
     let approvalScope: 'once' | 'session' | 'none' = 'none';
 
-    // Look for approval indicators in content
-    if (content.toLowerCase().includes('approved') || content.toLowerCase().includes('success')) {
+    if (content.includes('approved') || content.includes('success')) {
       approvalDecision = 'approve';
-      if (content.toLowerCase().includes('session') || content.toLowerCase().includes('always')) {
+      if (content.includes('session') || content.includes('always')) {
         approvalScope = 'session';
-      } else if (content.toLowerCase().includes('once')) {
+      } else if (content.includes('once')) {
         approvalScope = 'once';
       }
     }
 
     return {
       toolCallId,
-      toolName: 'Tool Execution', // Generic name for responses
+      toolName: 'Tool Execution',
       toolArgs: {},
       approvalDecision,
       approvalScope
