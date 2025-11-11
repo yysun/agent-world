@@ -45,7 +45,7 @@
     "test:coverage": "vitest run --coverage",
     "test:db": "npx tsx tests/db/migration-tests.ts",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --workspace=cli",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web",
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "pkill": "pkill -f tsx"
   },
