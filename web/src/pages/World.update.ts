@@ -62,6 +62,8 @@
  * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
  *
  * Changes:
+ * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
+ * - 2025-11-11: Enhanced handleWorldActivity to support agent IDs without "agent:" prefix (e.g., "g1" instead of "agent:g1")
  * - 2025-11-10: Fixed detectToolCallResponse to properly parse enhanced protocol format
  * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
  * - 2025-11-10: Added SSE streaming support to tool result submission for real-time agent responses
@@ -663,68 +665,36 @@ function extractToolAgentId(eventData: any): string | undefined {
 }
 
 const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
-  return clearAllAgentActivities(handleStreamErrorBase(state, data));
+  // Stream errors should clear waiting state
+  return {
+    ...handleStreamErrorBase(state, data),
+    isWaiting: false,
+    agentActivities: {}
+  };
 };
 
 const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
-  const nextState = handleToolStartBase(state, data);
-  const agentId = extractToolAgentId(data);
-  const toolName = extractToolName(data);
-  const message = formatToolMessage(agentId, 'calling tool', toolName, '...');
-  return setAgentActivity(nextState, agentId, {
-    message,
-    phase: 'tool-start',
-    toolName
-  });
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolStartBase(state, data);
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
-  const nextState = handleToolProgressBase(state, data);
-  const agentId = extractToolAgentId(data);
-  const toolName = extractToolName(data);
-  const message = formatToolMessage(agentId, 'continuing tool', toolName, '...');
-  return setAgentActivity(nextState, agentId, {
-    message,
-    phase: 'tool-progress',
-    toolName
-  });
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolProgressBase(state, data);
 };
 
 const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
-  const nextState = handleToolResultBase(state, data);
-  const agentId = extractToolAgentId(data);
-  const toolName = extractToolName(data);
-
-  const duration = data?.toolExecution?.duration;
-  const resultSize = data?.toolExecution?.resultSize;
-  const parts: string[] = [];
-  if (typeof duration === 'number' && Number.isFinite(duration)) {
-    parts.push(`${Math.round(duration)}ms`);
-  }
-  if (typeof resultSize === 'number' && Number.isFinite(resultSize) && resultSize > 0) {
-    parts.push(`${resultSize} chars`);
-  }
-  const suffix = parts.length > 0 ? `(${parts.join(', ')})` : undefined;
-
-  const message = formatToolMessage(agentId, 'tool finished', toolName, suffix);
-  return setAgentActivity(nextState, agentId, {
-    message,
-    phase: 'tool-result',
-    toolName
-  });
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolResultBase(state, data);
 };
 
 const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
-  const nextState = handleToolErrorBase(state, data);
-  const agentId = extractToolAgentId(data);
-  const toolName = extractToolName(data) ?? 'tool';
-  const toolError = data?.toolExecution?.error ?? 'failed';
-  const message = `${normalizeAgentId(agentId)} tool failed - ${toolName}: ${toolError}`;
-  return setAgentActivity(nextState, agentId, {
-    message,
-    phase: 'tool-error',
-    toolName
-  });
+  // Tool events are informational - don't control spinner
+  // Spinner is controlled by world events (pending count)
+  return handleToolErrorBase(state, data);
 };
 
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
@@ -737,82 +707,29 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   const pending = typeof activity.pendingOperations === 'number' ? activity.pendingOperations : 0;
   const source = typeof activity.source === 'string' ? activity.source : '';
 
-  // Create log-style message for significant world activity events
-  let shouldCreateMessage = false;
-  let activityMessage = '';
-  let category = 'world';
-  let logLevel: 'info' | 'debug' = 'debug';
-
+  // Log world activity events for debugging
   if (activity.type === 'response-start') {
-    if (source.startsWith('agent:')) {
-      const agentId = source.slice('agent:'.length);
-      const agent = state.world?.agents.find(a => a.id === agentId);
-      activityMessage = `${agent?.name || agentId} started processing`;
-      category = 'activity';
-      logLevel = 'info';
-      shouldCreateMessage = true;
-    } else if (source) {
-      activityMessage = `${source} started`;
-      category = 'activity';
-      logLevel = 'info';
-      shouldCreateMessage = true;
-    }
+    console.log(`[World] Processing started | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
   } else if (activity.type === 'idle' && pending === 0) {
-    activityMessage = 'All processing complete';
-    category = 'activity';
-    logLevel = 'info';
-    shouldCreateMessage = true;
-  } else if (activity.type === 'response-end' && pending > 0) {
-    // Show ongoing activity when one source finishes but others are still active
-    if (activity.activeSources && activity.activeSources.length > 0) {
-      const activeList = activity.activeSources
-        .map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s)
-        .join(', ');
-      activityMessage = `Active: ${activeList} (${pending} pending)`;
-      category = 'activity';
-      logLevel = 'debug';
-      shouldCreateMessage = true;
-    }
+    console.log(`[World] All processing complete | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
+  } else if (activity.type === 'response-end') {
+    console.log(`[World] Processing ended | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
   }
 
-  let newState = state;
-  if (shouldCreateMessage) {
-    // Log world activity event once when received (not on every render)
-    // Format: [World] message | pending: N | activityId: N | source: agent:id
-    const sourceName = source.startsWith('agent:') ? source.slice('agent:'.length) : source;
-    console.log(`[World] ${activityMessage} | pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`);
+  // Control spinner based on pending operations count (simple and reliable)
+  // pending > 0: Show spinner
+  // pending === 0: Hide spinner
+  const shouldWait = pending > 0;
 
-    // Note: We used to add world events to messages array, but this caused duplicate logs
-    // on every component re-render. Now we just log once here and don't add to messages.
-    // The UI doesn't display world events anyway (they return null in the view).
-    newState = state;
+  // Only update state if isWaiting needs to change
+  if (state.isWaiting !== shouldWait) {
+    return {
+      ...state,
+      isWaiting: shouldWait
+    };
   }
 
-  // Update agent activity status
-  if (source.startsWith('agent:')) {
-    const agentId = source.slice('agent:'.length);
-    if (activity.type === 'response-start') {
-      return setAgentActivity(newState, agentId, {
-        message: formatThinkingMessage(agentId),
-        phase: 'thinking',
-        activityId
-      });
-    }
-
-    if (activity.type === 'idle') {
-      return clearAgentActivity(newState, agentId, pending);
-    }
-  } else {
-    if (activity.type === 'response-start') {
-      return newState.isWaiting ? newState : { ...newState, isWaiting: true };
-    }
-
-    if (activity.type === 'idle' && pending === 0) {
-      return clearAllAgentActivities(newState, pending);
-    }
-  }
-
-  return newState;
+  return state;
 };
 
 // World initialization with core auto-restore
@@ -1158,7 +1075,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         sender: 'HUMAN'
       });
 
-      // Note: isWaiting will be set to false by handleStreamEnd when the stream completes or by handleStreamError/handleError on errors
+      // Note: isWaiting is controlled by world events (pending count), not send/stream events
       return InputDomain.createSentState(newState);
     } catch (error: any) {
       return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');

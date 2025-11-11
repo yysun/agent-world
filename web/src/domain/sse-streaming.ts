@@ -4,12 +4,15 @@
  * Features:
  * - Stream lifecycle state management (start, chunk, end, error)
  * - Active agent tracking during streaming
- * - Waiting state management
  * - Error handling
+ * 
+ * Note: isWaiting (spinner) is controlled by world events (pending count),
+ * not by stream events, to avoid race conditions.
  * 
  * Pure functions for state transitions.
  * 
  * Created: 2025-10-26 - Phase 2: Domain Module Extraction
+ * Updated: 2025-11-11 - Removed isWaiting control from stream events
  */
 
 import type { WorldComponentState } from '../types';
@@ -27,25 +30,24 @@ export interface StreamingState {
 
 /**
  * Create state for stream start
- * Sets active agent and marks as waiting
+ * Sets active agent (isWaiting controlled by world events)
  */
 export function createStreamStartState(
   state: WorldComponentState,
   agentName: string
 ): WorldComponentState {
   const activeAgent = state.world?.agents.find(a => a.name === agentName);
-  
+
   return {
     ...state,
     activeAgent: activeAgent || null,
-    isWaiting: true,
     needScroll: true
   };
 }
 
 /**
  * Create state for stream chunk received
- * Maintains waiting state and scroll flag
+ * Maintains scroll flag
  */
 export function createStreamChunkState(
   state: WorldComponentState
@@ -58,7 +60,7 @@ export function createStreamChunkState(
 
 /**
  * Create state for stream end
- * Clears active agent and waiting flag
+ * Clears active agent (isWaiting controlled by world events)
  */
 export function createStreamEndState(
   state: WorldComponentState
@@ -66,7 +68,6 @@ export function createStreamEndState(
   return {
     ...state,
     activeAgent: null,
-    isWaiting: false,
     needScroll: true
   };
 }

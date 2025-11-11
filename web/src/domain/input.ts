@@ -6,9 +6,13 @@
  * - Send message flow (validation, optimistic updates)
  * - Keyboard event handling (Enter key)
  * 
+ * Note: isWaiting (spinner) is controlled by world events (pending count),
+ * not by send state, to ensure accurate reflection of backend processing.
+ * 
  * Pure functions for testability and reusability.
  * 
  * Created: 2025-10-26 - Phase 2: Domain Module Extraction
+ * Updated: 2025-11-11 - Removed isWaiting control from send flow
  */
 
 import type { WorldComponentState } from '../types';
@@ -72,6 +76,7 @@ export function validateAndPrepareMessage(
 
 /**
  * Create optimistic state update for sending message
+ * Note: isWaiting (spinner) is controlled by world events, not send state
  */
 export function createSendingState(
   state: WorldComponentState,
@@ -82,7 +87,6 @@ export function createSendingState(
     messages: [...(state.messages || []), userMessage],
     userInput: '',
     isSending: true,
-    isWaiting: true,
     needScroll: true
   };
 }
@@ -101,6 +105,7 @@ export function createSentState(
 
 /**
  * Create error state when send fails
+ * Note: isWaiting cleared on error for safety
  */
 export function createSendErrorState(
   state: WorldComponentState,
