@@ -50,6 +50,8 @@ import {
 } from './mention-logic.js';
 import { publishMessage, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
+import { isAICommand } from '../ai-commands.js';
+import { executeShellCommand, formatResultForLLM } from '../shell-cmd-tool.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
@@ -228,6 +230,69 @@ export async function processAgentMessage(
 
         // Parse tool arguments
         const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+
+        // Handle special AI commands - bypass LLM and save result directly
+        if (toolCall.function.name === 'shell_cmd' && isAICommand(toolArgs.command)) {
+          loggerAgent.debug('AI command detected, bypassing LLM call', {
+            agentId: agent.id,
+            command: toolArgs.command
+          });
+
+          const result = await executeShellCommand(
+            toolArgs.command,
+            toolArgs.parameters || [],
+            toolArgs.directory || './'
+          );
+
+          const formattedResult = formatResultForLLM(result);
+
+          // Create a new assistant message with the result
+          const assistantReply: AgentMessage = {
+            role: 'assistant',
+            content: formattedResult,
+            sender: agent.id,
+            createdAt: new Date(),
+            chatId: world.currentChatId || null,
+            messageId: generateId(),
+            replyToMessageId: messageId,
+            agentId: agent.id
+          };
+          agent.memory.push(assistantReply);
+
+          // Mark original tool call as complete
+          const toolCallMsg = agent.memory.find(
+            m => m.role === 'assistant' && m.tool_calls?.some(tc => tc.id === toolCall.id)
+          );
+          if (toolCallMsg && toolCallMsg.toolCallStatus) {
+            toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: formattedResult };
+          }
+
+          // Save agent state
+          try {
+            const storage = await getStorageWrappers();
+            await storage.saveAgent(world.id, agent);
+            loggerAgent.debug('Saved agent memory with AI command result', { agentId: agent.id });
+          } catch (error) {
+            loggerAgent.error('Failed to save agent memory after AI command', {
+              agentId: agent.id,
+              error: error instanceof Error ? error.message : error
+            });
+          }
+
+          // Publish the new message
+          const aiCommandMessageEvent: WorldMessageEvent = {
+            content: assistantReply.content || '',
+            sender: agent.id,
+            timestamp: assistantReply.createdAt || new Date(),
+            messageId: assistantReply.messageId!,
+            chatId: assistantReply.chatId,
+            replyToMessageId: assistantReply.replyToMessageId,
+          };
+          (aiCommandMessageEvent as any).role = 'assistant';
+          world.eventEmitter.emit('message', aiCommandMessageEvent);
+
+          return; // End turn
+        }
 
         // Execute tool with context (approval checking happens inside wrapToolWithValidation)
         const toolContext = {
