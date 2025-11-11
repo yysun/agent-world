@@ -62,6 +62,7 @@
  * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
  *
  * Changes:
+ * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
  * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
  * - 2025-11-11: Enhanced handleWorldActivity to support agent IDs without "agent:" prefix (e.g., "g1" instead of "agent:g1")
  * - 2025-11-10: Fixed detectToolCallResponse to properly parse enhanced protocol format
@@ -203,11 +204,14 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     fromAgentId: displayFromAgentId,
     ownerAgentId: toKebabCase(agentName), // Track which agent's memory this came from
     role: memoryItem.role, // Preserve role for sorting
+    // Pass through tool_calls and tool_call_id for frontend formatting
+    tool_calls: memoryData.tool_calls || memoryData.toolCalls,
+    tool_call_id: memoryData.tool_call_id || memoryData.toolCallId,
     // Set tool call flags
     isToolCallRequest: !!toolCallRequest,
     isToolCallResponse: !!toolCallResponse,
     toolCallData: toolCallRequest || toolCallResponse
-  };
+  } as Message;
 };
 
 /**
@@ -711,19 +715,19 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   const pending = typeof activity.pendingOperations === 'number' ? activity.pendingOperations : 0;
   const source = typeof activity.source === 'string' ? activity.source : '';
 
-  // Log world activity events for debugging
-  if (activity.type === 'response-start') {
-    console.log(`[World] Processing started | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
-  } else if (activity.type === 'idle' && pending === 0) {
-    console.log(`[World] All processing complete | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
-  } else if (activity.type === 'response-end') {
-    console.log(`[World] Processing ended | pending: ${pending} | activityId: ${activityId} | source: ${source}`);
-  }
-
   // Control spinner based on pending operations count (simple and reliable)
   // pending > 0: Show spinner
   // pending === 0: Hide spinner
   const shouldWait = pending > 0;
+
+  // Log world activity events for debugging
+  if (activity.type === 'response-start') {
+    console.log(`[World] Processing started | pending: ${pending} | activityId: ${activityId} | source: ${source} | isWaiting: ${state.isWaiting} → ${shouldWait}`);
+  } else if (activity.type === 'idle' && pending === 0) {
+    console.log(`[World] All processing complete | pending: ${pending} | activityId: ${activityId} | source: ${source} | isWaiting: ${state.isWaiting} → ${shouldWait}`);
+  } else if (activity.type === 'response-end') {
+    console.log(`[World] Processing ended | pending: ${pending} | activityId: ${activityId} | source: ${source} | isWaiting: ${state.isWaiting} → ${shouldWait}`);
+  }
 
   // Only update state if isWaiting needs to change
   if (state.isWaiting !== shouldWait) {

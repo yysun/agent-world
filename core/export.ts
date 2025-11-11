@@ -30,6 +30,7 @@
  * - Uses getMemory() for efficient message retrieval
  * - O(n) messageId-based deduplication (replaces O(n²) content-based approach)
  * - Tool call detection and summarization
+ * - Enhanced tool call request display with tool name and argument details
  * - Enhanced tool result display with tool name and argument details
  *
  * Message Format Examples:
@@ -41,16 +42,17 @@
  *
  * Agent: o1 (incoming from HUMAN)
  * Time: 2025-10-25T21:24:57.105Z
- * [2 tool calls: function1, function2]
+ * [Tool: shell_cmd (command: ls -la, cwd: /home/user)]
  *
  * Agent: o1 (reply to human)
  * Time: 2025-10-25T21:24:57.105Z
- * [2 tool calls: function1, function2]
+ * [2 tool calls:
+ *  1. read_file (filePath: /path/to/file.txt, limit: 100)
+ *  2. grep_search (query: pattern, isRegexp: true, ...)]
  *
  * Agent: a1 (tool result)
  * Time: 2025-10-25T21:24:58.395Z
- * [Tool: run_command
- *  Args: command: ls -la, cwd: /home/user]
+ * [Tool: run_command (command: ls -la, cwd: /home/user)]
  *
  * Agent: a1 (incoming from o1) [in-memory, no reply]
  * Time: 2025-10-25T21:24:58.395Z
@@ -410,21 +412,39 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
 
           // Check for tool_calls field first (proper AI SDK format)
           if (message.tool_calls && message.tool_calls.length > 0) {
-            const toolNames = message.tool_calls
-              .map(tc => tc.function?.name || '')
-              .filter(name => name !== '');
+            // Format tool calls with details
+            const toolCallDetails = message.tool_calls.map(tc => {
+              const toolName = tc.function?.name || 'unknown';
+              let toolArgs = '';
+              try {
+                const args = JSON.parse(tc.function?.arguments || '{}');
+                const argKeys = Object.keys(args);
+                if (argKeys.length > 0) {
+                  // Show first 2-3 arguments with truncated values
+                  const argSummary = argKeys.slice(0, 3).map(key => {
+                    const val = args[key];
+                    const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                    return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
+                  }).join(', ');
+                  toolArgs = argKeys.length > 3 ? ` (${argSummary}, ...)` : ` (${argSummary})`;
+                }
+              } catch {
+                toolArgs = '';
+              }
+              return `${toolName}${toolArgs}`;
+            });
 
-            if (toolNames.length > 0) {
-              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]\n    \`\`\`\n\n`;
+            if (message.tool_calls.length === 1) {
+              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool: ${toolCallDetails[0]}]\n    \`\`\`\n\n`;
             } else {
-              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${message.tool_calls.length} tool call${message.tool_calls.length > 1 ? 's' : ''}]\n    \`\`\`\n\n`;
+              markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [${message.tool_calls.length} tool calls:\n     ${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n     ')}]\n    \`\`\`\n\n`;
             }
             hasToolCalls = true;
           }
           // Handle tool role messages (tool results)
           else if (message.role === 'tool') {
             const toolCallId = (message as any).tool_call_id || 'unknown';
-            
+
             // Find the tool call details from previous assistant messages
             let toolName = 'unknown';
             let toolArgs = '';
@@ -444,7 +464,7 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
                         const strVal = typeof val === 'string' ? val : JSON.stringify(val);
                         return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
                       }).join(', ');
-                      toolArgs = argKeys.length > 3 ? `${argSummary}, ...` : argSummary;
+                      toolArgs = argKeys.length > 3 ? ` (${argSummary}, ...)` : ` (${argSummary})`;
                     }
                   } catch {
                     toolArgs = '';
@@ -453,9 +473,8 @@ export async function exportWorldToMarkdown(worldName: string): Promise<string> 
                 }
               }
             }
-            
-            const argsDisplay = toolArgs ? `\n    Args: ${toolArgs}` : '';
-            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool: ${toolName}${argsDisplay}]\n    \`\`\`\n\n`;
+
+            markdown += `${index + 1}. **${label}**:\n    \`\`\`\n    [Tool: ${toolName}${toolArgs}]\n    \`\`\`\n\n`;
             hasToolCalls = true;
           }
           // Fallback: check content string for tool call JSON objects

@@ -36,7 +36,7 @@ function formatToolResult(
               const strVal = typeof val === 'string' ? val : JSON.stringify(val);
               return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
             }).join(', ');
-            toolArgs = argKeys.length > 3 ? `${argSummary}, ...` : argSummary;
+            toolArgs = argKeys.length > 3 ? ` (${argSummary}, ...)` : ` (${argSummary})`;
           }
         } catch {
           toolArgs = '';
@@ -46,8 +46,7 @@ function formatToolResult(
     }
   }
 
-  const argsDisplay = toolArgs ? `\n    Args: ${toolArgs}` : '';
-  return `[Tool: ${toolName}${argsDisplay}]`;
+  return `[Tool: ${toolName}${toolArgs}]`;
 }
 
 async function testToolResultDisplay() {
@@ -148,17 +147,16 @@ async function testToolResultDisplay() {
 
   // Test 1: run_command with simple arguments
   console.log('Test 1: run_command tool result');
-  console.log('Expected: [Tool: run_command');
-  console.log('          Args: command: ls -la, cwd: /home/user/project, ...]');
+  console.log('Expected: [Tool: run_command (command: ls -la, cwd: /home/user/project, ...)]');
   console.log('Actual:  ', results[0]);
   const test1Pass = results[0].includes('[Tool: run_command') &&
-    results[0].includes('Args: command: ls -la');
+    results[0].includes('command: ls -la') &&
+    results[0].includes('cwd: /home/user/project');
   console.log(`Result: ${test1Pass ? '✅ PASS' : '❌ FAIL'}\n`);
 
   // Test 2: read_file with long path (should truncate)
   console.log('Test 2: read_file with long path (truncation test)');
-  console.log('Expected: [Tool: read_file');
-  console.log('          Args: filePath: /very/long/path/to/some/file/wit... (truncated)');
+  console.log('Expected: [Tool: read_file (filePath: /very/long/path/to/some/file/wit..., offset: 0, limit: 100)]');
   console.log('Actual:  ', results[1]);
   const test2Pass = results[1].includes('[Tool: read_file') &&
     results[1].includes('...');
@@ -166,12 +164,11 @@ async function testToolResultDisplay() {
 
   // Test 3: grep_search with multiple args and "..." suffix
   console.log('Test 3: grep_search with 4+ arguments (should show "..." suffix)');
-  console.log('Expected: [Tool: grep_search');
-  console.log('          Args: query: ..., isRegexp: ..., includePattern: ..., ...]');
+  console.log('Expected: [Tool: grep_search (query: function.*export, isRegexp: true, includePattern: **/*.ts, ...)]');
   console.log('Actual:  ', results[2]);
   const test3Pass = results[2].includes('[Tool: grep_search') &&
-    results[2].includes('Args:') &&
-    results[2].includes(', ...');
+    results[2].includes('(') &&
+    results[2].includes(', ...)');
   console.log(`Result: ${test3Pass ? '✅ PASS' : '❌ FAIL'}\n`);
 
   // Overall result

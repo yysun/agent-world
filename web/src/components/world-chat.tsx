@@ -13,9 +13,15 @@
  * - Agent activity display for world events (response-start, tool-start)
  * - Tool call approval request/response rendering with inline action buttons
  * - Tool result message filtering (hides non-approval tool results, shows approval via ToolCallResponseBox)
+ * - Detailed tool call display: "Calling tool: shell_cmd (command: x, params: y)" format
+ * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2025-11-11: Fixed tool call display to prioritize tool_calls data over pre-saved text (upgrades old messages)
+ * - 2025-11-11: Updated tool call/result display to show full argument details without truncation
+ * - 2025-11-11: Enhanced tool call request preview to show tool name and arguments
+ * - 2025-11-11: Enhanced tool result preview to show tool name and arguments instead of just tool_call_id
  * - 2025-11-11: Updated shouldHideMessage() to filter non-approval tool results while preserving approval flow
  * - 2025-01-08: Added shouldHideMessage() to filter approval tool result messages from display
  * - 2025-11-05: Added tool call request/response box rendering for inline approval flow
@@ -178,26 +184,46 @@ export default function WorldChat(props: WorldChatProps) {
 
   // Helper function to detect and format tool calls (3-tier detection matching export logic)
   const formatMessageText = (message: Message): string => {
-    const text = message.text;
-
-    // Tier 1: Check for tool_calls array (AI SDK format)
+    // Tier 1: Check for tool_calls array FIRST (prioritize regenerating from data over using pre-saved text)
+    // This allows old messages with simple "Calling tool: name" to be upgraded to detailed format
     if ((message as any).tool_calls && (message as any).tool_calls.length > 0) {
       const toolCalls = (message as any).tool_calls;
-      const toolNames = toolCalls
-        .map((tc: any) => tc.function?.name || '')
-        .filter((name: string) => name !== '');
 
-      if (toolNames.length > 0) {
-        return `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]`;
+      // Format tool calls with details
+      const toolCallDetails = toolCalls.map((tc: any) => {
+        const toolName = tc.function?.name || 'unknown';
+        let toolArgs = '';
+        try {
+          const args = JSON.parse(tc.function?.arguments || '{}');
+          const argKeys = Object.keys(args);
+          if (argKeys.length > 0) {
+            // Show all arguments without truncation for better visibility
+            const argSummary = argKeys.map((key: string) => {
+              const val = args[key];
+              const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+              return `${key}: ${strVal}`;
+            }).join(', ');
+            toolArgs = ` (${argSummary})`;
+          }
+        } catch {
+          toolArgs = '';
+        }
+        return `${toolName}${toolArgs}`;
+      });
+
+      if (toolCalls.length === 1) {
+        return `Calling tool: ${toolCallDetails[0]}`;
       } else {
-        return `[${toolCalls.length} tool call${toolCalls.length > 1 ? 's' : ''}]`;
+        return `Calling tools:\n${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n')}`;
       }
     }
+
+    const text = message.text;
 
     // Tier 2: Check if this is a tool result message
     if (message.type === 'tool') {
       const toolCallId = (message as any).tool_call_id || 'unknown';
-      
+
       // Find the tool call details from previous assistant messages
       let toolName = 'unknown';
       let toolArgs = '';
@@ -213,13 +239,13 @@ export default function WorldChat(props: WorldChatProps) {
                 const args = JSON.parse(toolCall.function?.arguments || '{}');
                 const argKeys = Object.keys(args);
                 if (argKeys.length > 0) {
-                  // Show first 2-3 arguments with truncated values
-                  const argSummary = argKeys.slice(0, 3).map((key: string) => {
+                  // Show all arguments without truncation
+                  const argSummary = argKeys.map((key: string) => {
                     const val = args[key];
                     const strVal = typeof val === 'string' ? val : JSON.stringify(val);
-                    return `${key}: ${strVal.length > 50 ? strVal.substring(0, 47) + '...' : strVal}`;
+                    return `${key}: ${strVal}`;
                   }).join(', ');
-                  toolArgs = argKeys.length > 3 ? ` (${argSummary}, ...)` : ` (${argSummary})`;
+                  toolArgs = ` (${argSummary})`;
                 }
               } catch {
                 toolArgs = '';
@@ -229,8 +255,8 @@ export default function WorldChat(props: WorldChatProps) {
           }
         }
       }
-      
-      return `[Tool: ${toolName}${toolArgs}]`;
+
+      return `Tool result: ${toolName}${toolArgs}`;
     }
 
     // Tier 3: Fallback - check if message content is all JSON tool call objects
