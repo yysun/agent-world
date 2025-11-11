@@ -154,9 +154,20 @@ export async function processAgentMessage(
 
       // Save assistant message with tool_calls to agent memory FIRST
       // This ensures the tool call is in memory before execution/approval
+
+      // Format meaningful content for tool calls if LLM didn't provide text
+      let messageContent = llmResponse.content || '';
+      if (!messageContent && llmResponse.tool_calls && llmResponse.tool_calls.length > 0) {
+        const toolNames = llmResponse.tool_calls.map(tc => tc.function.name).join(', ');
+        const toolCount = llmResponse.tool_calls.length;
+        messageContent = toolCount === 1
+          ? `Calling tool: ${toolNames}`
+          : `Calling ${toolCount} tools: ${toolNames}`;
+      }
+
       const assistantMessage: AgentMessage = {
         role: 'assistant',
-        content: llmResponse.content || '',
+        content: messageContent,
         sender: agent.id,
         createdAt: new Date(),
         chatId: world.currentChatId || null,
