@@ -65,8 +65,8 @@ describe('shell_cmd integration with worlds', () => {
     });
 
     // Verify result format
-    expect(result).toContain('Command: echo Hello from test');
-    expect(result).toContain('Exit code: 0');
+    expect(result).toContain('**Command:** `echo "Hello from test"`');
+    expect(result).toContain('Exit code 0');
     expect(result).toContain('Hello from test');
   });
 
@@ -103,7 +103,7 @@ describe('shell_cmd integration with worlds', () => {
     });
 
     // Verify error is captured in result
-    expect(result).toContain('Command: ls /this-directory-does-not-exist-xyz');
+    expect(result).toContain('**Command:** `ls /this-directory-does-not-exist-xyz`');
     expect(result).toContain('Error:');
     expect(result.toLowerCase()).toContain('no such file');
   });

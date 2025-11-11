@@ -8,7 +8,8 @@
  * - Return results to LLM for further processing (except AI commands)
  * - AI command special handling (gemini, copilot, codex):
  *   * Full tool result saved as 'tool' role message
- *   * Command stdout saved as 'assistant' role message (bypassing LLM)
+ *   * Exit code 0: Only stdout saved as 'assistant' message (clean output)
+ *   * Exit code != 0: Full formatted result saved as 'assistant' message (includes stderr, errors)
  *   * No additional LLM call to process the output
  * - Error handling and exception tracking
  * - Long-running command support with 10-minute default timeout
@@ -32,10 +33,17 @@
  * - Features explicit approval metadata with structured configuration
  *
  * Recent Changes:
+ * - 2025-11-11: CRITICAL FIX - Quote parameters for shell execution
+ *   * Parameters with spaces/tabs/newlines now properly quoted before spawn
+ *   * Prevents shell from splitting multi-word parameters
+ *   * Fixes "unrecognized subcommand" errors with commands like "codex exec 'review the last commit'"
+ *   * Applied to both execution AND display formatting
  * - 2025-11-11: AI commands (gemini, copilot, codex) bypass LLM:
  *   * Save full tool result as 'tool' message
- *   * Extract stdout and save as 'assistant' message
+ *   * Exit code 0: Save only stdout as 'assistant' message (clean output)
+ *   * Exit code != 0: Save full formatted result as 'assistant' message (with errors)
  *   * Skip LLM processing entirely
+ *   * Improved markdown formatting with headers, code blocks, and status icons
  * - 2025-11-10: Fixed shell execution - enabled shell: true to support PATH resolution and installed commands
  * - 2025-11-04: Added explicit approval flag with structured metadata (required, message, options)
  * - Replaced heuristic-based approval detection with explicit configuration
@@ -142,8 +150,17 @@ export async function executeShellCommand(
     };
 
     try {
+      // Quote parameters that contain spaces, tabs, or newlines for shell execution
+      const quotedParams = parameters.map(param => {
+        if (param.includes(' ') || param.includes('\t') || param.includes('\n') || param.includes('"')) {
+          // Escape existing quotes and wrap in quotes
+          return `"${param.replace(/"/g, '\\"')}"`;
+        }
+        return param;
+      });
+
       // Spawn the child process
-      const childProcess = spawn(command, parameters, {
+      const childProcess = spawn(command, quotedParams, {
         cwd: resolvedDirectory,
         shell: true, // Use shell to enable PATH resolution and shell features
         timeout: timeout
@@ -319,7 +336,14 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
   // Command info section
   parts.push('### Command Execution');
   parts.push('');
-  parts.push(`**Command:** \`${result.command} ${result.parameters.join(' ')}\``);
+  // Quote parameters that contain spaces or special characters
+  const quotedParams = result.parameters.map(param => {
+    if (param.includes(' ') || param.includes('\t') || param.includes('\n')) {
+      return `"${param.replace(/"/g, '\\"')}"`;
+    }
+    return param;
+  });
+  parts.push(`**Command:** \`${result.command} ${quotedParams.join(' ')}\``);
   parts.push(`**Duration:** ${result.duration}ms`);
   parts.push(`**Executed at:** ${result.executedAt.toISOString()}`);
 
