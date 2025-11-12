@@ -27,7 +27,12 @@
       "@/*": [
         "./src/*"
       ]
-    }
+    },
+    /* Isolate from parent workspace */
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
+    "types": []
   },
   "include": [
     "src"
