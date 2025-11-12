@@ -323,10 +323,14 @@ export default function WorldChat(props: WorldChatProps) {
         {/* Conversation Area */}
         <div
           className="conversation-area"
-          ref={el => {
-            if (el) {
+          ref={(el, state) => {
+            if (el && needScroll) {
               requestAnimationFrame(() => {
                 el.scrollTop = el.scrollHeight;
+                // Reset needScroll directly in state to prevent unwanted scrolls
+                if (state) {
+                  state.needScroll = false;
+                }
               });
             }
           }}

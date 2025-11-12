@@ -43,7 +43,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     selectedWorldForEdit: null,
     chatToDelete: null,
     connectionStatus: 'disconnected',
-    needScroll: false,
+    needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
     editingMessageId: null,
     editingText: '',

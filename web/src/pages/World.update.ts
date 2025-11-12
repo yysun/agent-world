@@ -585,7 +585,8 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   if (state.isWaiting !== shouldWait) {
     return {
       ...state,
-      isWaiting: shouldWait
+      isWaiting: shouldWait,
+      needScroll: true  // Scroll when processing state changes (new content incoming)
     };
   }
   // No return = no re-render
@@ -986,8 +987,10 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // MESSAGE EDITING
   // ========================================
 
-  'start-edit-message': (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState =>
-    EditingDomain.startEditMessage(state, payload.messageId, payload.text),
+  'start-edit-message': (state: WorldComponentState, payload: WorldEventPayload<'start-edit-message'>): WorldComponentState => ({
+    ...EditingDomain.startEditMessage(state, payload.messageId, payload.text),
+    needScroll: false  // Don't scroll when starting edit
+  }),
 
   'cancel-edit-message': (state: WorldComponentState): WorldComponentState =>
     EditingDomain.cancelEditMessage(state),
@@ -1145,7 +1148,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       editingMessageId: null,
       editingText: '',
       isSending: true,
-      needScroll: true,
+      needScroll: false, // Don't scroll when editing - user is likely viewing that area
       lastUserMessageText: editedText
     };
 
