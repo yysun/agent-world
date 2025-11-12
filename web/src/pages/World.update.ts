@@ -556,14 +556,11 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
   return handleToolErrorBase(state, data);
 };
 
-const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
-  // Log every world activity event received
-
-
+const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState | void => {
   // Check for valid event types
   if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {
-    console.log('[World] Invalid event type, returning state unchanged');
-    return state;
+    console.log('[World] Invalid event type, no state change');
+    return;
   }
 
   const activityId = typeof activity.activityId === 'number' ? activity.activityId : null;
@@ -584,14 +581,14 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
     console.log(`[World] Processing ended | pending: ${pending} | activityId: ${activityId} | source: ${source} | isWaiting: ${state.isWaiting} → ${shouldWait}`);
   }
 
-  // Only update state if isWaiting needs to change
+  // Only update and return state if isWaiting needs to change
   if (state.isWaiting !== shouldWait) {
     return {
       ...state,
       isWaiting: shouldWait
     };
   }
-  return state;
+  // No return = no re-render
 };
 
 // World initialization with core auto-restore
@@ -965,12 +962,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStart': handleToolStart,
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
-  'handleToolResultSubmitted': (state: WorldComponentState, data: any): WorldComponentState => {
+  'handleToolResultSubmitted': (state: WorldComponentState, data: any) => {
     // Tool result submitted confirmation - log for debugging
     console.log('Tool result submitted successfully:', data);
-    return state;
   },
-  'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState => {
+  'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
