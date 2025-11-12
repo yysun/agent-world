@@ -9,6 +9,9 @@
  * - Real-time chat interface with ChatThread
  * - Settings editor for world/agents
  * - REST API + SSE for real-time updates
+ * - Auto-load default chat (currentChatId)
+ * - Load messages from agent memory
+ * - Switch chats by clicking sidebar chat list
  * - shadcn UI components for consistent design
  * 
  * Implementation:
@@ -19,6 +22,9 @@
  * - shadcn Card, Button, Badge, Tabs components
  * 
  * Changes:
+ * - 2025-11-12: Added chat switching - clicking chat in sidebar loads messages and sets current chat
+ * - 2025-11-12: Fixed default chat loading - auto-select currentChatId from world
+ * - 2025-11-12: Fixed agent messages display - load from agent memory via useChatData
  * - 2025-11-12: Removed WebSocket dependency, now using REST API + SSE
  * - 2025-11-04: Redesigned with chat list sidebar and world/agents in top right
  * - 2025-11-04: Redesigned with shadcn UI components and improved layout
@@ -32,6 +38,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useWorldData } from '@/hooks/useWorldData';
 import { useAgentData } from '@/hooks/useAgentData';
 import { useChatData } from '@/hooks/useChatData';
+import * as api from '@/lib/api';
 import { ChatThread } from '@/components/chat';
 import { messagesToChatMessages } from '@/components/chat/utils';
 import MarkdownEditor from '@/components/MarkdownEditor.tsx';
@@ -47,9 +54,9 @@ export default function WorldPage() {
 
   const { getWorld } = useWorldData();
   const { agents, createAgent, updateAgent, refetch: refetchAgents } = useAgentData(worldId || '');
-  const { chats, messages, sendMessage, createChat, subscribeToChat } = useChatData(worldId || '', undefined);
+  const { chats, messages, sendMessage, createChat, deleteChat, subscribeToChat, loadChatMessages } = useChatData(worldId || '', undefined);
 
-  const [world, setWorld] = useState<{ id: string; name: string; description?: string } | null>(null);
+  const [world, setWorld] = useState<{ id: string; name: string; description?: string; currentChatId?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -65,15 +72,30 @@ export default function WorldPage() {
   // Settings editing
   const [editingSaving, setEditingSaving] = useState(false);
 
-  // Load world on mount
+  // Load world on mount and auto-select default chat
   useEffect(() => {
     if (!worldId) return;
 
     const loadWorld = async () => {
+      console.log('[WorldPage] Loading world', { worldId });
       try {
         const worldData = await getWorld(worldId);
+        console.log('[WorldPage] Got world data', {
+          hasWorld: !!worldData,
+          currentChatId: worldData?.currentChatId,
+          chatsCount: worldData?.chats?.length
+        });
         if (worldData) {
           setWorld(worldData);
+
+          // Auto-select the current chat if available
+          if (worldData.currentChatId && worldData.chats) {
+            const currentChat = worldData.chats.find(c => c.id === worldData.currentChatId);
+            console.log('[WorldPage] Found current chat', { hasChat: !!currentChat, chatId: currentChat?.id });
+            if (currentChat) {
+              setSelectedChat(currentChat);
+            }
+          }
         } else {
           navigate('/');
         }
@@ -87,6 +109,22 @@ export default function WorldPage() {
 
     loadWorld();
   }, [worldId, getWorld, navigate]);
+
+  // Update selected chat when chats change and no chat is selected
+  useEffect(() => {
+    console.log('[WorldPage] Chat selection effect', {
+      hasSelectedChat: !!selectedChat,
+      chatsCount: chats.length,
+      currentChatId: world?.currentChatId
+    });
+    if (!selectedChat && chats.length > 0 && world?.currentChatId) {
+      const currentChat = chats.find(c => c.id === world.currentChatId);
+      console.log('[WorldPage] Auto-selecting chat', { hasChat: !!currentChat, chatId: currentChat?.id });
+      if (currentChat) {
+        setSelectedChat(currentChat);
+      }
+    }
+  }, [chats, world?.currentChatId, selectedChat]);
 
   // Subscribe to chat events
   useEffect(() => {
@@ -135,9 +173,20 @@ export default function WorldPage() {
     setViewMode('agent-settings');
   };
 
-  const handleChatSelect = (chat: Chat) => {
+  const handleChatSelect = async (chat: Chat) => {
+    console.log('[WorldPage] handleChatSelect', { chatId: chat.id, chatName: chat.name });
     setSelectedChat(chat);
     setViewMode('chat');
+
+    // Set the current chat on the backend and load messages
+    try {
+      if (worldId) {
+        await api.setChat(worldId, chat.id);
+      }
+      await loadChatMessages(chat.id);
+    } catch (err) {
+      console.error('Failed to load chat messages:', err);
+    }
   };
 
   const handleNewChat = async () => {
@@ -147,6 +196,22 @@ export default function WorldPage() {
       setViewMode('chat');
     } catch (err) {
       console.error('Failed to create chat:', err);
+    }
+  };
+
+  const handleDeleteChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent chat selection when clicking delete
+    if (!window.confirm('Delete this chat?')) return;
+
+    try {
+      await deleteChat(chatId);
+
+      // If deleting the currently selected chat, clear selection
+      if (selectedChat?.id === chatId) {
+        setSelectedChat(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
     }
   };
 
@@ -205,10 +270,32 @@ export default function WorldPage() {
           }`}
       >
         {/* Header row: World Name and Toggle */}
-        <div className="p-3 border-b border-border/50 bg-gradient-to-b from-muted/20 to-transparent">
-          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+        <div className="p-1 border-b border-border/50 bg-gradient-to-b from-muted/20 to-transparent">
+          <div className={`flex items-center ${sidebarCollapsed ? 'pl-1 justify-center' : 'pl-5 justify-between'}`}>
             {!sidebarCollapsed && (
-              <h2 className="text-sm font-bold text-foreground truncate flex-1">{world.name}</h2>
+              <div className="flex items-center gap-2 flex-1 min-w-0 group">
+                <h2 className="text-sm font-bold text-foreground truncate">{world.name}</h2>
+                <button
+                  onClick={() => setViewMode('world-settings')}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                  title="Settings"
+                  aria-label="Settings"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="w-4 h-4"
+                  >
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
             )}
             <Button
               variant="ghost"
@@ -246,7 +333,7 @@ export default function WorldPage() {
           <Button
             onClick={handleNewChat}
             variant="ghost"
-            className={`hover:bg-muted/50 transition-all text-muted-foreground hover:text-foreground ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
+            className={`hover:bg-primary/10 transition-all text-muted-foreground hover:text-primary ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
             size="sm"
             title={sidebarCollapsed ? 'New Chat' : undefined}
           >
@@ -276,18 +363,41 @@ export default function WorldPage() {
                 return (
                   <div
                     key={chat.id}
-                    className={`mx-2 my-1 px-3 py-2 cursor-pointer transition-all duration-200 rounded-lg ${isSelected
+                    className={`mx-2 my-1 px-3 py-2 cursor-pointer transition-all duration-200 rounded-lg group relative ${isSelected
                       ? 'bg-primary/15 border-l-4 border-l-primary shadow-sm scale-[0.98]'
                       : 'border-l-4 border-l-transparent hover:bg-muted/60 hover:scale-[0.99]'
                       }`}
                     onClick={() => handleChatSelect(chat)}
                   >
-                    <h3 className="font-semibold text-xs text-foreground truncate">
-                      {chat.name || '💬 Untitled Chat'}
-                    </h3>
-                    <p className="text-xs text-muted-foreground/80 truncate leading-relaxed mt-1">
-                      {messages.length > 0 ? messages[messages.length - 1].content : 'No messages yet'}
-                    </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-xs text-foreground truncate">
+                          {chat.name || '💬 Untitled Chat'}
+                        </h3>
+                        <p className="text-xs text-muted-foreground/80 truncate leading-relaxed mt-1">
+                          {messages.length > 0 ? messages[messages.length - 1].content : 'No messages yet'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteChat(chat.id, e)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                        title="Delete chat"
+                        aria-label="Delete chat"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="w-4 h-4"
+                        >
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -308,140 +418,126 @@ export default function WorldPage() {
           )}
         </div>
 
-        {/* Back Button */}
-        <div className={`border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent flex ${sidebarCollapsed ? 'justify-center p-2' : 'p-2'}`}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/')}
-            className={`hover:bg-muted/50 transition-all text-muted-foreground hover:text-foreground ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
-            title="Back to Worlds"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={sidebarCollapsed ? 'w-6 h-6' : 'w-5 h-5'}
+        {/* Back Button - Hidden for now */}
+        {false && (
+          <div className={`border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent flex ${sidebarCollapsed ? 'justify-center p-2' : 'p-2'}`}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/')}
+              className={`hover:bg-muted/50 transition-all text-muted-foreground hover:text-foreground ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
+              title="Back to Worlds"
             >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
-            {!sidebarCollapsed && <span className="ml-2">Back to Worlds</span>}
-          </Button>
-        </div>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={sidebarCollapsed ? 'w-6 h-6' : 'w-5 h-5'}
+              >
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              {!sidebarCollapsed && <span className="ml-2">Back to Worlds</span>}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-br from-background via-background to-muted/10 overflow-hidden">
         {viewMode === 'chat' ? (
           <>
-            {/* Header with World Info and Agents */}
-            <div className="bg-gradient-to-r from-background via-card/30 to-background border-b border-border/50 px-6 lg:px-8 py-6 shadow-sm shrink-0">
-              <div className="max-w-7xl mx-auto">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <h1 className="text-2xl sm:text-3xl font-bold text-foreground">{world.name}</h1>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {world.description || 'No description'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setViewMode('world-settings')}
-                      className="text-sm hover:bg-muted/50 shadow-sm"
-                    >
-                      ⚙️ Settings
-                    </Button>
-                  </div>
+            {/* Top Row - Chat Title (Fixed Height) */}
+            <div className="bg-gradient-to-r from-background via-card/30 to-background border-b border-border/50 px-6 py-4 shadow-sm shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-sm font-bold text-foreground">
+                    {selectedChat?.name || 'Select or create a chat'}
+                  </h1>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {world.name}
+                  </p>
                 </div>
-
-                {/* Active Agents */}
-                <div className="mt-6 p-4 rounded-xl bg-gradient-to-br from-muted/20 to-transparent border border-border/30">
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4 block">Active Agents</span>
-                  <div className="flex items-center gap-5 flex-wrap">
-                    {agents.map((agent) => {
-                      const isSelected = selectedAgent?.id === agent.id;
-                      const initials = (agent.name || '').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'A';
-                      return (
-                        <div
-                          key={agent.id}
-                          className="flex flex-col items-center gap-2 cursor-pointer group"
-                          onClick={() => handleAgentSelect(agent)}
-                        >
-                          <div className="relative">
-                            <div className={`w-14 h-14 rounded-full bg-gradient-to-br from-primary via-primary/80 to-primary/60 text-primary-foreground flex items-center justify-center font-bold text-base transition-all duration-300 shadow-md ${isSelected ? 'ring-4 ring-primary/30 scale-110 shadow-xl' : 'group-hover:scale-110 group-hover:shadow-xl group-hover:ring-2 group-hover:ring-primary/20'
-                              }`}>
-                              {initials}
-                            </div>
-                            <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-3 border-background shadow-sm ${isSelected ? 'bg-yellow-400 animate-pulse' : 'bg-green-500'
-                              }`} />
+                {/* Active Agents - Compact View */}
+                <div className="flex items-center gap-3">
+                  {agents.map((agent) => {
+                    const isSelected = selectedAgent?.id === agent.id;
+                    const initials = (agent.name || '').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'A';
+                    return (
+                      <div
+                        key={agent.id}
+                        className="flex items-center gap-2 cursor-pointer group"
+                        onClick={() => handleAgentSelect(agent)}
+                        title={agent.name}
+                      >
+                        <div className="relative">
+                          <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-primary via-primary/80 to-primary/60 text-primary-foreground flex items-center justify-center font-bold text-xs transition-all duration-300 shadow-md ${isSelected ? 'ring-2 ring-primary/30 scale-110' : 'group-hover:scale-110 group-hover:ring-1 group-hover:ring-primary/20'
+                            }`}>
+                            {initials}
                           </div>
-                          <span className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">{agent.name}</span>
+                          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-background shadow-sm ${isSelected ? 'bg-yellow-400' : 'bg-green-500'
+                            }`} />
                         </div>
-                      );
-                    })}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setShowAgentForm(!showAgentForm)}
-                      className="ml-2 h-9 text-xs font-semibold shadow-sm hover:shadow-md transition-all hover:scale-105"
-                    >
-                      ➕ Add Agent
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Create Agent Form */}
-                {showAgentForm && (
-                  <div className="mt-4 p-5 bg-gradient-to-br from-muted/30 to-muted/10 rounded-xl border border-border/50 shadow-sm">
-                    <form onSubmit={handleCreateAgent} className="flex gap-2 items-end">
-                      <div className="flex-1 space-y-1.5">
-                        <label htmlFor="agentName" className="text-xs font-medium text-foreground">
-                          Agent Name <span className="text-destructive">*</span>
-                        </label>
-                        <Input
-                          id="agentName"
-                          type="text"
-                          value={newAgentName}
-                          onChange={(e) => setNewAgentName(e.target.value)}
-                          placeholder="Enter agent name..."
-                          required
-                          disabled={creating}
-                          className="h-9"
-                        />
                       </div>
-                      <Button
-                        type="submit"
-                        disabled={creating}
-                        size="sm"
-                        className="h-9"
-                      >
-                        {creating ? 'Creating...' : 'Create'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowAgentForm(false)}
-                        disabled={creating}
-                        className="h-9"
-                      >
-                        Cancel
-                      </Button>
-                    </form>
-                  </div>
-                )}
+                    );
+                  })}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowAgentForm(!showAgentForm)}
+                    className="h-8 px-3 text-xs font-semibold"
+                  >
+                    ➕
+                  </Button>
+                </div>
               </div>
+
+              {/* Create Agent Form */}
+              {showAgentForm && (
+                <div className="mt-4 p-4 bg-gradient-to-br from-muted/30 to-muted/10 rounded-lg border border-border/50">
+                  <form onSubmit={handleCreateAgent} className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                      <label htmlFor="agentName" className="text-xs font-medium text-foreground">
+                        Agent Name <span className="text-destructive">*</span>
+                      </label>
+                      <Input
+                        id="agentName"
+                        type="text"
+                        value={newAgentName}
+                        onChange={(e) => setNewAgentName(e.target.value)}
+                        placeholder="Enter agent name..."
+                        required
+                        disabled={creating}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={creating}
+                      size="sm"
+                      className="h-8"
+                    >
+                      {creating ? 'Creating...' : 'Create'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAgentForm(false)}
+                      disabled={creating}
+                      className="h-8"
+                    >
+                      Cancel
+                    </Button>
+                  </form>
+                </div>
+              )}
             </div>
 
-            {/* Chat Messages Area */}
+            {/* Middle Row - Messages (Stretch & Scroll) */}
             <div className="flex-1 bg-gradient-to-br from-muted/10 via-transparent to-muted/20 overflow-hidden min-h-0">
               <ChatThread
                 worldId={worldId!}
@@ -449,7 +545,7 @@ export default function WorldPage() {
                 messages={messagesToChatMessages(messages)}
                 streaming={sending}
                 onSendMessage={handleSendMessage}
-                disabled={false}
+                disabled={!selectedChat}
               />
             </div>
           </>

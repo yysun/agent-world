@@ -99,4 +99,5 @@ export interface UseChatDataReturn {
   deleteChat: (chatId: string) => Promise<void>;
   subscribeToChat: (chatId?: string) => Promise<void>;
   unsubscribeFromChat: () => Promise<void>;
+  loadChatMessages: (chatId: string) => Promise<void>;
 }

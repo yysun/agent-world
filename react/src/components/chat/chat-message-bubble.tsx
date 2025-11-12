@@ -87,21 +87,20 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
 
     // Bubble styling based on role
     const bubbleClass = `
-      max-w-[80%] rounded-[1rem] px-4 py-2 shadow-sm
-      ${isUser ? 'bg-primary text-primary-foreground' : ''}
-      ${isAssistant ? 'bg-secondary text-secondary-foreground' : ''}
-      ${isSystem ? 'bg-muted text-muted-foreground italic text-sm border border-dashed' : ''}
-      ${isTool ? 'bg-accent text-accent-foreground text-xs' : ''}
+      rounded-[1rem] px-4 py-2 shadow-sm text-sm
+      ${isUser ? 'bg-primary text-primary-foreground max-w-[80%]' : ''}
+      ${isAssistant ? 'bg-secondary text-secondary-foreground max-w-[95%]' : ''}
+      ${isSystem ? 'bg-muted text-muted-foreground italic border border-dashed max-w-[80%]' : ''}
+      ${isTool ? 'bg-accent text-accent-foreground text-xs max-w-[80%]' : ''}
     `.trim();
 
     return (
       <div className={containerClass}>
-        <div className="flex flex-col gap-1 max-w-[80%]">
+        <div className={`flex flex-col gap-1 ${isAssistant ? 'max-w-[95%]' : 'max-w-[80%]'}`}>
           {/* Sender and timestamp (if not system message) */}
           {!isSystem && (showSender || showTimestamp) && (
             <div
-              className={`flex items-center gap-2 text-xs text-muted-foreground px-1 ${isUser ? 'justify-end' : 'justify-start'
-                }`}
+              className={`flex items-center gap-2 text-xs text-muted-foreground px-1`}
             >
               {showSender && <span className="font-medium">{senderName}</span>}
               {showTimestamp && timestamp && <span>{timestamp}</span>}

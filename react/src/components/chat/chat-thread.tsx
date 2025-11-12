@@ -22,6 +22,7 @@ import { useState } from 'react';
 import { ChatMessageList } from './chat-message-list';
 import { ChatTypingIndicator } from './chat-typing-indicator';
 import { ChatInput } from './chat-input';
+import { ChatMessageBubble } from './chat-message-bubble';
 import type { ChatMessage } from './types';
 
 export interface ChatThreadProps {
@@ -81,60 +82,53 @@ export function ChatThread({
     }
   };
 
-  // Determine header title
-  const headerTitle = selectedAgent ? selectedAgent.name : 'All Agents';
-  const headerSubtitle = selectedAgent
-    ? 'Chatting with this agent'
-    : 'Messages from all agents in this world';
-
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-border bg-card px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">
-              {headerTitle}
-            </h2>
-            <p className="text-xs text-muted-foreground">{headerSubtitle}</p>
-          </div>
-          {selectedAgent && (
-            <span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
-              Filtered
-            </span>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-4 py-4 space-y-4">
+          {messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-center text-muted-foreground">No messages yet. Start a conversation!</p>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <ChatMessageBubble
+                key={message.id || message.messageId}
+                message={message}
+                allMessages={messages}
+              />
+            ))
           )}
         </div>
       </div>
 
-      {/* Messages */}
-      <ChatMessageList
-        messages={messages}
-        loading={loading}
-        className="flex-1"
-      />
-
       {/* Typing Indicator */}
       {streaming && (
-        <div className="flex-shrink-0 border-t border-border bg-card px-4 py-2">
-          <ChatTypingIndicator />
+        <div className="flex-shrink-0 border-t border-border bg-card">
+          <div className="max-w-4xl mx-auto px-4 py-2">
+            <ChatTypingIndicator />
+          </div>
         </div>
       )}
 
       {/* Input */}
-      <div className="flex-shrink-0 border-t border-border bg-card px-4 py-3">
-        <ChatInput
-          value={draft}
-          onChange={setDraft}
-          onSubmit={handleSend}
-          disabled={disabled || streaming}
-          placeholder={
-            disabled
-              ? 'Disconnected...'
-              : streaming
-                ? 'Waiting for response...'
-                : 'Send a message...'
-          }
-        />
+      <div className="flex-shrink-0 border-t border-border bg-card">
+        <div className="max-w-4xl mx-auto px-4 py-3">
+          <ChatInput
+            value={draft}
+            onChange={setDraft}
+            onSubmit={handleSend}
+            disabled={disabled || streaming}
+            placeholder={
+              disabled
+                ? 'Disconnected...'
+                : streaming
+                  ? 'Waiting for response...'
+                  : 'Send a message...'
+            }
+          />
+        </div>
       </div>
     </div>
   );
