@@ -5,7 +5,6 @@
  * 
  * Features:
  * - React Router for page navigation
- * - WebSocket provider for global client access
  * - ErrorBoundary for graceful error handling
  * - Layout wrapper for consistent UI
  * - Route definitions (Home, World detail)
@@ -16,6 +15,7 @@
  * - * → 404 Not Found
  * 
  * Changes:
+ * - 2025-11-12: Removed WebSocketProvider, now using REST API + SSE
  * - 2025-11-03: Added WebSocketProvider (Phase 4)
  * - 2025-11-03: Added React Router setup (Phase 7)
  * - 2025-11-03: Added ErrorBoundary and Layout wrappers
@@ -23,7 +23,6 @@
  */
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { WebSocketProvider } from '@/lib/WebSocketContext';
 import ErrorBoundary from '@/components/ErrorBoundary.tsx';
 import Layout from '@/components/Layout.tsx';
 import HomePage from '@/pages/HomePage.tsx';
@@ -49,17 +48,15 @@ function NotFoundPage() {
 function App() {
   return (
     <ErrorBoundary>
-      <WebSocketProvider>
-        <BrowserRouter>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/world/:worldId" element={<WorldPage />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </Layout>
-        </BrowserRouter>
-      </WebSocketProvider>
+      <BrowserRouter>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/world/:worldId" element={<WorldPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
     </ErrorBoundary>
   );
 }

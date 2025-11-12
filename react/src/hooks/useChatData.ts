@@ -1,15 +1,13 @@
 /**
  * useChatData Hook - Chat management and real-time messaging
  * 
- * Purpose: Manage chats, send messages, and subscribe to real-time events
+ * Purpose: Manage chats, send messages via REST API and SSE
  * 
  * Features:
  * - List chats for world
  * - Create/delete chats
- * - Send messages with connection check
- * - Subscribe to chat events
- * - Real-time message updates
- * - Auto-subscribe/unsubscribe
+ * - Send messages with SSE streaming
+ * - Real-time message updates via callbacks
  * 
  * Usage:
  * ```tsx
@@ -30,130 +28,166 @@
  * ```
  * 
  * Changes:
+ * - 2025-11-12: Updated to use REST API and SSE instead of WebSocket
  * - 2025-11-03: Initial hook implementation with connection state checking
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWebSocket } from './useWebSocket';
-import type { Chat, Message, UseChatDataReturn, AgentEvent } from '@/types';
+import * as api from '@/lib/api';
+import { sendChatMessage } from '@/lib/sse-client';
+import type { Chat, Message, UseChatDataReturn } from '@/types';
 
 export function useChatData(worldId: string, chatId?: string): UseChatDataReturn {
-  const { client, state } = useWebSocket();
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [sseCleanup, setSseCleanup] = useState<(() => void) | null>(null);
 
   // Fetch chats
   const fetchChats = useCallback(async () => {
-    if (!client || state !== 'connected' || !worldId) return;
+    if (!worldId) return;
 
     try {
-      const data = await client.sendCommand(worldId, 'list-chats');
-      setChats(data || []);
+      const worldData = await api.getWorld(worldId);
+      setChats(worldData?.chats || []);
     } catch (err) {
       console.error('Failed to fetch chats:', err);
+      setError(err as Error);
     }
-  }, [client, state, worldId]);
+  }, [worldId]);
 
-  // Subscribe to events
-  const subscribeToChat = useCallback(
-    async (targetChatId?: string) => {
-      if (!client || state !== 'connected' || !worldId) return;
+  // Auto-fetch chats
+  useEffect(() => {
+    if (worldId) {
+      setLoading(true);
+      fetchChats().finally(() => setLoading(false));
+    }
+  }, [worldId, fetchChats]);
 
-      try {
-        await client.subscribe(worldId, targetChatId || chatId || null);
+  // Cleanup SSE connection on unmount
+  useEffect(() => {
+    return () => {
+      if (sseCleanup) {
+        sseCleanup();
+      }
+    };
+  }, [sseCleanup]);
 
-        // Listen for events
-        const handleEvent = (event: any) => {
-          if (event.worldId !== worldId) return;
-          if (targetChatId && event.chatId !== targetChatId) return;
-          if (chatId && event.chatId !== chatId) return;
+  const sendMessage = useCallback(
+    async (content: string, sender: string = 'human'): Promise<void> => {
+      if (!worldId) throw new Error('World ID is required');
 
-          const agentEvent = event as AgentEvent;
+      // Cleanup any existing SSE connection
+      if (sseCleanup) {
+        sseCleanup();
+      }
 
-          // Convert events to messages
-          if (agentEvent.payload) {
+      // Send message via SSE
+      const cleanup = await sendChatMessage(worldId, content, sender, {
+        onStreamStart: (data) => {
+          // Add placeholder message for streaming
+          const newMessage: Message = {
+            id: data.messageId,
+            content: '...',
+            sender: data.sender,
+            timestamp: new Date().toISOString(),
+            chatId,
+            worldId
+          };
+          setMessages(prev => [...prev, newMessage]);
+        },
+        onStreamChunk: (data) => {
+          // Update streaming message
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.messageId
+              ? { ...msg, content: data.content }
+              : msg
+          ));
+        },
+        onStreamEnd: (data) => {
+          // Finalize message
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.messageId
+              ? { ...msg, content: data.content }
+              : msg
+          ));
+        },
+        onStreamError: (data) => {
+          // Show error in message
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.messageId
+              ? { ...msg, content: `Error: ${data.error}` }
+              : msg
+          ));
+        },
+        onMessage: (data) => {
+          // Handle non-streaming messages
+          if (data.messageId) {
             const newMessage: Message = {
-              id: agentEvent.id,
-              content: agentEvent.payload.content || JSON.stringify(agentEvent.payload),
-              sender: agentEvent.payload.sender || agentEvent.payload.agent || 'system',
-              timestamp: agentEvent.createdAt,
-              chatId: agentEvent.chatId,
-              worldId: agentEvent.worldId
+              id: data.messageId,
+              content: data.content || data.message || '',
+              sender: data.sender || data.agentName || 'system',
+              timestamp: data.createdAt || new Date().toISOString(),
+              chatId: chatId,
+              worldId: worldId
             };
-
             setMessages(prev => {
               // Avoid duplicates
               if (prev.some(m => m.id === newMessage.id)) return prev;
               return [...prev, newMessage];
             });
           }
-        };
+        },
+        onError: (err) => {
+          console.error('SSE error:', err);
+          setError(err);
+        }
+      });
 
-        client.on('event', handleEvent);
-      } catch (err) {
-        console.error('Failed to subscribe:', err);
-        setError(err as Error);
-      }
+      setSseCleanup(() => cleanup);
     },
-    [client, state, worldId, chatId]
-  );
-
-  // Unsubscribe from events
-  const unsubscribeFromChat = useCallback(async () => {
-    if (!client || !worldId) return;
-
-    try {
-      await client.unsubscribe(worldId, chatId || null);
-    } catch (err) {
-      console.error('Failed to unsubscribe:', err);
-    }
-  }, [client, worldId, chatId]);
-
-  // Auto-fetch and subscribe
-  useEffect(() => {
-    if (state === 'connected' && worldId) {
-      setLoading(true);
-      fetchChats().finally(() => setLoading(false));
-      subscribeToChat();
-    }
-
-    return () => {
-      unsubscribeFromChat();
-    };
-  }, [state, worldId, chatId]);
-
-  const sendMessage = useCallback(
-    async (content: string, sender: string = 'human'): Promise<void> => {
-      if (!client) throw new Error('Client not connected');
-      if (state !== 'connected') throw new Error('Cannot send while disconnected');
-
-      await client.sendMessage(worldId, content, chatId, sender);
-    },
-    [client, state, worldId, chatId]
+    [worldId, chatId, sseCleanup]
   );
 
   const createChat = useCallback(
     async (): Promise<Chat> => {
-      if (!client) throw new Error('Client not connected');
-
-      const chat = await client.sendCommand(worldId, 'new-chat');
+      const result = await api.newChat(worldId);
       await fetchChats(); // Refresh list
-      return chat;
+
+      // Return chat object
+      return {
+        id: result.chatId,
+        name: 'New Chat',
+        createdAt: new Date().toISOString()
+      };
     },
-    [client, worldId, fetchChats]
+    [worldId, fetchChats]
   );
 
   const deleteChat = useCallback(
     async (targetChatId: string): Promise<void> => {
-      if (!client) throw new Error('Client not connected');
-
-      await client.sendCommand(worldId, 'delete-chat', { chatId: targetChatId });
+      await api.deleteChat(worldId, targetChatId);
       await fetchChats(); // Refresh list
     },
-    [client, worldId, fetchChats]
+    [worldId, fetchChats]
   );
+
+  // Dummy implementation for compatibility
+  const subscribeToChat = useCallback(
+    async (_targetChatId?: string) => {
+      // No-op for API-based implementation
+    },
+    []
+  );
+
+  const unsubscribeFromChat = useCallback(async () => {
+    // Cleanup SSE connection
+    if (sseCleanup) {
+      sseCleanup();
+      setSseCleanup(null);
+    }
+  }, [sseCleanup]);
 
   return {
     chats,

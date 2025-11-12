@@ -4,23 +4,14 @@
  * Purpose: Centralized type definitions for Agent World UI
  * 
  * Features:
- * - Re-exports from ws-client
  * - UI-specific types (World, Agent, Chat, Message)
  * - Form and state types
+ * - Hook return types
  * 
  * Changes:
+ * - 2025-11-12: Removed WebSocket-related types, using REST API now
  * - 2025-11-03: Initial type definitions
  */
-
-// Re-export ws-client types
-export type {
-  ConnectionState,
-  WSClientConfig,
-  WSClientMessage,
-  WSServerMessage,
-  WebSocketClient,
-  WebSocketClientConfig
-} from '@/lib/ws-client';
 
 // World types
 export interface World {
@@ -29,6 +20,8 @@ export interface World {
   description?: string;
   createdAt: string;
   currentChatId?: string;
+  agents?: Agent[];
+  chats?: Chat[];
 }
 
 // Agent types

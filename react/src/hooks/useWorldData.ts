@@ -1,7 +1,7 @@
 /**
  * useWorldData Hook - World CRUD operations
  * 
- * Purpose: Manage worlds via WebSocket commands
+ * Purpose: Manage worlds via REST API
  * 
  * Features:
  * - List worlds
@@ -27,27 +27,25 @@
  * ```
  * 
  * Changes:
+ * - 2025-11-12: Updated to use REST API instead of WebSocket
  * - 2025-11-03: Initial hook implementation
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useWebSocket } from './useWebSocket';
+import * as api from '@/lib/api';
 import type { World, UseWorldDataReturn } from '@/types';
 
 export function useWorldData(): UseWorldDataReturn {
-  const { client, state } = useWebSocket();
   const [worlds, setWorlds] = useState<World[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const refetch = useCallback(async () => {
-    if (!client || state !== 'connected') return;
-
     setLoading(true);
     setError(null);
 
     try {
-      const data = await client.sendCommand(undefined, 'list-worlds');
+      const data = await api.getWorlds();
       setWorlds(data || []);
     } catch (err) {
       setError(err as Error);
@@ -55,54 +53,44 @@ export function useWorldData(): UseWorldDataReturn {
     } finally {
       setLoading(false);
     }
-  }, [client, state]);
+  }, []);
 
-  // Auto-fetch on mount and when connected
+  // Auto-fetch on mount
   useEffect(() => {
-    if (state === 'connected') {
-      refetch();
-    }
-  }, [state, refetch]);
+    refetch();
+  }, [refetch]);
 
   const createWorld = useCallback(
     async (data: { name: string; description?: string }): Promise<World> => {
-      if (!client) throw new Error('Client not connected');
-
-      const world = await client.sendCommand(undefined, 'create-world', data);
+      const world = await api.createWorld(data);
       await refetch(); // Refresh list
       return world;
     },
-    [client, refetch]
+    [refetch]
   );
 
   const updateWorld = useCallback(
     async (worldId: string, data: { name?: string; description?: string }): Promise<World> => {
-      if (!client) throw new Error('Client not connected');
-
-      const world = await client.sendCommand(undefined, 'update-world', { worldId, ...data });
+      const world = await api.updateWorld(worldId, data);
       await refetch(); // Refresh list
       return world;
     },
-    [client, refetch]
+    [refetch]
   );
 
   const deleteWorld = useCallback(
     async (worldId: string): Promise<void> => {
-      if (!client) throw new Error('Client not connected');
-
-      await client.sendCommand(undefined, 'delete-world', { worldId });
+      await api.deleteWorld(worldId);
       await refetch(); // Refresh list
     },
-    [client, refetch]
+    [refetch]
   );
 
   const getWorld = useCallback(
     async (worldId: string): Promise<World | null> => {
-      if (!client) throw new Error('Client not connected');
-
-      return await client.sendCommand(undefined, 'get-world', { worldId });
+      return await api.getWorld(worldId);
     },
-    [client]
+    []
   );
 
   return {

@@ -8,7 +8,7 @@
  * - World and agents panel in top right
  * - Real-time chat interface with ChatThread
  * - Settings editor for world/agents
- * - WebSocket-based real-time updates
+ * - REST API + SSE for real-time updates
  * - shadcn UI components for consistent design
  * 
  * Implementation:
@@ -19,6 +19,7 @@
  * - shadcn Card, Button, Badge, Tabs components
  * 
  * Changes:
+ * - 2025-11-12: Removed WebSocket dependency, now using REST API + SSE
  * - 2025-11-04: Redesigned with chat list sidebar and world/agents in top right
  * - 2025-11-04: Redesigned with shadcn UI components and improved layout
  * - 2025-11-04: Integrated chat design system - replaced StreamChatBox with ChatThread
@@ -28,7 +29,6 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { useWorldData } from '@/hooks/useWorldData';
 import { useAgentData } from '@/hooks/useAgentData';
 import { useChatData } from '@/hooks/useChatData';
@@ -44,7 +44,6 @@ import type { Agent, Chat } from '@/types';
 export default function WorldPage() {
   const { worldId } = useParams<{ worldId: string }>();
   const navigate = useNavigate();
-  const { state: connectionState } = useWebSocket();
 
   const { getWorld } = useWorldData();
   const { agents, createAgent, updateAgent, refetch: refetchAgents } = useAgentData(worldId || '');
@@ -56,6 +55,7 @@ export default function WorldPage() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [viewMode, setViewMode] = useState<'chat' | 'world-settings' | 'agent-settings'>('chat');
   const [sending, setSending] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Agent creation
   const [showAgentForm, setShowAgentForm] = useState(false);
@@ -90,14 +90,14 @@ export default function WorldPage() {
 
   // Subscribe to chat events
   useEffect(() => {
-    if (worldId && connectionState === 'connected') {
+    if (worldId) {
       subscribeToChat();
     }
-  }, [worldId, connectionState, subscribeToChat]);
+  }, [worldId, subscribeToChat]);
 
   // Handlers
   const handleSendMessage = async (content: string) => {
-    if (!content.trim() || sending || connectionState !== 'connected') return;
+    if (!content.trim() || sending) return;
 
     setSending(true);
     try {
@@ -198,108 +198,151 @@ export default function WorldPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted/10 to-muted/30 flex">
-      {/* Left Sidebar - Chat List */}
-      <div className="w-72 bg-background/98 backdrop-blur-md border-r border-border/50 flex flex-col shadow-lg">
-        {/* Chats Header */}
-        <div className="p-5 pb-4 border-b border-border/50 bg-gradient-to-b from-muted/20 to-transparent">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-lg">💬</div>
-            <h2 className="text-lg font-bold text-foreground">Chats</h2>
+    <div className="h-screen bg-gradient-to-br from-background via-muted/10 to-muted/30 flex overflow-hidden">
+      {/* Left Sidebar - Chat List (collapsible) */}
+      <div
+        className={`bg-background/98 backdrop-blur-md border-r border-border/50 flex flex-col shadow-lg transition-all duration-300 ${sidebarCollapsed ? 'w-[50px]' : 'w-[280px]'
+          }`}
+      >
+        {/* Header row: World Name and Toggle */}
+        <div className="p-3 border-b border-border/50 bg-gradient-to-b from-muted/20 to-transparent">
+          <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {!sidebarCollapsed && (
+              <h2 className="text-sm font-bold text-foreground truncate flex-1">{world.name}</h2>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="shrink-0 h-10 w-10 p-0 hover:bg-muted/50"
+              title={sidebarCollapsed ? 'Expand panel' : 'Collapse panel'}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-6 h-6"
+              >
+                {sidebarCollapsed ? (
+                  <>
+                    <polyline points="9 18 15 12 9 6" />
+                  </>
+                ) : (
+                  <>
+                    <polyline points="15 18 9 12 15 6" />
+                  </>
+                )}
+              </svg>
+            </Button>
           </div>
+        </div>
+
+        {/* New Chat Button row */}
+        <div className={`flex ${sidebarCollapsed ? 'justify-center p-2' : 'p-2'}`}>
           <Button
             onClick={handleNewChat}
-            className="w-full justify-center shadow-sm hover:shadow-md transition-all"
-            size="default"
+            variant="ghost"
+            className={`hover:bg-muted/50 transition-all text-muted-foreground hover:text-foreground ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
+            size="sm"
+            title={sidebarCollapsed ? 'New Chat' : undefined}
           >
-            ✨ New Chat
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={sidebarCollapsed ? 'w-6 h-6' : 'w-5 h-5'}
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {!sidebarCollapsed && <span className="ml-2">New Chat</span>}
           </Button>
         </div>
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto">
-          <div className="py-1">
-            {chats.map((chat) => {
-              const isSelected = selectedChat?.id === chat.id;
-              const chatDate = new Date(chat.createdAt);
-              const now = new Date();
-              const diffDays = Math.floor((now.getTime() - chatDate.getTime()) / (1000 * 60 * 60 * 24));
+          {!sidebarCollapsed && (
+            <div className="py-1">
+              {chats.map((chat) => {
+                const isSelected = selectedChat?.id === chat.id;
 
-              let timeLabel = '';
-              if (diffDays === 0) {
-                timeLabel = chatDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-              } else if (diffDays === 1) {
-                timeLabel = 'Yesterday';
-              } else if (diffDays < 7) {
-                timeLabel = `${diffDays} days ago`;
-              } else {
-                timeLabel = chatDate.toLocaleDateString();
-              }
-
-              return (
-                <div
-                  key={chat.id}
-                  className={`mx-2 my-1 px-3 py-3 cursor-pointer transition-all duration-200 rounded-lg ${isSelected
-                    ? 'bg-primary/15 border-l-4 border-l-primary shadow-sm scale-[0.98]'
-                    : 'border-l-4 border-l-transparent hover:bg-muted/60 hover:scale-[0.99]'
-                    }`}
-                  onClick={() => handleChatSelect(chat)}
-                >
-                  <div className="flex items-start justify-between mb-1.5">
-                    <h3 className="font-semibold text-sm text-foreground truncate flex-1">
+                return (
+                  <div
+                    key={chat.id}
+                    className={`mx-2 my-1 px-3 py-2 cursor-pointer transition-all duration-200 rounded-lg ${isSelected
+                      ? 'bg-primary/15 border-l-4 border-l-primary shadow-sm scale-[0.98]'
+                      : 'border-l-4 border-l-transparent hover:bg-muted/60 hover:scale-[0.99]'
+                      }`}
+                    onClick={() => handleChatSelect(chat)}
+                  >
+                    <h3 className="font-semibold text-xs text-foreground truncate">
                       {chat.name || '💬 Untitled Chat'}
                     </h3>
-                    <span className="text-xs text-muted-foreground/70 ml-2 shrink-0 font-medium">
-                      {timeLabel}
-                    </span>
+                    <p className="text-xs text-muted-foreground/80 truncate leading-relaxed mt-1">
+                      {messages.length > 0 ? messages[messages.length - 1].content : 'No messages yet'}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground/80 truncate leading-relaxed">
-                    {messages.length > 0 ? messages[messages.length - 1].content : 'No messages yet'}
+                );
+              })}
+              {chats.length === 0 && (
+                <div className="text-center py-12 px-4">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/30 flex items-center justify-center text-3xl">
+                    💭
+                  </div>
+                  <p className="text-sm text-muted-foreground font-medium mb-1">
+                    No chats yet
+                  </p>
+                  <p className="text-xs text-muted-foreground/70">
+                    Click "New Chat" to start
                   </p>
                 </div>
-              );
-            })}
-            {chats.length === 0 && (
-              <div className="text-center py-12 px-4">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/30 flex items-center justify-center text-3xl">
-                  💭
-                </div>
-                <p className="text-sm text-muted-foreground font-medium mb-1">
-                  No chats yet
-                </p>
-                <p className="text-xs text-muted-foreground/70">
-                  Click "New Chat" to start
-                </p>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Back Button */}
-        <div className="p-4 border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent">
+        <div className={`border-t border-border/50 bg-gradient-to-t from-muted/20 to-transparent flex ${sidebarCollapsed ? 'justify-center p-2' : 'p-2'}`}>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate('/')}
-            className="w-full justify-start text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+            className={`hover:bg-muted/50 transition-all text-muted-foreground hover:text-foreground ${sidebarCollapsed ? 'h-10 w-10 p-0' : 'w-full justify-start h-10'}`}
+            title="Back to Worlds"
           >
-            ← Back to Worlds
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={sidebarCollapsed ? 'w-6 h-6' : 'w-5 h-5'}
+            >
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            {!sidebarCollapsed && <span className="ml-2">Back to Worlds</span>}
           </Button>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-br from-background via-background to-muted/10">
+      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-br from-background via-background to-muted/10 overflow-hidden">
         {viewMode === 'chat' ? (
           <>
             {/* Header with World Info and Agents */}
-            <div className="bg-gradient-to-r from-background via-card/30 to-background border-b border-border/50 px-6 lg:px-8 py-6 shadow-sm">
+            <div className="bg-gradient-to-r from-background via-card/30 to-background border-b border-border/50 px-6 lg:px-8 py-6 shadow-sm shrink-0">
               <div className="max-w-7xl mx-auto">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center text-2xl shadow-sm">
-                      🌍
-                    </div>
                     <div>
                       <h1 className="text-2xl sm:text-3xl font-bold text-foreground">{world.name}</h1>
                       <p className="text-sm text-muted-foreground mt-1">
@@ -307,14 +350,16 @@ export default function WorldPage() {
                       </p>
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setViewMode('world-settings')}
-                    className="text-sm hover:bg-muted/50 shadow-sm"
-                  >
-                    ⚙️ Settings
-                  </Button>
+                  <div className="flex items-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setViewMode('world-settings')}
+                      className="text-sm hover:bg-muted/50 shadow-sm"
+                    >
+                      ⚙️ Settings
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Active Agents */}
@@ -397,19 +442,19 @@ export default function WorldPage() {
             </div>
 
             {/* Chat Messages Area */}
-            <div className="flex-1 bg-gradient-to-br from-muted/10 via-transparent to-muted/20 overflow-hidden">
+            <div className="flex-1 bg-gradient-to-br from-muted/10 via-transparent to-muted/20 overflow-hidden min-h-0">
               <ChatThread
                 worldId={worldId!}
                 selectedAgent={selectedAgent}
                 messages={messagesToChatMessages(messages)}
                 streaming={sending}
                 onSendMessage={handleSendMessage}
-                disabled={connectionState !== 'connected'}
+                disabled={false}
               />
             </div>
           </>
         ) : viewMode === 'world-settings' ? (
-          <div className="flex-1 overflow-y-auto bg-gradient-to-br from-background to-muted/20">
+          <div className="flex-1 overflow-y-auto bg-gradient-to-br from-background to-muted/20 min-h-0">
             <div className="max-w-4xl mx-auto px-6 lg:px-8 py-8 sm:py-12">
               <div className="mb-8">
                 <Button
@@ -440,7 +485,7 @@ export default function WorldPage() {
             </div>
           </div>
         ) : viewMode === 'agent-settings' && selectedAgent ? (
-          <div className="flex-1 overflow-y-auto bg-gradient-to-br from-background to-muted/20">
+          <div className="flex-1 overflow-y-auto bg-gradient-to-br from-background to-muted/20 min-h-0">
             <div className="max-w-4xl mx-auto px-6 lg:px-8 py-8 sm:py-12">
               <div className="mb-8">
                 <Button

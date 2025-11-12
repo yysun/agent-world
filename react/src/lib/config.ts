@@ -4,14 +4,17 @@
  * Purpose: Centralized configuration for the React frontend
  * 
  * Features:
- * - WebSocket URL from environment
+ * - API base URL from environment
  * - Fallback defaults for development
  * 
  * Usage:
  * ```typescript
- * import { WS_URL } from '@/lib/config';
- * const client = new WebSocketClient(WS_URL);
+ * import { API_BASE_URL } from '@/lib/config';
+ * const response = await fetch(`${API_BASE_URL}/worlds`);
  * ```
+ * 
+ * Changes:
+ * - 2025-11-12: Updated to use API_BASE_URL instead of WS_URL for REST API
  */
 
-export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
