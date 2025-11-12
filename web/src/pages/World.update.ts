@@ -116,7 +116,7 @@ import {
   handleToolResult as handleToolResultBase,
   handleMessageToolCalls,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message, AgentActivityStatus, ApprovalRequest } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -428,115 +428,6 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
-type AgentActivityMap = Record<string, AgentActivityStatus>;
-
-function cloneAgentActivities(map: AgentActivityMap | undefined): AgentActivityMap {
-  return map ? { ...map } : {};
-}
-
-function normalizeAgentId(agentId?: string | null): string {
-  if (!agentId) {
-    return 'agent';
-  }
-  return toKebabCase(agentId);
-}
-
-function setAgentActivity(
-  state: WorldComponentState,
-  agentIdRaw: string | null | undefined,
-  options: {
-    message: string;
-    phase: AgentActivityStatus['phase'];
-    activityId?: number | null;
-    toolName?: string;
-  }
-): WorldComponentState {
-  const agentId = normalizeAgentId(agentIdRaw);
-  const currentActivities = state.agentActivities ?? {};
-  const previous = currentActivities[agentId];
-  const activityId = options.activityId ?? previous?.activityId ?? null;
-  const toolName = options.toolName ?? previous?.toolName;
-
-  const nextEntry: AgentActivityStatus = {
-    agentId,
-    message: options.message,
-    phase: options.phase,
-    activityId,
-    toolName,
-    updatedAt: Date.now()
-  };
-
-  if (
-    previous &&
-    previous.message === nextEntry.message &&
-    previous.phase === nextEntry.phase &&
-    previous.activityId === nextEntry.activityId &&
-    previous.toolName === nextEntry.toolName
-  ) {
-    if (!state.isWaiting) {
-      return { ...state, isWaiting: true };
-    }
-    return state;
-  }
-
-  const nextActivities: AgentActivityMap = {
-    ...currentActivities,
-    [agentId]: nextEntry
-  };
-
-  return {
-    ...state,
-    agentActivities: nextActivities,
-    isWaiting: true
-  };
-}
-
-function clearAgentActivity(
-  state: WorldComponentState,
-  agentIdRaw: string | null | undefined,
-  pendingOperations?: number
-): WorldComponentState {
-  const agentId = normalizeAgentId(agentIdRaw);
-  const currentActivities = state.agentActivities ?? {};
-
-  if (!currentActivities[agentId]) {
-    const pending = pendingOperations ?? 0;
-    if (pending === 0 && state.isWaiting && Object.keys(currentActivities).length === 0) {
-      return { ...state, isWaiting: false };
-    }
-    return state;
-  }
-
-  const nextActivities = cloneAgentActivities(currentActivities);
-  delete nextActivities[agentId];
-
-  const hasRemaining = Object.keys(nextActivities).length > 0;
-  const pending = pendingOperations ?? 0;
-  const shouldWait = hasRemaining || pending > 0;
-
-  return {
-    ...state,
-    agentActivities: nextActivities,
-    isWaiting: shouldWait
-  };
-}
-
-function clearAllAgentActivities(state: WorldComponentState, pendingOperations: number = 0): WorldComponentState {
-  if (!state.agentActivities || Object.keys(state.agentActivities).length === 0) {
-    if (pendingOperations === 0 && state.isWaiting) {
-      return { ...state, isWaiting: false };
-    }
-    return state;
-  }
-
-  const shouldWait = pendingOperations > 0;
-  return {
-    ...state,
-    agentActivities: {},
-    isWaiting: shouldWait ? state.isWaiting : false
-  };
-}
-
 const showApprovalRequestDialog = (
   state: WorldComponentState,
   request: ApprovalRequest
@@ -548,7 +439,6 @@ const showApprovalRequestDialog = (
   return {
     ...state,
     approvalRequest: request,
-    isWaiting: false,
     activeAgent: null,
     needScroll: true
   };
@@ -630,55 +520,16 @@ const submitApprovalDecision = async (
       true // Enable SSE streaming
     );
 
-    return {
-      ...baseState,
-      isWaiting: decision === 'approve' // Only wait for streaming response if approved
-    };
+    return baseState;
   } catch (error) {
     return {
       ...baseState,
-      isWaiting: false,
       error: (error as Error).message || 'Failed to submit approval decision'
     };
   }
 };
-
-function formatThinkingMessage(agentIdRaw: string | null | undefined): string {
-  return `${normalizeAgentId(agentIdRaw)} thinking ...`;
-}
-
-function formatToolMessage(
-  agentIdRaw: string | null | undefined,
-  action: string,
-  toolName?: string,
-  suffix?: string
-): string {
-  const agentId = normalizeAgentId(agentIdRaw);
-  const segments = [`${agentId} ${action}`];
-  if (toolName) {
-    segments.push(`- ${toolName}`);
-  }
-  if (suffix) {
-    segments.push(suffix);
-  }
-  return segments.join(' ').replace(/\s+/g, ' ').trim();
-}
-
-function extractToolName(eventData: any): string | undefined {
-  return eventData?.toolExecution?.toolName ?? eventData?.toolExecution?.name ?? undefined;
-}
-
-function extractToolAgentId(eventData: any): string | undefined {
-  return eventData?.sender ?? eventData?.agentName ?? eventData?.toolExecution?.agentId ?? undefined;
-}
-
 const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
-  // Stream errors should clear waiting state
-  return {
-    ...handleStreamErrorBase(state, data),
-    isWaiting: false,
-    agentActivities: {}
-  };
+  return handleStreamErrorBase(state, data);
 };
 
 const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
@@ -706,8 +557,12 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
 };
 
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState => {
+  // Log every world activity event received
+
+
   // Check for valid event types
   if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {
+    console.log('[World] Invalid event type, returning state unchanged');
     return state;
   }
 
@@ -736,7 +591,6 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
       isWaiting: shouldWait
     };
   }
-
   return state;
 };
 
@@ -794,8 +648,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       rawMessages,
       loading: false,
       needScroll: true,
-      agentActivities: {},
-      isWaiting: false,
       approvalRequest: null,
       lastUserMessageText: null,
     };
@@ -806,8 +658,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       error: error.message || 'Failed to load world data',
       loading: false,
       needScroll: false,
-      agentActivities: {},
-      isWaiting: false,
       approvalRequest: null,
       lastUserMessageText: state.lastUserMessageText ?? null,
     };
@@ -852,7 +702,7 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   return newState;
 };
 
-const handleMessageEvent = async <T extends WorldComponentState>(state: T, data: any): Promise<T> => {
+const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
   const messageData = data || {};
   const senderName = messageData.sender;
@@ -973,8 +823,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
 
       return {
         ...state,
-        messages: updatedMessages,
-        needScroll: false // Don't scroll for user message update
+        messages: updatedMessages
       };
     }
   }
@@ -1003,8 +852,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
 
     return {
       ...state,
-      messages: updatedMessages,
-      needScroll: true
+      messages: updatedMessages
     };
   }
 
@@ -1016,8 +864,7 @@ const handleMessageEvent = async <T extends WorldComponentState>(state: T, data:
   state.messages.push(newMessage);
 
   return {
-    ...state,
-    needScroll: true
+    ...state
   };
 };
 
@@ -1034,14 +881,11 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
     hasError: true
   };
 
-  const clearedState = clearAllAgentActivities(state);
-
   return {
-    ...clearedState,
+    ...state,
     error: errorMessage,
-    messages: [...(clearedState.messages || []), errorMsg],
-    needScroll: true,
-    isWaiting: false
+    messages: [...(state.messages || []), errorMsg],
+    needScroll: true
   } as T;
 };
 
@@ -1057,6 +901,9 @@ const handleError = <T extends WorldComponentState>(state: T, error: any): T => 
  * - Payload structures (ensures correct parameters)
  * - Handler return types (state consistency)
  */
+
+
+
 export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = {
 
   // ========================================
@@ -1086,7 +933,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     const sendingState = InputDomain.createSendingState(state, prepared.message);
     const newState: WorldComponentState = {
       ...sendingState,
-      agentActivities: {},
       lastUserMessageText: prepared.text
     };
 
@@ -1139,9 +985,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'toggle-log-details': (state: WorldComponentState, messageId: WorldEventPayload<'toggle-log-details'>): WorldComponentState =>
     MessageDisplayDomain.toggleLogDetails(state, messageId),
-
-  'ack-scroll': (state: WorldComponentState): WorldComponentState =>
-    MessageDisplayDomain.acknowledgeScroll(state),
 
   // ========================================
   // MESSAGE EDITING
@@ -1306,7 +1149,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       editingMessageId: null,
       editingText: '',
       isSending: true,
-      isWaiting: true,
       needScroll: true,
       lastUserMessageText: editedText
     };
@@ -1326,7 +1168,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         return {
           ...state,
           isSending: false,
-          isWaiting: false,
           error: `Message removal partially failed for agents: ${failedAgentNames}. ${deleteResult.messagesRemovedTotal || 0} messages removed.`
         };
       }
@@ -1344,18 +1185,16 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
           console.warn('Failed to clear edit backup:', e);
         }
 
-        // Success - message will arrive via SSE, keep waiting for responses
+        // Success - message will arrive via SSE
         return {
           ...optimisticState,
           isSending: false
-          // Keep isWaiting: true until SSE events complete
         };
       } catch (resubmitError: any) {
         // POST failed after DELETE succeeded
         return {
           ...optimisticState,
           isSending: false,
-          isWaiting: false,
           error: `Messages removed but resubmission failed: ${resubmitError.message || 'Unknown error'}. Please try editing again.`
         };
       }
@@ -1376,7 +1215,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return {
         ...state,
         isSending: false,
-        isWaiting: false,
         editingMessageId: null,
         editingText: '',
         error: errorMessage
@@ -1468,3 +1306,5 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
     AgentManagementDomain.clearWorldMessages(state, state.worldName),
 };
+
+

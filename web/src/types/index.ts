@@ -170,15 +170,6 @@ export interface Chat {
 // WORLD ACTIVITY STATUS
 // ========================================
 
-export interface AgentActivityStatus {
-  agentId: string;
-  message: string;
-  phase: 'thinking' | 'tool-start' | 'tool-progress' | 'tool-result' | 'tool-error';
-  activityId: number | null;
-  toolName?: string;
-  updatedAt: number;
-}
-
 export interface ApprovalRequest {
   toolCallId: string;
   originalToolCall?: any;
@@ -202,7 +193,6 @@ export interface WorldChatProps {
   messagesLoading: boolean;
   isSending: boolean;
   isWaiting: boolean;
-  agentActivities?: AgentActivityStatus[];
   needScroll?: boolean;
   activeAgent?: { spriteIndex: number; name: string } | null;
   selectedAgent?: { id?: string; name: string } | null;
@@ -281,7 +271,6 @@ export interface SSEComponentState {
   error?: string | null;
   needScroll?: boolean;
   isWaiting?: boolean;
-  agentActivities?: Record<string, AgentActivityStatus>;
 }
 
 // Main World Component State - consolidated from multiple components
@@ -295,7 +284,6 @@ export interface WorldComponentState extends SSEComponentState {
   messagesLoading: boolean;
   isSending: boolean;
   isWaiting: boolean;
-  agentActivities: Record<string, AgentActivityStatus>;
   selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
   selectedAgent: Agent | null;
   activeAgent: { spriteIndex: number; name: string } | null;

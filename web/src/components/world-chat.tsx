@@ -58,7 +58,6 @@ export default function WorldChat(props: WorldChatProps) {
     messagesLoading,
     isSending,
     isWaiting,
-    agentActivities = [],
     needScroll = false,
     activeAgent,
     currentChat,
@@ -72,13 +71,6 @@ export default function WorldChat(props: WorldChatProps) {
   const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
   const inputDisabled = isSending || isWaiting;
   const disableSend = !userInput.trim() || isSending || isWaiting;
-  const showWaitingDots = isWaiting && agentActivities.length === 0;
-
-  // Helper to get agent activity message for a specific agent
-  const getAgentActivityMessage = (agentId: string): string | null => {
-    const activity = agentActivities.find(a => a.agentId === agentId);
-    return activity ? activity.message : null;
-  };
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -186,35 +178,45 @@ export default function WorldChat(props: WorldChatProps) {
   const formatMessageText = (message: Message): string => {
     // Tier 1: Check for tool_calls array FIRST (prioritize regenerating from data over using pre-saved text)
     // This allows old messages with simple "Calling tool: name" to be upgraded to detailed format
-    if ((message as any).tool_calls && (message as any).tool_calls.length > 0) {
-      const toolCalls = (message as any).tool_calls;
-
-      // Format tool calls with details
-      const toolCallDetails = toolCalls.map((tc: any) => {
-        const toolName = tc.function?.name || 'unknown';
-        let toolArgs = '';
+    if ((message as any).tool_calls) {
+      // Parse tool_calls if it's a JSON string (from database)
+      let toolCalls = (message as any).tool_calls;
+      if (typeof toolCalls === 'string') {
         try {
-          const args = JSON.parse(tc.function?.arguments || '{}');
-          const argKeys = Object.keys(args);
-          if (argKeys.length > 0) {
-            // Show all arguments without truncation for better visibility
-            const argSummary = argKeys.map((key: string) => {
-              const val = args[key];
-              const strVal = typeof val === 'string' ? val : JSON.stringify(val);
-              return `${key}: ${strVal}`;
-            }).join(', ');
-            toolArgs = ` (${argSummary})`;
-          }
+          toolCalls = JSON.parse(toolCalls);
         } catch {
-          toolArgs = '';
+          toolCalls = [];
         }
-        return `${toolName}${toolArgs}`;
-      });
+      }
 
-      if (toolCalls.length === 1) {
-        return `Calling tool: ${toolCallDetails[0]}`;
-      } else {
-        return `Calling tools:\n${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n')}`;
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+        // Format tool calls with details
+        const toolCallDetails = toolCalls.map((tc: any) => {
+          const toolName = tc.function?.name || 'unknown';
+          let toolArgs = '';
+          try {
+            const args = JSON.parse(tc.function?.arguments || '{}');
+            const argKeys = Object.keys(args);
+            if (argKeys.length > 0) {
+              // Show all arguments without truncation for better visibility
+              const argSummary = argKeys.map((key: string) => {
+                const val = args[key];
+                const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+                return `${key}: ${strVal}`;
+              }).join(', ');
+              toolArgs = ` (${argSummary})`;
+            }
+          } catch {
+            toolArgs = '';
+          }
+          return `${toolName}${toolArgs}`;
+        });
+
+        if (toolCalls.length === 1) {
+          return `Calling tool: ${toolCallDetails[0]}`;
+        } else {
+          return `Calling tools:\n${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n')}`;
+        }
       }
     }
 
@@ -232,7 +234,18 @@ export default function WorldChat(props: WorldChatProps) {
         for (let i = currentIndex - 1; i >= 0; i--) {
           const prevMsg = this.state.messages[i];
           if (prevMsg.type === 'assistant' && (prevMsg as any).tool_calls) {
-            const toolCall = (prevMsg as any).tool_calls.find((tc: any) => tc.id === toolCallId);
+            // Parse tool_calls if it's a JSON string (from database)
+            let prevToolCalls = (prevMsg as any).tool_calls;
+            if (typeof prevToolCalls === 'string') {
+              try {
+                prevToolCalls = JSON.parse(prevToolCalls);
+              } catch {
+                prevToolCalls = [];
+              }
+            }
+            if (!Array.isArray(prevToolCalls)) continue;
+
+            const toolCall = prevToolCalls.find((tc: any) => tc.id === toolCallId);
             if (toolCall) {
               toolName = toolCall.function?.name || 'unknown';
               try {
@@ -311,11 +324,9 @@ export default function WorldChat(props: WorldChatProps) {
         <div
           className="conversation-area"
           ref={el => {
-            if (!el) return;
-            if (needScroll) {
+            if (el) {
               requestAnimationFrame(() => {
                 el.scrollTop = el.scrollHeight;
-                app.run('ack-scroll');
               });
             }
           }}
@@ -540,7 +551,7 @@ export default function WorldChat(props: WorldChatProps) {
                     <div className="streaming-indicator">
                       <div className="streaming-content">
                         <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                        <span>{getAgentActivityMessage(message.sender) || 'responding ...'}</span>
+                        <span>responding ...</span>
                       </div>
                     </div>
                   )}
@@ -558,8 +569,8 @@ export default function WorldChat(props: WorldChatProps) {
             })
           )}
 
-          {/* Show waiting dots only when no specific activity info */}
-          {showWaitingDots && (
+          {/* Show waiting dots when processing */}
+          {isWaiting && (
             <div className="message user-message waiting-message">
               <div className="message-content">
                 <div className="waiting-dots">
