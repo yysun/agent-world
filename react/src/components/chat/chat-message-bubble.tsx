@@ -6,7 +6,11 @@
  * Features:
  * - Role-based visual styling (user, assistant, system, tool)
  * - Timestamp and sender display
- * - Threading indicator for replies
+ * - Threading indicator with "reply to" display (e.g., "Agent: a1 (reply to HUMAN)")
+ * - Tool approval request display with action buttons
+ * - Tool approval response display with status
+ * - Detailed tool call formatting with arguments (e.g., "Calling tool: shell_cmd (command: x, directory: y)")
+ * - Detailed tool result formatting with matching call details
  * - Optimized with React.memo
  * 
  * Implementation:
@@ -14,19 +18,31 @@
  * - Assistant messages: left-aligned, secondary color
  * - System messages: centered, muted style
  * - Tool messages: left-aligned, accent color
+ * - Tool approval requests: rendered with ToolCallRequestBox
+ * - Tool approval responses: rendered with ToolCallResponseBox
+ * - Tool call messages: formatted with formatToolCallMessage() to show arguments
+ * - Reply messages: show reply target using getReplyTarget() helper
  * 
  * Changes:
+ * - 2025-11-12: Added reply-to display showing parent message target
+ * - 2025-11-12: Added detailed tool call/result formatting with arguments
+ * - 2025-11-12: Added tool approval request/response rendering
  * - 2025-11-04: Created for Phase 2 - Core Components
  */
 
 import React from 'react';
 import type { ChatMessage } from './types';
+import type { Message } from '@/types';
 import {
   isUserMessage,
   isAssistantMessage,
   isSystemMessage,
   isToolMessage,
 } from './types';
+import { ToolCallRequestBox } from './tool-call-request-box';
+import { ToolCallResponseBox } from './tool-call-response-box';
+import { formatToolCallMessage, isToolCallMessage } from '@/lib/domain/tool-formatting';
+import { getReplyTarget } from '@/lib/domain/message-display';
 
 export interface ChatMessageBubbleProps {
   /** Message to display */
@@ -40,6 +56,13 @@ export interface ChatMessageBubbleProps {
 
   /** All messages for threading context */
   allMessages?: ChatMessage[];
+
+  /** Callback when approval decision is made */
+  onApprovalDecision?: (data: {
+    toolCallId: string;
+    decision: 'approve' | 'deny';
+    scope: 'once' | 'session' | 'none';
+  }) => void;
 }
 
 /**
@@ -60,12 +83,23 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     message,
     showTimestamp = true,
     showSender = true,
-    allMessages: _allMessages,
+    allMessages,
+    onApprovalDecision,
   }) {
     const isUser = isUserMessage(message);
     const isAssistant = isAssistantMessage(message);
     const isSystem = isSystemMessage(message);
     const isTool = isToolMessage(message);
+
+    // Check if this message has tool approval data
+    const extendedMessage = message as unknown as Message;
+    const hasToolApprovalRequest = extendedMessage.isToolCallRequest && extendedMessage.toolCallData;
+    const hasToolApprovalResponse = extendedMessage.isToolCallResponse && extendedMessage.toolCallData;
+
+    // Format message content - upgrade tool call messages to detailed format
+    const displayContent = isToolCallMessage(extendedMessage)
+      ? formatToolCallMessage(extendedMessage, allMessages as Message[] | undefined)
+      : message.content;
 
     // Format timestamp
     const timestamp = message.createdAt
@@ -77,6 +111,10 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
 
     // Determine sender display name
     const senderName = message.sender || (isUser ? 'You' : 'Assistant');
+
+    // Check if this message is a reply and get the target
+    const replyTarget = getReplyTarget(extendedMessage, (allMessages as unknown as Message[]) || []);
+    const displayName = replyTarget ? `${senderName} (reply to ${replyTarget})` : senderName;
 
     // Container alignment
     const containerClass = isUser
@@ -102,16 +140,25 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
             <div
               className={`flex items-center gap-2 text-xs text-muted-foreground px-1`}
             >
-              {showSender && <span className="font-medium">{senderName}</span>}
+              {showSender && <span className="font-medium">{displayName}</span>}
               {showTimestamp && timestamp && <span>{timestamp}</span>}
             </div>
           )}
 
           {/* Message bubble */}
           <div className={bubbleClass}>
-            <p className="whitespace-pre-wrap break-words leading-relaxed">
-              {message.content}
-            </p>
+            {hasToolApprovalRequest ? (
+              <ToolCallRequestBox
+                message={extendedMessage}
+                onApprovalDecision={onApprovalDecision}
+              />
+            ) : hasToolApprovalResponse ? (
+              <ToolCallResponseBox message={extendedMessage} />
+            ) : (
+              <p className="whitespace-pre-wrap break-words leading-relaxed">
+                {displayContent}
+              </p>
+            )}
           </div>
         </div>
       </div>

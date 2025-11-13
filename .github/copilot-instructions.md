@@ -5,7 +5,7 @@
 **Tech Stack:** TypeScript, Node.js, vitest, ESLint, Prettier.  
 **Monorepo packages:** `core/` (business logic), `server/` (REST API), `cli/`, `web/` (AppRun frontend).
 **Frontend Reference:** Use `prompts/apprun.prompt.md` for `web/src` patterns.  
-**Storage:** Default SQLite database is located at `~/.agent-world/database.db`.  
+**Storage:** Default SQLite database is located at `~/agent-world/database.db`.  
 **Testing:** For simple or debug tests, make .ts file and test with 'npx tsx'.
 
 ## Unit Test Creation Rules

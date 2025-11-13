@@ -49,7 +49,17 @@ interface MemoryItem {
   createdAt: string;
   messageId?: string;
   replyToMessageId?: string;
-  tool_calls?: Array<{
+  // API returns tool_calls as JSON string from database
+  // Can be either snake_case (tool_calls) or camelCase (toolCalls) depending on backend serialization
+  tool_calls?: string | Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+  toolCalls?: string | Array<{
     id: string;
     type: 'function';
     function: {
@@ -58,6 +68,7 @@ interface MemoryItem {
     };
   }>;
   tool_call_id?: string;
+  toolCallId?: string;
 }
 
 interface AgentWithMemory {
@@ -70,40 +81,91 @@ interface AgentWithMemory {
  * Create a Message from a memory item
  */
 function createMessageFromMemory(memoryItem: MemoryItem, _agentName: string): Message {
+  // Parse tool_calls if it's a JSON string (API returns it as string from database)
+  // Check BOTH snake_case and camelCase (backend may serialize differently)
+  let toolCalls = memoryItem.tool_calls || memoryItem.toolCalls;
+
+  if (typeof toolCalls === 'string' && toolCalls.trim()) {
+    try {
+      toolCalls = JSON.parse(toolCalls);
+    } catch (err) {
+      console.warn('Failed to parse tool_calls JSON:', toolCalls, err);
+      toolCalls = undefined;
+    }
+  }
+
   return {
     id: memoryItem.messageId || `temp-${Date.now()}-${Math.random()}`,
-    content: memoryItem.content,
+    type: memoryItem.role, // Preserve role as type
+    text: memoryItem.content, // Use text field (primary in Message interface)
+    content: memoryItem.content, // Also set content for compatibility
     sender: memoryItem.sender || 'unknown',
     timestamp: memoryItem.createdAt,
+    createdAt: new Date(memoryItem.createdAt),
     chatId: memoryItem.chatId,
     worldId: undefined,
+    messageId: memoryItem.messageId,
+    replyToMessageId: memoryItem.replyToMessageId,
+    role: memoryItem.role,
+    // Preserve tool-related fields (check both snake_case and camelCase)
+    ...(toolCalls && { tool_calls: toolCalls }),
+    ...(memoryItem.tool_call_id || memoryItem.toolCallId) && {
+      tool_call_id: memoryItem.tool_call_id || memoryItem.toolCallId
+    },
   };
 }
 
 /**
  * Deduplicate messages by messageId (for user messages sent to multiple agents)
+ * 
+ * Logic matches web frontend (web/src/pages/World.update.ts deduplicateMessages):
+ * - User messages with same messageId appear only once
+ * - seenByAgents shows only the FIRST agent (intended recipient)
+ * - Agent messages remain separate (one per agent)
+ * - Sort by timestamp, with replies before incoming when timestamps match
  */
 function deduplicateMessages(messages: Message[]): Message[] {
-  const seen = new Map<string, Message>();
-  const result: Message[] = [];
+  const messageMap = new Map<string, Message>();
+  const messagesWithoutId: Message[] = [];
 
   for (const msg of messages) {
-    // For messages with messageId, deduplicate by that
-    if (msg.id) {
-      if (!seen.has(msg.id)) {
-        seen.set(msg.id, msg);
-        result.push(msg);
+    // Only deduplicate user messages with messageId
+    const isUserMessage = msg.type === 'user' ||
+      (msg.sender || '').toLowerCase() === 'human' ||
+      (msg.sender || '').toLowerCase() === 'you' ||
+      (msg.sender || '').toLowerCase() === 'user';
+
+    if (isUserMessage && msg.messageId) {
+      const existing = messageMap.get(msg.messageId);
+      if (!existing) {
+        // First occurrence - keep it
+        messageMap.set(msg.messageId, msg);
       }
+      // Subsequent occurrences are ignored (duplicates in other agents' memory)
     } else {
-      // Messages without ID are always added
-      result.push(msg);
+      // Keep all agent messages and messages without messageId
+      messagesWithoutId.push(msg);
     }
   }
 
-  // Sort by timestamp
-  return result.sort((a, b) =>
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
+  // Combine deduplicated user messages with all agent messages
+  // Sort by timestamp with logical flow: replies before incoming messages when timestamps match
+  return [...Array.from(messageMap.values()), ...messagesWithoutId]
+    .sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+
+      // Primary sort: by timestamp
+      if (dateA !== dateB) {
+        return dateA - dateB;
+      }
+
+      // Secondary sort: when timestamps are equal, assistant/agent (reply) comes before user/human (incoming)
+      // This ensures logical flow: agent replies first, then that reply is saved to other agents' memories
+      const roleOrderA = (a.type === 'agent' || a.type === 'assistant') ? 0 : (a.type === 'user' || a.type === 'human') ? 1 : 2;
+      const roleOrderB = (b.type === 'agent' || b.type === 'assistant') ? 0 : (b.type === 'user' || b.type === 'human') ? 1 : 2;
+      return roleOrderA - roleOrderB;
+    });
 }
 
 export function useChatData(worldId: string, chatId?: string): UseChatDataReturn {
@@ -209,9 +271,12 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
       // Add user message immediately to UI
       const tempUserMessage: Message = {
         id: `temp-${Date.now()}`,
+        type: 'user',
+        text: content,
         content,
         sender: 'human',
         timestamp: new Date().toISOString(),
+        createdAt: new Date(),
         chatId: currentChatId,
         worldId
       };
@@ -223,9 +288,12 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
           // Add placeholder message for streaming
           const newMessage: Message = {
             id: data.messageId,
+            type: 'assistant',
+            text: '...',
             content: '...',
             sender: data.sender,
             timestamp: new Date().toISOString(),
+            createdAt: new Date(),
             chatId: currentChatId,
             worldId
           };
@@ -235,7 +303,7 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
           // Update streaming message
           setMessages(prev => prev.map(msg =>
             msg.id === data.messageId
-              ? { ...msg, content: data.content }
+              ? { ...msg, text: data.content, content: data.content }
               : msg
           ));
         },
@@ -243,7 +311,7 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
           // Finalize message and reload from backend
           setMessages(prev => prev.map(msg =>
             msg.id === data.messageId
-              ? { ...msg, content: data.content }
+              ? { ...msg, text: data.content, content: data.content }
               : msg
           ));
 
@@ -263,11 +331,15 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
         onMessage: (data) => {
           // Handle non-streaming messages
           if (data.messageId) {
+            const content = data.content || data.message || '';
             const newMessage: Message = {
               id: data.messageId,
-              content: data.content || data.message || '',
+              type: 'assistant',
+              text: content,
+              content: content,
               sender: data.sender || data.agentName || 'system',
               timestamp: data.createdAt || new Date().toISOString(),
+              createdAt: new Date(data.createdAt || new Date()),
               chatId: currentChatId,
               worldId: worldId
             };

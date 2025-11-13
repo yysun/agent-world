@@ -1,14 +1,14 @@
 /**
  * SSE Client Utilities - Server-Sent Events Management for React
  * 
- * Purpose: Manage SSE connections for real-time streaming responses
- * Simplified version adapted from web/src/utils/sse-client.ts
+ * Source: Enhanced from web/src frontend SSE handling
+ * Adapted for: React 19.2.0
  * 
  * Features:
  * - SSE connection management with cleanup
- * - Event parsing and message handling
+ * - Comprehensive event parsing (stream, message, world, log, tool approval)
  * - Streaming message state management
- * - Error handling
+ * - Error handling and recovery
  * 
  * Implementation:
  * - Uses fetch API with ReadableStream for SSE
@@ -16,10 +16,12 @@
  * - Processes SSE data events with callbacks
  * 
  * Changes:
+ * - 2025-11-12: Enhanced with world events, log messages, tool approval events
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
 
 import { sendMessage as apiSendMessage } from './api';
+import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, LogEvent, WorldEvent, ApprovalRequest } from '../types';
 
 // SSE data structure interfaces
 interface SSEBaseData {
@@ -60,6 +62,21 @@ interface SSEMessageData extends SSEBaseData {
   };
 }
 
+interface SSELogData extends SSEBaseData {
+  type: 'log:message';
+  data: LogEvent;
+}
+
+interface SSEWorldEventData extends SSEBaseData {
+  type: 'world:event';
+  data: WorldEvent;
+}
+
+interface SSEToolApprovalData extends SSEBaseData {
+  type: 'tool:approval:request';
+  data: ApprovalRequest;
+}
+
 interface SSEErrorData extends SSEBaseData {
   type: 'error';
   message?: string;
@@ -73,17 +90,23 @@ interface SSECompleteData extends SSEBaseData {
 type SSEData =
   | SSEStreamingData
   | SSEMessageData
+  | SSELogData
+  | SSEWorldEventData
+  | SSEToolApprovalData
   | SSEErrorData
   | SSECompleteData
   | SSEBaseData;
 
 // Callback types
 export interface SSECallbacks {
-  onStreamStart?: (data: { messageId: string; sender: string }) => void;
-  onStreamChunk?: (data: { messageId: string; sender: string; content: string }) => void;
-  onStreamEnd?: (data: { messageId: string; sender: string; content: string }) => void;
-  onStreamError?: (data: { messageId: string; sender: string; error: string }) => void;
+  onStreamStart?: (data: StreamStartData) => void;
+  onStreamChunk?: (data: StreamChunkData) => void;
+  onStreamEnd?: (data: StreamEndData) => void;
+  onStreamError?: (data: StreamErrorData) => void;
   onMessage?: (data: SSEMessageData['data']) => void;
+  onLogMessage?: (data: LogEvent) => void;
+  onWorldEvent?: (data: WorldEvent) => void;
+  onToolApprovalRequest?: (data: ApprovalRequest) => void;
   onError?: (error: Error) => void;
   onComplete?: (data: any) => void;
 }
@@ -181,6 +204,15 @@ function handleSSEData(data: SSEData, callbacks: SSECallbacks): void {
     case 'message':
       callbacks.onMessage?.((data as SSEMessageData).data);
       break;
+    case 'log:message':
+      callbacks.onLogMessage?.((data as SSELogData).data);
+      break;
+    case 'world:event':
+      callbacks.onWorldEvent?.((data as SSEWorldEventData).data);
+      break;
+    case 'tool:approval:request':
+      callbacks.onToolApprovalRequest?.((data as SSEToolApprovalData).data);
+      break;
     case 'error':
       callbacks.onError?.(new Error((data as SSEErrorData).message || 'SSE error'));
       break;
@@ -201,22 +233,28 @@ function handleStreamingEvent(eventData: SSEStreamEvent, callbacks: SSECallbacks
 
   switch (eventData.type) {
     case 'start':
-      callbacks.onStreamStart?.({ messageId, sender });
+      callbacks.onStreamStart?.({ messageId, sender, worldName: eventData.worldName });
       break;
 
     case 'chunk':
       const content = eventData.accumulatedContent || eventData.content || '';
-      callbacks.onStreamChunk?.({ messageId, sender, content });
+      callbacks.onStreamChunk?.({
+        messageId,
+        sender,
+        content,
+        isAccumulated: Boolean(eventData.accumulatedContent),
+        worldName: eventData.worldName
+      });
       break;
 
     case 'end':
       const finalContent = eventData.finalContent || '';
-      callbacks.onStreamEnd?.({ messageId, sender, content: finalContent });
+      callbacks.onStreamEnd?.({ messageId, sender, content: finalContent, worldName: eventData.worldName });
       break;
 
     case 'error':
       const error = eventData.error || 'Streaming error';
-      callbacks.onStreamError?.({ messageId, sender, error });
+      callbacks.onStreamError?.({ messageId, sender, error, worldName: eventData.worldName });
       break;
   }
 }
