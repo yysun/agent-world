@@ -10,7 +10,6 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.53.2",
     "eventemitter3": "^5.0.1",
     "gray-matter": "^4.0.3",
     "react": "19.2.0",
@@ -20,13 +19,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@vitejs/plugin-react": "^5.1.1",
-    "postcss": "^8",
-    "tailwindcss": "^4",
-    "typescript": "^5",
-    "vite": "^7.2.2"
+    "@types/react-dom": "^19"
   }
 }

@@ -33,8 +33,5 @@
     "sqlite3": "^5.1.7",
     "zod": "^4.1.12"
   },
-  "devDependencies": {
-    "@types/node": "^24.3.0",
-    "typescript": "^5.8.3"
-  }
+  "devDependencies": {}
 }
