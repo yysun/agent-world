@@ -61,6 +61,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.53.2",
     "chalk": "^5.5.0",
     "cors": "^2.8.5",
     "enquirer": "^2.4.1",

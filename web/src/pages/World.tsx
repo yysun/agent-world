@@ -6,6 +6,20 @@
  * - Right panel always shows Chat History (no settings panel toggle)
  * - Agent selection highlighting with message filtering and CRUD modals
  * - AppRun MVU pattern with modular components and extracted handlers
+ * - Tailwind CSS utilities for layout, spacing, and responsive design
+ * 
+ * Implementation:
+ * - Flexbox layout with Tailwind utilities
+ * - Responsive grid and spacing with Tailwind classes
+ * - Preserves Doodle CSS for buttons and decorative elements
+ * - Custom CSS for agent sprites, animations, and message styling
+ * 
+ * Recent Changes:
+ * - Integrated Tailwind CSS utilities for layout and spacing
+ * - Added flexbox utilities for component structure
+ * - Migrated modal overlays to Tailwind positioning
+ * - Preserved agent sprites and animation CSS
+ * - Maintained Doodle borders on buttons and fieldsets
  */
 
 import { app, Component, safeHTML } from 'apprun';
@@ -86,22 +100,24 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     if (state.error) {
       return (
-        <div className="world-container">
-          <div className="world-columns">
-            <div className="chat-column">
+        <div className="world-container flex flex-col h-screen">
+          <div className="world-columns flex flex-1 overflow-hidden">
+            <div className="chat-column flex flex-col flex-1">
               <div className="agents-section">
-                <div className="agents-row">
-                  <div className="no-agents">Error</div>
+                <div className="agents-row flex items-center gap-4 px-4 py-2">
+                  <div className="text-text-secondary">Error</div>
                 </div>
               </div>
-              <div className="error-state">
-                <p>Error: {state.error}</p>
-                <button $onclick={['/World', state.worldName]}>Retry</button>
+              <div className="error-state flex items-center justify-center flex-1 p-4">
+                <div className="text-center">
+                  <p className="text-lg text-text-primary mb-4">Error: {state.error}</p>
+                  <button className="btn btn-primary px-6 py-3" $onclick={['/World', state.worldName]}>Retry</button>
+                </div>
               </div>
             </div>
-            <div className="settings-column">
-              <div className="settings-section">
-                <div className="settings-row">
+            <div className="settings-column w-96">
+              <div className="settings-section p-4">
+                <div className="settings-row flex gap-2">
                   <button className="world-settings-btn" title="World Settings">
                     <span className="world-gear-icon">⚙</span>
                   </button>
@@ -115,40 +131,40 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // Main content view
     return (
-      <div className="world-container">
-        <div className="world-columns">
-          <div className="chat-column">
+      <div className="world-container flex flex-col h-screen">
+        <div className="world-columns flex flex-1 overflow-hidden">
+          <div className="chat-column flex flex-col flex-1">
             <div className="agents-section">
-              <div className="agents-row agents-row-with-back">
+              <div className="agents-row agents-row-with-back flex items-center gap-4 px-4 py-2">
                 <div className="back-button-container">
                   <a href="/">
-                    <button className="back-button" title="Back to Worlds">
+                    <button className="back-button flex items-center justify-center" title="Back to Worlds">
                       <span className="world-back-icon">←</span>
                     </button>
                   </a>
                 </div>
-                <div className="agents-list-container">
+                <div className="agents-list-container flex-1">
                   {!state.world?.agents?.length ? (
-                    <div className="no-agents">No agents in this world:
+                    <div className="no-agents text-text-secondary">No agents in this world:
                       <span> {safeHTML('<a href="#" onclick="app.run(\'open-agent-create\')">Create Agent</a>')}</span>
                     </div>
                   ) : (
-                    <div className="agents-list">
+                    <div className="agents-list flex flex-wrap gap-6 justify-center items-center">
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         const isFilterActive = state.activeAgentFilters.includes(agent.id);
                         return (
-                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''}`} $onclick={['open-agent-edit', agent]}>
-                            <div className="agent-sprite-container">
-                              <div className={`agent-sprite sprite-${agent.spriteIndex}`}></div>
+                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''} flex flex-col items-center gap-1 px-4 cursor-pointer`} $onclick={['open-agent-edit', agent]}>
+                            <div className="agent-sprite-container relative">
+                              <div className={`agent-sprite sprite-${agent.spriteIndex} w-16 h-16`}></div>
                               <div
-                                className={`message-badge ${isFilterActive ? 'active' : ''}`}
+                                className={`message-badge ${isFilterActive ? 'active' : ''} absolute`}
                                 $onclick={['toggle-agent-filter', agent.id]}
                               >
                                 {agent.messageCount}
                               </div>
                             </div>
-                            <div className="agent-name">{agent.name}</div>
+                            <div className="agent-name text-sm text-center">{agent.name}</div>
                           </div>
                         );
                       })}
@@ -176,9 +192,9 @@ export default class WorldComponent extends Component<WorldComponentState, World
             />
           </div>
 
-          <div className="settings-column">
-            <div className="settings-section">
-              <div className="settings-row">
+          <div className="settings-column w-96">
+            <div className="settings-section p-4">
+              <div className="settings-row flex gap-2">
                 <button
                   className="world-settings-btn"
                   title="Create New Agent"
@@ -238,30 +254,30 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
         {/* Chat Delete Confirmation Modal */}
         {state.chatToDelete && (
-          <div className="modal-overlay" $onclick="chat-history-hide-modals">
-            <div className="modal-content chat-history-modal" onclick={(e: Event) => e.stopPropagation()}>
+          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" $onclick="chat-history-hide-modals">
+            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
               <button
-                className="modal-close-btn"
+                className="modal-close-btn absolute top-4 right-4 text-2xl"
                 $onclick="chat-history-hide-modals"
                 title="Close"
               >
                 ×
               </button>
-              <h3>Delete Chat</h3>
-              <p className="delete-confirmation-text">
-                Are you sure you want to delete chat <span className="delete-confirmation-name">"{state.chatToDelete.name}"</span>?
+              <h3 className="text-xl font-bold mb-4">Delete Chat</h3>
+              <p className="delete-confirmation-text mb-2">
+                Are you sure you want to delete chat <span className="delete-confirmation-name font-bold">"{state.chatToDelete.name}"</span>?
               </p>
-              <p className="warning delete-confirmation-warning">
+              <p className="warning delete-confirmation-warning text-system mb-4">
                 ⚠️ This action cannot be undone.
               </p>
-              <div className="form-actions">
+              <div className="form-actions flex gap-2 justify-end">
                 <button
-                  className="btn-danger"
+                  className="btn-danger px-4 py-2 rounded"
                   $onclick={['delete-chat-from-history', { chatId: state.chatToDelete.id }]}
                 >
                   Delete Chat
                 </button>
-                <button className="btn-secondary" $onclick="chat-history-hide-modals">
+                <button className="btn-secondary px-4 py-2 rounded" $onclick="chat-history-hide-modals">
                   Cancel
                 </button>
               </div>
@@ -271,30 +287,30 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
         {/* Message Delete Confirmation Modal */}
         {state.messageToDelete && (
-          <div className="modal-overlay" $onclick="hide-delete-message-confirm">
-            <div className="modal-content chat-history-modal" onclick={(e: Event) => e.stopPropagation()}>
+          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" $onclick="hide-delete-message-confirm">
+            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
               <button
-                className="modal-close-btn"
+                className="modal-close-btn absolute top-4 right-4 text-2xl"
                 $onclick="hide-delete-message-confirm"
                 title="Close"
               >
                 ×
               </button>
-              <h3>Delete Message</h3>
-              <p className="delete-confirmation-text">
+              <h3 className="text-xl font-bold mb-4">Delete Message</h3>
+              <p className="delete-confirmation-text mb-2">
                 Are you sure you want to delete this message?
               </p>
-              <p className="warning delete-confirmation-warning">
+              <p className="warning delete-confirmation-warning text-system mb-4">
                 ⚠️ This action will delete the message and all messages after it. This cannot be undone.
               </p>
-              <div className="form-actions">
+              <div className="form-actions flex gap-2 justify-end">
                 <button
-                  className="btn-danger"
+                  className="btn-danger px-4 py-2 rounded"
                   $onclick="delete-message-confirmed"
                 >
                   Delete Message
                 </button>
-                <button className="btn-secondary" $onclick="hide-delete-message-confirm">
+                <button className="btn-secondary px-4 py-2 rounded" $onclick="hide-delete-message-confirm">
                   Cancel
                 </button>
               </div>

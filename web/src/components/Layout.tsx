@@ -8,6 +8,7 @@ import app from 'apprun';
 //   item && item.parentElement.classList.add('active');
 // });
 
-export default () => <div id="main">
+export default () => <div id="main" className="w-full min-h-screen">
   <div id="pages"></div>
 </div>;
+

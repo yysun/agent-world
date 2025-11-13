@@ -8,9 +8,10 @@
 ### Phase 1: Setup and Configuration
 
 #### 1.1 Install Dependencies
-- [ ] Install `tailwindcss` as devDependency
-- [ ] Install `postcss` as devDependency
-- [ ] Install `autoprefixer` as devDependency
+- [x] Install `tailwindcss` as devDependency
+- [x] Install `postcss` as devDependency
+- [x] Install `autoprefixer` as devDependency
+- [x] Install `@tailwindcss/postcss` for Tailwind v4 compatibility
 
 **Command:**
 ```bash
@@ -18,12 +19,12 @@ cd web && npm install -D tailwindcss postcss autoprefixer
 ```
 
 #### 1.2 Initialize Tailwind Configuration
-- [ ] Generate `tailwind.config.js` in `/web` directory
-- [ ] Configure content paths to scan `.tsx` files
-- [ ] Extend theme with existing color palette
-- [ ] Set "Short Stack" as primary font family
-- [ ] Match existing breakpoints
-- [ ] Import CSS custom properties
+- [x] Generate `tailwind.config.js` in `/web` directory
+- [x] Configure content paths to scan `.tsx` files
+- [x] Extend theme with existing color palette
+- [x] Set "Short Stack" as primary font family
+- [x] Match existing breakpoints
+- [x] Import CSS custom properties
 
 **Configuration structure:**
 ```javascript
@@ -57,8 +58,8 @@ export default {
 ```
 
 #### 1.3 Create PostCSS Configuration
-- [ ] Create `postcss.config.js` in `/web` directory
-- [ ] Configure Tailwind and Autoprefixer plugins
+- [x] Create `postcss.config.js` in `/web` directory
+- [x] Configure Tailwind and Autoprefixer plugins
 
 **Configuration:**
 ```javascript
@@ -71,9 +72,9 @@ export default {
 ```
 
 #### 1.4 Update CSS Import Order
-- [ ] Add Tailwind directives to top of `styles.css`
-- [ ] Ensure Doodle CSS import remains after Tailwind base
-- [ ] Preserve existing custom CSS after Tailwind utilities
+- [x] Add Tailwind directives to top of `styles.css`
+- [x] Ensure Doodle CSS import remains after Tailwind base
+- [x] Preserve existing custom CSS after Tailwind utilities
 
 **New `styles.css` structure:**
 ```css
@@ -174,8 +175,8 @@ colors: {
 ```
 
 **Files to start with:**
-- `Layout.tsx` (minimal structure)
-- `Home.tsx` (carousel layout)
+- [x] `Layout.tsx` (minimal structure)
+- [x] `Home.tsx` (carousel layout)
 
 #### Priority 2: Spacing and Sizing
 
@@ -478,39 +479,39 @@ If integration causes issues:
 ## Implementation Checklist
 
 ### Setup
-- [ ] Install Tailwind, PostCSS, Autoprefixer
-- [ ] Create `tailwind.config.js` with custom theme
-- [ ] Create `postcss.config.js`
-- [ ] Create `web/src/tailwind.css` with directives
-- [ ] Update `main.tsx` import order
-- [ ] Test build succeeds
+- [x] Install Tailwind, PostCSS, Autoprefixer
+- [x] Create `tailwind.config.js` with custom theme
+- [x] Create `postcss.config.js`
+- [x] Create `web/src/tailwind.css` with directives
+- [x] Update `main.tsx` import order
+- [x] Test build succeeds
 
 ### Configuration
-- [ ] Map color palette to Tailwind config
-- [ ] Set "Short Stack" font family
-- [ ] Configure responsive breakpoints
-- [ ] Disable preflight reset
-- [ ] Configure content paths for purge
+- [x] Map color palette to Tailwind config
+- [x] Set "Short Stack" font family
+- [x] Configure responsive breakpoints
+- [x] Disable preflight reset
+- [x] Configure content paths for purge
 
 ### Migration (Incremental)
-- [ ] Convert Layout.tsx (minimal changes)
-- [ ] Convert Home.tsx carousel layout
-- [ ] Test visual parity
-- [ ] Convert agent list spacing
-- [ ] Test visual parity
-- [ ] Convert message layout utilities
-- [ ] Test visual parity
-- [ ] Convert responsive breakpoints
-- [ ] Test on mobile/tablet/desktop
+- [x] Convert Layout.tsx (minimal changes)
+- [x] Convert Home.tsx carousel layout
+- [x] Test visual parity
+- [x] Convert agent list spacing
+- [x] Test visual parity
+- [x] Convert message layout utilities
+- [x] Test visual parity
+- [x] Convert responsive breakpoints
+- [x] Test on mobile/tablet/desktop
 
 ### Validation
-- [ ] Run visual regression tests
-- [ ] Test all animations still work
-- [ ] Verify Doodle borders visible
-- [ ] Check font consistency
-- [ ] Test responsive behavior
-- [ ] Measure bundle size
-- [ ] Run Lighthouse audit
+- [x] Run visual regression tests
+- [x] Test all animations still work
+- [x] Verify Doodle borders visible
+- [x] Check font consistency
+- [x] Test responsive behavior
+- [x] Measure bundle size
+- [x] Run Lighthouse audit
 
 ### Documentation
 - [ ] Update web/README.md with Tailwind usage

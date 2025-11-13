@@ -5,6 +5,7 @@ import Agent from './pages/Agent';
 import World from './pages/World';
 import Settings from './pages/Settings';
 
+import './tailwind.css';
 import 'doodle.css/doodle.css';
 import './styles.css';
 
