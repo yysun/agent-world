@@ -19,7 +19,6 @@
  */
 
 import { useState } from 'react';
-import { ChatMessageList } from './chat-message-list';
 import { ChatTypingIndicator } from './chat-typing-indicator';
 import { ChatInput } from './chat-input';
 import { ChatMessageBubble } from './chat-message-bubble';
@@ -66,12 +65,12 @@ export interface ChatThreadProps {
  */
 export function ChatThread({
   worldId: _worldId,
-  selectedAgent,
+  selectedAgent: _selectedAgent,
   messages,
   streaming = false,
   onSendMessage,
   disabled = false,
-  loading = false,
+  loading: _loading = false,
 }: ChatThreadProps) {
   const [draft, setDraft] = useState('');
 

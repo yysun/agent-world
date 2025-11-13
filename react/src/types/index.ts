@@ -174,7 +174,7 @@ export interface World {
   turnLimit?: number;
   chatLLMProvider?: string;
   chatLLMModel?: string;
-  currentChatId?: string | null;
+  currentChatId?: string;
   mcpConfig?: string | null;
   agents?: Agent[];
   chats?: Chat[];
