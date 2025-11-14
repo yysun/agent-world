@@ -266,14 +266,31 @@ const AgentUpdateSchema = z.object({
 
 const ToolResultSchema = z.object({
   tool_call_id: z.string().min(1),
-  decision: z.enum(['approve', 'deny']),
+  decision: z.enum(['approve', 'deny']).optional(),
   scope: z.enum(['once', 'session']).optional(),
+  choice: z.string().optional(),
   toolName: z.string().min(1),
   toolArgs: z.record(z.unknown()).optional(),
   workingDirectory: z.string().optional(),
   agentId: z.string().min(1),
   stream: z.boolean().optional()
-});
+}).refine(
+  (data) => {
+    // For approval requests (client.requestApproval), decision is required
+    if (data.toolName === 'client.requestApproval') {
+      return data.decision !== undefined;
+    }
+    // For HITL requests (client.humanIntervention), choice is required
+    if (data.toolName === 'client.humanIntervention') {
+      return data.choice !== undefined && data.choice.length > 0;
+    }
+    // For other tools, no specific requirements
+    return true;
+  },
+  {
+    message: 'For approval requests, decision is required; for HITL requests, choice is required'
+  }
+);
 
 const router = express.Router();
 

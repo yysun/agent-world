@@ -157,12 +157,20 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
       clonedMessage.tool_calls = filteredToolCalls;
     }
 
-    // Filter tool result messages for approval_ calls
-    if (clonedMessage.role === 'tool' && clonedMessage.tool_call_id?.startsWith('approval_')) {
-      logger.debug('Dropping approval tool result from LLM context', {
-        toolCallId: clonedMessage.tool_call_id
-      });
-      continue;
+    // Filter tool result messages for approval_ and hitl_ calls
+    if (clonedMessage.role === 'tool' && clonedMessage.tool_call_id) {
+      if (clonedMessage.tool_call_id.startsWith('approval_')) {
+        logger.debug('Dropping approval tool result from LLM context', {
+          toolCallId: clonedMessage.tool_call_id
+        });
+        continue;
+      }
+      if (clonedMessage.tool_call_id.startsWith('hitl_')) {
+        logger.debug('Dropping HITL tool result from LLM context', {
+          toolCallId: clonedMessage.tool_call_id
+        });
+        continue;
+      }
     }
 
     prepared.push(clonedMessage);

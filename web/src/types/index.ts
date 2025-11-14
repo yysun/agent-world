@@ -116,6 +116,19 @@ export interface Message {
     approvalScope?: 'once' | 'session' | 'none';
     agentId?: string; // Agent that requested the approval
   };
+
+  // HITL (Human-in-the-Loop) request/response properties
+  isHITLRequest?: boolean;  // This is a HITL request message
+  isHITLResponse?: boolean; // This is a HITL response message
+  hitlData?: {
+    toolCallId: string;
+    originalToolCall?: any;
+    prompt: string;
+    options: string[];
+    context?: Record<string, unknown>;
+    choice?: string; // The selected option
+    agentId?: string;
+  };
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
@@ -180,6 +193,20 @@ export interface ApprovalRequest {
   agentId?: string;
 }
 
+// HITL Request Interface
+export interface HITLRequest {
+  toolCallId: string;
+  originalToolCall?: {
+    id: string;
+    name: string;
+    args: any;
+  };
+  prompt: string;
+  options: string[];
+  context?: Record<string, unknown>;
+  agentId: string;
+}
+
 // ========================================
 // COMPONENT PROP INTERFACES  
 // ========================================
@@ -201,6 +228,7 @@ export interface WorldChatProps {
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
   approvalRequest?: ApprovalRequest | null;
+  hitlRequest?: HITLRequest | null;
 }
 
 // World Settings Component Props
@@ -316,6 +344,7 @@ export interface WorldComponentState extends SSEComponentState {
   connectionStatus: string;
   needScroll: boolean;
   approvalRequest: ApprovalRequest | null;
+  hitlRequest: HITLRequest | null;
   lastUserMessageText?: string | null;
 }
 

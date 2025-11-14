@@ -294,6 +294,86 @@ async function handleNewApprovalRequest(
   });
 }
 
+// HITL (Human-in-the-Loop) request handler
+async function handleNewHITLRequest(
+  request: any,
+  rl: readline.Interface,
+  world: any
+): Promise<void> {
+  const { toolCallId, prompt, options, context, agentId } = request;
+
+  // Small delay to avoid mixing with world messages
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  console.log(`\n${boldYellow('🤔 Human Input Required')}`);
+  console.log(`${gray('Request:')} ${prompt}`);
+
+  if (context && Object.keys(context).length > 0) {
+    console.log(`${gray('Context:')}`);
+    for (const [key, value] of Object.entries(context)) {
+      const displayValue = typeof value === 'string' && value.length > 100
+        ? `${value.substring(0, 100)}...`
+        : String(value);
+      console.log(`  ${gray(key + ':')} ${displayValue}`);
+    }
+  }
+
+  // Create numbered choices from options array
+  const choices: string[] = [];
+  const choiceMap: Record<number, string> = {};
+
+  options.forEach((option: string, index: number) => {
+    const choiceNumber = index + 1;
+    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan(option)}`);
+    choiceMap[choiceNumber] = option;
+  });
+
+  console.log(`\n${boldMagenta('Please select an option:')}`);
+  for (const choice of choices) {
+    console.log(choice);
+  }
+
+  return new Promise<void>((resolve) => {
+    function askForChoice() {
+      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
+        const trimmed = answer.trim();
+        const num = parseInt(trimmed);
+
+        if (!isNaN(num) && choiceMap[num]) {
+          const choice = choiceMap[num];
+
+          try {
+            if (!agentId) {
+              console.error(`${error('Cannot send HITL response: agentId is missing')}`);
+              resolve();
+              return;
+            }
+
+            const { publishToolResult } = await import('../core/events/index.js');
+            const { originalToolCall } = request;
+            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
+            publishToolResult(world, agentId, {
+              tool_call_id: submittedToolCallId,
+              choice: choice,
+              toolName: originalToolCall?.name || 'client.humanIntervention',
+              toolArgs: originalToolCall?.args
+            });
+            resolve();
+          } catch (err) {
+            console.error(`${error('Failed to send HITL response:')} ${err}`);
+            resolve();
+          }
+        } else {
+          console.log(boldRed('Invalid selection. Please try again.'));
+          askForChoice();
+        }
+      });
+    }
+
+    askForChoice();
+  });
+}
+
 // Simplified approval handler for pipeline mode (non-interactive)
 async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
   const { toolName } = approvalException;
@@ -1011,11 +1091,15 @@ async function handleWorldEvent(
 
   // Handle regular message events from agents (non-streaming or after streaming ends)
   if (eventType === 'message' && eventData.sender && (eventData.content || eventData.tool_calls)) {
-    // Check for tool calls FIRST (including approval requests) - following OpenAI protocol
+    // Check for tool calls FIRST (including approval and HITL requests) - following OpenAI protocol
     if (rl && eventData.tool_calls) {
       const toolCallResult = handleToolCallEvents(eventData);
       if (toolCallResult?.isApprovalRequest && toolCallResult.approvalData) {
         await handleNewApprovalRequest(toolCallResult.approvalData, rl, globalState.world);
+        return;
+      }
+      if (toolCallResult?.isHITLRequest && toolCallResult.hitlData) {
+        await handleNewHITLRequest(toolCallResult.hitlData, rl, globalState.world);
         return;
       }
     }

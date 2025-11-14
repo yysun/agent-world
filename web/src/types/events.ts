@@ -28,7 +28,7 @@
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, ApprovalRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
+import type { Agent, ApprovalRequest, HITLRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -205,6 +205,19 @@ export type WorldEvents =
 
   /** Submit approval decision */
   | { name: 'submit-approval-decision'; payload: { decision: 'approve' | 'deny'; scope: 'once' | 'session' | 'none'; toolCallId: string } }
+
+  // ========================================
+  // HITL (HUMAN-IN-THE-LOOP) EVENTS
+  // ========================================
+
+  /** Display HITL request dialog */
+  | { name: 'show-hitl-request'; payload: HITLRequest }
+
+  /** Hide HITL request dialog */
+  | { name: 'hide-hitl-request'; payload: void }
+
+  /** Submit HITL decision */
+  | { name: 'submit-hitl-decision'; payload: { toolCallId: string; choice: string } }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

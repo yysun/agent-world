@@ -1600,15 +1600,23 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 /**
  * Get built-in tools that are always available to all worlds
  * These tools don't require MCP server configuration
- * Each tool is wrapped with universal parameter validation
+ * Built-in tools:
+ * - shell_cmd: Execute shell commands with approval flow
+ * - human_intervention.request: Request human decisions with custom options
+ * 
+ * Note: human_intervention.request is NOT wrapped with wrapToolWithValidation
+ * because it does its own transformation to client.humanIntervention protocol
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
+  const { createHumanInterventionTool } = require('./tool-utils.js');
+  const hitlTool = createHumanInterventionTool();
 
   return {
-    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd')
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
+    'human_intervention.request': hitlTool  // No wrapper - tool handles its own transformation
   };
 }
 

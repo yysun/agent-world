@@ -116,7 +116,7 @@ import {
   handleToolResult as handleToolResultBase,
   handleMessageToolCalls,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest, HITLRequest } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -525,6 +525,92 @@ const submitApprovalDecision = async (
     return {
       ...baseState,
       error: (error as Error).message || 'Failed to submit approval decision'
+    };
+  }
+};
+
+const showHITLRequestDialog = (
+  state: WorldComponentState,
+  request: HITLRequest
+): WorldComponentState => {
+  if (state.hitlRequest && state.hitlRequest.toolCallId === request.toolCallId) {
+    return state;
+  }
+
+  return {
+    ...state,
+    hitlRequest: request,
+    activeAgent: null,
+    needScroll: true
+  };
+};
+
+const hideHITLRequestDialog = (state: WorldComponentState): WorldComponentState => {
+  if (!state.hitlRequest) {
+    return state;
+  }
+
+  return {
+    ...state,
+    hitlRequest: null
+  };
+};
+
+const submitHITLDecision = async (
+  state: WorldComponentState,
+  payload: WorldEventPayload<'submit-hitl-decision'>
+): Promise<WorldComponentState> => {
+  const { choice, toolCallId } = payload;
+
+  // Check if this is from the HITL dialog (state.hitlRequest exists)
+  let request = state.hitlRequest;
+
+  // If not from dialog, find the message with matching toolCallId (inline HITL)
+  if (!request || request.toolCallId !== toolCallId) {
+    const message = state.messages?.find(msg =>
+      msg.hitlData?.toolCallId === toolCallId
+    );
+
+    if (message?.hitlData) {
+      request = {
+        toolCallId: message.hitlData.toolCallId,
+        originalToolCall: message.hitlData.originalToolCall,
+        prompt: message.hitlData.prompt,
+        options: message.hitlData.options,
+        context: message.hitlData.context,
+        agentId: message.hitlData.agentId
+      };
+    } else {
+      // No matching request found
+      return state;
+    }
+  }
+
+  const baseState: WorldComponentState = {
+    ...state,
+    hitlRequest: null,
+    needScroll: true
+  };
+
+  try {
+    // Submit HITL decision via tool result API
+    await submitToolResult(
+      state.worldName,
+      request.agentId,
+      {
+        tool_call_id: request.toolCallId,
+        choice: choice,
+        toolName: request.originalToolCall?.name || 'client.humanIntervention',
+        toolArgs: request.originalToolCall?.args
+      },
+      true // Enable SSE streaming
+    );
+
+    return baseState;
+  } catch (error) {
+    return {
+      ...baseState,
+      error: (error as Error).message || 'Failed to submit HITL decision'
     };
   }
 };
@@ -975,6 +1061,10 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'show-approval-request': showApprovalRequestDialog,
   'hide-approval-request': hideApprovalRequestDialog,
   'submit-approval-decision': submitApprovalDecision,
+
+  'show-hitl-request': showHITLRequestDialog,
+  'hide-hitl-request': hideHITLRequestDialog,
+  'submit-hitl-decision': submitHITLDecision,
 
   // ========================================
   // MESSAGE DISPLAY

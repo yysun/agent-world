@@ -319,3 +319,98 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
     }
   };
 }
+
+/**
+ * Create a generic Human-in-the-Loop (HITL) intervention tool
+ * Allows LLM to request human decisions with custom prompts and options
+ * 
+ * Flow:
+ * 1. LLM calls human_intervention.request with { prompt, options, context }
+ * 2. Tool transforms to client.humanIntervention protocol (like approval flow)
+ * 3. Client detects and renders UI with dynamic buttons
+ * 4. User selects option, submits via /tool-results API
+ * 5. Agent handler receives choice and resumes LLM
+ * 
+ * @returns Tool object compatible with OpenAI function calling
+ */
+export function createHumanInterventionTool(): any {
+  return {
+    name: 'human_intervention.request',
+    description: 'Request a decision from the human user. Use this when you need the human to choose between multiple options. The tool will pause execution and wait for the human\'s choice before continuing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'Clear question or context to help the human make a decision. Be specific about what you need and why.'
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of available choices for the human to select from. Must have at least one option. Examples: ["Option A", "Option B", "Cancel"]',
+          minItems: 1
+        },
+        context: {
+          type: 'object',
+          description: 'Optional additional data to help the human decide (e.g., current state, consequences of each option)',
+          additionalProperties: true
+        }
+      },
+      required: ['prompt', 'options']
+    },
+    execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
+      // Validate required parameters
+      if (!args.prompt || typeof args.prompt !== 'string' || args.prompt.trim() === '') {
+        return 'Error: prompt is required and must be a non-empty string';
+      }
+
+      if (!args.options || !Array.isArray(args.options) || args.options.length === 0) {
+        return 'Error: options is required and must be a non-empty array';
+      }
+
+      // Validate options are strings
+      if (!args.options.every((opt: any) => typeof opt === 'string')) {
+        return 'Error: all options must be strings';
+      }
+
+      // Generate client-side tool call ID with hitl_ prefix
+      const hitlToolCallId = `hitl_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+      // Create the transformed client.humanIntervention tool call
+      const hitlMessage = {
+        role: 'assistant' as const,
+        content: '',
+        tool_calls: [{
+          id: hitlToolCallId,
+          type: 'function' as const,
+          function: {
+            name: 'client.humanIntervention',
+            arguments: JSON.stringify({
+              originalToolCall: {
+                id: context?.toolCallId,
+                name: 'human_intervention.request',
+                args: args
+              },
+              prompt: args.prompt,
+              options: args.options,
+              context: args.context || {}
+            })
+          }
+        }],
+        toolCallStatus: {
+          [hitlToolCallId]: {
+            complete: false,
+            result: null
+          }
+        }
+      };
+
+      // Return structured response with _approvalMessage for LLM provider compatibility
+      return {
+        type: 'hitl_request',
+        _stopProcessing: true,
+        _approvalMessage: hitlMessage  // Use same field as approval flow
+      };
+    }
+  };
+}

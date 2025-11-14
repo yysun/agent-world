@@ -10,6 +10,10 @@
  * - Color-coded streaming indicators and status messages
  * - Modular design for reuse across CLI components
  * - Event-driven display (no timer dependencies)
+ * - Tool call detection for approval and HITL (Human-in-the-Loop) requests
+ * 
+ * CHANGES:
+ * - 2025-11-14: Extended handleToolCallEvents() to detect client.humanIntervention (HITL)
  */
 
 // Color helpers
@@ -186,10 +190,11 @@ export function isStreamingActive(streaming: StreamingState): boolean {
 /**
  * Handle tool call events in assistant messages
  * Returns approval request data if client.requestApproval is detected
+ * Returns HITL request data if client.humanIntervention is detected
  */
 export function handleToolCallEvents(
   eventData: any
-): { isApprovalRequest: boolean; approvalData?: any } | null {
+): { isApprovalRequest: boolean; approvalData?: any; isHITLRequest?: boolean; hitlData?: any } | null {
   // Check for null or undefined eventData
   if (!eventData) {
     return null;
@@ -225,9 +230,37 @@ export function handleToolCallEvents(
       }
     }
 
-    // Display other tool calls (non-approval)
+    // Look for client.humanIntervention calls (HITL)
     for (const toolCall of eventData.tool_calls) {
-      if (toolCall.function?.name && toolCall.function.name !== 'client.requestApproval') {
+      if (toolCall.function?.name === 'client.humanIntervention') {
+        try {
+          const args = JSON.parse(toolCall.function.arguments || '{}');
+          return {
+            isApprovalRequest: false,
+            isHITLRequest: true,
+            hitlData: {
+              toolCallId: toolCall.id,
+              originalToolCall: args.originalToolCall,
+              prompt: args.prompt || 'Please make a selection.',
+              options: Array.isArray(args.options) && args.options.length > 0
+                ? args.options
+                : ['Cancel'],
+              context: args.context,
+              agentId: eventData.sender || eventData.agentName
+            }
+          };
+        } catch (err) {
+          console.error(`${error('Failed to parse HITL request:')} ${err}`);
+          return null;
+        }
+      }
+    }
+
+    // Display other tool calls (non-approval, non-HITL)
+    for (const toolCall of eventData.tool_calls) {
+      if (toolCall.function?.name &&
+        toolCall.function.name !== 'client.requestApproval' &&
+        toolCall.function.name !== 'client.humanIntervention') {
         console.log(`${cyan('🔧')} ${yellow('Tool:')} ${toolCall.function.name}`);
       }
     }

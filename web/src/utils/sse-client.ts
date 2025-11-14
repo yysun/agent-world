@@ -317,32 +317,59 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
 const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
   for (const toolCall of toolCalls) {
     const toolName = toolCall?.function?.name;
-    if (toolName !== 'client.requestApproval') {
+
+    // Handle approval requests
+    if (toolName === 'client.requestApproval') {
+      let parsedArgs: any = {};
+      try {
+        parsedArgs = toolCall.function?.arguments
+          ? JSON.parse(toolCall.function.arguments)
+          : {};
+      } catch (error) {
+        console.warn('Failed to parse approval request arguments:', error);
+      }
+
+      const approvalRequest = {
+        toolCallId: toolCall.id || `approval-${Date.now()}`,
+        originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
+        toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
+        toolArgs: parsedArgs?.originalToolCall?.args ?? {},
+        message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
+        options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
+          ? parsedArgs.options
+          : ['Cancel', 'Once', 'Always'],
+        agentId
+      };
+
+      publishEvent('show-approval-request', approvalRequest);
       continue;
     }
 
-    let parsedArgs: any = {};
-    try {
-      parsedArgs = toolCall.function?.arguments
-        ? JSON.parse(toolCall.function.arguments)
-        : {};
-    } catch (error) {
-      console.warn('Failed to parse approval request arguments:', error);
+    // Handle HITL requests
+    if (toolName === 'client.humanIntervention') {
+      let parsedArgs: any = {};
+      try {
+        parsedArgs = toolCall.function?.arguments
+          ? JSON.parse(toolCall.function.arguments)
+          : {};
+      } catch (error) {
+        console.warn('Failed to parse HITL request arguments:', error);
+      }
+
+      const hitlRequest = {
+        toolCallId: toolCall.id || `hitl-${Date.now()}`,
+        originalToolCall: parsedArgs?.originalToolCall,
+        prompt: parsedArgs?.prompt ?? 'Please make a selection.',
+        options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
+          ? parsedArgs.options
+          : ['Cancel'],
+        context: parsedArgs?.context,
+        agentId: agentId || ''
+      };
+
+      publishEvent('show-hitl-request', hitlRequest);
+      continue;
     }
-
-    const approvalRequest = {
-      toolCallId: toolCall.id || `approval-${Date.now()}`,
-      originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
-      toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
-      toolArgs: parsedArgs?.originalToolCall?.args ?? {},
-      message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
-      options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-        ? parsedArgs.options
-        : ['Cancel', 'Once', 'Always'],
-      agentId
-    };
-
-    publishEvent('show-approval-request', approvalRequest);
   }
 };
 

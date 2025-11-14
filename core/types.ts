@@ -518,8 +518,9 @@ export function isApprovalRequest(result: any): result is ApprovalRequest {
  */
 export interface ToolResultData {
   tool_call_id: string;
-  decision: ApprovalDecision;
+  decision?: ApprovalDecision;
   scope?: ApprovalScope;
+  choice?: string;
   toolName: string;
   toolArgs?: object;
   workingDirectory?: string;

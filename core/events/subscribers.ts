@@ -79,18 +79,21 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       });
     }
 
-    // Check if this is an assistant message with tool_calls (approval request)
+    // Check if this is an assistant message with tool_calls (approval or HITL request)
     // These need to be saved to agent memory even though they're from the agent
     const messageData = messageEvent as any;
     const hasApprovalRequest = messageData.tool_calls?.some((tc: any) =>
       tc.function?.name === 'client.requestApproval'
     );
+    const hasHITLRequest = messageData.tool_calls?.some((tc: any) =>
+      tc.function?.name === 'client.humanIntervention'
+    );
 
-    // CRITICAL: Must check agent ID to prevent cross-agent approval contamination
+    // CRITICAL: Must check agent ID to prevent cross-agent contamination
     const isForThisAgent = messageEvent.sender === agent.id ||
       (messageData as any).agentName === agent.id;
 
-    if (messageData.role === 'assistant' && hasApprovalRequest && isForThisAgent) {
+    if (messageData.role === 'assistant' && (hasApprovalRequest || hasHITLRequest) && isForThisAgent) {
       // Check if this message already exists in memory (prevent duplicates)
       const alreadyInMemory = agent.memory.some(msg => msg.messageId === messageEvent.messageId);
 
@@ -102,11 +105,13 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
         return; // Don't process this message further
       }
 
-      loggerMemory.debug('Saving approval request to agent memory', {
+      const requestType = hasHITLRequest ? 'HITL' : 'approval';
+      loggerMemory.debug(`Saving ${requestType} request to agent memory`, {
         agentId: agent.id,
         messageId: messageEvent.messageId,
         toolCalls: messageData.tool_calls.length,
-        sender: messageEvent.sender
+        sender: messageEvent.sender,
+        requestType
       });
 
       const approvalMessage: AgentMessage = {
@@ -129,9 +134,10 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       try {
         const storage = await getStorageWrappers();
         await storage.saveAgent(world.id, agent);
-        loggerMemory.debug('Approval request saved to agent memory', {
+        loggerMemory.debug(`${requestType} request saved to agent memory`, {
           agentId: agent.id,
-          messageId: messageEvent.messageId
+          messageId: messageEvent.messageId,
+          requestType
         });
       } catch (error) {
         loggerMemory.error('Failed to save approval request to memory', {
@@ -244,17 +250,19 @@ export function subscribeAgentToToolMessages(world: World, agent: Agent): () => 
       return;
     }
 
-    // Parse approval decision from content
+    // Parse tool result data from content (supports both approval and HITL)
     let approvalDecision: 'approve' | 'deny' | undefined;
     let approvalScope: 'once' | 'session' | undefined;
+    let hitlChoice: string | undefined;
     let approvalData: any = {};
 
     try {
       approvalData = JSON.parse(parsedMessage.content || '{}');
       approvalDecision = approvalData.decision;
       approvalScope = approvalData.scope;
+      hitlChoice = approvalData.choice;
     } catch (error) {
-      loggerMemory.warn('[subscribeAgentToToolMessages] Failed to parse approval data', {
+      loggerMemory.warn('[subscribeAgentToToolMessages] Failed to parse tool result data', {
         agentId: agent.id,
         toolCallId: parsedMessage.tool_call_id,
         error: error instanceof Error ? error.message : error
@@ -291,10 +299,19 @@ export function subscribeAgentToToolMessages(world: World, agent: Agent): () => 
       }
     }
 
-    // Execute the tool if approved
+    // Execute the tool if approved, or return HITL choice
     let actualToolResult = '';
 
-    if (approvalDecision === 'approve' && approvalData.toolName) {
+    // Handle HITL (Human-in-the-Loop) requests
+    if (approvalData.toolName === 'client.humanIntervention' && hitlChoice) {
+      loggerAgent.debug('[subscribeAgentToToolMessages] HITL decision received', {
+        agentId: agent.id,
+        choice: hitlChoice
+      });
+      actualToolResult = hitlChoice;
+    }
+    // Handle approval requests
+    else if (approvalDecision === 'approve' && approvalData.toolName) {
       loggerAgent.debug('[subscribeAgentToToolMessages] Executing approved tool', {
         agentId: agent.id,
         toolName: approvalData.toolName,

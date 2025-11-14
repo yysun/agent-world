@@ -218,6 +218,7 @@ export function publishToolResult(world: World, agentId: string, data: ToolResul
     content: JSON.stringify({
       decision: data.decision,
       scope: data.scope,
+      choice: data.choice,
       toolName: data.toolName,
       toolArgs: data.toolArgs,
       workingDirectory: data.workingDirectory

@@ -30,6 +30,7 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import ApprovalDialog from '../components/approval-dialog';
+import HITLDialog from '../components/hitl-dialog';
 import { worldUpdateHandlers } from './World.update';
 
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
@@ -64,7 +65,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
     agentActivities: {},
-    approvalRequest: null
+    approvalRequest: null,
+    hitlRequest: null
   };
 
   override view = (state: WorldComponentState) => {
@@ -321,6 +323,11 @@ export default class WorldComponent extends Component<WorldComponentState, World
         {/* Approval Dialog */}
         {state.approvalRequest && (
           <ApprovalDialog approval={state.approvalRequest} />
+        )}
+
+        {/* HITL Dialog */}
+        {state.hitlRequest && (
+          <HITLDialog hitl={state.hitlRequest} />
         )}
       </div>
     );
