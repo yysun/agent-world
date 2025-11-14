@@ -1,3 +1,32 @@
+v0.9.0 (Unreleased)
+
+**Frontend & Architecture**
+- New React frontend with Vite replacing Next.js and WebSocket migration to REST API + SSE
+- Workspace optimization with hoisted dependencies and standardized versions
+
+**Tool Approval System**
+- Comprehensive tool approval system with structured protocol and session-based approvals
+- Approval flow refactoring with toolCallStatus tracking and completion status
+- Tool result message filtering to hide non-approval results while preserving approval flow
+
+**Events & Storage**
+- Enhanced event metadata with ownership, recipients, threading, and JSON indexes
+- SQL-based migration system with strict linear path and atomic execution
+- Fixed SQLite SQLITE_BUSY race conditions and tool_calls JSON parsing
+- Fixed tool results display in web frontend with proper subscription pattern
+
+**Shell Commands & Tools**
+- AI command bypass for shell_cmd tool (gemini, copilot, codex) eliminating unnecessary LLM calls
+- Enhanced shell command execution with PATH resolution and parameter quoting
+- Improved tool call and result display with detailed argument formatting
+
+**Chat & UI**
+- Message loading from agent memory with auto-select default chat
+- Chat functionality enhancements with better state management and scroll handling
+
+**Testing**
+- Comprehensive E2E and manual test scenarios for agent interactions and tool approval
+
 v0.8.0
 - Complete test suite migration from Jest to Vitest (547+ tests passing)
 - Comprehensive world chat session management with auto-save and title generation
