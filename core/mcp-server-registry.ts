@@ -115,7 +115,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
-import { wrapToolWithValidation } from './tool-utils.js';
+import { wrapToolWithValidation, createHumanInterventionTool } from './tool-utils.js';
 import { ApprovalRequiredException, type ApprovalPolicy, type World } from './types.js';
 
 // Scenario-based loggers for different MCP operations
@@ -1611,7 +1611,6 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
-  const { createHumanInterventionTool } = require('./tool-utils.js');
   const hitlTool = createHumanInterventionTool();
 
   return {
