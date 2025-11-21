@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
  * - 2025-11-10: Aligned approval submission tool_call_id to originalToolCall.id (parity with web/API)
  * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
  * - 2025-11-08: Improved approval UI - "Approval Required" instead of "Tool Approval Required"
@@ -1122,8 +1123,21 @@ async function handleWorldEvent(
       return;
     }
 
-    // Skip if this message was already displayed via streaming
-    if (streaming.messageId === eventData.messageId) {
+    // Skip if this message was already displayed via streaming (id or recent content match)
+    const duplicateByActiveId = streaming.messageId && streaming.messageId === eventData.messageId;
+    const duplicateByLastId = streaming.lastStreamedMessageId && streaming.lastStreamedMessageId === eventData.messageId;
+    const recentWindowMs = 5000;
+    const streamedContent = streaming.lastStreamedContent ? streaming.lastStreamedContent.trim() : undefined;
+    const eventContent = typeof eventData.content === 'string' ? eventData.content.trim() : undefined;
+    const duplicateByContent =
+      streaming.lastStreamedAt !== undefined &&
+      Date.now() - streaming.lastStreamedAt < recentWindowMs &&
+      streaming.lastStreamedSender === eventData.sender &&
+      streamedContent !== undefined &&
+      eventContent !== undefined &&
+      streamedContent === eventContent;
+
+    if (duplicateByActiveId || duplicateByLastId || duplicateByContent) {
       return;
     }
 
@@ -1995,15 +2009,14 @@ async function main(): Promise<void> {
   const args = program.args;
   const messageFromArgs = args.length > 0 ? args.join(' ') : null;
 
-  const isPipelineMode = !!(
-    options.command ||
-    messageFromArgs ||
-    !process.stdin.isTTY
-  );
+  // Only treat as pipeline mode if stdin is non-interactive
+  const isPipelineMode = !process.stdin.isTTY;
 
   if (isPipelineMode) {
+    // Disable streaming only for non-interactive stdin
     await runPipelineMode(options, messageFromArgs);
   } else {
+    // Enable streaming for all interactive sessions, even with --command
     await runInteractiveMode(options);
   }
 }

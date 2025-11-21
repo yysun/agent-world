@@ -13,6 +13,7 @@
  * - Tool call detection for approval and HITL (Human-in-the-Loop) requests
  * 
  * CHANGES:
+ * - 2025-02-06: Track last streamed message to prevent duplicate MESSAGE events after streaming output
  * - 2025-11-14: Extended handleToolCallEvents() to detect client.humanIntervention (HITL)
  */
 
@@ -30,6 +31,10 @@ export interface StreamingState {
   content: string;
   sender?: string;
   messageId?: string;
+  lastStreamedMessageId?: string;
+  lastStreamedContent?: string;
+  lastStreamedSender?: string;
+  lastStreamedAt?: number;
 }
 
 export function createStreamingState(): StreamingState {
@@ -37,7 +42,11 @@ export function createStreamingState(): StreamingState {
     isActive: false,
     content: '',
     sender: undefined,
-    messageId: undefined
+    messageId: undefined,
+    lastStreamedMessageId: undefined,
+    lastStreamedContent: undefined,
+    lastStreamedSender: undefined,
+    lastStreamedAt: undefined
   };
 }
 
@@ -73,6 +82,10 @@ export function handleStreamingEvents(
   // Handle end events - finish streaming but keep messageId to prevent duplicate display
   if (eventData.type === 'end') {
     if (streaming.isActive && streaming.messageId === eventData.messageId) {
+      streaming.lastStreamedMessageId = streaming.messageId;
+      streaming.lastStreamedContent = streaming.content;
+      streaming.lastStreamedSender = streaming.sender;
+      streaming.lastStreamedAt = Date.now();
       process.stdout.write('\n\n'); // End the streaming line with extra newline for spacing
       streaming.isActive = false;
       streaming.content = '';
@@ -181,6 +194,10 @@ export function resetStreamingState(streaming: StreamingState): void {
   streaming.content = '';
   streaming.sender = undefined;
   streaming.messageId = undefined;
+  streaming.lastStreamedMessageId = undefined;
+  streaming.lastStreamedContent = undefined;
+  streaming.lastStreamedSender = undefined;
+  streaming.lastStreamedAt = undefined;
 }
 
 export function isStreamingActive(streaming: StreamingState): boolean {
