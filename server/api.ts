@@ -270,7 +270,7 @@ const ToolResultSchema = z.object({
   scope: z.enum(['once', 'session']).optional(),
   choice: z.string().optional(),
   toolName: z.string().min(1),
-  toolArgs: z.record(z.unknown()).optional(),
+  toolArgs: z.record(z.string(), z.unknown()).optional(),
   workingDirectory: z.string().optional(),
   agentId: z.string().min(1),
   stream: z.boolean().optional()

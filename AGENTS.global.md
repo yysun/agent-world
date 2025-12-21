@@ -1,5 +1,12 @@
 ## File Comment Blocks
 
+- Add/update comment blocks at the top of each source file summarizing features, implementation, and changes.
+- Create before editing, if missing update after changes.
+
+## Command Keywords
+
+When the user message starts with/contains these keywords, perform the linked actions:
+
 - **REQ**: Create or update requirements in `.docs/reqs/{yyyy-mm-dd}/req-{name}.md`, focusing only on what is needed, not how or optimization.
 - **AP**: Create an architecture plan with markdown checkboxes, outlining phased implementation steps, and save it to `.docs/plans/{yyyy-mm-dd}/plan-{name}.md`.
 - **AR**: Review the architecture to validate assumptions, provide options, and update the existing requirement and plan docs without creating a new review document.
@@ -12,18 +19,6 @@
 - **CR**: Perform a code review using git to inspect uncommitted changes and suggest improvements for architecture, efficiency, maintainability, and security.
 - **GC**: Commit all current changes using git with a clear and concise commit message.
 
-
-## Command Keywords
-
-When the user message starts with/contains these keywords, perform the linked actions:
-
-
-
-- **MM**  
-  Memory Manage → Add or update project memory in the nearest `AGENTS.md` file.
-  Never modify the top-level AGENTS.md.  
-  Keep entries short, factual, and actionable.  
-  If unclear which module the memory belongs to, ask for clarification.  
 
 ## Requirement and Planning Rules
 
