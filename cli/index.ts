@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
  * - 2025-11-10: Aligned approval submission tool_call_id to originalToolCall.id (parity with web/API)
  * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
@@ -49,12 +50,16 @@ dotenv.config({ quiet: true });
  *   - No visible activity progress (clean output for scripting)
  *   - Extended timeout (120s) with quick exit on no activity (2s)
  *   - Silent timeout handling (no error messages for clean pipelines)
+ *   - Streaming disabled by default (can be enabled with --streaming flag)
  * - Interactive Mode: Real-time console interface with streaming responses
  *   - Full activity progress display with world events, tool execution, and streaming
  *   - Event-driven prompt display using world idle events
+ *   - Streaming enabled by default (can be disabled with --no-streaming flag)
  * - Unified Subscription: Both modes use subscribeWorld for consistent event handling
  * - World Management: Auto-discovery and interactive selection
- * - Real-time Streaming: Live agent responses via stream.ts module (interactive only)
+ * - Real-time Streaming: Live agent responses via stream.ts module
+ *   - Controlled via --streaming / --no-streaming flags
+ *   - Auto-detected from TTY when flag not specified
  * - Color Helpers: Consistent styling with simplified color functions
  * - Debug Logging: Configurable log levels using core logger module
  * - Environment Variables: Automatically loads .env file for API keys and configuration
@@ -73,7 +78,9 @@ dotenv.config({ quiet: true });
  * Pipeline: cli --root /data/worlds --world myworld --command "/clear agent1"
  * Pipeline: cli --root /data/worlds --world myworld "Hello, world!"
  * Pipeline: echo "Hello, world!" | cli --root /data/worlds --world myworld
+ * Pipeline with streaming: echo "Hello" | cli --world myworld --streaming
  * Interactive: cli --root /data/worlds --world myworld
+ * Interactive without streaming: cli --world myworld --no-streaming
  * Debug Mode: cli --root /data/worlds --world myworld --logLevel debug
  */
 import path from 'path';
@@ -852,8 +859,6 @@ function detachCLIListeners(
 
 // Pipeline mode execution with event-driven completion tracking
 async function runPipelineMode(options: CLIOptions, messageFromArgs: string | null): Promise<void> {
-  disableStreaming();
-
   let world: World | null = null;
   let worldSubscription: any = null;
   let cliListeners: Map<string, (...args: any[]) => void> | null = null;
@@ -1551,8 +1556,6 @@ async function confirmOverwrite(message: string, rl: readline.Interface): Promis
 async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const rootPath = options.root || DEFAULT_ROOT_PATH;
 
-  enableStreaming();
-
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
   const activityMonitor = new WorldActivityMonitor();
@@ -1961,6 +1964,23 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   }
 }
 
+/**
+ * Determine whether streaming should be enabled based on flag and TTY detection
+ * 
+ * @param streamingFlag - Explicit streaming flag from CLI options (undefined = auto-detect)
+ * @param isTTY - Whether stdin is a TTY (interactive terminal)
+ * @returns true to enable streaming, false to disable
+ */
+function determineStreamingMode(streamingFlag: boolean | undefined, isTTY: boolean): boolean {
+  // Explicit flag overrides auto-detection
+  if (streamingFlag !== undefined) {
+    return streamingFlag;
+  }
+
+  // Auto-detect: enable streaming for interactive (TTY), disable for pipeline
+  return isTTY;
+}
+
 // Main CLI entry point
 async function main(): Promise<void> {
   // Configure LLM providers from environment variables at startup
@@ -1978,6 +1998,7 @@ async function main(): Promise<void> {
     .option('-w, --world <name>', 'World name to connect to')
     .option('-c, --command <cmd>', 'Command to execute in pipeline mode')
     .option('-l, --logLevel <level>', 'Set log level (trace, debug, info, warn, error)', 'error')
+    .option('--streaming', 'Enable streaming responses (default: auto-detected from TTY)')
     .option('-s, --server', 'Launch the server before running CLI')
     .allowUnknownOption()
     .allowExcessArguments()
@@ -2009,14 +2030,24 @@ async function main(): Promise<void> {
   const args = program.args;
   const messageFromArgs = args.length > 0 ? args.join(' ') : null;
 
-  // Only treat as pipeline mode if stdin is non-interactive
-  const isPipelineMode = !process.stdin.isTTY;
+  // Determine mode and streaming configuration
+  const isTTY = process.stdin.isTTY;
+  const isPipelineMode = !isTTY;
 
+  // Determine streaming configuration from flag or auto-detect
+  const shouldStream = determineStreamingMode(options.streaming, isTTY);
+
+  // Apply streaming configuration globally
+  if (shouldStream) {
+    enableStreaming();
+  } else {
+    disableStreaming();
+  }
+
+  // Run appropriate mode (streaming is already configured)
   if (isPipelineMode) {
-    // Disable streaming only for non-interactive stdin
     await runPipelineMode(options, messageFromArgs);
   } else {
-    // Enable streaming for all interactive sessions, even with --command
     await runInteractiveMode(options);
   }
 }
