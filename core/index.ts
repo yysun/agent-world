@@ -104,6 +104,14 @@ export {
 // LLM Provider enum (needed for agent configuration)
 export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, LLMProvider, EventType, ApprovalRequiredException, type ApprovalDecision, type ApprovalScope, type ToolResultData, type LLMResponse } from './types.js';
 
+// === PI-AGENT INTEGRATION ===
+export {
+  piAgentIntegration,
+  shouldUsePiAgent,
+  USE_PI_AGENT,
+  PI_AGENT_PROVIDERS,
+} from './pi-agent/index.js';
+
 // === LOGGER ===
 export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';
 

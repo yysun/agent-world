@@ -127,6 +127,9 @@ import {
   generateGoogleResponse
 } from './google-direct.js';
 
+// Pi-Agent Integration
+import { shouldUsePiAgent, piAgentIntegration } from './pi-agent/index.js';
+
 import { generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
@@ -380,6 +383,33 @@ async function executeStreamAgentResponse(
 
     loggerStreaming.debug(`LLM: Starting streaming response for agent=${agent.id}, world=${world.id}, messageId=${messageId}`);
 
+    // NEW: Check if we should use pi-agent
+    if (shouldUsePiAgent(agent)) {
+      loggerStreaming.info(`LLM: Using pi-agent for streaming response, agent=${agent.id}, provider=${agent.provider}`);
+      
+      // Convert messages for LLM
+      const preparedMessages = stripCustomFieldsFromMessages(messages);
+      
+      // Use pi-agent integration
+      const result = await piAgentIntegration.streamAgentResponse(
+        world,
+        agent,
+        preparedMessages,
+        (event) => publishSSE(world, { 
+          agentName: agent.id, 
+          type: event.type as any, 
+          content: event.content,
+          messageId: event.messageId || messageId 
+        })
+      );
+      
+      // Emit end event after streaming completes
+      publishSSE(world, { agentName: agent.id, type: 'end', messageId });
+      
+      return result;
+    }
+
+    // EXISTING: Fall back to current implementation
     // Convert messages for LLM (strip custom fields)
     // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
     let preparedMessages = stripCustomFieldsFromMessages(messages);
@@ -509,6 +539,38 @@ async function executeGenerateAgentResponse(
   skipTools?: boolean
 ): Promise<{ response: LLMResponse; messageId: string }> {
   const messageId = generateId();
+  
+  // NEW: Check if we should use pi-agent
+  if (shouldUsePiAgent(agent)) {
+    loggerGeneration.info(`LLM: Using pi-agent for non-streaming response, agent=${agent.id}, provider=${agent.provider}`);
+    
+    // Convert messages for LLM
+    const preparedMessages = stripCustomFieldsFromMessages(messages);
+    
+    // Use pi-agent integration (note: skipTools not fully supported in pi-agent yet)
+    const result = await piAgentIntegration.generateAgentResponse(
+      world,
+      agent,
+      preparedMessages
+    );
+    
+    // Update agent activity and LLM call count
+    agent.lastActive = new Date();
+    agent.llmCallCount++;
+    agent.lastLLMCall = new Date();
+    
+    loggerGeneration.debug(`LLM: Finished non-streaming pi-agent response for agent=${agent.id}, world=${world.id}`, {
+      responseType: result.response.type,
+      contentLength: result.response.content?.length || 0,
+      hasToolCalls: result.response.type === 'tool_calls',
+      toolCallCount: result.response.tool_calls?.length || 0,
+      messageId: result.messageId
+    });
+    
+    return result;
+  }
+  
+  // EXISTING: Fall back to current implementation
   // Convert messages for LLM (strip custom fields)
   // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
   let preparedMessages = stripCustomFieldsFromMessages(messages);
