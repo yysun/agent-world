@@ -117,19 +117,17 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     const displayName = replyTarget ? `${senderName} (reply to ${replyTarget})` : senderName;
 
     // Container alignment
-    const containerClass = isUser
-      ? 'flex justify-end'
-      : isSystem
-        ? 'flex justify-center'
-        : 'flex justify-start';
+    const containerClass = isSystem
+      ? 'flex justify-center'
+      : 'flex justify-start';
 
     // Bubble styling based on role
     const bubbleClass = `
-      rounded-[1rem] px-4 py-2 shadow-sm text-sm
-      ${isUser ? 'bg-primary text-primary-foreground max-w-[80%]' : ''}
-      ${isAssistant ? 'bg-secondary text-secondary-foreground max-w-[95%]' : ''}
-      ${isSystem ? 'bg-muted text-muted-foreground italic border border-dashed max-w-[80%]' : ''}
-      ${isTool ? 'bg-accent text-accent-foreground text-xs max-w-[80%]' : ''}
+      rounded-[1rem] px-4 py-2 text-sm
+      ${isUser ? 'bg-muted text-foreground max-w-[80%] shadow-sm' : ''}
+      ${isAssistant ? 'bg-white text-foreground max-w-[95%] border-l-2 border-l-border/40' : ''}
+      ${isSystem ? 'bg-muted text-muted-foreground italic border border-dashed max-w-[80%] shadow-sm' : ''}
+      ${isTool ? 'bg-accent text-accent-foreground text-xs max-w-[80%] shadow-sm' : ''}
     `.trim();
 
     return (

@@ -63,6 +63,7 @@ export default function WorldPage() {
   const [viewMode, setViewMode] = useState<'chat' | 'world-settings' | 'agent-settings'>('chat');
   const [sending, setSending] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Agent creation
   const [showAgentForm, setShowAgentForm] = useState(false);
@@ -269,33 +270,16 @@ export default function WorldPage() {
         className={`bg-background/98 backdrop-blur-md border-r border-border/50 flex flex-col shadow-lg transition-all duration-300 ${sidebarCollapsed ? 'w-[50px]' : 'w-[280px]'
           }`}
       >
-        {/* Header row: World Name and Toggle */}
+        {/* Header row: Agent World Title and Toggle */}
         <div className="p-1 border-b border-border/50 bg-gradient-to-b from-muted/20 to-transparent">
-          <div className={`flex items-center ${sidebarCollapsed ? 'pl-1 justify-center' : 'pl-5 justify-between'}`}>
+          <div className={`flex items-center pt-1.5 ${sidebarCollapsed ? 'pl-1 justify-center' : 'pl-5 justify-between'}`}>
             {!sidebarCollapsed && (
-              <div className="flex items-center gap-2 flex-1 min-w-0 group">
-                <h2 className="text-sm font-bold text-foreground truncate">{world.name}</h2>
-                <button
-                  onClick={() => setViewMode('world-settings')}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground"
-                  title="Settings"
-                  aria-label="Settings"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4"
-                  >
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
-              </div>
+              <button
+                onClick={() => navigate('/')}
+                className="flex items-center gap-2 flex-1 min-w-0 hover:opacity-80 transition-opacity"
+              >
+                <h2 className="text-sm font-bold text-foreground truncate">Home</h2>
+              </button>
             )}
             <Button
               variant="ghost"
@@ -329,7 +313,7 @@ export default function WorldPage() {
         </div>
 
         {/* New Chat Button row */}
-        <div className={`flex ${sidebarCollapsed ? 'justify-center p-2' : 'p-2'}`}>
+        <div className={`flex ${sidebarCollapsed ? 'justify-center p-2' : 'px-4 py-2'}`}>
           <Button
             onClick={handleNewChat}
             variant="ghost"
@@ -353,31 +337,78 @@ export default function WorldPage() {
           </Button>
         </div>
 
+        {/* Search Box */}
+        {!sidebarCollapsed && (
+          <div className="px-4 pb-2">
+            <div className="relative">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
+              <Input
+                type="text"
+                placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 pl-9 pr-3 text-sm"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Chats Title */}
+        {!sidebarCollapsed && (
+          <div className="pl-7 pr-4 py-2">
+            <div className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4 text-muted-foreground"
+              >
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Chats</h3>
+            </div>
+          </div>
+        )}
+
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-2">
           {!sidebarCollapsed && (
             <div className="py-1">
-              {chats.map((chat) => {
+              {chats.filter(chat =>
+                !searchQuery ||
+                (chat.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+              ).map((chat) => {
                 const isSelected = selectedChat?.id === chat.id;
 
                 return (
                   <div
                     key={chat.id}
-                    className={`mx-2 my-1 px-3 py-2 cursor-pointer transition-all duration-200 rounded-lg group relative ${isSelected
+                    className={`mx-2 my-1 px-3 py-1 cursor-pointer transition-all duration-200 rounded-lg group relative ${isSelected
                       ? 'bg-primary/15 border-l-4 border-l-primary shadow-sm scale-[0.98]'
                       : 'border-l-4 border-l-transparent hover:bg-muted/60 hover:scale-[0.99]'
                       }`}
                     onClick={() => handleChatSelect(chat)}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-xs text-foreground truncate">
-                          {chat.name || '💬 Untitled Chat'}
-                        </h3>
-                        <p className="text-xs text-muted-foreground/80 truncate leading-relaxed mt-1">
-                          {messages.length > 0 ? messages[messages.length - 1].content : 'No messages yet'}
-                        </p>
-                      </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="flex-1 text-xs text-foreground truncate">
+                        {chat.name || '💬 Untitled Chat'}
+                      </h3>
                       <button
                         onClick={(e) => handleDeleteChat(chat.id, e)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
@@ -454,11 +485,33 @@ export default function WorldPage() {
             <div className="bg-gradient-to-r from-background via-card/30 to-background border-b border-border/50 px-6 py-4 shadow-sm shrink-0">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-sm font-bold text-foreground">
-                    {selectedChat?.name || 'Select or create a chat'}
-                  </h1>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-sm font-bold text-foreground">
+                      {world.name}
+                    </h1>
+                    <button
+                      onClick={() => setViewMode('world-settings')}
+                      className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                      title="Settings"
+                      aria-label="Settings"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="w-4 h-4"
+                      >
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </button>
+                  </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {world.name}
+                    {selectedChat?.name || 'Select or create a chat'}
                   </p>
                 </div>
                 {/* Active Agents - Compact View */}

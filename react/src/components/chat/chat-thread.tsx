@@ -85,7 +85,7 @@ export function ChatThread({
     <div className="flex h-full flex-col bg-background">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 py-4 space-y-4">
+        <div className="max-w-4xl mx-auto px-4 py-4 space-y-6">
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-center text-muted-foreground">No messages yet. Start a conversation!</p>
@@ -112,7 +112,7 @@ export function ChatThread({
       )}
 
       {/* Input */}
-      <div className="flex-shrink-0 border-t border-border bg-card">
+      <div className="flex-shrink-0 bg-card">
         <div className="max-w-4xl mx-auto px-4 py-3">
           <ChatInput
             value={draft}
