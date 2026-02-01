@@ -24,3 +24,6 @@ export type { SeparatorProps } from './separator';
 
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs';
 export type { TabsProps, TabsListProps, TabsTriggerProps, TabsContentProps } from './tabs';
+
+export { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './select';
+export type { SelectProps, SelectTriggerProps, SelectContentProps, SelectItemProps } from './select';
