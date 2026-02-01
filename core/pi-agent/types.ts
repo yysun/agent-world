@@ -141,16 +141,19 @@ export function adaptToPiAiContext(
   agent: Agent,
   messages: ChatMessage[]
 ): Context {
-  // Extract system prompt from first system message if present
+  // Extract system prompt from first system message if present, otherwise use agent's
   let systemPrompt = agent.systemPrompt || '';
+  let foundSystemMessage = false;
   const filteredMessages: Message[] = [];
 
   for (const msg of messages) {
     if (msg.role === 'system') {
-      // Skip system messages - they're handled via Context.systemPrompt
-      if (msg.content && !systemPrompt) {
+      // Use first system message as systemPrompt if not already found
+      if (msg.content && !foundSystemMessage) {
         systemPrompt = msg.content;
+        foundSystemMessage = true;
       }
+      // Skip system messages - they're handled via Context.systemPrompt
       continue;
     }
 
