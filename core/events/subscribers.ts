@@ -34,17 +34,18 @@ import { generateId } from '../utils.js';
 import { parseMessageContent } from '../message-prep.js';
 import { createCategoryLogger } from '../logger.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
-import {
-  publishMessage,
-  publishEvent,
-  subscribeToMessages
-} from './publishers.js';
+import { publishMessage, publishEvent, subscribeToMessages } from './publishers.js';
 import {
   saveIncomingMessageToMemory,
   resetLLMCallCountIfNeeded,
   generateChatTitleFromMessages
 } from './memory-manager.js';
-import { processAgentMessage, shouldAgentRespond } from './orchestrator.js';
+import {
+  processAgentMessage,
+  shouldAgentRespond,
+  isPiAgentCoreEnabled,
+  processAgentMessageWithPiAgent
+} from './orchestrator.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerMemory = createCategoryLogger('memory');
@@ -189,7 +190,13 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       await saveIncomingMessageToMemory(world, agent, messageEvent);
 
       loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
-      await processAgentMessage(world, agent, messageEvent);
+
+      // Use pi-agent-core if enabled, otherwise use legacy llm-manager
+      if (isPiAgentCoreEnabled()) {
+        await processAgentMessageWithPiAgent(world, agent, messageEvent);
+      } else {
+        await processAgentMessage(world, agent, messageEvent);
+      }
     } else {
       loggerAgent.debug('Agent will NOT respond - skipping memory save and SSE publishing', {
         agentId: agent.id,
