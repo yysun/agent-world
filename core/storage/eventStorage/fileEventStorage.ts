@@ -13,6 +13,13 @@
  * - Duplicate event ID handling (silently ignores duplicates)
  * - No database dependencies
  * - Suitable for serverless and file-based deployments
+ * - In-memory file locking to prevent concurrent write corruption
+ * - Automatic backup and recovery for corrupted JSON files
+ * 
+ * File Locking Limitations:
+ * - In-memory locking only prevents concurrent writes within same process
+ * - Does NOT protect against concurrent writes from multiple processes/servers
+ * - For multi-process deployments, use SQLite storage or external locking mechanism
  * 
  * Implementation:
  * - Uses JSON format for human-readable event storage
@@ -20,12 +27,16 @@
  * - File structure: baseDir/worldId/events/chatId.json
  * - World-scoped storage: events stored within each world's directory
  * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
+ * - FileLockManager ensures atomic read-modify-write operations
+ * - Corrupted files are backed up with .corrupted.{timestamp} suffix
  * 
  * Cascade Delete Behavior:
  * - Deleting a world directory removes all events for that world
  * - Deleting a chat file removes all events for that chat
  * 
  * Changes:
+ * - 2026-02-03: Added file locking to prevent race conditions and JSON corruption
+ * - 2026-02-03: Added automatic backup and recovery for corrupted JSON files
  * - 2025-11-09: Fixed file paths to be world-scoped (baseDir/worldId/events/) instead of storage root
  * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
@@ -35,12 +46,46 @@ import * as path from 'path';
 import { existsSync } from 'fs';
 import type { EventStorage, StoredEvent, GetEventsOptions } from './types.js';
 import { validateEventForPersistence } from './validation.js';
+import { createCategoryLogger } from '../../logger.js';
 
 /**
  * File storage configuration
  */
 export interface FileEventStorageConfig {
   baseDir: string;  // Base directory for event files
+}
+
+/**
+ * Simple in-memory lock manager to prevent concurrent writes to the same file
+ */
+class FileLockManager {
+  private locks = new Map<string, Promise<void>>();
+
+  /**
+   * Acquire a lock for a file path and execute the operation
+   */
+  async withLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+    // Wait for any existing lock on this file
+    while (this.locks.has(filePath)) {
+      await this.locks.get(filePath);
+    }
+
+    // Create a new lock
+    let releaseLock: () => void;
+    const lockPromise = new Promise<void>(resolve => {
+      releaseLock = resolve;
+    });
+    this.locks.set(filePath, lockPromise);
+
+    try {
+      // Execute the operation
+      return await operation();
+    } finally {
+      // Release the lock
+      this.locks.delete(filePath);
+      releaseLock!();
+    }
+  }
 }
 
 /**
@@ -74,6 +119,7 @@ async function ensureDir(dir: string): Promise<void> {
 
 /**
  * Read all events from a JSON file
+ * Includes error recovery for corrupted files
  */
 async function readEventsFromFile(filePath: string): Promise<StoredEvent[]> {
   if (!existsSync(filePath)) {
@@ -93,7 +139,18 @@ async function readEventsFromFile(filePath: string): Promise<StoredEvent[]> {
       createdAt: new Date(event.createdAt)
     }));
   } catch (error) {
-    console.error('[FileEventStorage] Failed to read events from file:', filePath, error);
+    const logger = createCategoryLogger('file-event-storage');
+    logger.error('Failed to read events from file', { filePath, error });
+
+    // Attempt recovery: create backup and return empty array
+    try {
+      const backupPath = `${filePath}.corrupted.${Date.now()}`;
+      await fs.copyFile(filePath, backupPath);
+      logger.warn('Created backup of corrupted file', { backupPath });
+    } catch (backupError) {
+      logger.error('Failed to create backup', { backupError });
+    }
+
     return [];
   }
 }
@@ -112,6 +169,7 @@ async function writeEventsToFile(filePath: string, events: StoredEvent[]): Promi
 export class FileEventStorage implements EventStorage {
   private baseDir: string;
   private seqCounters = new Map<string, number>();
+  private lockManager = new FileLockManager();
 
   constructor(config: FileEventStorageConfig) {
     this.baseDir = config.baseDir;
@@ -159,26 +217,29 @@ export class FileEventStorage implements EventStorage {
 
     const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
 
-    // Read existing events
-    const existingEvents = await readEventsFromFile(filePath);
+    // Use lock to prevent concurrent writes
+    await this.lockManager.withLock(filePath, async () => {
+      // Read existing events
+      const existingEvents = await readEventsFromFile(filePath);
 
-    // Check for duplicate ID - skip if already exists
-    const existingEvent = existingEvents.find(e => e.id === event.id);
-    if (existingEvent) {
-      // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
-      return;
-    }
+      // Check for duplicate ID - skip if already exists
+      const existingEvent = existingEvents.find(e => e.id === event.id);
+      if (existingEvent) {
+        // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
+        return;
+      }
 
-    // Auto-generate sequence number if not provided
-    const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
+      // Auto-generate sequence number if not provided
+      const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
 
-    const storedEvent: StoredEvent = {
-      ...event,
-      seq
-    };
+      const storedEvent: StoredEvent = {
+        ...event,
+        seq
+      };
 
-    existingEvents.push(storedEvent);
-    await writeEventsToFile(filePath, existingEvents);
+      existingEvents.push(storedEvent);
+      await writeEventsToFile(filePath, existingEvents);
+    });
   }
 
   /**
@@ -207,28 +268,31 @@ export class FileEventStorage implements EventStorage {
 
       const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
-      // Read existing events
-      const existingEvents = await readEventsFromFile(filePath);
-      const existingIds = new Set(existingEvents.map(e => e.id));
+      // Use lock to prevent concurrent writes
+      await this.lockManager.withLock(filePath, async () => {
+        // Read existing events
+        const existingEvents = await readEventsFromFile(filePath);
+        const existingIds = new Set(existingEvents.map(e => e.id));
 
-      // Generate seq numbers sequentially and filter out duplicates
-      const eventsWithSeq: StoredEvent[] = [];
-      for (const event of groupEvents) {
-        // Validate event metadata before persistence
-        validateEventForPersistence(event);
+        // Generate seq numbers sequentially and filter out duplicates
+        const eventsWithSeq: StoredEvent[] = [];
+        for (const event of groupEvents) {
+          // Validate event metadata before persistence
+          validateEventForPersistence(event);
 
-        // Skip if duplicate ID exists
-        if (existingIds.has(event.id)) {
-          continue; // Silently ignore duplicate
+          // Skip if duplicate ID exists
+          if (existingIds.has(event.id)) {
+            continue; // Silently ignore duplicate
+          }
+
+          const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
+          eventsWithSeq.push({ ...event, seq });
         }
 
-        const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
-        eventsWithSeq.push({ ...event, seq });
-      }
-
-      // Append new events and write back
-      existingEvents.push(...eventsWithSeq);
-      await writeEventsToFile(filePath, existingEvents);
+        // Append new events and write back
+        existingEvents.push(...eventsWithSeq);
+        await writeEventsToFile(filePath, existingEvents);
+      });
     }
   }
 
@@ -419,11 +483,14 @@ export class FileEventStorage implements EventStorage {
       return;
     }
 
-    // Read all events
-    const events = await readEventsFromFile(filePath);
+    // Use lock to prevent concurrent access during compaction
+    await this.lockManager.withLock(filePath, async () => {
+      // Read all events
+      const events = await readEventsFromFile(filePath);
 
-    // Write them back (this removes any gaps or corruption)
-    await writeEventsToFile(filePath, events);
+      // Write them back (this removes any gaps or corruption)
+      await writeEventsToFile(filePath, events);
+    });
   }
 }
 

@@ -156,7 +156,13 @@ export function getBuiltInTools(): AgentTool<any>[] {
  * 
  * Currently returns all built-in tools. Can be extended to support
  * agent-specific tool configuration.
+ * 
+ * Returns empty array if DISABLE_AGENT_TOOLS env var is set (for testing).
  */
 export function getToolsForAgent(_agentId: string): AgentTool<any>[] {
+  // Disable tools for testing if env var is set
+  if (process.env.DISABLE_AGENT_TOOLS === 'true') {
+    return [];
+  }
   return getBuiltInTools();
 }

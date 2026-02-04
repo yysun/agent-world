@@ -56,7 +56,7 @@ const PROVIDER_MAP: Record<LLMProvider, string> = {
   [LLMProvider.AZURE]: 'azure-openai-responses',
   [LLMProvider.XAI]: 'xai',
   [LLMProvider.OPENAI_COMPATIBLE]: 'openai',
-  [LLMProvider.OLLAMA]: 'openai' // Ollama uses OpenAI-compatible API
+  [LLMProvider.OLLAMA]: 'ollama' // Ollama has its own provider in pi-ai
 };
 
 // ============================================================================
@@ -147,6 +147,8 @@ export async function createPiAgentForAgent(
   // Get the model for this agent's provider and model ID
   const model = getModelForAgent(agent);
 
+  logger.debug('Creating pi-agent with model', { agentId: agent.id, model });
+
   // Create the pi-agent instance
   const piAgent = new PiAgent({
     initialState: {
@@ -167,7 +169,8 @@ export async function createPiAgentForAgent(
     agentId: agent.id,
     provider: agent.provider,
     model: agent.model,
-    hasSystemPrompt: !!agent.systemPrompt
+    hasSystemPrompt: !!agent.systemPrompt,
+    initialStateModel: piAgent.state.model
   });
 
   return piAgent;
@@ -182,10 +185,23 @@ function getModelForAgent(agent: Agent): Model<any> {
     throw new Error(`Unsupported provider: ${agent.provider}`);
   }
 
+  logger.debug('Getting model for agent', {
+    agentId: agent.id,
+    agentProvider: agent.provider,
+    mappedProvider: provider,
+    modelId: agent.model
+  });
+
   try {
     // For known providers with known models, use getModel directly
     const model = getModel(provider as any, agent.model as any);
-    logger.debug('Got model from pi-ai', { provider, modelId: agent.model });
+    logger.debug('Got model from pi-ai', { provider, modelId: agent.model, model });
+
+    // Check if model is undefined (not found in registry)
+    if (!model) {
+      throw new Error(`Model ${agent.model} not found in pi-ai registry for provider ${provider}`);
+    }
+
     return model;
   } catch (error) {
     // If model not found in pi-ai registry, create a custom model definition
@@ -197,7 +213,7 @@ function getModelForAgent(agent: Agent): Model<any> {
 
     // Return a minimal model definition for custom/unknown models
     // Use conservative defaults that work with most providers
-    return {
+    const customModel = {
       id: agent.model,
       name: agent.model,
       api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
@@ -209,6 +225,9 @@ function getModelForAgent(agent: Agent): Model<any> {
       contextWindow: 32000, // Conservative default for unknown models
       maxTokens: agent.maxTokens || 4096
     } as Model<any>;
+
+    logger.debug('Created custom model', { customModel });
+    return customModel;
   }
 }
 
@@ -229,8 +248,13 @@ function getBaseUrlForProvider(provider: LLMProvider): string {
       return 'https://api.x.ai/v1';
     case LLMProvider.OLLAMA:
       return process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-    case LLMProvider.OPENAI_COMPATIBLE:
-      return process.env.OPENAI_COMPATIBLE_BASE_URL || '';
+    case LLMProvider.OPENAI_COMPATIBLE: {
+      const url = process.env.OPENAI_COMPATIBLE_BASE_URL;
+      if (url && !url.match(/^https?:\/\//)) {
+        throw new Error(`Invalid OPENAI_COMPATIBLE_BASE_URL: must start with http:// or https://`);
+      }
+      return url || '';
+    }
     default:
       return '';
   }
@@ -266,6 +290,9 @@ export function getApiKeyForProvider(provider: string): string | undefined {
       return process.env.XAI_API_KEY;
     case 'groq':
       return process.env.GROQ_API_KEY;
+    case 'ollama':
+      // Ollama doesn't require an API key (runs locally), return dummy value
+      return 'ollama';
     default:
       logger.warn('No API key found for provider', { provider });
       return undefined;

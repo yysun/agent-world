@@ -659,6 +659,13 @@ export async function processAgentMessageWithPiAgent(
     // Get or create pi-agent instance
     const piAgent = await getPiAgentForAgent(world, agent, tools);
 
+    // Set streaming mode based on global flag
+    piAgent.state.isStreaming = isStreamingEnabled();
+    loggerAgent.debug('Set pi-agent streaming mode', {
+      agentId: agent.id,
+      isStreaming: piAgent.state.isStreaming
+    });
+
     // Load existing messages from agent memory and convert to pi-agent format
     const piMessages = toAgentMessages(agent.memory);
     piAgent.replaceMessages(piMessages);

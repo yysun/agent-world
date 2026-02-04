@@ -48,6 +48,8 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "test:db": "npx tsx tests/db/migration-tests.ts",
+    "test:e2e": "npx tsx tests/e2e/test-agent-response-rules.ts",
+    "test:e2e:interactive": "npx tsx tests/e2e/test-agent-response-rules.ts -i",
     "integration": "vitest run --config vitest.integration.config.ts",
     "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --workspace=react",
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run build --workspace=react",
