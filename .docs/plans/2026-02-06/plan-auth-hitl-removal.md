@@ -152,44 +152,46 @@ flowchart TD
 ### Phase 0: Branch Setup
 **Goal**: Start from clean `main` branch baseline
 
-- [ ] **Task 0.1**: Commit or stash any work on `pi` branch
-- [ ] **Task 0.2**: Checkout `main` branch
+- [x] **Task 0.1**: Commit or stash any work on `pi` branch
+- [x] **Task 0.2**: Checkout `main` branch
   ```bash
   git checkout main
   git pull origin main
   ```
-- [ ] **Task 0.3**: Verify working directory is clean
+- [x] **Task 0.3**: Verify working directory is clean
   ```bash
   git status
   ```
-- [ ] **Task 0.4**: Create feature branch
+- [x] **Task 0.4**: Create feature branch
   ```bash
   git checkout -b remove-auth-hitl
   ```
-- [ ] **Task 0.5**: Run baseline tests
+- [x] **Task 0.5**: Run baseline tests
   ```bash
   npm test
   ```
-- [ ] **Task 0.6**: Verify tests pass before proceeding
+- [x] **Task 0.6**: Verify tests pass before proceeding
 
-**Exit Criteria**: On `remove-auth-hitl` branch with all tests passing
+**Exit Criteria**: On `remove-auth-hitl` branch with all tests passing ✅
+
+**Result**: All 570 tests passing on remove-auth-hitl branch
 
 ---
 
 ### Phase 1: Pre-Removal Analysis
 **Goal**: Document current state and identify all code to remove
 
-- [ ] **Task 1.1**: Document current approval flow
+- [x] **Task 1.1**: Document current approval flow
   - Read `approval-checker.ts` and document logic
   - Trace approval integration in `orchestrator.ts`
-  - Document MCP tool registration for approval tools
+  - Document  MCP tool registration for approval tools
   - Save documentation in analysis notes
 
-- [ ] **Task 1.2**: Find ALL approval-related code
+- [x] **Task 1.2**: Find ALL approval-related code
   ```bash
   # Run comprehensive grep searches
   grep -rn "approval\|approveToolUse" core/ --include="*.ts" > /tmp/approval-refs.txt
-  grep -rn "HITL\|humanIntervention" core/ --include="*.ts" >> /tmp/approval-refs.txt
+ grep -rn "HITL\|humanIntervention" core/ --include="*.ts" >> /tmp/approval-refs.txt
   grep -rn "toolCallStatus" core/ --include="*.ts" >> /tmp/approval-refs.txt
   grep -rn "approval_\|hitl_" core/ --include="*.ts" >> /tmp/approval-refs.txt
   grep -rn "client\.approve" core/ --include="*.ts" >> /tmp/approval-refs.txt
@@ -197,29 +199,37 @@ flowchart TD
   - Review results and create comprehensive file list
   - Identify all functions that reference approval
 
-- [ ] **Task 1.3**: Check web UI for approval components
+- [x] **Task 1.3**: Check web UI for approval components
   ```bash
   grep -rn "approval\|approveToolUse" web/src/ --include="*.ts" --include="*.tsx"
   ```
 
-- [ ] **Task 1.4**: Check server for approval endpoints
+- [x] **Task 1.4**: Check server for approval endpoints
   ```bash
   grep -rn "approval" server/ --include="*.ts"
   ```
 
-- [ ] **Task 1.5**: Check storage schema
+- [x] **Task 1.5**: Check storage schema
   - Read database migration files
   - Look for `toolCallStatus` column
   - Check AgentMessage interface in types.ts
   - Document if approval data is persisted
 
-- [ ] **Task 1.6**: Save approval behavior examples
+- [x] **Task 1.6**: Save approval behavior examples
   - Create example of session approval message
   - Create example of once approval message
   - Create example of HITL request/response
   - Save in `.docs/reqs/2026-02-06/approval-examples.md`
 
-**Exit Criteria**: Complete file list, flow documented, examples saved
+**Exit Criteria**: Complete file list, flow documented, examples saved ✅
+
+**Results**:
+- **Core**: 218 approval references across 11 files
+- **Web**: 169 references (significant UI cleanup needed)
+- **Server**: 15 references (API endpoints)
+- **Tests**: 7 test files to remove/modify
+- **Storage**: toolCallStatus is type-only, NOT in database (no migration needed)
+- **Documentation**: Created approval-analysis.md with complete flow and examples
 
 ---
 

@@ -164,7 +164,7 @@ export async function processAgentMessage(
       });
 
       // Save assistant message with tool_calls to agent memory FIRST
-      // This ensures the tool call is in memory before execution/approval
+      // This ensures the tool call is in memory before execution
 
       // Format meaningful content for tool calls if LLM didn't provide text
       let messageContent = llmResponse.content || '';
@@ -336,7 +336,7 @@ export async function processAgentMessage(
           return; // End turn
         }
 
-        // Execute tool with context (approval checking happens inside wrapToolWithValidation)
+        // Execute tool with context
         const toolContext = {
           world,
           messages: agent.memory,
@@ -346,69 +346,6 @@ export async function processAgentMessage(
 
         try {
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
-
-          // Check if tool returned approval request
-          if (toolResult && typeof toolResult === 'object' && toolResult._stopProcessing && toolResult._approvalMessage) {
-            loggerAgent.debug('Tool requires approval', {
-              agentId: agent.id,
-              toolCallId: toolCall.id
-            });
-
-            // Save and publish approval request message
-            const approvalMsg = toolResult._approvalMessage;
-            const approvalMessageId = generateId();
-            const approvalMessage: AgentMessage = {
-              role: approvalMsg.role,
-              content: approvalMsg.content || '',
-              sender: agent.id,
-              createdAt: new Date(),
-              chatId: world.currentChatId || null,
-              messageId: approvalMessageId,
-              replyToMessageId: messageId,
-              tool_calls: approvalMsg.tool_calls,
-              agentId: agent.id,
-              toolCallStatus: approvalMsg.toolCallStatus
-            };
-
-            agent.memory.push(approvalMessage);
-
-            // Save agent with approval message
-            try {
-              const storage = await getStorageWrappers();
-              await storage.saveAgent(world.id, agent);
-              loggerAgent.debug('Approval request saved to memory', {
-                agentId: agent.id,
-                approvalMessageId
-              });
-            } catch (error) {
-              loggerAgent.error('Failed to save approval request', {
-                agentId: agent.id,
-                error: error instanceof Error ? error.message : error
-              });
-            }
-
-            // Publish approval request message event
-            const approvalEvent: WorldMessageEvent = {
-              content: approvalMessage.content || '',
-              sender: agent.id,
-              timestamp: approvalMessage.createdAt || new Date(),
-              messageId: approvalMessage.messageId!,
-              chatId: approvalMessage.chatId,
-              replyToMessageId: approvalMessage.replyToMessageId
-            };
-            (approvalEvent as any).role = 'assistant';
-            (approvalEvent as any).tool_calls = approvalMessage.tool_calls;
-            (approvalEvent as any).toolCallStatus = approvalMessage.toolCallStatus;
-
-            world.eventEmitter.emit('message', approvalEvent);
-
-            loggerAgent.debug('Approval request published', {
-              agentId: agent.id,
-              approvalMessageId
-            });
-
-            return; // Wait for user approval
-          }
 
           // Tool executed successfully - save result and continue LLM loop
           loggerAgent.debug('Tool executed successfully', {

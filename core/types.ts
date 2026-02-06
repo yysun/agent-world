@@ -100,19 +100,7 @@ export interface AgentMessage extends ChatMessage {
    *     }
    *   }
    * }
-   * 
-   * @since version 8 (simplified approval system)
    */
-  toolCallStatus?: {
-    [toolCallId: string]: {
-      complete: boolean;
-      result?: {
-        decision: 'approve' | 'deny';
-        scope?: 'once' | 'session';
-        timestamp: string;
-      } | null;
-    };
-  };
 }
 
 // Agent Types

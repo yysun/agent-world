@@ -19,7 +19,6 @@
 
 // Layer 2: Pure utilities (no dependencies)
 export * from './mention-logic.js';
-export * from './approval-checker.js';
 
 // Layer 3: Event publishers
 export * from './publishers.js';

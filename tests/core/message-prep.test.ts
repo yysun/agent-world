@@ -252,19 +252,6 @@ describe('filterClientSideMessages', () => {
     expect(result[0].role).toBe('user');
   });
 
-  it('should remove approval_ tool results', () => {
-    const messages: ChatMessage[] = [
-      { role: 'user', content: 'Hello' },
-      { role: 'tool', tool_call_id: 'approval_123', content: '{"decision":"approve"}' },
-      { role: 'tool', tool_call_id: 'regular_456', content: '{"result":"success"}' }
-    ];
-
-    const result = filterClientSideMessages(messages);
-
-    expect(result).toHaveLength(2);
-    expect(result[1].role).toBe('tool');
-    expect(result[1].tool_call_id).toBe('regular_456');
-  });
 
   it('should not mutate original messages', () => {
     const messages: ChatMessage[] = [

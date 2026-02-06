@@ -27,7 +27,6 @@
  * - Thread-safe registry operations with world-server mapping
  * - Consolidated logging under LOG_LLM_MCP for unified debugging
  * - Enhanced debug logging for MCP communication data flows
- * - Explicit approval system using structured tool metadata instead of heuristics
  *
  * Key Features:
  * - Azure OpenAI compatibility: Uses runtime AI SDK patch (core/ai-sdk-patch.ts) for schema corruption fix
@@ -115,8 +114,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
-import { wrapToolWithValidation, createHumanInterventionTool } from './tool-utils.js';
-import { ApprovalRequiredException, type ApprovalPolicy, type World } from './types.js';
+import { wrapToolWithValidation } from './tool-utils.js';
+import { type World } from './types.js';
 
 // Scenario-based loggers for different MCP operations
 const lifecycleLogger = createCategoryLogger('mcp.lifecycle');
@@ -127,7 +126,7 @@ const executionLogger = createCategoryLogger('mcp.execution');
 // Legacy logger for backward compatibility and general debug logs
 const logger = createCategoryLogger('llm.mcp');
 
-// === TOOL APPROVAL HELPERS ===
+// === TOOL UTILITY HELPERS ===
 
 /**
  * Sanitizes tool arguments by redacting sensitive information.
@@ -965,21 +964,12 @@ export async function mcpToolsToAiTools(
       });
     }
 
-    // NEW: Use explicit approval metadata from MCP tool if available
-    // MCP tools don't currently support approval metadata, so default to no approval
-    const requiresApproval = false;
-
     aiTools[key] = {
       description: enhancedDescription,
       parameters: finalSchema,
 
-      // NEW: Tool metadata  
+      // Tool metadata  
       location: 'server' as const,
-      approval: requiresApproval ? {
-        required: true,
-        message: 'This MCP tool requires approval to execute.',
-        options: ['Cancel', 'Once', 'Always']
-      } : undefined,
 
       execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: ToolExecutionContext) => {
         const startTime = performance.now();
@@ -1601,21 +1591,15 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * Get built-in tools that are always available to all worlds
  * These tools don't require MCP server configuration
  * Built-in tools:
- * - shell_cmd: Execute shell commands with approval flow
- * - human_intervention.request: Request human decisions with custom options
- * 
- * Note: human_intervention.request is NOT wrapped with wrapToolWithValidation
- * because it does its own transformation to client.humanIntervention protocol
+ * - shell_cmd: Execute shell commands
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
-  const hitlTool = createHumanInterventionTool();
 
   return {
-    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
-    'human_intervention.request': hitlTool  // No wrapper - tool handles its own transformation
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd')
   };
 }
 

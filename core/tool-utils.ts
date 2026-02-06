@@ -7,8 +7,6 @@
  * - Creates error tool results for malformed calls
  * - Emits SSE events for tool errors
  * - Universal parameter validation for all tool types
- * - Explicit approval checking using structured tool metadata
- * - Direct injection of client.requestApproval messages for natural approval flow
  *
  * Implementation Details:
  * - Uses minimal fallback ID generator to avoid external dependencies
@@ -16,21 +14,10 @@
  * - Publishes tool-error SSE events to surface problems
  * - Best-effort error reporting to avoid cascading failures
  * - Consistent parameter validation for both MCP and built-in tools
- * - Approval checking using explicit tool.approval metadata instead of heuristics
- * - Dynamic imports to avoid circular dependencies with approval cache
  *
  * Recent Changes:
- * - 2025-11-08: Removed event emission from wrapToolWithValidation
- * - Tool wrapper only creates approval request structure, no event emission
- * - Upper layer (LLM providers → events.ts) handles storage and event emission
- * - 2025-11-05: wrapToolWithValidation creates client.requestApproval messages for approval
- * - Returns structured object with type='approval_request' and _stopProcessing marker
- * - Returns simple string error message when tool execution is denied
- * - Natural message flow without exceptions - CLI detects client.requestApproval tool call
- * - LLM providers check for _stopProcessing marker and return _approvalMessage
- * - Replaced heuristic-based approval detection with explicit tool.approval metadata
- * - Enhanced wrapToolWithValidation to handle approval flow before parameter validation
- * - Added universal parameter validation for consistent tool execution
+ * - 2026-02-06: Removed approval checking and HITL functionality
+ * - Simplified wrapToolWithValidation to focus on parameter validation only
  * - Initial implementation for empty/missing name validation
  */
 
@@ -223,12 +210,12 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
 }
 
 /**
- * Wrap tool execution with universal parameter validation and approval checking
- * Provides a standardized validation and approval layer for all tools
+ * Wrap tool execution with universal parameter validation
+ * Provides a standardized validation layer for all tools
  * 
- * @param tool - Tool object with execute function, parameters schema, and optional approval metadata
+ * @param tool - Tool object with execute function and parameters schema
  * @param toolName - Name of the tool (for logging and error reporting)
- * @returns Wrapped tool with validation and approval checking
+ * @returns Wrapped tool with validation
  */
 export function wrapToolWithValidation(tool: any, toolName: string): any {
   if (!tool || !tool.execute) {
@@ -240,69 +227,6 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
   return {
     ...tool,
     execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
-      // Check if tool requires approval BEFORE parameter validation
-      if (tool.approval?.required && context?.world && context?.messages) {
-        const { checkToolApproval } = await import('./events/index.js');
-        const approvalMessage = tool.approval.message || `The tool "${toolName}" requires approval to execute.`;
-
-        const approvalCheck = await checkToolApproval(
-          context.world,
-          toolName,
-          args,
-          approvalMessage,
-          context.messages,
-          { workingDirectory: context?.workingDirectory || process.cwd() }
-        );
-
-        if (approvalCheck?.needsApproval) {
-          // Create a client.requestApproval tool call for the approval request
-          // Upper layer (events.ts via LLM provider) will handle storage and event emission
-          const approvalToolCallId = `approval_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-          const approvalResult = {
-            role: 'assistant' as const,
-            content: '',
-            tool_calls: [{
-              id: approvalToolCallId,
-              type: 'function' as const,
-              function: {
-                name: 'client.requestApproval',
-                arguments: JSON.stringify({
-                  originalToolCall: {
-                    id: context?.toolCallId,
-                    name: toolName,
-                    args: args,
-                    workingDirectory: context?.workingDirectory || process.cwd()
-                  },
-                  message: approvalMessage,
-                  options: approvalCheck.approvalRequest?.options || ['deny', 'approve_once', 'approve_session']
-                })
-              }
-            }],
-            // Initialize toolCallStatus as incomplete
-            toolCallStatus: {
-              [approvalToolCallId]: {
-                complete: false,
-                result: null
-              }
-            }
-          };
-
-          // Return the approval request in a structured format
-          // No event emission here - that's the upper layer's responsibility
-          return {
-            type: 'approval_request',
-            approvalRequest: approvalCheck.approvalRequest,
-            _stopProcessing: true,
-            _approvalMessage: approvalResult
-          };
-        }
-
-        if (!approvalCheck?.canExecute) {
-          // Tool execution was denied
-          return `Error: Tool execution denied - approval not granted`;
-        }
-      }
-
       // Apply validation if tool has parameters schema
       if (tool.parameters) {
         const validation = validateToolParameters(args, tool.parameters, toolName);
@@ -316,101 +240,6 @@ export function wrapToolWithValidation(tool: any, toolName: string): any {
 
       // No schema available, proceed with original args
       return originalExecute(args, sequenceId, parentToolCall, context);
-    }
-  };
-}
-
-/**
- * Create a generic Human-in-the-Loop (HITL) intervention tool
- * Allows LLM to request human decisions with custom prompts and options
- * 
- * Flow:
- * 1. LLM calls human_intervention.request with { prompt, options, context }
- * 2. Tool transforms to client.humanIntervention protocol (like approval flow)
- * 3. Client detects and renders UI with dynamic buttons
- * 4. User selects option, submits via /tool-results API
- * 5. Agent handler receives choice and resumes LLM
- * 
- * @returns Tool object compatible with OpenAI function calling
- */
-export function createHumanInterventionTool(): any {
-  return {
-    name: 'human_intervention.request',
-    description: 'Request a decision from the human user. Use this when you need the human to choose between multiple options. The tool will pause execution and wait for the human\'s choice before continuing.',
-    parameters: {
-      type: 'object',
-      properties: {
-        prompt: {
-          type: 'string',
-          description: 'Clear question or context to help the human make a decision. Be specific about what you need and why.'
-        },
-        options: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of available choices for the human to select from. Must have at least one option. Examples: ["Option A", "Option B", "Cancel"]',
-          minItems: 1
-        },
-        context: {
-          type: 'object',
-          description: 'Optional additional data to help the human decide (e.g., current state, consequences of each option)',
-          additionalProperties: true
-        }
-      },
-      required: ['prompt', 'options']
-    },
-    execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
-      // Validate required parameters
-      if (!args.prompt || typeof args.prompt !== 'string' || args.prompt.trim() === '') {
-        return 'Error: prompt is required and must be a non-empty string';
-      }
-
-      if (!args.options || !Array.isArray(args.options) || args.options.length === 0) {
-        return 'Error: options is required and must be a non-empty array';
-      }
-
-      // Validate options are strings
-      if (!args.options.every((opt: any) => typeof opt === 'string')) {
-        return 'Error: all options must be strings';
-      }
-
-      // Generate client-side tool call ID with hitl_ prefix
-      const hitlToolCallId = `hitl_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-      // Create the transformed client.humanIntervention tool call
-      const hitlMessage = {
-        role: 'assistant' as const,
-        content: '',
-        tool_calls: [{
-          id: hitlToolCallId,
-          type: 'function' as const,
-          function: {
-            name: 'client.humanIntervention',
-            arguments: JSON.stringify({
-              originalToolCall: {
-                id: context?.toolCallId,
-                name: 'human_intervention.request',
-                args: args
-              },
-              prompt: args.prompt,
-              options: args.options,
-              context: args.context || {}
-            })
-          }
-        }],
-        toolCallStatus: {
-          [hitlToolCallId]: {
-            complete: false,
-            result: null
-          }
-        }
-      };
-
-      // Return structured response with _approvalMessage for LLM provider compatibility
-      return {
-        type: 'hitl_request',
-        _stopProcessing: true,
-        _approvalMessage: hitlMessage  // Use same field as approval flow
-      };
     }
   };
 }
