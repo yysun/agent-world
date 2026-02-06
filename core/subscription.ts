@@ -9,7 +9,7 @@
 import { World } from './types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
-import { subscribeAgentToMessages, subscribeAgentToToolMessages, subscribeWorldToMessages } from './events/index.js';
+import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
 
 function toKebabCase(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -55,10 +55,8 @@ export async function startWorld(world: World, client: ClientConnection): Promis
   let currentWorld: World | null = world;
 
   // Subscribe all loaded agents to world messages (moved from getFullWorld)
-  // Both handlers subscribe independently to 'message' events and filter their own messages
   for (const agent of currentWorld.agents.values()) {
     subscribeAgentToMessages(currentWorld, agent);
-    subscribeAgentToToolMessages(currentWorld, agent);
   }
 
   subscribeWorldToMessages(currentWorld);
@@ -121,7 +119,6 @@ export async function startWorld(world: World, client: ClientConnection): Promis
       // Subscribe all loaded agents to world messages (moved from getFullWorld)
       for (const agent of currentWorld.agents.values()) {
         subscribeAgentToMessages(currentWorld, agent);
-        subscribeAgentToToolMessages(currentWorld, agent);
       }
 
       logger.debug('World subscription refreshed', {

@@ -405,16 +405,16 @@ export async function processAgentMessage(
             });
           }
 
-          // Continue LLM loop with tool result - call resumeLLMAfterApproval
+          // Continue LLM loop with tool result
           // The tool result is now in memory, so the next LLM call will see it
           loggerAgent.debug('Continuing LLM loop with tool result', {
             agentId: agent.id,
             toolCallId: toolCall.id
           });
 
-          // Use the existing resumeLLMAfterApproval function (same as approval flow)
-          const { resumeLLMAfterApproval } = await import('./memory-manager.js');
-          await resumeLLMAfterApproval(world, agent, world.currentChatId);
+          // Continue the LLM execution loop with the tool result
+          const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
+          await continueLLMAfterToolExecution(world, agent, world.currentChatId);
 
         } catch (error) {
           loggerAgent.error('Tool execution error', {

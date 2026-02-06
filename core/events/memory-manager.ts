@@ -2,24 +2,25 @@
  * Memory Management Module
  * 
  * Handles agent memory operations, LLM call management, and chat title generation.
- * Provides functions for saving messages, resuming LLM after approval, and text response handling.
+ * Provides functions for saving messages, continuing LLM after tool execution, and text response handling.
  * 
  * Features:
  * - Save incoming messages to agent memory with auto-save
- * - Resume LLM after approval with tool result in memory
+ * - Continue LLM execution after tool results (auto-execution flow)
  * - Handle text responses with auto-mention logic
  * - Reset LLM call count for human/world messages
  * - Generate chat titles from message content using LLM
  * 
  * Dependencies (Layer 4):
  * - types.ts (Layer 1)
- * - mention-logic.ts, approval-checker.ts (Layer 2)
+ * - mention-logic.ts (Layer 2)
  * - publishers.ts (Layer 3)
  * - utils.ts, logger.ts
  * - llm-manager.ts (runtime)
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-06: Renamed resumeLLMAfterApproval to continueLLMAfterToolExecution (removed approval terminology)
  * - 2025-01-09: Extracted from events.ts for modular architecture
  */
 
@@ -116,10 +117,11 @@ export async function saveIncomingMessageToMemory(
 }
 
 /**
- * Resume LLM after approval response
- * Calls the LLM with the updated memory (including tool result) to continue execution
+ * Continue LLM execution after tool execution
+ * Calls the LLM with the updated memory (including tool result) to continue the execution loop
+ * Used for auto-execution flow where tools are executed automatically
  */
-export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?: string | null): Promise<void> {
+export async function continueLLMAfterToolExecution(world: World, agent: Agent, chatId?: string | null): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
     // Use the chatId from the approval message event, fallback to world.currentChatId
@@ -128,7 +130,7 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
     // Filter memory to current chat only
     const currentChatMessages = agent.memory.filter(m => m.chatId === targetChatId);
 
-    loggerAgent.debug('Resuming LLM with approval result in memory', {
+    loggerAgent.debug('Continuing LLM execution with tool result in memory', {
       agentId: agent.id,
       targetChatId,
       worldCurrentChatId: world.currentChatId,
@@ -202,7 +204,7 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
       messageId = result.messageId;
     }
 
-    loggerAgent.debug('LLM response received after approval', {
+    loggerAgent.debug('LLM response received after tool execution', {
       agentId: agent.id,
       responseType: llmResponse.type,
       hasContent: !!llmResponse.content,
@@ -210,7 +212,7 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
     });
 
     if (llmResponse.type !== 'text' || !llmResponse.content) {
-      loggerAgent.warn('LLM response after approval is not text or empty - no message will be published', {
+      loggerAgent.warn('LLM response after tool execution is not text or empty - no message will be published', {
         agentId: agent.id,
         responseType: llmResponse.type,
         hasContent: !!llmResponse.content,
@@ -237,13 +239,13 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
     try {
       const storage = await getStorageWrappers();
       await storage.saveAgent(world.id, agent);
-      loggerMemory.debug('Agent response saved to memory after approval', {
+      loggerMemory.debug('Agent response saved to memory after tool execution', {
         agentId: agent.id,
         messageId,
         memorySize: agent.memory.length
       });
     } catch (error) {
-      loggerMemory.error('Failed to save agent response after approval', {
+      loggerMemory.error('Failed to save agent response after tool execution', {
         agentId: agent.id,
         error: error instanceof Error ? error.message : String(error)
       });
@@ -252,13 +254,13 @@ export async function resumeLLMAfterApproval(world: World, agent: Agent, chatId?
     // Publish the response message
     publishMessage(world, responseText, agent.id, targetChatId, undefined);
 
-    loggerAgent.debug('Agent response published after approval', {
+    loggerAgent.debug('Agent response published after tool execution', {
       agentId: agent.id,
       messageId,
       responseLength: responseText.length
     });
   } catch (error) {
-    loggerAgent.error('Failed to resume LLM after approval', {
+    loggerAgent.error('Failed to continue LLM after tool execution', {
       agentId: agent.id,
       error: error instanceof Error ? error.message : error
     });

@@ -294,26 +294,6 @@ export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): v
 }
 
 /**
- * Publish approval request event
- * Used when a tool requires approval before execution
- * Note: This function is legacy - approval requests now use direct message events
- * with OpenAI tool call protocol (see tool-utils.ts)
- */
-export function publishApprovalRequest(world: World, approvalRequest: any, agentId: string, messageId: string): void {
-  const approvalEvent = {
-    type: 'approval_request',
-    agentId,
-    messageId,
-    approvalRequest,
-    timestamp: new Date().toISOString()
-  };
-  // Emit as approval event for legacy compatibility
-  world.eventEmitter.emit('approval', approvalEvent);
-  // Note: SSE events are for streaming only, not for tool messages
-  // Approval requests should use message events with OpenAI tool call format
-}
-
-/**
  * SSE subscription using World.eventEmitter
  */
 export function subscribeToSSE(

@@ -11,6 +11,7 @@
  * - Support for time-based and sequence-based pagination
  * - Event type filtering
  * - Duplicate event ID handling (silently ignores duplicates)
+ * - Write locking to prevent concurrent write corruption
  * - No database dependencies
  * - Suitable for serverless and file-based deployments
  * 
@@ -20,12 +21,14 @@
  * - File structure: baseDir/worldId/events/chatId.json
  * - World-scoped storage: events stored within each world's directory
  * - Checks for duplicate IDs before insertion (matches SQLite INSERT OR IGNORE behavior)
+ * - Write lock manager ensures atomic file operations per file path
  * 
  * Cascade Delete Behavior:
  * - Deleting a world directory removes all events for that world
  * - Deleting a chat file removes all events for that chat
  * 
  * Changes:
+ * - 2026-02-06: Added write lock manager to prevent concurrent write corruption during rapid event saves
  * - 2025-11-09: Fixed file paths to be world-scoped (baseDir/worldId/events/) instead of storage root
  * - 2025-11-03: Added duplicate event ID detection to prevent constraint violations
  */
@@ -107,6 +110,41 @@ async function writeEventsToFile(filePath: string, events: StoredEvent[]): Promi
 }
 
 /**
+ * File write lock manager to prevent concurrent writes to the same file
+ */
+class WriteLockManager {
+  private locks = new Map<string, Promise<void>>();
+
+  /**
+   * Execute a write operation with exclusive file lock
+   */
+  async withLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+    // Wait for any existing lock on this file
+    const existingLock = this.locks.get(filePath);
+    if (existingLock) {
+      await existingLock;
+    }
+
+    // Create new lock
+    let resolve: () => void;
+    const newLock = new Promise<void>((r) => { resolve = r; });
+    this.locks.set(filePath, newLock);
+
+    try {
+      // Execute the operation
+      const result = await operation();
+      return result;
+    } finally {
+      // Release lock
+      this.locks.delete(filePath);
+      resolve!();
+    }
+  }
+}
+
+const writeLockManager = new WriteLockManager();
+
+/**
  * File-backed event storage implementation
  */
 export class FileEventStorage implements EventStorage {
@@ -159,26 +197,29 @@ export class FileEventStorage implements EventStorage {
 
     const filePath = getEventFilePath(this.baseDir, event.worldId, event.chatId);
 
-    // Read existing events
-    const existingEvents = await readEventsFromFile(filePath);
+    // Use lock to prevent concurrent writes to the same file
+    await writeLockManager.withLock(filePath, async () => {
+      // Read existing events
+      const existingEvents = await readEventsFromFile(filePath);
 
-    // Check for duplicate ID - skip if already exists
-    const existingEvent = existingEvents.find(e => e.id === event.id);
-    if (existingEvent) {
-      // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
-      return;
-    }
+      // Check for duplicate ID - skip if already exists
+      const existingEvent = existingEvents.find(e => e.id === event.id);
+      if (existingEvent) {
+        // Silently ignore duplicate event ID (matches SQLite INSERT OR IGNORE behavior)
+        return;
+      }
 
-    // Auto-generate sequence number if not provided
-    const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
+      // Auto-generate sequence number if not provided
+      const seq = event.seq ?? await this.getNextSeq(event.worldId, event.chatId);
 
-    const storedEvent: StoredEvent = {
-      ...event,
-      seq
-    };
+      const storedEvent: StoredEvent = {
+        ...event,
+        seq
+      };
 
-    existingEvents.push(storedEvent);
-    await writeEventsToFile(filePath, existingEvents);
+      existingEvents.push(storedEvent);
+      await writeEventsToFile(filePath, existingEvents);
+    });
   }
 
   /**
@@ -207,28 +248,31 @@ export class FileEventStorage implements EventStorage {
 
       const filePath = getEventFilePath(this.baseDir, worldId, chatId);
 
-      // Read existing events
-      const existingEvents = await readEventsFromFile(filePath);
-      const existingIds = new Set(existingEvents.map(e => e.id));
+      // Use lock to prevent concurrent writes to the same file
+      await writeLockManager.withLock(filePath, async () => {
+        // Read existing events
+        const existingEvents = await readEventsFromFile(filePath);
+        const existingIds = new Set(existingEvents.map(e => e.id));
 
-      // Generate seq numbers sequentially and filter out duplicates
-      const eventsWithSeq: StoredEvent[] = [];
-      for (const event of groupEvents) {
-        // Validate event metadata before persistence
-        validateEventForPersistence(event);
+        // Generate seq numbers sequentially and filter out duplicates
+        const eventsWithSeq: StoredEvent[] = [];
+        for (const event of groupEvents) {
+          // Validate event metadata before persistence
+          validateEventForPersistence(event);
 
-        // Skip if duplicate ID exists
-        if (existingIds.has(event.id)) {
-          continue; // Silently ignore duplicate
+          // Skip if duplicate ID exists
+          if (existingIds.has(event.id)) {
+            continue; // Silently ignore duplicate
+          }
+
+          const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
+          eventsWithSeq.push({ ...event, seq });
         }
 
-        const seq = event.seq ?? await this.getNextSeq(worldId, chatId);
-        eventsWithSeq.push({ ...event, seq });
-      }
-
-      // Append new events and write back
-      existingEvents.push(...eventsWithSeq);
-      await writeEventsToFile(filePath, existingEvents);
+        // Append new events and write back
+        existingEvents.push(...eventsWithSeq);
+        await writeEventsToFile(filePath, existingEvents);
+      });
     }
   }
 
