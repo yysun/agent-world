@@ -64,6 +64,16 @@ import { handleTextResponse } from './memory-manager.js';
 import { isAICommand } from '../ai-commands.js';
 import { executeShellCommand, formatResultForLLM } from '../shell-cmd-tool.js';
 
+// Pi-agent-core imports
+import {
+  getPiAgentForAgent,
+  toAgentMessages,
+  toStoredMessage,
+  bridgeEventToWorld
+} from '../pi-agent-adapter.js';
+import { getToolsForAgent } from '../pi-agent-tools.js';
+import type { AgentEvent } from '@mariozechner/pi-agent-core';
+
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
@@ -532,4 +542,185 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   const shouldRespond = mentions.includes(agent.id.toLowerCase());
   loggerResponse.debug('AGENT message mention check', { agentId: agent.id, shouldRespond });
   return shouldRespond;
+}
+
+// ============================================================================
+// Pi-Agent-Core Based Processing (New Implementation)
+// ============================================================================
+
+/**
+ * Feature flag to enable pi-agent-core based processing
+ * Set USE_PI_AGENT=true environment variable to use pi-agent-core instead of llm-manager.ts
+ */
+let usePiAgentCore = process.env.USE_PI_AGENT === 'true';
+
+/**
+ * Enable or disable pi-agent-core based processing
+ */
+export function setUsePiAgentCore(enabled: boolean): void {
+  usePiAgentCore = enabled;
+  loggerAgent.info('Pi-agent-core mode', { enabled });
+}
+
+/**
+ * Check if pi-agent-core is enabled
+ */
+export function isPiAgentCoreEnabled(): boolean {
+  return usePiAgentCore;
+}
+
+/**
+ * Process agent message using pi-agent-core
+ * 
+ * This is the new implementation that uses @mariozechner/pi-agent-core
+ * instead of the old llm-manager.ts approach.
+ */
+export async function processAgentMessageWithPiAgent(
+  world: World,
+  agent: Agent,
+  messageEvent: WorldMessageEvent
+): Promise<void> {
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  const messageId = generateId();
+
+  try {
+    loggerAgent.debug('Processing agent message with pi-agent-core', {
+      agentId: agent.id,
+      worldId: world.id,
+      chatId: world.currentChatId
+    });
+
+    // Get tools for this agent
+    const tools = getToolsForAgent(agent.id);
+
+    // Get or create pi-agent instance
+    const piAgent = await getPiAgentForAgent(world, agent, tools);
+
+    // Set streaming mode based on global flag
+    piAgent.state.isStreaming = isStreamingEnabled();
+    loggerAgent.debug('Set pi-agent streaming mode', {
+      agentId: agent.id,
+      isStreaming: piAgent.state.isStreaming
+    });
+
+    // Load existing messages from agent memory and convert to pi-agent format
+    const piMessages = toAgentMessages(agent.memory);
+    piAgent.replaceMessages(piMessages);
+
+    // Set system prompt if present
+    if (agent.systemPrompt) {
+      piAgent.setSystemPrompt(agent.systemPrompt);
+    }
+
+    // Set tools
+    piAgent.setTools(tools);
+
+    // Track new messages for saving
+    const newMessages: AgentMessage[] = [];
+    const lastAssistantMessageId = messageId;
+
+    // Subscribe to events and bridge to World using adapter's bridging function
+    const unsubscribe = piAgent.subscribe((event: AgentEvent) => {
+      // Use adapter's event bridging for SSE and tool events
+      bridgeEventToWorld(world, event, agent.id, lastAssistantMessageId);
+
+      // Handle turn_end for message collection and turn limit
+      if (event.type === 'turn_end') {
+        // Increment LLM call count on each turn
+        agent.llmCallCount++;
+        agent.lastLLMCall = new Date();
+
+        // Convert the turn's message to storage format
+        const storedMsg = toStoredMessage(
+          event.message,
+          agent.id,
+          world.currentChatId || null
+        );
+        if (storedMsg) {
+          storedMsg.replyToMessageId = messageEvent.messageId;
+          newMessages.push(storedMsg);
+        }
+
+        // Check turn limit
+        const turnLimit = getWorldTurnLimit(world);
+        if (agent.llmCallCount >= turnLimit) {
+          loggerTurnLimit.info('Turn limit reached, aborting agent', {
+            agentId: agent.id,
+            llmCallCount: agent.llmCallCount,
+            turnLimit
+          });
+          piAgent.abort();
+          publishMessage(world, `@human Turn limit reached (${turnLimit} LLM calls). Please take control of the conversation.`, agent.id);
+        }
+      }
+
+      // Log agent completion
+      if (event.type === 'agent_end') {
+        loggerAgent.debug('Pi-agent run completed', {
+          agentId: agent.id,
+          messageCount: event.messages.length,
+          newMessages: newMessages.length
+        });
+      }
+    });
+
+    try {
+      // Run the prompt
+      await piAgent.prompt(messageEvent.content);
+
+      // Save new messages to agent memory
+      if (newMessages.length > 0) {
+        for (const msg of newMessages) {
+          agent.memory.push(msg);
+        }
+
+        // Also emit the final message event
+        const lastMsg = newMessages[newMessages.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
+          const finalEvent: WorldMessageEvent = {
+            content: lastMsg.content,
+            sender: agent.id,
+            timestamp: lastMsg.createdAt || new Date(),
+            messageId: lastMsg.messageId || generateId(),
+            chatId: lastMsg.chatId,
+            replyToMessageId: lastMsg.replyToMessageId
+          };
+          world.eventEmitter.emit('message', finalEvent);
+        }
+
+        // Save agent state
+        try {
+          const storage = await getStorageWrappers();
+          await storage.saveAgent(world.id, agent);
+          loggerAgent.debug('Saved agent memory after pi-agent run', {
+            agentId: agent.id,
+            newMessages: newMessages.length,
+            totalMemory: agent.memory.length
+          });
+        } catch (error) {
+          loggerAgent.error('Failed to save agent memory', {
+            agentId: agent.id,
+            error: error instanceof Error ? error.message : error
+          });
+        }
+      } else {
+        loggerAgent.warn('Pi-agent run completed but no new messages collected', {
+          agentId: agent.id,
+          worldId: world.id
+        });
+      }
+    } finally {
+      unsubscribe();
+    }
+
+  } catch (error) {
+    loggerAgent.error('Error processing agent message with pi-agent-core', {
+      agentId: agent.id,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+    throw error;
+  } finally {
+    completeActivity();
+  }
 }

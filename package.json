@@ -67,6 +67,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.51.0",
+    "@mariozechner/pi-ai": "^0.51.0",
+    "@sinclair/typebox": "^0.34.48",
     "chalk": "^5.5.0",
     "cors": "^2.8.5",
     "enquirer": "^2.4.1",

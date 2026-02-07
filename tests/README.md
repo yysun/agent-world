@@ -23,7 +23,9 @@ tests/
 ├── api/               # API endpoint tests
 ├── cli/               # CLI command tests
 ├── db/                # Standalone database tests (migration-tests.ts)
+├── e2e/               # End-to-end tests with real LLM calls
 ├── integration/       # Integration tests (migration-paths.test.ts)
+├── manual/            # Manual test scenarios and documentation
 └── web/               # Web interface tests
 ```
 
@@ -106,7 +108,7 @@ test('persists agent memory', async () => {
 ## Running Tests
 
 ```bash
-# Run all tests
+# Run all unit tests
 npm test
 
 # Run specific test file
@@ -126,6 +128,11 @@ npm run test:db
 
 # Run specific test by name
 npm test -- -t "should save agent"
+
+# Run E2E tests with real LLM calls (requires API keys)
+npx tsx tests/e2e/test-agent-response-rules.ts
+npx tsx tests/e2e/test-approval-none.ts
+# See tests/e2e/README.md for more E2E tests
 ```
 
 ## Common Issues

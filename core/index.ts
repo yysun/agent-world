@@ -92,6 +92,8 @@ export {
   publishMessage,
   publishMessageWithId,
   publishToolResult,
+  setUsePiAgentCore,
+  isPiAgentCoreEnabled,
 } from './events/index.js';
 
 export {
