@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-07: Disabled tool definitions for Ollama provider requests
  * - 2025-11-09: Phase 2 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
  * - Returns LLMResponse interface with type discriminator
@@ -146,6 +147,11 @@ function convertMCPToolsToOpenAI(mcpTools: Record<string, any>): OpenAI.Chat.Com
   }));
 }
 
+function shouldAttachTools(provider: Agent['provider']): boolean {
+  // Ollama frequently behaves better without OpenAI-style tool definitions attached.
+  return provider !== 'ollama';
+}
+
 /**
  * Streaming OpenAI response handler - Pure client (no tool execution)
  * Returns LLMResponse with type='text' or type='tool_calls'
@@ -161,7 +167,10 @@ export async function streamOpenAIResponse(
   messageId: string
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
-  const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
+  const openaiTools =
+    shouldAttachTools(agent.provider) && Object.keys(mcpTools).length > 0
+      ? convertMCPToolsToOpenAI(mcpTools)
+      : undefined;
 
   const requestParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
     model,
@@ -285,7 +294,10 @@ export async function generateOpenAIResponse(
   world: World
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
-  const openaiTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToOpenAI(mcpTools) : undefined;
+  const openaiTools =
+    shouldAttachTools(agent.provider) && Object.keys(mcpTools).length > 0
+      ? convertMCPToolsToOpenAI(mcpTools)
+      : undefined;
 
   const requestParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
     model,
