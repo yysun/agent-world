@@ -16,11 +16,12 @@
  * - Processes SSE data events with callbacks
  * 
  * Changes:
+ * - 2026-02-07: Matched chat request flow with web/src/utils/sse-client.ts (payload/headers/options parsing)
  * - 2025-11-12: Enhanced with world events, log messages, tool approval events
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
 
-import { sendMessage as apiSendMessage } from './api';
+import { apiRequest } from './api';
 import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, LogEvent, WorldEvent, ApprovalRequest } from '../types';
 
 // SSE data structure interfaces
@@ -111,26 +112,72 @@ export interface SSECallbacks {
   onComplete?: (data: any) => void;
 }
 
+interface SendChatMessageOptions {
+  sender?: string;
+  historyMessages?: Array<Record<string, any>>;
+  callbacks?: SSECallbacks;
+  onMessage?: (data: SSEData) => void;
+  onError?: (error: Error) => void;
+  onComplete?: (data: any) => void;
+}
+
 /**
  * Send a chat message to a world via SSE streaming
  * 
  * @param worldName - Name of the world to send message to
  * @param message - Message content to send
- * @param sender - Message sender identifier (default: 'human')
- * @param callbacks - Callback functions for SSE events
+ * @param senderOrOptions - Sender string or options object (web-compatible)
+ * @param legacyOnMessage - Legacy callback support for raw SSE data
+ * @param legacyOnError - Legacy callback support for stream errors
+ * @param legacyOnComplete - Legacy callback support for completion event
  * @returns Cleanup function to cancel the stream
  */
 export async function sendChatMessage(
   worldName: string,
   message: string,
-  sender: string = 'human',
-  callbacks: SSECallbacks = {}
+  senderOrOptions?: string | SendChatMessageOptions,
+  legacyOnMessage?: (data: SSEData) => void,
+  legacyOnError?: (error: Error) => void,
+  legacyOnComplete?: (data: any) => void
 ): Promise<() => void> {
+  let sender = 'HUMAN';
+  let historyMessages: Array<Record<string, any>> | undefined;
+  let callbacks: SSECallbacks = {};
+  let onMessage = legacyOnMessage;
+  let onError = legacyOnError;
+  let onComplete = legacyOnComplete;
+
+  if (typeof senderOrOptions === 'string') {
+    sender = senderOrOptions;
+  } else if (senderOrOptions === undefined) {
+    sender = 'HUMAN';
+  } else {
+    sender = senderOrOptions.sender ?? 'HUMAN';
+    historyMessages = senderOrOptions.historyMessages;
+    callbacks = senderOrOptions.callbacks ?? {};
+    onMessage = senderOrOptions.onMessage ?? onMessage;
+    onError = senderOrOptions.onError ?? onError;
+    onComplete = senderOrOptions.onComplete ?? onComplete;
+  }
+
   if (!worldName || !message?.trim()) {
     throw new Error('World name and non-empty message are required');
   }
 
-  const response = await apiSendMessage(worldName, message, sender);
+  const requestPayload: Record<string, any> = { message, sender };
+  if (historyMessages && historyMessages.length > 0) {
+    requestPayload.messages = historyMessages;
+  }
+
+  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(requestPayload),
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+  });
 
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -170,16 +217,22 @@ export async function sendChatMessage(
 
             const data: SSEData = JSON.parse(dataContent);
             handleSSEData(data, callbacks);
+            onMessage?.(data);
+            if (data.type === 'complete') {
+              onComplete?.((data as SSECompleteData).payload || data);
+            }
 
           } catch (error) {
             console.error('Error parsing SSE data:', error);
             callbacks.onError?.(new Error('Failed to parse SSE data'));
+            onError?.(new Error('Failed to parse SSE data'));
           }
         }
       }
     } catch (error) {
       console.error('SSE stream error:', error);
       callbacks.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       cleanup();
     }

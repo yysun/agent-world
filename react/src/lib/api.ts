@@ -11,8 +11,14 @@
  * - Message management (send, delete)
  * - Error handling with structured responses
  * - TypeScript support
+ *
+ * Implementation:
+ * - Shared fetch wrapper (`apiRequest`) with structured backend error parsing
+ * - World creation payload defaults aligned with web frontend behavior
+ * - Chat message endpoint payload kept minimal; SSE headers are set by sse-client
  * 
  * Changes:
+ * - 2026-02-07: Aligned world creation and chat message request payload handling with web/src/api.ts
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
 
@@ -111,9 +117,23 @@ export async function createWorld(worldData: Partial<World>): Promise<World> {
     throw new Error('World data with name is required');
   }
 
+  // Match web frontend payload defaults to keep API behavior consistent.
+  const completeWorld: World = {
+    id: worldData.id ?? '',
+    name: worldData.name,
+    description: worldData.description || '',
+    turnLimit: worldData.turnLimit ?? 5,
+    chatLLMProvider: worldData.chatLLMProvider,
+    chatLLMModel: worldData.chatLLMModel,
+    mcpConfig: worldData.mcpConfig,
+    agents: worldData.agents ?? [],
+    currentChatId: worldData.currentChatId ?? '',
+    chats: worldData.chats ?? [],
+  };
+
   const response = await apiRequest('/worlds', {
     method: 'POST',
-    body: JSON.stringify(worldData),
+    body: JSON.stringify(completeWorld),
   });
 
   return response.json();
@@ -290,10 +310,6 @@ export async function sendMessage(
     {
       method: 'POST',
       body: JSON.stringify({ message, sender }),
-      headers: {
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      },
     }
   );
 }

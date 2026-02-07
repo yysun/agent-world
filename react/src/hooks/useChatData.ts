@@ -10,6 +10,11 @@
  * - Load messages from agent memory for the current chat
  * - Real-time message updates via callbacks
  * - Auto-select default chat (currentChatId)
+ *
+ * Implementation:
+ * - Uses API calls for chat/world fetches and memory reconstruction
+ * - Streams responses via `sendChatMessage` using web-compatible options payload
+ * - Maintains local optimistic message state while SSE events update final content
  * 
  * Usage:
  * ```tsx
@@ -30,6 +35,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-07: Updated sendChatMessage usage to web-compatible options payload style
  * - 2025-11-12: Added message loading from agent memory (loads messages for current chat)
  * - 2025-11-12: Added auto-select default chat when no chatId provided
  * - 2025-11-12: Updated to use REST API and SSE instead of WebSocket
@@ -283,82 +289,85 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
       setMessages(prev => [...prev, tempUserMessage]);
 
       // Send message via SSE
-      const cleanup = await sendChatMessage(worldId, content, sender, {
-        onStreamStart: (data) => {
-          // Add placeholder message for streaming
-          const newMessage: Message = {
-            id: data.messageId,
-            type: 'assistant',
-            text: '...',
-            content: '...',
-            sender: data.sender,
-            timestamp: new Date().toISOString(),
-            createdAt: new Date(),
-            chatId: currentChatId,
-            worldId
-          };
-          setMessages(prev => [...prev, newMessage]);
-        },
-        onStreamChunk: (data) => {
-          // Update streaming message
-          setMessages(prev => prev.map(msg =>
-            msg.id === data.messageId
-              ? { ...msg, text: data.content, content: data.content }
-              : msg
-          ));
-        },
-        onStreamEnd: (data) => {
-          // Finalize message and reload from backend
-          setMessages(prev => prev.map(msg =>
-            msg.id === data.messageId
-              ? { ...msg, text: data.content, content: data.content }
-              : msg
-          ));
-
-          // Reload messages from backend after stream ends
-          if (currentChatId) {
-            setTimeout(() => loadChatMessages(currentChatId), 500);
-          }
-        },
-        onStreamError: (data) => {
-          // Show error in message
-          setMessages(prev => prev.map(msg =>
-            msg.id === data.messageId
-              ? { ...msg, content: `Error: ${data.error}` }
-              : msg
-          ));
-        },
-        onMessage: (data) => {
-          // Handle non-streaming messages
-          if (data.messageId) {
-            const content = data.content || data.message || '';
+      const cleanup = await sendChatMessage(worldId, content, {
+        sender,
+        callbacks: {
+          onStreamStart: (data) => {
+            // Add placeholder message for streaming
             const newMessage: Message = {
               id: data.messageId,
               type: 'assistant',
-              text: content,
-              content: content,
-              sender: data.sender || data.agentName || 'system',
-              timestamp: data.createdAt || new Date().toISOString(),
-              createdAt: new Date(data.createdAt || new Date()),
+              text: '...',
+              content: '...',
+              sender: data.sender,
+              timestamp: new Date().toISOString(),
+              createdAt: new Date(),
               chatId: currentChatId,
-              worldId: worldId
+              worldId
             };
-            setMessages(prev => {
-              // Avoid duplicates
-              if (prev.some(m => m.id === newMessage.id)) return prev;
-              return [...prev, newMessage];
-            });
+            setMessages(prev => [...prev, newMessage]);
+          },
+          onStreamChunk: (data) => {
+            // Update streaming message
+            setMessages(prev => prev.map(msg =>
+              msg.id === data.messageId
+                ? { ...msg, text: data.content, content: data.content }
+                : msg
+            ));
+          },
+          onStreamEnd: (data) => {
+            // Finalize message and reload from backend
+            setMessages(prev => prev.map(msg =>
+              msg.id === data.messageId
+                ? { ...msg, text: data.content, content: data.content }
+                : msg
+            ));
+
+            // Reload messages from backend after stream ends
+            if (currentChatId) {
+              setTimeout(() => loadChatMessages(currentChatId), 500);
+            }
+          },
+          onStreamError: (data) => {
+            // Show error in message
+            setMessages(prev => prev.map(msg =>
+              msg.id === data.messageId
+                ? { ...msg, content: `Error: ${data.error}` }
+                : msg
+            ));
+          },
+          onMessage: (data) => {
+            // Handle non-streaming messages
+            if (data.messageId) {
+              const content = data.content || data.message || '';
+              const newMessage: Message = {
+                id: data.messageId,
+                type: 'assistant',
+                text: content,
+                content: content,
+                sender: data.sender || data.agentName || 'system',
+                timestamp: data.createdAt || new Date().toISOString(),
+                createdAt: new Date(data.createdAt || new Date()),
+                chatId: currentChatId,
+                worldId: worldId
+              };
+              setMessages(prev => {
+                // Avoid duplicates
+                if (prev.some(m => m.id === newMessage.id)) return prev;
+                return [...prev, newMessage];
+              });
+            }
+          },
+          onComplete: () => {
+            // Reload messages from backend when complete
+            if (currentChatId) {
+              loadChatMessages(currentChatId);
+            }
+          },
+          onError: (err) => {
+            console.error('SSE error:', err);
+            setError(err);
           }
-        },
-        onComplete: () => {
-          // Reload messages from backend when complete
-          if (currentChatId) {
-            loadChatMessages(currentChatId);
-          }
-        },
-        onError: (err) => {
-          console.error('SSE error:', err);
-          setError(err);
         }
       });
 
