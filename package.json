@@ -40,7 +40,7 @@
     "web:dev": "npm-run-all --sequential server:wait web:dev:direct",
     "web:dev:direct": "npm run dev --workspace=web",
     "web:watch": "npm-run-all --parallel server:watch web:dev:direct",
-    "react:dev": "npm-run-all --sequential server:wait react:dev:direct",
+    "react:dev": "npm-run-all --parallel server:watch react:dev:direct",
     "react:dev:direct": "npm run dev --workspace=react",
     "react:watch": "npm-run-all --parallel server:watch react:dev:direct",
     "test": "vitest run",
