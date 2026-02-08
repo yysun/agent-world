@@ -643,6 +643,12 @@ const handleToolError = (state: WorldComponentState, data: any): WorldComponentS
   return handleToolErrorBase(state, data);
 };
 
+const handleToolStream = (state: WorldComponentState, data: any): WorldComponentState => {
+  // Tool stream events for real-time shell command output
+  // Spinner is controlled by world events (pending count)
+  return handleToolStreamBase(state, data);
+};
+
 const handleWorldActivity = (state: WorldComponentState, activity: any): WorldComponentState | void => {
   // Check for valid event types
   if (!activity || (activity.type !== 'response-start' && activity.type !== 'response-end' && activity.type !== 'idle')) {

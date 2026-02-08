@@ -6,9 +6,10 @@
  * 
  * Features:
  * - SSE connection management with cleanup
- * - Comprehensive event parsing (stream, message, world, log, tool approval)
+ * - Comprehensive event parsing (stream, message, world, log, tool approval, tool streaming)
  * - Streaming message state management
  * - Error handling and recovery
+ * - Shell command output streaming (stdout/stderr) support
  * 
  * Implementation:
  * - Uses fetch API with ReadableStream for SSE
@@ -16,13 +17,14 @@
  * - Processes SSE data events with callbacks
  * 
  * Changes:
+ * - 2026-02-08: Added tool-stream event handling for shell command output streaming
  * - 2026-02-07: Matched chat request flow with web/src/utils/sse-client.ts (payload/headers/options parsing)
  * - 2025-11-12: Enhanced with world events, log messages, tool approval events
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
 
 import { apiRequest } from './api';
-import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, LogEvent, WorldEvent, ApprovalRequest } from '../types';
+import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData, LogEvent, WorldEvent, ApprovalRequest } from '../types';
 
 // SSE data structure interfaces
 interface SSEBaseData {
@@ -104,6 +106,7 @@ export interface SSECallbacks {
   onStreamChunk?: (data: StreamChunkData) => void;
   onStreamEnd?: (data: StreamEndData) => void;
   onStreamError?: (data: StreamErrorData) => void;
+  onToolStream?: (data: ToolStreamData) => void;
   onMessage?: (data: SSEMessageData['data']) => void;
   onLogMessage?: (data: LogEvent) => void;
   onWorldEvent?: (data: WorldEvent) => void;
@@ -254,6 +257,9 @@ function handleSSEData(data: SSEData, callbacks: SSECallbacks): void {
     case 'sse':
       handleStreamingEvent((data as SSEStreamingData).data, callbacks);
       break;
+    case 'tool-stream':
+      handleToolStreamEvent(data as any, callbacks);
+      break;
     case 'message':
       callbacks.onMessage?.((data as SSEMessageData).data);
       break;
@@ -310,6 +316,22 @@ function handleStreamingEvent(eventData: SSEStreamEvent, callbacks: SSECallbacks
       callbacks.onStreamError?.({ messageId, sender, error, worldName: eventData.worldName });
       break;
   }
+}
+
+/**
+ * Process tool stream events (shell command output)
+ */
+function handleToolStreamEvent(eventData: any, callbacks: SSECallbacks): void {
+  if (!eventData) return;
+
+  callbacks.onToolStream?.({
+    messageId: eventData.messageId || '',
+    agentName: eventData.agentName || eventData.sender || '',
+    content: eventData.accumulatedContent || eventData.content || '',
+    stream: eventData.stream || 'stdout',
+    accumulatedContent: eventData.accumulatedContent,
+    worldName: eventData.worldName
+  });
 }
 
 export default {

@@ -35,6 +35,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-08: Added onToolStream callback for shell command output streaming
  * - 2026-02-07: Updated sendChatMessage usage to web-compatible options payload style
  * - 2025-11-12: Added message loading from agent memory (loads messages for current chat)
  * - 2025-11-12: Added auto-select default chat when no chatId provided
@@ -335,6 +336,23 @@ export function useChatData(worldId: string, chatId?: string): UseChatDataReturn
                 ? { ...msg, content: `Error: ${data.error}` }
                 : msg
             ));
+          },
+          onToolStream: (data) => {
+            // Update tool streaming message with accumulated output
+            setMessages(prev => prev.map(msg => {
+              // Find existing tool message by messageId
+              if (msg.messageId === data.messageId && msg.isToolEvent) {
+                return {
+                  ...msg,
+                  text: data.content,
+                  content: data.content,
+                  isToolStreaming: true,
+                  streamType: data.stream,
+                  toolEventType: 'progress'
+                };
+              }
+              return msg;
+            }));
           },
           onMessage: (data) => {
             // Handle non-streaming messages

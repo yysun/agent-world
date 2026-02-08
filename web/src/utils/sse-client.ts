@@ -282,9 +282,9 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         const newContent = eventData.accumulatedContent !== undefined
           ? eventData.accumulatedContent
           : toolStream.content + (eventData.content || '');
-        
+
         toolStream.content = newContent;
-        
+
         // Publish tool stream event with stream type metadata
         publishEvent('handleToolStream', {
           messageId,
@@ -294,7 +294,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           accumulatedContent: newContent,
           worldName: eventData.worldName || streamingState.currentWorldName
         });
-        
+
         console.log('[tool-stream] Accumulated output:', {
           messageId,
           stream: eventData.stream,
@@ -309,7 +309,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           messageId: messageId,
           isStreaming: true
         });
-        
+
         publishEvent('handleToolStream', {
           messageId,
           agentName,
@@ -318,7 +318,7 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           accumulatedContent: eventData.content || '',
           worldName: eventData.worldName || streamingState.currentWorldName
         });
-        
+
         console.log('[tool-stream] Started new stream:', {
           messageId,
           stream: eventData.stream,
@@ -1008,7 +1008,7 @@ export const handleToolStream = <T extends SSEComponentState>(state: T, data: an
 
   // Import domain function to maintain separation of concerns
   const { createToolStreamState } = require('../domain/sse-streaming');
-  
+
   return createToolStreamState(state, {
     messageId,
     agentName,

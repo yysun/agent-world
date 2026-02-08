@@ -10,8 +10,10 @@
  * - API request/response types
  * - Comprehensive Message, Agent, World, Chat interfaces
  * - Tool approval flow types
+ * - Tool streaming output support (stdout/stderr)
  * 
  * Changes:
+ * - 2026-02-08: Added ToolStreamData interface and tool streaming fields to Message
  * - 2025-11-12: Enhanced with web frontend types for feature parity
  * - 2025-11-12: Removed WebSocket-related types, using REST API now
  * - 2025-11-03: Initial type definitions
@@ -101,6 +103,8 @@ export interface Message {
   isToolEvent?: boolean;
   isLogExpanded?: boolean;
   toolEventType?: 'start' | 'progress' | 'result' | 'error';
+  isToolStreaming?: boolean; // Flag for actively streaming tool output
+  streamType?: 'stdout' | 'stderr'; // Stream type for styling
   toolExecution?: {
     toolName: string;
     toolCallId: string;
@@ -244,6 +248,18 @@ export interface StreamErrorData {
   messageId: string;
   sender: string;
   error: string;
+  worldName?: string;
+}
+
+/**
+ * SSE Tool Stream Event - Shell command output streaming
+ */
+export interface ToolStreamData {
+  messageId: string;
+  agentName: string;
+  content: string;
+  stream: 'stdout' | 'stderr';
+  accumulatedContent?: string;
   worldName?: string;
 }
 

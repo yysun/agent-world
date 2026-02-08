@@ -33,6 +33,8 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
+ *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
  * - Enhanced comment documentation with detailed feature descriptions
  * - Improved function descriptions with implementation details
  * - Added details about world-aware operations and LLM integration
@@ -209,6 +211,11 @@ export function wouldAgentHaveRespondedToHistoricalMessage(
 
   // Always include tool messages (they are results from previous interactions)
   if (message.role === 'tool' || message.sender === 'tool') {
+    return true;
+  }
+
+  // Always include assistant messages with tool_calls (required for tool result context)
+  if (message.role === 'assistant' && (message as ChatMessage).tool_calls?.length) {
     return true;
   }
 

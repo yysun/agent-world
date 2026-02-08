@@ -9,6 +9,7 @@
  * - Threading indicator with "reply to" display (e.g., "Agent: a1 (reply to HUMAN)")
  * - Tool approval request display with action buttons
  * - Tool approval response display with status
+ * - Tool streaming output with stdout/stderr distinction
  * - Detailed tool call formatting with arguments (e.g., "Calling tool: shell_cmd (command: x, directory: y)")
  * - Detailed tool result formatting with matching call details
  * - Optimized with React.memo
@@ -20,10 +21,12 @@
  * - Tool messages: left-aligned, accent color
  * - Tool approval requests: rendered with ToolCallRequestBox
  * - Tool approval responses: rendered with ToolCallResponseBox
+ * - Tool streaming output: rendered with monospace pre block and color-coded by stream type
  * - Tool call messages: formatted with formatToolCallMessage() to show arguments
  * - Reply messages: show reply target using getReplyTarget() helper
  * 
  * Changes:
+ * - 2026-02-08: Added tool streaming output rendering with stdout/stderr visual distinction
  * - 2026-02-08: Updated message bubble colors to use theme tokens for dark mode
  * - 2026-02-08: Increased user bubble max width for better readability
  * - 2025-11-12: Added reply-to display showing parent message target
@@ -97,6 +100,7 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     const extendedMessage = message as unknown as Message;
     const hasToolApprovalRequest = extendedMessage.isToolCallRequest && extendedMessage.toolCallData;
     const hasToolApprovalResponse = extendedMessage.isToolCallResponse && extendedMessage.toolCallData;
+    const hasToolStreaming = extendedMessage.isToolStreaming;
 
     // Format message content - upgrade tool call messages to detailed format
     const displayContent = isToolCallMessage(extendedMessage)
@@ -154,6 +158,24 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
               />
             ) : hasToolApprovalResponse ? (
               <ToolCallResponseBox message={extendedMessage} />
+            ) : hasToolStreaming ? (
+              /* Render streaming tool output with stdout/stderr distinction */
+              <div className="flex flex-col gap-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  ⚙️ Executing...
+                </div>
+                <div className={`rounded-md overflow-hidden ${extendedMessage.streamType === 'stderr'
+                    ? 'bg-red-950/30 border border-red-500/30'
+                    : 'bg-slate-900 border border-slate-700'
+                  }`}>
+                  <pre className={`text-xs p-3 font-mono whitespace-pre-wrap break-all ${extendedMessage.streamType === 'stderr'
+                      ? 'text-red-400'
+                      : 'text-slate-300'
+                    }`}>
+                    {message.content || '(waiting for output...)'}
+                  </pre>
+                </div>
+              </div>
             ) : (
               <p className="whitespace-pre-wrap break-words leading-relaxed">
                 {displayContent}
