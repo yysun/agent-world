@@ -5,6 +5,7 @@
  * - Stream lifecycle state management (start, chunk, end, error)
  * - Active agent tracking during streaming
  * - Error handling
+ * - Tool stream chunk accumulation for shell command output
  * 
  * Note: isWaiting (spinner) is controlled by world events (pending count),
  * not by stream events, to avoid race conditions.
@@ -13,6 +14,7 @@
  * 
  * Created: 2025-10-26 - Phase 2: Domain Module Extraction
  * Updated: 2025-11-11 - Removed isWaiting control from stream events
+ * Updated: 2026-02-08 - Added createToolStreamState for shell command streaming
  */
 
 import type { WorldComponentState } from '../types';
@@ -101,4 +103,61 @@ export function isStreaming(state: StreamingState): boolean {
  */
 export function getActiveAgentName(state: StreamingState): string | null {
   return state.activeAgent?.name || null;
+}
+
+/**
+ * Create state for tool stream chunk received
+ * Accumulates streaming tool output (stdout/stderr) in real-time
+ * 
+ * @param state - Current component state
+ * @param data - Tool stream data with content and stream type
+ * @returns Updated state with accumulated tool output
+ */
+export function createToolStreamState(
+  state: WorldComponentState,
+  data: {
+    messageId: string;
+    agentName: string;
+    content: string;
+    stream: 'stdout' | 'stderr';
+  }
+): WorldComponentState {
+  const { messageId, agentName, content, stream } = data;
+  const messages = [...(state.messages || [])];
+
+  // Find existing tool message (created by handleToolStart or previous stream chunk)
+  const toolMessageIndex = messages.findIndex(msg =>
+    msg.messageId === messageId && msg.isToolEvent
+  );
+
+  if (toolMessageIndex !== -1) {
+    // Update existing tool message with accumulated output
+    messages[toolMessageIndex] = {
+      ...messages[toolMessageIndex],
+      text: content,
+      streamType: stream,
+      isToolStreaming: true,
+      toolEventType: 'progress'
+    };
+  } else {
+    // Create new tool message if not found (streaming without tool-start)
+    messages.push({
+      id: `tool-stream-${messageId}`,
+      sender: agentName,
+      text: content,
+      isToolEvent: true,
+      isToolStreaming: true,
+      streamType: stream,
+      toolEventType: 'progress',
+      messageId: messageId,
+      createdAt: new Date(),
+      type: 'tool-stream'
+    } as any);
+  }
+
+  return {
+    ...state,
+    messages,
+    needScroll: true
+  };
 }

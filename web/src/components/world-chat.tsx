@@ -515,6 +515,16 @@ export default function WorldChat(props: WorldChatProps) {
                       ) : message.isToolCallResponse && message.toolCallData ? (
                         /* Render tool call response box for approval results */
                         <ToolCallResponseBox message={message} />
+                      ) : message.isToolStreaming ? (
+                        /* Render streaming tool output with stdout/stderr distinction */
+                        <div className="tool-stream-output">
+                          <div className="tool-stream-header">
+                            ⚙️ Executing...
+                          </div>
+                          <div className={`tool-stream-content ${message.streamType === 'stderr' ? 'stderr' : 'stdout'}`}>
+                            <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
+                          </div>
+                        </div>
                       ) : (
                         /* Regular message content */
                         <div className="message-content">

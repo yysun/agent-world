@@ -114,6 +114,7 @@ import {
   handleToolStart as handleToolStartBase,
   handleToolProgress as handleToolProgressBase,
   handleToolResult as handleToolResultBase,
+  handleToolStream as handleToolStreamBase,
   handleMessageToolCalls,
 } from '../utils/sse-client';
 import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest, HITLRequest } from '../types';
@@ -1049,6 +1050,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStart': handleToolStart,
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
+  'handleToolStream': handleToolStream,
   'handleToolResultSubmitted': (state: WorldComponentState, data: any) => {
     // Tool result submitted confirmation - log for debugging
     console.log('Tool result submitted successfully:', data);

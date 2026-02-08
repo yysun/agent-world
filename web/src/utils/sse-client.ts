@@ -12,6 +12,7 @@
  * - Agent @mention support for approval responses
  * - Log event processing
  * - Tool result streaming support with real-time updates
+ * - Shell command output streaming (stdout/stderr) with real-time display
  * 
  * Implementation:
  * - Uses fetch API with ReadableStream for SSE
@@ -22,12 +23,14 @@
  * - Detects client.requestApproval tool calls with agentId tracking
  * - Passes agentId to approval requests for @mention support
  * - Supports streaming and non-streaming modes for tool result submission
+ * - Streams shell command output with stdout/stderr distinction
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
  * Updated: 2025-11-05 - Added handleMessageToolCalls for message event tool call detection
  * Updated: 2025-11-05 - Enhanced approval request detection for OpenAI protocol compatibility
  * Updated: 2025-11-05 - Added agentId tracking for approval requests to support @mention in responses
  * Updated: 2025-11-10 - Added SSE streaming support to submitToolResult function
+ * Updated: 2026-02-08 - Added tool-stream event handler for shell command output streaming
  */
 
 import app from 'apprun';
@@ -269,6 +272,59 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
         toolExecution: eventData.toolExecution,
         worldName: eventData.worldName || streamingState.currentWorldName
       });
+      break;
+
+    case 'tool-stream':
+      // Handle streaming shell command output (stdout/stderr)
+      const toolStream = streamingState.activeMessages.get(messageId);
+      if (toolStream) {
+        // Accumulate content for this stream
+        const newContent = eventData.accumulatedContent !== undefined
+          ? eventData.accumulatedContent
+          : toolStream.content + (eventData.content || '');
+        
+        toolStream.content = newContent;
+        
+        // Publish tool stream event with stream type metadata
+        publishEvent('handleToolStream', {
+          messageId,
+          agentName,
+          content: newContent,
+          stream: eventData.stream || 'stdout',
+          accumulatedContent: newContent,
+          worldName: eventData.worldName || streamingState.currentWorldName
+        });
+        
+        console.log('[tool-stream] Accumulated output:', {
+          messageId,
+          stream: eventData.stream,
+          chunkLength: eventData.content?.length,
+          totalLength: newContent.length
+        });
+      } else {
+        // Create new stream if not exists (tool started without tool-start event)
+        streamingState.activeMessages.set(messageId, {
+          content: eventData.content || '',
+          sender: agentName,
+          messageId: messageId,
+          isStreaming: true
+        });
+        
+        publishEvent('handleToolStream', {
+          messageId,
+          agentName,
+          content: eventData.content || '',
+          stream: eventData.stream || 'stdout',
+          accumulatedContent: eventData.content || '',
+          worldName: eventData.worldName || streamingState.currentWorldName
+        });
+        
+        console.log('[tool-stream] Started new stream:', {
+          messageId,
+          stream: eventData.stream,
+          contentLength: eventData.content?.length
+        });
+      }
       break;
 
     case 'end':
@@ -943,3 +999,20 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
 // Note: handleMemoryOnlyMessage function removed
 // Memory-only messages are no longer sent via SSE as per requirements
 // They are handled internally in the backend without frontend notification
+
+/**
+ * Handle tool stream chunk - Update tool message with streaming output
+ */
+export const handleToolStream = <T extends SSEComponentState>(state: T, data: any): T => {
+  const { messageId, agentName, content, stream } = data;
+
+  // Import domain function to maintain separation of concerns
+  const { createToolStreamState } = require('../domain/sse-streaming');
+  
+  return createToolStreamState(state, {
+    messageId,
+    agentName,
+    content,
+    stream: stream || 'stdout'
+  });
+};

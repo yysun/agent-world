@@ -28,7 +28,7 @@
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, ApprovalRequest, HITLRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData } from './index';
+import type { Agent, ApprovalRequest, HITLRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -165,6 +165,9 @@ export type WorldEvents =
 
   /** Handle stream error event */
   | { name: 'handleStreamError'; payload: StreamErrorData }
+
+  /** Handle tool stream event */
+  | { name: 'handleToolStream'; payload: ToolStreamData }
 
   /** Handle message event from SSE */
   | { name: 'handleMessageEvent'; payload: any }

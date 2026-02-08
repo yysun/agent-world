@@ -83,6 +83,8 @@ export interface Message {
   isToolEvent?: boolean;
   isLogExpanded?: boolean;
   toolEventType?: 'start' | 'progress' | 'result' | 'error';
+  isToolStreaming?: boolean; // Flag for actively streaming tool output
+  streamType?: 'stdout' | 'stderr'; // Stream type for styling
   toolExecution?: {
     toolName: string;
     toolCallId: string;
@@ -384,6 +386,15 @@ export interface StreamErrorData {
   messageId: string;
   sender: string;
   error: string;
+  worldName?: string;
+}
+
+export interface ToolStreamData {
+  messageId: string;
+  agentName: string;
+  content: string;
+  stream: 'stdout' | 'stderr';
+  accumulatedContent?: string;
   worldName?: string;
 }
 
