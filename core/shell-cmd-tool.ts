@@ -17,7 +17,7 @@
  * - LLM guidance to ask user for directory if not provided
  * - Graceful error handling for invalid tool calls
  * - Universal parameter validation for consistent execution
- * - Explicit approval configuration using structured metadata
+ * - Explicit execution safety configuration using structured metadata
  *
  * Implementation Details:
  * - Uses Node.js child_process.spawn for command execution
@@ -37,7 +37,7 @@
  *   * Callbacks invoked in real-time as data arrives from child process
  *   * Maintains backwards compatibility - callbacks are optional
  *   * Full output still accumulated and returned in CommandExecutionResult
- * - 2026-02-06: Removed approval system metadata (no longer used after approval removal)
+ * - 2026-02-06: Removed legacy manual tool-decision metadata
  * - 2025-11-11: CRITICAL FIX - Quote parameters for shell execution
  *   * Parameters with spaces/tabs/newlines now properly quoted before spawn
  *   * Prevents shell from splitting multi-word parameters

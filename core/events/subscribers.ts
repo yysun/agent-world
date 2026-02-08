@@ -6,13 +6,12 @@
  * 
  * Features:
  * - Agent message subscription with automatic response processing
- * - Tool message subscription with approval flow and security checks
+ * - Tool message subscription with security checks
  * - World message subscription for title generation
  * - World activity listener for chat title updates on idle
  * 
  * Dependencies (Layer 6):
  * - types.ts (Layer 1)
- * - approval-checker.ts (Layer 2)
  * - publishers.ts (Layer 3)
  * - persistence.ts, memory-manager.ts (Layer 4)
  * - orchestrator.ts (Layer 5)
@@ -20,6 +19,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention request handling from message subscription
  * - 2025-11-09: Extracted from events.ts for modular architecture
  */
 
@@ -27,15 +27,12 @@ import type {
   World,
   Agent,
   WorldMessageEvent,
-  AgentMessage,
   StorageAPI
 } from '../types.js';
-import { generateId } from '../utils.js';
 import { parseMessageContent } from '../message-prep.js';
 import { createCategoryLogger } from '../logger.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import {
-  publishMessage,
   publishEvent,
   subscribeToMessages
 } from './publishers.js';
@@ -47,7 +44,6 @@ import {
 import { processAgentMessage, shouldAgentRespond } from './orchestrator.js';
 
 const loggerAgent = createCategoryLogger('agent');
-const loggerMemory = createCategoryLogger('memory');
 const loggerChatTitle = createCategoryLogger('chattitle');
 
 // Storage wrapper instance - initialized lazily
@@ -79,77 +75,7 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
       });
     }
 
-    // Check if this is an assistant message with tool_calls (approval or HITL request)
-    // These need to be saved to agent memory even though they're from the agent
-    const messageData = messageEvent as any;
-    const hasApprovalRequest = messageData.tool_calls?.some((tc: any) =>
-      tc.function?.name === 'client.requestApproval'
-    );
-    const hasHITLRequest = messageData.tool_calls?.some((tc: any) =>
-      tc.function?.name === 'client.humanIntervention'
-    );
-
-    // CRITICAL: Must check agent ID to prevent cross-agent contamination
-    const isForThisAgent = messageEvent.sender === agent.id ||
-      (messageData as any).agentName === agent.id;
-
-    if (messageData.role === 'assistant' && (hasApprovalRequest || hasHITLRequest) && isForThisAgent) {
-      // Check if this message already exists in memory (prevent duplicates)
-      const alreadyInMemory = agent.memory.some(msg => msg.messageId === messageEvent.messageId);
-
-      if (alreadyInMemory) {
-        loggerMemory.debug('Approval request already in memory - skipping duplicate save', {
-          agentId: agent.id,
-          messageId: messageEvent.messageId
-        });
-        return; // Don't process this message further
-      }
-
-      const requestType = hasHITLRequest ? 'HITL' : 'approval';
-      loggerMemory.debug(`Saving ${requestType} request to agent memory`, {
-        agentId: agent.id,
-        messageId: messageEvent.messageId,
-        toolCalls: messageData.tool_calls.length,
-        sender: messageEvent.sender,
-        requestType
-      });
-
-      const approvalMessage: AgentMessage = {
-        role: 'assistant',
-        content: messageEvent.content || '',
-        sender: agent.id,
-        createdAt: messageEvent.timestamp,
-        chatId: world.currentChatId || null,
-        messageId: messageEvent.messageId,
-        replyToMessageId: messageData.replyToMessageId,
-        tool_calls: messageData.tool_calls,
-        agentId: agent.id,
-        // CRITICAL: Include toolCallStatus from event (marks as incomplete)
-        toolCallStatus: messageData.toolCallStatus
-      };
-
-      agent.memory.push(approvalMessage);
-
-      // Auto-save agent memory
-      try {
-        const storage = await getStorageWrappers();
-        await storage.saveAgent(world.id, agent);
-        loggerMemory.debug(`${requestType} request saved to agent memory`, {
-          agentId: agent.id,
-          messageId: messageEvent.messageId,
-          requestType
-        });
-      } catch (error) {
-        loggerMemory.error('Failed to save approval request to memory', {
-          agentId: agent.id,
-          error: error instanceof Error ? error.message : error
-        });
-      }
-
-      return; // Don't process this message further
-    }
-
-    // Check if this is a tool result message (approval response)
+    // Check if this is a tool result message
     // Parse enhanced format first to detect tool messages
     const { message: parsedMessage, targetAgentId } = parseMessageContent(messageEvent.content, 'user');
 

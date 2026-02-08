@@ -1,8 +1,14 @@
 /**
- * Tests for Event Metadata Type Definitions
- * 
- * Tests the MessageEventMetadata and ToolEventMetadata interfaces,
- * and the validateMessageEventMetadata type guard function.
+ * Purpose: Validate event metadata interfaces and runtime type guard behavior.
+ * Key features:
+ * - Confirms MessageEventMetadata and ToolEventMetadata fixture completeness
+ * - Confirms validateMessageEventMetadata rejects incomplete metadata
+ * - Confirms validateMessageEventMetadata accepts complete metadata
+ * Implementation notes:
+ * - Uses compile-time typed fixtures for interface shape coverage
+ * - Uses plain object fixtures for runtime type-guard checks
+ * Recent changes:
+ * - Removed legacy manual-intervention metadata fields from test fixtures
  */
 
 import { describe, it, expect } from 'vitest';
@@ -27,12 +33,6 @@ describe('Event Metadata Types', () => {
         threadDepth: 0,
         isReply: false,
         hasReplies: false,
-        requiresApproval: false,
-        approvalScope: null,
-        approvedAt: null,
-        approvedBy: null,
-        deniedAt: null,
-        denialReason: null,
         llmTokensInput: null,
         llmTokensOutput: null,
         llmLatency: null,
@@ -57,8 +57,7 @@ describe('Event Metadata Types', () => {
         ownerAgentId: 'agent1',
         triggeredByMessageId: 'msg-123',
         executionDuration: 150,
-        resultSize: 1024,
-        wasApproved: true
+        resultSize: 1024
       };
 
       expect(metadata).toBeDefined();
@@ -80,7 +79,6 @@ describe('Event Metadata Types', () => {
         threadDepth: 0,
         isReply: false,
         hasReplies: false,
-        requiresApproval: false,
         hasToolCalls: false,
         toolCallCount: 0
       };
@@ -104,12 +102,6 @@ describe('Event Metadata Types', () => {
         threadDepth: 0,
         isReply: false,
         hasReplies: false,
-        requiresApproval: false,
-        approvalScope: null,
-        approvedAt: null,
-        approvedBy: null,
-        deniedAt: null,
-        denialReason: null,
         llmTokensInput: null,
         llmTokensOutput: null,
         llmLatency: null,

@@ -7,13 +7,13 @@
  * Modular structure:
  * - publishers.ts: Event emission functions (Layer 3)
  * - mention-logic.ts: Auto-mention processing (Layer 2)
- * - approval-checker.ts: Approval validation (Layer 2)
  * - persistence.ts: Event persistence (Layer 4)
  * - memory-manager.ts: Memory & LLM resumption (Layer 4)
  * - orchestrator.ts: Agent message processing (Layer 5)
  * - subscribers.ts: Event subscriptions (Layer 6)
  * 
  * Changes:
+ * - 2026-02-08: Removed outdated manual tool-intervention checker module reference
  * - 2025-11-09: Completed extraction of all layers (2-6) from monolithic events.ts
  */
 

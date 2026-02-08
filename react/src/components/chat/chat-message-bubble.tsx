@@ -8,8 +8,6 @@
  * - Sender avatars rendered on the left side of message bubbles
  * - Timestamp and sender display
  * - Threading indicator with "reply to" display (e.g., "Agent: a1 (reply to HUMAN)")
- * - Tool approval request display with action buttons
- * - Tool approval response display with status
  * - Tool streaming output with stdout/stderr distinction
  * - Detailed tool call formatting with arguments (e.g., "Calling tool: shell_cmd (command: x, directory: y)")
  * - Detailed tool result formatting with matching call details
@@ -21,13 +19,12 @@
  * - System messages: centered, muted style
  * - Tool messages: left-aligned, accent color
  * - Non-system messages include deterministic avatar initials + color
- * - Tool approval requests: rendered with ToolCallRequestBox
- * - Tool approval responses: rendered with ToolCallResponseBox
  * - Tool streaming output: rendered with monospace pre block and color-coded by stream type
  * - Tool call messages: formatted with formatToolCallMessage() to show arguments
  * - Reply messages: show reply target using getReplyTarget() helper
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention request/response UI branches
  * - 2026-02-08: Adjusted avatar vertical offset to align with message box top
  * - 2026-02-08: Added sender avatars on the left side of non-system message bubbles
  * - 2026-02-08: Added tool streaming output rendering with stdout/stderr visual distinction
@@ -35,7 +32,6 @@
  * - 2026-02-08: Increased user bubble max width for better readability
  * - 2025-11-12: Added reply-to display showing parent message target
  * - 2025-11-12: Added detailed tool call/result formatting with arguments
- * - 2025-11-12: Added tool approval request/response rendering
  * - 2025-11-04: Created for Phase 2 - Core Components
  */
 
@@ -48,8 +44,6 @@ import {
   isSystemMessage,
   isToolMessage,
 } from './types';
-import { ToolCallRequestBox } from './tool-call-request-box';
-import { ToolCallResponseBox } from './tool-call-response-box';
 import { formatToolCallMessage, isToolCallMessage } from '@/lib/domain/tool-formatting';
 import { getReplyTarget } from '@/lib/domain/message-display';
 
@@ -66,12 +60,6 @@ export interface ChatMessageBubbleProps {
   /** All messages for threading context */
   allMessages?: ChatMessage[];
 
-  /** Callback when approval decision is made */
-  onApprovalDecision?: (data: {
-    toolCallId: string;
-    decision: 'approve' | 'deny';
-    scope: 'once' | 'session' | 'none';
-  }) => void;
 }
 
 const AGENT_AVATAR_COLOR_CLASSES = [
@@ -132,17 +120,13 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     showTimestamp = true,
     showSender = true,
     allMessages,
-    onApprovalDecision,
   }) {
     const isUser = isUserMessage(message);
     const isAssistant = isAssistantMessage(message);
     const isSystem = isSystemMessage(message);
     const isTool = isToolMessage(message);
 
-    // Check if this message has tool approval data
     const extendedMessage = message as unknown as Message;
-    const hasToolApprovalRequest = extendedMessage.isToolCallRequest && extendedMessage.toolCallData;
-    const hasToolApprovalResponse = extendedMessage.isToolCallResponse && extendedMessage.toolCallData;
     const hasToolStreaming = extendedMessage.isToolStreaming;
 
     // Format message content - upgrade tool call messages to detailed format
@@ -207,14 +191,7 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
 
           {/* Message bubble */}
           <div className={bubbleClass}>
-            {hasToolApprovalRequest ? (
-              <ToolCallRequestBox
-                message={extendedMessage}
-                onApprovalDecision={onApprovalDecision}
-              />
-            ) : hasToolApprovalResponse ? (
-              <ToolCallResponseBox message={extendedMessage} />
-            ) : hasToolStreaming ? (
+            {hasToolStreaming ? (
               /* Render streaming tool output with stdout/stderr distinction */
               <div className="flex flex-col gap-2">
                 <div className="text-xs font-medium text-muted-foreground">

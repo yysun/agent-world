@@ -1,8 +1,14 @@
 /**
- * Tests for Enhanced Event Persistence
- * 
- * Tests that message events are persisted with complete enhanced metadata
- * including agent ownership, recipients, classification, and threading.
+ * Purpose: Validate enhanced event persistence metadata for message flows.
+ * Key features:
+ * - Verifies persisted metadata for human, agent, mention, and tool-call messages
+ * - Verifies recipient/memory flags and delivery ownership metadata
+ * - Verifies null chat behavior and owner/delivery consistency
+ * Implementation notes:
+ * - Uses in-memory event storage with async event-emitter persistence hooks
+ * - Uses direct WorldMessageEvent emission to exercise metadata derivation
+ * Recent changes:
+ * - Removed legacy manual-intervention metadata scenario coverage
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -274,23 +280,4 @@ describe('Enhanced Event Persistence', () => {
     expect(messageEvent.meta.deliveredToAgents).toEqual(messageEvent.meta.ownerAgentIds);
   });
 
-  it('should set requiresApproval flag when present', async () => {
-    const messageEvent: any = {
-      content: 'Need approval',
-      sender: 'agent1',
-      messageId: 'msg-7',
-      timestamp: new Date(),
-      chatId: 'chat-1',
-      requiresApproval: true
-    };
-    
-    world.eventEmitter.emit('message', messageEvent);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
-    const stored = events.find((e: StoredEvent) => e.id === 'msg-7');
-    
-    expect(stored).toBeDefined();
-    expect(stored.meta.requiresApproval).toBe(true);
-  });
 });

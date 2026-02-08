@@ -11,8 +11,7 @@
  * - Message deduplication by messageId for multi-agent scenarios
  * - Displays only the first/intended recipient agent, not all who received it
  * - Agent activity display for world events (response-start, tool-start)
- * - Tool call approval request/response rendering with inline action buttons
- * - Tool result message filtering (hides non-approval tool results, shows approval via ToolCallResponseBox)
+ * - Tool result message filtering (hides internal tool result protocol messages)
  * - Detailed tool call display: "Calling tool: shell_cmd (command: x, params: y)" format
  * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
  * - Left-side avatar rendering for message boxes using actual agent spriteIndex values
@@ -20,6 +19,7 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention request and response box rendering
  * - 2026-02-08: Fixed undefined HUMAN_AVATAR_SPRITE_INDEX runtime error in avatar sprite resolver
  * - 2026-02-08: Left human message avatars empty while preserving avatar alignment slot
  * - 2026-02-08: Mapped message avatars to world agents' assigned spriteIndex values
@@ -28,9 +28,6 @@
  * - 2025-11-11: Updated tool call/result display to show full argument details without truncation
  * - 2025-11-11: Enhanced tool call request preview to show tool name and arguments
  * - 2025-11-11: Enhanced tool result preview to show tool name and arguments instead of just tool_call_id
- * - 2025-11-11: Updated shouldHideMessage() to filter non-approval tool results while preserving approval flow
- * - 2025-01-08: Added shouldHideMessage() to filter approval tool result messages from display
- * - 2025-11-05: Added tool call request/response box rendering for inline approval flow
  * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
  * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
  * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
@@ -50,8 +47,6 @@ import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
-import ToolCallRequestBox from './tool-call-request-box';
-import ToolCallResponseBox from './tool-call-response-box';
 
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
@@ -153,29 +148,15 @@ export default function WorldChat(props: WorldChatProps) {
     })()
     : messages;  // No filters = use pre-deduplicated messages
 
-  // Helper function to check if message should be hidden from display
-  // Filters out tool result messages that are NOT approval responses (client-side display filtering)
-  // Approval responses have isToolCallResponse=true and are displayed via ToolCallResponseBox
+  // Helper function to check if message should be hidden from display.
+  // Internal tool result protocol messages are not shown in the chat UI.
   const shouldHideMessage = (message: Message): boolean => {
-    // Don't hide if this is an approval response (has toolCallData for ToolCallResponseBox)
-    if (message.isToolCallResponse && message.toolCallData) {
-      return false;
-    }
-
-    // Check if this is a non-approval tool result message
-    // These are identified by:
-    // 1. Type 'tool' without toolCallData (regular tool execution results)
-    // 2. Type 'user'/'human' with JSON containing {__type: 'tool_result'} without decision field
-
-    // Case 1: OpenAI format - type='tool' without toolCallData
     if (message.type === 'tool') {
       return true;
     }
 
-    // Case 2: Enhanced string protocol - JSON in message.text
     try {
       const text = message.text.trim();
-      // Strip @mention if present
       const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
 
       if (jsonText.startsWith('{') && jsonText.endsWith('}')) {
@@ -394,7 +375,7 @@ export default function WorldChat(props: WorldChatProps) {
             <div className="no-messages">No messages yet. Start a conversation!</div>
           ) : (
             filteredMessages.map((message, index) => {
-              // Skip messages that should be hidden (non-approval tool result messages)
+              // Skip messages that should be hidden (internal tool result messages)
               if (shouldHideMessage(message)) {
                 return null;
               }
@@ -570,13 +551,7 @@ export default function WorldChat(props: WorldChatProps) {
                       </div>
                     ) : (
                       <>
-                        {/* Render tool call request box for approval requests */}
-                        {message.isToolCallRequest && message.toolCallData ? (
-                          <ToolCallRequestBox message={message} />
-                        ) : message.isToolCallResponse && message.toolCallData ? (
-                          /* Render tool call response box for approval results */
-                          <ToolCallResponseBox message={message} />
-                        ) : message.isToolStreaming ? (
+                        {message.isToolStreaming ? (
                           /* Render streaming tool output with stdout/stderr distinction */
                           <div className="tool-stream-output">
                             <div className="tool-stream-header">

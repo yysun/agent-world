@@ -41,7 +41,7 @@
  * - Added nanoid support for chat ID generation
  * - Added wouldAgentHaveRespondedToHistoricalMessage for LLM context filtering
  * - Updated prepareMessagesForLLM to filter irrelevant conversation history
- * - Consolidated with message-prep.ts filtering (client.* tools, approval_ results)
+ * - Consolidated with message-prep.ts filtering for client-side tool calls
  */
 
 import { nanoid } from 'nanoid';
@@ -341,7 +341,7 @@ export async function prepareMessagesForLLM(
     messages.push(messageDataToAgentMessage(includeCurrentMessage));
   }
 
-  // Filter out client-side tool calls and approval results
+  // Filter out client-side tool calls and orphaned tool results.
   const { filterClientSideMessages } = await import('./message-prep.js');
   return filterClientSideMessages(messages);
 }

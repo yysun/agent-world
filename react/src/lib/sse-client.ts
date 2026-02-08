@@ -6,7 +6,7 @@
  * 
  * Features:
  * - SSE connection management with cleanup
- * - Comprehensive event parsing (stream, message, world, log, tool approval, tool streaming)
+ * - Comprehensive event parsing (stream, message, world, log, tool streaming)
  * - Streaming message state management
  * - Error handling and recovery
  * - Shell command output streaming (stdout/stderr) support
@@ -17,14 +17,15 @@
  * - Processes SSE data events with callbacks
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention SSE event handling
  * - 2026-02-08: Added tool-stream event handling for shell command output streaming
  * - 2026-02-07: Matched chat request flow with web/src/utils/sse-client.ts (payload/headers/options parsing)
- * - 2025-11-12: Enhanced with world events, log messages, tool approval events
+ * - 2025-11-12: Enhanced with world events and log messages
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
 
 import { apiRequest } from './api';
-import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData, LogEvent, WorldEvent, ApprovalRequest } from '../types';
+import type { StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData, LogEvent, WorldEvent } from '../types';
 
 // SSE data structure interfaces
 interface SSEBaseData {
@@ -75,11 +76,6 @@ interface SSEWorldEventData extends SSEBaseData {
   data: WorldEvent;
 }
 
-interface SSEToolApprovalData extends SSEBaseData {
-  type: 'tool:approval:request';
-  data: ApprovalRequest;
-}
-
 interface SSEErrorData extends SSEBaseData {
   type: 'error';
   message?: string;
@@ -95,7 +91,6 @@ type SSEData =
   | SSEMessageData
   | SSELogData
   | SSEWorldEventData
-  | SSEToolApprovalData
   | SSEErrorData
   | SSECompleteData
   | SSEBaseData;
@@ -110,7 +105,6 @@ export interface SSECallbacks {
   onMessage?: (data: SSEMessageData['data']) => void;
   onLogMessage?: (data: LogEvent) => void;
   onWorldEvent?: (data: WorldEvent) => void;
-  onToolApprovalRequest?: (data: ApprovalRequest) => void;
   onError?: (error: Error) => void;
   onComplete?: (data: any) => void;
 }
@@ -268,9 +262,6 @@ function handleSSEData(data: SSEData, callbacks: SSECallbacks): void {
       break;
     case 'world:event':
       callbacks.onWorldEvent?.((data as SSEWorldEventData).data);
-      break;
-    case 'tool:approval:request':
-      callbacks.onToolApprovalRequest?.((data as SSEToolApprovalData).data);
       break;
     case 'error':
       callbacks.onError?.(new Error((data as SSEErrorData).message || 'SSE error'));

@@ -9,10 +9,10 @@
  * - SSE event handling types
  * - API request/response types
  * - Comprehensive Message, Agent, World, Chat interfaces
- * - Tool approval flow types
  * - Tool streaming output support (stdout/stderr)
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention message and SSE types
  * - 2026-02-08: Added ToolStreamData interface and tool streaming fields to Message
  * - 2025-11-12: Enhanced with web frontend types for feature parity
  * - 2025-11-12: Removed WebSocket-related types, using REST API now
@@ -51,19 +51,6 @@ export interface WorldEvent {
   level?: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   data?: any;
   messageId: string;
-}
-
-/**
- * Approval Request - tool approval UI state
- */
-export interface ApprovalRequest {
-  toolCallId: string;
-  originalToolCall?: any;
-  toolName: string;
-  toolArgs: Record<string, unknown>;
-  message: string;
-  options: string[];
-  agentId?: string;
 }
 
 /**
@@ -123,21 +110,6 @@ export interface Message {
   };
   expandable?: boolean;
   resultPreview?: string;
-
-  // Tool approval
-  isToolCallRequest?: boolean;
-  isToolCallResponse?: boolean;
-  toolCallData?: {
-    toolCallId: string;
-    originalToolCall?: any;
-    toolName: string;
-    toolArgs: Record<string, unknown>;
-    approvalMessage?: string;
-    approvalOptions?: string[];
-    approvalDecision?: 'approve' | 'deny';
-    approvalScope?: 'once' | 'session' | 'none';
-    agentId?: string;
-  };
 
   // Legacy compatibility
   content?: string;

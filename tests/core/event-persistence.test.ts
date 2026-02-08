@@ -423,7 +423,6 @@ describe('Event Persistence Integration', () => {
       expect(toolEvent!.meta.triggeredByMessageId).toBe('msg-metadata-test');
       expect(toolEvent!.meta.executionDuration).toBeDefined();
       expect(toolEvent!.meta.resultSize).toBeDefined();
-      expect(toolEvent!.meta.wasApproved).toBe(false);
     });
 
     test('should not persist tool event without messageId', async () => {

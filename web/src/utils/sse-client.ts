@@ -8,10 +8,7 @@
  * - Event parsing and routing via AppRun
  * - Streaming message state management
  * - Tool execution event handling (start, progress, result, error)
- * - Tool call detection and approval request handling (OpenAI protocol)
- * - Agent @mention support for approval responses
  * - Log event processing
- * - Tool result streaming support with real-time updates
  * - Shell command output streaming (stdout/stderr) with real-time display
  * 
  * Implementation:
@@ -19,17 +16,10 @@
  * - Publishes events via app.run() for AppRun integration
  * - Maintains active streaming messages Map
  * - Accumulates chunks for smooth streaming display
- * - Processes tool_calls in SSE chunks and message events
- * - Detects client.requestApproval tool calls with agentId tracking
- * - Passes agentId to approval requests for @mention support
- * - Supports streaming and non-streaming modes for tool result submission
  * - Streams shell command output with stdout/stderr distinction
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
- * Updated: 2025-11-05 - Added handleMessageToolCalls for message event tool call detection
- * Updated: 2025-11-05 - Enhanced approval request detection for OpenAI protocol compatibility
- * Updated: 2025-11-05 - Added agentId tracking for approval requests to support @mention in responses
- * Updated: 2025-11-10 - Added SSE streaming support to submitToolResult function
+ * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers
  * Updated: 2026-02-08 - Added tool-stream event handler for shell command output streaming
  */
 
@@ -219,9 +209,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
           tool_calls: toolCalls
         });
 
-        if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-          publishApprovalRequests(toolCalls, agentName);
-        }
       }
       break;
 
@@ -369,209 +356,6 @@ const handleStreamingEvent = (data: SSEStreamingData): void => {
       break;
   }
 };
-
-const publishApprovalRequests = (toolCalls: any[], agentId?: string): void => {
-  for (const toolCall of toolCalls) {
-    const toolName = toolCall?.function?.name;
-
-    // Handle approval requests
-    if (toolName === 'client.requestApproval') {
-      let parsedArgs: any = {};
-      try {
-        parsedArgs = toolCall.function?.arguments
-          ? JSON.parse(toolCall.function.arguments)
-          : {};
-      } catch (error) {
-        console.warn('Failed to parse approval request arguments:', error);
-      }
-
-      const approvalRequest = {
-        toolCallId: toolCall.id || `approval-${Date.now()}`,
-        originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
-        toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
-        toolArgs: parsedArgs?.originalToolCall?.args ?? {},
-        message: parsedArgs?.message ?? 'This tool requires your approval to continue.',
-        options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-          ? parsedArgs.options
-          : ['Cancel', 'Once', 'Always'],
-        agentId
-      };
-
-      publishEvent('show-approval-request', approvalRequest);
-      continue;
-    }
-
-    // Handle HITL requests
-    if (toolName === 'client.humanIntervention') {
-      let parsedArgs: any = {};
-      try {
-        parsedArgs = toolCall.function?.arguments
-          ? JSON.parse(toolCall.function.arguments)
-          : {};
-      } catch (error) {
-        console.warn('Failed to parse HITL request arguments:', error);
-      }
-
-      const hitlRequest = {
-        toolCallId: toolCall.id || `hitl-${Date.now()}`,
-        originalToolCall: parsedArgs?.originalToolCall,
-        prompt: parsedArgs?.prompt ?? 'Please make a selection.',
-        options: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-          ? parsedArgs.options
-          : ['Cancel'],
-        context: parsedArgs?.context,
-        agentId: agentId || ''
-      };
-
-      publishEvent('show-hitl-request', hitlRequest);
-      continue;
-    }
-  }
-};
-
-/**
- * Handle tool_calls in message events (OpenAI protocol)
- * Detects approval requests and publishes show-approval-request event
- * @param message - Message event data that may contain tool_calls
- */
-export const handleMessageToolCalls = (message: any): void => {
-  if (!message?.tool_calls || !Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
-    return;
-  }
-
-  // Extract agentId from message
-  const agentId = message.agentId || message.sender;
-
-  // Check for approval requests in tool_calls
-  publishApprovalRequests(message.tool_calls, agentId);
-};
-
-/**
- * Export publishApprovalRequests for testing
- */
-export { publishApprovalRequests };
-
-/**
- * Submit a tool approval decision using structured API with SSE streaming support
- * 
- * @param worldName - Name of the world
- * @param agentId - ID of the agent that requested approval
- * @param toolResultData - Structured tool result data
- * @param stream - Enable SSE streaming (default: true)
- * @returns Promise that resolves with cleanup function if streaming, or void if non-streaming
- */
-export async function submitToolResult(
-  worldName: string,
-  agentId: string,
-  toolResultData: {
-    tool_call_id: string;
-    decision: 'approve' | 'deny';
-    scope?: 'once' | 'session' | 'unlimited';
-    toolName: string;
-    toolArgs?: Record<string, unknown>;
-    workingDirectory?: string;
-  },
-  stream: boolean = true
-): Promise<(() => void) | void> {
-  if (!worldName || !agentId) {
-    throw new Error('World name and agent ID are required');
-  }
-
-  const requestPayload = {
-    ...toolResultData,
-    agentId,
-    stream
-  };
-
-  // Non-streaming mode: simple POST request
-  if (stream === false) {
-    await apiRequest(`/worlds/${encodeURIComponent(worldName)}/tool-results`, {
-      method: 'POST',
-      body: JSON.stringify(requestPayload),
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    return;
-  }
-
-  // Streaming mode: SSE connection
-  streamingState.currentWorldName = worldName;
-
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/tool-results`, {
-    method: 'POST',
-    body: JSON.stringify(requestPayload),
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    },
-  });
-
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let isActive = true;
-
-  const cleanup = (): void => {
-    if (isActive) {
-      isActive = false;
-      try {
-        reader.cancel();
-      } catch (error) {
-        console.warn('Error canceling tool result SSE reader:', error);
-      }
-    }
-  };
-
-  // Process SSE stream
-  const processStream = async (): Promise<void> => {
-    try {
-      while (isActive) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.trim() === '' || !line.startsWith('data: ')) continue;
-
-          try {
-            const dataContent = line.slice(6).trim();
-            if (dataContent === '') continue;
-
-            const data: SSEData = JSON.parse(dataContent);
-
-            // Handle tool-result-submitted confirmation
-            if (data.type === 'tool-result-submitted') {
-              publishEvent('handleToolResultSubmitted', data.data);
-              continue;
-            }
-
-            // Handle other SSE events normally
-            handleSSEData(data);
-
-          } catch (error) {
-            console.error('Error parsing tool result SSE data:', error);
-            publishEvent('handleError', { message: 'Failed to parse SSE data' });
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Tool result SSE stream error:', error);
-      publishEvent('handleError', { message: (error as Error).message || 'SSE stream error' });
-    } finally {
-      cleanup();
-    }
-  };
-
-  processStream();
-  return cleanup;
-}
 
 /**
  * Send a chat message to a world via SSE streaming

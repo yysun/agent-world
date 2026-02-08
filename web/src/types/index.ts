@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention message and state types
  * - 2026-02-08: Added WorldChatProps.agents for avatar sprite resolution in chat messages
  * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
  * - 2025-10-26: Clarified seenByAgents is CALCULATED (not persisted) - populated with all agent IDs
@@ -105,33 +106,6 @@ export interface Message {
   expandable?: boolean;
   resultPreview?: string;
 
-  // Tool call approval request/response properties
-  isToolCallRequest?: boolean;  // This is a tool call approval request message
-  isToolCallResponse?: boolean; // This is a tool call approval response message
-  toolCallData?: {
-    toolCallId: string;
-    originalToolCall?: any; // Store complete original tool call (including id) to match CLI
-    toolName: string;
-    toolArgs: Record<string, unknown>;
-    approvalMessage?: string;
-    approvalOptions?: string[];
-    approvalDecision?: 'approve' | 'deny';
-    approvalScope?: 'once' | 'session' | 'none';
-    agentId?: string; // Agent that requested the approval
-  };
-
-  // HITL (Human-in-the-Loop) request/response properties
-  isHITLRequest?: boolean;  // This is a HITL request message
-  isHITLResponse?: boolean; // This is a HITL response message
-  hitlData?: {
-    toolCallId: string;
-    originalToolCall?: any;
-    prompt: string;
-    options: string[];
-    context?: Record<string, unknown>;
-    choice?: string; // The selected option
-    agentId?: string;
-  };
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
@@ -186,32 +160,8 @@ export interface Chat {
 // WORLD ACTIVITY STATUS
 // ========================================
 
-export interface ApprovalRequest {
-  toolCallId: string;
-  originalToolCall?: any;
-  toolName: string;
-  toolArgs: Record<string, unknown>;
-  message: string;
-  options: string[];
-  agentId?: string;
-}
-
-// HITL Request Interface
-export interface HITLRequest {
-  toolCallId: string;
-  originalToolCall?: {
-    id: string;
-    name: string;
-    args: any;
-  };
-  prompt: string;
-  options: string[];
-  context?: Record<string, unknown>;
-  agentId: string;
-}
-
 // ========================================
-// COMPONENT PROP INTERFACES  
+// COMPONENT PROP INTERFACES
 // ========================================
 
 // World Chat Component Props
@@ -231,8 +181,6 @@ export interface WorldChatProps {
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
-  approvalRequest?: ApprovalRequest | null;
-  hitlRequest?: HITLRequest | null;
 }
 
 // World Settings Component Props
@@ -347,8 +295,6 @@ export interface WorldComponentState extends SSEComponentState {
   // SSE state (required overrides)
   connectionStatus: string;
   needScroll: boolean;
-  approvalRequest: ApprovalRequest | null;
-  hitlRequest: HITLRequest | null;
   lastUserMessageText?: string | null;
 }
 

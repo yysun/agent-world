@@ -18,6 +18,7 @@
  * - Chat message endpoint payload kept minimal; SSE headers are set by sse-client
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention decision API helper
  * - 2026-02-07: Aligned world creation and chat message request payload handling with web/src/api.ts
  * - 2025-11-12: Created for React frontend refactoring from WebSocket to REST API
  */
@@ -315,51 +316,6 @@ export async function sendMessage(
 }
 
 /**
- * Send a tool approval/denial decision message
- * @param worldName - World name
- * @param toolCallId - Tool call ID from the approval request
- * @param decision - Approval decision (approve or deny)
- * @param scope - Approval scope (once, session, or none)
- * @param toolName - Tool name being approved/denied
- */
-export async function sendApprovalDecision(
-  worldName: string,
-  toolCallId: string,
-  decision: 'approve' | 'deny',
-  scope: 'once' | 'session' | 'none',
-  toolName: string
-): Promise<void> {
-  if (!worldName || !toolCallId) {
-    throw new Error('World name and tool call ID are required');
-  }
-
-  const approvalMessage = {
-    role: 'tool',
-    tool_call_id: toolCallId,
-    content: JSON.stringify({
-      decision,
-      scope,
-      toolName
-    })
-  };
-
-  const requestPayload = {
-    message: ' ',
-    sender: 'system',
-    stream: false,
-    messages: [approvalMessage]
-  };
-
-  await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
-    method: 'POST',
-    body: JSON.stringify(requestPayload),
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  });
-}
-
-/**
  * Export world to markdown and download it
  */
 export async function exportWorldToMarkdown(worldName: string): Promise<void> {
@@ -425,7 +381,6 @@ export default {
   newChat,
   deleteMessage,
   sendMessage,
-  sendApprovalDecision,
   exportWorldToMarkdown,
   getWorldMarkdown,
 };

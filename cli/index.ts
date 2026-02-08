@@ -749,7 +749,7 @@ async function handleSubscribe(
 
   const world = subscription.world as World;
 
-  // Store world in globalState for access in event handlers (e.g., approval handling)
+  // Store world in globalState for access in interactive event handlers.
   if (globalState) {
     globalState.world = world;
   }
@@ -787,7 +787,7 @@ async function handleWorldEvent(
         rl.prompt();
       }
     }
-    // Handle info messages (e.g., approval checking)
+    // Handle informational world messages.
     else if (payload.type === 'info' && payload.message) {
       console.log(`${gray('[World]')} ${payload.message}`);
     }

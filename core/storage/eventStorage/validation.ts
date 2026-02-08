@@ -8,6 +8,9 @@
  * - validateEventForPersistence: Strict validation that throws on incomplete metadata
  * - createDefaultMessageMetadata: Create safe defaults for all required fields
  * - Type-safe validation with TypeScript type guards
+ *
+ * Recent Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention metadata defaults
  * 
  * Implementation: 2025-11-07
  * - Clean build approach - all metadata fields required from creation
@@ -63,12 +66,6 @@ export function createDefaultMessageMetadata(sender: string): MessageEventMetada
     threadDepth: 0,
     isReply: false,
     hasReplies: false,
-    requiresApproval: false,
-    approvalScope: null,
-    approvedAt: null,
-    approvedBy: null,
-    deniedAt: null,
-    denialReason: null,
     llmTokensInput: null,
     llmTokensOutput: null,
     llmLatency: null,

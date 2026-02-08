@@ -119,7 +119,7 @@ export function setupEventPersistence(world: World): () => void {
         content: event.content,
         sender: event.sender,
         replyToMessageId: event.replyToMessageId,
-        // Preserve OpenAI protocol fields for tool calls and approvals
+        // Preserve OpenAI protocol fields for tool calls.
         role: (event as any).role,
         tool_calls: (event as any).tool_calls,
         tool_call_id: (event as any).tool_call_id,
@@ -148,14 +148,6 @@ export function setupEventPersistence(world: World): () => void {
         threadDepth: threadMetadata.threadDepth,
         isReply: threadMetadata.isReply,
         hasReplies: false, // Will be updated async in future
-
-        // Tool Approval
-        requiresApproval: (event as any).requiresApproval || false,
-        approvalScope: null, // Set when approval is granted
-        approvedAt: null,
-        approvedBy: null,
-        deniedAt: null,
-        denialReason: null,
 
         // Performance (for agent messages with LLM usage)
         llmTokensInput: (event as any).usage?.inputTokens || null,
@@ -274,8 +266,7 @@ export function setupEventPersistence(world: World): () => void {
         ownerAgentId: event.agentName,
         triggeredByMessageId: event.messageId,
         executionDuration: event.toolExecution?.duration ?? 0,
-        resultSize: event.toolExecution?.resultSize ?? 0,
-        wasApproved: false // Default, should be updated if approval tracking is needed
+        resultSize: event.toolExecution?.resultSize ?? 0
       },
       createdAt: isActivityEvent ? new Date(event.timestamp) : new Date()
     };

@@ -7,6 +7,9 @@
  * - AI SDK compatible chat messages with utility functions for seamless integration
  * - Storage interfaces and world-specific file operations with EventEmitter integration
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
+ *
+ * Recent Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention result types from core API surface
  */
 
 import { type EventEmitter } from 'events';
@@ -72,50 +75,10 @@ export interface AgentMessage extends ChatMessage {
   agentId?: string; // Agent ID for identifying message source
 
   /**
-   * Tool call completion tracking for approval requests/responses
-   * Maps tool_call_id to completion status and result
-   * 
-   * Usage:
-   * - Approval requests: Mark as incomplete when tool_calls sent
-   * - Approval responses: Mark as complete with decision/scope
-   * - Server is source of truth, client reads this status
-   * 
-   * @example
-   * // Approval request (incomplete)
-   * {
-   *   "approval_123": {
-   *     complete: false,
-   *     result: null
-   *   }
-   * }
-   * 
-   * // Approval response (complete)
-   * {
-   *   "approval_123": {
-   *     complete: true,
-   *     result: {
-   *       decision: "approve",
-   *       scope: "session",
-   *       timestamp: "2025-11-08T16:30:00.000Z"
-   *     }
-   *   }
-   * }
+   * Tool call completion tracking.
+   * Maps tool_call_id to completion status and result payload.
    */
   toolCallStatus?: Record<string, { complete: boolean; result: any }>;
-}
-
-/**
- * Structured data for tool result publishing.
- * Used by publishToolResult() to construct proper tool messages.
- */
-export interface ToolResultData {
-  tool_call_id: string;
-  decision?: 'approve' | 'deny';
-  scope?: 'once' | 'session' | 'unlimited';
-  choice?: string;
-  toolName?: string;
-  toolArgs?: Record<string, unknown>;
-  workingDirectory?: string;
 }
 
 // Agent Types
@@ -492,7 +455,7 @@ export interface LLMResponse {
 
   /**
    * Original assistant message for memory storage
-   * CRITICAL: Must include full tool_calls array for approval flow
+   * Must include full tool_calls array to preserve tool call context.
    */
   assistantMessage: {
     role: 'assistant';
@@ -775,6 +738,4 @@ export function validateMessageThreading(
     }
   }
 }
-
-
 

@@ -2,23 +2,24 @@
  * Message Preparation Utilities for LLM Processing
  *
  * Features:
- * - Filters client.* tool calls and approval_ tool results from messages
+ * - Filters client.* tool calls from messages prepared for LLM input
  * - Two-layer architecture: storage (agent.memory) vs processing (LLM input)
  * - Maintains complete message history while providing clean LLM context
  * - Enhanced string protocol: Parses JSON strings with __type markers into OpenAI format
  *
  * Implementation:
- * - Removes client.* tool calls and approval_ tool results from LLM context
- * - No approval cache updates (handled by server API layer)
+ * - Removes client.* tool calls from LLM context
+ * - No side-effect state updates while preparing messages
  * - parseMessageContent() converts enhanced string format to OpenAI ChatMessage
  * - Used by utils.ts prepareMessagesForLLM() - high-level function applies this filter
  * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
+ * - 2026-02-08: Removed stale manual tool-intervention terminology from message prep docs
  * - 2026-02-08: Fixed OpenAI API validation error - now filters orphaned tool messages
  * - Tool messages referencing removed client.* tool_call_ids are now properly filtered
  * - Tracks removed tool_call_ids to prevent "tool must follow tool_calls" errors
- * - 2025-11-04: Simplified from message-filter.ts, removed approval cache logic
+ * - 2025-11-04: Simplified from message-filter.ts, removed legacy tool decision cache logic
  * - 2025-11-06: Added parseMessageContent() for enhanced string protocol support
  * - 2025-11-06: Consolidated with utils.ts - renamed to filterClientSideMessages, added alias
  */
@@ -53,7 +54,7 @@ const logger = createCategoryLogger('llm.message-prep');
  * 
  * @example
  * // Tool result with agentId (enhanced format)
- * parseMessageContent('{"__type":"tool_result","tool_call_id":"approval_123","agentId":"a1","content":"..."}')
+ * parseMessageContent('{"__type":"tool_result","tool_call_id":"call_123","agentId":"a1","content":"..."}')
  * // → {message: {role: "tool", ...}, targetAgentId: "a1"}
  * 
  * // Regular text (backward compatible)
@@ -120,9 +121,8 @@ export function parseMessageContent(
  * Filter client-side messages and tool calls from message array.
  * 
  * This function creates a clean copy of messages suitable for LLM processing:
- * - Removes messages marked as clientOnly (approval UI messages)
+ * - Removes messages marked as clientOnly
  * - Removes client.* tool calls from assistant messages
- * - Removes approval_ tool results from tool messages
  * - Removes orphaned tool messages (those referencing removed client.* tool calls)
  * - Removes orphaned tool messages with missing tool_call_ids (invalid data)
  * - Removes tool messages that don't have a preceding assistant message with matching tool_call

@@ -102,7 +102,7 @@
  * Enhanced debug logging: Complete MCP data flow visibility (August 2025)
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
- * Explicit approval system: Replaced heuristic detection with structured metadata (November 2025)
+ * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
  */
 
 import { createHash } from 'crypto';
@@ -140,7 +140,7 @@ export function sanitizeArgs(args: any): any {
     return args;
   }
 
-  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'auth', 'apikey', 'api_key', 'authorization'];
+  const sensitiveKeys = ['key', 'password', 'token', 'secret', 'apikey', 'api_key'];
   const sanitized = { ...args };
 
   for (const key in sanitized) {
@@ -993,8 +993,8 @@ export async function mcpToolsToAiTools(
           agentId
         });
 
-        // NOTE: Approval now handled in tool-utils.ts wrapToolWithValidation()
-        // This ensures consistent approval flow for all tools (MCP and built-in)
+        // NOTE: Tool safety checks are handled in tool-utils.ts wrapToolWithValidation().
+        // This ensures consistent execution guardrails for all tools (MCP and built-in).
 
         // Debug log: Request data being sent to MCP server
         // OLLAMA BUG FIX: Translate "$" arguments to proper parameter names

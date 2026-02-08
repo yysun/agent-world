@@ -20,7 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
- * - 2026-02-06: Renamed resumeLLMAfterApproval to continueLLMAfterToolExecution (removed approval terminology)
+ * - 2026-02-08: Removed stale manual tool-intervention terminology from comments and transient types
+ * - 2026-02-06: Renamed resumeLLMAfterManualDecision to continueLLMAfterToolExecution
  * - 2025-01-09: Extracted from events.ts for modular architecture
  */
 
@@ -124,7 +125,7 @@ export async function saveIncomingMessageToMemory(
 export async function continueLLMAfterToolExecution(world: World, agent: Agent, chatId?: string | null): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
-    // Use the chatId from the approval message event, fallback to world.currentChatId
+    // Use explicit chatId when provided, fallback to world.currentChatId.
     const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
 
     // Filter memory to current chat only
@@ -187,7 +188,6 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
     }
 
     // Generate LLM response (streaming or non-streaming)
-    let response: string | { type: string; originalMessage: any; approvalMessage: any };
     let messageId: string;
 
     let llmResponse: import('../types.js').LLMResponse;
@@ -400,7 +400,7 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
     };
 
     const { response: titleResponse } = await generateAgentResponse(world, tempAgent, [userPrompt], undefined, true); // skipTools = true for title generation
-    // Title generation should never return approval flow (skipTools=true), but add guard just in case
+    // Title generation should return plain text when skipTools=true; keep a guard for safety.
     title = typeof titleResponse === 'string' ? titleResponse : '';
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 

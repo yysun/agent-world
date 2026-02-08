@@ -29,6 +29,7 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
  * Updated: 2025-11-10 - Added tool event forwarding to SSE channel
  */
 
@@ -225,7 +226,7 @@ export function createSSEHandler(
   const messageListener = (eventData: MessageEventPayload) => {
     // Enhance message event data with structured format
     // CRITICAL: replyToMessageId must be included for frontend threading display
-    // CRITICAL: tool_calls must be included for approval request handling (OpenAI protocol)
+    // Include tool_calls to preserve complete assistant tool-call context on the client.
     const messageData = {
       type: 'message',
       sender: eventData.sender,

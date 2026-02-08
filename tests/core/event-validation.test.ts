@@ -1,8 +1,14 @@
 /**
- * Tests for Event Validation
- * 
- * Tests the strict validation logic that ensures all events
- * have complete metadata before persistence.
+ * Purpose: Validate strict event metadata checks before persistence.
+ * Key features:
+ * - Verifies complete message metadata passes validation
+ * - Verifies incomplete message/tool metadata fails validation
+ * - Verifies default message metadata factory output
+ * Implementation notes:
+ * - Uses strongly typed StoredEvent fixtures for message/tool/system events
+ * - Exercises validation boundary cases with missing required properties
+ * Recent changes:
+ * - Removed legacy manual-intervention metadata assertions from message/tool fixtures
  */
 
 import { describe, it, expect } from 'vitest';
@@ -33,12 +39,6 @@ describe('Event Validation', () => {
           threadDepth: 0,
           isReply: false,
           hasReplies: false,
-          requiresApproval: false,
-          approvalScope: null,
-          approvedAt: null,
-          approvedBy: null,
-          deniedAt: null,
-          denialReason: null,
           llmTokensInput: null,
           llmTokensOutput: null,
           llmLatency: null,
@@ -86,8 +86,7 @@ describe('Event Validation', () => {
           ownerAgentId: 'agent1',
           triggeredByMessageId: 'msg-123',
           executionDuration: 150,
-          resultSize: 1024,
-          wasApproved: true
+          resultSize: 1024
         },
         createdAt: new Date()
       };

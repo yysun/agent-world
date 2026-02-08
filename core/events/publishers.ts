@@ -4,18 +4,23 @@
  * Purpose: Functions that emit events to World.eventEmitter
  * Features:
  * - Message publishing with chat session management
- * - Tool result publishing with structured API
  * - SSE event publishing for streaming
  * - Tool event publishing for agent behaviors
  * - CRUD event publishing for configuration changes
- * - Approval request publishing (legacy)
+ *
+ * Implementation Notes:
+ * - Uses parseMessageContent to preserve enhanced tool-result protocol support
+ * - Emits events synchronously through world-scoped EventEmitter channels
+ *
+ * Recent Changes:
+ * - 2026-02-08: Removed legacy manual tool-result publishing helper from event API
  *
  * All functions emit events synchronously and return immediately
  */
 
 import {
   World, WorldMessageEvent, WorldSSEEvent, WorldToolEvent, WorldSystemEvent, WorldCRUDEvent,
-  EventType, ToolResultData
+  EventType
 } from '../types.js';
 import { generateId } from '../utils.js';
 import { parseMessageContent } from '../message-prep.js';
@@ -185,46 +190,6 @@ export function publishMessageWithId(world: World, content: string, sender: stri
   };
   world.eventEmitter.emit('message', messageEvent);
   return messageEvent;
-}
-
-/**
- * Publish a tool result message using structured API
- * Constructs a proper role='tool' message using enhanced string protocol and publishes via publishMessage()
- * 
- * This is the primary API for approval responses and tool results.
- * Uses the __type: 'tool_result' enhanced protocol which is automatically parsed by parseMessageContent()
- * and converted to OpenAI role='tool' format.
- * 
- * @param world - World instance
- * @param agentId - Target agent ID
- * @param data - Tool result data (decision, scope, tool_call_id, etc.)
- * @returns WorldMessageEvent with generated messageId
- * 
- * @example
- * publishToolResult(world, 'assistant-1', {
- *   tool_call_id: 'call_123',
- *   decision: 'approve',
- *   scope: 'session',
- *   toolName: 'shell_cmd',
- *   toolArgs: { command: 'ls -la' },
- *   workingDirectory: '/home/user'
- * });
- */
-export function publishToolResult(world: World, agentId: string, data: ToolResultData): WorldMessageEvent {
-  const enhancedMessage = JSON.stringify({
-    __type: 'tool_result',
-    tool_call_id: data.tool_call_id,
-    agentId: agentId,
-    content: JSON.stringify({
-      decision: data.decision,
-      scope: data.scope,
-      choice: data.choice,
-      toolName: data.toolName,
-      toolArgs: data.toolArgs,
-      workingDirectory: data.workingDirectory
-    })
-  });
-  return publishMessage(world, enhancedMessage, 'human');
 }
 
 /**

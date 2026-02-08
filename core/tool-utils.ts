@@ -16,7 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
- * - 2026-02-06: Removed approval checking and HITL functionality
+ * - 2026-02-06: Removed legacy manual tool-intervention functionality
  * - Simplified wrapToolWithValidation to focus on parameter validation only
  * - Initial implementation for empty/missing name validation
  */

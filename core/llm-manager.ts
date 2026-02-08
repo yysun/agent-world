@@ -94,8 +94,9 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-02-08: Removed stale manual tool-intervention terminology from internal comments
  * - 2025-11-09: Phase 5 - Updated to expect LLMResponse from all providers
- * - Removed old approval_flow return type handling
+ * - Removed old manual tool decision return type handling
  * - All providers now return unified LLMResponse interface with type discriminator
  * - Updated logging to handle LLMResponse structure (type, content, tool_calls)
  * - Providers are now pure clients - no tool execution, only API calls
@@ -151,7 +152,7 @@ function stripCustomFields(message: AgentMessage): ChatMessage {
 function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] {
   loggerUtil.debug(`Stripping custom fields from ${messages.length} messages`);
 
-  // First, filter out client-side messages (approval requests, etc.)
+  // First, filter out client-side tool request wrappers and orphaned tool results.
   const filteredMessages = filterClientSideMessages(messages);
 
   loggerUtil.debug(`Filtered to ${filteredMessages.length} messages (removed ${messages.length - filteredMessages.length} client-side messages)`);
@@ -179,7 +180,7 @@ function appendToolRulesToSystemMessage(messages: AgentMessage[], hasMCPTools: b
   ];
 }
 
-// Storage wrapper for approval handling
+// Storage wrapper for tool-execution follow-up handling
 let storageWrappersPromise: Promise<StorageAPI> | null = null;
 
 async function getStorageWrappers(): Promise<StorageAPI> {

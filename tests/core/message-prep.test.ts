@@ -1,11 +1,13 @@
 /**
- * Unit tests for message preparation utilities
- * 
- * Tests:
- * - parseMessageContent() with enhanced string protocol
- * - Tool result detection and conversion
- * - Backward compatibility with regular text
- * - Error handling for invalid JSON
+ * Purpose: Verify message preparation utilities for protocol and plain-text inputs.
+ * Key features:
+ * - Validates parseMessageContent() for tool_result envelopes and standard text
+ * - Validates filterClientSideMessages() for client.* tool-call stripping behavior
+ * Implementation notes:
+ * - Uses OpenAI-style ChatMessage fixtures with mixed assistant/tool sequences
+ * - Asserts ordering and orphaned tool-message cleanup after filtering
+ * Recent changes:
+ * - Removed legacy decision-flow wording and switched to neutral client tool names
  */
 
 import { describe, it, expect } from 'vitest';
@@ -17,10 +19,9 @@ describe('parseMessageContent', () => {
     it('should parse tool_result format to OpenAI ChatMessage', () => {
       const content = JSON.stringify({
         __type: 'tool_result',
-        tool_call_id: 'approval_abc123',
+        tool_call_id: 'call_abc123',
         content: JSON.stringify({
-          decision: 'approve',
-          scope: 'session',
+          status: 'completed',
           toolName: 'shell_cmd'
         })
       });
@@ -28,10 +29,9 @@ describe('parseMessageContent', () => {
       const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
-      expect(result.tool_call_id).toBe('approval_abc123');
+      expect(result.tool_call_id).toBe('call_abc123');
       expect(result.content).toBe(JSON.stringify({
-        decision: 'approve',
-        scope: 'session',
+        status: 'completed',
         toolName: 'shell_cmd'
       }));
       expect(result.createdAt).toBeInstanceOf(Date);
@@ -40,27 +40,27 @@ describe('parseMessageContent', () => {
     it('should handle tool_result with empty content', () => {
       const content = JSON.stringify({
         __type: 'tool_result',
-        tool_call_id: 'approval_xyz',
+        tool_call_id: 'call_xyz',
         content: ''
       });
 
       const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
-      expect(result.tool_call_id).toBe('approval_xyz');
+      expect(result.tool_call_id).toBe('call_xyz');
       expect(result.content).toBe('');
     });
 
     it('should handle tool_result with missing content field', () => {
       const content = JSON.stringify({
         __type: 'tool_result',
-        tool_call_id: 'approval_xyz'
+        tool_call_id: 'call_xyz'
       });
 
       const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('tool');
-      expect(result.tool_call_id).toBe('approval_xyz');
+      expect(result.tool_call_id).toBe('call_xyz');
       expect(result.content).toBe('');
     });
 
@@ -109,22 +109,22 @@ describe('parseMessageContent', () => {
       expect(result.content).toBe('Assistant response');
     });
 
-    it('should handle approval text format (legacy)', () => {
-      const content = 'approve shell_cmd for session';
+    it('should handle command-like text format (legacy)', () => {
+      const content = 'run shell_cmd in current directory';
 
       const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
-      expect(result.content).toBe('approve shell_cmd for session');
+      expect(result.content).toBe('run shell_cmd in current directory');
     });
 
-    it('should handle deny text format (legacy)', () => {
-      const content = 'deny file_write';
+    it('should handle cancellation-like text format (legacy)', () => {
+      const content = 'cancel file_write';
 
       const { message: result, targetAgentId } = parseMessageContent(content);
 
       expect(result.role).toBe('user');
-      expect(result.content).toBe('deny file_write');
+      expect(result.content).toBe('cancel file_write');
     });
   });
 
@@ -221,7 +221,7 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_1', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } },
+          { id: 'call_1', type: 'function', function: { name: 'client.localAction', arguments: '{}' } },
           { id: 'call_2', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
         ]
       }
@@ -241,7 +241,7 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_1', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } }
+          { id: 'call_1', type: 'function', function: { name: 'client.localAction', arguments: '{}' } }
         ]
       }
     ];
@@ -259,7 +259,7 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: 'test',
         tool_calls: [
-          { id: 'call_1', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } }
+          { id: 'call_1', type: 'function', function: { name: 'client.localAction', arguments: '{}' } }
         ]
       }
     ];
@@ -268,7 +268,7 @@ describe('filterClientSideMessages', () => {
 
     // Original should be unchanged
     expect(messages[0].tool_calls).toHaveLength(1);
-    expect(messages[0].tool_calls![0].function.name).toBe('client.requestApproval');
+    expect(messages[0].tool_calls![0].function.name).toBe('client.localAction');
   });
 
   it('should filter out orphaned tool messages for removed client.* tool calls', () => {
@@ -278,10 +278,10 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_client', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } }
+          { id: 'call_client', type: 'function', function: { name: 'client.localAction', arguments: '{}' } }
         ]
       },
-      { role: 'tool', tool_call_id: 'call_client', content: 'approval granted' }
+      { role: 'tool', tool_call_id: 'call_client', content: 'client action complete' }
     ];
 
     const result = filterClientSideMessages(messages);
@@ -298,11 +298,11 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_1', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } },
+          { id: 'call_1', type: 'function', function: { name: 'client.localAction', arguments: '{}' } },
           { id: 'call_2', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
         ]
       },
-      { role: 'tool', tool_call_id: 'call_1', content: 'approval granted' },
+      { role: 'tool', tool_call_id: 'call_1', content: 'client action complete' },
       { role: 'tool', tool_call_id: 'call_2', content: 'command executed' }
     ];
 
@@ -333,10 +333,10 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_2', type: 'function', function: { name: 'client.approve', arguments: '{}' } }
+          { id: 'call_2', type: 'function', function: { name: 'client.localSignal', arguments: '{}' } }
         ]
       },
-      { role: 'tool', tool_call_id: 'call_2', content: 'approved' },
+      { role: 'tool', tool_call_id: 'call_2', content: 'signal delivered' },
       {
         role: 'assistant',
         content: 'Final step',
@@ -372,10 +372,10 @@ describe('filterClientSideMessages', () => {
         role: 'assistant',
         content: '',
         tool_calls: [
-          { id: 'call_1', type: 'function', function: { name: 'client.approve', arguments: '{}' } }
+          { id: 'call_1', type: 'function', function: { name: 'client.localSignal', arguments: '{}' } }
         ]
       },
-      { role: 'tool', tool_call_id: 'call_1', content: 'approved' },
+      { role: 'tool', tool_call_id: 'call_1', content: 'signal delivered' },
       { role: 'user', content: 'Second' },
       {
         role: 'assistant',

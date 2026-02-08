@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
  * - 2026-02-08: Pass world agents into WorldChat for correct per-agent message avatars
  * - Integrated Tailwind CSS utilities for layout and spacing
  * - Added flexbox utilities for component structure
@@ -30,8 +31,6 @@ import WorldChat from '../components/world-chat';
 import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
-import ApprovalDialog from '../components/approval-dialog';
-import HITLDialog from '../components/hitl-dialog';
 import { worldUpdateHandlers } from './World.update';
 
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
@@ -65,9 +64,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     editingText: '',
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
-    agentActivities: {},
-    approvalRequest: null,
-    hitlRequest: null
+    agentActivities: {}
   };
 
   override view = (state: WorldComponentState) => {
@@ -322,15 +319,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
           </div>
         )}
 
-        {/* Approval Dialog */}
-        {state.approvalRequest && (
-          <ApprovalDialog approval={state.approvalRequest} />
-        )}
-
-        {/* HITL Dialog */}
-        {state.hitlRequest && (
-          <HITLDialog hitl={state.hitlRequest} />
-        )}
       </div>
     );
   };

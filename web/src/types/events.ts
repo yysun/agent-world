@@ -25,10 +25,11 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention event variants
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
 
-import type { Agent, ApprovalRequest, HITLRequest, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData } from './index';
+import type { Agent, Message, StreamStartData, StreamChunkData, StreamEndData, StreamErrorData, ToolStreamData } from './index';
 
 /**
  * World Component Events - Discriminated Union Type
@@ -195,32 +196,6 @@ export type WorldEvents =
 
   /** Handle world activity event */
   | { name: 'handleWorldActivity'; payload: any }
-
-  // ========================================
-  // APPROVAL FLOW EVENTS
-  // ========================================
-
-  /** Display approval request dialog */
-  | { name: 'show-approval-request'; payload: ApprovalRequest }
-
-  /** Hide approval request dialog */
-  | { name: 'hide-approval-request'; payload: void }
-
-  /** Submit approval decision */
-  | { name: 'submit-approval-decision'; payload: { decision: 'approve' | 'deny'; scope: 'once' | 'session' | 'none'; toolCallId: string } }
-
-  // ========================================
-  // HITL (HUMAN-IN-THE-LOOP) EVENTS
-  // ========================================
-
-  /** Display HITL request dialog */
-  | { name: 'show-hitl-request'; payload: HITLRequest }
-
-  /** Hide HITL request dialog */
-  | { name: 'hide-hitl-request'; payload: void }
-
-  /** Submit HITL decision */
-  | { name: 'submit-hitl-decision'; payload: { toolCallId: string; choice: string } }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

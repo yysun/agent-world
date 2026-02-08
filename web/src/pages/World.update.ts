@@ -15,8 +15,6 @@
  * - Smooth streaming indicator management (removed after final message displayed)
  * - Message editing with backend API integration (remove + resubmit)
  * - Memory-only message streaming for agent→agent messages saved without response
- * - Tool call approval request/response detection and display
- * - Agent @mention support in approval responses
  *
  * Message Edit Feature (Frontend-Driven):
  * - Uses backend messageId (server-generated) for message identification
@@ -48,30 +46,12 @@
  * - Race condition fix: Multiple agents may process same temp message simultaneously
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
- * Tool Call Approval Flow:
- * - Detects client.requestApproval tool calls in SSE message events
- * - Flags messages with isToolCallRequest and toolCallData
- * - Renders ToolCallRequestBox with approval buttons inline in chat
- * - Detects tool result messages as approval responses
- * - Flags responses with isToolCallResponse and approval decision
- * - Renders ToolCallResponseBox showing approval result
- * - Captures agentId from approval requests and includes it in responses
- * - Sends approval responses using enhanced string protocol with agentId in JSON
- * - Enhanced protocol format: JSON.stringify({__type:'tool_result',tool_call_id,agentId,content})
- * - Server automatically prepends @mention based on agentId in JSON
- * - Matches TUI/CLI implementation for OpenAI-compliant agent memory
- *
  * Changes:
+ * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
  * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
  * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
  * - 2025-11-11: Enhanced handleWorldActivity to support agent IDs without "agent:" prefix (e.g., "g1" instead of "agent:g1")
- * - 2025-11-10: Fixed detectToolCallResponse to properly parse enhanced protocol format
  * - 2025-11-10: Fixed tool result message display - filter out internal protocol messages with __type: tool_result
- * - 2025-11-10: Added SSE streaming support to tool result submission for real-time agent responses
- * - 2025-11-06: Moved agentId into JSON structure (cleaner than @mention prefix)
- * - 2025-11-06: Updated approval response to use enhanced string protocol (OpenAI format)
- * - 2025-11-05: Added agent @mention support for approval responses to match CLI behavior
- * - 2025-11-05: Added tool call request/response detection and inline display
  * - 2025-10-26: Phase 1 - Converted to AppRun native typed events with Update<State, Events> tuple pattern
  * - 2025-10-26: Fixed createMessageFromMemory to swap sender/fromAgentId for incoming agent messages
  * - 2025-10-26: Fixed display to show only first agent (intended recipient), not all recipients
@@ -104,7 +84,6 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import {
   sendChatMessage,
-  submitToolResult,
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
@@ -115,9 +94,8 @@ import {
   handleToolProgress as handleToolProgressBase,
   handleToolResult as handleToolResultBase,
   handleToolStream as handleToolStreamBase,
-  handleMessageToolCalls,
 } from '../utils/sse-client';
-import type { WorldComponentState, Agent, AgentMessage, Message, ApprovalRequest, HITLRequest } from '../types';
+import type { WorldComponentState, Agent, AgentMessage, Message } from '../types';
 import type { WorldEventName, WorldEventPayload } from '../types/events';
 import toKebabCase from '../utils/toKebabCase';
 
@@ -179,25 +157,12 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     displayFromAgentId = memoryItem.agentId || (isUserMessage ? undefined : agentName);
   }
 
-  // Check for tool call request/response in memory item
   const memoryData = memoryItem as any;
-  const toolCallRequest = detectToolCallRequest(memoryData);
-  const toolCallResponse = detectToolCallResponse(memoryData);
-
-  // Set message text - use placeholder for tool call messages with empty content
-  let messageText = memoryItem.content || '';
-  if (!messageText && (toolCallRequest || toolCallResponse)) {
-    if (toolCallRequest) {
-      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
-    } else if (toolCallResponse) {
-      messageText = `[Tool execution result]`;
-    }
-  }
 
   return {
     id: `msg-${Date.now() + Math.random()}`,
     sender: displaySender,
-    text: messageText,
+    text: memoryItem.content || '',
     messageId: memoryItem.messageId,
     replyToMessageId: memoryItem.replyToMessageId, // Preserve parent message reference
     createdAt: memoryItem.createdAt || new Date(),
@@ -208,150 +173,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     // Pass through tool_calls and tool_call_id for frontend formatting
     tool_calls: memoryData.tool_calls || memoryData.toolCalls,
     tool_call_id: memoryData.tool_call_id || memoryData.toolCallId,
-    // Set tool call flags
-    isToolCallRequest: !!toolCallRequest,
-    isToolCallResponse: !!toolCallResponse,
-    toolCallData: toolCallRequest || toolCallResponse
   } as Message;
-};
-
-/**
- * Detect if message contains tool call approval request
- * @param messageData - Message data from SSE event
- * @returns Tool call data if this is an approval request, null otherwise
- */
-const detectToolCallRequest = (messageData: any): Message['toolCallData'] | null => {
-  // Handle both tool_calls (snake_case from DB) and toolCalls (camelCase from API)
-  const toolCallsField = messageData?.tool_calls || messageData?.toolCalls;
-
-  // If tool_calls/toolCalls is a string, parse it first
-  let toolCalls = toolCallsField;
-  if (typeof toolCallsField === 'string') {
-    try {
-      toolCalls = JSON.parse(toolCallsField);
-    } catch (error) {
-      console.warn('Failed to parse tool_calls JSON string:', error);
-      return null;
-    }
-  }
-
-  if (!toolCalls || !Array.isArray(toolCalls)) {
-    return null;
-  }
-
-  // Find client.requestApproval tool call
-  for (const toolCall of toolCalls) {
-    const toolName = toolCall?.function?.name;
-    if (toolName === 'client.requestApproval') {
-      let parsedArgs: any = {};
-      try {
-        parsedArgs = toolCall.function?.arguments
-          ? JSON.parse(toolCall.function.arguments)
-          : {};
-      } catch (error) {
-        console.warn('Failed to parse approval request arguments:', error);
-      }
-
-      console.log('[detectToolCallRequest] Debug:', {
-        'toolCall.id': toolCall.id,
-        'parsedArgs': parsedArgs,
-        'parsedArgs.originalToolCall': parsedArgs?.originalToolCall
-      });
-      return {
-        toolCallId: toolCall.id || `approval-${Date.now()}`,
-        originalToolCall: parsedArgs?.originalToolCall, // Store complete original tool call (including id)
-        toolName: parsedArgs?.originalToolCall?.name ?? 'Unknown tool',
-        toolArgs: parsedArgs?.originalToolCall?.args ?? {},
-        approvalMessage: parsedArgs?.message ?? 'This tool requires your approval to continue.',
-        approvalOptions: Array.isArray(parsedArgs?.options) && parsedArgs.options.length > 0
-          ? parsedArgs.options
-          : ['deny', 'approve_once', 'approve_session'],
-        agentId: messageData?.sender || messageData?.agentId // Capture agent that made the request
-      } as Message['toolCallData'];
-    }
-  }
-
-  return null;
-};
-
-/**
- * Detect if message is a tool result (approval response)
- * ONLY detects approval responses - regular tool execution results should NOT be detected
- * Approval responses have tool_call_id starting with 'approval_' or contain enhanced protocol
- * Parses enhanced protocol format: {__type: 'tool_result', content: '{"decision":"approve",...}'}
- * @param messageData - Message data from SSE event
- * @returns Tool call data if this is an approval response, null otherwise (including regular tool results)
- */
-const detectToolCallResponse = (messageData: any): Message['toolCallData'] | null => {
-  // Check if this is a tool result message
-  if (messageData.role === 'tool' || messageData.type === 'tool') {
-    const toolCallId = messageData.tool_call_id || 'unknown';
-    const rawContent = messageData.content || messageData.message || '';
-
-    // Try to parse enhanced protocol format
-    try {
-      const outerParsed = JSON.parse(rawContent);
-
-      // Check for __type: 'tool_result' (enhanced protocol for approval responses)
-      if (outerParsed.__type === 'tool_result' && outerParsed.content) {
-        try {
-          const innerContent = JSON.parse(outerParsed.content);
-
-          // Only process if it has decision field (approval response indicator)
-          if (innerContent.decision) {
-            // Extract decision and scope from structured data
-            const approvalDecision: 'approve' | 'deny' = innerContent.decision === 'approve' ? 'approve' : 'deny';
-            const approvalScope: 'once' | 'session' | 'none' =
-              innerContent.scope === 'session' ? 'session' :
-                innerContent.scope === 'once' ? 'once' : 'none';
-
-            return {
-              toolCallId: outerParsed.tool_call_id || toolCallId,
-              toolName: innerContent.toolName || 'Tool Execution',
-              toolArgs: innerContent.toolArgs || {},
-              approvalDecision,
-              approvalScope
-            };
-          }
-          // No decision field - this is a regular tool result, not an approval response
-          return null;
-        } catch (innerError) {
-          console.warn('Failed to parse tool result inner content:', innerError);
-        }
-      }
-    } catch (outerError) {
-      // Not JSON or not enhanced protocol - check if it's an approval by tool_call_id prefix
-    }
-
-    // Only detect as approval response if tool_call_id starts with 'approval_'
-    if (!toolCallId.startsWith('approval_')) {
-      return null; // Regular tool execution result - not an approval response
-    }
-
-    // Legacy approval detection for messages with 'approval_' prefix
-    const content = rawContent.toLowerCase();
-    let approvalDecision: 'approve' | 'deny' = 'deny';
-    let approvalScope: 'once' | 'session' | 'none' = 'none';
-
-    if (content.includes('approved') || content.includes('success')) {
-      approvalDecision = 'approve';
-      if (content.includes('session') || content.includes('always')) {
-        approvalScope = 'session';
-      } else if (content.includes('once')) {
-        approvalScope = 'once';
-      }
-    }
-
-    return {
-      toolCallId,
-      toolName: 'Tool Execution',
-      toolArgs: {},
-      approvalDecision,
-      approvalScope
-    };
-  }
-
-  return null;
 };
 
 /**
@@ -429,192 +251,6 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
-const showApprovalRequestDialog = (
-  state: WorldComponentState,
-  request: ApprovalRequest
-): WorldComponentState => {
-  if (state.approvalRequest && state.approvalRequest.toolCallId === request.toolCallId) {
-    return state;
-  }
-
-  return {
-    ...state,
-    approvalRequest: request,
-    activeAgent: null,
-    needScroll: true
-  };
-};
-
-const hideApprovalRequestDialog = (state: WorldComponentState): WorldComponentState => {
-  if (!state.approvalRequest) {
-    return state;
-  }
-
-  return {
-    ...state,
-    approvalRequest: null
-  };
-};
-
-const submitApprovalDecision = async (
-  state: WorldComponentState,
-  payload: WorldEventPayload<'submit-approval-decision'>
-): Promise<WorldComponentState> => {
-  const { decision, scope, toolCallId } = payload;
-
-  // Check if this is from the approval dialog (state.approvalRequest exists)
-  let request = state.approvalRequest;
-
-  // If not from dialog, find the message with matching toolCallId (inline approval)
-  if (!request || request.toolCallId !== toolCallId) {
-    const message = state.messages?.find(msg =>
-      msg.toolCallData?.toolCallId === toolCallId
-    );
-
-    if (message?.toolCallData) {
-      request = {
-        toolCallId: message.toolCallData.toolCallId,
-        originalToolCall: message.toolCallData.originalToolCall, // Preserve originalToolCall for correct tool_call_id
-        toolName: message.toolCallData.toolName,
-        toolArgs: message.toolCallData.toolArgs,
-        message: message.toolCallData.approvalMessage || '',
-        options: message.toolCallData.approvalOptions || [],
-        agentId: message.toolCallData.agentId // Preserve agentId from toolCallData
-      };
-    } else {
-      // No matching request found
-      return state;
-    }
-  }
-
-  const baseState: WorldComponentState = {
-    ...state,
-    approvalRequest: null,
-    needScroll: true
-  };
-
-  // Use structured API for tool result submission with SSE streaming
-  const approvalDecision: 'approve' | 'deny' = decision === 'approve' ? 'approve' : 'deny';
-  const approvalScope: 'session' | 'once' | undefined =
-    decision === 'approve' ? (scope === 'session' ? 'session' : 'once') : undefined;
-
-  try {
-    // Submit using structured API endpoint with streaming enabled
-    const { originalToolCall } = request;
-    // Always use approval request toolCallId - backend will extract originalToolCall.id itself
-    console.log('[submitApprovalDecision] Debug:', {
-      'request.toolCallId': request.toolCallId,
-      'originalToolCall': originalToolCall,
-      'originalToolCall.id': originalToolCall?.id
-    });
-    await submitToolResult(
-      state.worldName,
-      request.agentId,
-      {
-        tool_call_id: request.toolCallId,
-        decision: approvalDecision,
-        scope: approvalScope,
-        toolName: originalToolCall?.name || request.toolName,
-        toolArgs: originalToolCall?.args || request.toolArgs,
-        workingDirectory: originalToolCall?.workingDirectory
-      },
-      true // Enable SSE streaming
-    );
-
-    return baseState;
-  } catch (error) {
-    return {
-      ...baseState,
-      error: (error as Error).message || 'Failed to submit approval decision'
-    };
-  }
-};
-
-const showHITLRequestDialog = (
-  state: WorldComponentState,
-  request: HITLRequest
-): WorldComponentState => {
-  if (state.hitlRequest && state.hitlRequest.toolCallId === request.toolCallId) {
-    return state;
-  }
-
-  return {
-    ...state,
-    hitlRequest: request,
-    activeAgent: null,
-    needScroll: true
-  };
-};
-
-const hideHITLRequestDialog = (state: WorldComponentState): WorldComponentState => {
-  if (!state.hitlRequest) {
-    return state;
-  }
-
-  return {
-    ...state,
-    hitlRequest: null
-  };
-};
-
-const submitHITLDecision = async (
-  state: WorldComponentState,
-  payload: WorldEventPayload<'submit-hitl-decision'>
-): Promise<WorldComponentState> => {
-  const { choice, toolCallId } = payload;
-
-  // Check if this is from the HITL dialog (state.hitlRequest exists)
-  let request = state.hitlRequest;
-
-  // If not from dialog, find the message with matching toolCallId (inline HITL)
-  if (!request || request.toolCallId !== toolCallId) {
-    const message = state.messages?.find(msg =>
-      msg.hitlData?.toolCallId === toolCallId
-    );
-
-    if (message?.hitlData) {
-      request = {
-        toolCallId: message.hitlData.toolCallId,
-        originalToolCall: message.hitlData.originalToolCall,
-        prompt: message.hitlData.prompt,
-        options: message.hitlData.options,
-        context: message.hitlData.context,
-        agentId: message.hitlData.agentId
-      };
-    } else {
-      // No matching request found
-      return state;
-    }
-  }
-
-  const baseState: WorldComponentState = {
-    ...state,
-    hitlRequest: null,
-    needScroll: true
-  };
-
-  try {
-    // Submit HITL decision via tool result API
-    await submitToolResult(
-      state.worldName,
-      request.agentId,
-      {
-        tool_call_id: request.toolCallId,
-        choice: choice,
-        toolName: request.originalToolCall?.name || 'client.humanIntervention',
-        toolArgs: request.originalToolCall?.args
-      },
-      true // Enable SSE streaming
-    );
-
-    return baseState;
-  } catch (error) {
-    return {
-      ...baseState,
-      error: (error as Error).message || 'Failed to submit HITL decision'
-    };
-  }
-};
 const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
   return handleStreamErrorBase(state, data);
 };
@@ -739,7 +375,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       rawMessages,
       loading: false,
       needScroll: true,
-      approvalRequest: null,
       lastUserMessageText: null,
     };
 
@@ -749,7 +384,6 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       error: error.message || 'Failed to load world data',
       loading: false,
       needScroll: false,
-      approvalRequest: null,
       lastUserMessageText: state.lastUserMessageText ?? null,
     };
   }
@@ -812,12 +446,6 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  // PHASE 1: Check for tool_calls and handle approval requests (OpenAI protocol)
-  // This must happen before message display to show approval dialog immediately
-  if (messageData.tool_calls) {
-    handleMessageToolCalls(messageData);
-  }
-
   // Find and update agent message count
   let fromAgentId: string | undefined;
   if (state.world?.agents) {
@@ -831,20 +459,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     }
   }
 
-  // Check if this is a tool call approval request or response FIRST
-  const toolCallRequest = detectToolCallRequest(messageData);
-  const toolCallResponse = detectToolCallResponse(messageData);
-
-  // Set message text - use placeholder for tool call messages with empty content
-  let messageText = messageData.content || messageData.message || '';
-  if (!messageText && (toolCallRequest || toolCallResponse)) {
-    // Tool call message with empty content - use placeholder
-    if (toolCallRequest) {
-      messageText = `[Tool approval request: ${toolCallRequest.toolName}]`;
-    } else if (toolCallResponse) {
-      messageText = `[Tool execution result]`;
-    }
-  }
+  const messageText = messageData.content || messageData.message || '';
 
   // Determine message type based on role field
   let messageType: string;
@@ -868,10 +483,6 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     messageId: messageData.messageId,
     replyToMessageId: messageData.replyToMessageId,
     role: messageData.role, // Preserve role for filtering
-    // Set tool call flags
-    isToolCallRequest: !!toolCallRequest,
-    isToolCallResponse: !!toolCallResponse,
-    toolCallData: toolCallRequest || toolCallResponse
   };
 
   const existingMessages = state.messages || [];
@@ -1057,22 +668,10 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolProgress': handleToolProgress,
   'handleToolResult': handleToolResult,
   'handleToolStream': handleToolStream,
-  'handleToolResultSubmitted': (state: WorldComponentState, data: any) => {
-    // Tool result submitted confirmation - log for debugging
-    console.log('Tool result submitted successfully:', data);
-  },
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
-
-  'show-approval-request': showApprovalRequestDialog,
-  'hide-approval-request': hideApprovalRequestDialog,
-  'submit-approval-decision': submitApprovalDecision,
-
-  'show-hitl-request': showHITLRequestDialog,
-  'hide-hitl-request': hideHITLRequestDialog,
-  'submit-hitl-decision': submitHITLDecision,
 
   // ========================================
   // MESSAGE DISPLAY
@@ -1403,5 +1002,3 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'clear-world-messages': async (state: WorldComponentState): Promise<WorldComponentState> =>
     AgentManagementDomain.clearWorldMessages(state, state.worldName),
 };
-
-
