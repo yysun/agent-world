@@ -32,6 +32,11 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-08: Added streaming callback support for real-time output
+ *   * Added onStdout and onStderr callbacks to executeShellCommand options
+ *   * Callbacks invoked in real-time as data arrives from child process
+ *   * Maintains backwards compatibility - callbacks are optional
+ *   * Full output still accumulated and returned in CommandExecutionResult
  * - 2026-02-06: Removed approval system metadata (no longer used after approval removal)
  * - 2025-11-11: CRITICAL FIX - Quote parameters for shell execution
  *   * Parameters with spaces/tabs/newlines now properly quoted before spawn
@@ -62,6 +67,7 @@ import { resolve, join } from 'path';
 import { homedir } from 'os';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
+import { publishSSE } from './events/index.js';
 
 const logger = createCategoryLogger('shell-cmd');
 
@@ -115,6 +121,8 @@ export async function executeShellCommand(
   directory: string,
   options: {
     timeout?: number; // Timeout in milliseconds (default: 600000 = 10 minutes)
+    onStdout?: (data: string) => void; // Real-time stdout callback
+    onStderr?: (data: string) => void; // Real-time stderr callback
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
@@ -172,14 +180,38 @@ export async function executeShellCommand(
         }
       }, timeout);
 
-      // Capture stdout
+      // Capture stdout with optional streaming
       childProcess.stdout?.on('data', (data) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+        stdout += chunk;
+        
+        // Call streaming callback if provided (with error handling)
+        if (options.onStdout) {
+          try {
+            options.onStdout(chunk);
+          } catch (error) {
+            logger.warn('Error in stdout streaming callback', {
+              error: error instanceof Error ? error.message : error
+            });
+          }
+        }
       });
 
-      // Capture stderr
+      // Capture stderr with optional streaming
       childProcess.stderr?.on('data', (data) => {
-        stderr += data.toString();
+        const chunk = data.toString();
+        stderr += chunk;
+        
+        // Call streaming callback if provided (with error handling)
+        if (options.onStderr) {
+          try {
+            options.onStderr(chunk);
+          } catch (error) {
+            logger.warn('Error in stderr streaming callback', {
+              error: error instanceof Error ? error.message : error
+            });
+          }
+        }
       });
 
       // Handle process exit
@@ -414,7 +446,7 @@ export function createShellCmdToolDefinition() {
       required: ['command', 'directory'],
       additionalProperties: false
     },
-    execute: async (args: any) => {
+    execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
       // Universal parameter validation
       const toolSchema = {
         type: 'object',
@@ -462,9 +494,35 @@ export function createShellCmdToolDefinition() {
         parameters.filter((p: any) => typeof p === 'string') :
         [];
 
-      // Execute command
+      // Extract world and messageId from context for streaming
+      const world = context?.world;
+      const currentMessageId = context?.toolCallId;
+
+      // Execute command with streaming callbacks if world is available
       const result = await executeShellCommand(command, validParameters, directory, {
-        timeout
+        timeout,
+        onStdout: world ? (chunk) => {
+          // Publish streaming events to world event system
+          publishSSE(world, {
+            type: 'tool-stream',
+            toolName: 'shell_cmd',
+            content: chunk,
+            stream: 'stdout',
+            messageId: currentMessageId,
+            agentName: 'shell_cmd'
+          });
+        } : undefined,
+        onStderr: world ? (chunk) => {
+          // Publish streaming events to world event system
+          publishSSE(world, {
+            type: 'tool-stream',
+            toolName: 'shell_cmd',
+            content: chunk,
+            stream: 'stderr',
+            messageId: currentMessageId,
+            agentName: 'shell_cmd'
+          });
+        } : undefined
       });
 
       // Return formatted result for LLM

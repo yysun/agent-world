@@ -7,10 +7,12 @@
  * FEATURES:
  * - Real-time streaming with visual feedback and state tracking
  * - Comprehensive event processing (chunk, end, error)
+ * - Tool streaming output display for shell_cmd (stdout/stderr)
  * - Color-coded streaming indicators and status messages
  * - Modular design for reuse across CLI components
  * - Event-driven display (no timer dependencies)
  * CHANGES:
+ * - 2026-02-08: Added tool streaming support for shell_cmd real-time output display
  * - 2025-02-06: Track last streamed message to prevent duplicate MESSAGE events after streaming output
  */
 
@@ -20,6 +22,7 @@ const boldGreen = (text: string) => `\x1b[1m\x1b[32m${text}\x1b[0m`;
 const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
 const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
+const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
 const error = (text: string) => `\x1b[1m\x1b[31m✗\x1b[0m ${text}`;
 
 // Streaming state interface
@@ -52,6 +55,12 @@ export function handleStreamingEvents(
   eventData: any,
   streaming: StreamingState
 ): void {
+  // Handle tool streaming events first
+  if (eventData.type === 'tool-stream') {
+    handleToolStreamEvents(eventData);
+    return;
+  }
+
   // Handle chunk events
   if (eventData.type === 'chunk' && eventData.content) {
     if (!streaming.isActive) {
@@ -134,6 +143,16 @@ export function handleToolEvents(eventData: any): void {
     const { toolName, error: toolError } = eventData.toolExecution;
     const agentName = eventData.agentName || eventData.sender || 'agent';
     console.log(`${error(`${agentName} tool failed - ${toolName}: ${toolError}`)}`);
+    return;
+  }
+}
+
+// Handle tool streaming events (real-time stdout/stderr from shell_cmd)
+export function handleToolStreamEvents(eventData: any): void {
+  if (eventData.type === 'tool-stream' && eventData.toolName === 'shell_cmd') {
+    const stream = eventData.stream === 'stderr' ? 'stderr' : 'stdout';
+    const color = stream === 'stderr' ? red : gray;
+    process.stdout.write(color(eventData.content));
     return;
   }
 }
