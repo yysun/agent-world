@@ -5,6 +5,7 @@
  * 
  * Features:
  * - Role-based visual styling (user, assistant, system, tool)
+ * - Sender avatars rendered on the left side of message bubbles
  * - Timestamp and sender display
  * - Threading indicator with "reply to" display (e.g., "Agent: a1 (reply to HUMAN)")
  * - Tool approval request display with action buttons
@@ -15,10 +16,11 @@
  * - Optimized with React.memo
  * 
  * Implementation:
- * - User messages: right-aligned, primary color
+ * - User messages: left-aligned with user avatar and muted bubble
  * - Assistant messages: left-aligned, secondary color
  * - System messages: centered, muted style
  * - Tool messages: left-aligned, accent color
+ * - Non-system messages include deterministic avatar initials + color
  * - Tool approval requests: rendered with ToolCallRequestBox
  * - Tool approval responses: rendered with ToolCallResponseBox
  * - Tool streaming output: rendered with monospace pre block and color-coded by stream type
@@ -26,6 +28,8 @@
  * - Reply messages: show reply target using getReplyTarget() helper
  * 
  * Changes:
+ * - 2026-02-08: Adjusted avatar vertical offset to align with message box top
+ * - 2026-02-08: Added sender avatars on the left side of non-system message bubbles
  * - 2026-02-08: Added tool streaming output rendering with stdout/stderr visual distinction
  * - 2026-02-08: Updated message bubble colors to use theme tokens for dark mode
  * - 2026-02-08: Increased user bubble max width for better readability
@@ -68,6 +72,45 @@ export interface ChatMessageBubbleProps {
     decision: 'approve' | 'deny';
     scope: 'once' | 'session' | 'none';
   }) => void;
+}
+
+const AGENT_AVATAR_COLOR_CLASSES = [
+  'bg-cyan-500/90 text-white border-cyan-300/60',
+  'bg-emerald-500/90 text-white border-emerald-300/60',
+  'bg-indigo-500/90 text-white border-indigo-300/60',
+  'bg-fuchsia-500/90 text-white border-fuchsia-300/60',
+  'bg-orange-500/90 text-white border-orange-300/60',
+  'bg-teal-500/90 text-white border-teal-300/60',
+] as const;
+
+function getAvatarLabel(senderName: string, isUser: boolean, isTool: boolean): string {
+  if (isUser) return 'ME';
+  if (isTool) return 'TL';
+
+  const parts = senderName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length === 0) return 'AI';
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
+
+function getAvatarColorClass(senderName: string, isUser: boolean, isTool: boolean): string {
+  if (isUser) {
+    return 'bg-primary text-primary-foreground border-primary/40';
+  }
+
+  if (isTool) {
+    return 'bg-amber-500/90 text-white border-amber-300/60';
+  }
+
+  const hash = Array.from(senderName.toLowerCase()).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return AGENT_AVATAR_COLOR_CLASSES[hash % AGENT_AVATAR_COLOR_CLASSES.length];
 }
 
 /**
@@ -121,11 +164,15 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     // Check if this message is a reply and get the target
     const replyTarget = getReplyTarget(extendedMessage, (allMessages as unknown as Message[]) || []);
     const displayName = replyTarget ? `${senderName} (reply to ${replyTarget})` : senderName;
+    const avatarLabel = getAvatarLabel(senderName, isUser, isTool);
+    const avatarColorClass = getAvatarColorClass(senderName, isUser, isTool);
+    const hasMetaRow = !isSystem && (showSender || showTimestamp);
+    const avatarOffsetClass = hasMetaRow ? 'mt-5' : 'mt-0';
 
     // Container alignment
     const containerClass = isSystem
       ? 'flex justify-center'
-      : 'flex justify-start';
+      : 'flex items-start gap-3';
 
     // Bubble styling based on role
     const bubbleClass = `
@@ -138,7 +185,16 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
 
     return (
       <div className={containerClass}>
-        <div className={`flex flex-col gap-1 ${isAssistant ? 'max-w-[95%]' : isUser ? 'max-w-[92%]' : 'max-w-[80%]'}`}>
+        {!isSystem && (
+          <div
+            className={`${avatarOffsetClass} flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold tracking-wide ${avatarColorClass}`}
+            aria-hidden="true"
+          >
+            {avatarLabel}
+          </div>
+        )}
+
+        <div className={`min-w-0 flex flex-col gap-1 ${isAssistant ? 'max-w-[95%]' : isUser ? 'max-w-[92%]' : 'max-w-[80%]'}`}>
           {/* Sender and timestamp (if not system message) */}
           {!isSystem && (showSender || showTimestamp) && (
             <div

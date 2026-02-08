@@ -16,6 +16,11 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
+ * - Moved right-aligned message avatars to the message side and removed circular avatar mask
+ * - Fixed message avatar sprite-sheet coordinates for 32px chat avatars
+ * - Left human message avatars empty while preserving avatar spacing
+ * - Added left-side avatar layout for world chat message boxes
  * - Added activity indicator styles for world events (response-start, tool-start)
  * - Added .memory-only-message class for agent messages saved to other agents' memory (gray border)
  * - Removed @import for Google Fonts to prevent flickering during route changes
@@ -858,7 +863,91 @@ legend {
   padding: 1rem;
   border-radius: 12px;
   max-width: 100%;
-  width: 98%;
+  width: 100%;
+}
+
+.message-row {
+  --chat-message-avatar-size: 64px;
+  --chat-message-avatar-gap: 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--chat-message-avatar-gap);
+  width: 100%;
+  min-width: 0;
+}
+
+.message-row-left {
+  justify-content: flex-start;
+}
+
+.message-row-right {
+  justify-content: flex-end;
+}
+
+.message-avatar-container {
+  width: var(--chat-message-avatar-size);
+  flex: 0 0 var(--chat-message-avatar-size);
+  display: flex;
+  justify-content: center;
+  padding-top: 2rem;
+}
+
+.message-avatar {
+  width: var(--chat-message-avatar-size);
+  height: var(--chat-message-avatar-size);
+  background-size: calc(var(--chat-message-avatar-size) * 3) calc(var(--chat-message-avatar-size) * 3);
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+/* Message avatars use 3x3 cells from the shared sprite sheet */
+.message-avatar.sprite-0 {
+  background-position: 0 0;
+}
+
+.message-avatar.sprite-1 {
+  background-position: calc(-1 * var(--chat-message-avatar-size)) 0;
+}
+
+.message-avatar.sprite-2 {
+  background-position: calc(-2 * var(--chat-message-avatar-size)) 0;
+}
+
+.message-avatar.sprite-3 {
+  background-position: 0 calc(-1 * var(--chat-message-avatar-size));
+}
+
+.message-avatar.sprite-4 {
+  background-position: calc(-1 * var(--chat-message-avatar-size)) calc(-1 * var(--chat-message-avatar-size));
+}
+
+.message-avatar.sprite-5 {
+  background-position: calc(-2 * var(--chat-message-avatar-size)) calc(-1 * var(--chat-message-avatar-size));
+}
+
+.message-avatar.sprite-6 {
+  background-position: 0 calc(-2 * var(--chat-message-avatar-size));
+}
+
+.message-avatar.sprite-7 {
+  background-position: calc(-1 * var(--chat-message-avatar-size)) calc(-2 * var(--chat-message-avatar-size));
+}
+
+.message-avatar.sprite-8 {
+  background-position: calc(-2 * var(--chat-message-avatar-size)) calc(-2 * var(--chat-message-avatar-size));
+}
+
+.message-avatar-empty {
+  background: transparent !important;
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+
+.message-row .message {
+  width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+  max-width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+  min-width: 0;
 }
 
 .user-message {
@@ -1453,12 +1542,25 @@ legend {
     max-width: 100%;
   }
 
+  .message-row .message {
+    width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+    max-width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+  }
+
+  .message-row {
+    --chat-message-avatar-size: 65px;
+  }
+
   .conversation-area {
     min-height: 250px;
   }
 }
 
 @media only screen and (max-width: 480px) {
+  .message-row {
+    --chat-message-avatar-size: 55px;
+  }
+
   .world-container {
     padding: 0.5rem 0.5rem 0.75rem 0.5rem;
   }

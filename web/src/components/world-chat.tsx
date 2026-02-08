@@ -15,9 +15,15 @@
  * - Tool result message filtering (hides non-approval tool results, shows approval via ToolCallResponseBox)
  * - Detailed tool call display: "Calling tool: shell_cmd (command: x, params: y)" format
  * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
+ * - Left-side avatar rendering for message boxes using actual agent spriteIndex values
+ * - Human messages keep an empty avatar slot (no sprite image)
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-08: Fixed undefined HUMAN_AVATAR_SPRITE_INDEX runtime error in avatar sprite resolver
+ * - 2026-02-08: Left human message avatars empty while preserving avatar alignment slot
+ * - 2026-02-08: Mapped message avatars to world agents' assigned spriteIndex values
+ * - 2026-02-08: Added left-side avatars for world chat message boxes
  * - 2025-11-11: Fixed tool call display to prioritize tool_calls data over pre-saved text (upgrades old messages)
  * - 2025-11-11: Updated tool call/result display to show full argument details without truncation
  * - 2025-11-11: Enhanced tool call request preview to show tool name and arguments
@@ -48,6 +54,7 @@ import ToolCallRequestBox from './tool-call-request-box';
 import ToolCallResponseBox from './tool-call-response-box';
 
 const debug = false;
+const SYSTEM_AVATAR_SPRITE_INDEX = 4;
 
 export default function WorldChat(props: WorldChatProps) {
   const {
@@ -60,6 +67,7 @@ export default function WorldChat(props: WorldChatProps) {
     isWaiting,
     needScroll = false,
     activeAgent,
+    agents = [],
     currentChat,
     editingMessageId = null,
     editingText = '',
@@ -71,6 +79,15 @@ export default function WorldChat(props: WorldChatProps) {
   const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
   const inputDisabled = isSending || isWaiting;
   const disableSend = !userInput.trim() || isSending || isWaiting;
+  const agentSpriteByName = new Map<string, number>();
+  const agentSpriteById = new Map<string, number>();
+
+  for (const agent of agents) {
+    const normalizedName = toKebabCase(agent.name);
+    const normalizedId = toKebabCase(agent.id);
+    agentSpriteByName.set(normalizedName, agent.spriteIndex);
+    agentSpriteById.set(normalizedId, agent.spriteIndex);
+  }
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -312,6 +329,42 @@ export default function WorldChat(props: WorldChatProps) {
     return text;
   };
 
+  const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
+    if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
+      return 'message-row-left';
+    }
+    return 'message-row-right';
+  };
+
+  const getMessageAvatarSpriteIndex = (message: Message): number => {
+    const senderType = getSenderType(message.sender);
+    if (senderType === SenderType.HUMAN) {
+      // Human messages render an empty avatar slot, so sprite index is unused.
+      return SYSTEM_AVATAR_SPRITE_INDEX;
+    }
+    if (senderType === SenderType.SYSTEM || senderType === SenderType.WORLD) {
+      return SYSTEM_AVATAR_SPRITE_INDEX;
+    }
+
+    const normalizedSender = toKebabCase(message.sender || '');
+    const normalizedFromAgentId = toKebabCase(message.fromAgentId || '');
+
+    if (agentSpriteByName.has(normalizedSender)) {
+      return agentSpriteByName.get(normalizedSender)!;
+    }
+    if (agentSpriteById.has(normalizedSender)) {
+      return agentSpriteById.get(normalizedSender)!;
+    }
+    if (agentSpriteById.has(normalizedFromAgentId)) {
+      return agentSpriteById.get(normalizedFromAgentId)!;
+    }
+    if (agentSpriteByName.has(normalizedFromAgentId)) {
+      return agentSpriteByName.get(normalizedFromAgentId)!;
+    }
+
+    return SYSTEM_AVATAR_SPRITE_INDEX;
+  };
+
   return (
     <fieldset className="chat-fieldset">
       <legend>
@@ -435,6 +488,10 @@ export default function WorldChat(props: WorldChatProps) {
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
               const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass}`.trim();
+              const rowAlignmentClass = getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
+              const isHumanAvatar = senderType === SenderType.HUMAN;
+              const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
+              const avatarTitle = senderType === SenderType.HUMAN ? 'HUMAN' : message.sender || 'Agent';
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
@@ -479,105 +536,110 @@ export default function WorldChat(props: WorldChatProps) {
               }
 
               return (
-                <div key={message.id || 'msg-' + index} className={messageClasses}>
-                  <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
-                    {displayLabel}
+                <div key={message.id || 'msg-' + index} className={`message-row ${rowAlignmentClass}`}>
+                  <div className="message-avatar-container" title={avatarTitle}>
+                    <div className={isHumanAvatar ? 'message-avatar message-avatar-empty' : `message-avatar agent-sprite sprite-${avatarSpriteIndex}`}></div>
                   </div>
-                  {isEditing ? (
-                    <div className="message-edit-container">
-                      <textarea
-                        className="message-edit-input"
-                        value={editingText}
-                        $oninput='update-edit-text'
-                        rows={3}
-                        autoFocus
-                      />
-                      <div className="message-edit-actions">
-                        <button
-                          className="btn-primary"
-                          $onclick={['save-edit-message', message.id]}
-                        >
-                          Update
-                        </button>
-                        <button
-                          className="btn-secondary"
-                          $onclick='cancel-edit-message'
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                  <div className={messageClasses}>
+                    <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
+                      {displayLabel}
                     </div>
-                  ) : (
-                    <>
-                      {/* Render tool call request box for approval requests */}
-                      {message.isToolCallRequest && message.toolCallData ? (
-                        <ToolCallRequestBox message={message} />
-                      ) : message.isToolCallResponse && message.toolCallData ? (
-                        /* Render tool call response box for approval results */
-                        <ToolCallResponseBox message={message} />
-                      ) : message.isToolStreaming ? (
-                        /* Render streaming tool output with stdout/stderr distinction */
-                        <div className="tool-stream-output">
-                          <div className="tool-stream-header">
-                            ⚙️ Executing...
-                          </div>
-                          <div className={`tool-stream-content ${message.streamType === 'stderr' ? 'stderr' : 'stdout'}`}>
-                            <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
-                          </div>
-                        </div>
-                      ) : (
-                        /* Regular message content */
-                        <div className="message-content">
-                          {safeHTML(renderMarkdown(formatMessageText(message)))}
-                        </div>
-                      )}
-                      {isUserMessage && !message.isStreaming && (
-                        <div className="message-actions">
+                    {isEditing ? (
+                      <div className="message-edit-container">
+                        <textarea
+                          className="message-edit-input"
+                          value={editingText}
+                          $oninput='update-edit-text'
+                          rows={3}
+                          autoFocus
+                        />
+                        <div className="message-edit-actions">
                           <button
-                            className="message-edit-btn"
-                            $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
-                            title="Edit message"
-                            disabled={!message.messageId || message.userEntered}
+                            className="btn-primary"
+                            $onclick={['save-edit-message', message.id]}
                           >
-                            ✏️
+                            Update
                           </button>
                           <button
-                            className="message-delete-btn"
-                            $onclick={['show-delete-message-confirm', {
-                              messageId: message.id,
-                              backendMessageId: message.messageId,
-                              messageText: message.text,
-                              userEntered: message.userEntered
-                            }]}
-                            title="Delete message and all after it"
-                            disabled={!message.messageId || message.userEntered}
+                            className="btn-secondary"
+                            $onclick='cancel-edit-message'
                           >
-                            🗑️
+                            Cancel
                           </button>
                         </div>
-                      )}
-                    </>
-                  )}
-                  <div className="message-timestamp">
-                    {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
-                  </div>
-                  {message.isStreaming && (
-                    <div className="streaming-indicator">
-                      <div className="streaming-content">
-                        <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
-                        <span>responding ...</span>
                       </div>
+                    ) : (
+                      <>
+                        {/* Render tool call request box for approval requests */}
+                        {message.isToolCallRequest && message.toolCallData ? (
+                          <ToolCallRequestBox message={message} />
+                        ) : message.isToolCallResponse && message.toolCallData ? (
+                          /* Render tool call response box for approval results */
+                          <ToolCallResponseBox message={message} />
+                        ) : message.isToolStreaming ? (
+                          /* Render streaming tool output with stdout/stderr distinction */
+                          <div className="tool-stream-output">
+                            <div className="tool-stream-header">
+                              ⚙️ Executing...
+                            </div>
+                            <div className={`tool-stream-content ${message.streamType === 'stderr' ? 'stderr' : 'stdout'}`}>
+                              <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Regular message content */
+                          <div className="message-content">
+                            {safeHTML(renderMarkdown(formatMessageText(message)))}
+                          </div>
+                        )}
+                        {isUserMessage && !message.isStreaming && (
+                          <div className="message-actions">
+                            <button
+                              className="message-edit-btn"
+                              $onclick={['start-edit-message', { messageId: message.id, text: message.text }]}
+                              title="Edit message"
+                              disabled={!message.messageId || message.userEntered}
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              className="message-delete-btn"
+                              $onclick={['show-delete-message-confirm', {
+                                messageId: message.id,
+                                backendMessageId: message.messageId,
+                                messageText: message.text,
+                                userEntered: message.userEntered
+                              }]}
+                              title="Delete message and all after it"
+                              disabled={!message.messageId || message.userEntered}
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="message-timestamp">
+                      {message.createdAt ? new Date(message.createdAt).toLocaleTimeString() : 'Now'}
                     </div>
-                  )}
-                  {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
-                  {debug && <div className="message-debug-info">{JSON.stringify({
-                    id: message.id,
-                    type: message.type,
-                    sender: message.sender,
-                    fromAgentId: message.fromAgentId,
-                    messageId: message.messageId || 'undefined',
-                    hasMessageId: !!message.messageId,
-                  })}</div>}
+                    {message.isStreaming && (
+                      <div className="streaming-indicator">
+                        <div className="streaming-content">
+                          <div className={`agent-sprite sprite-${activeAgent?.spriteIndex ?? 0}`}></div>
+                          <span>responding ...</span>
+                        </div>
+                      </div>
+                    )}
+                    {message.hasError && <div className="error-indicator">Error: {message.errorMessage}</div>}
+                    {debug && <div className="message-debug-info">{JSON.stringify({
+                      id: message.id,
+                      type: message.type,
+                      sender: message.sender,
+                      fromAgentId: message.fromAgentId,
+                      messageId: message.messageId || 'undefined',
+                      hasMessageId: !!message.messageId,
+                    })}</div>}
+                  </div>
                 </div>
               );
             })
@@ -585,12 +647,17 @@ export default function WorldChat(props: WorldChatProps) {
 
           {/* Show waiting dots when processing */}
           {isWaiting && (
-            <div className="message user-message waiting-message">
-              <div className="message-content">
-                <div className="waiting-dots">
-                  <span>.</span>
-                  <span>.</span>
-                  <span>.</span>
+            <div className="message-row message-row-left">
+              <div className="message-avatar-container" title="HUMAN">
+                <div className="message-avatar message-avatar-empty"></div>
+              </div>
+              <div className="message user-message waiting-message">
+                <div className="message-content">
+                  <div className="waiting-dots">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </div>
                 </div>
               </div>
             </div>

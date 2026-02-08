@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-08: Pass world agents into WorldChat for correct per-agent message avatars
  * - Integrated Tailwind CSS utilities for layout and spacing
  * - Added flexbox utilities for component structure
  * - Migrated modal overlays to Tailwind positioning
@@ -186,6 +187,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               isWaiting={state.isWaiting}
               needScroll={state.needScroll}
               activeAgent={state.activeAgent}
+              agents={state.world?.agents || []}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
               editingMessageId={state.editingMessageId}

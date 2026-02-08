@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-08: Added WorldChatProps.agents for avatar sprite resolution in chat messages
  * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
  * - 2025-10-26: Clarified seenByAgents is CALCULATED (not persisted) - populated with all agent IDs
  * - 2025-10-25: Added seenByAgents?: string[] to Message interface for multi-agent deduplication
@@ -224,6 +225,7 @@ export interface WorldChatProps {
   isWaiting: boolean;
   needScroll?: boolean;
   activeAgent?: { spriteIndex: number; name: string } | null;
+  agents?: Agent[];
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
   editingMessageId?: string | null;
