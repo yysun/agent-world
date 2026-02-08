@@ -1,4 +1,31 @@
-v0.9.0 (Unreleased)
+v0.10.0
+
+**Streaming & Tooling**
+- Added end-to-end tool streaming support across Web, React, and CLI clients
+- Added shell command output streaming via SSE and streaming callback support in tools
+- Added structured `ToolResultData` publishing and explicit `--streaming` control
+- Removed legacy manual tool-intervention request/response handling paths
+
+**Approval/HITL Removal**
+- Removed approval and human-in-the-loop handling from core orchestration and CLI stream processing
+- Completed cleanup of approval/HITL related code paths and aligned docs
+
+**React/Web Experience**
+- Added a responsive React World page with a side settings panel
+- Improved chat components with enhanced styling, search, new input features, and select dropdown support
+- Improved message bubbles with sender avatars/alignment and better auto-scroll behavior
+
+**Reliability & Tests**
+- Improved `FileEventStorage` reliability with atomic writes and recovery for trailing data
+- Prevented duplicate streamed `MESSAGE` events via last-message tracking
+- Added comprehensive tests for orphaned tool-message filtering/formatting and new end-to-end coverage
+
+**Docs & Developer Experience**
+- Added npm usage documentation for the `@agent-world/core` package
+- Updated shell command tool docs for streaming behavior
+- Updated development scripts and dependencies (including React dev/watch workflow improvements)
+
+v0.9.0
 
 **Frontend & Architecture**
 - New React frontend with Vite replacing Next.js and WebSocket migration to REST API + SSE
