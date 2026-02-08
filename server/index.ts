@@ -8,9 +8,17 @@
  * - Category-based logging with configurable levels
  * - Health check endpoint and proper error handling
  * - Environment Variables: Automatically loads .env file for API keys and configuration
+ * - Controlled startup behavior for direct execution vs imported usage
+ * - Optional browser auto-open and process signal handler registration
  * 
  * Configuration: AGENT_WORLD_DATA_PATH, LOG_LEVEL, LLM provider keys
  * Endpoints: /health + API routes from ./api.ts
+ * 
+ * Recent Changes:
+ * - 2026-02-08: Fixed auto-run detection to only trigger on direct execution
+ * - 2026-02-08: Made browser auto-open configurable via AGENT_WORLD_AUTO_OPEN env var
+ * - 2026-02-08: Prevented duplicate process signal handler registration using WeakSet
+ * - 2026-02-08: Added shutdown guard to prevent race conditions during graceful shutdown
  */
 
 // Load environment variables from .env file
@@ -37,8 +45,16 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 0;
 const HOST = process.env.HOST || '127.0.0.1';
 
+type StartWebServerOptions = {
+  openBrowser?: boolean;
+  registerProcessHandlers?: boolean;
+};
+
 // Create server logger after logger auto-initialization
 const serverLogger = createCategoryLogger('server');
+
+// Track servers that have registered process handlers (prevents duplicate registration)
+const serversWithHandlers = new WeakSet<Server>();
 
 // LLM provider configuration
 function configureLLMProvidersFromEnv(): void {
@@ -133,7 +149,14 @@ app.use((req, res) => {
 });
 
 // Server startup function
-export function startWebServer(port = PORT, host = HOST): Promise<Server> {
+export function startWebServer(
+  port = PORT,
+  host = HOST,
+  options: StartWebServerOptions = {}
+): Promise<Server> {
+  const openBrowser = options.openBrowser ?? false;
+  const registerProcessHandlers = options.registerProcessHandlers ?? false;
+
   return new Promise((resolve, reject) => {
     configureLLMProvidersFromEnv();
 
@@ -150,14 +173,24 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
         // console.log(`📁 Serving static files from: ${path.join(__dirname, '../public')}`);
         // console.log(`🚀 HTTP server running with REST API and SSE chat`);
         resolve(server);
-        open(url);
+        if (openBrowser) {
+          open(url).catch((error) => {
+            serverLogger.warn('Failed to open browser automatically', {
+              error: error instanceof Error ? error.message : String(error),
+              url
+            });
+          });
+        }
       }
     });
 
     server.on('error', reject);
 
     // Setup graceful shutdown handlers
+    let shuttingDown = false;
     const gracefulShutdown = async (signal: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       serverLogger.info(`Received ${signal}, initiating graceful shutdown`);
 
       try {
@@ -183,33 +216,46 @@ export function startWebServer(port = PORT, host = HOST): Promise<Server> {
       }
     };
 
-    // Register shutdown handlers
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    if (registerProcessHandlers && !serversWithHandlers.has(server)) {
+      serversWithHandlers.add(server);
+      // Register shutdown handlers once
+      process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+      process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-    // Handle uncaught exceptions and unhandled rejections
-    process.on('uncaughtException', (error) => {
-      serverLogger.error('Uncaught exception', { error: error.message });
-      gracefulShutdown('uncaughtException');
-    });
-
-    process.on('unhandledRejection', (reason, promise) => {
-      serverLogger.error('Unhandled rejection', {
-        reason: reason instanceof Error ? reason.message : reason,
-        promise: promise.toString()
+      // Handle uncaught exceptions and unhandled rejections
+      process.on('uncaughtException', (error) => {
+        serverLogger.error('Uncaught exception', { error: error.message });
+        gracefulShutdown('uncaughtException');
       });
-    });
+
+      process.on('unhandledRejection', (reason, promise) => {
+        serverLogger.error('Unhandled rejection', {
+          reason: reason instanceof Error ? reason.message : reason,
+          promise: promise.toString()
+        });
+      });
+    }
   });
 }
 
-// Direct execution handling - check both direct execution and npm bin execution
+// Direct execution handling
 const currentFileUrl = import.meta.url;
-const entryPointUrl = pathToFileURL(path.resolve(process.argv[1])).href;
+const entryPointUrl = process.argv[1]
+  ? pathToFileURL(path.resolve(process.argv[1])).href
+  : '';
 const isDirectExecution = currentFileUrl === entryPointUrl;
-const isServerBinCommand = process.argv[1].includes('agent-world-server') || currentFileUrl.includes('server/index.js');
+const isBinExecution = process.argv[1]?.includes('agent-world-server') || false;
 
-if (isDirectExecution || isServerBinCommand) {
-  startWebServer()
+// Auto-open browser by default when launched via npx/bin, unless explicitly disabled
+const shouldOpenBrowser = isBinExecution
+  ? process.env.AGENT_WORLD_AUTO_OPEN !== 'false'
+  : process.env.AGENT_WORLD_AUTO_OPEN === 'true';
+
+if (isDirectExecution || isBinExecution) {
+  startWebServer(PORT, HOST, {
+    openBrowser: shouldOpenBrowser,
+    registerProcessHandlers: true
+  })
     .then(() => console.log('Server started successfully'))
     .catch((error) => {
       console.error('Failed to start server:', error);
