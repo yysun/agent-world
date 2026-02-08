@@ -270,4 +270,193 @@ describe('filterClientSideMessages', () => {
     expect(messages[0].tool_calls).toHaveLength(1);
     expect(messages[0].tool_calls![0].function.name).toBe('client.requestApproval');
   });
+
+  it('should filter out orphaned tool messages for removed client.* tool calls', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Hello' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_client', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_client', content: 'approval granted' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should only have the user message (assistant dropped, tool message dropped)
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe('user');
+  });
+
+  it('should keep tool messages for valid (non-client.*) tool calls', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Hello' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'client.requestApproval', arguments: '{}' } },
+          { id: 'call_2', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'approval granted' },
+      { role: 'tool', tool_call_id: 'call_2', content: 'command executed' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should have: user message, assistant (with shell_cmd only), tool message for shell_cmd
+    expect(result).toHaveLength(3);
+    expect(result[0].role).toBe('user');
+    expect(result[1].role).toBe('assistant');
+    expect(result[1].tool_calls).toHaveLength(1);
+    expect(result[1].tool_calls![0].function.name).toBe('shell_cmd');
+    expect(result[2].role).toBe('tool');
+    expect(result[2].tool_call_id).toBe('call_2');
+  });
+
+  it('should handle complex message sequences with multiple assistants and tools', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Start' },
+      {
+        role: 'assistant',
+        content: 'Calling tools',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'real_tool', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'result 1' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'client.approve', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_2', content: 'approved' },
+      {
+        role: 'assistant',
+        content: 'Final step',
+        tool_calls: [
+          { id: 'call_3', type: 'function', function: { name: 'another_tool', arguments: '{}' } },
+          { id: 'call_4', type: 'function', function: { name: 'client.notify', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_3', content: 'result 3' },
+      { role: 'tool', tool_call_id: 'call_4', content: 'notified' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Expected: user, assistant(real_tool), tool(call_1), assistant(another_tool), tool(call_3)
+    expect(result).toHaveLength(5);
+    expect(result[0].role).toBe('user');
+    expect(result[1].role).toBe('assistant');
+    expect(result[1].tool_calls![0].function.name).toBe('real_tool');
+    expect(result[2].role).toBe('tool');
+    expect(result[2].tool_call_id).toBe('call_1');
+    expect(result[3].role).toBe('assistant');
+    expect(result[3].tool_calls).toHaveLength(1);
+    expect(result[3].tool_calls![0].function.name).toBe('another_tool');
+    expect(result[4].role).toBe('tool');
+    expect(result[4].tool_call_id).toBe('call_3');
+  });
+
+  it('should preserve message order after filtering', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'First' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'client.approve', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'approved' },
+      { role: 'user', content: 'Second' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'real_tool', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_2', content: 'result' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should be: user(First), user(Second), assistant(real_tool), tool(call_2)
+    expect(result).toHaveLength(4);
+    expect(result[0].content).toBe('First');
+    expect(result[1].content).toBe('Second');
+    expect(result[2].tool_calls![0].function.name).toBe('real_tool');
+    expect(result[3].tool_call_id).toBe('call_2');
+  });
+
+  it('should drop tool messages without tool_call_id (invalid data)', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Hello' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', content: 'some result' } as ChatMessage // Missing tool_call_id
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should drop the invalid tool message
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe('user');
+    expect(result[1].role).toBe('assistant');
+  });
+
+  it('should drop tool messages that lack matching assistant tool_calls (legacy data)', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Calling tool' }, // No tool_calls field (legacy data)
+      { role: 'tool', tool_call_id: 'orphaned_call', content: 'some result' },
+      { role: 'assistant', content: 'Done' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should drop the orphaned tool message
+    expect(result).toHaveLength(3);
+    expect(result[0].role).toBe('user');
+    expect(result[1].role).toBe('assistant');
+    expect(result[1].content).toBe('Calling tool');
+    expect(result[2].role).toBe('assistant');
+    expect(result[2].content).toBe('Done');
+  });
+
+  it('should handle mixed valid and invalid tool messages', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'valid_call', type: 'function', function: { name: 'real_tool', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'valid_call', content: 'valid result' },
+      { role: 'tool', tool_call_id: 'invalid_call', content: 'orphaned result' },
+      { role: 'tool', content: 'missing tool_call_id' } as ChatMessage
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    // Should only keep assistant and valid tool message
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe('assistant');
+    expect(result[1].role).toBe('tool');
+    expect(result[1].tool_call_id).toBe('valid_call');
+  });
 });

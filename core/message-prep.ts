@@ -15,6 +15,9 @@
  * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
+ * - 2026-02-08: Fixed OpenAI API validation error - now filters orphaned tool messages
+ * - Tool messages referencing removed client.* tool_call_ids are now properly filtered
+ * - Tracks removed tool_call_ids to prevent "tool must follow tool_calls" errors
  * - 2025-11-04: Simplified from message-filter.ts, removed approval cache logic
  * - 2025-11-06: Added parseMessageContent() for enhanced string protocol support
  * - 2025-11-06: Consolidated with utils.ts - renamed to filterClientSideMessages, added alias
@@ -120,6 +123,9 @@ export function parseMessageContent(
  * - Removes messages marked as clientOnly (approval UI messages)
  * - Removes client.* tool calls from assistant messages
  * - Removes approval_ tool results from tool messages
+ * - Removes orphaned tool messages (those referencing removed client.* tool calls)
+ * - Removes orphaned tool messages with missing tool_call_ids (invalid data)
+ * - Removes tool messages that don't have a preceding assistant message with matching tool_call
  * - Drops messages that become empty after filtering
  * 
  * @param messages - All messages from agent memory
@@ -127,7 +133,10 @@ export function parseMessageContent(
  */
 export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[] {
   const prepared: ChatMessage[] = [];
+  const removedToolCallIds = new Set<string>();
+  const validToolCallIds = new Set<string>();
 
+  // First pass: Filter assistant messages and track tool_call_ids
   for (const message of messages) {
     // Deep clone to avoid mutating original
     const clonedMessage: ChatMessage = {
@@ -142,14 +151,24 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
 
     // Filter assistant messages with tool calls
     if (clonedMessage.role === 'assistant' && clonedMessage.tool_calls?.length) {
+      // Track which tool_call_ids we're removing
+      const removedCalls = clonedMessage.tool_calls.filter(
+        toolCall => toolCall.function.name.startsWith('client.')
+      );
+      removedCalls.forEach(tc => removedToolCallIds.add(tc.id));
+
       const filteredToolCalls = clonedMessage.tool_calls.filter(
         toolCall => !toolCall.function.name.startsWith('client.')
       );
 
+      // Track valid tool_call_ids (non-client.*)
+      filteredToolCalls.forEach(tc => validToolCallIds.add(tc.id));
+
       // If all tool calls were client.* and no content, skip this message
       if (filteredToolCalls.length === 0 && !clonedMessage.content) {
         logger.debug('Dropping assistant message with only client.* tool calls', {
-          droppedToolCalls: clonedMessage.tool_calls.map(tc => tc.function.name)
+          droppedToolCalls: clonedMessage.tool_calls.map(tc => tc.function.name),
+          droppedToolCallIds: Array.from(removedToolCallIds)
         });
         continue;
       }
@@ -157,9 +176,38 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
       clonedMessage.tool_calls = filteredToolCalls;
     }
 
+    // Filter tool messages
+    if (clonedMessage.role === 'tool') {
+      // Drop tool messages without tool_call_id (invalid data)
+      if (!clonedMessage.tool_call_id) {
+        logger.debug('Dropping tool message without tool_call_id (invalid data)');
+        continue;
+      }
+
+      // Drop tool messages referencing removed client.* tool calls
+      if (removedToolCallIds.has(clonedMessage.tool_call_id)) {
+        logger.debug('Dropping orphaned tool message for removed client.* tool call', {
+          toolCallId: clonedMessage.tool_call_id
+        });
+        continue;
+      }
+
+      // Drop tool messages that don't have a valid preceding tool_call
+      // This handles legacy data where tool_calls weren't properly saved
+      if (!validToolCallIds.has(clonedMessage.tool_call_id)) {
+        logger.debug('Dropping tool message with no matching tool_call (legacy data)', {
+          toolCallId: clonedMessage.tool_call_id
+        });
+        continue;
+      }
+    }
+
     prepared.push(clonedMessage);
   }
 
-  logger.debug(`Prepared ${prepared.length}/${messages.length} messages for LLM consumption`);
+  logger.debug(`Prepared ${prepared.length}/${messages.length} messages for LLM consumption`, {
+    removedToolCallIds: Array.from(removedToolCallIds),
+    validToolCallIds: Array.from(validToolCallIds)
+  });
   return prepared;
 }

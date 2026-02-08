@@ -10,6 +10,7 @@
  * - Reset LLM call count for new conversation turns
  * - Turn limit enforcement with automatic handoff to human
  * - AI command handling (gemini, copilot, codex) - results saved directly to memory
+ * - Enhanced tool call message formatting with parameters display
  * 
  * Implementation:
  * - AI commands executed via shell_cmd bypass LLM response flow
@@ -19,6 +20,9 @@
  *   * Exit code != 0: Save full formatted result (includes stderr, error details)
  * - Tool call marked complete and turn ends without LLM processing
  * - Normal shell commands follow standard tool execution and LLM continuation
+ * - Tool call messages show up to 3 parameters with truncation for readability
+ *   * Single tool: "Calling tool: shell_cmd (command: "ls", directory: "./")"
+ *   * Multiple tools: "Calling 2 tools: shell_cmd, read_file"
  * 
  * Dependencies (Layer 5):
  * - types.ts (Layer 1)
@@ -30,6 +34,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-08: Enhanced tool call message formatting to include parameters
  * - 2025-11-11: Added AI command special handling - bypass LLM, save output to memory
  * - 2025-11-09: Extracted from events.ts for modular architecture
  */
@@ -75,6 +80,58 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+/**
+ * Format tool calls with their parameters for display
+ * @param toolCalls - Array of tool calls from LLM response
+ * @returns Formatted message string showing tool names and parameters
+ */
+function formatToolCallsMessage(toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>): string {
+  const toolCount = toolCalls.length;
+
+  if (toolCount === 1) {
+    const tc = toolCalls[0];
+    const toolName = tc.function.name;
+
+    try {
+      const args = JSON.parse(tc.function.arguments);
+      const paramParts: string[] = [];
+
+      // Format parameters - show up to 3 key parameters
+      const keys = Object.keys(args).slice(0, 3);
+      for (const key of keys) {
+        let value = args[key];
+
+        // Truncate long values
+        if (typeof value === 'string' && value.length > 50) {
+          value = value.substring(0, 47) + '...';
+        } else if (typeof value === 'object') {
+          value = JSON.stringify(value);
+          if (value.length > 50) {
+            value = value.substring(0, 47) + '...';
+          }
+        }
+
+        paramParts.push(`${key}: ${JSON.stringify(value)}`);
+      }
+
+      if (Object.keys(args).length > 3) {
+        paramParts.push('...');
+      }
+
+      return paramParts.length > 0
+        ? `Calling tool: ${toolName} (${paramParts.join(', ')})`
+        : `Calling tool: ${toolName}`;
+    } catch (e) {
+      // If arguments can't be parsed, just show the tool name
+      return `Calling tool: ${toolName}`;
+    }
+  } else {
+    // Multiple tools - just list the names
+    const toolNames = toolCalls.map(tc => tc.function.name).join(', ');
+    return `Calling ${toolCount} tools: ${toolNames}`;
+  }
 }
 
 /**
@@ -169,11 +226,7 @@ export async function processAgentMessage(
       // Format meaningful content for tool calls if LLM didn't provide text
       let messageContent = llmResponse.content || '';
       if (!messageContent && llmResponse.tool_calls && llmResponse.tool_calls.length > 0) {
-        const toolNames = llmResponse.tool_calls.map(tc => tc.function.name).join(', ');
-        const toolCount = llmResponse.tool_calls.length;
-        messageContent = toolCount === 1
-          ? `Calling tool: ${toolNames}`
-          : `Calling ${toolCount} tools: ${toolNames}`;
+        messageContent = formatToolCallsMessage(llmResponse.tool_calls);
       }
 
       const assistantMessage: AgentMessage = {
