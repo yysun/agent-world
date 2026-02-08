@@ -16,17 +16,6 @@
  * Changes:
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
- * - 2025-11-10: Aligned approval submission tool_call_id to originalToolCall.id (parity with web/API)
- * - 2025-11-08: Phase 3 - Display approval completion status from toolCallStatus field
- * - 2025-11-08: Improved approval UI - "Approval Required" instead of "Tool Approval Required"
- * - 2025-11-06: Updated approval protocol - agentId now embedded in JSON (server auto-prepends @mention)
- * - 2025-11-05: Aligned tool approval to OpenAI protocol - check tool_calls in message events
- * - 2025-11-05: Changed approval UI from enquirer to rl.question (numbered choices)
- * - 2025-11-05: Removed SSE-based approval handling (approvals come as message events)
- * - 2025-11-05: Added message-based approval system support for client.requestApproval tool calls
- * - 2025-11-05: Extended MessageEventPayload interface to include tool_calls
- * - 2025-11-05: Added handleNewApprovalRequest function for three-option approval prompting
- * - 2025-11-05: Made handleWorldEvent async to support approval request processing
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
  * - 2025-11-01: Allow working with external worlds without importing
  * - 2025-11-01: Changed selectWorld return type to support external path tracking
@@ -87,7 +76,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { program } from 'commander';
 import readline from 'readline';
-import enquirer from 'enquirer';
 import {
   listWorlds,
   subscribeWorld,
@@ -99,7 +87,7 @@ import {
   type WorldActivityEventPayload,
   type WorldActivityEventType
 } from '../core/index.js';
-import { World, EventType, ApprovalRequiredException, type ApprovalDecision, type ApprovalScope } from '../core/types.js';
+import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput, displayChatMessages } from './commands.js';
 import {
@@ -108,7 +96,6 @@ import {
   handleWorldEventWithStreaming,
   handleToolEvents,
   handleActivityEvents,
-  handleToolCallEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
 
@@ -170,282 +157,6 @@ const boldCyan = (text: string) => `\x1b[1m\x1b[36m${text}\x1b[0m`;
 const success = (text: string) => `${boldGreen('✓')} ${text}`;
 const error = (text: string) => `${boldRed('✗')} ${text}`;
 const bullet = (text: string) => `${gray('•')} ${text}`;
-
-interface ApprovalRequest {
-  toolCallId: string;
-  originalToolCall?: any;
-  toolName: string;
-  toolArgs: any;
-  message: string;
-  options: string[];
-  agentId?: string;
-}
-
-// Handle approval requests from tool calls
-async function handleNewApprovalRequest(
-  request: ApprovalRequest,
-  rl: readline.Interface,
-  world: any
-): Promise<void> {
-  const { toolCallId, toolName, toolArgs, message, options, agentId } = request;
-
-  // Small delay to avoid mixing with world messages
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  console.log(`\n${boldYellow('🔒 Approval Required')}`);
-  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
-
-  if (toolArgs && Object.keys(toolArgs).length > 0) {
-    console.log(`${gray('Arguments:')}`);
-    for (const [key, value] of Object.entries(toolArgs)) {
-      const displayValue = typeof value === 'string' && value.length > 100
-        ? `${value.substring(0, 100)}...`
-        : String(value);
-      console.log(`  ${gray(key + ':')} ${displayValue}`);
-    }
-  }
-
-  if (message) {
-    console.log(`${gray('Reason:')} ${message}`);
-  }
-
-  // Create choices based on available options
-  const choices = [];
-  let choiceNumber = 1;
-  const choiceMap: Record<number, string> = {};
-
-  if (options.includes('deny')) {
-    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Deny')}`);
-    choiceMap[choiceNumber] = 'deny';
-    choiceNumber++;
-  }
-  if (options.includes('approve_once')) {
-    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve Once')}`);
-    choiceMap[choiceNumber] = 'approve_once';
-    choiceNumber++;
-  }
-  if (options.includes('approve_session')) {
-    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan('Approve for Session')}`);
-    choiceMap[choiceNumber] = 'approve_session';
-    choiceNumber++;
-  }
-
-  // Fallback to basic options if none match
-  if (choices.length === 0) {
-    choices.push(`  ${yellow('1.')} ${cyan('Deny')}`);
-    choices.push(`  ${yellow('2.')} ${cyan('Approve Once')}`);
-    choices.push(`  ${yellow('3.')} ${cyan('Approve for Session')}`);
-    choiceMap[1] = 'deny';
-    choiceMap[2] = 'approve_once';
-    choiceMap[3] = 'approve_session';
-  }
-
-  console.log(`\n${boldMagenta('How would you like to respond?')}`);
-  for (const choice of choices) {
-    console.log(choice);
-  }
-
-  return new Promise<void>((resolve) => {
-    function askForDecision() {
-      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
-        const trimmed = answer.trim();
-        const num = parseInt(trimmed);
-
-        if (!isNaN(num) && choiceMap[num]) {
-          const decision = choiceMap[num];
-
-          let approvalDecision: 'approve' | 'deny';
-          let approvalScope: 'session' | 'once' | undefined;
-
-          if (decision === 'approve_session') {
-            approvalDecision = 'approve';
-            approvalScope = 'session';
-          } else if (decision === 'approve_once') {
-            approvalDecision = 'approve';
-            approvalScope = 'once';
-          } else {
-            approvalDecision = 'deny';
-            approvalScope = undefined;
-          }
-
-          try {
-            if (!agentId) {
-              console.error(`${error('Cannot send approval: agentId is missing')}`);
-              resolve();
-              return;
-            }
-
-            const { publishToolResult } = await import('../core/events/index.js');
-            const { originalToolCall } = request;
-            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
-            publishToolResult(world, agentId, {
-              tool_call_id: submittedToolCallId,
-              decision: approvalDecision,
-              scope: approvalScope,
-              toolName: originalToolCall?.name || toolName,
-              toolArgs: originalToolCall?.args || toolArgs,
-              workingDirectory: originalToolCall?.workingDirectory
-            });
-            resolve();
-          } catch (err) {
-            console.error(`${error('Failed to send approval response:')} ${err}`);
-            resolve();
-          }
-        } else {
-          console.log(boldRed('Invalid selection. Please try again.'));
-          askForDecision();
-        }
-      });
-    }
-
-    askForDecision();
-  });
-}
-
-// HITL (Human-in-the-Loop) request handler
-async function handleNewHITLRequest(
-  request: any,
-  rl: readline.Interface,
-  world: any
-): Promise<void> {
-  const { toolCallId, prompt, options, context, agentId } = request;
-
-  // Small delay to avoid mixing with world messages
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  console.log(`\n${boldYellow('🤔 Human Input Required')}`);
-  console.log(`${gray('Request:')} ${prompt}`);
-
-  if (context && Object.keys(context).length > 0) {
-    console.log(`${gray('Context:')}`);
-    for (const [key, value] of Object.entries(context)) {
-      const displayValue = typeof value === 'string' && value.length > 100
-        ? `${value.substring(0, 100)}...`
-        : String(value);
-      console.log(`  ${gray(key + ':')} ${displayValue}`);
-    }
-  }
-
-  // Create numbered choices from options array
-  const choices: string[] = [];
-  const choiceMap: Record<number, string> = {};
-
-  options.forEach((option: string, index: number) => {
-    const choiceNumber = index + 1;
-    choices.push(`  ${yellow(`${choiceNumber}.`)} ${cyan(option)}`);
-    choiceMap[choiceNumber] = option;
-  });
-
-  console.log(`\n${boldMagenta('Please select an option:')}`);
-  for (const choice of choices) {
-    console.log(choice);
-  }
-
-  return new Promise<void>((resolve) => {
-    function askForChoice() {
-      rl.question(`\n${boldMagenta('Select an option (number):')} `, async (answer) => {
-        const trimmed = answer.trim();
-        const num = parseInt(trimmed);
-
-        if (!isNaN(num) && choiceMap[num]) {
-          const choice = choiceMap[num];
-
-          try {
-            if (!agentId) {
-              console.error(`${error('Cannot send HITL response: agentId is missing')}`);
-              resolve();
-              return;
-            }
-
-            const { publishToolResult } = await import('../core/events/index.js');
-            const { originalToolCall } = request;
-            const submittedToolCallId = (originalToolCall && originalToolCall.id) ? originalToolCall.id : toolCallId;
-            publishToolResult(world, agentId, {
-              tool_call_id: submittedToolCallId,
-              choice: choice,
-              toolName: originalToolCall?.name || 'client.humanIntervention',
-              toolArgs: originalToolCall?.args
-            });
-            resolve();
-          } catch (err) {
-            console.error(`${error('Failed to send HITL response:')} ${err}`);
-            resolve();
-          }
-        } else {
-          console.log(boldRed('Invalid selection. Please try again.'));
-          askForChoice();
-        }
-      });
-    }
-
-    askForChoice();
-  });
-}
-
-// Simplified approval handler for pipeline mode (non-interactive)
-async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
-  const { toolName } = approvalException;
-
-  console.error(`${boldRed('Tool approval required in pipeline mode:')}`);
-  console.error(`${gray('Tool:')} ${yellow(toolName)}`);
-  console.error(`${gray('Pipeline mode: Denying tool execution (use interactive mode for approvals)')}`);
-
-  return { decision: 'deny', scope: 'once' };
-}
-
-// CLI approval handling for tool execution
-async function handleApprovalRequest(
-  approvalException: ApprovalRequiredException,
-  rl: readline.Interface
-): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
-  const { toolName, toolArgs, message, options } = approvalException;
-
-  console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
-  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
-
-  if (toolArgs && Object.keys(toolArgs).length > 0) {
-    console.log(`${gray('Arguments:')}`);
-    for (const [key, value] of Object.entries(toolArgs)) {
-      const displayValue = typeof value === 'string' && value.length > 100
-        ? `${value.substring(0, 100)}...`
-        : String(value);
-      console.log(`  ${gray(key + ':')} ${displayValue}`);
-    }
-  }
-
-  if (message) {
-    console.log(`${gray('Details:')} ${message}`);
-  }
-
-  // Display options
-  console.log(`\n${boldMagenta('How would you like to respond?')}`);
-  console.log(`  ${yellow('1.')} ${cyan('Cancel (deny)')}`);
-  console.log(`  ${yellow('2.')} ${cyan('Allow Once')}`);
-  console.log(`  ${yellow('3.')} ${cyan('Allow Always (this session)')}`);
-
-  return new Promise<{ decision: ApprovalDecision; scope: ApprovalScope }>((resolve) => {
-    function askForDecision() {
-      rl.question(`\n${boldMagenta('Select an option (number):')} `, (answer) => {
-        const trimmed = answer.trim();
-        const num = parseInt(trimmed);
-
-        if (num === 1) {
-          resolve({ decision: 'deny', scope: 'once' });
-        } else if (num === 2) {
-          resolve({ decision: 'approve', scope: 'once' });
-        } else if (num === 3) {
-          resolve({ decision: 'approve', scope: 'session' });
-        } else {
-          console.log(boldRed('Invalid selection. Please try again.'));
-          askForDecision();
-        }
-      });
-    }
-
-    askForDecision();
-  });
-}
-
 
 type ActivityEventState = WorldActivityEventType;
 
@@ -888,7 +599,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(options.command, world, 'human', handlePipelineApproval);
+      const result = await processCLIInput(options.command, world, 'human');
       printCLIResult(result);
 
       if (!options.command.startsWith('/') && world) {
@@ -921,7 +632,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(messageFromArgs, world, 'human', handlePipelineApproval);
+      const result = await processCLIInput(messageFromArgs, world, 'human');
       printCLIResult(result);
 
       try {
@@ -954,7 +665,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           process.exit(1);
         }
         const snapshot = activityMonitor.captureSnapshot();
-        const result = await processCLIInput(input.trim(), world, 'HUMAN', handlePipelineApproval);
+        const result = await processCLIInput(input.trim(), world, 'HUMAN');
         printCLIResult(result);
 
         try {
@@ -1097,32 +808,6 @@ async function handleWorldEvent(
 
   // Handle regular message events from agents (non-streaming or after streaming ends)
   if (eventType === 'message' && eventData.sender && (eventData.content || eventData.tool_calls)) {
-    // Check for tool calls FIRST (including approval and HITL requests) - following OpenAI protocol
-    if (rl && eventData.tool_calls) {
-      const toolCallResult = handleToolCallEvents(eventData);
-      if (toolCallResult?.isApprovalRequest && toolCallResult.approvalData) {
-        await handleNewApprovalRequest(toolCallResult.approvalData, rl, globalState.world);
-        return;
-      }
-      if (toolCallResult?.isHITLRequest && toolCallResult.hitlData) {
-        await handleNewHITLRequest(toolCallResult.hitlData, rl, globalState.world);
-        return;
-      }
-    }
-
-    // Display tool call completion status (approval results)
-    if (eventData.toolCallStatus) {
-      for (const [toolCallId, status] of Object.entries(eventData.toolCallStatus)) {
-        if (status && typeof status === 'object' && 'complete' in status && status.complete && 'result' in status && status.result) {
-          const result = status.result as { decision: string; scope?: string; toolName?: string; timestamp?: string };
-          const decision = result.decision === 'approve' ? green('✓ Approved') : boldRed('✗ Denied');
-          const scope = result.scope === 'session' ? gray('(for session)') : result.scope === 'once' ? gray('(once)') : '';
-          const toolName = result.toolName || 'unknown';
-          console.log(`${gray('[Approval]')} ${decision} ${scope} - ${yellow(toolName)}`);
-        }
-      }
-    }
-
     // Skip user messages to prevent echo
     if (eventData.sender === 'human' || eventData.sender.startsWith('user')) {
       return;
@@ -1675,7 +1360,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
 
       try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN', (error) => handleApprovalRequest(error, rl));
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {

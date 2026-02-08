@@ -51,9 +51,6 @@ import {
   getWorld,
   updateWorld,
   publishMessage,
-  ApprovalRequiredException,
-  type ApprovalDecision,
-  type ApprovalScope,
   listWorlds,
   deleteWorld,
   listAgents,
@@ -112,9 +109,6 @@ export interface CLIContext {
 }
 
 export type PromptFunction = (question: string, options?: string[]) => Promise<string>;
-
-// CLI approval handler type
-export type CLIApprovalHandler = (approvalException: ApprovalRequiredException) => Promise<{ decision: ApprovalDecision; scope: ApprovalScope }>;
 
 // Enquirer prompt response interfaces
 interface WorldCreateAnswers {
@@ -2156,8 +2150,7 @@ export async function processCLICommand(
 export async function processCLIInput(
   input: string,
   world: World | null,
-  sender: string = 'human',
-  approvalHandler?: CLIApprovalHandler
+  sender: string = 'human'
 ): Promise<CLIResponse> {
   const context: CLIContext = {
     currentWorld: world,
@@ -2216,41 +2209,6 @@ export async function processCLIInput(
       technicalDetails: `Message published to world '${world.name}'`
     };
   } catch (error) {
-    // Handle approval requirements
-    if (error instanceof ApprovalRequiredException && approvalHandler) {
-      try {
-        const { decision, scope } = await approvalHandler(error);
-
-        if (decision === 'deny') {
-          return {
-            success: false,
-            message: 'Tool execution denied by user',
-            technicalDetails: `Approval denied for tool: ${error.toolName}`
-          };
-        }
-
-        // NOTE: Approval cache removed - approvals now handled via message-based protocol
-        // The approval decision is sent as a tool result message and stored in agent memory
-        // Session approvals are detected by scanning message history
-
-        // Retry the message
-        publishMessage(world as any, input, sender);
-        return {
-          success: true,
-          message: '',
-          data: { sender, approvalGranted: true },
-          technicalDetails: `Message published to world '${world.name}' after approval`
-        };
-      } catch (approvalError) {
-        return {
-          success: false,
-          message: 'Failed to handle tool approval',
-          error: approvalError instanceof Error ? approvalError.message : String(approvalError),
-          technicalDetails: `Approval handling failed for tool: ${error.toolName}`
-        };
-      }
-    }
-
     return {
       success: false,
       message: 'Failed to send message',
