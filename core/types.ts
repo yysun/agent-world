@@ -101,6 +101,21 @@ export interface AgentMessage extends ChatMessage {
    *   }
    * }
    */
+  toolCallStatus?: Record<string, { complete: boolean; result: any }>;
+}
+
+/**
+ * Structured data for tool result publishing.
+ * Used by publishToolResult() to construct proper tool messages.
+ */
+export interface ToolResultData {
+  tool_call_id: string;
+  decision?: 'approve' | 'deny';
+  scope?: 'once' | 'session' | 'unlimited';
+  choice?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  workingDirectory?: string;
 }
 
 // Agent Types
