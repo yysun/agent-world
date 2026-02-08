@@ -6,6 +6,7 @@ The `shell_cmd` tool is a built-in LLM tool that allows agents to execute shell 
 
 - **Command Execution**: Execute any shell command with parameters
 - **Output Capture**: Captures both stdout and stderr
+- **Real-time Streaming**: Stream output in real-time as it's produced (optional)
 - **Error Handling**: Gracefully handles command errors, timeouts, and exceptions
 - **Execution History**: Maintains history of all command executions
 - **Persistence**: Stores command, parameters, results, and exceptions
@@ -13,6 +14,8 @@ The `shell_cmd` tool is a built-in LLM tool that allows agents to execute shell 
 - **Security**: No shell expansion for better security
 - **Timeout Support**: Configurable timeouts to prevent hanging processes
 - **Working Directory**: Execute commands in specific directories
+- **Event System Integration**: Streaming events published to world event system for CLI/UI display
+- **Backwards Compatible**: Streaming is optional and doesn't affect existing functionality
 
 ## Availability
 
@@ -119,14 +122,25 @@ import { executeShellCommand, getExecutionHistory } from 'agent-world';
 // import { executeShellCommand, getExecutionHistory } from 'agent-world/core';
 
 // Execute a command
-const result = await executeShellCommand('ls', ['-la', '/tmp']);
+const result = await executeShellCommand('ls', ['-la', '/tmp'], './');
 console.log(result.stdout);
 console.log(result.exitCode);
 
 // Execute with options
-const result2 = await executeShellCommand('pwd', [], {
-  timeout: 5000,
-  cwd: '/home/user'
+const result2 = await executeShellCommand('pwd', [], './', {
+  timeout: 5000
+});
+
+// Execute with streaming callbacks for real-time output
+const result3 = await executeShellCommand('npm', ['install'], './', {
+  onStdout: (chunk) => {
+    // Display stdout in real-time
+    process.stdout.write(chunk);
+  },
+  onStderr: (chunk) => {
+    // Display stderr in real-time
+    process.stderr.write(chunk);
+  }
 });
 
 // Get execution history
@@ -135,6 +149,62 @@ for (const exec of history) {
   console.log(`${exec.command} - Exit code: ${exec.exitCode}`);
 }
 ```
+
+## Real-time Streaming Output
+
+The shell command tool supports real-time streaming of command output through optional callbacks. This is useful for long-running commands where you want to see output as it's produced.
+
+### Streaming Callbacks
+
+When executing commands programmatically, you can provide callbacks to receive output in real-time:
+
+```typescript
+import { executeShellCommand } from 'agent-world';
+
+await executeShellCommand('npm', ['test'], './', {
+  onStdout: (chunk) => {
+    // Called for each stdout chunk
+    console.log('STDOUT:', chunk);
+  },
+  onStderr: (chunk) => {
+    // Called for each stderr chunk
+    console.error('STDERR:', chunk);
+  }
+});
+```
+
+**Key Features:**
+- Callbacks are **optional** - existing code works without changes
+- Complete output is still accumulated and returned in `CommandExecutionResult`
+- Callbacks receive output chunks as they arrive from the child process
+- Callback errors are caught and logged (won't break command execution)
+- Full backwards compatibility with existing code
+
+### World Event System Integration
+
+When executed within a world context (e.g., by an LLM agent), streaming output is automatically published to the world event system using SSE events:
+
+```typescript
+{
+  type: 'tool-stream',
+  toolName: 'shell_cmd',
+  content: 'output chunk',
+  stream: 'stdout',  // or 'stderr'
+  messageId: 'tool-call-id',
+  agentName: 'shell_cmd'
+}
+```
+
+### CLI Streaming Display
+
+The CLI automatically displays streaming output in real-time when commands are executed:
+
+- **stdout**: Displayed in gray
+- **stderr**: Displayed in red
+- Output appears immediately as it's produced by the command
+- No need to wait for command completion to see output
+
+This provides immediate feedback for long-running commands like builds, tests, or package installations.
 
 ## Execution History
 
