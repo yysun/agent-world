@@ -13,6 +13,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-02-08: Added core-level sender normalization for consistent user-role detection
  * - 2026-02-08: Removed legacy manual tool-result publishing helper from event API
  *
  * All functions emit events synchronously and return immediately
@@ -34,6 +35,24 @@ let globalStreamingEnabled = true;
 export function enableStreaming(): void { globalStreamingEnabled = true; }
 export function disableStreaming(): void { globalStreamingEnabled = false; }
 export function isStreamingEnabled(): boolean { return globalStreamingEnabled; }
+
+/**
+ * Normalize sender values so role/persistence logic remains consistent across clients.
+ * Examples:
+ * - "HUMAN", "user", "User42" => "human"
+ * - "SYSTEM" => "system"
+ * - Agent IDs remain unchanged.
+ */
+export function normalizeSender(sender: string): string {
+  const trimmed = String(sender ?? '').trim();
+  if (!trimmed) return 'human';
+
+  const lower = trimmed.toLowerCase();
+  if (lower === 'human' || lower.startsWith('user')) return 'human';
+  if (lower === 'system') return 'system';
+  if (lower === 'world') return 'world';
+  return trimmed;
+}
 
 /**
  * Publish CRUD event for agent, chat, or world configuration changes
@@ -89,9 +108,11 @@ export function publishEvent(world: World, type: string, content: any): void {
 export function publishMessage(world: World, content: string, sender: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const messageId = generateId();
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const normalizedSender = normalizeSender(sender);
 
   loggerMemory.debug('[publishMessage] ENTRY', {
     sender,
+    normalizedSender,
     chatId,
     contentPreview: content.substring(0, 200),
     messageId
@@ -129,7 +150,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
   let role: string;
   if (parsedMsg.role === 'tool') {
     role = 'tool';
-  } else if (sender === 'human' || sender.startsWith('user')) {
+  } else if (normalizedSender === 'human' || normalizedSender.startsWith('user')) {
     role = 'user';
   } else {
     // Agent senders get role 'assistant'
@@ -138,7 +159,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   const messageEvent: WorldMessageEvent & { role?: string; tool_calls?: any } = {
     content: finalContent,
-    sender,
+    sender: normalizedSender,
     role,
     timestamp: new Date(),
     messageId,
@@ -148,7 +169,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   loggerMemory.debug('[publishMessage] Generated messageId', {
     messageId,
-    sender,
+    sender: normalizedSender,
     role,
     worldId: world.id,
     chatId: targetChatId,
@@ -158,7 +179,7 @@ export function publishMessage(world: World, content: string, sender: string, ch
 
   loggerMemory.debug('[publishMessage] Emitting message event', {
     messageId,
-    sender,
+    sender: normalizedSender,
     role,
     chatId: targetChatId,
     contentPreview: finalContent.substring(0, 100)
@@ -180,9 +201,10 @@ export function publishMessage(world: World, content: string, sender: string, ch
  */
 export function publishMessageWithId(world: World, content: string, sender: string, messageId: string, chatId?: string | null, replyToMessageId?: string): WorldMessageEvent {
   const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
+  const normalizedSender = normalizeSender(sender);
   const messageEvent: WorldMessageEvent = {
     content,
-    sender,
+    sender: normalizedSender,
     timestamp: new Date(),
     messageId,
     chatId: targetChatId,

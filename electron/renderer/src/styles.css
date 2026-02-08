@@ -1,0 +1,42 @@
+/**
+ * Renderer Global Styles - Tailwind Entry and Minor Utility Overrides
+ *
+ * Features:
+ * - Tailwind CSS import for utility-first styling
+ * - Global element defaults for desktop renderer fit
+ * - Subtle scrollbar styling for dense column layouts
+ *
+ * Implementation Notes:
+ * - Tailwind v4 is loaded via `@import "tailwindcss"`
+ *
+ * Recent Changes:
+ * - 2026-02-08: Initial Tailwind-driven renderer styles
+ */
+
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(71 85 105) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgb(71 85 105);
+  border-radius: 8px;
+}

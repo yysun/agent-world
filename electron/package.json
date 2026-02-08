@@ -1,0 +1,23 @@
+{
+  "name": "@agent-world/electron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "renderer:dev": "vite --config vite.config.js",
+    "renderer:build": "vite build --config vite.config.js",
+    "electron:dev": "wait-on http://127.0.0.1:5181 && ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
+    "dev": "npm-run-all --parallel renderer:dev electron:dev",
+    "start": "npm run renderer:build && electron ."
+  },
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@vitejs/plugin-react": "^5.1.2",
+    "electron": "^35.0.0"
+  }
+}
