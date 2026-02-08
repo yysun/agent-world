@@ -164,7 +164,15 @@ export async function streamGoogleResponse(
     const result = await generativeModel.generateContentStream({ contents: googleMessages });
 
     for await (const chunk of result.stream) {
-      const chunkText = chunk.text();
+      let chunkText = '';
+      try {
+        chunkText = chunk.text();
+      } catch (e) {
+        // chunk.text() throws if the response is a function call or blocked by safety
+        // Log it to see what's happening
+        logger.debug('Google Direct: chunk.text() threw error (likely tool call)', { error: e instanceof Error ? e.message : String(e) });
+      }
+
       if (chunkText) {
         fullResponse += chunkText;
         onChunk(chunkText);
@@ -173,7 +181,8 @@ export async function streamGoogleResponse(
       // Check for function calls in the chunk
       if (chunk.candidates?.[0]?.content?.parts) {
         for (const part of chunk.candidates[0].content.parts) {
-          if (part.functionCall) {
+           if (part.functionCall) {
+            logger.debug('Google Direct: Function call detected in chunk', { name: part.functionCall.name });
             functionCalls.push({
               id: generateId(),
               type: 'function',

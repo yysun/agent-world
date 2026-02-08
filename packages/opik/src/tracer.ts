@@ -11,9 +11,17 @@ export class OpikTracer {
   private client: Opik;
   private activeSpans: Map<string, SpanMap> = new Map();
   private activeTraces: Map<string, any> = new Map();
+  private scenarioName: string = "default_run";
 
   constructor() {
     this.client = OpikClient.getInstance()!;
+  }
+
+  public setScenarioName(name: string) {
+      this.scenarioName = name;
+      // Clear active traces so next event starts a new trace with new name
+      this.activeTraces.clear();
+      this.activeSpans.clear();
   }
 
   /**
@@ -42,16 +50,32 @@ export class OpikTracer {
   }
 
   private handleWorldEvent(payload: any) {
+    // DEBUG: Log ALL world events associated with this tracer
+    console.log(`[OpikTracer] 📥 World Event: ${payload.type}`, payload.toolExecution ? `Tool: ${payload.toolExecution.toolName}` : '');
+
     // Tool start
     if (payload.type === 'tool-start') {
       const trace = this.ensureTrace(payload.agentName);
       if (!trace) return;
       
+      // Phase 4: Shadow Monitoring - Risk Tagging
+      const toolName = payload.toolExecution.toolName;
+      const isRisky = toolName === 'shell_cmd' || toolName.startsWith('fs_');
+      
+      // DEBUG: Log tool name detection
+      if (isRisky) {
+          console.log(`[OpikTracer] 🚨 High risk tool detected: ${toolName}. Tagging as 'risk_level:high'.`);
+      } else {
+        console.log(`[OpikTracer] Normal tool detected: ${toolName}`);
+      }
+
       const span = trace.span({
-        name: payload.toolExecution.toolName,
+        name: toolName,
         type: 'tool',
         input: payload.toolExecution.input,
+        tags: isRisky ? ['risk_level:high', 'tool:risky', `tool:${toolName}`] : [`tool:${toolName}`]
       });
+
       // Store span by toolCallId if available, or generate one
       const id = payload.messageId + ':' + payload.toolExecution.toolCallId;
       this.storeSpan(id, span);
@@ -62,16 +86,12 @@ export class OpikTracer {
        const id = payload.messageId + ':' + payload.toolExecution.toolCallId;
        const span = this.getSpan(id);
        if (span) {
-         span.end(); // spans typically don't take output in end(), use update() or properties if needed, but span.end() is void in typings above?
-         // Actually span.end returns 'this'.
-         // To set output, Opik spans usually require setting output in the span data or via update()
-         
-         // Looking at typings: update: (updates: SpanUpdateData) => this;
-         // I should check SpanUpdateData
+         // Update with output before ending the span
          span.update({
            output: payload.toolExecution.result
          });
          
+         span.end();
          this.removeSpan(id);
        }
     }
@@ -86,20 +106,46 @@ export class OpikTracer {
       const span = trace.span({
         name: 'llm_generation',
         type: 'llm',
+        input: { messages: payload.messages || "Input messages not captured in SSE payload" } 
       });
-      this.storeSpan(payload.messageId, span);
+      // Store object wrapper to hold accumulated content
+      this.storeSpan(payload.messageId, { span, content: "" });
+    }
+    
+    if (payload.type === 'chunk' && payload.content) {
+        const spanMap = this.getSpan(payload.messageId);
+        if (spanMap) {
+            spanMap.content += payload.content;
+        }
     }
 
     if (payload.type === 'end') {
-      const span = this.getSpan(payload.messageId);
-      if (span) {
-        // We don't have the full content here, it was streamed. 
-        // We might need to accumulate chunks if we want to log the output.
-        // For now just end it.
+      const spanMap = this.getSpan(payload.messageId);
+      if (spanMap) {
+        const span = spanMap.span;
+        const recordedContent = spanMap.content;
+        
+        // If content is empty/missing, check if there are tool calls in the payload
+        // Note: The SSE 'end' payload might not carry tool calls in current architecture,
+        // but if we had access to them, we'd log them.
+        // For now, if content is empty, use a placeholder so the trace isn't blank "1"
+        const finalContent = recordedContent ? recordedContent : "(No text content generated)";
+
+        // Update span with final output
+        span.update({
+            output: { content: finalContent }
+        });
         span.end();
+        
         this.removeSpan(payload.messageId);
       }
     }
+  }
+
+  public async flush() {
+      if (this.client) {
+          await this.client.flush();
+      }
   }
 
   // Simplified trace management for POC
@@ -107,7 +153,7 @@ export class OpikTracer {
     let trace = this.activeTraces.get(agentId);
     if (!trace) {
       trace = this.client.trace({
-        name: `agent_run_${agentId}`,
+        name: `${this.scenarioName}: ${agentId}`,
       });
       this.activeTraces.set(agentId, trace);
     }

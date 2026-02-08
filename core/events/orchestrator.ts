@@ -63,6 +63,7 @@ import { publishMessage, publishSSE, publishEvent, isStreamingEnabled } from './
 import { handleTextResponse } from './memory-manager.js';
 import { isAICommand } from '../ai-commands.js';
 import { executeShellCommand, formatResultForLLM } from '../shell-cmd-tool.js';
+import { globalGuardrail } from '../security/guardrails.js';
 
 // Pi-agent-core imports
 import {
@@ -154,9 +155,22 @@ export async function processAgentMessage(
 
     // Handle text responses
     if (llmResponse.type === 'text') {
-      const responseText = llmResponse.content || '';
+      let responseText = llmResponse.content || '';
+      
+      // Phase 1: Security Guardrails
+      const guardrail = globalGuardrail.validate(responseText);
+      if (guardrail.flagged) {
+          loggerAgent.warn('Security Guardrail Triggered', { 
+              agentId: agent.id, 
+              reason: guardrail.reason,
+              original: responseText 
+          });
+          responseText = guardrail.redactedText || "[Redacted by Safety Guardrail]";
+      }
+
       if (!responseText) {
         loggerAgent.debug('LLM text response is empty', { agentId: agent.id });
+
         return;
       }
 
@@ -242,6 +256,19 @@ export async function processAgentMessage(
       // This is the UNIFIED tool execution path for both streaming and non-streaming
       const toolCall = llmResponse.tool_calls?.[0];
       if (toolCall) {
+        // Emit tool-start event for monitoring/tracing
+        const toolStartEvent: any = {
+          type: 'tool-start',
+          messageId: assistantMessage.messageId || generateId(),
+          agentName: agent.id,
+          toolExecution: {
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            input: JSON.parse(toolCall.function.arguments || '{}')
+          }
+        };
+        world.eventEmitter.emit('world', toolStartEvent);
+
         loggerAgent.debug('Executing tool call', {
           agentId: agent.id,
           toolCallId: toolCall.id,
@@ -377,6 +404,18 @@ export async function processAgentMessage(
             ...(toolArgs.directory && { directory: toolArgs.directory })
           });
 
+          // Emit tool-result event for Opik/Tracing (fixes missing span end)
+          world.eventEmitter.emit('world', {
+            type: 'tool-result',
+            messageId: assistantMessage.messageId, 
+            agentName: agent.id,
+            toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                result: toolResult
+            }
+          });
+
           // Save tool result to agent memory
           const toolResultMessage: AgentMessage = {
             role: 'tool',
@@ -432,6 +471,18 @@ export async function processAgentMessage(
             agentId: agent.id,
             toolCallId: toolCall.id,
             error: error instanceof Error ? error.message : error
+          });
+
+          // Emit tool-error event for Opik/Tracing
+          world.eventEmitter.emit('world', {
+            type: 'tool-error',
+            messageId: assistantMessage.messageId,
+            agentName: agent.id,
+            toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                result: error instanceof Error ? error.message : String(error)
+            }
           });
 
           // Save error as tool result

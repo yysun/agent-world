@@ -40,11 +40,12 @@ Focus: The "Loop" to evaluate agents against the dataset.
 ## Phase 4: Shadow Monitoring (High Risk)
 Focus: Visibility into dangerous tools.
 
-- [ ] **Tool Tagging**: Update `OpikTracer` (`packages/opik/src/tracer.ts`).
-    - [ ] Detect usage of `shell_cmd` or `fs_*` tools.
-    - [ ] Add tag `risk_level: high` to the Trace/Span.
-    - [ ] Add tag `tool: shell_cmd` for filtering.
+- [x] **Tool Tagging**: Update `OpikTracer` (`packages/opik/src/tracer.ts`).
+    - [x] Detect usage of `shell_cmd` or `fs_*` tools.
+    - [x] Add tag `risk_level: high` to the Trace/Span.
+    - [x] Add tag `tool: shell_cmd` for filtering.
 
 ## Verification
 - [ ] Run `npx tsx scripts/eval-robustness.ts` and verify results appear in Opik "Experiments" or "Traces".
 - [ ] Attempt to make an agent leak an API key and verify it is redacted in the logs/UI.
+- [x] Run `tests/opik/scenarios/infinite-etude-traffic.ts` (Scenario 3) to verify `risk_level: high` tagging for `shell_cmd`.
