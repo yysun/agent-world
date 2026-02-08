@@ -15,10 +15,11 @@
  * - Provides unified chat experience
  * 
  * Changes:
+ * - 2026-02-08: Added auto-scroll so new and streaming messages stay in view
  * - 2025-11-04: Created for Phase 3 - Input & Interaction
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChatTypingIndicator } from './chat-typing-indicator';
 import { ChatInput } from './chat-input';
 import { ChatMessageBubble } from './chat-message-bubble';
@@ -73,6 +74,17 @@ export function ChatThread({
   loading: _loading = false,
 }: ChatThreadProps) {
   const [draft, setDraft] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevMessagesLengthRef = useRef(messages.length);
+
+  useEffect(() => {
+    const hasNewMessage = messages.length > prevMessagesLengthRef.current;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: hasNewMessage ? 'smooth' : 'auto',
+      block: 'end',
+    });
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages, streaming]);
 
   const handleSend = () => {
     if (draft.trim()) {
@@ -91,13 +103,16 @@ export function ChatThread({
               <p className="text-center text-muted-foreground">No messages yet. Start a conversation!</p>
             </div>
           ) : (
-            messages.map((message) => (
-              <ChatMessageBubble
-                key={message.id || message.messageId}
-                message={message}
-                allMessages={messages}
-              />
-            ))
+            <>
+              {messages.map((message) => (
+                <ChatMessageBubble
+                  key={message.id || message.messageId}
+                  message={message}
+                  allMessages={messages}
+                />
+              ))}
+              <div ref={messagesEndRef} />
+            </>
           )}
         </div>
       </div>

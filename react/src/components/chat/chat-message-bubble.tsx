@@ -24,6 +24,8 @@
  * - Reply messages: show reply target using getReplyTarget() helper
  * 
  * Changes:
+ * - 2026-02-08: Updated message bubble colors to use theme tokens for dark mode
+ * - 2026-02-08: Increased user bubble max width for better readability
  * - 2025-11-12: Added reply-to display showing parent message target
  * - 2025-11-12: Added detailed tool call/result formatting with arguments
  * - 2025-11-12: Added tool approval request/response rendering
@@ -124,15 +126,15 @@ export const ChatMessageBubble = React.memo<ChatMessageBubbleProps>(
     // Bubble styling based on role
     const bubbleClass = `
       rounded-[1rem] px-4 py-2 text-sm
-      ${isUser ? 'bg-muted text-foreground max-w-[80%] shadow-sm' : ''}
-      ${isAssistant ? 'bg-white text-foreground max-w-[95%] border-l-2 border-l-border/40' : ''}
-      ${isSystem ? 'bg-muted text-muted-foreground italic border border-dashed max-w-[80%] shadow-sm' : ''}
-      ${isTool ? 'bg-accent text-accent-foreground text-xs max-w-[80%] shadow-sm' : ''}
+      ${isUser ? 'bg-muted text-foreground max-w-[92%] border border-border/50 shadow-sm' : ''}
+      ${isAssistant ? 'bg-card text-card-foreground max-w-[95%] border border-border/60 shadow-sm' : ''}
+      ${isSystem ? 'bg-muted text-muted-foreground italic border border-dashed border-border/70 max-w-[80%] shadow-sm' : ''}
+      ${isTool ? 'bg-accent text-accent-foreground text-xs border border-border/50 max-w-[80%] shadow-sm' : ''}
     `.trim();
 
     return (
       <div className={containerClass}>
-        <div className={`flex flex-col gap-1 ${isAssistant ? 'max-w-[95%]' : 'max-w-[80%]'}`}>
+        <div className={`flex flex-col gap-1 ${isAssistant ? 'max-w-[95%]' : isUser ? 'max-w-[92%]' : 'max-w-[80%]'}`}>
           {/* Sender and timestamp (if not system message) */}
           {!isSystem && (showSender || showTimestamp) && (
             <div
