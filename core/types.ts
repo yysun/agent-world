@@ -536,7 +536,7 @@ export interface WorldMessageEvent {
  */
 export interface WorldSSEEvent {
   agentName: string;
-  type: 'start' | 'chunk' | 'end' | 'error' | 'log';
+  type: 'start' | 'chunk' | 'end' | 'error' | 'log' | 'tool-stream';
   content?: string;
   error?: string;
   messageId: string;
@@ -552,6 +552,9 @@ export interface WorldSSEEvent {
     timestamp: string;
     data?: any;
   };
+  // Tool streaming fields
+  toolName?: string;
+  stream?: 'stdout' | 'stderr';
 }
 
 /**
