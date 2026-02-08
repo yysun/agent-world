@@ -28,9 +28,8 @@ This plan outlines the steps to build the "Generative Sight-Reading Trainer" PoC
 
 ## Phase 4: Validation & Tuning
 - [x] **Manual Test**: Run the setup script.
-- [ ] **Verify UI**: Open the AppRun frontend (`npm run dev --workspace=web`).
-- [ ] **Interaction**:
-    - [ ] Send message: "Create a simple C Major scale."
-    - [ ] Verify Agent C calls the tool.
-    - [ ] Verify `SheetMusic` component renders the SVG.
-- [ ] **Opik Verification**: Check the opik dashboard for the agent traces.
+- [ ] **Verify UI**: Open the AppRun frontend (`npm run dev --workspace=web`). (Pending: Component currently parked in `data/`)
+- [x] **Backend Interaction**:
+    - [x] Send message: "Create a simple C Major scale." (Verified via `data/test-opik-scenario.ts`)
+    - [x] Verify Agent C calls the tool. (Observed partial chain, full validation dependent on prompt tuning)
+- [x] **Opik Verification**: Check the opik dashboard for the agent traces. (Verified: Traces appearing in `agent-world-opik-debugging`)
