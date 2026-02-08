@@ -247,6 +247,7 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 - **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
+- **[Using Core from npm](docs/core-npm-usage.md)** - Integration guide for server and browser apps
 
 
 ## Built-in Tools
@@ -307,5 +308,4 @@ Agent World thrives on community examples and improvements:
 MIT License - Build amazing things and share them with the world!
 
 Copyright © 2025 Yiyi Sun
-
 

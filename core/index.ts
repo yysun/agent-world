@@ -30,7 +30,10 @@
  * - Storage implementation: StorageAPI, storage factory functions
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
- * Version: 3.0.0
+ * Recent Changes:
+ * - 2026-02-08: Exported LLM provider configuration helpers for npm core library consumers
+ *
+ * Version: 3.1.0
  */
 
 // === WORLD MANAGEMENT ===
@@ -103,6 +106,26 @@ export {
 
 // LLM Provider enum (needed for agent configuration)
 export { type World, type Agent, type Chat, type AgentMessage, type RemovalResult, type EditErrorLog, type ToolResultData, LLMProvider, EventType, type LLMResponse } from './types.js';
+
+// === LLM PROVIDER CONFIGURATION ===
+export {
+  configureLLMProvider,
+  validateProviderConfig,
+  isProviderConfigured,
+  getConfiguredProviders,
+  clearAllConfiguration,
+  getConfigurationStatus,
+  type BaseLLMConfig,
+  type OpenAIConfig,
+  type AnthropicConfig,
+  type GoogleConfig,
+  type AzureConfig,
+  type XAIConfig,
+  type OpenAICompatibleConfig,
+  type OllamaConfig,
+  type ProviderConfigMap,
+  type ProviderConfig,
+} from './llm-config.js';
 
 // === LOGGER ===
 export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';
