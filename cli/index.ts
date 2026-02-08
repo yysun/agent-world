@@ -99,7 +99,8 @@ import {
   type WorldActivityEventPayload,
   type WorldActivityEventType
 } from '../core/index.js';
-import { World, EventType, ApprovalRequiredException, type ApprovalDecision, type ApprovalScope } from '../core/types.js';
+import { OpikTracer } from '@agent-world/opik';
+import { World, EventType } from '../core/types.js';
 import { getDefaultRootPath } from '../core/storage/storage-factory.js';
 import { processCLIInput, displayChatMessages } from './commands.js';
 import {
@@ -381,71 +382,6 @@ async function handleNewHITLRequest(
     askForChoice();
   });
 }
-
-// Simplified approval handler for pipeline mode (non-interactive)
-async function handlePipelineApproval(approvalException: ApprovalRequiredException): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
-  const { toolName } = approvalException;
-
-  console.error(`${boldRed('Tool approval required in pipeline mode:')}`);
-  console.error(`${gray('Tool:')} ${yellow(toolName)}`);
-  console.error(`${gray('Pipeline mode: Denying tool execution (use interactive mode for approvals)')}`);
-
-  return { decision: 'deny', scope: 'once' };
-}
-
-// CLI approval handling for tool execution
-async function handleApprovalRequest(
-  approvalException: ApprovalRequiredException,
-  rl: readline.Interface
-): Promise<{ decision: ApprovalDecision; scope: ApprovalScope }> {
-  const { toolName, toolArgs, message, options } = approvalException;
-
-  console.log(`\n${boldYellow('🔒 Tool Approval Required')}`);
-  console.log(`${gray('Tool:')} ${yellow(toolName)}`);
-
-  if (toolArgs && Object.keys(toolArgs).length > 0) {
-    console.log(`${gray('Arguments:')}`);
-    for (const [key, value] of Object.entries(toolArgs)) {
-      const displayValue = typeof value === 'string' && value.length > 100
-        ? `${value.substring(0, 100)}...`
-        : String(value);
-      console.log(`  ${gray(key + ':')} ${displayValue}`);
-    }
-  }
-
-  if (message) {
-    console.log(`${gray('Details:')} ${message}`);
-  }
-
-  // Display options
-  console.log(`\n${boldMagenta('How would you like to respond?')}`);
-  console.log(`  ${yellow('1.')} ${cyan('Cancel (deny)')}`);
-  console.log(`  ${yellow('2.')} ${cyan('Allow Once')}`);
-  console.log(`  ${yellow('3.')} ${cyan('Allow Always (this session)')}`);
-
-  return new Promise<{ decision: ApprovalDecision; scope: ApprovalScope }>((resolve) => {
-    function askForDecision() {
-      rl.question(`\n${boldMagenta('Select an option (number):')} `, (answer) => {
-        const trimmed = answer.trim();
-        const num = parseInt(trimmed);
-
-        if (num === 1) {
-          resolve({ decision: 'deny', scope: 'once' });
-        } else if (num === 2) {
-          resolve({ decision: 'approve', scope: 'once' });
-        } else if (num === 3) {
-          resolve({ decision: 'approve', scope: 'session' });
-        } else {
-          console.log(boldRed('Invalid selection. Please try again.'));
-          askForDecision();
-        }
-      });
-    }
-
-    askForDecision();
-  });
-}
-
 
 type ActivityEventState = WorldActivityEventType;
 
@@ -876,6 +812,9 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
       }
       world = worldSubscription.world as World;
 
+      // Attach Opik tracer if configured
+      tryAttachOpik(world);
+
       // Attach direct listeners to the world.eventEmitter for pipeline handling
       // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
       cliListeners = attachCLIListeners(world, null, null, activityMonitor, progressRenderer);
@@ -888,7 +827,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(options.command, world, 'human', handlePipelineApproval);
+      const result = await processCLIInput(options.command, world, 'human');
       printCLIResult(result);
 
       if (!options.command.startsWith('/') && world) {
@@ -921,7 +860,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
         process.exit(1);
       }
       const snapshot = activityMonitor.captureSnapshot();
-      const result = await processCLIInput(messageFromArgs, world, 'human', handlePipelineApproval);
+      const result = await processCLIInput(messageFromArgs, world, 'human');
       printCLIResult(result);
 
       try {
@@ -954,7 +893,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
           process.exit(1);
         }
         const snapshot = activityMonitor.captureSnapshot();
-        const result = await processCLIInput(input.trim(), world, 'HUMAN', handlePipelineApproval);
+        const result = await processCLIInput(input.trim(), world, 'HUMAN');
         printCLIResult(result);
 
         try {
@@ -1011,6 +950,21 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
   }
 }
 
+// Helper to attach Opik tracer if configured
+function tryAttachOpik(world: World): void {
+  // Check if Opik is enabled via ENV or manual flag? 
+  // Assuming keys presence is enough as per OpikClient logic.
+  if (process.env.OPIK_API_KEY || process.env.OPIK_ENABLED === 'true') {
+    try {
+      const tracer = new OpikTracer();
+      tracer.attachToWorld(world);
+      console.log('Opik tracing enabled for world:', world.name);
+    } catch (error) {
+      console.warn('Failed to attach Opik tracer:', error);
+    }
+  }
+}
+
 /**
  * Subscribe to world and attach CLI event listeners for interactive mode
  * 
@@ -1042,6 +996,9 @@ async function handleSubscribe(
   if (globalState) {
     globalState.world = world;
   }
+
+  // Attach Opik tracer if configured
+  tryAttachOpik(world);
 
   // Attach direct listeners to the world.eventEmitter for CLI handling
   // Interactive mode needs all event types including SSE for streaming responses
@@ -1675,7 +1632,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       }
 
       try {
-        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN', (error) => handleApprovalRequest(error, rl));
+        const result = await processCLIInput(trimmedInput, worldState?.world || null, 'HUMAN');
 
         // Handle exit commands from result (redundant, but keep for safety)
         if (result.data?.exit) {

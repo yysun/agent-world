@@ -229,6 +229,25 @@ LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run server
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
 
+## Opik Integration (Observability)
+
+Agent World integrates with [Opik](https://www.comet.com/opik) to provide detailed tracing of agent executions, LLM calls, and tool usage.
+
+### Setup
+
+1.  **Sign Up**: Create an account at [Comet Opik](https://www.comet.com/signup).
+2.  **Get API Key**: Navigate to your Opik settings to generate an API Key.
+3.  **Configure Environment**:
+    Add the following to your `.env` file or export them in your shell:
+
+    ```bash
+    export OPIK_API_KEY="your-api-key"
+    export OPIK_WORKSPACE="your-workspace-name"  # Optional (default: default)
+    export OPIK_PROJECT="agent-world"            # Optional (default: agent-world-default)
+    ```
+
+Once configured, the CLI will automatically detect the key and start tracing your sessions. You can view traces in your Opik dashboard to debug agent reasoning and performance.
+
 ## Learn More
 
 ### World Database Setup

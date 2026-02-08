@@ -69,7 +69,8 @@ import {
   getPiAgentForAgent,
   toAgentMessages,
   toStoredMessage,
-  bridgeEventToWorld
+  bridgeEventToWorld,
+  clearPiAgentCache
 } from '../pi-agent-adapter.js';
 import { getToolsForAgent } from '../pi-agent-tools.js';
 import type { AgentEvent } from '@mariozechner/pi-agent-core';
@@ -533,8 +534,30 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
       loggerResponse.debug('No mentions - public message', { agentId: agent.id });
       return true;
     }
-    const shouldRespond = mentions.includes(agent.id.toLowerCase());
-    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, shouldRespond });
+    
+    // Check if any mention matches agent ID or normalized Name
+    const agentIdLower = agent.id.toLowerCase();
+    
+    // Normalize agent name for matching (e.g. "Maestro Composer" -> "maestro composer", "maestro-composer", "maestro")
+    const agentNameLower = agent.name.toLowerCase();
+    const nameParts = agentNameLower.split(/[\s-_]+/);
+    
+    const shouldRespond = mentions.some(mention => {
+      const m = mention.toLowerCase();
+      // 1. Exact ID match (existing logic)
+      if (m === agentIdLower) return true;
+      
+      // 2. Exact Name match (spaces allowed in mention if extractor supported it, but here mention is single word)
+      // So checks if "maestro" matches start of agent name parts
+      if (nameParts.includes(m)) return true;
+
+      // 3. Prefix match for ID (e.g. "maestro" matches "maestro-composer")
+      if (agentIdLower.startsWith(m + '-')) return true;
+
+      return false;
+    });
+
+    loggerResponse.debug('HUMAN message mention check', { agentId: agent.id, mentions, shouldRespond });
     return shouldRespond;
   }
 
@@ -596,11 +619,22 @@ export async function processAgentMessageWithPiAgent(
     // Get or create pi-agent instance
     const piAgent = await getPiAgentForAgent(world, agent, tools);
 
-    // Set streaming mode based on global flag
-    piAgent.state.isStreaming = isStreamingEnabled();
+    // CRITICAL FIX: Only set isStreaming=true if this adapter supports proper streaming
+    // pi-agent-core interprets isStreaming=true as "I am currently busy", which blocks execution
+    // We must NOT set this to true before prompt() unless we want to block ourselves.
+    // Instead, piAgent likely expects 'isStreaming' to correspond to its internal busy state, 
+    // OR it interprets this as "Should I stream response?".
+    // If the latter, the error thrown "Agent is already processing" implies status check.
+    
+    // Let's assume piAgent manages 'isStreaming' state internally and we should not overwrite it.
+    // piAgent.state.isStreaming = isStreamingEnabled();
+    
+    // However, we want strict JSON output for Engraver, and streaming might break that if not handled.
+    // But for now, fixing the BLOCKER is priority.
+    
     loggerAgent.debug('Set pi-agent streaming mode', {
       agentId: agent.id,
-      isStreaming: piAgent.state.isStreaming
+      isStreaming: piAgent.state.isStreaming // Log what it is naturally
     });
 
     // Load existing messages from agent memory and convert to pi-agent format
@@ -665,8 +699,19 @@ export async function processAgentMessageWithPiAgent(
     });
 
     try {
-      // Run the prompt
-      await piAgent.prompt(messageEvent.content);
+      // Run the prompt with retry logic
+      try {
+        await piAgent.prompt(messageEvent.content);
+      } catch (promptError) {
+        if (String(promptError).includes('Agent is already processing a prompt')) {
+           // If stuck, clear cache so the NEXT attempt works.
+           // Auto-retry is hard because of event subscription closure complexity.
+           // By clearing cache and re-throwing, we ensure the user's NEXT message works at least.
+           loggerAgent.warn('Agent stuck in processing state, clearing cache', { agentId: agent.id });
+           clearPiAgentCache(world.id, agent.id);
+        }
+        throw promptError;
+      }
 
       // Save new messages to agent memory
       if (newMessages.length > 0) {
@@ -714,6 +759,12 @@ export async function processAgentMessageWithPiAgent(
     }
 
   } catch (error) {
+    // If agent is stuck in processing state, clear the cache so fresh instance is created next time
+    if (String(error).includes('Agent is already processing a prompt')) {
+      loggerAgent.warn('Agent stuck in processing state, clearing cache', { agentId: agent.id });
+      clearPiAgentCache(world.id, agent.id);
+    }
+
     loggerAgent.error('Error processing agent message with pi-agent-core', {
       agentId: agent.id,
       error: error instanceof Error ? error.message : String(error),

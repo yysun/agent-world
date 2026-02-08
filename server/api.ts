@@ -71,7 +71,7 @@ import {
   getMemory as coreGetMemory,
   exportWorldToMarkdown,
   removeMessagesFrom,
-  type World,
+  // type World,
   type Agent,
   type Chat,
   type ToolResultData,
@@ -79,7 +79,9 @@ import {
   LLMProvider,
   EventType
 } from '../core/index.js';
+import { World } from '../core/types.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
+import { OpikTracer } from '@agent-world/opik';
 import {
   listMCPServers,
   restartMCPServer,
@@ -97,6 +99,22 @@ const loggerValidation = createCategoryLogger('api.validation');
 const loggerMcp = createCategoryLogger('api.mcp');
 const loggerExport = createCategoryLogger('api.export');
 const DEFAULT_WORLD_NAME = 'Default World';
+
+/**
+ * Helper to optionally attach Opik tracing to a World instance
+ */
+function tryAttachOpik(world: World): void {
+  // Check if Opik is enabled via ENV or manual flag
+  if ((process.env.OPIK_API_KEY || process.env.OPIK_ENABLED === 'true') && process.env.OPIK_ENABLED !== 'false') {
+    try {
+      const tracer = new OpikTracer();
+      tracer.attachToWorld(world);
+    } catch (error) {
+      console.warn('Failed to attach Opik tracer in API:', error);
+    }
+  }
+}
+
 
 type WorldContext = {
   id: string;
@@ -205,6 +223,10 @@ function validateWorld(req: Request, res: Response, next: Function) {
       sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
       return;
     }
+    
+    // Attach Opik tracer if configured
+    tryAttachOpik(world);
+
     // Attach worldCtx to request for downstream handlers
     (req as any).worldCtx = worldCtx;
     (req as any).world = world;

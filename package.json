@@ -18,7 +18,8 @@
   "workspaces": [
     "core",
     "react",
-    "web"
+    "web",
+    "packages/opik"
   ],
   "bin": {
     "agent-world": "dist/cli/index.js",
@@ -52,7 +53,7 @@
     "test:e2e:interactive": "npx tsx tests/e2e/test-agent-response-rules.ts -i",
     "integration": "vitest run --config vitest.integration.config.ts",
     "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --workspace=react",
-    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run build --workspace=react",
+    "build": "npm run build --workspace=core && npm run build --workspace=packages/opik && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run build --workspace=react",
     "pkill": "pkill -f tsx"
   },
   "description": "World-mediated agent management system with clean API surface",
@@ -67,6 +68,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@agent-world/opik": "*",
     "@mariozechner/pi-agent-core": "^0.51.0",
     "@mariozechner/pi-ai": "^0.51.0",
     "@sinclair/typebox": "^0.34.48",

@@ -21,6 +21,7 @@
  */
 
 import { Agent as PiAgent } from '@mariozechner/pi-agent-core';
+import * as fs from 'fs';
 import type { AgentEvent, AgentMessage as PiAgentMessage, AgentTool, AgentState } from '@mariozechner/pi-agent-core';
 import { getModel, getEnvApiKey } from '@mariozechner/pi-ai';
 import type { Message, Model, UserMessage, AssistantMessage, ToolResultMessage } from '@mariozechner/pi-ai';
@@ -88,10 +89,18 @@ export async function getPiAgentForAgent(
 
   if (cached) {
     logger.debug('Using cached pi-agent instance', { worldId: world.id, agentId: agent.id });
+    try {
+      const fs = await import('fs');
+      fs.appendFileSync('data/debug_trace.log', `[${new Date().toISOString()}] ADAPTER: Returning CACHED pi-agent for ${agent.id}\n`);
+    } catch (e) {}
     return cached.agent;
   }
 
   logger.debug('Creating new pi-agent instance', { worldId: world.id, agentId: agent.id });
+  try {
+    const fs = await import('fs');
+    fs.appendFileSync('data/debug_trace.log', `[${new Date().toISOString()}] ADAPTER: Creating NEW pi-agent for ${agent.id}\n`);
+  } catch (e) {}
   const piAgent = await createPiAgentForAgent(world, agent, tools);
 
   // Cache the instance
@@ -247,7 +256,8 @@ function getBaseUrlForProvider(provider: LLMProvider): string {
     case LLMProvider.XAI:
       return 'https://api.x.ai/v1';
     case LLMProvider.OLLAMA:
-      return process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+      // Default to OpenAI-compatible endpoint as per system design
+      return process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
     case LLMProvider.OPENAI_COMPATIBLE: {
       const url = process.env.OPENAI_COMPATIBLE_BASE_URL;
       if (url && !url.match(/^https?:\/\//)) {
@@ -640,6 +650,11 @@ export function subscribePiAgentToWorld(
   messageId: string
 ): () => void {
   const unsubscribe = piAgent.subscribe((event) => {
+    // DEBUG LOG
+    try {
+      fs.appendFileSync('data/debug_trace.log', `[${new Date().toISOString()}] ADAPTER EVENT: ${event.type} Agent:${agentId}\n`);
+    } catch (e) {}
+
     bridgeEventToWorld(world, event, agentId, messageId);
   });
 

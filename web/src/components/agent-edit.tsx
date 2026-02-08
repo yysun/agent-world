@@ -49,10 +49,17 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
   yield { ...state, loading: true, error: null };
 
   try {
+    // Ensure numeric values are numbers
+    const agentData = {
+      ...state.agent,
+      temperature: Number(state.agent.temperature),
+      maxTokens: Number(state.agent.maxTokens)
+    };
+
     if (state.mode === 'create') {
-      await api.createAgent(state.worldName, state.agent);
+      await api.createAgent(state.worldName, agentData);
     } else {
-      await api.updateAgent(state.worldName, state.agent.name, state.agent);
+      await api.updateAgent(state.worldName, state.agent.name, agentData);
     }
 
     const successMessage = state.mode === 'create'
@@ -289,14 +296,11 @@ export default class AgentEdit extends Component<AgentEditState> {
                       <label htmlFor="agent-temperature">Temperature</label>
                       <input
                         id="agent-temperature"
-                        type="number"
+                        type="text"
                         className="form-input"
                         placeholder="0.0 - 2.0"
-                        min="0"
-                        max="2"
-                        step="0.1"
                         value={state.agent.temperature}
-                        $bind="agent.temperature"
+                        $oninput={(e: any) => state.agent.temperature = e.target.value}
                         disabled={state.loading}
                       />
                     </div>

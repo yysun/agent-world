@@ -187,15 +187,10 @@ export async function executeMigration(db: Database, migration: MigrationFile): 
   const sql = readMigrationFile(migration.filePath);
 
   try {
-    // Split SQL into statements and execute each one
-    const statements = sql
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-
-    for (const statement of statements) {
-      await run(statement);
-    }
+    // Execute the full SQL script using exec to properly handle triggers and multi-line statements
+    // Splitting by ';' is insufficient for CREATE TRIGGER ... END;
+    const exec = promisify(db.exec.bind(db));
+    await exec(sql);
 
     await recordMigration(db, migration.version, migration.name);
     await setVersion(db, migration.version);

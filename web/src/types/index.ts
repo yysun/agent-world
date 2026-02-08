@@ -32,6 +32,10 @@
 import type { AgentMessage, LLMProvider, EventType, SenderType, RemovalResult } from '../../../core/types';
 export type { EventType, SenderType, AgentMessage, LLMProvider, RemovalResult };
 
+// Re-export Sheet Music Data Type
+import type { SheetMusicData } from '../components/sheet-music';
+export type { SheetMusicData };
+
 // ========================================
 // UI DATA INTERFACES
 // ========================================

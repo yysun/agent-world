@@ -1,0 +1,28 @@
+{
+  "name": "@agent-world/opik",
+  "version": "0.1.0",
+  "description": "Opik observability integration for Agent World",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "opik": "^1.0.0"
+  },
+  "peerDependencies": {
+    "@agent-world/core": "*"
+  },
+  "devDependencies": {
+    "@agent-world/core": "*",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

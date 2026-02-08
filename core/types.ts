@@ -101,6 +101,18 @@ export interface AgentMessage extends ChatMessage {
    *   }
    * }
    */
+  toolCallStatus?: Record<string, { complete: boolean; result: any | null }>;
+}
+
+export interface ToolResultData {
+  tool_call_id: string;
+  decision?: string;
+  scope?: string;
+  choice?: string;
+  toolName?: string;
+  toolArgs?: any;
+  workingDirectory?: string;
+  [key: string]: any;
 }
 
 // Agent Types
