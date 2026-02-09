@@ -318,10 +318,10 @@ export async function prepareMessagesForLLM(
       // Falls back to getMemory for backward compatibility if getAgentMemoryForChat is not available
       if ('getAgentMemoryForChat' in storage) {
         conversationHistory = await storage.getAgentMemoryForChat(worldId, agent.id, chatId);
-      } else {
+      } else if ('getMemory' in storage) {
         // FALLBACK: Use old getMemory approach for backward compatibility
         // Note: getMemory returns all messages for all agents in the chat, same as new approach
-        conversationHistory = await storage.getMemory(worldId, chatId);
+        conversationHistory = await (storage as any).getMemory(worldId, chatId);
       }
     }
   } catch (error) {

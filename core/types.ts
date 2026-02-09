@@ -72,6 +72,7 @@ export interface AgentMessage extends ChatMessage {
 
   sender?: string; // Custom field - removed before LLM calls
   chatId?: string | null; // Chat session ID for memory filtering
+  worldId?: string; // World ID for centralized message storage
   agentId?: string; // Agent ID for identifying message source
 
   /**
