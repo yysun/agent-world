@@ -396,3 +396,178 @@ export async function getMemory(rootPath: string, worldId: string, chatId: strin
     return [];
   }
 }
+
+/**
+ * Chat messages storage path utility
+ */
+function getChatMessagesPath(rootPath: string, worldId: string, chatId: string): string {
+  return path.join(getChatDir(rootPath, worldId), `${chatId}_messages.json`);
+}
+
+/**
+ * Save a message to centralized chat messages file
+ */
+export async function saveChatMessage(
+  rootPath: string,
+  worldId: string,
+  chatId: string,
+  message: AgentMessage
+): Promise<void> {
+  if (!message.messageId) {
+    throw new Error('Cannot save message without messageId');
+  }
+
+  await ensureChatDirectory(rootPath, worldId);
+  const messagesPath = getChatMessagesPath(rootPath, worldId, chatId);
+  
+  let messages: AgentMessage[] = [];
+  if (await exists(messagesPath)) {
+    const data = await fs.readFile(messagesPath, 'utf-8');
+    messages = JSON.parse(data);
+  }
+  
+  // Upsert by messageId
+  const existingIndex = messages.findIndex(m => m.messageId === message.messageId);
+  if (existingIndex >= 0) {
+    messages[existingIndex] = message;
+  } else {
+    messages.push(message);
+    // Sort by createdAt to maintain order
+    messages.sort((a, b) => {
+      const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return at - bt;
+    });
+  }
+  
+  await writeJsonFile(messagesPath, messages);
+}
+
+/**
+ * Load messages from centralized chat messages file
+ */
+export async function getChatMessages(
+  rootPath: string,
+  worldId: string,
+  chatId: string
+): Promise<AgentMessage[]> {
+  const messagesPath = getChatMessagesPath(rootPath, worldId, chatId);
+  
+  if (!await exists(messagesPath)) {
+    return [];
+  }
+  
+  try {
+    const data = await fs.readFile(messagesPath, 'utf-8');
+    const messages = JSON.parse(data) as AgentMessage[];
+    
+    // Reconstruct Date objects
+    return messages.map(msg => ({
+      ...msg,
+      createdAt: msg.createdAt ? new Date(msg.createdAt) : new Date()
+    }));
+  } catch (error) {
+    logger.error('Failed to load chat messages', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId,
+      chatId
+    });
+    return [];
+  }
+}
+
+/**
+ * Get agent-specific view of chat messages
+ */
+export async function getAgentMemoryForChat(
+  rootPath: string,
+  worldId: string,
+  agentId: string,
+  chatId: string
+): Promise<AgentMessage[]> {
+  // Get all messages from the chat
+  const allMessages = await getChatMessages(rootPath, worldId, chatId);
+  
+  // For now, return all messages in the chat
+  // In the future, we could filter based on agent-specific logic
+  return allMessages;
+}
+
+/**
+ * Delete a specific message from chat
+ */
+export async function deleteChatMessage(
+  rootPath: string,
+  worldId: string,
+  chatId: string,
+  messageId: string
+): Promise<boolean> {
+  const messagesPath = getChatMessagesPath(rootPath, worldId, chatId);
+  
+  if (!await exists(messagesPath)) {
+    return false;
+  }
+  
+  try {
+    const data = await fs.readFile(messagesPath, 'utf-8');
+    let messages = JSON.parse(data) as AgentMessage[];
+    
+    const originalLength = messages.length;
+    messages = messages.filter(m => m.messageId !== messageId);
+    
+    if (messages.length === originalLength) {
+      return false; // Message not found
+    }
+    
+    await writeJsonFile(messagesPath, messages);
+    return true;
+  } catch (error) {
+    logger.error('Failed to delete chat message', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId,
+      chatId,
+      messageId
+    });
+    return false;
+  }
+}
+
+/**
+ * Update a specific message in chat
+ */
+export async function updateChatMessage(
+  rootPath: string,
+  worldId: string,
+  chatId: string,
+  messageId: string,
+  updates: Partial<AgentMessage>
+): Promise<boolean> {
+  const messagesPath = getChatMessagesPath(rootPath, worldId, chatId);
+  
+  if (!await exists(messagesPath)) {
+    return false;
+  }
+  
+  try {
+    const data = await fs.readFile(messagesPath, 'utf-8');
+    const messages = JSON.parse(data) as AgentMessage[];
+    
+    const index = messages.findIndex(m => m.messageId === messageId);
+    if (index < 0) {
+      return false; // Message not found
+    }
+    
+    messages[index] = { ...messages[index], ...updates };
+    
+    await writeJsonFile(messagesPath, messages);
+    return true;
+  } catch (error) {
+    logger.error('Failed to update chat message', {
+      error: error instanceof Error ? error.message : String(error),
+      worldId,
+      chatId,
+      messageId
+    });
+    return false;
+  }
+}

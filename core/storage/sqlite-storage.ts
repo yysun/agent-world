@@ -711,6 +711,166 @@ export async function restoreFromWorldChat(ctx: SQLiteStorageContext, worldId: s
   }
 }
 
+// CHAT MESSAGE OPERATIONS (CENTRALIZED STORAGE)
+/**
+ * Save a message to centralized chat_messages table
+ */
+export async function saveChatMessage(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  message: AgentMessage
+): Promise<void> {
+  await ensureInitialized(ctx);
+  
+  if (!message.messageId) {
+    throw new Error('Cannot save message without messageId');
+  }
+  
+  await run(ctx, `
+    INSERT INTO chat_messages (
+      chat_id, world_id, message_id, role, content, sender,
+      reply_to_message_id, tool_calls, tool_call_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(message_id) DO UPDATE SET
+      content = excluded.content,
+      tool_calls = excluded.tool_calls,
+      tool_call_id = excluded.tool_call_id
+  `, 
+    chatId, worldId, message.messageId, message.role,
+    message.content, message.sender || 'unknown', message.replyToMessageId || null,
+    message.tool_calls ? JSON.stringify(message.tool_calls) : null,
+    message.tool_call_id || null,
+    message.createdAt instanceof Date ? message.createdAt.toISOString() : (message.createdAt || new Date().toISOString())
+  );
+}
+
+/**
+ * Get all messages for a chat from centralized storage
+ */
+export async function getChatMessages(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string
+): Promise<AgentMessage[]> {
+  await ensureInitialized(ctx);
+  
+  const rows = await all(ctx, `
+    SELECT message_id, role, content, sender, chat_id, world_id,
+           reply_to_message_id, tool_calls, tool_call_id, created_at
+    FROM chat_messages
+    WHERE chat_id = ? AND world_id = ?
+    ORDER BY created_at ASC
+  `, chatId, worldId) as any[];
+  
+  return rows.map(row => ({
+    messageId: row.message_id,
+    role: row.role,
+    content: row.content,
+    sender: row.sender,
+    chatId: row.chat_id,
+    worldId: row.world_id,
+    replyToMessageId: row.reply_to_message_id || undefined,
+    tool_calls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
+    tool_call_id: row.tool_call_id || undefined,
+    createdAt: new Date(row.created_at),
+    agentId: row.sender // For compatibility - sender is typically the agentId
+  }));
+}
+
+/**
+ * Get agent-specific view of chat messages
+ * Returns messages relevant to this agent (messages from/to the agent)
+ */
+export async function getAgentMemoryForChat(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  agentId: string,
+  chatId: string
+): Promise<AgentMessage[]> {
+  await ensureInitialized(ctx);
+  
+  // Get all messages from the chat
+  const allMessages = await getChatMessages(ctx, worldId, chatId);
+  
+  // For now, return all messages in the chat
+  // In the future, we could filter based on agent-specific logic
+  // (e.g., only messages where sender === agentId or messages directed to the agent)
+  return allMessages;
+}
+
+/**
+ * Delete a specific message from chat
+ */
+export async function deleteChatMessage(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  messageId: string
+): Promise<boolean> {
+  await ensureInitialized(ctx);
+  
+  try {
+    const result = await run(ctx, `
+      DELETE FROM chat_messages 
+      WHERE message_id = ? AND chat_id = ? AND world_id = ?
+    `, messageId, chatId, worldId);
+    return (result as any).changes > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Update a specific message in chat
+ */
+export async function updateChatMessage(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  messageId: string,
+  updates: Partial<AgentMessage>
+): Promise<boolean> {
+  await ensureInitialized(ctx);
+  
+  const setClauses: string[] = [];
+  const values: any[] = [];
+  
+  if (updates.content !== undefined) {
+    setClauses.push('content = ?');
+    values.push(updates.content);
+  }
+  if (updates.role !== undefined) {
+    setClauses.push('role = ?');
+    values.push(updates.role);
+  }
+  if (updates.tool_calls !== undefined) {
+    setClauses.push('tool_calls = ?');
+    values.push(updates.tool_calls ? JSON.stringify(updates.tool_calls) : null);
+  }
+  if (updates.tool_call_id !== undefined) {
+    setClauses.push('tool_call_id = ?');
+    values.push(updates.tool_call_id || null);
+  }
+  
+  if (setClauses.length === 0) {
+    return false; // No updates to apply
+  }
+  
+  values.push(messageId, chatId, worldId);
+  
+  try {
+    const result = await run(ctx, `
+      UPDATE chat_messages 
+      SET ${setClauses.join(', ')}
+      WHERE message_id = ? AND chat_id = ? AND world_id = ?
+    `, ...values);
+    return (result as any).changes > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ARCHIVE OPERATIONS
 export async function archiveAgentMemory(
   ctx: SQLiteStorageContext,

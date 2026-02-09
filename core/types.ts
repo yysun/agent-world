@@ -96,6 +96,11 @@ export interface Agent {
   lastActive?: Date;
   llmCallCount: number;
   lastLLMCall?: Date;
+  /**
+   * @deprecated Agent memory is now loaded dynamically from chat sessions.
+   * This field will be removed in a future version.
+   * Use StorageAPI.getAgentMemoryForChat() instead.
+   */
   memory: AgentMessage[];
 }
 
@@ -384,7 +389,9 @@ export interface StorageAPI {
   deleteAgent(worldId: string, agentId: string): Promise<boolean>;
   listAgents(worldId: string): Promise<Agent[]>;
   agentExists(worldId: string, agentId: string): Promise<boolean>;
+  /** @deprecated Use saveChatMessage instead. Agent memory is now stored in centralized chat_messages. */
   saveAgentMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
+  /** @deprecated Use saveChatMessage instead. Agent memory is now stored in centralized chat_messages. */
   archiveMemory(worldId: string, agentId: string, memory: AgentMessage[]): Promise<void>;
   deleteMemoryByChatId(worldId: string, chatId: string): Promise<number>;
 
@@ -404,6 +411,13 @@ export interface StorageAPI {
   loadWorldChat(worldId: string, chatId: string): Promise<WorldChat | null>;
   loadWorldChatFull(worldId: string, chatId: string): Promise<WorldChat | null>;
   restoreFromWorldChat(worldId: string, chat: WorldChat): Promise<boolean>;
+
+  // Chat message operations (new centralized storage)
+  saveChatMessage(worldId: string, chatId: string, message: AgentMessage): Promise<void>;
+  getChatMessages(worldId: string, chatId: string): Promise<AgentMessage[]>;
+  getAgentMemoryForChat(worldId: string, agentId: string, chatId: string): Promise<AgentMessage[]>;
+  deleteChatMessage(worldId: string, chatId: string, messageId: string): Promise<boolean>;
+  updateChatMessage(worldId: string, chatId: string, messageId: string, updates: Partial<AgentMessage>): Promise<boolean>;
 
   // Integrity operations
   validateIntegrity(worldId: string, agentId?: string): Promise<boolean>;

@@ -119,6 +119,7 @@ export class MemoryStorage implements StorageAPI {
   private chats = new Map<string, Map<string, Chat>>(); // worldId -> chatId -> Chat
   private worldChats = new Map<string, Map<string, WorldChat>>(); // worldId -> chatId -> WorldChat
   private archivedMemory = new Map<string, Map<string, AgentMessage[]>>(); // worldId -> agentId -> archived messages
+  private chatMessages = new Map<string, Map<string, AgentMessage[]>>(); // worldId -> chatId -> messages[]
 
   // World operations
   async saveWorld(worldData: World): Promise<void> {
@@ -154,6 +155,7 @@ export class MemoryStorage implements StorageAPI {
       this.chats.delete(worldId);
       this.worldChats.delete(worldId);
       this.archivedMemory.delete(worldId);
+      this.chatMessages.delete(worldId);
     }
     return deleted;
   }
@@ -460,6 +462,88 @@ export class MemoryStorage implements StorageAPI {
     }
   }
 
+  // Chat message operations (centralized storage)
+  async saveChatMessage(worldId: string, chatId: string, message: AgentMessage): Promise<void> {
+    if (!message.messageId) {
+      throw new Error('Cannot save message without messageId');
+    }
+
+    if (!this.chatMessages.has(worldId)) {
+      this.chatMessages.set(worldId, new Map());
+    }
+    const worldChats = this.chatMessages.get(worldId)!;
+    
+    if (!worldChats.has(chatId)) {
+      worldChats.set(chatId, []);
+    }
+    const messages = worldChats.get(chatId)!;
+    
+    // Upsert by messageId
+    const index = messages.findIndex(m => m.messageId === message.messageId);
+    const clonedMessage = deepClone(message);
+    
+    if (index >= 0) {
+      messages[index] = clonedMessage;
+    } else {
+      messages.push(clonedMessage);
+      // Sort by createdAt to maintain order
+      messages.sort((a, b) => {
+        const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return at - bt;
+      });
+    }
+  }
+
+  async getChatMessages(worldId: string, chatId: string): Promise<AgentMessage[]> {
+    const messages = this.chatMessages.get(worldId)?.get(chatId) || [];
+    return messages.map(msg => deepClone(msg));
+  }
+
+  async getAgentMemoryForChat(worldId: string, agentId: string, chatId: string): Promise<AgentMessage[]> {
+    // Get all messages from the chat
+    const allMessages = await this.getChatMessages(worldId, chatId);
+    
+    // For now, return all messages in the chat
+    // In the future, we could filter based on agent-specific logic
+    return allMessages;
+  }
+
+  async deleteChatMessage(worldId: string, chatId: string, messageId: string): Promise<boolean> {
+    const worldChats = this.chatMessages.get(worldId);
+    if (!worldChats) return false;
+    
+    const messages = worldChats.get(chatId);
+    if (!messages) return false;
+    
+    const index = messages.findIndex(m => m.messageId === messageId);
+    if (index >= 0) {
+      messages.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  async updateChatMessage(
+    worldId: string,
+    chatId: string,
+    messageId: string,
+    updates: Partial<AgentMessage>
+  ): Promise<boolean> {
+    const worldChats = this.chatMessages.get(worldId);
+    if (!worldChats) return false;
+    
+    const messages = worldChats.get(chatId);
+    if (!messages) return false;
+    
+    const index = messages.findIndex(m => m.messageId === messageId);
+    if (index >= 0) {
+      messages[index] = { ...messages[index], ...updates };
+      return true;
+    }
+    return false;
+  }
+
   async repairData(worldId: string, agentId?: string): Promise<boolean> {
     // For memory storage, repair is mostly about validation
     // since data corruption is unlikely in memory
@@ -477,6 +561,7 @@ export class MemoryStorage implements StorageAPI {
     this.chats.clear();
     this.worldChats.clear();
     this.archivedMemory.clear();
+    this.chatMessages.clear();
   }
 
   /**

@@ -233,6 +233,46 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       }
     },
 
+    // Chat message operations (centralized storage)
+    async saveChatMessage(worldId: string, chatId: string, message: AgentMessage): Promise<void> {
+      if (!storageInstance) return;
+      if ('saveChatMessage' in storageInstance) {
+        return (storageInstance as any).saveChatMessage(worldId, chatId, message);
+      }
+    },
+
+    async getChatMessages(worldId: string, chatId: string): Promise<AgentMessage[]> {
+      if (!storageInstance) return [];
+      if ('getChatMessages' in storageInstance) {
+        return (storageInstance as any).getChatMessages(worldId, chatId);
+      }
+      return [];
+    },
+
+    async getAgentMemoryForChat(worldId: string, agentId: string, chatId: string): Promise<AgentMessage[]> {
+      if (!storageInstance) return [];
+      if ('getAgentMemoryForChat' in storageInstance) {
+        return (storageInstance as any).getAgentMemoryForChat(worldId, agentId, chatId);
+      }
+      return [];
+    },
+
+    async deleteChatMessage(worldId: string, chatId: string, messageId: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      if ('deleteChatMessage' in storageInstance) {
+        return (storageInstance as any).deleteChatMessage(worldId, chatId, messageId);
+      }
+      return false;
+    },
+
+    async updateChatMessage(worldId: string, chatId: string, messageId: string, updates: Partial<AgentMessage>): Promise<boolean> {
+      if (!storageInstance) return false;
+      if ('updateChatMessage' in storageInstance) {
+        return (storageInstance as any).updateChatMessage(worldId, chatId, messageId, updates);
+      }
+      return false;
+    },
+
     async archiveMemory(worldId: string, agentId: string, memory: any[]): Promise<void> {
       if (!storageInstance) return;
       if ('archiveAgentMemory' in storageInstance) {
@@ -532,6 +572,43 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       console.warn('[file-storage] World chat restoration not yet implemented for file storage');
       return false;
     },
+    
+    // Chat message operations (centralized storage)
+    async saveChatMessage(worldId: string, chatId: string, message: AgentMessage): Promise<void> {
+      await ensureModulesLoaded();
+      if (worldStorage?.saveChatMessage) {
+        return worldStorage.saveChatMessage(rootPath, worldId, chatId, message);
+      }
+    },
+    async getChatMessages(worldId: string, chatId: string): Promise<AgentMessage[]> {
+      await ensureModulesLoaded();
+      if (worldStorage?.getChatMessages) {
+        return worldStorage.getChatMessages(rootPath, worldId, chatId);
+      }
+      return [];
+    },
+    async getAgentMemoryForChat(worldId: string, agentId: string, chatId: string): Promise<AgentMessage[]> {
+      await ensureModulesLoaded();
+      if (worldStorage?.getAgentMemoryForChat) {
+        return worldStorage.getAgentMemoryForChat(rootPath, worldId, agentId, chatId);
+      }
+      return [];
+    },
+    async deleteChatMessage(worldId: string, chatId: string, messageId: string): Promise<boolean> {
+      await ensureModulesLoaded();
+      if (worldStorage?.deleteChatMessage) {
+        return worldStorage.deleteChatMessage(rootPath, worldId, chatId, messageId);
+      }
+      return false;
+    },
+    async updateChatMessage(worldId: string, chatId: string, messageId: string, updates: Partial<AgentMessage>): Promise<boolean> {
+      await ensureModulesLoaded();
+      if (worldStorage?.updateChatMessage) {
+        return worldStorage.updateChatMessage(rootPath, worldId, chatId, messageId, updates);
+      }
+      return false;
+    },
+    
     async loadAgentWithRetry(worldId: string, agentId: string, options?: any): Promise<Agent | null> {
       await ensureModulesLoaded();
       let retries = options?.retries || 3;
@@ -676,7 +753,12 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       archiveAgentMemory,
       deleteMemoryByChatId,
       getMemory,
-      saveAgentMemory
+      saveAgentMemory,
+      saveChatMessage,
+      getChatMessages,
+      getAgentMemoryForChat,
+      deleteChatMessage,
+      updateChatMessage
     } = await import('./sqlite-storage.js');
     const ctx = await createSQLiteStorageContext(sqliteConfig);
     // Note: ensureInitialized is called within sqlite-storage functions, no need to call here
@@ -761,6 +843,13 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       },
 
       getMemory: (worldId: string, chatId: string) => getMemory(ctx, worldId, chatId),
+
+      // Chat message operations (centralized storage)
+      saveChatMessage: (worldId: string, chatId: string, message: AgentMessage) => saveChatMessage(ctx, worldId, chatId, message),
+      getChatMessages: (worldId: string, chatId: string) => getChatMessages(ctx, worldId, chatId),
+      getAgentMemoryForChat: (worldId: string, agentId: string, chatId: string) => getAgentMemoryForChat(ctx, worldId, agentId, chatId),
+      deleteChatMessage: (worldId: string, chatId: string, messageId: string) => deleteChatMessage(ctx, worldId, chatId, messageId),
+      updateChatMessage: (worldId: string, chatId: string, messageId: string, updates: Partial<AgentMessage>) => updateChatMessage(ctx, worldId, chatId, messageId, updates),
 
       close: () => close(ctx),
       getDatabaseStats: () => getDatabaseStats(ctx)
