@@ -261,7 +261,10 @@ export function messageDataToAgentMessage(messageData: MessageData): AgentMessag
 }
 
 /**
- * Prepare messages array for LLM using standard chat message format
+ * Prepare messages array for LLM using standard chat message format.
+ * Messages are now loaded directly from the centralized chat_messages storage (new approach)
+ * instead of aggregating from agent memory across all agents.
+ * 
  * Filters conversation history by chatId if provided and excludes messages
  * the agent would not have responded to (prevents irrelevant context pollution)
  */
@@ -302,13 +305,24 @@ export async function prepareMessagesForLLM(
     });
   }
 
-  // Load FRESH conversation history from storage (not from in-memory agent)
-  // This ensures we always have the latest messages
+  // Load conversation history from centralized chat messages storage (NEW APPROACH)
+  // This loads only the messages for this specific agent in this specific chat
   let conversationHistory: AgentMessage[] = [];
   try {
     const { createStorageWithWrappers } = await import('./storage/storage-factory.js');
     const storage = await createStorageWithWrappers();
-    conversationHistory = await storage.getMemory(worldId, chatId);
+    
+    if (chatId) {
+      // NEW: Load from centralized chat_messages storage
+      // Falls back to getMemory for backward compatibility if getAgentMemoryForChat is not available
+      if ('getAgentMemoryForChat' in storage) {
+        conversationHistory = await storage.getAgentMemoryForChat(worldId, agent.id, chatId);
+      } else {
+        // FALLBACK: Use old getMemory approach for backward compatibility
+        const allMessages = await storage.getMemory(worldId, chatId);
+        conversationHistory = allMessages.filter(msg => msg.agentId === agent.id);
+      }
+    }
   } catch (error) {
     const { logger } = await import('./logger.js');
     logger.error('Could not load conversation history from storage', {
@@ -319,13 +333,9 @@ export async function prepareMessagesForLLM(
     });
   }
 
-  // Filter to only include messages from THIS specific agent
-  // getMemory returns messages from ALL agents, but we only want this agent's memory
-  const agentMessages = conversationHistory.filter(msg => msg.agentId === agent.id);
-
   // IDEMPOTENCE: Always filter out system messages from history
   // System message should only come from agent.systemPrompt above, never from storage
-  const filteredHistory = agentMessages.filter(msg => msg.role !== 'system');
+  const filteredHistory = conversationHistory.filter(msg => msg.role !== 'system');
 
   // Filter to only include messages this agent would have responded to
   // This prevents irrelevant "not mentioned" messages from polluting LLM context
