@@ -8,6 +8,14 @@ This package provides Opik observability integration for Agent World.
 - **Project Organization**: Supports configuring Opik Workspace and Project names via environment variables.
 - **Conditional Activation**: Only active when `OPIK_API_KEY` is present.
 
+## Safety & Guardrails
+
+The tracer includes built-in support for safety monitoring:
+
+- **Guardrail Logging**: Captures PII and harmful content detection events.
+- **Risk Tagging**: Automatically tags traces with `risk_level: high` when sensitive tools (like `shell_cmd`) are used.
+- **Redaction**: Ensures flagged content is redacted in the logs.
+
 ## Configuration
 
 The package relies on environment variables for configuration:

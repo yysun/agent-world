@@ -132,9 +132,20 @@ export class OpikTracer {
         const finalContent = recordedContent ? recordedContent : "(No text content generated)";
 
         // Update span with final output
-        span.update({
+        const updateParams: any = {
             output: { content: finalContent }
-        });
+        };
+
+        if (payload.usage) {
+            updateParams.usage = {
+                prompt_tokens: payload.usage.inputTokens,
+                completion_tokens: payload.usage.outputTokens,
+                total_tokens: payload.usage.totalTokens
+            };
+            console.log(`[OpikTracer] 📊 Token Usage: ${payload.usage.totalTokens} tokens`);
+        }
+
+        span.update(updateParams);
         span.end();
         
         this.removeSpan(payload.messageId);

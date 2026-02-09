@@ -1598,8 +1598,38 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
 
+  const renderSheetMusicTool = {
+    name: 'render_sheet_music',
+    description: 'Render musical notes as sheet music on the frontend using VexFlow notation. Use this tool to visualize musical compositions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clef: { type: 'string', description: 'Clef type (e.g., treble, bass)' },
+        keySignature: { type: 'string', description: 'Key signature (e.g., C, G, Am)' },
+        timeSignature: { type: 'string', description: 'Time signature (e.g., 4/4, 3/4)' },
+        notes: { 
+          type: 'array', 
+          items: { type: 'object', additionalProperties: true },
+          description: 'Array of note objects with keys and duration' 
+        }
+      },
+      required: ['notes'],
+      additionalProperties: false
+    },
+    execute: async (args: any) => {
+      // Logic for backend execution (none needed, just ack)
+      return {
+        content: [{ 
+          type: 'text', 
+          text: `Sheet music rendered for ${args.notes?.length || 0} notes. Key: ${args.keySignature || 'N/A'}` 
+        }]
+      };
+    }
+  };
+
   return {
-    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd')
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
+    'render_sheet_music': wrapToolWithValidation(renderSheetMusicTool, 'render_sheet_music')
   };
 }
 

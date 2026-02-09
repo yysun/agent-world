@@ -46,6 +46,7 @@ import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
 import ToolCallRequestBox from './tool-call-request-box';
 import ToolCallResponseBox from './tool-call-response-box';
+import SheetMusic from './demos/sheet-music';
 
 const debug = false;
 
@@ -478,6 +479,17 @@ export default function WorldChat(props: WorldChatProps) {
                 displayLabel = message.sender;
               }
 
+              // Detect Render Sheet Music Tool Call
+              let sheetMusicData = null;
+              if (message.tool_calls) {
+                  const call = message.tool_calls.find((tc: any) => tc.function.name === 'render_sheet_music');
+                  if (call) {
+                      try { sheetMusicData = JSON.parse(call.function.arguments); } catch (e) {}
+                  }
+              } else if (message.toolCallData?.toolName === 'render_sheet_music') {
+                  sheetMusicData = message.toolCallData.toolArgs;
+              }
+
               return (
                 <div key={message.id || 'msg-' + index} className={messageClasses}>
                   <div className="message-sender" style={{ whiteSpace: 'pre-line' }}>
@@ -509,6 +521,7 @@ export default function WorldChat(props: WorldChatProps) {
                     </div>
                   ) : (
                     <>
+                      {sheetMusicData && <SheetMusic data={sheetMusicData} />}
                       {/* Render tool call request box for approval requests */}
                       {message.isToolCallRequest && message.toolCallData ? (
                         <ToolCallRequestBox message={message} />

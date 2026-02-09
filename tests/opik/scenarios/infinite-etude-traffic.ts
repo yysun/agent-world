@@ -12,7 +12,7 @@ import { LLMProvider } from '../../../core/types';
 // Load env for Opik API Key
 // dotenv.config() handled by import 'dotenv/config'
 
-const DELAY_MS = 60000; // Time to wait between steps (Increased for local LLM)
+const DELAY_MS = 30000; // Time to wait between steps (Reduced to 30s)
 
 function wait(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));

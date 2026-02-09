@@ -101,6 +101,25 @@ export function getWorldTurnLimit(world: World): number {
   return world.turnLimit || 5; // Default to 5 if not configured
 }
 
+// Helper to generate prefix candidates for multi-word mentions
+function generateMentionCandidates(rawMention: string): string[] {
+  const parts = rawMention.split(/[- ]+/);
+  const candidates: string[] = [];
+  
+  for (let i = 0; i < parts.length; i++) {
+      const candidateParts = parts.slice(0, i + 1);
+      let candidate = toKebabCase(candidateParts.join('-'));
+      
+      // Fuzzy Fix for "Pedagogu" -> "pedagogue"
+      if (candidate.endsWith('pedagogu')) {
+         candidate = candidate + 'e';
+      }
+      
+      candidates.push(candidate);
+  }
+  return candidates;
+}
+
 /**
  * Extract @mentions from message content - returns only first valid mention
  * Implements first-mention-only logic to prevent multiple agent responses
@@ -108,26 +127,23 @@ export function getWorldTurnLimit(world: World): number {
 export function extractMentions(content: string): string[] {
   if (!content) return [];
 
-  const mentionRegex = /@(\w+(?:[-_]\w+)*)/g;
-  const allMentions: string[] = [];
-  let firstValidMention: string | null = null;
+  // Robust regex to capture full multi-word names (e.g. "Madame Pedagogue")
+  // Matches @ followed by words, allowing spaces between them, until end of line or puctuation
+  const mentionRegex = /@([a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+)*)/g;
+  
+  const allCandidates: string[] = [];
   let match;
 
-  while ((match = mentionRegex.exec(content)) !== null) {
-    const mention = match[1];
-    if (mention && mention.length > 0) {
-      const lowerMention = mention.toLowerCase();
-      allMentions.push(lowerMention);
-
-      // Only keep the first valid mention
-      if (firstValidMention === null) {
-        firstValidMention = lowerMention;
+  // We only care about the FIRST mention found in the text
+  if ((match = mentionRegex.exec(content)) !== null) {
+      const mention = match[1];
+      if (mention && mention.length > 0) {
+          const candidates = generateMentionCandidates(mention);
+          allCandidates.push(...candidates);
       }
-    }
   }
 
-  // Return array with first mention only
-  return firstValidMention ? [firstValidMention] : [];
+  return allCandidates;
 }
 
 /**
@@ -141,16 +157,18 @@ export function extractParagraphBeginningMentions(content: string): string[] {
   if (!content) return [];
 
   const validMentions: string[] = [];
-  const mentionPattern = /^@(\w+(?:[-_]\w+)*)/;
+  // Updated regex to support spaces in names at start of line
+  const mentionPattern = /^@([a-zA-Z0-9]+(?:[- ][a-zA-Z0-9]+)*)/;
   const lines = content.split(/\n/);
 
   for (const line of lines) {
     const trimmed = line.trimStart();
     // Only match if @ is the very first character after trimming
     if (trimmed.startsWith('@')) {
-      const match = mentionPattern.exec(trimmed);
+      const match = trimmed.match(mentionPattern);
       if (match && match[1]) {
-        validMentions.push(match[1].toLowerCase());
+        const candidates = generateMentionCandidates(match[1]);
+        validMentions.push(...candidates);
       }
     }
   }

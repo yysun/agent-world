@@ -140,29 +140,67 @@ IMPORTANT:
   }
 };
 
+
+// ============================================================================
+// Sheet Music Tools
+// ============================================================================
+
+export const RenderSheetMusicParams = Type.Object({
+  clef: Type.Optional(Type.String({ description: 'Clef type (e.g., treble, bass)' })),
+  keySignature: Type.Optional(Type.String({ description: 'Key signature (e.g., C, G, Am)' })),
+  timeSignature: Type.Optional(Type.String({ description: 'Time signature (e.g., 4/4, 3/4)' })),
+  notes: Type.Array(
+    Type.Object({
+      keys: Type.Array(Type.String(), { description: 'Keys e.g. ["c/4"]' }),
+      duration: Type.String({ description: 'Duration e.g. "q", "h", "w"' })
+    }),
+    { description: 'Array of note objects' }
+  )
+});
+
+export type RenderSheetMusicParamsType = Static<typeof RenderSheetMusicParams>;
+
+export const renderSheetMusicTool: AgentTool<typeof RenderSheetMusicParams> = {
+  name: 'render_sheet_music',
+  label: 'Render Sheet Music',
+  description: 'Render musical notes as sheet music on the frontend using VexFlow.',
+  parameters: RenderSheetMusicParams,
+  execute: async (toolCallId, params, signal) => {
+    // Ack only
+    return {
+      content: [{ type: 'text', text: `Rendered ${params.notes.length} notes.` }],
+      details: {}
+    };
+  }
+};
+
 // ============================================================================
 // Tool Collection
 // ============================================================================
 
 /**
- * Get all available built-in tools
+ * Get all built-in tools
  */
 export function getBuiltInTools(): AgentTool<any>[] {
-  return [shellCmdTool];
+  return [shellCmdTool, renderSheetMusicTool];
 }
 
 /**
  * Get tools for a specific agent
  * 
- * Currently returns all built-in tools. Can be extended to support
- * agent-specific tool configuration.
- * 
- * Returns empty array if DISABLE_AGENT_TOOLS env var is set (for testing).
+ * Returns tools appropriate for the agent's role.
  */
-export function getToolsForAgent(_agentId: string): AgentTool<any>[] {
+export function getToolsForAgent(agentId: string): AgentTool<any>[] {
   // Disable tools for testing if env var is set
   if (process.env.DISABLE_AGENT_TOOLS === 'true') {
     return [];
   }
-  return getBuiltInTools();
+
+  // Only Monsieur Engraver gets the render tool
+  if (agentId === 'monsieur-engraver') {
+      return [renderSheetMusicTool];
+  }
+
+  // Everyone else gets Shell
+  return [shellCmdTool];
 }

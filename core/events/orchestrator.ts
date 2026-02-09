@@ -97,6 +97,7 @@ export async function processAgentMessage(
   agent: Agent,
   messageEvent: WorldMessageEvent
 ): Promise<void> {
+  console.log(`[ORCHESTRATOR] Processing message for agent: ${agent.id}`);
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
     // Prepare messages for LLM - loads fresh data from storage
