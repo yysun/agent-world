@@ -63,6 +63,7 @@ async function getStorageWrappers(): Promise<StorageAPI> {
 
 /**
  * Save incoming message to agent memory with auto-save
+ * Now saves to centralized chat_messages storage instead of agent.memory
  */
 export async function saveIncomingMessageToMemory(
   world: World,
@@ -95,22 +96,30 @@ export async function saveIncomingMessageToMemory(
       sender: messageEvent.sender,
       createdAt: messageEvent.timestamp,
       chatId: world.currentChatId || null,
+      worldId: world.id,
       messageId: messageEvent.messageId,
       replyToMessageId: messageEvent.replyToMessageId,
       agentId: agent.id
     };
 
-    agent.memory.push(userMessage);
-
+    // Save to centralized chat messages storage
     try {
       const storage = await getStorageWrappers();
+      if (world.currentChatId) {
+        await storage.saveChatMessage(world.id, world.currentChatId, userMessage);
+        loggerMemory.debug('Message saved to centralized storage', {
+          agentId: agent.id,
+          messageId: messageEvent.messageId,
+          chatId: world.currentChatId
+        });
+      }
+      
+      // DEPRECATED: Also save to agent.memory for backward compatibility during migration
+      // This will be removed in a future version
+      agent.memory.push(userMessage);
       await storage.saveAgent(world.id, agent);
-      loggerMemory.debug('Agent saved successfully', {
-        agentId: agent.id,
-        messageId: messageEvent.messageId
-      });
     } catch (error) {
-      loggerMemory.error('Failed to auto-save memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
+      loggerMemory.error('Failed to save message', { agentId: agent.id, error: error instanceof Error ? error.message : error });
     }
   } catch (error) {
     loggerMemory.error('Could not save incoming message to memory', { agentId: agent.id, error: error instanceof Error ? error.message : error });
@@ -226,23 +235,31 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
     const responseText = llmResponse.content;
 
     // Save response to agent memory with all required fields
-    agent.memory.push({
+    const assistantMessage: AgentMessage = {
       role: 'assistant',
       content: responseText,
       messageId,
       sender: agent.id,
       createdAt: new Date(),
       chatId: targetChatId,
+      worldId: world.id,
       agentId: agent.id
-    });
+    };
 
+    // Save to centralized storage
     try {
       const storage = await getStorageWrappers();
+      if (targetChatId) {
+        await storage.saveChatMessage(world.id, targetChatId, assistantMessage);
+      }
+      // DEPRECATED: backward compatibility
+      agent.memory.push(assistantMessage);
       await storage.saveAgent(world.id, agent);
-      loggerMemory.debug('Agent response saved to memory after tool execution', {
+      
+      loggerMemory.debug('Agent response saved after tool execution', {
         agentId: agent.id,
         messageId,
-        memorySize: agent.memory.length
+        chatId: targetChatId
       });
     } catch (error) {
       loggerMemory.error('Failed to save agent response after tool execution', {
@@ -300,24 +317,32 @@ export async function handleTextResponse(
   }
 
   // Save response to agent memory with all required fields
-  agent.memory.push({
+  const assistantMessage: AgentMessage = {
     role: 'assistant',
     content: finalResponse,
     messageId,
     sender: agent.id,
     createdAt: new Date(),
     chatId: world.currentChatId || null,
+    worldId: world.id,
     replyToMessageId: messageEvent.messageId,
     agentId: agent.id
-  });
+  };
 
+  // Save to centralized storage
   try {
     const storage = await getStorageWrappers();
+    if (world.currentChatId) {
+      await storage.saveChatMessage(world.id, world.currentChatId, assistantMessage);
+    }
+    // DEPRECATED: backward compatibility
+    agent.memory.push(assistantMessage);
     await storage.saveAgent(world.id, agent);
-    loggerMemory.debug('Agent response saved to memory', {
+    
+    loggerMemory.debug('Agent response saved to storage', {
       agentId: agent.id,
       messageId,
-      memorySize: agent.memory.length
+      chatId: world.currentChatId
     });
   } catch (error) {
     loggerMemory.error('Failed to save agent response', {

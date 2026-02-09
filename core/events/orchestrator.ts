@@ -246,18 +246,23 @@ export async function processAgentMessage(
         }, {} as Record<string, { complete: boolean; result: any }>)
       };
 
-      agent.memory.push(assistantMessage);
-
-      // Auto-save agent memory
+      // Save to centralized chat messages storage (new approach)
       try {
         const storage = await getStorageWrappers();
+        if (world.currentChatId) {
+          assistantMessage.worldId = world.id;
+          await storage.saveChatMessage(world.id, world.currentChatId, assistantMessage);
+          loggerAgent.debug('Assistant message with tool_calls saved to centralized storage', {
+            agentId: agent.id,
+            messageId,
+            chatId: world.currentChatId,
+            toolCallCount: llmResponse.tool_calls?.length || 0
+          });
+        }
+        
+        // DEPRECATED: Also save to agent.memory for backward compatibility during migration
+        agent.memory.push(assistantMessage);
         await storage.saveAgent(world.id, agent);
-        loggerAgent.debug('Assistant message with tool_calls saved to memory', {
-          agentId: agent.id,
-          messageId,
-          toolCallCount: llmResponse.tool_calls?.length || 0,
-          toolCallIds: llmResponse.tool_calls?.map(tc => tc.id)
-        });
       } catch (error) {
         loggerAgent.error('Failed to save assistant message with tool_calls', {
           agentId: agent.id,
@@ -329,11 +334,26 @@ export async function processAgentMessage(
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
+            worldId: world.id,
             messageId: generateId(),
             replyToMessageId: messageId,
             agentId: agent.id
           };
-          agent.memory.push(toolResultMessage);
+          
+          // Save to centralized storage
+          try {
+            const storage = await getStorageWrappers();
+            if (world.currentChatId) {
+              await storage.saveChatMessage(world.id, world.currentChatId, toolResultMessage);
+            }
+            // DEPRECATED: backward compatibility
+            agent.memory.push(toolResultMessage);
+          } catch (error) {
+            loggerAgent.error('Failed to save tool result message', {
+              agentId: agent.id,
+              error: error instanceof Error ? error.message : error
+            });
+          }
 
           // Save assistant message (bypassing LLM)
           // Exit code 0: Save only stdout (clean output)
@@ -348,11 +368,26 @@ export async function processAgentMessage(
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
+            worldId: world.id,
             messageId: generateId(),
             replyToMessageId: toolResultMessage.messageId,
             agentId: agent.id
           };
-          agent.memory.push(assistantReply);
+          
+          // Save to centralized storage
+          try {
+            const storage = await getStorageWrappers();
+            if (world.currentChatId) {
+              await storage.saveChatMessage(world.id, world.currentChatId, assistantReply);
+            }
+            // DEPRECATED: backward compatibility
+            agent.memory.push(assistantReply);
+          } catch (error) {
+            loggerAgent.error('Failed to save assistant reply message', {
+              agentId: agent.id,
+              error: error instanceof Error ? error.message : error
+            });
+          }
 
           // Mark original tool call as complete
           const toolCallMsg = agent.memory.find(
@@ -427,26 +462,23 @@ export async function processAgentMessage(
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
+            worldId: world.id,
             messageId: generateId(),
             replyToMessageId: messageId,
             agentId: agent.id
           };
 
-          agent.memory.push(toolResultMessage);
-
-          // Update tool call status to complete
-          const toolCallMsg = agent.memory.find(
-            m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
-          );
-          if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
-            (toolCallMsg as any).toolCallStatus[toolCall.id] = { complete: true, result: toolResult };
-          }
-
-          // Save agent with tool result
+          // Save to centralized storage
           try {
             const storage = await getStorageWrappers();
+            if (world.currentChatId) {
+              await storage.saveChatMessage(world.id, world.currentChatId, toolResultMessage);
+            }
+            // DEPRECATED: backward compatibility
+            agent.memory.push(toolResultMessage);
             await storage.saveAgent(world.id, agent);
-            loggerAgent.debug('Tool result saved to memory', {
+            
+            loggerAgent.debug('Tool result saved to storage', {
               agentId: agent.id,
               toolCallId: toolCall.id,
               messageId: toolResultMessage.messageId
@@ -484,15 +516,20 @@ export async function processAgentMessage(
             sender: agent.id,
             createdAt: new Date(),
             chatId: world.currentChatId || null,
+            worldId: world.id,
             messageId: generateId(),
             replyToMessageId: messageId,
             agentId: agent.id
           };
 
-          agent.memory.push(errorMessage);
-
+          // Save to centralized storage
           try {
             const storage = await getStorageWrappers();
+            if (world.currentChatId) {
+              await storage.saveChatMessage(world.id, world.currentChatId, errorMessage);
+            }
+            // DEPRECATED: backward compatibility
+            agent.memory.push(errorMessage);
             await storage.saveAgent(world.id, agent);
           } catch (saveError) {
             loggerAgent.error('Failed to save error message', {
