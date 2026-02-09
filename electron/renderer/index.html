@@ -2,15 +2,18 @@
 <!--
   Renderer Entry Document - Vite + React mount point
   Features: Minimal shell for React root bootstrapping
-  Recent Changes: 2026-02-08 migrated desktop renderer to Vite+React pipeline
+  Recent Changes:
+  - 2026-02-08 removed "Agent World Desktop" page title text
+  - 2026-02-08 switched body classes to semantic theme tokens
+  - 2026-02-08 migrated desktop renderer to Vite+React pipeline
 -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Agent World Desktop</title>
+    <title>Agent World</title>
   </head>
-  <body class="bg-slate-950 text-slate-100">
+  <body class="bg-background text-foreground">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

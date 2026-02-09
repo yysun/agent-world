@@ -1,22 +1,18 @@
 /**
- * Electron Main Process - Workspace-Scoped Desktop Runtime
+ * Electron Main Process - Desktop Runtime and IPC Router
  *
  * Features:
- * - VS Code-style "Open Folder" workspace selection and persistence
- * - Workspace-scoped world storage under <workspace>/.agent-world
- * - IPC handlers for workspace, world, session, and chat actions
- * - Renderer loading from Vite dev server or built Vite output
+ * - Workspace selection and persistence
+ * - World/session/chat IPC handlers
+ * - Renderer startup for dev and packaged modes
  *
  * Implementation Notes:
- * - Core APIs run only in main process; renderer accesses state via preload IPC
- * - Storage context is initialized lazily on first core operation
- * - Workspace switching after initialization triggers controlled relaunch
+ * - Core logic runs in main; renderer uses preload IPC bridge
+ * - Workspace switches after core init require restart/relaunch
  *
  * Recent Changes:
- * - 2026-02-08: Added multi-subscription IPC support for concurrent chat streams
- * - 2026-02-08: Added main->renderer chat event streaming over IPC
- * - 2026-02-08: Migrated renderer integration to Vite/React build flow
- * - 2026-02-08: Added session/chat IPC methods for three-column desktop workflow
+ * - 2026-02-08: Added direct `workspace:openRecent` IPC for recent workspace dropdown actions
+ * - 2026-02-08: Added real-time chat event streaming with multi-subscription support
  */
 
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
@@ -308,6 +304,48 @@ async function openWorkspaceDialog() {
   return { ...getWorkspaceState(), canceled: false };
 }
 
+async function openRecentWorkspace(workspacePath) {
+  const nextWorkspace = String(workspacePath || '').trim();
+  if (!nextWorkspace) {
+    return { ...getWorkspaceState(), canceled: true };
+  }
+
+  if (!fs.existsSync(nextWorkspace)) {
+    throw new Error(`Workspace path does not exist: ${nextWorkspace}`);
+  }
+
+  const stats = fs.statSync(nextWorkspace);
+  if (!stats.isDirectory()) {
+    throw new Error(`Workspace path is not a directory: ${nextWorkspace}`);
+  }
+
+  if (coreWorkspacePath && coreWorkspacePath !== nextWorkspace) {
+    const confirm = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      buttons: ['Restart', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Switch Workspace',
+      message: 'Switching workspace requires restart after core is initialized.',
+      detail: `Current: ${coreWorkspacePath}\nNext: ${nextWorkspace}`
+    });
+
+    if (confirm.response === 0) {
+      writeWorkspacePreference(nextWorkspace);
+      const args = process.argv.filter((arg) => !arg.startsWith('--workspace='));
+      args.push(`--workspace=${nextWorkspace}`);
+      app.relaunch({ args });
+      app.exit(0);
+      return { ...getWorkspaceState(), relaunched: true };
+    }
+
+    return { ...getWorkspaceState(), canceled: true };
+  }
+
+  setWorkspace(nextWorkspace, true);
+  return { ...getWorkspaceState(), canceled: false };
+}
+
 async function listWorkspaceWorlds() {
   ensureCoreReady();
   const worlds = await listWorlds();
@@ -473,6 +511,8 @@ async function sendChatMessage(payload) {
 function registerIpcHandlers() {
   ipcMain.handle('workspace:get', async () => getWorkspaceState());
   ipcMain.handle('workspace:open', async () => openWorkspaceDialog());
+  ipcMain.handle('workspace:openRecent', async (_event, payload) =>
+    openRecentWorkspace(payload?.workspacePath));
   ipcMain.handle('world:list', async () => listWorkspaceWorlds());
   ipcMain.handle('world:create', async (_, payload) => createWorkspaceWorld(payload));
   ipcMain.handle('session:list', async (_, payload) => listWorldSessions(payload?.worldId));

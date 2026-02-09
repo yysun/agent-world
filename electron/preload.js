@@ -1,21 +1,16 @@
 /**
- * Electron Preload Bridge - IPC-Only Renderer API Contract
+ * Electron Preload Bridge - Renderer IPC Surface
  *
  * Features:
- * - Workspace APIs: get/open workspace context
- * - World APIs: list/create worlds
- * - Session APIs: list/create/select chat sessions
- * - Chat APIs: fetch messages and send messages
+ * - Workspace, world, session, and chat invoke APIs
+ * - Realtime chat event subscription
  *
  * Implementation Notes:
- * - Renderer receives only explicit invoke-based methods
- * - No direct Node.js or server API surface is exposed to renderer
+ * - Exposes only explicit safe methods via `contextBridge`
  *
  * Recent Changes:
+ * - 2026-02-08: Added `openRecentWorkspace` bridge method for workspace dropdown recents
  * - 2026-02-08: Added subscription ID support for concurrent chat streams
- * - 2026-02-08: Added renderer subscription API for main->renderer chat events
- * - 2026-02-08: Expanded bridge for session and chat operations
- * - 2026-02-08: Standardized IPC-only desktop data contract
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -35,6 +30,7 @@ function onChatEvent(callback) {
 const desktopApi = {
   getWorkspace: () => ipcRenderer.invoke('workspace:get'),
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
+  openRecentWorkspace: (workspacePath) => ipcRenderer.invoke('workspace:openRecent', { workspacePath }),
   listWorlds: () => ipcRenderer.invoke('world:list'),
   createWorld: (payload) => ipcRenderer.invoke('world:create', payload),
   listSessions: (worldId) => ipcRenderer.invoke('session:list', { worldId }),
