@@ -773,8 +773,8 @@ export async function getChatMessages(
     replyToMessageId: row.reply_to_message_id || undefined,
     tool_calls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
     tool_call_id: row.tool_call_id || undefined,
-    createdAt: new Date(row.created_at),
-    agentId: row.sender // For compatibility - sender is typically the agentId
+    createdAt: new Date(row.created_at)
+    // Note: agentId is set based on context where needed
   }));
 }
 

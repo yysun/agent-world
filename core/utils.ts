@@ -306,7 +306,8 @@ export async function prepareMessagesForLLM(
   }
 
   // Load conversation history from centralized chat messages storage (NEW APPROACH)
-  // This loads only the messages for this specific agent in this specific chat
+  // This loads all messages in the chat (not filtered by agent)
+  // Filtering happens later based on message relevance
   let conversationHistory: AgentMessage[] = [];
   try {
     const { createStorageWithWrappers } = await import('./storage/storage-factory.js');
@@ -319,8 +320,8 @@ export async function prepareMessagesForLLM(
         conversationHistory = await storage.getAgentMemoryForChat(worldId, agent.id, chatId);
       } else {
         // FALLBACK: Use old getMemory approach for backward compatibility
-        const allMessages = await storage.getMemory(worldId, chatId);
-        conversationHistory = allMessages.filter(msg => msg.agentId === agent.id);
+        // Note: getMemory returns all messages for all agents in the chat, same as new approach
+        conversationHistory = await storage.getMemory(worldId, chatId);
       }
     }
   } catch (error) {
