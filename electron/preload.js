@@ -58,6 +58,7 @@ const desktopApi = {
   selectSession: (worldId, chatId) => ipcRenderer.invoke('session:select', { worldId, chatId }),
   getMessages: (worldId, chatId) => ipcRenderer.invoke('chat:getMessages', { worldId, chatId }),
   sendMessage: (payload) => ipcRenderer.invoke('chat:sendMessage', payload),
+  deleteMessage: (worldId, messageId, chatId) => ipcRenderer.invoke('message:delete', { worldId, messageId, chatId }),
   subscribeChatEvents: (worldId, chatId, subscriptionId) =>
     ipcRenderer.invoke('chat:subscribeEvents', { worldId, chatId, subscriptionId }),
   unsubscribeChatEvents: (subscriptionId) =>

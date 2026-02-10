@@ -9,14 +9,31 @@
  * - Theme toggle and collapsible left sidebar
  * - SSE-based streaming message rendering
  * - Agent management with avatar badges and message counts
+ * - User message edit and delete functionality (via IPC)
  *
  * Implementation Notes:
  * - Function component with local state and IPC-only desktop API calls
  * - Window drag regions are explicit (`drag` + `no-drag`) for custom title rows
  * - Composer textarea auto-resizes and supports Enter-to-send (Shift+Enter newline)
  * - Loads all worlds from workspace folder, displays in dropdown for selection
+ * - Message edit uses two-phase approach: DELETE (remove messages) → POST (resubmit edited content)
+ * - Edit creates localStorage backup before deletion for recovery
+ * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-10: Tool output panels now default to collapsed state
+ * - 2026-02-10: Sender labels now resolve reply chains to show HUMAN for final assistant replies after tool steps
+ * - 2026-02-10: Switched tool output expand/collapse controls to icon-only buttons (no text labels)
+ * - 2026-02-10: Removed agent/tool background tints; keep visual distinction with colored left borders only
+ * - 2026-02-10: Added collapsible tool output sections in chat messages (expand/collapse)
+ * - 2026-02-10: Added role-based message card styling so agent, tool, and system/log messages are visually distinct
+ * - 2026-02-10: Updated tool message rendering so non-streaming tool output keeps terminal-style formatting
+ * - 2026-02-10: Implemented user message edit and delete following web app patterns
+ * - 2026-02-10: Added edit button (pencil icon) and delete button (X icon) on user messages
+ * - 2026-02-10: Edit mode shows textarea with Save/Cancel buttons, supports Escape to cancel
+ * - 2026-02-10: Delete shows confirmation dialog with message preview
+ * - 2026-02-10: Both features use IPC bridge (deleteMessage, loadWorld, sendMessage)
+ * - 2026-02-10: Added helper functions: createMessageFromMemory, deduplicateMessages
  * - 2026-02-10: Fixed stuck "Processing..." state by ending stale tool-stream activity and syncing stream counts on tool lifecycle events
  * - 2026-02-10: Added markdown rendering for messages (matching web app behavior)
  * - 2026-02-10: Added delete button (X) next to name field in agent edit form
@@ -84,10 +101,14 @@ const HUMAN_SENDER_VALUES = new Set(['human', 'user', 'you']);
  * Preserves special formatting for tool output and log messages
  */
 function MessageContent({ message }) {
+  const role = String(message?.role || '').toLowerCase();
+  const isToolMessage = role === 'tool' || message.isToolStreaming;
+  const [isToolCollapsed, setIsToolCollapsed] = useState(true);
+
   // Use useMemo to cache markdown rendering and avoid re-parsing on every render
   const renderedContent = useMemo(() => {
     // Skip markdown for special message types that need specific formatting
-    if (message.logEvent || message.isToolStreaming) {
+    if (message.logEvent || isToolMessage) {
       return null;
     }
 
@@ -96,7 +117,7 @@ function MessageContent({ message }) {
     if (!content) return '';
 
     return renderMarkdown(content);
-  }, [message.content, message.logEvent, message.isToolStreaming]);
+  }, [message.content, message.logEvent, isToolMessage]);
 
   // Log message rendering with level-based colored dot
   if (message.logEvent) {
@@ -127,35 +148,74 @@ function MessageContent({ message }) {
     );
   }
 
-  // Tool streaming output with stdout/stderr distinction
-  if (message.isToolStreaming) {
+  // Tool output with stdout/stderr distinction
+  if (isToolMessage) {
     return (
       <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          ⚙️ Executing...
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            {message.isToolStreaming ? '⚙️ Executing...' : '⚙️ Tool output'}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsToolCollapsed((collapsed) => !collapsed)}
+            className="inline-flex h-6 w-6 items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+            aria-label={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
+            title={isToolCollapsed ? 'Expand tool output' : 'Collapse tool output'}
+          >
+            {isToolCollapsed ? (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+                aria-hidden="true"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            ) : (
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+                aria-hidden="true"
+              >
+                <path d="m18 15-6-6-6 6" />
+              </svg>
+            )}
+          </button>
         </div>
-        <div
-          className="rounded-md overflow-hidden border"
-          style={message.streamType === 'stderr' ? {
-            backgroundColor: 'rgba(69, 10, 10, 0.3)',
-            borderColor: 'rgba(239, 68, 68, 0.3)'
-          } : {
-            backgroundColor: 'rgb(15, 23, 42)',
-            borderColor: 'rgb(51, 65, 85)'
-          }}
-        >
-          <pre
-            className="text-xs p-3 font-mono whitespace-pre-wrap"
-            style={{
-              color: message.streamType === 'stderr'
-                ? 'rgb(248, 113, 113)'
-                : 'rgb(203, 213, 225)',
-              wordBreak: 'break-all'
+        {!isToolCollapsed ? (
+          <div
+            className="rounded-md overflow-hidden border"
+            style={message.streamType === 'stderr' ? {
+              backgroundColor: 'rgba(69, 10, 10, 0.3)',
+              borderColor: 'rgba(239, 68, 68, 0.3)'
+            } : {
+              backgroundColor: 'rgb(15, 23, 42)',
+              borderColor: 'rgb(51, 65, 85)'
             }}
           >
-            {message.content || '(waiting for output...)'}
-          </pre>
-        </div>
+            <pre
+              className="text-xs p-3 font-mono whitespace-pre-wrap"
+              style={{
+                color: message.streamType === 'stderr'
+                  ? 'rgb(248, 113, 113)'
+                  : 'rgb(203, 213, 225)',
+                wordBreak: 'break-all'
+              }}
+            >
+              {message.content || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
+            </pre>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -238,24 +298,131 @@ function upsertMessageList(existingMessages, incomingMessage) {
   return next;
 }
 
+/**
+ * Convert agent memory item to message for display
+ */
+function createMessageFromMemory(memoryItem, agentName) {
+  const sender = memoryItem.sender || agentName;
+  const messageType =
+    sender === 'human' || sender === 'user' ? 'user' :
+      memoryItem.role === 'tool' ? 'tool' :
+        memoryItem.role === 'assistant' ? 'agent' : 'agent';
+
+  return {
+    id: `msg-${Date.now()}-${Math.random()}`,
+    sender,
+    content: memoryItem.content || '',
+    messageId: memoryItem.messageId,
+    replyToMessageId: memoryItem.replyToMessageId,
+    createdAt: memoryItem.createdAt || new Date(),
+    type: messageType,
+    fromAgentId: memoryItem.agentId,
+    role: memoryItem.role,
+    chatId: memoryItem.chatId
+  };
+}
+
+/**
+ * Deduplicate user messages across agents (multi-agent scenarios)
+ * User messages appear only once, agent messages remain separate
+ */
+function deduplicateMessages(messages, agents = []) {
+  const messageMap = new Map();
+  const messagesWithoutId = [];
+
+  for (const msg of messages) {
+    const isUserMessage = msg.type === 'user' ||
+      msg.sender?.toLowerCase() === 'human' ||
+      msg.sender?.toLowerCase() === 'user';
+
+    if (isUserMessage && msg.messageId) {
+      if (!messageMap.has(msg.messageId)) {
+        messageMap.set(msg.messageId, {
+          ...msg,
+          seenByAgents: msg.fromAgentId ? [msg.fromAgentId] : []
+        });
+      }
+    } else {
+      messagesWithoutId.push(msg);
+    }
+  }
+
+  return [...messageMap.values(), ...messagesWithoutId]
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 function isHumanMessage(message) {
   const role = String(message?.role || '').toLowerCase();
   const sender = String(message?.sender || '').toLowerCase();
   return role === 'user' || HUMAN_SENDER_VALUES.has(sender);
 }
 
-function getReplyTarget(message, messagesById) {
-  const replyToMessageId = message?.replyToMessageId;
-  if (!replyToMessageId) return null;
-  const parentMessage = messagesById.get(String(replyToMessageId));
-  if (!parentMessage) return null;
-  return isHumanMessage(parentMessage) ? 'HUMAN' : (parentMessage.sender || 'unknown');
+function getMessageCardClassName(message) {
+  const role = String(message?.role || '').toLowerCase();
+  const isUser = role === 'user';
+  const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
+  const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
+
+  const roleClassName = isUser
+    ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
+    : isTool
+      ? 'mr-auto w-[92%] border-l-amber-500/50'
+      : isSystem
+        ? 'mr-auto w-[90%] border-l-border bg-muted/40'
+        : 'mr-auto w-[86%] border-l-sky-500/40';
+
+  return `group relative rounded-lg border-l p-3 ${roleClassName}`;
 }
 
-function getMessageSenderLabel(message, messagesById) {
+function getReplyTarget(message, messagesById) {
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (!replyToMessageId) return null;
+
+  const visited = new Set();
+  let currentId = replyToMessageId;
+  let closestReplyTarget = null;
+
+  for (let depth = 0; depth < 25 && currentId; depth += 1) {
+    if (visited.has(currentId)) break;
+    visited.add(currentId);
+
+    const parentMessage = messagesById.get(currentId);
+    if (!parentMessage) break;
+
+    const parentTarget = isHumanMessage(parentMessage) ? 'HUMAN' : (parentMessage.sender || 'unknown');
+    if (!closestReplyTarget) {
+      closestReplyTarget = parentTarget;
+    }
+    if (parentTarget === 'HUMAN') {
+      return 'HUMAN';
+    }
+
+    currentId = String(parentMessage?.replyToMessageId || '').trim();
+  }
+
+  return closestReplyTarget;
+}
+
+function inferReplyTargetFromHistory(message, messages, currentIndex) {
+  const role = String(message?.role || '').toLowerCase();
+  if (role !== 'assistant') return null;
+  if (message?.replyToMessageId) return null;
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (isHumanMessage(candidate)) {
+      return 'HUMAN';
+    }
+  }
+
+  return null;
+}
+
+function getMessageSenderLabel(message, messagesById, messages, currentIndex) {
   if (isHumanMessage(message)) return 'HUMAN';
   const sender = message?.sender || 'unknown';
-  const replyTarget = getReplyTarget(message, messagesById);
+  const replyTarget = getReplyTarget(message, messagesById) ||
+    inferReplyTargetFromHistory(message, messages, currentIndex);
   if (!replyTarget) return sender;
   return `${sender} (reply to ${replyTarget})`;
 }
@@ -433,6 +600,10 @@ export default function App() {
     messages: false,
     send: false
   });
+  // Message edit/delete state
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editingText, setEditingText] = useState('');
+  const [deletingMessageId, setDeletingMessageId] = useState(null);
   // Activity state for streaming indicators
   const [isBusy, setIsBusy] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -1438,6 +1609,206 @@ export default function App() {
     onSendMessage();
   }, [onSendMessage]);
 
+  /**
+   * Enter edit mode for a user message
+   * Shows textarea with current message text and Save/Cancel buttons
+   */
+  const onStartEditMessage = useCallback((messageId, currentText) => {
+    setEditingMessageId(messageId);
+    setEditingText(currentText || '');
+  }, []);
+
+  /**
+   * Cancel edit mode and discard changes
+   * Returns to normal message display
+   */
+  const onCancelEditMessage = useCallback(() => {
+    setEditingMessageId(null);
+    setEditingText('');
+  }, []);
+
+  /**
+   * Save edited message using two-phase approach:
+   * Phase 1: DELETE - Removes edited message and all subsequent messages from agent memories
+   * Phase 2: POST - Resubmits edited content, triggering new agent responses via SSE streaming
+   * 
+   * This approach reuses existing SSE infrastructure and maintains conversation flow integrity.
+   * localStorage backup created before DELETE for recovery if POST fails.
+   * 
+   * Error handling:
+   * - 423 Locked: World is processing, user should retry
+   * - 404 Not Found: Message already deleted
+   * - 400 Bad Request: Invalid message type (only user messages editable)
+   * - Partial failures: Some agents succeeded, others failed (shows which agents failed)
+   */
+  const onSaveEditMessage = useCallback(async (message) => {
+    const editedText = editingText.trim();
+    if (!editedText) {
+      setStatusText('Message cannot be empty', 'error');
+      return;
+    }
+
+    if (!message.messageId) {
+      setStatusText('Cannot edit: message not saved yet', 'error');
+      return;
+    }
+
+    if (!selectedSessionId) {
+      setStatusText('Cannot edit: no active chat session', 'error');
+      return;
+    }
+
+    if (!loadedWorld?.id) {
+      setStatusText('Cannot edit: no world loaded', 'error');
+      return;
+    }
+
+    // Store backup in localStorage
+    const backup = {
+      messageId: message.messageId,
+      chatId: selectedSessionId,
+      newContent: editedText,
+      timestamp: Date.now(),
+      worldId: loadedWorld.id
+    };
+    try {
+      localStorage.setItem('agent-world-desktop-edit-backup', JSON.stringify(backup));
+    } catch (e) {
+      console.warn('Failed to save edit backup:', e);
+    }
+
+    // Optimistic update: remove edited message and all subsequent messages
+    const editedIndex = messages.findIndex(m => m.id === message.id);
+    const optimisticMessages = editedIndex >= 0 ? messages.slice(0, editedIndex) : messages;
+    setMessages(optimisticMessages);
+    setEditingMessageId(null);
+    setEditingText('');
+
+    try {
+      // Phase 1: DELETE - remove messages from backend
+      const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, selectedSessionId);
+
+      // Check for failures
+      if (!deleteResult.success) {
+        const failedAgents = deleteResult.failedAgents || [];
+        if (failedAgents.length > 0) {
+          const errors = failedAgents.map(f => `${f.agentId}: ${f.error}`).join(', ');
+          throw new Error(`Delete failed for some agents: ${errors}`);
+        }
+        throw new Error('Failed to delete message');
+      }
+
+      // Phase 2: POST - resubmit edited message
+      try {
+        await api.sendMessage({
+          worldId: loadedWorld.id,
+          chatId: selectedSessionId,
+          content: editedText,
+          sender: 'human'
+        });
+
+        // Clear backup on success
+        try {
+          localStorage.removeItem('agent-world-desktop-edit-backup');
+        } catch (e) {
+          console.warn('Failed to clear edit backup:', e);
+        }
+
+        setStatusText('Message edited successfully', 'success');
+      } catch (resubmitError) {
+        setStatusText(
+          `Messages removed but resubmission failed: ${resubmitError.message}. Please try editing again.`,
+          'error'
+        );
+        // Reload messages on POST error
+        await refreshMessages(loadedWorld.id, selectedSessionId);
+      }
+    } catch (error) {
+      let errorMessage = error.message || 'Failed to edit message';
+
+      if (error.message?.includes('423')) {
+        errorMessage = 'Cannot edit: world is processing. Please try again in a moment.';
+      } else if (error.message?.includes('404')) {
+        errorMessage = 'Message not found. It may have been already deleted.';
+      } else if (error.message?.includes('400')) {
+        errorMessage = 'Invalid message: only user messages can be edited.';
+      }
+
+      setStatusText(errorMessage, 'error');
+      // Reload messages on error
+      await refreshMessages(loadedWorld.id, selectedSessionId);
+    }
+  }, [api, editingText, loadedWorld, selectedSessionId, messages, setStatusText, refreshMessages]);
+
+  /**
+   * Delete user message and all subsequent messages from conversation
+   * Shows confirmation dialog with message preview before deletion
+   * 
+   * After successful deletion:
+   * 1. Reloads world data via loadWorld IPC
+   * 2. Rebuilds message list from agent memories
+   * 3. Applies deduplication for multi-agent scenarios
+   * 
+   * Handles partial failures where some agents succeed and others fail.
+   */
+  const onDeleteMessage = useCallback(async (message) => {
+    if (!message.messageId || !selectedSessionId) return;
+
+    const preview = (message.content || '').substring(0, 100);
+    const previewText = preview.length < (message.content || '').length ? `${preview}...` : preview;
+    const confirmed = window.confirm(
+      `Delete this message and all responses after it?\n\n"${previewText}"`
+    );
+    if (!confirmed) return;
+
+    setDeletingMessageId(message.id);
+    try {
+      // Call DELETE via IPC
+      const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, selectedSessionId);
+
+      // Check for failures
+      if (!deleteResult.success) {
+        const failedAgents = deleteResult.failedAgents || [];
+        if (failedAgents.length > 0 && failedAgents.length < deleteResult.totalAgents) {
+          const errors = failedAgents.map(f => f.agentId).join(', ');
+          setStatusText(`Partial failure - failed for agents: ${errors}`, 'error');
+        } else {
+          throw new Error(deleteResult.error || 'Failed to delete message');
+        }
+      }
+
+      // Reload world via existing loadWorld IPC
+      const reloadResult = await api.loadWorld(loadedWorld.id);
+      if (!reloadResult.success) {
+        throw new Error('Failed to reload world after delete');
+      }
+
+      // Rebuild messages from agent memory
+      const world = reloadResult.world;
+      const agents = world.agents || [];
+      let newMessages = [];
+
+      for (const agent of agents) {
+        for (const memoryItem of agent.memory || []) {
+          if (memoryItem.chatId === selectedSessionId) {
+            newMessages.push(createMessageFromMemory(memoryItem, agent.name));
+          }
+        }
+      }
+
+      // Apply deduplication
+      newMessages = deduplicateMessages(newMessages, agents);
+
+      setMessages(newMessages);
+      setLoadedWorld(world);
+      setStatusText('Message deleted successfully', 'success');
+    } catch (error) {
+      setStatusText(error.message || 'Failed to delete message', 'error');
+    } finally {
+      setDeletingMessageId(null);
+    }
+  }, [api, loadedWorld, selectedSessionId, setStatusText]);
+
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {
       return;
@@ -1959,26 +2330,89 @@ export default function App() {
                         : 'Select a session from the left column.'}
                     </div>
                   ) : (
-                    messages.map((message) => {
-                      const senderLabel = getMessageSenderLabel(message, messagesById);
+                    messages.map((message, messageIndex) => {
+                      const senderLabel = getMessageSenderLabel(message, messagesById, messages, messageIndex);
                       const messageKey = message.messageId || message.id;
                       return (
                         <article
                           key={messageKey}
-                          className={`rounded-lg border-l p-3 ${String(message.role).toLowerCase() === 'user'
-                            ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
-                            : 'mr-auto border-l-border bg-card/70'
-                            }`}
+                          className={getMessageCardClassName(message)}
                         >
                           <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                             <span>{senderLabel}</span>
                             <span>{formatTime(message.createdAt)}</span>
                           </div>
 
-                          <MessageContent message={message} />
+                          {editingMessageId === message.id ? (
+                            <div className="space-y-2">
+                              <textarea
+                                value={editingText}
+                                onChange={(e) => setEditingText(e.target.value)}
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/20 resize-none transition-all"
+                                rows={3}
+                                autoFocus
+                                placeholder="Edit your message..."
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') {
+                                    onCancelEditMessage();
+                                  }
+                                }}
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => onSaveEditMessage(message)}
+                                  disabled={!editingText.trim()}
+                                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={onCancelEditMessage}
+                                  className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <MessageContent message={message} />
+                          )}
 
                           {message.isStreaming ? (
                             <ThinkingIndicator className="mt-2" />
+                          ) : null}
+
+                          {/* Action buttons - show on hover in lower right */}
+                          {isHumanMessage(message) && message.messageId && editingMessageId !== message.id ? (
+                            <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => onStartEditMessage(message.id, message.content)}
+                                disabled={!message.messageId}
+                                className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                                title="Edit message"
+                                aria-label="Edit message"
+                              >
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteMessage(message)}
+                                disabled={deletingMessageId === message.id}
+                                className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                                title="Delete message"
+                                aria-label="Delete message"
+                              >
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M18 6L6 18M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
                           ) : null}
                         </article>
                       );

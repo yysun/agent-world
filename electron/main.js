@@ -67,6 +67,7 @@ import {
   restoreChat,
   subscribeWorld,
   updateWorld,
+  removeMessagesFrom,
   LLMProvider,
   configureLLMProvider,
   addLogStreamCallback
@@ -1316,6 +1317,25 @@ async function sendChatMessage(payload) {
 }
 
 /**
+ * Delete message and all subsequent messages in a chat
+ * @param {any} payload - {worldId, messageId, chatId}
+ * @returns {Promise<any>} Deletion result with success status and details
+ */
+async function deleteMessageFromChat(payload) {
+  ensureCoreReady();
+  const worldId = String(payload?.worldId || '').trim();
+  const messageId = String(payload?.messageId || '').trim();
+  const chatId = String(payload?.chatId || '').trim();
+
+  if (!worldId) throw new Error('World ID is required.');
+  if (!messageId) throw new Error('Message ID is required.');
+  if (!chatId) throw new Error('Chat ID is required.');
+
+  const result = await removeMessagesFrom(worldId, messageId, chatId);
+  return result;
+}
+
+/**
  * @param {any} payload
  */
 function unsubscribeChatEvents(payload) {
@@ -1347,6 +1367,7 @@ function registerIpcHandlers() {
   ipcMain.handle('session:select', async (_, payload) => selectWorldSession(payload?.worldId, payload?.chatId));
   ipcMain.handle('chat:getMessages', async (_, payload) => getSessionMessages(payload?.worldId, payload?.chatId));
   ipcMain.handle('chat:sendMessage', async (_, payload) => sendChatMessage(payload));
+  ipcMain.handle('message:delete', async (_, payload) => deleteMessageFromChat(payload));
   ipcMain.handle('chat:subscribeEvents', async (_, payload) => subscribeChatEvents(payload));
   ipcMain.handle('chat:unsubscribeEvents', async (_, payload) => unsubscribeChatEvents(payload));
 }
