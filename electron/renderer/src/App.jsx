@@ -17,6 +17,8 @@
  * - Loads all worlds from workspace folder, displays in dropdown for selection
  *
  * Recent Changes:
+ * - 2026-02-10: Fixed stuck "Processing..." state by ending stale tool-stream activity and syncing stream counts on tool lifecycle events
+ * - 2026-02-10: Added markdown rendering for messages (matching web app behavior)
  * - 2026-02-10: Added delete button (X) next to name field in agent edit form
  * - 2026-02-10: Added a leading dot indicator for each chat session row in the sidebar list
  * - 2026-02-10: Added left inset spacing for the chat-session list container
@@ -45,6 +47,7 @@ import {
   AgentQueueDisplay,
   ElapsedTimeCounter
 } from './components/index.js';
+import { renderMarkdown } from './utils/markdown';
 
 const THEME_STORAGE_KEY = 'agent-world-desktop-theme';
 const COMPOSER_MAX_ROWS = 5;
@@ -74,6 +77,97 @@ const WORLD_PROVIDER_OPTIONS = [
 const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' };
 const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' };
 const HUMAN_SENDER_VALUES = new Set(['human', 'user', 'you']);
+
+/**
+ * Message Content Renderer Component
+ * Renders message content with markdown support for regular messages
+ * Preserves special formatting for tool output and log messages
+ */
+function MessageContent({ message }) {
+  // Use useMemo to cache markdown rendering and avoid re-parsing on every render
+  const renderedContent = useMemo(() => {
+    // Skip markdown for special message types that need specific formatting
+    if (message.logEvent || message.isToolStreaming) {
+      return null;
+    }
+
+    // Render markdown for regular message content
+    const content = message.content || '';
+    if (!content) return '';
+
+    return renderMarkdown(content);
+  }, [message.content, message.logEvent, message.isToolStreaming]);
+
+  // Log message rendering with level-based colored dot
+  if (message.logEvent) {
+    return (
+      <div className="flex items-start gap-2 text-xs font-mono" style={{ color: 'hsl(var(--muted-foreground))' }}>
+        <span
+          className="inline-block rounded-full mt-0.5"
+          style={{
+            width: '6px',
+            height: '6px',
+            flexShrink: 0,
+            backgroundColor:
+              message.logEvent.level === 'error' ? '#ef4444' :
+                message.logEvent.level === 'warn' ? '#f59e0b' :
+                  message.logEvent.level === 'info' ? '#10b981' :
+                    message.logEvent.level === 'debug' ? '#06b6d4' :
+                      '#9ca3af'
+          }}
+        />
+        <div className="flex-1">
+          <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+            {message.logEvent.category}
+          </span>
+          {' - '}
+          <span>{message.logEvent.message}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Tool streaming output with stdout/stderr distinction
+  if (message.isToolStreaming) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          ⚙️ Executing...
+        </div>
+        <div
+          className="rounded-md overflow-hidden border"
+          style={message.streamType === 'stderr' ? {
+            backgroundColor: 'rgba(69, 10, 10, 0.3)',
+            borderColor: 'rgba(239, 68, 68, 0.3)'
+          } : {
+            backgroundColor: 'rgb(15, 23, 42)',
+            borderColor: 'rgb(51, 65, 85)'
+          }}
+        >
+          <pre
+            className="text-xs p-3 font-mono whitespace-pre-wrap"
+            style={{
+              color: message.streamType === 'stderr'
+                ? 'rgb(248, 113, 113)'
+                : 'rgb(203, 213, 225)',
+              wordBreak: 'break-all'
+            }}
+          >
+            {message.content || '(waiting for output...)'}
+          </pre>
+        </div>
+      </div>
+    );
+  }
+
+  // Regular message content with markdown rendering
+  return (
+    <div
+      className="prose prose-invert max-w-none text-foreground"
+      dangerouslySetInnerHTML={{ __html: renderedContent }}
+    />
+  );
+}
 
 function getDesktopApi() {
   const api = window.agentWorldDesktop;
@@ -1881,66 +1975,7 @@ export default function App() {
                             <span>{formatTime(message.createdAt)}</span>
                           </div>
 
-                          {message.logEvent ? (
-                            /* Log message rendering with level-based colored dot */
-                            <div className="flex items-start gap-2 text-xs font-mono" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                              <span
-                                className="inline-block rounded-full mt-0.5"
-                                style={{
-                                  width: '6px',
-                                  height: '6px',
-                                  flexShrink: 0,
-                                  backgroundColor:
-                                    message.logEvent.level === 'error' ? '#ef4444' :
-                                      message.logEvent.level === 'warn' ? '#f59e0b' :
-                                        message.logEvent.level === 'info' ? '#10b981' :
-                                          message.logEvent.level === 'debug' ? '#06b6d4' :
-                                            '#9ca3af'
-                                }}
-                              />
-                              <div className="flex-1">
-                                <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-                                  {message.logEvent.category}
-                                </span>
-                                {' - '}
-                                <span>{message.logEvent.message}</span>
-                              </div>
-                            </div>
-                          ) : message.isToolStreaming ? (
-                            /* Tool streaming output with stdout/stderr distinction */
-                            <div className="flex flex-col gap-2">
-                              <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                                ⚙️ Executing...
-                              </div>
-                              <div
-                                className="rounded-md overflow-hidden border"
-                                style={message.streamType === 'stderr' ? {
-                                  backgroundColor: 'rgba(69, 10, 10, 0.3)',
-                                  borderColor: 'rgba(239, 68, 68, 0.3)'
-                                } : {
-                                  backgroundColor: 'rgb(15, 23, 42)',
-                                  borderColor: 'rgb(51, 65, 85)'
-                                }}
-                              >
-                                <pre
-                                  className="text-xs p-3 font-mono whitespace-pre-wrap"
-                                  style={{
-                                    color: message.streamType === 'stderr'
-                                      ? 'rgb(248, 113, 113)'
-                                      : 'rgb(203, 213, 225)',
-                                    wordBreak: 'break-all'
-                                  }}
-                                >
-                                  {message.content || '(waiting for output...)'}
-                                </pre>
-                              </div>
-                            </div>
-                          ) : (
-                            /* Regular message content */
-                            <div className="whitespace-pre-wrap text-sm text-foreground">
-                              {message.content}
-                            </div>
-                          )}
+                          <MessageContent message={message} />
 
                           {message.isStreaming ? (
                             <ThinkingIndicator className="mt-2" />

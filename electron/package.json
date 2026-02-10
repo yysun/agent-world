@@ -13,11 +13,16 @@
     "start": "npm run renderer:build && electron ."
   },
   "dependencies": {
+    "dompurify": "^3.3.1",
+    "dotenv": "^16.4.5",
+    "marked": "^17.0.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/dompurify": "^3.0.5",
+    "@types/marked": "^5.0.2",
     "@vitejs/plugin-react": "^5.1.2",
     "electron": "^35.0.0"
   }

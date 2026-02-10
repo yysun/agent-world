@@ -19,6 +19,8 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-10: Fixed tool realtime event serialization to preserve stable tool IDs (`toolExecution.toolCallId`) across start/result/error
+ * - 2026-02-10: Added explicit .env loading from project-root/cwd candidates so provider keys are available when Electron starts from `electron/`
  * - 2026-02-10: Added global log event streaming to forward logger.error/warn/info/debug/trace to renderer
  * - 2026-02-10: Added agent delete IPC handler for agent deletion from edit panel
  * - 2026-02-10: Fixed session message counts by deriving counts from persisted chat messages instead of stale chat metadata
@@ -48,6 +50,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import dotenv from 'dotenv';
 import {
   createAgent,
   createWorld,
@@ -89,6 +92,27 @@ const worldSubscriptions = new Map(); // Track world subscriptions for agent res
 const canceledSubscriptionIds = new Set();
 /** @type {(() => void) | null} */
 let logStreamUnsubscribe = null; // Global log stream subscription cleanup
+
+function loadEnvironmentVariables() {
+  const candidates = [
+    process.env.AGENT_WORLD_DOTENV_PATH,
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../.env'),
+    path.resolve(__dirname, '../.env')
+  ]
+    .filter((candidate) => typeof candidate === 'string' && candidate.length > 0)
+    .map((candidate) => path.resolve(candidate));
+
+  const uniqueCandidates = [...new Set(candidates)];
+
+  for (const envPath of uniqueCandidates) {
+    if (!fs.existsSync(envPath)) continue;
+    dotenv.config({ path: envPath, quiet: true });
+    break;
+  }
+}
+
+loadEnvironmentVariables();
 
 function getWorkspacePrefsPath() {
   return path.join(app.getPath('userData'), WORKSPACE_PREFS_FILE);
