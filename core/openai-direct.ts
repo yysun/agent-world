@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-10: Added env-flagged Ollama tool attachment support via ENABLE_OLLAMA_TOOLS
  * - 2026-02-07: Disabled tool definitions for Ollama provider requests
  * - 2025-11-09: Phase 2 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
@@ -147,9 +148,20 @@ function convertMCPToolsToOpenAI(mcpTools: Record<string, any>): OpenAI.Chat.Com
   }));
 }
 
+function isTruthyEnvValue(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
 function shouldAttachTools(provider: Agent['provider']): boolean {
+  if (provider !== 'ollama') {
+    return true;
+  }
+
   // Ollama frequently behaves better without OpenAI-style tool definitions attached.
-  return provider !== 'ollama';
+  // Opt-in override: ENABLE_OLLAMA_TOOLS=true|1|yes|on
+  return isTruthyEnvValue(process.env.ENABLE_OLLAMA_TOOLS);
 }
 
 /**
