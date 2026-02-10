@@ -34,6 +34,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-10: Upgrade generic LLM tool-call text (e.g., "Calling tool: shell_cmd") to include parsed parameters
+ * - 2026-02-10: Made tool-call argument parsing more robust for both JSON strings and object-like payloads
  * - 2026-02-08: Enhanced tool call message formatting to include parameters
  * - 2025-11-11: Added AI command special handling - bypass LLM, save output to memory
  * - 2025-11-09: Extracted from events.ts for modular architecture
@@ -73,6 +75,15 @@ const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
 
+type DisplayToolCall = {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: unknown;
+  };
+};
+
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
 async function getStorageWrappers(): Promise<StorageAPI> {
@@ -87,7 +98,43 @@ async function getStorageWrappers(): Promise<StorageAPI> {
  * @param toolCalls - Array of tool calls from LLM response
  * @returns Formatted message string showing tool names and parameters
  */
-function formatToolCallsMessage(toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>): string {
+function parseToolCallArgs(rawArguments: unknown): Record<string, unknown> | null {
+  if (rawArguments == null) return {};
+  if (typeof rawArguments === 'object' && !Array.isArray(rawArguments)) {
+    return rawArguments as Record<string, unknown>;
+  }
+  if (typeof rawArguments !== 'string') return null;
+
+  const trimmed = rawArguments.trim();
+  if (!trimmed) return {};
+
+  const parsed = JSON.parse(trimmed);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return null;
+}
+
+function shouldUpgradeToolCallMessage(content: string, toolCalls: DisplayToolCall[]): boolean {
+  if (!content.trim()) return true;
+  if (!toolCalls || toolCalls.length === 0) return false;
+
+  const normalizedContent = content.trim().toLowerCase().replace(/\s+/g, ' ');
+  const genericCallingToolPattern = /^calling tool(?::|\s)/i;
+  if (genericCallingToolPattern.test(content) && !content.includes('(')) {
+    return true;
+  }
+
+  const firstToolName = String(toolCalls[0]?.function?.name || '').trim().toLowerCase();
+  if (!firstToolName) return false;
+
+  return normalizedContent === `calling tool: ${firstToolName}` ||
+    normalizedContent === `calling tool ${firstToolName}` ||
+    normalizedContent === `calling tool: ${firstToolName}.` ||
+    normalizedContent === `calling tool ${firstToolName}.`;
+}
+
+function formatToolCallsMessage(toolCalls: DisplayToolCall[]): string {
   const toolCount = toolCalls.length;
 
   if (toolCount === 1) {
@@ -95,7 +142,10 @@ function formatToolCallsMessage(toolCalls: Array<{ id: string; type: 'function';
     const toolName = tc.function.name;
 
     try {
-      const args = JSON.parse(tc.function.arguments);
+      const args = parseToolCallArgs(tc.function.arguments);
+      if (!args) {
+        return `Calling tool: ${toolName}`;
+      }
       const paramParts: string[] = [];
 
       // Format parameters - show up to 3 key parameters
@@ -106,9 +156,10 @@ function formatToolCallsMessage(toolCalls: Array<{ id: string; type: 'function';
         // Truncate long values
         if (typeof value === 'string' && value.length > 50) {
           value = value.substring(0, 47) + '...';
-        } else if (typeof value === 'object') {
-          value = JSON.stringify(value);
-          if (value.length > 50) {
+        } else if (value !== null && typeof value === 'object') {
+          const serialized = JSON.stringify(value);
+          value = serialized ?? String(value);
+          if (typeof value === 'string' && value.length > 50) {
             value = value.substring(0, 47) + '...';
           }
         }
@@ -123,7 +174,7 @@ function formatToolCallsMessage(toolCalls: Array<{ id: string; type: 'function';
       return paramParts.length > 0
         ? `Calling tool: ${toolName} (${paramParts.join(', ')})`
         : `Calling tool: ${toolName}`;
-    } catch (e) {
+    } catch {
       // If arguments can't be parsed, just show the tool name
       return `Calling tool: ${toolName}`;
     }
@@ -225,7 +276,8 @@ export async function processAgentMessage(
 
       // Format meaningful content for tool calls if LLM didn't provide text
       let messageContent = llmResponse.content || '';
-      if (!messageContent && llmResponse.tool_calls && llmResponse.tool_calls.length > 0) {
+      if (llmResponse.tool_calls && llmResponse.tool_calls.length > 0 &&
+        shouldUpgradeToolCallMessage(messageContent, llmResponse.tool_calls as DisplayToolCall[])) {
         messageContent = formatToolCallsMessage(llmResponse.tool_calls);
       }
 
