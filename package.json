@@ -17,7 +17,6 @@
   "type": "module",
   "workspaces": [
     "core",
-    "react",
     "web"
   ],
   "bin": {
@@ -27,7 +26,7 @@
   "scripts": {
     "prestart": "npm run build",
     "start": "node dist/server/index.js",
-    "dev": "npm-run-all --parallel server:watch web:dev react:dev",
+    "dev": "npm-run-all --parallel server:watch web:dev",
     "cli": "npm run cli:start",
     "cli:start": "node dist/cli/index.js",
     "cli:dev": "npx tsx cli/index.ts",
@@ -40,9 +39,6 @@
     "web:dev": "npm-run-all --sequential server:wait web:dev:direct",
     "web:dev:direct": "npm run dev --workspace=web",
     "web:watch": "npm-run-all --parallel server:watch web:dev:direct",
-    "react:dev": "npm-run-all --parallel server:wait react:dev:direct",
-    "react:dev:direct": "npm run dev --workspace=react",
-    "react:watch": "npm-run-all --parallel server:watch react:dev:direct",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -51,8 +47,8 @@
     "test:e2e": "npx tsx tests/e2e/test-agent-response-rules.ts",
     "test:e2e:interactive": "npx tsx tests/e2e/test-agent-response-rules.ts -i",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run check --workspace=react",
-    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web && npm run build --workspace=react",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web",
+    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "pkill": "pkill -f tsx"
   },
   "description": "World-mediated agent management system with clean API surface",

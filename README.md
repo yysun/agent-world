@@ -30,7 +30,7 @@ Paste that prompt. Agents come alive instantly.
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
 - ✅ Multiple AI Providers - Use different models for different agents
-- ✅ Modern Web Interface - React + Next.js frontend with real-time chat
+- ✅ Modern Web Interface - Clean, responsive UI with real-time chat
 
 ## What You Can Build
 
