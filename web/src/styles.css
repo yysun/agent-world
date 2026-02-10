@@ -16,6 +16,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Fixed user-message edit/delete controls clipping by placing action buttons inside the message bubble
  * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
  * - Moved right-aligned message avatars to the message side and removed circular avatar mask
  * - Fixed message avatar sprite-sheet coordinates for 32px chat avatars
@@ -864,6 +865,8 @@ legend {
   border-radius: 12px;
   max-width: 100%;
   width: 100%;
+  position: relative;
+  box-sizing: border-box;
 }
 
 .message-row {
@@ -955,8 +958,9 @@ legend {
   background: none;
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
-  width: calc(98% - 3rem);
-  max-width: calc(100% - 3rem);
+  width: 98%;
+  max-width: 100%;
+  padding-right: 3.5rem;
 }
 
 .agent-message {
@@ -1206,32 +1210,22 @@ legend {
   position: relative;
 }
 
-/* Extend hover area to include the edit button region */
-.user-message::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: -3rem;
-  bottom: 0;
-  width: 3rem;
-  pointer-events: auto;
-}
-
 /* Message Action Buttons Container */
 .message-actions {
   position: absolute;
   top: 0.5rem;
-  right: -2.5rem;
+  right: 0.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   align-items: center;
-  z-index: 1;
+  z-index: 2;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
 
-.message:hover .message-actions {
+.message:hover .message-actions,
+.message:focus-within .message-actions {
   opacity: 1;
 }
 
