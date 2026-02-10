@@ -17,10 +17,14 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-02-10: Added tool streaming support (handleToolStreamStart/Chunk/End)
+ * - 2026-02-10: Added 50K character truncation for tool output
+ * - 2026-02-10: Added stdout/stderr distinction for shell commands
  * - 2026-02-10: Initial implementation
  */
 
 const DEBOUNCE_MS = 16; // 60fps frame budget
+const MAX_TOOL_OUTPUT_LENGTH = 50000; // Characters
 
 /**
  * @typedef {Object} StreamEntry
@@ -31,6 +35,8 @@ const DEBOUNCE_MS = 16; // 60fps frame budget
  * @property {boolean} hasError
  * @property {string|null} errorMessage
  * @property {string} createdAt
+ * @property {boolean} [isToolStreaming] - True if streaming tool output
+ * @property {('stdout'|'stderr')} [streamType] - Tool output stream type
  */
 
 /**
@@ -39,6 +45,9 @@ const DEBOUNCE_MS = 16; // 60fps frame budget
  * @property {(messageId: string, content: string) => void} onStreamUpdate
  * @property {(messageId: string) => void} onStreamEnd
  * @property {(messageId: string, errorMessage: string) => void} onStreamError
+ * @property {(entry: StreamEntry) => void} [onToolStreamStart] - Called when tool streaming starts
+ * @property {(messageId: string, content: string, streamType: 'stdout'|'stderr') => void} [onToolStreamUpdate] - Called on tool stream chunks
+ * @property {(messageId: string) => void} [onToolStreamEnd] - Called when tool streaming ends
  */
 
 /**
@@ -53,8 +62,24 @@ export function createStreamingState(callbacks) {
   /** @type {Map<string, string>} Pending content updates awaiting debounce */
   const pendingUpdates = new Map();
 
+  /** @type {Map<string, {content: string, streamType: 'stdout'|'stderr'}>} Pending tool updates */
+  const pendingToolUpdates = new Map();
+
   /** @type {number|null} */
   let debounceFrameId = null;
+
+  /**
+   * Truncate tool output to prevent UI freezing
+   * @param {string} content
+   * @returns {string}
+   */
+  function truncateOutput(content) {
+    if (content.length > MAX_TOOL_OUTPUT_LENGTH) {
+      return '⚠️ Output truncated (showing last 50,000 chars)\n\n' +
+        content.slice(-MAX_TOOL_OUTPUT_LENGTH);
+    }
+    return content;
+  }
 
   /**
    * Flush all pending updates immediately
@@ -69,6 +94,13 @@ export function createStreamingState(callbacks) {
       callbacks.onStreamUpdate(messageId, content);
     }
     pendingUpdates.clear();
+
+    for (const [messageId, update] of pendingToolUpdates) {
+      if (callbacks.onToolStreamUpdate) {
+        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType);
+      }
+    }
+    pendingToolUpdates.clear();
   }
 
   /**
@@ -78,6 +110,23 @@ export function createStreamingState(callbacks) {
    */
   function scheduleUpdate(messageId, content) {
     pendingUpdates.set(messageId, content);
+
+    if (debounceFrameId === null) {
+      debounceFrameId = requestAnimationFrame(() => {
+        debounceFrameId = null;
+        flush();
+      });
+    }
+  }
+
+  /**
+   * Schedule a debounced tool update
+   * @param {string} messageId
+   * @param {string} content
+   * @param {('stdout'|'stderr')} streamType
+   */
+  function scheduleToolUpdate(messageId, content, streamType) {
+    pendingToolUpdates.set(messageId, { content, streamType });
 
     if (debounceFrameId === null) {
       debounceFrameId = requestAnimationFrame(() => {
@@ -186,6 +235,110 @@ export function createStreamingState(callbacks) {
   }
 
   /**
+   * Handle tool stream start event
+   * @param {string} messageId
+   * @param {string} agentName
+   * @param {('stdout'|'stderr')} streamType
+   * @returns {StreamEntry}
+   * 
+   * @example
+   * const entry = streaming.handleToolStreamStart('msg1', 'shell_cmd', 'stdout');
+   */
+  function handleToolStreamStart(messageId, agentName, streamType) {
+    const entry = {
+      messageId,
+      agentName,
+      content: '',
+      isStreaming: false,
+      isToolStreaming: true,
+      hasError: false,
+      errorMessage: null,
+      streamType,
+      createdAt: new Date().toISOString()
+    };
+
+    streams.set(messageId, entry);
+    if (callbacks.onToolStreamStart) {
+      callbacks.onToolStreamStart(entry);
+    }
+    return entry;
+  }
+
+  /**
+   * Handle tool stream chunk event
+   * @param {string} messageId
+   * @param {string} chunk
+   * @param {('stdout'|'stderr')} streamType
+   * 
+   * @example
+   * streaming.handleToolStreamChunk('msg1', 'Hello\n', 'stdout');
+   */
+  function handleToolStreamChunk(messageId, chunk, streamType) {
+    const entry = streams.get(messageId);
+    if (!entry) {
+      // Stream not found - create one for late-arriving chunks
+      const newEntry = {
+        messageId,
+        agentName: 'shell_cmd',
+        content: chunk,
+        isStreaming: false,
+        isToolStreaming: true,
+        hasError: false,
+        errorMessage: null,
+        streamType,
+        createdAt: new Date().toISOString()
+      };
+      streams.set(messageId, newEntry);
+      if (callbacks.onToolStreamStart) {
+        callbacks.onToolStreamStart(newEntry);
+      }
+      return;
+    }
+
+    entry.content += chunk;
+    entry.streamType = streamType; // Update stream type (handles stdout/stderr switching)
+
+    // Apply truncation if needed
+    if (entry.content.length > MAX_TOOL_OUTPUT_LENGTH) {
+      entry.content = truncateOutput(entry.content);
+    }
+
+    scheduleToolUpdate(messageId, entry.content, streamType);
+  }
+
+  /**
+   * Handle tool stream end event
+   * @param {string} messageId
+   * @returns {string|null} Final content or null if stream not found
+   * 
+   * @example
+   * const finalContent = streaming.handleToolStreamEnd('msg1');
+   */
+  function handleToolStreamEnd(messageId) {
+    const entry = streams.get(messageId);
+    if (!entry) return null;
+
+    // Flush any pending updates for this stream
+    if (pendingToolUpdates.has(messageId)) {
+      const update = pendingToolUpdates.get(messageId);
+      if (callbacks.onToolStreamUpdate) {
+        callbacks.onToolStreamUpdate(messageId, update.content, update.streamType);
+      }
+      pendingToolUpdates.delete(messageId);
+    }
+
+    entry.isToolStreaming = false;
+    const finalContent = entry.content;
+    streams.delete(messageId);
+
+    if (callbacks.onToolStreamEnd) {
+      callbacks.onToolStreamEnd(messageId);
+    }
+
+    return finalContent;
+  }
+
+  /**
    * Get current content for a stream
    * @param {string} messageId
    * @returns {string|null}
@@ -227,6 +380,7 @@ export function createStreamingState(callbacks) {
     flush();
     streams.clear();
     pendingUpdates.clear();
+    pendingToolUpdates.clear();
     if (debounceFrameId !== null) {
       cancelAnimationFrame(debounceFrameId);
       debounceFrameId = null;
@@ -238,6 +392,9 @@ export function createStreamingState(callbacks) {
     handleChunk,
     handleEnd,
     handleError,
+    handleToolStreamStart,
+    handleToolStreamChunk,
+    handleToolStreamEnd,
     getContent,
     isActive,
     getActiveCount,

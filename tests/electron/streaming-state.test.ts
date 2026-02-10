@@ -316,4 +316,202 @@ describe('createStreamingState', () => {
       expect(ids).toContain('c');
     });
   });
+
+  describe('Tool Streaming', () => {
+    beforeEach(() => {
+      // Add tool streaming callbacks
+      callbacks.onToolStreamStart = vi.fn();
+      callbacks.onToolStreamUpdate = vi.fn();
+      callbacks.onToolStreamEnd = vi.fn();
+      state = createStreamingState(callbacks);
+    });
+
+    describe('handleToolStreamStart', () => {
+      it('should create tool stream entry with stdout type', () => {
+        const entry = state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+
+        expect(entry.messageId).toBe('msg-1');
+        expect(entry.agentName).toBe('shell_cmd');
+        expect(entry.content).toBe('');
+        expect(entry.isToolStreaming).toBe(true);
+        expect(entry.streamType).toBe('stdout');
+        expect(entry.createdAt).toBeDefined();
+      });
+
+      it('should create tool stream entry with stderr type', () => {
+        const entry = state.handleToolStreamStart('msg-1', 'shell_cmd', 'stderr');
+
+        expect(entry.streamType).toBe('stderr');
+        expect(entry.isToolStreaming).toBe(true);
+      });
+
+      it('should call onToolStreamStart callback', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+
+        expect(callbacks.onToolStreamStart).toHaveBeenCalledTimes(1);
+        expect(callbacks.onToolStreamStart).toHaveBeenCalledWith(
+          expect.objectContaining({
+            messageId: 'msg-1',
+            agentName: 'shell_cmd',
+            streamType: 'stdout'
+          })
+        );
+      });
+
+      it('should track tool stream as active', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+
+        expect(state.isActive('msg-1')).toBe(true);
+        expect(state.getActiveCount()).toBe(1);
+      });
+    });
+
+    describe('handleToolStreamChunk', () => {
+      it('should accumulate tool output chunks', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Hello\n', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'World\n', 'stdout');
+
+        expect(state.getContent('msg-1')).toBe('Hello\nWorld\n');
+      });
+
+      it('should schedule debounced update', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Output', 'stdout');
+
+        expect(rafCallback).not.toBeNull();
+        expect(callbacks.onToolStreamUpdate).not.toHaveBeenCalled();
+
+        rafCallback();
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Output', 'stdout');
+      });
+
+      it('should update streamType when switching streams', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Normal output\n', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Error output\n', 'stderr');
+
+        rafCallback();
+        const lastCall = callbacks.onToolStreamUpdate.mock.calls[callbacks.onToolStreamUpdate.mock.calls.length - 1];
+        expect(lastCall[2]).toBe('stderr'); // streamType parameter
+      });
+
+      it('should handle rapid stdout/stderr switching', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+
+        for (let i = 0; i < 10; i++) {
+          const type = i % 2 === 0 ? 'stdout' : 'stderr';
+          state.handleToolStreamChunk('msg-1', `Line ${i}\n`, type);
+        }
+
+        expect(state.isActive('msg-1')).toBe(true);
+        const content = state.getContent('msg-1');
+        expect(content.split('\n').length).toBe(11); // 10 lines + empty line
+      });
+
+      it('should create stream for late-arriving chunks', () => {
+        state.handleToolStreamChunk('msg-1', 'Late chunk', 'stdout');
+
+        expect(state.isActive('msg-1')).toBe(true);
+        expect(callbacks.onToolStreamStart).toHaveBeenCalledTimes(1);
+        expect(state.getContent('msg-1')).toBe('Late chunk');
+      });
+
+      it('should truncate tool output exceeding 50K characters', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+
+        const longOutput = 'x'.repeat(60000);
+        state.handleToolStreamChunk('msg-1', longOutput, 'stdout');
+
+        rafCallback();
+        const lastCall = callbacks.onToolStreamUpdate.mock.calls[callbacks.onToolStreamUpdate.mock.calls.length - 1];
+        const content = lastCall[1];
+
+        expect(content).toContain('⚠️ Output truncated');
+        expect(content.length).toBeLessThanOrEqual(50100); // Truncation + warning
+      });
+    });
+
+    describe('handleToolStreamEnd', () => {
+      it('should end tool stream and return content', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Done\n', 'stdout');
+
+        const finalContent = state.handleToolStreamEnd('msg-1');
+
+        expect(finalContent).toBe('Done\n');
+        expect(callbacks.onToolStreamEnd).toHaveBeenCalledWith('msg-1');
+        expect(state.isActive('msg-1')).toBe(false);
+      });
+
+      it('should flush pending updates before ending', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Final', 'stdout');
+
+        state.handleToolStreamEnd('msg-1');
+
+        expect(callbacks.onToolStreamUpdate).toHaveBeenCalledWith('msg-1', 'Final', 'stdout');
+      });
+
+      it('should return null for unknown stream', () => {
+        const result = state.handleToolStreamEnd('unknown');
+
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should handle empty tool output', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', '', 'stdout');
+
+        expect(state.getContent('msg-1')).toBe('');
+      });
+
+      it('should handle whitespace-only output', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', '   \n\n   ', 'stdout');
+
+        expect(state.getContent('msg-1')).toBe('   \n\n   ');
+      });
+
+      it('should handle tool stream without explicit end', () => {
+        state.handleToolStreamStart('msg-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('msg-1', 'Output', 'stdout');
+
+        // Simulate cleanup without end
+        state.cleanup();
+        expect(state.getActiveCount()).toBe(0);
+      });
+    });
+
+    describe('concurrent text and tool streaming', () => {
+      it('should handle text and tool streaming simultaneously', () => {
+        state.handleStart('msg-1', 'agent-1');
+        state.handleToolStreamStart('msg-2', 'shell_cmd', 'stdout');
+
+        state.handleChunk('msg-1', 'Text content');
+        state.handleToolStreamChunk('msg-2', 'Tool output', 'stdout');
+
+        expect(state.getActiveCount()).toBe(2);
+        expect(state.isActive('msg-1')).toBe(true);
+        expect(state.isActive('msg-2')).toBe(true);
+      });
+
+      it('should not interfere with text streaming state', () => {
+        state.handleStart('msg-1', 'agent-1');
+        state.handleToolStreamStart('msg-2', 'shell_cmd', 'stdout');
+
+        state.handleChunk('msg-1', 'Text');
+        state.handleToolStreamChunk('msg-2', 'Tool output', 'stdout');
+
+        state.handleEnd('msg-1');
+        expect(state.isActive('msg-1')).toBe(false);
+        expect(state.isActive('msg-2')).toBe(true);
+
+        state.handleToolStreamEnd('msg-2');
+        expect(state.isActive('msg-2')).toBe(false);
+      });
+    });
+  });
 });

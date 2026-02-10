@@ -127,7 +127,7 @@ export {
 } from './llm-config.js';
 
 // === LOGGER ===
-export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers } from './logger.js';
+export { type LoggerConfig, type LogLevel, logger, createCategoryLogger, loggers, addLogStreamCallback } from './logger.js';
 
 // === SUBSCRIPTION SYSTEM ===
 export { type ClientConnection, subscribeWorld } from './subscription.js';

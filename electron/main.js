@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-10: Added global log event streaming to forward logger.error/warn/info/debug/trace to renderer
  * - 2026-02-10: Added agent delete IPC handler for agent deletion from edit panel
  * - 2026-02-10: Fixed session message counts by deriving counts from persisted chat messages instead of stale chat metadata
  * - 2026-02-10: Added world form parity fields (`chatLLMProvider`, `chatLLMModel`, `mcpConfig`) to world create/update IPC and serialized world payloads
@@ -64,7 +65,8 @@ import {
   subscribeWorld,
   updateWorld,
   LLMProvider,
-  configureLLMProvider
+  configureLLMProvider,
+  addLogStreamCallback
 } from '../dist/core/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -85,6 +87,8 @@ const chatEventSubscriptions = new Map();
 const worldSubscriptions = new Map(); // Track world subscriptions for agent responses
 /** @type {Set<string>} */
 const canceledSubscriptionIds = new Set();
+/** @type {(() => void) | null} */
+let logStreamUnsubscribe = null; // Global log stream subscription cleanup
 
 function getWorkspacePrefsPath() {
   return path.join(app.getPath('userData'), WORKSPACE_PREFS_FILE);
@@ -500,6 +504,25 @@ function serializeRealtimeToolEvent(worldId, chatId, event) {
 }
 
 /**
+ * Serialize log event for IPC transmission
+ * @param {any} logEvent - Log event from logger callback
+ * @returns {any} Serialized event payload
+ */
+function serializeRealtimeLogEvent(logEvent) {
+  return {
+    type: 'log',
+    logEvent: {
+      level: logEvent?.level || 'info',
+      category: logEvent?.category || 'unknown',
+      message: logEvent?.message || '',
+      timestamp: logEvent?.timestamp || new Date().toISOString(),
+      data: logEvent?.data || null,
+      messageId: logEvent?.messageId || `log-${Date.now()}`
+    }
+  };
+}
+
+/**
  * Load all worlds from current workspace
  * @returns {Promise<{success: boolean, worlds?: any[], error?: string, message?: string}>}
  */
@@ -580,6 +603,33 @@ async function loadSpecificWorld(worldId) {
 function sendRealtimeEventToRenderer(payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(CHAT_EVENT_CHANNEL, payload);
+}
+
+/**
+ * Subscribe to global log stream events and forward to renderer
+ */
+function subscribeToLogEvents() {
+  // Unsubscribe from any existing log stream
+  if (logStreamUnsubscribe) {
+    logStreamUnsubscribe();
+    logStreamUnsubscribe = null;
+  }
+
+  // Subscribe to log events from core logger
+  logStreamUnsubscribe = addLogStreamCallback((logEvent) => {
+    // Forward log event to renderer
+    sendRealtimeEventToRenderer(serializeRealtimeLogEvent(logEvent));
+  });
+}
+
+/**
+ * Unsubscribe from global log stream events
+ */
+function unsubscribeFromLogEvents() {
+  if (logStreamUnsubscribe) {
+    logStreamUnsubscribe();
+    logStreamUnsubscribe = null;
+  }
 }
 
 /**
@@ -1318,6 +1368,7 @@ function initializeWorkspace() {
 function setupAppLifecycle() {
   app.on('window-all-closed', () => {
     clearChatEventSubscriptions();
+    unsubscribeFromLogEvents();
     if (process.platform !== 'darwin') {
       app.quit();
     }
@@ -1333,6 +1384,7 @@ function setupAppLifecycle() {
 async function bootstrap() {
   await app.whenReady();
   initializeWorkspace();
+  subscribeToLogEvents();
   registerIpcHandlers();
   createMainWindow();
   setupAppLifecycle();

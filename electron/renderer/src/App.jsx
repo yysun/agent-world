@@ -397,6 +397,36 @@ export default function App() {
           next[index] = { ...next[index], isStreaming: false, hasError: true, errorMessage };
           return next;
         });
+      },
+      onToolStreamStart: (entry) => {
+        setMessages((existing) => upsertMessageList(existing, {
+          id: entry.messageId,
+          messageId: entry.messageId,
+          role: 'tool',
+          sender: entry.agentName || 'shell_cmd',
+          content: '',
+          createdAt: entry.createdAt,
+          isToolStreaming: true,
+          streamType: entry.streamType
+        }));
+      },
+      onToolStreamUpdate: (messageId, content, streamType) => {
+        setMessages((existing) => {
+          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          if (index < 0) return existing;
+          const next = [...existing];
+          next[index] = { ...next[index], content, streamType };
+          return next;
+        });
+      },
+      onToolStreamEnd: (messageId) => {
+        setMessages((existing) => {
+          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          if (index < 0) return existing;
+          const next = [...existing];
+          next[index] = { ...next[index], isToolStreaming: false, streamType: undefined };
+          return next;
+        });
       }
     });
 
@@ -703,8 +733,31 @@ export default function App() {
 
         setMessages((existing) => upsertMessageList(existing, {
           ...incomingMessage,
-          isStreaming: false
+          isStreaming: false,
+          isToolStreaming: false,
+          streamType: undefined
         }));
+        return;
+      }
+
+      if (payload.type === 'log') {
+        const logEvent = payload.logEvent;
+        if (!logEvent) return;
+
+        // Create log message for inline display
+        const logMessage = {
+          id: `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          messageId: `log-${Date.now()}`,
+          sender: 'system',
+          content: logEvent.message,
+          text: logEvent.message,
+          role: 'system',
+          type: 'log',
+          createdAt: logEvent.timestamp || new Date().toISOString(),
+          logEvent: logEvent
+        };
+
+        setMessages((existing) => [...existing, logMessage]);
         return;
       }
 
@@ -745,6 +798,20 @@ export default function App() {
           if (activityStateRef.current) {
             activityStateRef.current.setActiveStreamCount(count);
           }
+        } else if (eventType === 'tool-stream') {
+          // Handle tool streaming events (shell command output)
+          const { content, stream } = streamPayload;
+
+          // Check if this is the first chunk (need to start)
+          if (!streaming.isActive(messageId)) {
+            streaming.handleToolStreamStart(
+              messageId,
+              streamPayload.agentName || 'shell_cmd',
+              stream || 'stdout'
+            );
+          }
+
+          streaming.handleToolStreamChunk(messageId, content || '', stream || 'stdout');
         }
       }
 
@@ -1781,9 +1848,68 @@ export default function App() {
                             <span>{senderLabel}</span>
                             <span>{formatTime(message.createdAt)}</span>
                           </div>
-                          <div className="whitespace-pre-wrap text-sm text-foreground">
-                            {message.content}
-                          </div>
+
+                          {message.logEvent ? (
+                            /* Log message rendering with level-based colored dot */
+                            <div className="flex items-start gap-2 text-xs font-mono" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                              <span
+                                className="inline-block rounded-full mt-0.5"
+                                style={{
+                                  width: '6px',
+                                  height: '6px',
+                                  flexShrink: 0,
+                                  backgroundColor:
+                                    message.logEvent.level === 'error' ? '#ef4444' :
+                                      message.logEvent.level === 'warn' ? '#f59e0b' :
+                                        message.logEvent.level === 'info' ? '#10b981' :
+                                          message.logEvent.level === 'debug' ? '#06b6d4' :
+                                            '#9ca3af'
+                                }}
+                              />
+                              <div className="flex-1">
+                                <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+                                  {message.logEvent.category}
+                                </span>
+                                {' - '}
+                                <span>{message.logEvent.message}</span>
+                              </div>
+                            </div>
+                          ) : message.isToolStreaming ? (
+                            /* Tool streaming output with stdout/stderr distinction */
+                            <div className="flex flex-col gap-2">
+                              <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                                ⚙️ Executing...
+                              </div>
+                              <div
+                                className="rounded-md overflow-hidden border"
+                                style={message.streamType === 'stderr' ? {
+                                  backgroundColor: 'rgba(69, 10, 10, 0.3)',
+                                  borderColor: 'rgba(239, 68, 68, 0.3)'
+                                } : {
+                                  backgroundColor: 'rgb(15, 23, 42)',
+                                  borderColor: 'rgb(51, 65, 85)'
+                                }}
+                              >
+                                <pre
+                                  className="text-xs p-3 font-mono whitespace-pre-wrap"
+                                  style={{
+                                    color: message.streamType === 'stderr'
+                                      ? 'rgb(248, 113, 113)'
+                                      : 'rgb(203, 213, 225)',
+                                    wordBreak: 'break-all'
+                                  }}
+                                >
+                                  {message.content || '(waiting for output...)'}
+                                </pre>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Regular message content */
+                            <div className="whitespace-pre-wrap text-sm text-foreground">
+                              {message.content}
+                            </div>
+                          )}
+
                           {message.isStreaming ? (
                             <ThinkingIndicator className="mt-2" />
                           ) : null}
