@@ -20,7 +20,8 @@
     "web"
   ],
   "bin": {
-    "agent-world": "dist/cli/index.js",
+    "agent-world": "scripts/launch-electron.js",
+    "agent-world-cli": "dist/cli/index.js",
     "agent-world-server": "dist/server/index.js"
   },
   "scripts": {

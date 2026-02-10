@@ -15,6 +15,7 @@
  * - Scrollbar styling uses semantic theme color tokens
  *
  * Recent Changes:
+ * - 2026-02-10: Darkened light-theme sidebar background token slightly for better visual contrast
  * - 2026-02-09: Replaced renderer color system with requested OKLCH shadcn-style root/dark tokens
  * - 2026-02-09: Synced all semantic color tokens to shadcn defaults (including dark-mode accents)
  * - 2026-02-09: Updated sidebar token to shadcn-style panel values (light/dark)
@@ -95,7 +96,7 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.975 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
