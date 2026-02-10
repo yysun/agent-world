@@ -3,15 +3,30 @@
  *
  * Features:
  * - Workspace selection and persistence
+ * - Load all worlds from workspace folders
  * - World/session/chat IPC handlers
  * - Renderer startup for dev and packaged modes
  *
  * Implementation Notes:
  * - Core logic runs in main; renderer uses preload IPC bridge
- * - Workspace switches after core init require restart/relaunch
+ * - Loads all worlds from workspace folder, user selects which to use
+ * - Workspace switching requires app restart with --workspace=<path> arg
+ * - openWorkspace() returns folder path without switching workspace or loading worlds
+ * - Defaults to ~/agent-world workspace if no preference or --workspace arg (matches CLI)
+ * - Respects AGENT_WORLD_STORAGE_TYPE and AGENT_WORLD_DATA_PATH from .env if set
+ * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
- * - 2026-02-08: Added direct `workspace:openRecent` IPC for recent workspace dropdown actions
+ * - 2026-02-10: Fixed to respect AGENT_WORLD_STORAGE_TYPE from .env (not hardcode sqlite)
+ * - 2026-02-10: Respect AGENT_WORLD_DATA_PATH from .env if set, default to workspace path
+ * - 2026-02-10: Fixed to use SQLite storage instead of file storage (matches CLI default)
+ * - 2026-02-10: Removed .agent-world folder concept, use workspace path directly via env
+ * - 2026-02-10: Added default workspace path ~/agent-world to match CLI behavior
+ * - 2026-02-10: Removed recent workspace functionality (worlds load from environment only)
+ * - 2026-02-09: Simplified workspace dialog to only return path (no auto-switching)
+ * - 2026-02-09: Removed automatic core reload from workspace functions
+ * - 2026-02-09: Changed to load all worlds instead of auto-selecting first
+ * - 2026-02-09: Added automatic world loading from folders with error handling
  * - 2026-02-08: Added real-time chat event streaming with multi-subscription support
  */
 
@@ -19,6 +34,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import {
   createWorld,
   getMemory,
@@ -40,7 +56,6 @@ const CHAT_EVENT_CHANNEL = 'chat:event';
 
 let mainWindow = null;
 let activeWorkspacePath = null;
-let activeStoragePath = null;
 let coreWorkspacePath = null;
 const chatEventSubscriptions = new Map();
 const canceledSubscriptionIds = new Set();
@@ -77,16 +92,19 @@ function workspaceFromCommandLine() {
   return value.length > 0 ? value : null;
 }
 
-function resolveStoragePath(workspacePath) {
-  return path.join(workspacePath, '.agent-world');
-}
-
 function configureWorkspaceStorage(workspacePath) {
-  const storagePath = resolveStoragePath(workspacePath);
-  fs.mkdirSync(storagePath, { recursive: true });
-  process.env.AGENT_WORLD_STORAGE_TYPE = 'file';
-  process.env.AGENT_WORLD_DATA_PATH = storagePath;
-  activeStoragePath = storagePath;
+  // Use workspace path directly as AGENT_WORLD_DATA_PATH
+  // Respect existing AGENT_WORLD_STORAGE_TYPE from .env if set
+  // Otherwise default to SQLite storage (matches CLI behavior)
+  fs.mkdirSync(workspacePath, { recursive: true });
+  
+  if (!process.env.AGENT_WORLD_STORAGE_TYPE) {
+    process.env.AGENT_WORLD_STORAGE_TYPE = 'sqlite';
+  }
+  
+  if (!process.env.AGENT_WORLD_DATA_PATH) {
+    process.env.AGENT_WORLD_DATA_PATH = workspacePath;
+  }
 }
 
 function configureProvidersFromEnv() {
@@ -130,6 +148,14 @@ function ensureWorkspaceSelected() {
   }
 }
 
+function resetCore() {
+  // Clear all active chat subscriptions before resetting
+  clearChatEventSubscriptions();
+
+  // Reset core workspace path to allow reinitialization
+  coreWorkspacePath = null;
+}
+
 function ensureCoreReady() {
   ensureWorkspaceSelected();
   if (!coreWorkspacePath) {
@@ -140,13 +166,16 @@ function ensureCoreReady() {
   }
 
   if (coreWorkspacePath !== activeWorkspacePath) {
-    throw new Error('Workspace changed after core initialization. Restart the app to switch workspaces.');
+    // Auto-reload core with new workspace instead of throwing error
+    resetCore();
+    configureWorkspaceStorage(activeWorkspacePath);
+    configureProvidersFromEnv();
+    coreWorkspacePath = activeWorkspacePath;
   }
 }
 
 function setWorkspace(workspacePath, persist) {
   activeWorkspacePath = workspacePath;
-  activeStoragePath = resolveStoragePath(workspacePath);
   if (persist) {
     writeWorkspacePreference(workspacePath);
   }
@@ -155,7 +184,7 @@ function setWorkspace(workspacePath, persist) {
 function getWorkspaceState() {
   return {
     workspacePath: activeWorkspacePath,
-    storagePath: activeStoragePath,
+    storagePath: activeWorkspacePath,
     coreInitialized: !!coreWorkspacePath
   };
 }
@@ -216,6 +245,12 @@ function deriveEventRole(event) {
   return 'assistant';
 }
 
+/**
+ * Serialize realtime message event for IPC transmission
+ * @param {string} worldId - World identifier
+ * @param {object} event - Event object from world emitter
+ * @returns {object} Serialized event payload
+ */
 function serializeRealtimeMessageEvent(worldId, event) {
   const createdAt = toIsoTimestamp(event?.timestamp);
   return {
@@ -234,6 +269,81 @@ function serializeRealtimeMessageEvent(worldId, event) {
   };
 }
 
+/**
+ * Load all worlds from current workspace
+ * @returns {Promise<{success: boolean, worlds?: Array, error?: string, message?: string}>}
+ */
+async function loadWorldsFromWorkspace() {
+  try {
+    ensureCoreReady();
+
+    const worlds = await listWorlds();
+    if (!worlds || worlds.length === 0) {
+      return {
+        success: false,
+        error: 'No worlds found in this folder',
+        message: 'No worlds found in this folder. Please open a folder containing an Agent World.',
+        worlds: []
+      };
+    }
+
+    // Sort by name
+    const sortedWorlds = [...worlds].sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      success: true,
+      worlds: sortedWorlds.map((w) => ({ id: w.id, name: w.name }))
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message || 'Unknown error',
+      message: `Failed to load worlds: ${error.message || 'Unknown error'}`,
+      worlds: []
+    };
+  }
+}
+
+/**
+ * Load specific world by ID with sessions
+ * @param {string} worldId - World identifier
+ * @returns {Promise<{success: boolean, world?: object, sessions?: Array, error?: string, message?: string}>}
+ */
+async function loadSpecificWorld(worldId) {
+  try {
+    ensureCoreReady();
+
+    // Load world details
+    const world = await getWorld(worldId);
+    if (!world) {
+      return {
+        success: false,
+        error: 'Failed to load world',
+        message: `Failed to load world '${worldId}'. The world data may be corrupted.`
+      };
+    }
+
+    // Load sessions
+    const sessions = await listChats(world.id);
+
+    return {
+      success: true,
+      world: serializeWorldInfo(world),
+      sessions: sessions.map((chat) => serializeChat(chat))
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message || 'Unknown error',
+      message: `Failed to load world: ${error.message || 'Unknown error'}`
+    };
+  }
+}
+
+/**
+ * Send realtime event to renderer process
+ * @param {object} payload - Event payload to send
+ */
 function sendRealtimeEventToRenderer(payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(CHAT_EVENT_CHANNEL, payload);
@@ -255,6 +365,9 @@ function removeChatEventSubscription(subscriptionId) {
   chatEventSubscriptions.delete(subscriptionId);
 }
 
+/**
+ * Clear all active chat event subscriptions
+ */
 function clearChatEventSubscriptions() {
   for (const subscriptionId of chatEventSubscriptions.keys()) {
     removeChatEventSubscription(subscriptionId);
@@ -262,6 +375,11 @@ function clearChatEventSubscriptions() {
   canceledSubscriptionIds.clear();
 }
 
+/**
+ * Open folder picker dialog for project/workspace selection
+ * Note: Returns selected path without switching workspace or loading worlds
+ * @returns {Promise<{workspacePath?: string, canceled: boolean}>}
+ */
 async function openWorkspaceDialog() {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Open Folder',
@@ -272,86 +390,34 @@ async function openWorkspaceDialog() {
     return { ...getWorkspaceState(), canceled: true };
   }
 
-  const nextWorkspace = result.filePaths[0];
-  if (!nextWorkspace) {
+  const selectedPath = result.filePaths[0];
+  if (!selectedPath) {
     return { ...getWorkspaceState(), canceled: true };
   }
 
-  if (coreWorkspacePath && coreWorkspacePath !== nextWorkspace) {
-    const confirm = await dialog.showMessageBox(mainWindow, {
-      type: 'question',
-      buttons: ['Restart', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Switch Workspace',
-      message: 'Switching workspace requires restart after core is initialized.',
-      detail: `Current: ${coreWorkspacePath}\nNext: ${nextWorkspace}`
-    });
-
-    if (confirm.response === 0) {
-      writeWorkspacePreference(nextWorkspace);
-      const args = process.argv.filter((arg) => !arg.startsWith('--workspace='));
-      args.push(`--workspace=${nextWorkspace}`);
-      app.relaunch({ args });
-      app.exit(0);
-      return { ...getWorkspaceState(), relaunched: true };
-    }
-
-    return { ...getWorkspaceState(), canceled: true };
-  }
-
-  setWorkspace(nextWorkspace, true);
-  return { ...getWorkspaceState(), canceled: false };
+  // Return selected path for project context (informational only)
+  return {
+    ...getWorkspaceState(),
+    canceled: false,
+    workspacePath: selectedPath
+  };
 }
 
-async function openRecentWorkspace(workspacePath) {
-  const nextWorkspace = String(workspacePath || '').trim();
-  if (!nextWorkspace) {
-    return { ...getWorkspaceState(), canceled: true };
-  }
-
-  if (!fs.existsSync(nextWorkspace)) {
-    throw new Error(`Workspace path does not exist: ${nextWorkspace}`);
-  }
-
-  const stats = fs.statSync(nextWorkspace);
-  if (!stats.isDirectory()) {
-    throw new Error(`Workspace path is not a directory: ${nextWorkspace}`);
-  }
-
-  if (coreWorkspacePath && coreWorkspacePath !== nextWorkspace) {
-    const confirm = await dialog.showMessageBox(mainWindow, {
-      type: 'question',
-      buttons: ['Restart', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Switch Workspace',
-      message: 'Switching workspace requires restart after core is initialized.',
-      detail: `Current: ${coreWorkspacePath}\nNext: ${nextWorkspace}`
-    });
-
-    if (confirm.response === 0) {
-      writeWorkspacePreference(nextWorkspace);
-      const args = process.argv.filter((arg) => !arg.startsWith('--workspace='));
-      args.push(`--workspace=${nextWorkspace}`);
-      app.relaunch({ args });
-      app.exit(0);
-      return { ...getWorkspaceState(), relaunched: true };
-    }
-
-    return { ...getWorkspaceState(), canceled: true };
-  }
-
-  setWorkspace(nextWorkspace, true);
-  return { ...getWorkspaceState(), canceled: false };
-}
-
+/**
+ * List all worlds in current workspace
+ * @returns {Promise<Array>} Array of serialized world info
+ */
 async function listWorkspaceWorlds() {
   ensureCoreReady();
   const worlds = await listWorlds();
   return worlds.map((world) => serializeWorldInfo(world));
 }
 
+/**
+ * Create a new world in current workspace
+ * @param {object} payload - World creation payload {name, description?, turnLimit?}
+ * @returns {Promise<object>} Serialized created world info
+ */
 async function createWorkspaceWorld(payload) {
   ensureCoreReady();
   const name = String(payload?.name || '').trim();
@@ -375,6 +441,105 @@ async function createWorkspaceWorld(payload) {
   }
 
   return serializeWorldInfo(created);
+}
+
+/**
+ * Import world from external folder with validation
+ * @returns {Promise<{success: boolean, world?: object, sessions?: Array, error?: string, message?: string}>}
+ */
+async function importWorld() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import World from Folder',
+    properties: ['openDirectory'],
+    buttonLabel: 'Import'
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return {
+      success: false,
+      error: 'Import canceled',
+      message: 'World import was canceled'
+    };
+  }
+
+  const folderPath = result.filePaths[0];
+
+  try {
+    ensureCoreReady();
+
+    // Task 2.4d: Path safety validation
+    const normalizedPath = path.normalize(folderPath);
+    const absolutePath = path.resolve(normalizedPath);
+
+    // Task 2.4b: Validate world folder structure
+    if (!fs.existsSync(absolutePath)) {
+      return {
+        success: false,
+        error: 'Folder not found',
+        message: 'The selected folder does not exist'
+      };
+    }
+
+    const stats = fs.statSync(absolutePath);
+    if (!stats.isDirectory()) {
+      return {
+        success: false,
+        error: 'Not a directory',
+        message: 'Selected path is not a folder'
+      };
+    }
+
+    // Check for valid world structure (look for .world file or world data)
+    const worldConfigFile = path.join(absolutePath, '.world');
+    const hasWorldConfig = fs.existsSync(worldConfigFile);
+
+    if (!hasWorldConfig) {
+      return {
+        success: false,
+        error: 'Invalid world folder',
+        message: 'Selected folder does not contain a valid world (.world file not found)'
+      };
+    }
+
+    // Get the world ID from the folder name
+    const worldId = path.basename(absolutePath);
+
+    // Task 2.4c: Check for duplicate world IDs (check BEFORE trying to load)
+    const worlds = await listWorlds();
+    if (worlds.some(w => w.id === worldId)) {
+      return {
+        success: false,
+        error: 'World already exists',
+        message: `A world with ID '${worldId}' already exists in this workspace`
+      };
+    }
+
+    // Try to load the world details (should exist if .world file is valid)
+    const importedWorld = await getWorld(worldId);
+    if (!importedWorld) {
+      return {
+        success: false,
+        error: 'Failed to load world',
+        message: 'Could not load world data from the selected folder'
+      };
+    }
+
+    // Load sessions for the imported world
+    const sessions = await listChats(worldId);
+
+    return {
+      success: true,
+      world: serializeWorldInfo(importedWorld),
+      sessions: sessions.map(chat => serializeChat(chat))
+    };
+  } catch (error) {
+    // Task 2.4e: Error handling with specific error messages
+    return {
+      success: false,
+      error: error.message || 'Unknown error',
+      message: `Failed to import world: ${error.message || 'Unknown error occurred'}`
+    };
+  }
 }
 
 async function listWorldSessions(worldId) {
@@ -511,8 +676,9 @@ async function sendChatMessage(payload) {
 function registerIpcHandlers() {
   ipcMain.handle('workspace:get', async () => getWorkspaceState());
   ipcMain.handle('workspace:open', async () => openWorkspaceDialog());
-  ipcMain.handle('workspace:openRecent', async (_event, payload) =>
-    openRecentWorkspace(payload?.workspacePath));
+  ipcMain.handle('world:loadFromFolder', async () => loadWorldsFromWorkspace());
+  ipcMain.handle('world:load', async (_event, worldId) => loadSpecificWorld(worldId));
+  ipcMain.handle('world:import', async () => importWorld());
   ipcMain.handle('world:list', async () => listWorkspaceWorlds());
   ipcMain.handle('world:create', async (_, payload) => createWorkspaceWorld(payload));
   ipcMain.handle('session:list', async (_, payload) => listWorldSessions(payload?.worldId));
@@ -558,6 +724,11 @@ function initializeWorkspace() {
   const startupWorkspace = workspaceFromCommandLine() || readWorkspacePreference();
   if (startupWorkspace) {
     setWorkspace(startupWorkspace, false);
+  } else {
+    // Default to ~/agent-world if no workspace specified (matches CLI behavior)
+    const homeDir = os.homedir();
+    const defaultWorkspace = path.join(homeDir, 'agent-world');
+    setWorkspace(defaultWorkspace, false);
   }
 }
 

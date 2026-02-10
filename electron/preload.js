@@ -3,13 +3,17 @@
  *
  * Features:
  * - Workspace, world, session, and chat invoke APIs
+ * - Load all worlds from workspace folders
+ * - Load specific world by ID
  * - Realtime chat event subscription
  *
  * Implementation Notes:
  * - Exposes only explicit safe methods via `contextBridge`
  *
  * Recent Changes:
- * - 2026-02-08: Added `openRecentWorkspace` bridge method for workspace dropdown recents
+ * - 2026-02-10: Removed openRecentWorkspace (worlds load from environment only)
+ * - 2026-02-09: Added `loadWorld` bridge method for loading specific world by ID
+ * - 2026-02-09: Added `loadWorldFromFolder` bridge method for loading all worlds
  * - 2026-02-08: Added subscription ID support for concurrent chat streams
  */
 
@@ -30,7 +34,9 @@ function onChatEvent(callback) {
 const desktopApi = {
   getWorkspace: () => ipcRenderer.invoke('workspace:get'),
   openWorkspace: () => ipcRenderer.invoke('workspace:open'),
-  openRecentWorkspace: (workspacePath) => ipcRenderer.invoke('workspace:openRecent', { workspacePath }),
+  loadWorldFromFolder: () => ipcRenderer.invoke('world:loadFromFolder'),
+  loadWorld: (worldId) => ipcRenderer.invoke('world:load', worldId),
+  importWorld: () => ipcRenderer.invoke('world:import'),
   listWorlds: () => ipcRenderer.invoke('world:list'),
   createWorld: (payload) => ipcRenderer.invoke('world:create', payload),
   listSessions: (worldId) => ipcRenderer.invoke('session:list', { worldId }),

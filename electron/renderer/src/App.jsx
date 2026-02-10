@@ -2,31 +2,36 @@
  * Desktop Renderer App - Three-Column Workspace UI
  *
  * Features:
+ * - World selector dropdown showing all worlds from workspace
  * - Workspace/world/session sidebar, chat center, context panel
+ * - User can select which world to load from dropdown
  * - Theme toggle and collapsible left sidebar
- * - Workspace dropdown with open action and recent workspaces
  * - React-style chat composer with multiline textarea and action row
  *
  * Implementation Notes:
  * - Function component with local state and IPC-only desktop API calls
  * - Window drag regions are explicit (`drag` + `no-drag`) for custom title rows
  * - Composer textarea auto-resizes and supports Enter-to-send (Shift+Enter newline)
+ * - Loads all worlds from workspace folder, displays in dropdown for selection
  *
  * Recent Changes:
+ * - 2026-02-10: Removed recent workspace and folder path display (worlds from environment only)
+ * - 2026-02-09: Changed to world selector dropdown showing all worlds from folder
+ * - 2026-02-09: Removed workspace history, replaced with world list from current folder
+ * - 2026-02-09: Refactored state management for automatic world loading from folders
  * - 2026-02-09: Updated sidebar UI elements to use sidebar-specific token classes consistently
  * - 2026-02-09: Prevented Enter-to-send during IME composition and while send is in-flight
  * - 2026-02-09: Switched sidebars to solid sidebar token background (removed translucency)
  * - 2026-02-09: Restyled chat composer to mirror React app input area and interaction
- * - 2026-02-08: Removed top open button and added workspace dropdown (`Open...` + recent opened)
  * - 2026-02-08: Simplified/condensed header comment block
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const THEME_STORAGE_KEY = 'agent-world-desktop-theme';
-const RECENT_WORKSPACES_KEY = 'agent-world-desktop-recent-workspaces';
-const MAX_RECENT_WORKSPACES = 8;
 const COMPOSER_MAX_ROWS = 5;
+const DEFAULT_TURN_LIMIT = 5;
+const MIN_TURN_LIMIT = 1;
 const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' };
 const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' };
 
@@ -43,30 +48,6 @@ function getStoredThemePreference() {
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
   return 'system';
-}
-
-function getStoredRecentWorkspaces() {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(RECENT_WORKSPACES_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((value) => typeof value === 'string')
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0)
-      .slice(0, MAX_RECENT_WORKSPACES);
-  } catch {
-    return [];
-  }
-}
-
-function mergeRecentWorkspace(existing, workspacePath) {
-  const nextPath = String(workspacePath || '').trim();
-  if (!nextPath) return existing;
-  const deduped = existing.filter((value) => value !== nextPath);
-  return [nextPath, ...deduped].slice(0, MAX_RECENT_WORKSPACES);
 }
 
 function formatTime(value) {
@@ -125,25 +106,27 @@ export default function App() {
     storagePath: null,
     coreInitialized: false
   });
-  const [worlds, setWorlds] = useState([]);
-  const [selectedWorldId, setSelectedWorldId] = useState(null);
+  const [loadedWorld, setLoadedWorld] = useState(null);
+  const [worldLoadError, setWorldLoadError] = useState(null);
+  const [loadingWorld, setLoadingWorld] = useState(false);
+  const [availableWorlds, setAvailableWorlds] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState('');
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [recentWorkspaces, setRecentWorkspaces] = useState(getStoredRecentWorkspaces);
   const [status, setStatus] = useState({ text: '', kind: 'info' });
   const [creatingWorld, setCreatingWorld] = useState({
     name: '',
     description: '',
-    turnLimit: 5
+    turnLimit: DEFAULT_TURN_LIMIT
   });
+  const [showCreateWorldPrompt, setShowCreateWorldPrompt] = useState(false);
+  const [selectedProjectPath, setSelectedProjectPath] = useState(null);
   const [loading, setLoading] = useState({
-    worlds: false,
     sessions: false,
     messages: false,
     send: false
@@ -153,50 +136,15 @@ export default function App() {
     setStatus({ text, kind });
   }, []);
 
-  const rememberWorkspace = useCallback((workspacePath) => {
-    const nextPath = String(workspacePath || '').trim();
-    if (!nextPath || typeof window === 'undefined') return;
-
-    setRecentWorkspaces((existing) => {
-      const next = mergeRecentWorkspace(existing, nextPath);
-      window.localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, []);
-
   const selectedWorld = useMemo(
-    () => worlds.find((world) => world.id === selectedWorldId) || null,
-    [worlds, selectedWorldId]
+    () => loadedWorld,
+    [loadedWorld]
   );
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) || null,
     [sessions, selectedSessionId]
   );
-
-  const refreshWorlds = useCallback(async (preferredWorldId = null) => {
-    setLoading((value) => ({ ...value, worlds: true }));
-    try {
-      const nextWorlds = await api.listWorlds();
-      setWorlds(nextWorlds);
-
-      const nextSelected =
-        preferredWorldId && nextWorlds.some((world) => world.id === preferredWorldId)
-          ? preferredWorldId
-          : nextWorlds[0]?.id || null;
-
-      setSelectedWorldId(nextSelected);
-      if (!nextSelected) {
-        setSessions([]);
-        setSelectedSessionId(null);
-        setMessages([]);
-      }
-    } catch (error) {
-      setStatusText(safeMessage(error, 'Failed to load worlds.'), 'error');
-    } finally {
-      setLoading((value) => ({ ...value, worlds: false }));
-    }
-  }, [api, setStatusText]);
 
   const refreshSessions = useCallback(async (worldId, preferredSessionId = null) => {
     if (!worldId) {
@@ -244,28 +192,48 @@ export default function App() {
       const nextWorkspace = await api.getWorkspace();
       setWorkspace(nextWorkspace);
       if (nextWorkspace.workspacePath) {
-        rememberWorkspace(nextWorkspace.workspacePath);
-        await refreshWorlds();
+        // Load worlds from workspace
+        setLoadingWorld(true);
+        try {
+          const worldsState = await api.loadWorldFromFolder();
+          if (worldsState.success && worldsState.worlds) {
+            setAvailableWorlds(worldsState.worlds);
+            setWorldLoadError(null);
+            // User must explicitly select a world (no auto-selection)
+          } else {
+            setAvailableWorlds([]);
+            setLoadedWorld(null);
+            setWorldLoadError(worldsState.message || worldsState.error);
+            setSessions([]);
+          }
+        } catch (error) {
+          setAvailableWorlds([]);
+          setLoadedWorld(null);
+          setWorldLoadError(safeMessage(error, 'Failed to load worlds from folder'));
+          setSessions([]);
+        } finally {
+          setLoadingWorld(false);
+        }
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to initialize app.'), 'error');
     }
-  }, [api, refreshWorlds, rememberWorkspace, setStatusText]);
+  }, [api, setStatusText]);
 
   useEffect(() => {
     initialize();
   }, [initialize]);
 
   useEffect(() => {
-    refreshSessions(selectedWorldId);
-  }, [selectedWorldId, refreshSessions]);
+    refreshSessions(loadedWorld?.id);
+  }, [loadedWorld, refreshSessions]);
 
   useEffect(() => {
-    refreshMessages(selectedWorldId, selectedSessionId);
-  }, [selectedWorldId, selectedSessionId, refreshMessages]);
+    refreshMessages(loadedWorld?.id, selectedSessionId);
+  }, [loadedWorld, selectedSessionId, refreshMessages]);
 
   useEffect(() => {
-    if (!selectedWorldId || !selectedSessionId) {
+    if (!loadedWorld?.id || !selectedSessionId) {
       return undefined;
     }
 
@@ -274,7 +242,7 @@ export default function App() {
     const removeListener = api.onChatEvent((payload) => {
       if (disposed || !payload || payload.type !== 'message') return;
       if (payload.subscriptionId && payload.subscriptionId !== subscriptionId) return;
-      if (payload.worldId && payload.worldId !== selectedWorldId) return;
+      if (payload.worldId && payload.worldId !== loadedWorld.id) return;
 
       const incomingMessage = payload.message;
       if (!incomingMessage) return;
@@ -285,7 +253,7 @@ export default function App() {
       setMessages((existing) => upsertMessageList(existing, incomingMessage));
     });
 
-    api.subscribeChatEvents(selectedWorldId, selectedSessionId, subscriptionId).catch((error) => {
+    api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch((error) => {
       if (!disposed) {
         setStatusText(safeMessage(error, 'Failed to subscribe to chat updates.'), 'error');
       }
@@ -294,12 +262,12 @@ export default function App() {
     return () => {
       disposed = true;
       removeListener();
-      api.unsubscribeChatEvents(subscriptionId).catch(() => {});
+      api.unsubscribeChatEvents(subscriptionId).catch(() => { });
     };
-  }, [api, selectedSessionId, selectedWorldId, setStatusText]);
+  }, [api, selectedSessionId, loadedWorld, setStatusText]);
 
   useEffect(() => () => {
-    api.unsubscribeChatEvents('default').catch(() => {});
+    api.unsubscribeChatEvents('default').catch(() => { });
   }, [api]);
 
   useEffect(() => {
@@ -335,30 +303,38 @@ export default function App() {
     try {
       const nextWorkspace = await api.openWorkspace();
       setWorkspace(nextWorkspace);
-      if (!nextWorkspace.canceled) {
-        rememberWorkspace(nextWorkspace.workspacePath);
-        await refreshWorlds();
-        setStatusText(`Workspace opened: ${nextWorkspace.workspacePath}`, 'success');
-      }
+      setWorkspaceMenuOpen(false);
+      setStatusText('Workspace path selected', 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to open workspace.'), 'error');
     }
-  }, [api, refreshWorlds, rememberWorkspace, setStatusText]);
+  }, [api, setStatusText]);
 
-  const onOpenRecentWorkspace = useCallback(async (workspacePath) => {
+  const onSelectWorld = useCallback(async (worldId) => {
+    if (!worldId) return;
+
     try {
-      const nextWorkspace = await api.openRecentWorkspace(workspacePath);
-      setWorkspace(nextWorkspace);
+      setLoadingWorld(true);
       setWorkspaceMenuOpen(false);
-      if (!nextWorkspace.canceled && !nextWorkspace.relaunched) {
-        rememberWorkspace(nextWorkspace.workspacePath);
-        await refreshWorlds();
-        setStatusText(`Workspace opened: ${nextWorkspace.workspacePath}`, 'success');
+      const result = await api.loadWorld(worldId);
+
+      if (result.success) {
+        setLoadedWorld(result.world);
+        setSessions(result.sessions || []);
+        setWorldLoadError(null);
+        setStatusText(`World loaded: ${result.world.id}`, 'success');
+      } else {
+        setLoadedWorld(null);
+        setSessions([]);
+        setWorldLoadError(result.message || result.error);
+        setStatusText(result.message || 'Failed to load world', 'error');
       }
     } catch (error) {
-      setStatusText(safeMessage(error, 'Failed to open recent workspace.'), 'error');
+      setStatusText(safeMessage(error, 'Failed to load world.'), 'error');
+    } finally {
+      setLoadingWorld(false);
     }
-  }, [api, refreshWorlds, rememberWorkspace, setStatusText]);
+  }, [api, setStatusText]);
 
   const onCreateWorld = useCallback(async (event) => {
     event.preventDefault();
@@ -374,47 +350,95 @@ export default function App() {
         turnLimit: Number(creatingWorld.turnLimit) || 5
       });
       setCreatingWorld({ name: '', description: '', turnLimit: 5 });
-      await refreshWorlds(created.id);
+      setShowCreateWorldPrompt(false);
+
+      // Add to available worlds list
+      setAvailableWorlds((worlds) => [...worlds, { id: created.id, name: created.name }]);
+
+      // Load the created world and its sessions
+      setLoadedWorld(created);
+      const sessions = await api.listSessions(created.id);
+      setSessions(sessions || []);
+      setWorldLoadError(null);
+
       setStatusText(`World created: ${created.name}`, 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to create world.'), 'error');
     }
-  }, [api, creatingWorld, refreshWorlds, setStatusText]);
+  }, [api, creatingWorld, setStatusText]);
+
+  const onImportWorld = useCallback(async () => {
+    try {
+      const result = await api.importWorld();
+      if (result.success) {
+        // Add to available worlds list
+        setAvailableWorlds((worlds) => [...worlds, { id: result.world.id, name: result.world.name }]);
+
+        // Auto-select the imported world
+        setLoadedWorld(result.world);
+        setSessions(result.sessions || []);
+        setWorldLoadError(null);
+
+        setStatusText(`World imported: ${result.world.name}`, 'success');
+      } else {
+        setStatusText(result.message || result.error || 'Failed to import world', 'error');
+      }
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to import world.'), 'error');
+    }
+  }, [api, setStatusText]);
+
+  const onSelectProject = useCallback(async () => {
+    try {
+      const result = await api.openWorkspace();
+      if (!result.canceled && result.workspacePath) {
+        setSelectedProjectPath(result.workspacePath);
+        setStatusText(`Project selected: ${result.workspacePath}`, 'info');
+      }
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to select project folder.'), 'error');
+    }
+  }, [api, setStatusText]);
+
+  const onClearProject = useCallback(() => {
+    setSelectedProjectPath(null);
+    setStatusText('Project cleared', 'info');
+  }, [setStatusText]);
 
   const onCreateSession = useCallback(async () => {
-    if (!selectedWorldId) {
-      setStatusText('Select a world first.', 'error');
+    if (!loadedWorld?.id) {
+      setStatusText('No world loaded. Please open a folder with a world first.', 'error');
       return;
     }
 
     try {
-      const result = await api.createSession(selectedWorldId);
+      const result = await api.createSession(loadedWorld.id);
       setSessions(result.sessions || []);
       const nextSessionId = result.currentChatId || result.sessions?.[0]?.id || null;
       setSelectedSessionId(nextSessionId);
       if (nextSessionId) {
-        await api.selectSession(selectedWorldId, nextSessionId);
+        await api.selectSession(loadedWorld.id, nextSessionId);
       }
       setStatusText('Chat session created.', 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to create session.'), 'error');
     }
-  }, [api, selectedWorldId, setStatusText]);
+  }, [api, loadedWorld, setStatusText]);
 
   const onSelectSession = useCallback(async (chatId) => {
-    if (!selectedWorldId) return;
+    if (!loadedWorld?.id) return;
     try {
-      await api.selectSession(selectedWorldId, chatId);
+      await api.selectSession(loadedWorld.id, chatId);
       setSelectedSessionId(chatId);
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to select session.'), 'error');
     }
-  }, [api, selectedWorldId, setStatusText]);
+  }, [api, loadedWorld, setStatusText]);
 
   const onSendMessage = useCallback(async () => {
     if (loading.send) return;
-    if (!selectedWorldId || !selectedSessionId) {
-      setStatusText('Select a world and session before sending messages.', 'error');
+    if (!loadedWorld?.id || !selectedSessionId) {
+      setStatusText('Select a session before sending messages.', 'error');
       return;
     }
     const content = composer.trim();
@@ -423,7 +447,7 @@ export default function App() {
     setLoading((value) => ({ ...value, send: true }));
     try {
       await api.sendMessage({
-        worldId: selectedWorldId,
+        worldId: loadedWorld.id,
         chatId: selectedSessionId,
         content,
         sender: 'human'
@@ -434,7 +458,7 @@ export default function App() {
     } finally {
       setLoading((value) => ({ ...value, send: false }));
     }
-  }, [api, composer, loading.send, selectedSessionId, selectedWorldId, setStatusText]);
+  }, [api, composer, loading.send, selectedSessionId, loadedWorld, setStatusText]);
 
   const onSubmitMessage = useCallback((event) => {
     event.preventDefault();
@@ -469,9 +493,8 @@ export default function App() {
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
       <div className="flex h-full">
         <aside
-          className={`border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden transition-all duration-200 ${
-            leftSidebarCollapsed ? 'w-0 border-r-0 p-0 opacity-0' : 'w-80 px-4 pb-4 pt-2 opacity-100'
-          }`}
+          className={`border-r border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden transition-all duration-200 ${leftSidebarCollapsed ? 'w-0 border-r-0 p-0 opacity-0' : 'w-80 px-4 pb-4 pt-2 opacity-100'
+            }`}
         >
           <div className="mb-3 flex h-8 items-start justify-end gap-2" style={DRAG_REGION_STYLE}>
             <button
@@ -499,7 +522,31 @@ export default function App() {
 
           <div className="mb-4 space-y-2 text-xs">
             <div className="flex items-center justify-between">
-              <div className="uppercase tracking-wide text-sidebar-foreground/70">Workspace</div>
+              <div className="uppercase tracking-wide text-sidebar-foreground/70">
+                Worlds {availableWorlds.length > 0 ? `(${availableWorlds.length})` : ''}
+              </div>
+              <div className="flex items-center gap-1" style={NO_DRAG_REGION_STYLE}>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateWorldPrompt(true)}
+                  className="rounded p-1 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  title="Create new world"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={onImportWorld}
+                  className="rounded p-1 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  title="Import world from folder"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div className="relative" ref={workspaceDropdownRef} style={NO_DRAG_REGION_STYLE}>
               <button
@@ -507,7 +554,9 @@ export default function App() {
                 onClick={() => setWorkspaceMenuOpen((value) => !value)}
                 className="flex w-full items-center justify-between rounded-md border border-sidebar-border bg-sidebar px-2 py-2 text-left text-sidebar-foreground hover:bg-sidebar-accent"
               >
-                <span className="truncate">{workspace.workspacePath || 'No folder selected'}</span>
+                <span className="truncate">
+                  {loadedWorld?.name || (availableWorlds.length > 0 ? 'Select a world' : 'No worlds available')}
+                </span>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
@@ -523,84 +572,148 @@ export default function App() {
               </button>
               {workspaceMenuOpen ? (
                 <div className="absolute left-0 right-0 z-30 mt-1 max-h-56 overflow-auto rounded-md border border-sidebar-border bg-sidebar p-1 shadow-lg">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setWorkspaceMenuOpen(false);
-                      await onOpenWorkspace();
-                    }}
-                    className="flex w-full items-center rounded px-2 py-1.5 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  >
-                    Open ...
-                  </button>
-                  <div className="my-1 border-t border-sidebar-border" />
-                  {recentWorkspaces.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sidebar-foreground/70">No recent opened</div>
+                  {availableWorlds.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sidebar-foreground/70">No worlds available</div>
                   ) : (
-                    recentWorkspaces.map((path) => (
+                    availableWorlds.map((world) => (
                       <button
-                        key={path}
+                        key={world.id}
                         type="button"
-                        onClick={() => onOpenRecentWorkspace(path)}
-                        className="flex w-full items-center rounded px-2 py-1.5 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        title={path}
+                        onClick={() => onSelectWorld(world.id)}
+                        className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${loadedWorld?.id === world.id ? 'bg-sidebar-accent' : ''
+                          }`}
+                        title={world.id}
                       >
-                        <span className="truncate">{path}</span>
+                        <span className="truncate">{world.name}</span>
                       </button>
                     ))
                   )}
                 </div>
               ) : null}
             </div>
-            <div className="uppercase tracking-wide text-sidebar-foreground/70">Storage</div>
-            <div className="rounded-md border border-sidebar-border bg-sidebar-accent p-2 break-all text-sidebar-foreground/80">
-              {workspace.storagePath || 'N/A'}
+          </div>
+          {/* World Info Section */}
+          {loadingWorld ? (
+            <div className="mb-4 rounded-md border border-sidebar-border bg-sidebar-accent p-4 text-xs">
+              <div className="flex items-center gap-2 text-sidebar-foreground">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Loading world from folder...</span>
+              </div>
             </div>
-          </div>
-
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-xs uppercase tracking-wide text-sidebar-foreground/70">Worlds</div>
-            <button
-              type="button"
-              onClick={() => refreshWorlds(selectedWorldId)}
-              className="rounded border border-sidebar-border px-2 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              {loading.worlds ? '...' : 'Refresh'}
-            </button>
-          </div>
-
-          <div className="mb-4 max-h-44 space-y-2 overflow-auto pr-1">
-            {worlds.length === 0 ? (
-              <div className="rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
-                No worlds in this workspace.
+          ) : worldLoadError ? (
+            showCreateWorldPrompt ? (
+              <div className="mb-4 rounded-md border border-sidebar-border bg-sidebar-accent p-4 text-xs">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="font-medium text-sidebar-foreground">Create a World</div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateWorldPrompt(false)}
+                    className="text-sidebar-foreground/70 hover:text-sidebar-foreground"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <form onSubmit={onCreateWorld} className="space-y-3">
+                  <input
+                    value={creatingWorld.name}
+                    onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
+                    placeholder="World name"
+                    className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                    autoFocus
+                  />
+                  <textarea
+                    value={creatingWorld.description}
+                    onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
+                    placeholder="Description (optional)"
+                    className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  />
+                  <input
+                    type="number"
+                    min={MIN_TURN_LIMIT}
+                    value={creatingWorld.turnLimit}
+                    onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
+                    placeholder={`Turn limit (default: ${DEFAULT_TURN_LIMIT})`}
+                    className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                  >
+                    Create World
+                  </button>
+                </form>
               </div>
             ) : (
-              worlds.map((world) => (
-                <button
-                  key={world.id}
-                  type="button"
-                  onClick={() => setSelectedWorldId(world.id)}
-                  className={`w-full rounded-md border p-2 text-left text-xs ${
-                    selectedWorldId === world.id
-                      ? 'border-sidebar-primary bg-sidebar-primary/15 text-sidebar-foreground'
-                      : 'border-sidebar-border bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                  }`}
-                >
-                  <div className="font-medium">{world.name}</div>
-                  <div className="mt-1 text-[11px] text-sidebar-foreground/70">
-                    Agents {world.totalAgents} • Messages {world.totalMessages}
+              <div className="mb-4 rounded-md border border-sidebar-border bg-sidebar-accent p-4 text-xs">
+                <div className="mb-2 text-sidebar-foreground">
+                  {worldLoadError}
+                </div>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateWorldPrompt(true)}
+                    className="w-full rounded border border-sidebar-border px-2 py-1.5 text-sidebar-foreground hover:bg-sidebar hover:border-sidebar-primary"
+                  >
+                    Create a World
+                  </button>
+                </div>
+              </div>
+            )
+          ) : availableWorlds.length === 0 && !worldLoadError ? (
+            <div className="mb-4 rounded-md border border-sidebar-border bg-sidebar-accent p-4 text-xs">
+              <div className="mb-2 font-medium text-sidebar-foreground">
+                No worlds available
+              </div>
+              <div className="mb-2 text-sidebar-foreground/70">
+                Create your first world or import an existing one
+              </div>
+              <div className="text-[10px] text-sidebar-foreground/60">
+                Tip: Use the + button above to create a new world
+              </div>
+            </div>
+          ) : loadedWorld ? (
+            <div className="mb-4 space-y-2 text-xs">
+              <div className="uppercase tracking-wide text-sidebar-foreground/70">World Info</div>
+              <div className="rounded-md border border-sidebar-border bg-sidebar-accent p-3">
+                <div className="mb-2 text-sm font-semibold text-sidebar-foreground">
+                  {loadedWorld.name}
+                </div>
+                {loadedWorld.description ? (
+                  <div className="mb-2 text-sidebar-foreground/80">
+                    {loadedWorld.description}
                   </div>
-                </button>
-              ))
-            )}
-          </div>
-
+                ) : null}
+                <div className="space-y-1 text-sidebar-foreground/80">
+                  <div>
+                    Agents: {loadedWorld.totalAgents} | Turn Limit: {loadedWorld.turnLimit} | Messages: {loadedWorld.totalMessages}
+                  </div>
+                  <div className="text-[10px] text-sidebar-foreground/60">
+                    ID: {loadedWorld.id}
+                  </div>
+                  <div className="break-all text-[10px] text-sidebar-foreground/60">
+                    Path: {workspace.storagePath ? `${workspace.storagePath}/${loadedWorld.id}` : 'N/A'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : availableWorlds.length > 0 ? (
+            <div className="mb-4 rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
+              Select a world from the dropdown above
+            </div>
+          ) : null}
           <div className="mb-2 flex items-center justify-between">
             <div className="text-xs uppercase tracking-wide text-sidebar-foreground/70">Chat Sessions</div>
             <button
               type="button"
               onClick={onCreateSession}
-              className="rounded border border-sidebar-border px-2 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              disabled={!loadedWorld}
+              className="rounded border border-sidebar-border px-2 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              title={!loadedWorld ? 'Load a world first' : 'Create new session'}
             >
               New
             </button>
@@ -609,7 +722,7 @@ export default function App() {
           <div className="max-h-56 space-y-2 overflow-auto pr-1">
             {sessions.length === 0 ? (
               <div className="rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
-                {selectedWorldId ? 'No sessions yet.' : 'Select a world to load sessions.'}
+                {loadedWorld ? 'No sessions yet.' : 'No world loaded.'}
               </div>
             ) : (
               sessions.map((session) => (
@@ -617,11 +730,10 @@ export default function App() {
                   key={session.id}
                   type="button"
                   onClick={() => onSelectSession(session.id)}
-                  className={`w-full rounded-md border p-2 text-left text-xs ${
-                    selectedSessionId === session.id
-                      ? 'border-sidebar-primary bg-sidebar-primary/15 text-sidebar-foreground'
-                      : 'border-sidebar-border bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                  }`}
+                  className={`w-full rounded-md border p-2 text-left text-xs ${selectedSessionId === session.id
+                    ? 'border-sidebar-primary bg-sidebar-primary/15 text-sidebar-foreground'
+                    : 'border-sidebar-border bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                    }`}
                 >
                   <div className="font-medium">{session.name}</div>
                   <div className="mt-1 text-[11px] text-sidebar-foreground/70">
@@ -635,9 +747,8 @@ export default function App() {
 
         <main className="relative flex min-w-0 flex-1 flex-col bg-background">
           <header
-            className={`flex items-center justify-between border-b border-border pb-3 pt-2 ${
-              leftSidebarCollapsed ? 'pl-24 pr-5' : 'px-5'
-            }`}
+            className={`flex items-center justify-between border-b border-border pb-3 pt-2 ${leftSidebarCollapsed ? 'pl-24 pr-5' : 'px-5'
+              }`}
             style={DRAG_REGION_STYLE}
           >
             <div className="flex items-center gap-3">
@@ -680,11 +791,10 @@ export default function App() {
                     key={mode}
                     type="button"
                     onClick={() => setThemePreference(mode)}
-                    className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${
-                      themePreference === mode
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                    }`}
+                    className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${themePreference === mode
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                      }`}
                     title={`Use ${mode} theme`}
                   >
                     {mode}
@@ -714,11 +824,10 @@ export default function App() {
                   messages.map((message) => (
                     <article
                       key={message.id}
-                      className={`max-w-3xl rounded-lg border p-3 ${
-                        String(message.role).toLowerCase() === 'user'
-                          ? 'ml-auto border-primary/40 bg-primary/15'
-                          : 'border-border bg-card/70'
-                      }`}
+                      className={`max-w-3xl rounded-lg border p-3 ${String(message.role).toLowerCase() === 'user'
+                        ? 'ml-auto border-primary/40 bg-primary/15'
+                        : 'border-border bg-card/70'
+                        }`}
                     >
                       <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                         <span>{message.sender}</span>
@@ -766,8 +875,10 @@ export default function App() {
                       </button>
                       <button
                         type="button"
+                        onClick={onSelectProject}
                         className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Current workspace"
+                        aria-label="Select project folder"
+                        title="Select project folder for context"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -781,7 +892,7 @@ export default function App() {
                         >
                           <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
                         </svg>
-                        <span>workspace</span>
+                        <span>Project</span>
                       </button>
                     </div>
                     <button
@@ -792,14 +903,54 @@ export default function App() {
                       {loading.send ? 'Sending...' : 'Send'}
                     </button>
                   </div>
+                  {selectedProjectPath ? (
+                    <div className="flex items-center justify-between border-t border-border pt-2">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="h-3.5 w-3.5 shrink-0"
+                        >
+                          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+                        </svg>
+                        <span className="truncate" title={selectedProjectPath}>
+                          Project: {selectedProjectPath}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onClearProject}
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label="Clear project"
+                        title="Clear project"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="h-3.5 w-3.5"
+                        >
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </form>
             </section>
 
             <aside
-              className={`border-l border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ${
-                panelOpen ? 'w-80 p-4 opacity-100' : 'w-0 p-0 opacity-0'
-              }`}
+              className={`border-l border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ${panelOpen ? 'w-80 p-4 opacity-100' : 'w-0 p-0 opacity-0'
+                }`}
             >
               {panelOpen ? (
                 <div className="h-full overflow-auto">
@@ -808,7 +959,6 @@ export default function App() {
                   <div className="mb-5 rounded-md border border-sidebar-border bg-sidebar-accent p-3 text-xs">
                     <div className="mb-2 text-sidebar-foreground/70">Active Context</div>
                     <div className="space-y-1 text-sidebar-foreground">
-                      <div>Workspace: {workspace.workspacePath || 'N/A'}</div>
                       <div>World: {selectedWorld?.name || 'N/A'}</div>
                       <div>Session: {selectedSession?.name || 'N/A'}</div>
                     </div>
@@ -849,13 +999,12 @@ export default function App() {
 
           {status.text ? (
             <div
-              className={`border-t px-5 py-2 text-xs ${
-                status.kind === 'error'
-                  ? 'border-destructive/40 bg-destructive/15 text-destructive'
-                  : status.kind === 'success'
-                    ? 'border-secondary/40 bg-secondary/20 text-secondary-foreground'
-                    : 'border-border bg-card text-muted-foreground'
-              }`}
+              className={`border-t px-5 py-2 text-xs ${status.kind === 'error'
+                ? 'border-destructive/40 bg-destructive/15 text-destructive'
+                : status.kind === 'success'
+                  ? 'border-secondary/40 bg-secondary/20 text-secondary-foreground'
+                  : 'border-border bg-card text-muted-foreground'
+                }`}
             >
               {status.text}
             </div>
