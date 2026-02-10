@@ -11,6 +11,7 @@
  * - Exposes only explicit safe methods via `contextBridge`
  *
  * Recent Changes:
+ * - 2026-02-10: Added agent delete bridge method for renderer agent deletion
  * - 2026-02-10: Added agent create/update bridge methods for renderer avatar controls and agent edit panel
  * - 2026-02-10: Added chat delete bridge method (`deleteChat`) for chat-session removal
  * - 2026-02-10: Added session delete bridge method for renderer chat-session actions
@@ -47,6 +48,7 @@ const desktopApi = {
   deleteWorld: (worldId) => ipcRenderer.invoke('world:delete', { worldId }),
   createAgent: (worldId, payload) => ipcRenderer.invoke('agent:create', { worldId, ...payload }),
   updateAgent: (worldId, agentId, payload) => ipcRenderer.invoke('agent:update', { worldId, agentId, ...payload }),
+  deleteAgent: (worldId, agentId) => ipcRenderer.invoke('agent:delete', { worldId, agentId }),
   getLastSelectedWorld: () => ipcRenderer.invoke('world:getLastSelected'),
   saveLastSelectedWorld: (worldId) => ipcRenderer.invoke('world:saveLastSelected', worldId),
   listSessions: (worldId) => ipcRenderer.invoke('session:list', { worldId }),

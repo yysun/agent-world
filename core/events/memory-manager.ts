@@ -44,7 +44,7 @@ import {
   addAutoMention,
   hasAnyMentionAtBeginning
 } from './mention-logic.js';
-import { publishMessage, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
+import { publishMessage, publishMessageWithId, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
 
 const loggerMemory = createCategoryLogger('memory');
 const loggerAgent = createCategoryLogger('agent');
@@ -251,8 +251,8 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
       });
     }
 
-    // Publish the response message
-    publishMessage(world, responseText, agent.id, targetChatId, undefined);
+    // Publish the response message using the same messageId from streaming
+    publishMessageWithId(world, responseText, agent.id, messageId, targetChatId, undefined);
 
     loggerAgent.debug('Agent response published after tool execution', {
       agentId: agent.id,
@@ -326,8 +326,8 @@ export async function handleTextResponse(
     });
   }
 
-  // Publish the response message
-  publishMessage(world, finalResponse, agent.id, messageEvent.chatId, messageEvent.messageId);
+  // Publish the response message using the same messageId from streaming
+  publishMessageWithId(world, finalResponse, agent.id, messageId, messageEvent.chatId, messageEvent.messageId);
 
   loggerAgent.debug('Agent response published', {
     agentId: agent.id,

@@ -1,5 +1,7 @@
 /**
  * Desktop Renderer App - Three-Column Workspace UI
+ * Purpose:
+ * - Render the Electron desktop workspace for world, session, and chat management.
  *
  * Features:
  * - World selector dropdown showing all worlds from workspace
@@ -13,15 +15,44 @@
  * - Window drag regions are explicit (`drag` + `no-drag`) for custom title rows
  * - Composer textarea auto-resizes and supports Enter-to-send (Shift+Enter newline)
  * - Loads all worlds from workspace folder, displays in dropdown for selection
+ *
+ * Recent Changes:
+ * - 2026-02-10: Added delete button (X) next to name field in agent edit form
+ * - 2026-02-10: Added a leading dot indicator for each chat session row in the sidebar list
+ * - 2026-02-10: Added left inset spacing for the chat-session list container
+ * - 2026-02-10: Added chat-session search input above the session list and removed world-card ID/path details
+ * - 2026-02-10: Nudged session badge/delete control farther right for tighter edge alignment
+ * - 2026-02-10: Reduced session stack spacing and aligned badge/delete control to the far-right edge of each row
+ * - 2026-02-10: Tightened session row text/padding to reduce visual line height
+ * - 2026-02-10: Selected chat-session highlight now uses a slightly darker dedicated sidebar token
+ * - 2026-02-10: Removed chat-session row borders and aligned selected-row highlight to `bg-sidebar-accent` (same as user messages)
+ * - 2026-02-10: Session rows now use a compact height, with badge/delete controls overlaid in the same right-side position
+ * - 2026-02-10: Session list now shows message totals as right-aligned badges instead of inline "x messages" text
+ * - 2026-02-10: Keep selected session message count in sync with loaded/streamed messages for live sidebar updates
+ * - Reworked edit-form actions to use a fixed bottom row with tighter button padding
+ * - Reduced edit-form Save/Cancel button size and pinned actions to panel bottom for easier access
+ * - Added world form parity with web app (chat provider/model + MCP config fields) for create/edit panels
+ * - Agent avatar message badges now count only non-human messages from the selected chat
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createStreamingState } from './streaming-state.js';
+import { createActivityState } from './activity-state.js';
+import {
+  ThinkingIndicator,
+  ToolExecutionStatus,
+  ActivityPulse,
+  AgentQueueDisplay,
+  ElapsedTimeCounter
+} from './components/index.js';
 
 const THEME_STORAGE_KEY = 'agent-world-desktop-theme';
 const COMPOSER_MAX_ROWS = 5;
 const DEFAULT_TURN_LIMIT = 5;
 const MIN_TURN_LIMIT = 1;
 const MAX_HEADER_AGENT_AVATARS = 8;
+const DEFAULT_WORLD_CHAT_LLM_PROVIDER = 'ollama';
+const DEFAULT_WORLD_CHAT_LLM_MODEL = 'llama3.2:3b';
 const DEFAULT_AGENT_FORM = {
   id: '',
   name: '',
@@ -33,6 +64,13 @@ const DEFAULT_AGENT_FORM = {
   maxTokens: ''
 };
 const AGENT_PROVIDER_OPTIONS = ['openai', 'anthropic', 'google', 'xai', 'azure', 'openai-compatible', 'ollama'];
+const WORLD_PROVIDER_OPTIONS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google', label: 'Google' },
+  { value: 'azure', label: 'Azure' },
+  { value: 'ollama', label: 'Ollama' }
+];
 const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' };
 const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' };
 const HUMAN_SENDER_VALUES = new Set(['human', 'user', 'you']);
@@ -170,88 +208,38 @@ function sortSessionsByNewest(sessions) {
   return [...sessions].sort((left, right) => getSessionTimestamp(right) - getSessionTimestamp(left));
 }
 
-function applySseUpdateToMessages(existingMessages, ssePayload, fallbackChatId) {
-  const eventType = String(ssePayload?.eventType || '').toLowerCase();
-  const messageId = ssePayload?.messageId;
-  if (!eventType || !messageId) return existingMessages;
-
-  const sender = ssePayload?.agentName || 'assistant';
-  const chunk = typeof ssePayload?.content === 'string' ? ssePayload.content : '';
-  const createdAt = ssePayload?.createdAt || new Date().toISOString();
-  const chatId = ssePayload?.chatId || fallbackChatId || null;
-  const lookupId = String(messageId);
-  const existingIndex = existingMessages.findIndex((message) => String(message.messageId || message.id) === lookupId);
-
-  if (eventType === 'start') {
-    return upsertMessageList(existingMessages, {
-      id: lookupId,
-      messageId: lookupId,
-      role: 'assistant',
-      sender,
-      content: '',
-      createdAt,
-      chatId,
-      isStreaming: true
-    });
-  }
-
-  if (eventType === 'chunk') {
-    if (existingIndex >= 0) {
-      const next = [...existingMessages];
-      const current = next[existingIndex];
-      next[existingIndex] = {
-        ...current,
-        id: current.id || lookupId,
-        messageId: current.messageId || lookupId,
-        role: current.role || 'assistant',
-        sender: current.sender || sender,
-        content: `${current.content || ''}${chunk}`,
-        createdAt: current.createdAt || createdAt,
-        chatId: current.chatId || chatId,
-        isStreaming: true
-      };
-      next.sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
-      return next;
-    }
-
-    return upsertMessageList(existingMessages, {
-      id: lookupId,
-      messageId: lookupId,
-      role: 'assistant',
-      sender,
-      content: chunk,
-      createdAt,
-      chatId,
-      isStreaming: true
-    });
-  }
-
-  if (eventType === 'end') {
-    if (existingIndex < 0) return existingMessages;
-    const next = [...existingMessages];
-    next[existingIndex] = {
-      ...next[existingIndex],
-      isStreaming: false
-    };
-    return next;
-  }
-
-  if (eventType === 'error') {
-    if (existingIndex < 0) return existingMessages;
-    const next = [...existingMessages];
-    next[existingIndex] = {
-      ...next[existingIndex],
-      isStreaming: false,
-      hasError: true,
-      errorMessage: ssePayload?.error || 'Stream error'
-    };
-    return next;
-  }
-
-  return existingMessages;
+function getDefaultWorldForm() {
+  return {
+    name: '',
+    description: '',
+    turnLimit: DEFAULT_TURN_LIMIT,
+    chatLLMProvider: DEFAULT_WORLD_CHAT_LLM_PROVIDER,
+    chatLLMModel: DEFAULT_WORLD_CHAT_LLM_MODEL,
+    mcpConfig: ''
+  };
 }
 
-function validateWorldForm(worldForm, isUpdate = false) {
+function getWorldFormFromWorld(world) {
+  if (!world) return getDefaultWorldForm();
+
+  const turnLimitRaw = Number(world.turnLimit);
+  const turnLimit = Number.isFinite(turnLimitRaw) && turnLimitRaw >= MIN_TURN_LIMIT
+    ? Math.floor(turnLimitRaw)
+    : DEFAULT_TURN_LIMIT;
+  const chatLLMProvider = String(world.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
+  const chatLLMModel = String(world.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+
+  return {
+    name: String(world.name || ''),
+    description: String(world.description || ''),
+    turnLimit,
+    chatLLMProvider,
+    chatLLMModel,
+    mcpConfig: world.mcpConfig == null ? '' : String(world.mcpConfig)
+  };
+}
+
+function validateWorldForm(worldForm) {
   const name = String(worldForm.name || '').trim();
   if (!name) return { valid: false, error: 'World name is required.' };
 
@@ -259,13 +247,27 @@ function validateWorldForm(worldForm, isUpdate = false) {
   const turnLimit = Number.isFinite(turnLimitRaw) && turnLimitRaw >= MIN_TURN_LIMIT
     ? Math.floor(turnLimitRaw)
     : DEFAULT_TURN_LIMIT;
+  const chatLLMProvider = String(worldForm.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
+  const chatLLMModel = String(worldForm.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+  const mcpConfig = worldForm.mcpConfig == null ? '' : String(worldForm.mcpConfig);
+
+  if (mcpConfig.trim()) {
+    try {
+      JSON.parse(mcpConfig);
+    } catch {
+      return { valid: false, error: 'MCP Config must be valid JSON.' };
+    }
+  }
 
   return {
     valid: true,
     data: {
       name,
       description: String(worldForm.description || '').trim(),
-      turnLimit
+      turnLimit,
+      chatLLMProvider,
+      chatLLMModel,
+      mcpConfig
     }
   };
 }
@@ -299,6 +301,8 @@ export default function App() {
   const composerTextareaRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const previousMessageCountRef = useRef(0);
+  const streamingStateRef = useRef(null);
+  const activityStateRef = useRef(null);
 
   const [workspace, setWorkspace] = useState({
     workspacePath: null,
@@ -309,6 +313,7 @@ export default function App() {
   const [loadingWorld, setLoadingWorld] = useState(false);
   const [availableWorlds, setAvailableWorlds] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [sessionSearch, setSessionSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [composer, setComposer] = useState('');
@@ -318,16 +323,8 @@ export default function App() {
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [status, setStatus] = useState({ text: '', kind: 'info' });
-  const [creatingWorld, setCreatingWorld] = useState({
-    name: '',
-    description: '',
-    turnLimit: DEFAULT_TURN_LIMIT
-  });
-  const [editingWorld, setEditingWorld] = useState({
-    name: '',
-    description: '',
-    turnLimit: DEFAULT_TURN_LIMIT
-  });
+  const [creatingWorld, setCreatingWorld] = useState(getDefaultWorldForm);
+  const [editingWorld, setEditingWorld] = useState(getDefaultWorldForm);
   const [creatingAgent, setCreatingAgent] = useState(DEFAULT_AGENT_FORM);
   const [editingAgent, setEditingAgent] = useState(DEFAULT_AGENT_FORM);
   const [selectedAgentId, setSelectedAgentId] = useState(null);
@@ -335,15 +332,111 @@ export default function App() {
   const [updatingWorld, setUpdatingWorld] = useState(false);
   const [deletingWorld, setDeletingWorld] = useState(false);
   const [savingAgent, setSavingAgent] = useState(false);
+  const [deletingAgent, setDeletingAgent] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState(null);
   const [loading, setLoading] = useState({
     sessions: false,
     messages: false,
     send: false
   });
+  // Activity state for streaming indicators
+  const [isBusy, setIsBusy] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [activeTools, setActiveTools] = useState([]);
+  const [activeStreamCount, setActiveStreamCount] = useState(0);
+  // Prompt editor modal state
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false);
+  const [promptEditorValue, setPromptEditorValue] = useState('');
+  const [promptEditorTarget, setPromptEditorTarget] = useState(null); // 'create' or 'edit'
+  // MCP config editor modal state
+  const [mcpEditorOpen, setMcpEditorOpen] = useState(false);
+  const [mcpEditorValue, setMcpEditorValue] = useState('');
+  const [mcpEditorTarget, setMcpEditorTarget] = useState(null); // 'create' or 'edit'
 
   const setStatusText = useCallback((text, kind = 'info') => {
     setStatus({ text, kind });
+  }, []);
+
+  // Initialize streaming state manager
+  useEffect(() => {
+    streamingStateRef.current = createStreamingState({
+      onStreamStart: (entry) => {
+        setMessages((existing) => upsertMessageList(existing, {
+          id: entry.messageId,
+          messageId: entry.messageId,
+          role: 'assistant',
+          sender: entry.agentName,
+          content: '',
+          createdAt: entry.createdAt,
+          isStreaming: true
+        }));
+      },
+      onStreamUpdate: (messageId, content) => {
+        setMessages((existing) => {
+          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          if (index < 0) return existing;
+          const next = [...existing];
+          next[index] = { ...next[index], content };
+          return next;
+        });
+      },
+      onStreamEnd: (messageId) => {
+        setMessages((existing) => {
+          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          if (index < 0) return existing;
+          const next = [...existing];
+          next[index] = { ...next[index], isStreaming: false };
+          return next;
+        });
+      },
+      onStreamError: (messageId, errorMessage) => {
+        setMessages((existing) => {
+          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          if (index < 0) return existing;
+          const next = [...existing];
+          next[index] = { ...next[index], isStreaming: false, hasError: true, errorMessage };
+          return next;
+        });
+      }
+    });
+
+    return () => {
+      if (streamingStateRef.current) {
+        streamingStateRef.current.cleanup();
+      }
+    };
+  }, []);
+
+  // Initialize activity state manager
+  useEffect(() => {
+    activityStateRef.current = createActivityState({
+      onToolStart: (entry) => {
+        setActiveTools((tools) => [...tools, entry]);
+      },
+      onToolResult: (toolUseId) => {
+        setActiveTools((tools) => tools.filter((t) => t.toolUseId !== toolUseId));
+      },
+      onToolError: (toolUseId) => {
+        setActiveTools((tools) => tools.filter((t) => t.toolUseId !== toolUseId));
+      },
+      onToolProgress: (toolUseId, progress) => {
+        setActiveTools((tools) => tools.map((t) =>
+          t.toolUseId === toolUseId ? { ...t, progress } : t
+        ));
+      },
+      onElapsedUpdate: (ms) => {
+        setElapsedMs(ms);
+      },
+      onBusyChange: (busy) => {
+        setIsBusy(busy);
+      }
+    });
+
+    return () => {
+      if (activityStateRef.current) {
+        activityStateRef.current.cleanup();
+      }
+    };
   }, []);
 
   const selectedWorld = useMemo(
@@ -355,6 +448,11 @@ export default function App() {
     () => sessions.find((session) => session.id === selectedSessionId) || null,
     [sessions, selectedSessionId]
   );
+  const filteredSessions = useMemo(() => {
+    const query = String(sessionSearch || '').trim().toLowerCase();
+    if (!query) return sessions;
+    return sessions.filter((session) => String(session?.name || '').toLowerCase().includes(query));
+  }, [sessions, sessionSearch]);
 
   const rawWorldAgents = useMemo(
     () => (Array.isArray(selectedWorld?.agents) ? selectedWorld.agents : []),
@@ -362,6 +460,11 @@ export default function App() {
   );
 
   const messageCountByAgentId = useMemo(() => {
+    const normalizedSelectedSessionId = String(selectedSessionId || '').trim();
+    if (!normalizedSelectedSessionId) {
+      return new Map();
+    }
+
     const idToAgentId = new Map();
     const nameToAgentId = new Map();
 
@@ -376,8 +479,9 @@ export default function App() {
 
     const counts = new Map();
     for (const message of messages) {
-      const role = String(message?.role || '').toLowerCase();
-      if (role === 'user') continue;
+      const messageChatId = String(message?.chatId || '').trim();
+      if (!messageChatId || messageChatId !== normalizedSelectedSessionId) continue;
+      if (isHumanMessage(message)) continue;
 
       const fromAgentId = String(message?.fromAgentId || '').trim();
       let resolvedAgentId = null;
@@ -396,13 +500,12 @@ export default function App() {
     }
 
     return counts;
-  }, [messages, rawWorldAgents]);
+  }, [messages, rawWorldAgents, selectedSessionId]);
 
   const worldAgents = useMemo(() => {
     return rawWorldAgents.map((agent, index) => {
       const name = getAgentDisplayName(agent, index);
       const id = String(agent?.id || `agent-${index + 1}`);
-      const backendMessageCountRaw = Number(agent?.messageCount);
       const derivedMessageCount = messageCountByAgentId.get(id);
       return {
         id,
@@ -417,9 +520,7 @@ export default function App() {
         llmCallCount: Number.isFinite(Number(agent?.llmCallCount)) ? Number(agent.llmCallCount) : 0,
         messageCount: Number.isFinite(derivedMessageCount)
           ? Math.max(0, Math.floor(derivedMessageCount))
-          : Number.isFinite(backendMessageCountRaw)
-            ? Math.max(0, Math.floor(backendMessageCountRaw))
-            : 0
+          : 0
       };
     });
   }, [messageCountByAgentId, rawWorldAgents]);
@@ -543,21 +644,43 @@ export default function App() {
   }, [loadedWorld, selectedSessionId, refreshMessages]);
 
   useEffect(() => {
-    if (!loadedWorld) {
-      setEditingWorld({
-        name: '',
-        description: '',
-        turnLimit: DEFAULT_TURN_LIMIT
+    const normalizedSessionId = String(selectedSessionId || '').trim();
+    if (!normalizedSessionId) return;
+
+    const nextMessageCount = Array.isArray(messages) ? messages.length : 0;
+    setSessions((existing) => {
+      let changed = false;
+      const next = existing.map((session) => {
+        const sessionId = String(session?.id || '').trim();
+        if (sessionId !== normalizedSessionId) return session;
+
+        const currentCountRaw = Number(session?.messageCount);
+        const currentCount = Number.isFinite(currentCountRaw) ? Math.max(0, Math.floor(currentCountRaw)) : 0;
+        if (currentCount === nextMessageCount) return session;
+
+        changed = true;
+        return {
+          ...session,
+          messageCount: nextMessageCount
+        };
       });
+
+      return changed ? next : existing;
+    });
+  }, [messages, selectedSessionId]);
+
+  useEffect(() => {
+    if (!loadedWorld) {
+      setEditingWorld(getDefaultWorldForm());
       return;
     }
 
-    setEditingWorld({
-      name: loadedWorld.name || '',
-      description: loadedWorld.description || '',
-      turnLimit: Number(loadedWorld.turnLimit) || DEFAULT_TURN_LIMIT
-    });
+    setEditingWorld(getWorldFormFromWorld(loadedWorld));
   }, [loadedWorld]);
+
+  useEffect(() => {
+    setSessionSearch('');
+  }, [loadedWorld?.id]);
 
   useEffect(() => {
     if (!loadedWorld?.id || !selectedSessionId) {
@@ -591,7 +714,61 @@ export default function App() {
         const streamChatId = streamPayload.chatId || payload.chatId || null;
         if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
 
-        setMessages((existing) => applySseUpdateToMessages(existing, streamPayload, selectedSessionId));
+        const eventType = String(streamPayload.eventType || '').toLowerCase();
+        const messageId = streamPayload.messageId;
+        if (!messageId) return;
+
+        const streaming = streamingStateRef.current;
+        if (!streaming) return;
+
+        if (eventType === 'start') {
+          streaming.handleStart(messageId, streamPayload.agentName || 'assistant');
+          // Sync stream count with activity state and UI
+          const count = streaming.getActiveCount();
+          setActiveStreamCount(count);
+          if (activityStateRef.current) {
+            activityStateRef.current.setActiveStreamCount(count);
+          }
+        } else if (eventType === 'chunk') {
+          streaming.handleChunk(messageId, streamPayload.content || '');
+        } else if (eventType === 'end') {
+          streaming.handleEnd(messageId);
+          const count = streaming.getActiveCount();
+          setActiveStreamCount(count);
+          if (activityStateRef.current) {
+            activityStateRef.current.setActiveStreamCount(count);
+          }
+        } else if (eventType === 'error') {
+          streaming.handleError(messageId, streamPayload.error || 'Stream error');
+          const count = streaming.getActiveCount();
+          setActiveStreamCount(count);
+          if (activityStateRef.current) {
+            activityStateRef.current.setActiveStreamCount(count);
+          }
+        }
+      }
+
+      // Handle tool events 
+      if (payload.type === 'tool') {
+        const toolPayload = payload.tool;
+        if (!toolPayload) return;
+
+        const activity = activityStateRef.current;
+        if (!activity) return;
+
+        const toolEventType = String(toolPayload.eventType || '').toLowerCase();
+        const toolUseId = toolPayload.toolUseId;
+        if (!toolUseId) return;
+
+        if (toolEventType === 'tool-start') {
+          activity.handleToolStart(toolUseId, toolPayload.toolName || 'unknown', toolPayload.toolInput);
+        } else if (toolEventType === 'tool-result') {
+          activity.handleToolResult(toolUseId, toolPayload.result || '');
+        } else if (toolEventType === 'tool-error') {
+          activity.handleToolError(toolUseId, toolPayload.error || 'Tool error');
+        } else if (toolEventType === 'tool-progress') {
+          activity.handleToolProgress(toolUseId, toolPayload.progress || '');
+        }
       }
     });
 
@@ -605,6 +782,13 @@ export default function App() {
       disposed = true;
       removeListener();
       api.unsubscribeChatEvents(subscriptionId).catch(() => { });
+      // Cleanup streaming state on session change
+      if (streamingStateRef.current) {
+        streamingStateRef.current.cleanup();
+      }
+      if (activityStateRef.current) {
+        activityStateRef.current.cleanup();
+      }
     };
   }, [api, selectedSessionId, loadedWorld, setStatusText]);
 
@@ -695,7 +879,7 @@ export default function App() {
 
     try {
       const created = await api.createWorld(validation.data);
-      setCreatingWorld({ name: '', description: '', turnLimit: 5 });
+      setCreatingWorld(getDefaultWorldForm());
 
       // Add to available worlds list
       setAvailableWorlds((worlds) => [...worlds, { id: created.id, name: created.name }]);
@@ -723,11 +907,7 @@ export default function App() {
 
   const onOpenWorldEditPanel = useCallback(() => {
     if (!loadedWorld) return;
-    setEditingWorld({
-      name: loadedWorld.name || '',
-      description: loadedWorld.description || '',
-      turnLimit: Number(loadedWorld.turnLimit) || DEFAULT_TURN_LIMIT
-    });
+    setEditingWorld(getWorldFormFromWorld(loadedWorld));
     setPanelMode('edit-world');
     setPanelOpen(true);
   }, [loadedWorld]);
@@ -789,7 +969,7 @@ export default function App() {
       return;
     }
 
-    const validation = validateWorldForm(editingWorld, true);
+    const validation = validateWorldForm(editingWorld);
     if (!validation.valid) {
       setStatusText(validation.error, 'error');
       return;
@@ -867,6 +1047,32 @@ export default function App() {
       setStatusText(safeMessage(error, 'Failed to update agent.'), 'error');
     } finally {
       setSavingAgent(false);
+    }
+  }, [api, editingAgent, loadedWorld, refreshWorldDetails, setStatusText]);
+
+  const onDeleteAgent = useCallback(async () => {
+    if (!loadedWorld?.id || !editingAgent.id) {
+      setStatusText('No agent selected to delete.', 'error');
+      return;
+    }
+
+    const agentName = editingAgent.name || editingAgent.id;
+    const shouldDelete = window.confirm(`Delete agent "${agentName}"? This action cannot be undone.`);
+    if (!shouldDelete) return;
+
+    setDeletingAgent(true);
+    try {
+      await api.deleteAgent(loadedWorld.id, editingAgent.id);
+
+      await refreshWorldDetails(loadedWorld.id);
+      setPanelOpen(false);
+      setPanelMode('create-world');
+      setSelectedAgentId(null);
+      setStatusText(`Agent deleted: ${agentName}`, 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to delete agent.'), 'error');
+    } finally {
+      setDeletingAgent(false);
     }
   }, [api, editingAgent, loadedWorld, refreshWorldDetails, setStatusText]);
 
@@ -1272,12 +1478,6 @@ export default function App() {
                   <div>
                     Agents: {loadedWorld.totalAgents} | Turn Limit: {loadedWorld.turnLimit} | Messages: {loadedWorld.totalMessages}
                   </div>
-                  <div className="text-[10px] text-sidebar-foreground/60">
-                    ID: {loadedWorld.id}
-                  </div>
-                  <div className="break-all text-[10px] text-sidebar-foreground/60">
-                    Path: {workspace.storagePath ? `${workspace.storagePath}/${loadedWorld.id}` : 'N/A'}
-                  </div>
                 </div>
               </div>
             </div>
@@ -1312,13 +1512,28 @@ export default function App() {
             </button>
           </div>
 
-          <div className="flex-1 min-h-0 space-y-2 overflow-auto pr-1">
+          <div className="mb-2 shrink-0">
+            <input
+              type="text"
+              value={sessionSearch}
+              onChange={(event) => setSessionSearch(event.target.value)}
+              placeholder="Search sessions..."
+              className="w-full rounded-md border border-sidebar-border bg-sidebar px-2 py-1 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/60 focus:border-sidebar-ring"
+              aria-label="Search chat sessions"
+            />
+          </div>
+
+          <div className="flex-1 min-h-0 space-y-1 overflow-auto pr-1">
             {sessions.length === 0 ? (
               <div className="rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
                 {loadedWorld ? 'No sessions yet.' : 'No world loaded.'}
               </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
+                No matching sessions.
+              </div>
             ) : (
-              sessions.map((session) => (
+              filteredSessions.map((session) => (
                 <div
                   key={session.id}
                   role="button"
@@ -1330,33 +1545,48 @@ export default function App() {
                       onSelectSession(session.id);
                     }
                   }}
-                  className={`group w-full rounded-md border p-2 text-left text-xs ${selectedSessionId === session.id
-                    ? 'border-sidebar-foreground/50 bg-sidebar-accent text-sidebar-foreground'
-                    : 'border-sidebar-border bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  className={`group w-full rounded-md pl-2 pr-0 py-1 text-left text-xs ${selectedSessionId === session.id
+                    ? 'bg-sidebar-session-selected text-sidebar-foreground'
+                    : 'bg-sidebar text-sidebar-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground'
                     }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{session.name}</div>
-                      <div className="mt-1 text-[11px] text-sidebar-foreground/70">
-                        {session.messageCount} messages
-                      </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="min-w-0 flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${selectedSessionId === session.id
+                          ? 'bg-sidebar-foreground/75'
+                          : 'bg-sidebar-foreground/35 group-hover:bg-sidebar-foreground/55'
+                          }`}
+                        aria-hidden="true"
+                      />
+                      <div className="truncate text-[11px] font-medium leading-[1.05]">{session.name}</div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(event) => onDeleteSession(session.id, event)}
-                      disabled={deletingSessionId === session.id}
-                      className={`shrink-0 rounded p-1 text-sidebar-foreground/70 transition-all hover:bg-destructive/20 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50 ${deletingSessionId === session.id
-                        ? 'opacity-100'
-                        : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-                        }`}
-                      title="Delete session"
-                      aria-label={`Delete session ${session.name}`}
-                    >
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 6L6 18M6 6l12 12" />
-                      </svg>
-                    </button>
+                    <div className="relative h-5 w-7 shrink-0 -mr-1">
+                      <span
+                        className={`absolute inset-0 inline-flex items-center justify-center rounded-full border border-sidebar-border bg-sidebar-accent px-1.5 text-[10px] font-medium leading-none text-sidebar-foreground/80 transition-opacity ${deletingSessionId === session.id
+                          ? 'opacity-0'
+                          : 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0'
+                          }`}
+                        aria-hidden="true"
+                      >
+                        {session.messageCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(event) => onDeleteSession(session.id, event)}
+                        disabled={deletingSessionId === session.id}
+                        className={`absolute inset-0 flex items-center justify-center rounded text-sidebar-foreground/70 transition-all hover:bg-destructive/20 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50 ${deletingSessionId === session.id
+                          ? 'opacity-100'
+                          : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                          }`}
+                        title="Delete session"
+                        aria-label={`Delete session ${session.name}`}
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -1555,14 +1785,28 @@ export default function App() {
                             {message.content}
                           </div>
                           {message.isStreaming ? (
-                            <div className="mt-2 text-[11px] text-muted-foreground animate-pulse">
-                              Streaming response...
-                            </div>
+                            <ThinkingIndicator className="mt-2" />
                           ) : null}
                         </article>
                       );
                     })
                   )}
+                  {/* Activity indicators at bottom of messages */}
+                  {isBusy ? (
+                    <div className="mt-4 space-y-3 rounded-lg border border-border/50 bg-card/50 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <ActivityPulse isActive={isBusy} />
+                          <span className="text-xs font-medium text-foreground">Processing...</span>
+                          <AgentQueueDisplay count={activeStreamCount} />
+                        </div>
+                        <ElapsedTimeCounter elapsedMs={elapsedMs} />
+                      </div>
+                      {activeTools.length > 0 ? (
+                        <ToolExecutionStatus tools={activeTools} />
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1623,9 +1867,21 @@ export default function App() {
                     <button
                       type="submit"
                       disabled={loading.send || !composer.trim()}
-                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Send message"
                     >
-                      {loading.send ? 'Sending...' : 'Send'}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-5 w-5"
+                      >
+                        <path d="M12 19V5M5 12l7-7 7 7" />
+                      </svg>
                     </button>
                   </div>
                   {selectedProjectPath ? (
@@ -1678,7 +1934,7 @@ export default function App() {
                 }`}
             >
               {panelOpen ? (
-                <div className="h-full overflow-auto">
+                <div className="flex h-full flex-col">
                   <h2 className="mb-3 text-xs uppercase tracking-wide text-sidebar-foreground/70">
                     {panelMode === 'edit-world'
                       ? 'Edit World'
@@ -1686,282 +1942,408 @@ export default function App() {
                         ? 'Create Agent'
                         : panelMode === 'edit-agent'
                           ? 'Edit Agent'
-                          : 'Context Panel'}
+                          : 'Create World'}
                   </h2>
 
-                  <div className="mb-5 rounded-md border border-sidebar-border bg-sidebar-accent p-3 text-xs">
-                    <div className="mb-2 text-sidebar-foreground/70">Active Context</div>
-                    <div className="space-y-1 text-sidebar-foreground">
-                      <div>World: {selectedWorld?.name || 'N/A'}</div>
-                      <div>Session: {selectedSession?.name || 'N/A'}</div>
-                      {panelMode === 'edit-agent' && selectedAgentForPanel ? (
-                        <div>Agent: {selectedAgentForPanel.name}</div>
-                      ) : null}
-                    </div>
+                  <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
+                    {panelMode === 'edit-world' && loadedWorld ? (
+                      <>
+                        <form onSubmit={onUpdateWorld} className="flex min-h-0 flex-1 flex-col">
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+                            <div className="rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground/80">
+                              Name: {editingWorld.name}
+                            </div>
+                            <textarea
+                              value={editingWorld.description}
+                              onChange={(event) => setEditingWorld((value) => ({ ...value, description: event.target.value }))}
+                              placeholder="Description (optional)"
+                              className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={updatingWorld || deletingWorld}
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <select
+                                value={editingWorld.chatLLMProvider}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                                disabled={updatingWorld || deletingWorld}
+                              >
+                                <option value="">Select provider</option>
+                                {WORLD_PROVIDER_OPTIONS.map((provider) => (
+                                  <option key={provider.value} value={provider.value}>
+                                    {provider.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                value={editingWorld.chatLLMModel}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
+                                placeholder="Chat LLM model"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={updatingWorld || deletingWorld}
+                              />
+                            </div>
+                            <input
+                              type="number"
+                              min={MIN_TURN_LIMIT}
+                              max="50"
+                              value={editingWorld.turnLimit}
+                              onChange={(event) => setEditingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={updatingWorld || deletingWorld}
+                            />
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
+                                value={editingWorld.mcpConfig}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, mcpConfig: event.target.value }))}
+                                placeholder="Enter MCP servers configuration as JSON..."
+                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={updatingWorld || deletingWorld}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMcpEditorValue(editingWorld.mcpConfig);
+                                  setMcpEditorTarget('edit');
+                                  setMcpEditorOpen(true);
+                                }}
+                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand editor"
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPanelMode('create-world');
+                                setPanelOpen(false);
+                              }}
+                              disabled={updatingWorld || deletingWorld}
+                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={updatingWorld || deletingWorld}
+                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </form>
+                      </>
+                    ) : panelMode === 'create-agent' && loadedWorld ? (
+                      <>
+                        <form onSubmit={onCreateAgent} className="flex min-h-0 flex-1 flex-col">
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+                            <input
+                              value={creatingAgent.name}
+                              onChange={(event) => setCreatingAgent((value) => ({ ...value, name: event.target.value }))}
+                              placeholder="Agent name"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent}
+                            />
+                            <input
+                              value={creatingAgent.type}
+                              onChange={(event) => setCreatingAgent((value) => ({ ...value, type: event.target.value }))}
+                              placeholder="Agent type"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent}
+                            />
+                            <select
+                              value={creatingAgent.provider}
+                              onChange={(event) => setCreatingAgent((value) => ({ ...value, provider: event.target.value }))}
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                              disabled={savingAgent}
+                            >
+                              {AGENT_PROVIDER_OPTIONS.map((provider) => (
+                                <option key={provider} value={provider}>
+                                  {provider}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={creatingAgent.model}
+                              onChange={(event) => setCreatingAgent((value) => ({ ...value, model: event.target.value }))}
+                              placeholder="Model (for example: gpt-4o-mini)"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent}
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={creatingAgent.temperature}
+                                onChange={(event) => setCreatingAgent((value) => ({ ...value, temperature: event.target.value }))}
+                                placeholder="Temperature"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent}
+                              />
+                              <input
+                                type="number"
+                                min="1"
+                                value={creatingAgent.maxTokens}
+                                onChange={(event) => setCreatingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
+                                placeholder="Max tokens"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent}
+                              />
+                            </div>
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
+                                value={creatingAgent.systemPrompt}
+                                onChange={(event) => setCreatingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
+                                placeholder="System prompt (optional)"
+                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPromptEditorValue(creatingAgent.systemPrompt);
+                                  setPromptEditorTarget('create');
+                                  setPromptEditorOpen(true);
+                                }}
+                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand editor"
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPanelOpen(false);
+                                setPanelMode('create-world');
+                              }}
+                              disabled={savingAgent}
+                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingAgent}
+                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {savingAgent ? 'Creating...' : 'Create'}
+                            </button>
+                          </div>
+                        </form>
+                      </>
+                    ) : panelMode === 'edit-agent' && loadedWorld && selectedAgentForPanel ? (
+                      <>
+                        <form onSubmit={onUpdateAgent} className="flex min-h-0 flex-1 flex-col">
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+                            <div className="flex items-center gap-2">
+                              <input
+                                value={editingAgent.name}
+                                onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
+                                placeholder="Agent name"
+                                className="flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent || deletingAgent}
+                              />
+                              <button
+                                type="button"
+                                onClick={onDeleteAgent}
+                                disabled={savingAgent || deletingAgent}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-destructive/20 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Delete agent"
+                                aria-label="Delete agent"
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M18 6L6 18M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                            <input
+                              value={editingAgent.type}
+                              onChange={(event) => setEditingAgent((value) => ({ ...value, type: event.target.value }))}
+                              placeholder="Agent type"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent || deletingAgent}
+                            />
+                            <select
+                              value={editingAgent.provider}
+                              onChange={(event) => setEditingAgent((value) => ({ ...value, provider: event.target.value }))}
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                              disabled={savingAgent || deletingAgent}
+                            >
+                              {AGENT_PROVIDER_OPTIONS.map((provider) => (
+                                <option key={provider} value={provider}>
+                                  {provider}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={editingAgent.model}
+                              onChange={(event) => setEditingAgent((value) => ({ ...value, model: event.target.value }))}
+                              placeholder="Model (for example: gpt-4o-mini)"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent || deletingAgent}
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={editingAgent.temperature}
+                                onChange={(event) => setEditingAgent((value) => ({ ...value, temperature: event.target.value }))}
+                                placeholder="Temperature"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent || deletingAgent}
+                              />
+                              <input
+                                type="number"
+                                min="1"
+                                value={editingAgent.maxTokens}
+                                onChange={(event) => setEditingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
+                                placeholder="Max tokens"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent || deletingAgent}
+                              />
+                            </div>
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
+                                value={editingAgent.systemPrompt}
+                                onChange={(event) => setEditingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
+                                placeholder="System prompt (optional)"
+                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={savingAgent || deletingAgent}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPromptEditorValue(editingAgent.systemPrompt);
+                                  setPromptEditorTarget('edit');
+                                  setPromptEditorOpen(true);
+                                }}
+                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand editor"
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPanelOpen(false);
+                                setPanelMode('create-world');
+                                setSelectedAgentId(null);
+                              }}
+                              disabled={savingAgent || deletingAgent}
+                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingAgent || deletingAgent}
+                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {savingAgent ? 'Saving...' : deletingAgent ? 'Deleting...' : 'Save'}
+                            </button>
+                          </div>
+                        </form>
+                      </>
+                    ) : (
+                      <>
+                        <form onSubmit={onCreateWorld} className="flex min-h-0 flex-1 flex-col">
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+                            <input
+                              value={creatingWorld.name}
+                              onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
+                              placeholder="World name"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            />
+                            <textarea
+                              value={creatingWorld.description}
+                              onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
+                              placeholder="Description (optional)"
+                              className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <select
+                                value={creatingWorld.chatLLMProvider}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                              >
+                                <option value="">Select provider</option>
+                                {WORLD_PROVIDER_OPTIONS.map((provider) => (
+                                  <option key={provider.value} value={provider.value}>
+                                    {provider.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                value={creatingWorld.chatLLMModel}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
+                                placeholder="Chat LLM model"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              />
+                            </div>
+                            <input
+                              type="number"
+                              min={MIN_TURN_LIMIT}
+                              max="50"
+                              value={creatingWorld.turnLimit}
+                              onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            />
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
+                                value={creatingWorld.mcpConfig}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, mcpConfig: event.target.value }))}
+                                placeholder="Enter MCP servers configuration as JSON..."
+                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMcpEditorValue(creatingWorld.mcpConfig);
+                                  setMcpEditorTarget('create');
+                                  setMcpEditorOpen(true);
+                                }}
+                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand editor"
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <button
+                              type="button"
+                              onClick={() => setPanelOpen(false)}
+                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                            >
+                              Create
+                            </button>
+                          </div>
+                        </form>
+                      </>
+                    )}
                   </div>
-
-                  {panelMode === 'edit-world' && loadedWorld ? (
-                    <>
-                      <h3 className="mb-2 text-xs uppercase tracking-wide text-sidebar-foreground/70">Update World</h3>
-                      <form onSubmit={onUpdateWorld} className="space-y-3">
-                        <input
-                          value={editingWorld.name}
-                          onChange={(event) => setEditingWorld((value) => ({ ...value, name: event.target.value }))}
-                          placeholder="World name"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={updatingWorld || deletingWorld}
-                        />
-                        <textarea
-                          value={editingWorld.description}
-                          onChange={(event) => setEditingWorld((value) => ({ ...value, description: event.target.value }))}
-                          placeholder="Description (optional)"
-                          className="h-24 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={updatingWorld || deletingWorld}
-                        />
-                        <input
-                          type="number"
-                          min={MIN_TURN_LIMIT}
-                          value={editingWorld.turnLimit}
-                          onChange={(event) => setEditingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={updatingWorld || deletingWorld}
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPanelMode('create-world');
-                              setPanelOpen(false);
-                            }}
-                            disabled={updatingWorld || deletingWorld}
-                            className="flex-1 rounded-md border border-sidebar-border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={updatingWorld || deletingWorld}
-                            className="flex-1 rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </form>
-                    </>
-                  ) : panelMode === 'create-agent' && loadedWorld ? (
-                    <>
-                      <h3 className="mb-2 text-xs uppercase tracking-wide text-sidebar-foreground/70">New Agent</h3>
-                      <form onSubmit={onCreateAgent} className="space-y-3">
-                        <input
-                          value={creatingAgent.name}
-                          onChange={(event) => setCreatingAgent((value) => ({ ...value, name: event.target.value }))}
-                          placeholder="Agent name"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <input
-                          value={creatingAgent.type}
-                          onChange={(event) => setCreatingAgent((value) => ({ ...value, type: event.target.value }))}
-                          placeholder="Agent type"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <select
-                          value={creatingAgent.provider}
-                          onChange={(event) => setCreatingAgent((value) => ({ ...value, provider: event.target.value }))}
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        >
-                          {AGENT_PROVIDER_OPTIONS.map((provider) => (
-                            <option key={provider} value={provider}>
-                              {provider}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          value={creatingAgent.model}
-                          onChange={(event) => setCreatingAgent((value) => ({ ...value, model: event.target.value }))}
-                          placeholder="Model (for example: gpt-4o-mini)"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <textarea
-                          value={creatingAgent.systemPrompt}
-                          onChange={(event) => setCreatingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
-                          placeholder="System prompt (optional)"
-                          className="h-24 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={creatingAgent.temperature}
-                            onChange={(event) => setCreatingAgent((value) => ({ ...value, temperature: event.target.value }))}
-                            placeholder="Temperature"
-                            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            disabled={savingAgent}
-                          />
-                          <input
-                            type="number"
-                            min="1"
-                            value={creatingAgent.maxTokens}
-                            onChange={(event) => setCreatingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
-                            placeholder="Max tokens"
-                            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            disabled={savingAgent}
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPanelOpen(false);
-                              setPanelMode('create-world');
-                            }}
-                            disabled={savingAgent}
-                            className="flex-1 rounded-md border border-sidebar-border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={savingAgent}
-                            className="flex-1 rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {savingAgent ? 'Creating...' : 'Create'}
-                          </button>
-                        </div>
-                      </form>
-                    </>
-                  ) : panelMode === 'edit-agent' && loadedWorld && selectedAgentForPanel ? (
-                    <>
-                      <h3 className="mb-2 text-xs uppercase tracking-wide text-sidebar-foreground/70">Update Agent</h3>
-                      <form onSubmit={onUpdateAgent} className="space-y-3">
-                        <input
-                          value={editingAgent.name}
-                          onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
-                          placeholder="Agent name"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <input
-                          value={editingAgent.type}
-                          onChange={(event) => setEditingAgent((value) => ({ ...value, type: event.target.value }))}
-                          placeholder="Agent type"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <select
-                          value={editingAgent.provider}
-                          onChange={(event) => setEditingAgent((value) => ({ ...value, provider: event.target.value }))}
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        >
-                          {AGENT_PROVIDER_OPTIONS.map((provider) => (
-                            <option key={provider} value={provider}>
-                              {provider}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          value={editingAgent.model}
-                          onChange={(event) => setEditingAgent((value) => ({ ...value, model: event.target.value }))}
-                          placeholder="Model (for example: gpt-4o-mini)"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <textarea
-                          value={editingAgent.systemPrompt}
-                          onChange={(event) => setEditingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
-                          placeholder="System prompt (optional)"
-                          className="h-24 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                          disabled={savingAgent}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={editingAgent.temperature}
-                            onChange={(event) => setEditingAgent((value) => ({ ...value, temperature: event.target.value }))}
-                            placeholder="Temperature"
-                            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            disabled={savingAgent}
-                          />
-                          <input
-                            type="number"
-                            min="1"
-                            value={editingAgent.maxTokens}
-                            onChange={(event) => setEditingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
-                            placeholder="Max tokens"
-                            className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            disabled={savingAgent}
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPanelOpen(false);
-                              setPanelMode('create-world');
-                              setSelectedAgentId(null);
-                            }}
-                            disabled={savingAgent}
-                            className="flex-1 rounded-md border border-sidebar-border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={savingAgent}
-                            className="flex-1 rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {savingAgent ? 'Saving...' : 'Save'}
-                          </button>
-                        </div>
-                      </form>
-                    </>
-                  ) : (
-                    <>
-                      <h3 className="mb-2 text-xs uppercase tracking-wide text-sidebar-foreground/70">Create World</h3>
-                      <form onSubmit={onCreateWorld} className="space-y-3">
-                        <input
-                          value={creatingWorld.name}
-                          onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
-                          placeholder="World name"
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                        />
-                        <textarea
-                          value={creatingWorld.description}
-                          onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
-                          placeholder="Description (optional)"
-                          className="h-24 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                        />
-                        <input
-                          type="number"
-                          min={MIN_TURN_LIMIT}
-                          value={creatingWorld.turnLimit}
-                          onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                          className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setPanelOpen(false)}
-                            className="flex-1 rounded-md border border-sidebar-border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            className="flex-1 rounded-md bg-sidebar-primary px-3 py-2 text-sm font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
-                          >
-                            Create
-                          </button>
-                        </div>
-                      </form>
-                    </>
-                  )}
                 </div>
               ) : null}
             </aside>
@@ -1981,6 +2363,110 @@ export default function App() {
           ) : null}
         </main>
       </div>
+
+      {/* Prompt Editor Modal */}
+      {promptEditorOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="flex h-[80vh] w-[80vw] max-w-4xl flex-col rounded-lg border border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-sm font-medium text-foreground">Edit System Prompt</h3>
+              <button
+                type="button"
+                onClick={() => setPromptEditorOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 p-4">
+              <textarea
+                value={promptEditorValue}
+                onChange={(event) => setPromptEditorValue(event.target.value)}
+                placeholder="Enter system prompt..."
+                className="h-full w-full resize-none rounded-md border border-input bg-card p-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setPromptEditorOpen(false)}
+                className="rounded-md border border-input px-4 py-2 text-sm text-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (promptEditorTarget === 'create') {
+                    setCreatingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
+                  } else if (promptEditorTarget === 'edit') {
+                    setEditingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
+                  }
+                  setPromptEditorOpen(false);
+                }}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* MCP Config Editor Modal */}
+      {mcpEditorOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="flex h-[80vh] w-[80vw] max-w-4xl flex-col rounded-lg border border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-sm font-medium text-foreground">Edit MCP Configuration</h3>
+              <button
+                type="button"
+                onClick={() => setMcpEditorOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 p-4">
+              <textarea
+                value={mcpEditorValue}
+                onChange={(event) => setMcpEditorValue(event.target.value)}
+                placeholder="Enter MCP servers configuration as JSON..."
+                className="h-full w-full resize-none rounded-md border border-input bg-card p-4 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setMcpEditorOpen(false)}
+                className="rounded-md border border-input px-4 py-2 text-sm text-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (mcpEditorTarget === 'create') {
+                    setCreatingWorld((value) => ({ ...value, mcpConfig: mcpEditorValue }));
+                  } else if (mcpEditorTarget === 'edit') {
+                    setEditingWorld((value) => ({ ...value, mcpConfig: mcpEditorValue }));
+                  }
+                  setMcpEditorOpen(false);
+                }}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

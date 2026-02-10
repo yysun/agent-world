@@ -1,5 +1,7 @@
 /**
  * Electron Main Process - Desktop Runtime and IPC Router
+ * Purpose:
+ * - Host desktop runtime IPC handlers that bridge renderer actions to core world/chat APIs.
  *
  * Features:
  * - Workspace selection and persistence
@@ -17,6 +19,9 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-10: Added agent delete IPC handler for agent deletion from edit panel
+ * - 2026-02-10: Fixed session message counts by deriving counts from persisted chat messages instead of stale chat metadata
+ * - 2026-02-10: Added world form parity fields (`chatLLMProvider`, `chatLLMModel`, `mcpConfig`) to world create/update IPC and serialized world payloads
  * - 2026-02-10: Added agent create/update IPC handlers and expanded world agent summaries for header avatars and edit panel
  * - 2026-02-10: Added world agent summaries (`id`, `name`) to serialized world payloads for renderer header avatars
  * - 2026-02-10: Added `chat:delete` IPC handler for deleting chat sessions
@@ -45,6 +50,7 @@ import os from 'node:os';
 import {
   createAgent,
   createWorld,
+  deleteAgent,
   deleteChat,
   updateAgent,
   deleteWorld,
@@ -308,6 +314,9 @@ function serializeWorldInfo(world) {
     name: world.name,
     description: world.description || '',
     turnLimit: world.turnLimit,
+    chatLLMProvider: world.chatLLMProvider || null,
+    chatLLMModel: world.chatLLMModel || null,
+    mcpConfig: world.mcpConfig || null,
     totalAgents: world.totalAgents,
     totalMessages: world.totalMessages,
     agents: serializeWorldAgents(world)
@@ -318,6 +327,7 @@ function serializeWorldInfo(world) {
  * @param {any} chat
  */
 function serializeChat(chat) {
+  const rawMessageCount = Number(chat?.messageCount);
   return {
     id: chat.id,
     worldId: chat.worldId,
@@ -325,8 +335,47 @@ function serializeChat(chat) {
     description: chat.description || '',
     createdAt: chat.createdAt instanceof Date ? chat.createdAt.toISOString() : String(chat.createdAt),
     updatedAt: chat.updatedAt instanceof Date ? chat.updatedAt.toISOString() : String(chat.updatedAt),
-    messageCount: chat.messageCount
+    messageCount: Number.isFinite(rawMessageCount) ? Math.max(0, Math.floor(rawMessageCount)) : 0
   };
+}
+
+/**
+ * Build serialized chat sessions with message counts derived from persisted memory.
+ * Chat metadata `messageCount` is not always current across all storage flows.
+ * @param {string} worldId
+ * @param {any[]} chats
+ */
+async function serializeChatsWithMessageCounts(worldId, chats) {
+  const normalizedWorldId = String(worldId || '').trim();
+  if (!normalizedWorldId) {
+    return [];
+  }
+
+  const chatList = Array.isArray(chats) ? chats : [];
+  const messageCounts = new Map();
+
+  await Promise.all(chatList.map(async (chat) => {
+    const chatId = String(chat?.id || '').trim();
+    if (!chatId) return;
+
+    try {
+      const messages = await getMemory(normalizedWorldId, chatId);
+      const count = Array.isArray(messages) ? messages.length : 0;
+      messageCounts.set(chatId, count);
+    } catch {
+      const fallbackCount = Number(chat?.messageCount);
+      messageCounts.set(chatId, Number.isFinite(fallbackCount) ? fallbackCount : 0);
+    }
+  }));
+
+  return chatList.map((chat) => {
+    const chatId = String(chat?.id || '').trim();
+    const derivedCount = messageCounts.get(chatId);
+    return serializeChat({
+      ...chat,
+      messageCount: Number.isFinite(Number(derivedCount)) ? Number(derivedCount) : chat?.messageCount
+    });
+  });
 }
 
 /**
@@ -424,6 +473,33 @@ function serializeRealtimeSSEEvent(worldId, chatId, event) {
 }
 
 /**
+ * Serialize realtime tool event for IPC transmission
+ * @param {string} worldId - World identifier
+ * @param {string | null} chatId - Subscription chat id
+ * @param {any} event - Tool event object from world emitter
+ * @returns {any} Serialized event payload
+ */
+function serializeRealtimeToolEvent(worldId, chatId, event) {
+  const eventType = event?.type || 'tool-progress';
+  return {
+    type: 'tool',
+    worldId,
+    chatId: chatId || null,
+    tool: {
+      eventType,
+      toolUseId: event?.toolUseId || `tool-${Date.now()}`,
+      toolName: event?.toolName || 'unknown',
+      toolInput: event?.toolInput || null,
+      result: event?.result || null,
+      error: event?.error || null,
+      progress: event?.progress || null,
+      agentId: event?.agentId || null,
+      createdAt: new Date().toISOString()
+    }
+  };
+}
+
+/**
  * Load all worlds from current workspace
  * @returns {Promise<{success: boolean, worlds?: any[], error?: string, message?: string}>}
  */
@@ -479,12 +555,13 @@ async function loadSpecificWorld(worldId) {
     }
 
     // Load sessions
-    const sessions = await listChats(world.id);
+    const chats = await listChats(world.id);
+    const sessions = await serializeChatsWithMessageCounts(world.id, chats);
 
     return {
       success: true,
       world: serializeWorldInfo(world),
-      sessions: sessions.map((chat) => serializeChat(chat))
+      sessions
     };
   } catch (error) {
     const err = /** @type {Error} */ (error);
@@ -578,7 +655,7 @@ async function listWorkspaceWorlds() {
 
 /**
  * Create a new world in current workspace
- * @param {any} payload - World creation payload {name, description?, turnLimit?}
+ * @param {any} payload - World creation payload {name, description?, turnLimit?, chatLLMProvider?, chatLLMModel?, mcpConfig?}
  * @returns {Promise<any>} Serialized created world info
  */
 async function createWorkspaceWorld(payload) {
@@ -592,11 +669,23 @@ async function createWorkspaceWorld(payload) {
   const turnLimit = Number.isFinite(turnLimitRaw) && turnLimitRaw > 0
     ? Math.floor(turnLimitRaw)
     : 5;
+  const chatLLMProvider = payload?.chatLLMProvider == null
+    ? undefined
+    : String(payload.chatLLMProvider || '').trim() || undefined;
+  const chatLLMModel = payload?.chatLLMModel == null
+    ? undefined
+    : String(payload.chatLLMModel || '').trim() || undefined;
+  const mcpConfig = payload?.mcpConfig == null
+    ? undefined
+    : String(payload.mcpConfig);
 
   const created = await createWorld({
     name,
     description: payload?.description ? String(payload.description) : undefined,
-    turnLimit
+    turnLimit,
+    chatLLMProvider,
+    chatLLMModel,
+    mcpConfig
   });
 
   if (!created) {
@@ -608,7 +697,7 @@ async function createWorkspaceWorld(payload) {
 
 /**
  * Update an existing world in current workspace
- * @param {any} payload - Update payload {worldId, name?, description?, turnLimit?}
+ * @param {any} payload - Update payload {worldId, name?, description?, turnLimit?, chatLLMProvider?, chatLLMModel?, mcpConfig?}
  * @returns {Promise<any>} Serialized updated world info
  */
 async function updateWorkspaceWorld(payload) {
@@ -638,6 +727,24 @@ async function updateWorkspaceWorld(payload) {
       ? Math.floor(turnLimitRaw)
       : 5;
     updates.turnLimit = turnLimit;
+  }
+
+  if (payload?.chatLLMProvider !== undefined) {
+    const provider = payload.chatLLMProvider == null
+      ? undefined
+      : String(payload.chatLLMProvider || '').trim() || undefined;
+    updates.chatLLMProvider = provider;
+  }
+
+  if (payload?.chatLLMModel !== undefined) {
+    const model = payload.chatLLMModel == null
+      ? undefined
+      : String(payload.chatLLMModel || '').trim() || undefined;
+    updates.chatLLMModel = model;
+  }
+
+  if (payload?.mcpConfig !== undefined) {
+    updates.mcpConfig = payload.mcpConfig == null ? null : String(payload.mcpConfig);
   }
 
   if (Object.keys(updates).length === 0) {
@@ -759,6 +866,22 @@ async function updateWorldAgent(payload) {
 }
 
 /**
+ * Delete an agent from a world
+ * @param {any} payload - Agent payload {worldId, agentId}
+ * @returns {Promise<{success: boolean}>}
+ */
+async function deleteWorldAgent(payload) {
+  ensureCoreReady();
+  const worldId = String(payload?.worldId || '').trim();
+  const agentId = String(payload?.agentId || '').trim();
+  if (!worldId) throw new Error('World ID is required.');
+  if (!agentId) throw new Error('Agent ID is required.');
+
+  const success = await deleteAgent(worldId, agentId);
+  return { success };
+}
+
+/**
  * Delete an existing world in current workspace
  * @param {any} payload - Delete payload {worldId}
  * @returns {Promise<{success: boolean, worldId: string}>}
@@ -876,12 +999,13 @@ async function importWorld() {
     }
 
     // Load sessions for the imported world
-    const sessions = await listChats(worldId);
+    const chats = await listChats(worldId);
+    const sessions = await serializeChatsWithMessageCounts(worldId, chats);
 
     return {
       success: true,
       world: serializeWorldInfo(importedWorld),
-      sessions: sessions.map(chat => serializeChat(chat))
+      sessions
     };
   } catch (error) {
     // Task 2.4e: Error handling with specific error messages
@@ -905,7 +1029,7 @@ async function listWorldSessions(worldId) {
   if (!world) throw new Error(`World not found: ${id}`);
 
   const chats = await listChats(id);
-  return chats.map((chat) => serializeChat(chat));
+  return await serializeChatsWithMessageCounts(id, chats);
 }
 
 /**
@@ -920,9 +1044,10 @@ async function createWorldSession(worldId) {
   if (!updatedWorld) throw new Error(`World not found: ${id}`);
 
   const chats = await listChats(id);
+  const sessions = await serializeChatsWithMessageCounts(id, chats);
   return {
     currentChatId: updatedWorld.currentChatId || null,
-    sessions: chats.map((chat) => serializeChat(chat))
+    sessions
   };
 }
 
@@ -944,9 +1069,10 @@ async function deleteWorldSession(worldId, chatId) {
   if (!world) throw new Error(`World not found: ${id}`);
 
   const chats = await listChats(id);
+  const sessions = await serializeChatsWithMessageCounts(id, chats);
   return {
     currentChatId: world.currentChatId || null,
-    sessions: chats.map((chat) => serializeChat(chat))
+    sessions
   };
 }
 
@@ -1025,14 +1151,26 @@ async function subscribeChatEvents(payload) {
     });
   };
 
+  const toolHandler = (/** @type {any} */ event) => {
+    // Forward tool events (tool-start, tool-result, tool-error, tool-progress)
+    const eventType = event?.type || '';
+    if (!eventType.startsWith('tool-')) return;
+    sendRealtimeEventToRenderer({
+      ...serializeRealtimeToolEvent(worldId, chatId, event),
+      subscriptionId
+    });
+  };
+
   world.eventEmitter.on('message', messageHandler);
   world.eventEmitter.on('sse', sseHandler);
+  world.eventEmitter.on('world', toolHandler);
   chatEventSubscriptions.set(subscriptionId, {
     worldId,
     chatId,
     unsubscribe: () => {
       world.eventEmitter.off('message', messageHandler);
       world.eventEmitter.off('sse', sseHandler);
+      world.eventEmitter.off('world', toolHandler);
     }
   });
 
@@ -1118,6 +1256,7 @@ function registerIpcHandlers() {
   ipcMain.handle('world:delete', async (_, payload) => deleteWorkspaceWorld(payload));
   ipcMain.handle('agent:create', async (_, payload) => createWorldAgent(payload));
   ipcMain.handle('agent:update', async (_, payload) => updateWorldAgent(payload));
+  ipcMain.handle('agent:delete', async (_, payload) => deleteWorldAgent(payload));
   ipcMain.handle('world:getLastSelected', async () => readWorldPreference());
   ipcMain.handle('world:saveLastSelected', async (_, worldId) => { writeWorldPreference(worldId); return true; });
   ipcMain.handle('session:list', async (_, payload) => listWorldSessions(payload?.worldId));
