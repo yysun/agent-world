@@ -26,6 +26,13 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Changes:
+ * - 2026-02-10: Added agent identifier resolution across manager APIs.
+ *   - Agent operations now accept either stored agent ID or agent name.
+ *   - Fallback lookup resolves renamed agents where `id` and `toKebabCase(name)` differ.
+ * - 2026-02-10: Added world identifier resolution across manager APIs.
+ *   - World operations now accept either stored world ID or world name.
+ *   - Fallback lookup resolves renamed worlds where `id` and `toKebabCase(name)` differ.
+ *   - List APIs return normalized world IDs for consistent client routing.
  * - 2025-10-26: Consolidated message publishing - removed resubmitMessageToWorld
  *   - Added chatId to WorldMessageEvent and publishMessage parameters
  *   - editUserMessage now calls publishMessage directly with validation
@@ -87,6 +94,79 @@ function ensureInitialization(): Promise<void> {
 const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: 'New Chat' } as const;
 
 /**
+ * Resolve a world identifier to the persisted world ID.
+ * Accepts either world ID or world name and supports historical rename drift.
+ */
+async function resolveWorldIdentifier(worldIdOrName: string): Promise<string | null> {
+  const normalizedInput = utils.toKebabCase(worldIdOrName);
+  if (!normalizedInput) return null;
+
+  // Fast path: direct normalized ID lookup
+  const directWorld = await storageWrappers!.loadWorld(normalizedInput);
+  if (directWorld?.id) {
+    return directWorld.id;
+  }
+
+  // Fallback: scan worlds and match by normalized ID or normalized name
+  const worlds = await storageWrappers!.listWorlds();
+  const matched = worlds.find((world: World) => {
+    const storedId = String(world.id || '');
+    const storedName = String(world.name || '');
+
+    return (
+      storedId === worldIdOrName ||
+      storedName === worldIdOrName ||
+      utils.toKebabCase(storedId) === normalizedInput ||
+      utils.toKebabCase(storedName) === normalizedInput
+    );
+  });
+
+  return matched?.id || null;
+}
+
+async function getResolvedWorldId(worldIdOrName: string): Promise<string> {
+  const resolved = await resolveWorldIdentifier(worldIdOrName);
+  return resolved || utils.toKebabCase(worldIdOrName);
+}
+
+/**
+ * Resolve an agent identifier to the persisted agent ID within a world.
+ * Accepts either agent ID or agent name and supports historical rename drift.
+ */
+async function resolveAgentIdentifier(worldIdOrName: string, agentIdOrName: string): Promise<string | null> {
+  const resolvedWorldId = await getResolvedWorldId(worldIdOrName);
+  const normalizedInput = utils.toKebabCase(agentIdOrName);
+  if (!normalizedInput) return null;
+
+  // Fast path: direct normalized ID lookup
+  const directAgent = await storageWrappers!.loadAgent(resolvedWorldId, normalizedInput);
+  if (directAgent?.id) {
+    return directAgent.id;
+  }
+
+  // Fallback: scan agents and match by normalized ID or normalized name
+  const agents = await storageWrappers!.listAgents(resolvedWorldId);
+  const matched = agents.find((agent: Agent) => {
+    const storedId = String(agent.id || '');
+    const storedName = String(agent.name || '');
+
+    return (
+      storedId === agentIdOrName ||
+      storedName === agentIdOrName ||
+      utils.toKebabCase(storedId) === normalizedInput ||
+      utils.toKebabCase(storedName) === normalizedInput
+    );
+  });
+
+  return matched?.id || null;
+}
+
+async function getResolvedAgentId(worldIdOrName: string, agentIdOrName: string): Promise<string> {
+  const resolved = await resolveAgentIdentifier(worldIdOrName, agentIdOrName);
+  return resolved || utils.toKebabCase(agentIdOrName);
+}
+
+/**
  * Create new world with configuration and automatically create a new chat
  */
 export async function createWorld(params: CreateWorldParams): Promise<World | null> {
@@ -142,8 +222,8 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
 export async function updateWorld(worldId: string, updates: UpdateWorldParams): Promise<World | null> {
   await ensureInitialization();
 
-  const normalizedWorldId = utils.toKebabCase(worldId);
-  const existingData = await storageWrappers!.loadWorld(normalizedWorldId);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const existingData = await storageWrappers!.loadWorld(resolvedWorldId);
 
   if (!existingData) {
     return null;
@@ -156,7 +236,7 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
   };
 
   await storageWrappers!.saveWorld(updatedData);
-  return getWorld(normalizedWorldId);
+  return getWorld(resolvedWorldId);
 }
 
 /**
@@ -164,10 +244,10 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
  */
 export async function deleteWorld(worldId: string): Promise<boolean> {
   await ensureInitialization();
-  const normalizedWorldId = utils.toKebabCase(worldId);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   // Clean up event persistence listeners if world is currently loaded
-  const world = await getWorld(normalizedWorldId);
+  const world = await getWorld(resolvedWorldId);
   if (world?._eventPersistenceCleanup) {
     world._eventPersistenceCleanup();
   }
@@ -175,7 +255,7 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
     world._activityListenerCleanup();
   }
 
-  return await storageWrappers!.deleteWorld(normalizedWorldId);
+  return await storageWrappers!.deleteWorld(resolvedWorldId);
 }
 
 /**
@@ -189,10 +269,12 @@ export async function listWorlds(): Promise<World[]> {
   const worldsWithAgentCount = await Promise.all(
     allWorldData.map(async (data: World) => {
       try {
+        const normalizedId = utils.toKebabCase(data.id || data.name || '');
         const agents = await storageWrappers!.listAgents(data.id);
-        return { ...data, agentCount: agents.length };
+        return { ...data, id: normalizedId || data.id, agentCount: agents.length };
       } catch (error) {
-        return { ...data, agentCount: 0 };
+        const normalizedId = utils.toKebabCase(data.id || data.name || '');
+        return { ...data, id: normalizedId || data.id, agentCount: 0 };
       }
     })
   );
@@ -206,14 +288,14 @@ export async function listWorlds(): Promise<World[]> {
 export async function getWorld(worldId: string): Promise<World | null> {
   await ensureInitialization();
 
-  const normalizedWorldId = utils.toKebabCase(worldId);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   logger.debug('getWorldConfig called', {
     originalWorldId: worldId,
-    normalizedWorldId
+    resolvedWorldId
   });
 
-  const worldData = await storageWrappers!.loadWorld(normalizedWorldId);
+  const worldData = await storageWrappers!.loadWorld(resolvedWorldId);
 
   logger.debug('loadWorld result', {
     worldFound: !!worldData,
@@ -226,14 +308,14 @@ export async function getWorld(worldId: string): Promise<World | null> {
     return null;
   }
 
-  let agents = await storageWrappers!.listAgents(normalizedWorldId);
-  let chats = await storageWrappers!.listChats(normalizedWorldId);
+  let agents = await storageWrappers!.listAgents(resolvedWorldId);
+  let chats = await storageWrappers!.listChats(resolvedWorldId);
 
   // If there are no chats, create a new one
   if (chats.length === 0) {
     logger.debug('No chats found for world, creating new chat');
-    await newChat(normalizedWorldId);
-    chats = await storageWrappers!.listChats(normalizedWorldId);
+    await newChat(resolvedWorldId);
+    chats = await storageWrappers!.listChats(resolvedWorldId);
   }
 
   const world: World = {
@@ -261,10 +343,11 @@ export async function getWorld(worldId: string): Promise<World | null> {
  */
 export async function createAgent(worldId: string, params: CreateAgentParams): Promise<Agent> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   const agentId = params.id || utils.toKebabCase(params.name);
 
-  const exists = await storageWrappers!.agentExists(worldId, agentId);
+  const exists = await storageWrappers!.agentExists(resolvedWorldId, agentId);
   if (exists) {
     throw new Error(`Agent with ID '${agentId}' already exists`);
   }
@@ -286,10 +369,10 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
     memory: [],
   };
 
-  await storageWrappers!.saveAgent(worldId, agent);
+  await storageWrappers!.saveAgent(resolvedWorldId, agent);
 
   // Emit CRUD event for real-time updates
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
   if (world) {
     world.agents.set(agent.id, agent);
     publishCRUDEvent(world, 'create', 'agent', agent.id, agent);
@@ -303,8 +386,10 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
  */
 export async function getAgent(worldId: string, agentId: string): Promise<Agent | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
-  const agentData = await storageWrappers!.loadAgent(worldId, agentId);
+  const agentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
   if (!agentData) return null;
 
   return agentData;
@@ -315,8 +400,10 @@ export async function getAgent(worldId: string, agentId: string): Promise<Agent 
  */
 export async function updateAgent(worldId: string, agentId: string, updates: UpdateAgentParams): Promise<Agent | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
-  const existingAgentData = await storageWrappers!.loadAgent(worldId, agentId);
+  const existingAgentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
 
   if (!existingAgentData) {
     return null;
@@ -335,13 +422,13 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
     lastActive: new Date()
   };
 
-  await storageWrappers!.saveAgent(worldId, updatedAgent);
+  await storageWrappers!.saveAgent(resolvedWorldId, updatedAgent);
 
   // Emit CRUD event for real-time updates
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
   if (world) {
-    world.agents.set(agentId, updatedAgent);
-    publishCRUDEvent(world, 'update', 'agent', agentId, updatedAgent);
+    world.agents.set(resolvedAgentId, updatedAgent);
+    publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, updatedAgent);
   }
 
   return updatedAgent;
@@ -352,15 +439,17 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
  */
 export async function deleteAgent(worldId: string, agentId: string): Promise<boolean> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
-  const success = await storageWrappers!.deleteAgent(worldId, agentId);
+  const success = await storageWrappers!.deleteAgent(resolvedWorldId, resolvedAgentId);
 
   // Emit CRUD event for real-time updates
   if (success) {
-    const world = await getWorld(worldId);
+    const world = await getWorld(resolvedWorldId);
     if (world) {
-      world.agents.delete(agentId);
-      publishCRUDEvent(world, 'delete', 'agent', agentId);
+      world.agents.delete(resolvedAgentId);
+      publishCRUDEvent(world, 'delete', 'agent', resolvedAgentId);
     }
   }
 
@@ -372,7 +461,8 @@ export async function deleteAgent(worldId: string, agentId: string): Promise<boo
  */
 export async function listAgents(worldId: string): Promise<Agent[]> {
   await ensureInitialization();
-  return await storageWrappers!.listAgents(worldId);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  return await storageWrappers!.listAgents(resolvedWorldId);
 }
 
 /**
@@ -380,8 +470,10 @@ export async function listAgents(worldId: string): Promise<Agent[]> {
  */
 export async function updateAgentMemory(worldId: string, agentId: string, messages: AgentMessage[]): Promise<Agent | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
-  const existingAgentData = await storageWrappers!.loadAgent(worldId, agentId);
+  const existingAgentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
 
   if (!existingAgentData) {
     return null;
@@ -390,7 +482,7 @@ export async function updateAgentMemory(worldId: string, agentId: string, messag
   // Ensure messages have the agentId set
   const messagesWithAgentId = messages.map(msg => ({
     ...msg,
-    agentId: agentId
+    agentId: resolvedAgentId
   }));
 
   const updatedAgent: Agent = {
@@ -399,8 +491,8 @@ export async function updateAgentMemory(worldId: string, agentId: string, messag
     lastActive: new Date()
   };
 
-  await storageWrappers!.saveAgentMemory(worldId, agentId, updatedAgent.memory);
-  await storageWrappers!.saveAgent(worldId, updatedAgent);
+  await storageWrappers!.saveAgentMemory(resolvedWorldId, resolvedAgentId, updatedAgent.memory);
+  await storageWrappers!.saveAgent(resolvedWorldId, updatedAgent);
   return updatedAgent;
 }
 
@@ -409,10 +501,17 @@ export async function updateAgentMemory(worldId: string, agentId: string, messag
  */
 export async function clearAgentMemory(worldId: string, agentId: string): Promise<Agent | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
-  logger.debug('Core clearAgentMemory called', { worldId, agentId });
+  logger.debug('Core clearAgentMemory called', {
+    worldId,
+    resolvedWorldId,
+    originalAgentId: agentId,
+    resolvedAgentId
+  });
 
-  const existingAgentData = await storageWrappers!.loadAgent(worldId, agentId);
+  const existingAgentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
 
   logger.debug('loadAgent result', {
     agentFound: !!existingAgentData,
@@ -429,10 +528,10 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
   if (existingAgentData.memory && existingAgentData.memory.length > 0) {
     try {
       logger.debug('Archiving existing memory');
-      await storageWrappers!.archiveMemory(worldId, agentId, existingAgentData.memory);
+      await storageWrappers!.archiveMemory(resolvedWorldId, resolvedAgentId, existingAgentData.memory);
       logger.debug('Memory archived successfully');
     } catch (error) {
-      logger.error('Failed to archive memory', { agentId, error: error instanceof Error ? error.message : error });
+      logger.error('Failed to archive memory', { resolvedAgentId, error: error instanceof Error ? error.message : error });
     }
   }
 
@@ -445,11 +544,11 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
 
   logger.debug('Saving cleared memory to disk');
 
-  await storageWrappers!.saveAgentMemory(worldId, agentId, []);
-  await storageWrappers!.saveAgent(worldId, updatedAgent);
+  await storageWrappers!.saveAgentMemory(resolvedWorldId, resolvedAgentId, []);
+  await storageWrappers!.saveAgent(resolvedWorldId, updatedAgent);
 
   logger.debug('Memory and LLM call count cleared and saved successfully', {
-    agentId,
+    resolvedAgentId,
     newLLMCallCount: updatedAgent.llmCallCount
   });
   return updatedAgent;
@@ -491,43 +590,45 @@ async function createChat(worldId: string, params: CreateChatParams): Promise<Ch
  */
 export async function newChat(worldId: string): Promise<World | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
-  const chats = await listChats(worldId);
+  const chats = await listChats(resolvedWorldId);
   const existingChat = chats.find(chat => chat.name === NEW_CHAT_CONFIG.REUSABLE_CHAT_TITLE);
 
   // Only reuse existing "New Chat" if it's empty (has no messages)
   if (existingChat) {
-    const messages = await storageWrappers!.getMemory(worldId, existingChat.id);
+    const messages = await storageWrappers!.getMemory(resolvedWorldId, existingChat.id);
     if (messages.length === 0) {
-      return await updateWorld(worldId, { currentChatId: existingChat.id });
+      return await updateWorld(resolvedWorldId, { currentChatId: existingChat.id });
     }
     // If chat has messages, fall through to create a new one
   }
 
-  const chatData = await createChat(worldId, {
+  const chatData = await createChat(resolvedWorldId, {
     name: "New Chat",
     captureChat: false
   });
-  return await updateWorld(worldId, { currentChatId: chatData.id });
+  return await updateWorld(resolvedWorldId, { currentChatId: chatData.id });
 }
 
 export async function listChats(worldId: string): Promise<Chat[]> {
   await ensureInitialization();
-  return await storageWrappers!.listChats(worldId);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  return await storageWrappers!.listChats(resolvedWorldId);
 }
 
 export async function updateChat(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null> {
   await ensureInitialization();
 
-  const normalizedWorldId = utils.toKebabCase(worldId);
-  const chat = await storageWrappers!.updateChatData(normalizedWorldId, chatId, updates);
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const chat = await storageWrappers!.updateChatData(resolvedWorldId, chatId, updates);
 
   if (!chat) {
     return null;
   }
 
   // When a chat is updated we refresh the cached world representation
-  const world = await getWorld(normalizedWorldId);
+  const world = await getWorld(resolvedWorldId);
   if (world && world.chats.has(chatId)) {
     world.chats.set(chatId, {
       ...world.chats.get(chatId)!,
@@ -540,13 +641,14 @@ export async function updateChat(worldId: string, chatId: string, updates: Updat
 
 export async function deleteChat(worldId: string, chatId: string): Promise<boolean> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   // First, delete all agent memory items associated with this chat
-  const deletedMemoryCount = await storageWrappers!.deleteMemoryByChatId(worldId, chatId);
-  logger.debug('Deleted memory items for chat', { worldId, chatId, deletedMemoryCount });
+  const deletedMemoryCount = await storageWrappers!.deleteMemoryByChatId(resolvedWorldId, chatId);
+  logger.debug('Deleted memory items for chat', { worldId, resolvedWorldId, chatId, deletedMemoryCount });
 
   // Get the world to check if this was the current chat
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
   let shouldSetNewCurrentChat = false;
 
   if (world && world.currentChatId === chatId) {
@@ -559,7 +661,7 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
   }
 
   // Then delete the chat itself
-  const chatDeleted = await storageWrappers!.deleteChatData(worldId, chatId);
+  const chatDeleted = await storageWrappers!.deleteChatData(resolvedWorldId, chatId);
 
   // Remove from world's in-memory chat map
   if (chatDeleted && world) {
@@ -568,17 +670,17 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 
   // If this was the current chat, set a fallback current chat
   if (shouldSetNewCurrentChat && chatDeleted) {
-    const remainingChats = await storageWrappers!.listChats(worldId);
+    const remainingChats = await storageWrappers!.listChats(resolvedWorldId);
     if (remainingChats.length > 0) {
       // Set the most recently updated chat as current
       const latestChat = remainingChats.sort((a, b) =>
         new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       )[0];
-      await updateWorld(worldId, { currentChatId: latestChat.id });
+      await updateWorld(resolvedWorldId, { currentChatId: latestChat.id });
     } else {
       // No chats left, create a new one
       logger.debug('No chats remaining after deletion, creating new chat');
-      await newChat(worldId);
+      await newChat(resolvedWorldId);
     }
   }
 
@@ -587,8 +689,9 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 
 export async function restoreChat(worldId: string, chatId: string): Promise<World | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
-  let world = await getWorld(worldId);
+  let world = await getWorld(resolvedWorldId);
   if (!world) {
     return null;
   }
@@ -597,7 +700,7 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
     return world;
   }
 
-  world = await updateWorld(worldId, {
+  world = await updateWorld(resolvedWorldId, {
     currentChatId: chatId
   });
   return world;
@@ -605,13 +708,14 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
 
 export async function getMemory(worldId: string, chatId?: string | null): Promise<AgentMessage[] | null> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
-  let world = await getWorld(worldId);
+  let world = await getWorld(resolvedWorldId);
   if (!world) {
     return null;
   }
 
-  return await storageWrappers!.getMemory(worldId, chatId || world.currentChatId);
+  return await storageWrappers!.getMemory(resolvedWorldId, chatId || world.currentChatId);
 }
 
 /**
@@ -624,26 +728,27 @@ export async function getMemory(worldId: string, chatId?: string | null): Promis
  */
 export async function migrateMessageIds(worldId: string): Promise<number> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   let totalMigrated = 0;
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
 
   if (!world) {
     throw new Error(`World '${worldId}' not found`);
   }
 
   // Get all agents in the world
-  const agents = await listAgents(worldId);
+  const agents = await listAgents(resolvedWorldId);
 
   // Get all chats for the world
-  const chats = await storageWrappers!.listChats(worldId);
+  const chats = await storageWrappers!.listChats(resolvedWorldId);
 
   // Migrate messages for each chat
   for (const chat of chats) {
     const chatId = chat.id;
 
     // Get all memory for this chat
-    const memory = await storageWrappers!.getMemory(worldId, chatId);
+    const memory = await storageWrappers!.getMemory(resolvedWorldId, chatId);
 
     if (!memory || memory.length === 0) {
       continue;
@@ -672,13 +777,13 @@ export async function migrateMessageIds(worldId: string): Promise<number> {
       for (const agent of agents) {
         const agentMessages = updatedMemory.filter(m => m.agentId === agent.id);
         if (agentMessages.length > 0) {
-          await storageWrappers!.saveAgentMemory(worldId, agent.id, agentMessages);
+          await storageWrappers!.saveAgentMemory(resolvedWorldId, agent.id, agentMessages);
         }
       }
     }
   }
 
-  logger.info(`Migrated ${totalMigrated} messages with messageId for world '${worldId}'`);
+  logger.info(`Migrated ${totalMigrated} messages with messageId for world '${resolvedWorldId}'`);
   return totalMigrated;
 }
 
@@ -697,17 +802,18 @@ export async function removeMessagesFrom(
   chatId: string
 ): Promise<RemovalResult> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
   if (!world) {
     throw new Error(`World '${worldId}' not found`);
   }
 
   // Get all agents
-  const agents = await listAgents(worldId);
+  const agents = await listAgents(resolvedWorldId);
 
   // Get all memory for this chat to find the target message and its timestamp
-  const memory = await storageWrappers!.getMemory(worldId, chatId);
+  const memory = await storageWrappers!.getMemory(resolvedWorldId, chatId);
 
   if (!memory || memory.length === 0) {
     return {
@@ -754,7 +860,7 @@ export async function removeMessagesFrom(
   for (const agent of agents) {
     try {
       // Load the agent's full memory (all chats)
-      const fullAgent = await storageWrappers!.loadAgent(worldId, agent.id);
+      const fullAgent = await storageWrappers!.loadAgent(resolvedWorldId, agent.id);
       if (!fullAgent || !fullAgent.memory || fullAgent.memory.length === 0) {
         processedAgents.push(agent.id);
         continue;
@@ -806,7 +912,7 @@ export async function removeMessagesFrom(
       }
 
       // Save updated memory
-      await storageWrappers!.saveAgentMemory(worldId, agent.id, messagesToKeep);
+      await storageWrappers!.saveAgentMemory(resolvedWorldId, agent.id, messagesToKeep);
 
       messagesRemovedTotal += removedCount;
       processedAgents.push(agent.id);
@@ -859,9 +965,10 @@ export async function editUserMessage(
   chatId: string
 ): Promise<RemovalResult> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   // Check if world.isProcessing is true
-  const world = await getWorld(worldId);
+  const world = await getWorld(resolvedWorldId);
   if (!world) {
     throw new Error(`World '${worldId}' not found`);
   }
@@ -871,7 +978,7 @@ export async function editUserMessage(
   }
 
   // Step 1: Remove the message and all subsequent messages
-  const removalResult = await removeMessagesFrom(worldId, messageId, chatId);
+  const removalResult = await removeMessagesFrom(resolvedWorldId, messageId, chatId);
 
   if (!removalResult.success) {
     return removalResult;
@@ -900,7 +1007,7 @@ export async function editUserMessage(
     const { publishMessage } = await import('./events/index.js');
     const messageEvent = publishMessage(world, newContent, 'human', chatId);
 
-    logger.info(`Resubmitted edited message to world '${worldId}' with new messageId '${messageEvent.messageId}'`);
+    logger.info(`Resubmitted edited message to world '${resolvedWorldId}' with new messageId '${messageEvent.messageId}'`);
 
     return {
       ...removalResult,
@@ -909,7 +1016,7 @@ export async function editUserMessage(
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to resubmit message to world '${worldId}': ${errorMsg}`);
+    logger.error(`Failed to resubmit message to world '${resolvedWorldId}': ${errorMsg}`);
     return {
       ...removalResult,
       resubmissionStatus: 'failed',
@@ -928,9 +1035,10 @@ export async function editUserMessage(
  */
 export async function logEditError(worldId: string, errorLog: EditErrorLog): Promise<void> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   const rootPath = getDefaultRootPath();
-  const worldDir = getWorldDir(rootPath, worldId);
+  const worldDir = getWorldDir(rootPath, resolvedWorldId);
   const errorsFile = path.join(worldDir, 'edit-errors.json');
 
   try {
@@ -951,9 +1059,9 @@ export async function logEditError(worldId: string, errorLog: EditErrorLog): Pro
 
     // Write back to file
     fs.writeFileSync(errorsFile, JSON.stringify(errors, null, 2), 'utf-8');
-    logger.debug(`Logged edit error for world '${worldId}'`);
+    logger.debug(`Logged edit error for world '${resolvedWorldId}'`);
   } catch (error) {
-    logger.error(`Failed to log edit error for world '${worldId}': ${error instanceof Error ? error.message : error}`);
+    logger.error(`Failed to log edit error for world '${resolvedWorldId}': ${error instanceof Error ? error.message : error}`);
   }
 }
 
@@ -965,9 +1073,10 @@ export async function logEditError(worldId: string, errorLog: EditErrorLog): Pro
  */
 export async function getEditErrors(worldId: string): Promise<EditErrorLog[]> {
   await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
 
   const rootPath = getDefaultRootPath();
-  const worldDir = getWorldDir(rootPath, worldId);
+  const worldDir = getWorldDir(rootPath, resolvedWorldId);
   const errorsFile = path.join(worldDir, 'edit-errors.json');
 
   try {
@@ -978,7 +1087,7 @@ export async function getEditErrors(worldId: string): Promise<EditErrorLog[]> {
     const data = fs.readFileSync(errorsFile, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
-    logger.error(`Failed to read edit errors for world '${worldId}': ${error instanceof Error ? error.message : error}`);
+    logger.error(`Failed to read edit errors for world '${resolvedWorldId}': ${error instanceof Error ? error.message : error}`);
     return [];
   }
 }

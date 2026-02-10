@@ -20,6 +20,7 @@
  * - Preserves Doodle CSS for buttons and decorative borders
  * 
  * Recent Changes:
+ * - 2026-02-10: Fixed world navigation to use world IDs (with fallback) instead of world names
  * - Integrated Tailwind CSS utilities for layout and spacing
  * - Added responsive utilities with custom breakpoints
  * - Migrated typography to Tailwind text utilities
@@ -200,7 +201,7 @@ export default class HomeComponent extends Component<HomeState> {
               <button className="btn add-world-btn w-12 h-12 flex items-center justify-center rounded-lg" title="Add New World" $onclick="open-world-create">
                 <span className="plus-icon text-2xl">+</span>
               </button>
-              <a href={'/World/' + (state.worlds[state.currentIndex]?.name || '')}>
+              <a href={'/World/' + encodeURIComponent(state.worlds[state.currentIndex]?.id || state.worlds[state.currentIndex]?.name || '')}>
                 <button className="btn btn-primary enter-btn px-8 py-3 rounded-lg text-lg">
                   Enter {state.worlds[state.currentIndex]?.name || 'World'}
                 </button>
@@ -238,12 +239,12 @@ export default class HomeComponent extends Component<HomeState> {
       currentIndex: state.currentIndex < state.worlds.length - 1 ? state.currentIndex + 1 : 0
     }),
     'select-world': (state: HomeState, world: World): HomeState => {
-      const index = state.worlds.findIndex(w => w.name === world.name);
+      const index = state.worlds.findIndex(w => (w.id && w.id === world.id) || w.name === world.name);
       return { ...state, currentIndex: index >= 0 ? index : state.currentIndex };
     },
     'enter-world': (state: HomeState, world: World): void => { // no return - no render needed
       // Navigate to the world page
-      window.location.href = '/World/' + world.name;
+      window.location.href = '/World/' + encodeURIComponent(world.id || world.name);
     },
 
     // Simplified World Edit Event Handlers
@@ -282,4 +283,3 @@ export default class HomeComponent extends Component<HomeState> {
     }
   };
 }
-
