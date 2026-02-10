@@ -17,6 +17,7 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-02-10: Added getActiveToolStreamIds/endAllToolStreams to prevent stale tool-stream busy state
  * - 2026-02-10: Added tool streaming support (handleToolStreamStart/Chunk/End)
  * - 2026-02-10: Added 50K character truncation for tool output
  * - 2026-02-10: Added stdout/stderr distinction for shell commands
@@ -374,6 +375,28 @@ export function createStreamingState(callbacks) {
   }
 
   /**
+   * Get IDs for active tool streams only
+   * @returns {string[]}
+   */
+  function getActiveToolStreamIds() {
+    return Array.from(streams.entries())
+      .filter(([, entry]) => entry.isToolStreaming === true)
+      .map(([messageId]) => messageId);
+  }
+
+  /**
+   * End all active tool streams and flush final updates
+   * @returns {string[]} IDs of ended tool streams
+   */
+  function endAllToolStreams() {
+    const endedIds = getActiveToolStreamIds();
+    endedIds.forEach((messageId) => {
+      handleToolStreamEnd(messageId);
+    });
+    return endedIds;
+  }
+
+  /**
    * Clean up all streams (for session switch)
    */
   function cleanup() {
@@ -399,6 +422,8 @@ export function createStreamingState(callbacks) {
     isActive,
     getActiveCount,
     getActiveIds,
+    getActiveToolStreamIds,
+    endAllToolStreams,
     flush,
     cleanup
   };

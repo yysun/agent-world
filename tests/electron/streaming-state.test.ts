@@ -16,6 +16,7 @@
  * - beforeEach resets mocks and state
  *
  * Recent Changes:
+ * - 2026-02-10: Added tests for tool stream bulk cleanup APIs (`getActiveToolStreamIds`, `endAllToolStreams`)
  * - 2026-02-10: Initial test suite
  */
 
@@ -511,6 +512,36 @@ describe('createStreamingState', () => {
 
         state.handleToolStreamEnd('msg-2');
         expect(state.isActive('msg-2')).toBe(false);
+      });
+
+      it('should return only tool stream IDs', () => {
+        state.handleStart('assistant-stream', 'agent-1');
+        state.handleToolStreamStart('tool-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamStart('tool-2', 'shell_cmd', 'stderr');
+
+        const toolIds = state.getActiveToolStreamIds();
+
+        expect(toolIds).toHaveLength(2);
+        expect(toolIds).toContain('tool-1');
+        expect(toolIds).toContain('tool-2');
+        expect(toolIds).not.toContain('assistant-stream');
+      });
+
+      it('should end all active tool streams without ending text streams', () => {
+        state.handleStart('assistant-stream', 'agent-1');
+        state.handleToolStreamStart('tool-1', 'shell_cmd', 'stdout');
+        state.handleToolStreamChunk('tool-1', 'output-1', 'stdout');
+        state.handleToolStreamStart('tool-2', 'shell_cmd', 'stderr');
+        state.handleToolStreamChunk('tool-2', 'output-2', 'stderr');
+
+        const endedIds = state.endAllToolStreams();
+
+        expect(endedIds).toEqual(expect.arrayContaining(['tool-1', 'tool-2']));
+        expect(state.isActive('tool-1')).toBe(false);
+        expect(state.isActive('tool-2')).toBe(false);
+        expect(state.isActive('assistant-stream')).toBe(true);
+        expect(callbacks.onToolStreamEnd).toHaveBeenCalledWith('tool-1');
+        expect(callbacks.onToolStreamEnd).toHaveBeenCalledWith('tool-2');
       });
     });
   });

@@ -724,6 +724,27 @@ export default function App() {
       if (payload.subscriptionId && payload.subscriptionId !== subscriptionId) return;
       if (payload.worldId && payload.worldId !== loadedWorld.id) return;
 
+      const syncActiveStreamCount = () => {
+        const streaming = streamingStateRef.current;
+        if (!streaming) return;
+
+        const count = streaming.getActiveCount();
+        setActiveStreamCount(count);
+        if (activityStateRef.current) {
+          activityStateRef.current.setActiveStreamCount(count);
+        }
+      };
+
+      const endAllToolStreams = () => {
+        const streaming = streamingStateRef.current;
+        if (!streaming) return;
+
+        const endedIds = streaming.endAllToolStreams();
+        if (endedIds.length > 0) {
+          syncActiveStreamCount();
+        }
+      };
+
       if (payload.type === 'message') {
         const incomingMessage = payload.message;
         if (!incomingMessage) return;
@@ -737,6 +758,12 @@ export default function App() {
           isToolStreaming: false,
           streamType: undefined
         }));
+
+        // Tool stream chunks can outlive their owning tool call in some flows.
+        // Once assistant output is finalized, close any lingering tool stream state.
+        if (String(incomingMessage.role || '').toLowerCase() === 'assistant') {
+          endAllToolStreams();
+        }
         return;
       }
 
@@ -775,29 +802,18 @@ export default function App() {
         if (!streaming) return;
 
         if (eventType === 'start') {
+          // A new assistant stream means previous tool execution phase is complete.
+          endAllToolStreams();
           streaming.handleStart(messageId, streamPayload.agentName || 'assistant');
-          // Sync stream count with activity state and UI
-          const count = streaming.getActiveCount();
-          setActiveStreamCount(count);
-          if (activityStateRef.current) {
-            activityStateRef.current.setActiveStreamCount(count);
-          }
+          syncActiveStreamCount();
         } else if (eventType === 'chunk') {
           streaming.handleChunk(messageId, streamPayload.content || '');
         } else if (eventType === 'end') {
           streaming.handleEnd(messageId);
-          const count = streaming.getActiveCount();
-          setActiveStreamCount(count);
-          if (activityStateRef.current) {
-            activityStateRef.current.setActiveStreamCount(count);
-          }
+          syncActiveStreamCount();
         } else if (eventType === 'error') {
           streaming.handleError(messageId, streamPayload.error || 'Stream error');
-          const count = streaming.getActiveCount();
-          setActiveStreamCount(count);
-          if (activityStateRef.current) {
-            activityStateRef.current.setActiveStreamCount(count);
-          }
+          syncActiveStreamCount();
         } else if (eventType === 'tool-stream') {
           // Handle tool streaming events (shell command output)
           const { content, stream } = streamPayload;
@@ -809,6 +825,7 @@ export default function App() {
               streamPayload.agentName || 'shell_cmd',
               stream || 'stdout'
             );
+            syncActiveStreamCount();
           }
 
           streaming.handleToolStreamChunk(messageId, content || '', stream || 'stdout');
@@ -831,8 +848,22 @@ export default function App() {
           activity.handleToolStart(toolUseId, toolPayload.toolName || 'unknown', toolPayload.toolInput);
         } else if (toolEventType === 'tool-result') {
           activity.handleToolResult(toolUseId, toolPayload.result || '');
+          const streaming = streamingStateRef.current;
+          if (streaming?.isActive(toolUseId)) {
+            streaming.handleToolStreamEnd(toolUseId);
+            syncActiveStreamCount();
+          } else {
+            endAllToolStreams();
+          }
         } else if (toolEventType === 'tool-error') {
           activity.handleToolError(toolUseId, toolPayload.error || 'Tool error');
+          const streaming = streamingStateRef.current;
+          if (streaming?.isActive(toolUseId)) {
+            streaming.handleToolStreamEnd(toolUseId);
+            syncActiveStreamCount();
+          } else {
+            endAllToolStreams();
+          }
         } else if (toolEventType === 'tool-progress') {
           activity.handleToolProgress(toolUseId, toolPayload.progress || '');
         }
@@ -856,6 +887,7 @@ export default function App() {
       if (activityStateRef.current) {
         activityStateRef.current.cleanup();
       }
+      setActiveStreamCount(0);
     };
   }, [api, selectedSessionId, loadedWorld, setStatusText]);
 

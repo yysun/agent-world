@@ -485,17 +485,24 @@ function serializeRealtimeSSEEvent(worldId, chatId, event) {
  */
 function serializeRealtimeToolEvent(worldId, chatId, event) {
   const eventType = event?.type || 'tool-progress';
+  const toolExecution = event?.toolExecution || null;
+  const toolUseId = String(
+    event?.toolUseId ||
+    toolExecution?.toolCallId ||
+    `tool-${Date.now()}`
+  );
+
   return {
     type: 'tool',
     worldId,
     chatId: chatId || null,
     tool: {
       eventType,
-      toolUseId: event?.toolUseId || `tool-${Date.now()}`,
-      toolName: event?.toolName || 'unknown',
-      toolInput: event?.toolInput || null,
-      result: event?.result || null,
-      error: event?.error || null,
+      toolUseId,
+      toolName: event?.toolName || toolExecution?.toolName || 'unknown',
+      toolInput: event?.toolInput || toolExecution?.input || null,
+      result: event?.result || toolExecution?.result || null,
+      error: event?.error || toolExecution?.error || null,
       progress: event?.progress || null,
       agentId: event?.agentId || null,
       createdAt: new Date().toISOString()
