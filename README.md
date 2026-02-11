@@ -81,7 +81,7 @@ Each Agent World has a collection of agents that can communicate through a share
 | **Human message** | `Hello everyone!` | All active agents |
 | **Direct mention** | `@alice Can you help?` | Only @alice |
 | **Paragraph mention** | `Please review this:\n@alice` | Only @alice |
-| **Mid-text mention** | `I think @alice should help` | Nobody (saved to memory) |
+| **Mid-text mention** | `I think @alice should help` | Nobody (event is persisted; no agent-memory save) |
 | **Stop World** | `<world>pass</world>` | No agents |
 
 ### Agent Behavior
@@ -93,8 +93,12 @@ Each Agent World has a collection of agents that can communicate through a share
 
 **Agents never respond to:**
 - Their own messages
-- Other agents (unless @mentioned), but will save message to memory
-- Mid-text mentions (will save message to memory)
+- Other agents (unless @mentioned at paragraph start)
+- Mid-text mentions (not at paragraph start)
+
+**When messages are saved to agent memory:**
+- Incoming messages are saved only for agents that will respond
+- Non-responding agents skip agent-memory save (message events are still persisted)
 
 **Turn limits prevent loops:**
 - Default: 5 responses per conversation thread
