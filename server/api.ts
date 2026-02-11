@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-11: Extended non-streaming timeout on tool-stream events to prevent premature timeout during long-running tools
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
  * - Chat endpoints now pass the normalized world id (worldCtx.id) to streaming/non-streaming handlers
@@ -596,7 +597,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
     let awaitingIdle = false;
 
     const responsePromise = new Promise<void>((resolve, reject) => {
-      const timeoutTimer = setTimeout(() => {
+      let timeoutTimer = setTimeout(() => {
         if (!isComplete) {
           hasError = true;
           errorMessage = 'Request timeout - no response received within 60 seconds';
@@ -604,6 +605,19 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
           reject(new Error(errorMessage));
         }
       }, 60000); // Longer timeout as fallback since we rely on events
+
+      // Helper to reset the fallback timeout (called when tool-stream data arrives)
+      const resetTimeout = () => {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = setTimeout(() => {
+          if (!isComplete) {
+            hasError = true;
+            errorMessage = 'Request timeout - no response received within 60 seconds';
+            loggerChat.debug('Non-streaming timeout', { awaitingIdle, hasError });
+            reject(new Error(errorMessage));
+          }
+        }, 60000);
+      };
 
       // Subscribe with minimal client (no forwarding callbacks)
       subscribeWorld(worldName, { isOpen: true }).then(sub => {
@@ -646,6 +660,15 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         // Listen to message events for response content
         world.eventEmitter.on(EventType.MESSAGE, messageListener);
         listeners.set(EventType.MESSAGE, messageListener);
+
+        // Listen to SSE events to extend timeout on tool-stream data
+        const sseListener = (eventData: any) => {
+          if (eventData.type === 'tool-stream') {
+            resetTimeout();
+          }
+        };
+        world.eventEmitter.on(EventType.SSE, sseListener);
+        listeners.set(EventType.SSE, sseListener);
 
         // Publish message
         publishMessage(world, message, sender);

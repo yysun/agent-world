@@ -29,6 +29,7 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
+ * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
  * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
  * Updated: 2025-11-10 - Added tool event forwarding to SSE channel
  */
@@ -243,6 +244,10 @@ export function createSSEHandler(
   listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
+    // Extend fallback timeout when tool-stream data arrives (keeps long-running tools alive)
+    if (eventData.type === 'tool-stream') {
+      startTimeoutFallback();
+    }
     sendSSE({ type: EventType.SSE, data: eventData });
   };
   world.eventEmitter.on(EventType.SSE, sseListener);
