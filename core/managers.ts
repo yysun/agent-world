@@ -350,6 +350,12 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
 
+  // Check if world is processing to prevent agent creation during concurrent chat sessions
+  const world = await getWorld(resolvedWorldId);
+  if (world?.isProcessing) {
+    throw new Error('Cannot create agent while world is processing');
+  }
+
   const agentId = params.id || utils.toKebabCase(params.name);
 
   const exists = await storageWrappers!.agentExists(resolvedWorldId, agentId);
@@ -377,7 +383,6 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
   await storageWrappers!.saveAgent(resolvedWorldId, agent);
 
   // Emit CRUD event for real-time updates
-  const world = await getWorld(resolvedWorldId);
   if (world) {
     world.agents.set(agent.id, agent);
     publishCRUDEvent(world, 'create', 'agent', agent.id, agent);
@@ -408,6 +413,12 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
+  // Check if world is processing to prevent agent modification during concurrent chat sessions
+  const world = await getWorld(resolvedWorldId);
+  if (world?.isProcessing) {
+    throw new Error('Cannot update agent while world is processing');
+  }
+
   const existingAgentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
 
   if (!existingAgentData) {
@@ -430,7 +441,6 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
   await storageWrappers!.saveAgent(resolvedWorldId, updatedAgent);
 
   // Emit CRUD event for real-time updates
-  const world = await getWorld(resolvedWorldId);
   if (world) {
     world.agents.set(resolvedAgentId, updatedAgent);
     publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, updatedAgent);
@@ -447,15 +457,18 @@ export async function deleteAgent(worldId: string, agentId: string): Promise<boo
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
+  // Check if world is processing to prevent agent deletion during concurrent chat sessions
+  const world = await getWorld(resolvedWorldId);
+  if (world?.isProcessing) {
+    throw new Error('Cannot delete agent while world is processing');
+  }
+
   const success = await storageWrappers!.deleteAgent(resolvedWorldId, resolvedAgentId);
 
   // Emit CRUD event for real-time updates
-  if (success) {
-    const world = await getWorld(resolvedWorldId);
-    if (world) {
-      world.agents.delete(resolvedAgentId);
-      publishCRUDEvent(world, 'delete', 'agent', resolvedAgentId);
-    }
+  if (success && world) {
+    world.agents.delete(resolvedAgentId);
+    publishCRUDEvent(world, 'delete', 'agent', resolvedAgentId);
   }
 
   return success;
@@ -477,6 +490,12 @@ export async function updateAgentMemory(worldId: string, agentId: string, messag
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
+
+  // Check if world is processing to prevent memory modification during concurrent chat sessions
+  const world = await getWorld(resolvedWorldId);
+  if (world?.isProcessing) {
+    throw new Error('Cannot update agent memory while world is processing');
+  }
 
   const existingAgentData = await storageWrappers!.loadAgent(resolvedWorldId, resolvedAgentId);
 
@@ -508,6 +527,12 @@ export async function clearAgentMemory(worldId: string, agentId: string): Promis
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
+
+  // Check if world is processing to prevent memory clearing during concurrent chat sessions
+  const world = await getWorld(resolvedWorldId);
+  if (world?.isProcessing) {
+    throw new Error('Cannot clear agent memory while world is processing');
+  }
 
   logger.debug('Core clearAgentMemory called', {
     worldId,

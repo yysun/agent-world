@@ -503,6 +503,8 @@ export interface WorldSSEEvent {
   content?: string;
   error?: string;
   messageId: string;
+  /** Chat ID for concurrency-safe event routing. Events without chatId are broadcast to all sessions. */
+  chatId?: string | null;
   usage?: {
     inputTokens: number;
     outputTokens: number;

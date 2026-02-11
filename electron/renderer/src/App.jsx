@@ -624,6 +624,9 @@ export default function App() {
     messages: false,
     send: false
   });
+  // Per-session send state for concurrent chat support
+  // Tracks which sessions are currently sending messages (allows sending to multiple sessions simultaneously)
+  const [sendingSessionIds, setSendingSessionIds] = useState(new Set());
   // Message edit/delete state
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
@@ -1687,7 +1690,8 @@ export default function App() {
   }, [api, loadedWorld, sessions, setStatusText]);
 
   const onSendMessage = useCallback(async () => {
-    if (loading.send) return;
+    // Check if this specific session is already sending (per-session concurrency support)
+    if (selectedSessionId && sendingSessionIds.has(selectedSessionId)) return;
     if (!loadedWorld?.id || !selectedSessionId) {
       setStatusText('Select a session before sending messages.', 'error');
       return;
@@ -1695,7 +1699,8 @@ export default function App() {
     const content = composer.trim();
     if (!content) return;
 
-    setLoading((value) => ({ ...value, send: true }));
+    // Mark this session as sending (allows concurrent sends to different sessions)
+    setSendingSessionIds((prev) => new Set([...prev, selectedSessionId]));
     try {
       await api.sendMessage({
         worldId: loadedWorld.id,
@@ -1707,9 +1712,14 @@ export default function App() {
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to send message.'), 'error');
     } finally {
-      setLoading((value) => ({ ...value, send: false }));
+      // Remove this session from sending state
+      setSendingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selectedSessionId);
+        return next;
+      });
     }
-  }, [api, composer, loading.send, selectedSessionId, loadedWorld, setStatusText]);
+  }, [api, composer, selectedSessionId, loadedWorld, setStatusText, sendingSessionIds]);
 
   const onSubmitMessage = useCallback((event) => {
     event.preventDefault();
@@ -1923,11 +1933,13 @@ export default function App() {
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (composer.trim() && !loading.send) {
+      // Check per-session sending state for concurrency support
+      const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
+      if (composer.trim() && !isCurrentSessionSending) {
         onSendMessage();
       }
     }
-  }, [composer, loading.send, onSendMessage]);
+  }, [composer, selectedSessionId, sendingSessionIds, onSendMessage]);
 
   useEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -2600,7 +2612,7 @@ export default function App() {
                     </div>
                     <button
                       type="submit"
-                      disabled={loading.send || !composer.trim()}
+                      disabled={(selectedSessionId && sendingSessionIds.has(selectedSessionId)) || !composer.trim()}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
                       aria-label="Send message"
                     >

@@ -57,6 +57,9 @@ export function normalizeSender(sender: string): string {
 /**
  * Publish CRUD event for agent, chat, or world configuration changes
  * Allows subscribed clients to receive real-time updates for all CRUD operations
+ * 
+ * Note: CRUD events are entity-level operations and don't belong to any specific chat,
+ * so chatId is always null to avoid foreign key constraint issues.
  */
 export function publishCRUDEvent(
   world: World,
@@ -71,7 +74,7 @@ export function publishCRUDEvent(
     entityId,
     entityData: operation === 'delete' ? null : entityData,
     timestamp: new Date(),
-    chatId: world.currentChatId ?? null
+    chatId: null  // CRUD events are entity-level, not chat-scoped
   };
 
   world.eventEmitter.emit(EventType.CRUD, event);
@@ -261,6 +264,7 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     content: data.content,
     error: data.error,
     messageId: data.messageId || generateId(),
+    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
     usage: data.usage,
     logEvent: data.logEvent,
     tool_calls: data.tool_calls

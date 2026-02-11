@@ -63,6 +63,7 @@ async function getStorageWrappers(): Promise<StorageAPI> {
 
 /**
  * Save incoming message to agent memory with auto-save
+ * Uses explicit chatId from the message event for concurrency-safe saving
  */
 export async function saveIncomingMessageToMemory(
   world: World,
@@ -80,7 +81,11 @@ export async function saveIncomingMessageToMemory(
       });
     }
 
-    if (!world.currentChatId) {
+    // Derive chatId from the message event for concurrency-safe processing
+    // This ensures messages stay bound to their originating session
+    const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+
+    if (!targetChatId) {
       loggerMemory.warn('Saving message without chatId', {
         agentId: agent.id,
         messageId: messageEvent.messageId
@@ -94,7 +99,7 @@ export async function saveIncomingMessageToMemory(
       ...parsedMessage,
       sender: messageEvent.sender,
       createdAt: messageEvent.timestamp,
-      chatId: world.currentChatId || null,
+      chatId: targetChatId,
       messageId: messageEvent.messageId,
       replyToMessageId: messageEvent.replyToMessageId,
       agentId: agent.id
@@ -192,9 +197,15 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
 
     let llmResponse: import('../types.js').LLMResponse;
 
+    // Create a wrapped publishSSE that captures the targetChatId for concurrency-safe event routing
+    // This ensures SSE events stay bound to the originating session during tool continuation
+    const publishSSEWithChatId = (w: import('../types.js').World, data: Partial<import('../types.js').WorldSSEEvent>) => {
+      publishSSE(w, { ...data, chatId: targetChatId });
+    };
+
     if (isStreamingEnabled()) {
       const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(world, agent, messages as any, publishSSE);
+      const result = await streamAgentResponse(world, agent, messages as any, publishSSEWithChatId);
       llmResponse = result.response;
       messageId = result.messageId;
     } else {
@@ -275,14 +286,19 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
 
 /**
  * Handle text response from LLM (extracted for clarity)
+ * @param chatId - Explicit chat ID for concurrency-safe processing. If not provided, uses messageEvent.chatId or world.currentChatId.
  */
 export async function handleTextResponse(
   world: World,
   agent: Agent,
   responseText: string,
   messageId: string,
-  messageEvent: WorldMessageEvent
+  messageEvent: WorldMessageEvent,
+  chatId?: string | null
 ): Promise<void> {
+  // Derive target chatId: explicit parameter > message event > world.currentChatId
+  const targetChatId = chatId !== undefined ? chatId : (messageEvent.chatId ?? world.currentChatId ?? null);
+
   // Apply auto-mention logic if needed
   let finalResponse = responseText;
   if (shouldAutoMention(responseText, messageEvent.sender, agent.id)) {
@@ -306,7 +322,7 @@ export async function handleTextResponse(
     messageId,
     sender: agent.id,
     createdAt: new Date(),
-    chatId: world.currentChatId || null,
+    chatId: targetChatId,
     replyToMessageId: messageEvent.messageId,
     agentId: agent.id
   });
@@ -327,7 +343,7 @@ export async function handleTextResponse(
   }
 
   // Publish the response message using the same messageId from streaming
-  publishMessageWithId(world, finalResponse, agent.id, messageId, messageEvent.chatId, messageEvent.messageId);
+  publishMessageWithId(world, finalResponse, agent.id, messageId, targetChatId, messageEvent.messageId);
 
   loggerAgent.debug('Agent response published', {
     agentId: agent.id,

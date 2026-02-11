@@ -318,18 +318,22 @@ export async function processAgentMessage(
 ): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
+    // Derive target chatId from the originating message event for concurrency-safe processing
+    // This ensures processing stays bound to the originating session even if world.currentChatId changes
+    const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+
     // Prepare messages for LLM - loads fresh data from storage
     // The user message is already saved in subscribeAgentToMessages, so it's in storage
     const filteredMessages = await prepareMessagesForLLM(
       world.id,
       agent,
-      world.currentChatId ?? null
+      targetChatId
     );
 
     // Log prepared messages for debugging
     loggerAgent.debug('Prepared messages for LLM', {
       agentId: agent.id,
-      chatId: world.currentChatId,
+      chatId: targetChatId,
       totalMessages: filteredMessages.length,
       systemMessages: filteredMessages.filter(m => m.role === 'system').length,
       userMessages: filteredMessages.filter(m => m.role === 'user').length,
@@ -352,9 +356,15 @@ export async function processAgentMessage(
     let llmResponse: import('../types.js').LLMResponse;
     let messageId: string;
 
+    // Create a wrapped publishSSE that captures the targetChatId for concurrency-safe event routing
+    // This ensures SSE events stay bound to the originating session even during concurrent processing
+    const publishSSEWithChatId = (w: World, data: Partial<import('../types.js').WorldSSEEvent>) => {
+      publishSSE(w, { ...data, chatId: targetChatId });
+    };
+
     if (isStreamingEnabled()) {
       const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(world, agent, filteredMessages, publishSSE);
+      const result = await streamAgentResponse(world, agent, filteredMessages, publishSSEWithChatId);
       llmResponse = result.response;
       messageId = result.messageId;
     } else {
@@ -381,7 +391,8 @@ export async function processAgentMessage(
       }
 
       // Process text response (existing logic below)
-      await handleTextResponse(world, agent, responseText, messageId, messageEvent);
+      // Pass targetChatId explicitly for concurrency-safe processing
+      await handleTextResponse(world, agent, responseText, messageId, messageEvent, targetChatId);
       return;
     }
 
@@ -417,8 +428,9 @@ export async function processAgentMessage(
 
       // For streaming mode, send the formatted tool call message via SSE
       // This ensures web clients receive the complete tool call info with parameters
+      // Use publishSSEWithChatId to ensure concurrency-safe event routing
       if (isStreamingEnabled()) {
-        publishSSE(world, {
+        publishSSEWithChatId(world, {
           agentName: agent.id,
           type: 'chunk',
           content: messageContent,
@@ -432,7 +444,7 @@ export async function processAgentMessage(
         content: messageContent,
         sender: agent.id,
         createdAt: new Date(),
-        chatId: world.currentChatId || null,
+        chatId: targetChatId,
         messageId,
         replyToMessageId: messageEvent.messageId,
         tool_calls: executableToolCalls,
@@ -557,7 +569,7 @@ export async function processAgentMessage(
               tool_call_id: toolCall.id,
               sender: agent.id,
               createdAt: new Date(),
-              chatId: world.currentChatId || null,
+              chatId: targetChatId,
               messageId: generateId(),
               replyToMessageId: messageId,
               agentId: agent.id
@@ -576,7 +588,7 @@ export async function processAgentMessage(
               content: assistantContent,
               sender: agent.id,
               createdAt: new Date(),
-              chatId: world.currentChatId || null,
+              chatId: targetChatId,
               messageId: generateId(),
               replyToMessageId: toolResultMessage.messageId,
               agentId: agent.id
@@ -641,7 +653,7 @@ export async function processAgentMessage(
             agentId: agent.id,
             toolName: toolCall.function.name,
             toolCallId: toolCall.id,
-            chatId: world.currentChatId || null,
+            chatId: targetChatId,
             ...(toolArgs.command && { command: toolArgs.command }),
             ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
             ...(toolArgs.directory && { directory: toolArgs.directory })
@@ -654,7 +666,7 @@ export async function processAgentMessage(
             tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),
-            chatId: world.currentChatId || null,
+            chatId: targetChatId,
             messageId: generateId(),
             replyToMessageId: messageId,
             agentId: agent.id
@@ -690,12 +702,14 @@ export async function processAgentMessage(
           // The tool result is now in memory, so the next LLM call will see it
           loggerAgent.debug('Continuing LLM loop with tool result', {
             agentId: agent.id,
-            toolCallId: toolCall.id
+            toolCallId: toolCall.id,
+            targetChatId
           });
 
           // Continue the LLM execution loop with the tool result
+          // Pass explicit chatId for concurrency-safe continuation
           const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
-          await continueLLMAfterToolExecution(world, agent, world.currentChatId);
+          await continueLLMAfterToolExecution(world, agent, targetChatId);
 
         } catch (error) {
           loggerAgent.error('Tool execution error', {
@@ -711,7 +725,7 @@ export async function processAgentMessage(
             tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),
-            chatId: world.currentChatId || null,
+            chatId: targetChatId,
             messageId: generateId(),
             replyToMessageId: messageId,
             agentId: agent.id

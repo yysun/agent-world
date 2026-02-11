@@ -1301,9 +1301,13 @@ async function subscribeChatEvents(payload) {
   };
 
   const sseHandler = (/** @type {any} */ event) => {
-    if (chatId && world.currentChatId && String(world.currentChatId) !== chatId) return;
+    // Route SSE events based on the event's chatId, not world.currentChatId
+    // This ensures concurrent sessions receive their events even when user switches selection
+    const eventChatId = event?.chatId ? String(event.chatId) : null;
+    // Only filter if subscription has chatId AND event has chatId AND they don't match
+    if (chatId && eventChatId && eventChatId !== chatId) return;
     sendRealtimeEventToRenderer({
-      ...serializeRealtimeSSEEvent(worldId, chatId, event),
+      ...serializeRealtimeSSEEvent(worldId, eventChatId || chatId, event),
       subscriptionId
     });
   };
@@ -1312,8 +1316,12 @@ async function subscribeChatEvents(payload) {
     // Forward tool events (tool-start, tool-result, tool-error, tool-progress)
     const eventType = event?.type || '';
     if (!eventType.startsWith('tool-')) return;
+    // Route tool events based on the event's chatId for concurrency-safe routing
+    const eventChatId = event?.chatId ? String(event.chatId) : null;
+    // Only filter if subscription has chatId AND event has chatId AND they don't match
+    if (chatId && eventChatId && eventChatId !== chatId) return;
     sendRealtimeEventToRenderer({
-      ...serializeRealtimeToolEvent(worldId, chatId, event),
+      ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
       subscriptionId
     });
   };

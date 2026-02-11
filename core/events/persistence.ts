@@ -176,10 +176,11 @@ export function setupEventPersistence(world: World): () => void {
     }
 
     // Persist start/end events for metadata tracking
+    // Use event.chatId for concurrency-safe routing (falls back to null for broadcast)
     const eventData = {
       id: `${event.messageId}-sse-${event.type}`,
       worldId: world.id,
-      chatId: world.currentChatId || null,
+      chatId: event.chatId || null,
       type: 'sse',
       payload: {
         agentName: event.agentName,
@@ -242,7 +243,9 @@ export function setupEventPersistence(world: World): () => void {
     const eventData = {
       id: eventId,
       worldId: world.id,
-      chatId: world.currentChatId || null, // Default to current chat
+      // Activity events (response-start/end, idle) are world-level, use null chatId
+      // Tool events use chatId from event for concurrency-safe routing
+      chatId: isActivityEvent ? null : (event.chatId || null),
       type: isActivityEvent ? 'world' : 'tool',
       payload: isActivityEvent ? {
         activityType: event.type,

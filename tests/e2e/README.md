@@ -50,6 +50,31 @@ TEST_PROVIDER=anthropic TEST_MODEL=claude-3-5-sonnet-20241022 npm run test:e2e
 
 **Expected Results**: All tests should pass when agent response rules are working correctly.
 
+### 2. Concurrent Chat Sessions (`test-concurrent-chats.ts`)
+
+**Validates concurrent chat session isolation and routing:**
+
+- ✅ **SSE Events Include chatId**: All SSE events have chatId for routing
+- ✅ **Chat Creation**: Multiple chats have unique IDs
+- ✅ **Response Isolation**: Each chat receives its own responses
+- ✅ **No Cross-Contamination**: Responses contain expected keywords per chat
+
+**Run:**
+```bash
+# Auto mode
+npx tsx tests/e2e/test-concurrent-chats.ts
+
+# Interactive mode
+npx tsx tests/e2e/test-concurrent-chats.ts -i
+
+# With custom model
+TEST_MODEL=llama3.1 npx tsx tests/e2e/test-concurrent-chats.ts
+```
+
+**Requirements**: Ollama running locally with `llama3.2:3b` (or model specified in TEST_MODEL).
+
+**Expected Results**: All 9 tests should pass demonstrating proper chat isolation.
+
 ## Test Modes
 
 ### Auto Mode (Default)
