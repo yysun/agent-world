@@ -243,10 +243,10 @@ export default function WorldChat(props: WorldChatProps) {
       // Find the tool call details from previous assistant messages
       let toolName = 'unknown';
       let toolArgs = '';
-      const currentIndex = this.state.messages.findIndex(m => m.messageId === message.messageId);
+      const currentIndex = messages.findIndex(m => m.messageId === message.messageId);
       if (currentIndex >= 0) {
         for (let i = currentIndex - 1; i >= 0; i--) {
-          const prevMsg = this.state.messages[i];
+          const prevMsg = messages[i];
           if (prevMsg.type === 'assistant' && (prevMsg as any).tool_calls) {
             // Parse tool_calls if it's a JSON string (from database)
             let prevToolCalls = (prevMsg as any).tool_calls;
