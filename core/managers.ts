@@ -25,6 +25,11 @@
  * - Comprehensive error tracking for partial failures
  * - Error log persistence with 100-entry retention policy
  *
+ * Recent Changes:
+ * - 2026-02-11: Made `deleteWorld` side-effect-free by removing `getWorld` usage.
+ *   - `deleteWorld` now avoids world runtime hydration/chat creation paths during deletion.
+ *   - Cleanup hooks are invoked only if present on directly loaded world data.
+ *
  * Changes:
  * - 2026-02-10: Added agent identifier resolution across manager APIs.
  *   - Agent operations now accept either stored agent ID or agent name.
@@ -246,13 +251,13 @@ export async function deleteWorld(worldId: string): Promise<boolean> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
 
-  // Clean up event persistence listeners if world is currently loaded
-  const world = await getWorld(resolvedWorldId);
-  if (world?._eventPersistenceCleanup) {
-    world._eventPersistenceCleanup();
+  // Side-effect-free cleanup path: avoid getWorld() because it can hydrate runtime state.
+  const worldData = await storageWrappers!.loadWorld(resolvedWorldId);
+  if (worldData?._eventPersistenceCleanup) {
+    worldData._eventPersistenceCleanup();
   }
-  if (world?._activityListenerCleanup) {
-    world._activityListenerCleanup();
+  if (worldData?._activityListenerCleanup) {
+    worldData._activityListenerCleanup();
   }
 
   return await storageWrappers!.deleteWorld(resolvedWorldId);
