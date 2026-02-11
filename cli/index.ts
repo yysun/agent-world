@@ -14,6 +14,8 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
+ * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
  * - 2025-02-06: Prevented duplicate MESSAGE output when streaming already rendered agent responses
  * - 2025-11-01: Added multi-world selection in loadWorldFromFile
@@ -172,6 +174,7 @@ interface IdleWaiter {
   seenProcessing: boolean;
   timeoutId?: ReturnType<typeof setTimeout>;
   noActivityTimeoutId?: ReturnType<typeof setTimeout>;
+  timeoutMs: number;
 }
 
 class WorldActivityMonitor {
@@ -250,7 +253,8 @@ class WorldActivityMonitor {
           cleanup();
           reject(error);
         },
-        seenProcessing: false
+        seenProcessing: false,
+        timeoutMs
       };
 
       const cleanup = () => {
@@ -300,6 +304,27 @@ class WorldActivityMonitor {
       this.finishWaiter(waiter, false, error);
     }
     this.lastEvent = null;
+  }
+
+  /**
+   * Extend timeout for all active waiters.
+   * Called when streaming data arrives to prevent premature timeout.
+   */
+  extendTimeout(): void {
+    for (const waiter of this.waiters) {
+      // Reset the main timeout
+      if (waiter.timeoutId) {
+        clearTimeout(waiter.timeoutId);
+        waiter.timeoutId = setTimeout(() => {
+          this.finishWaiter(waiter, false, new Error('Timed out waiting for world to become idle'));
+        }, waiter.timeoutMs);
+      }
+      // Clear noActivity timeout since we have activity
+      if (waiter.noActivityTimeoutId) {
+        clearTimeout(waiter.noActivityTimeoutId);
+        waiter.noActivityTimeoutId = undefined;
+      }
+    }
   }
 
   getActiveSources(): string[] {
@@ -527,11 +552,24 @@ function attachCLIListeners(
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
   if (streaming && globalState && rl) {
     const sseListener = (eventData: any) => {
+      // Extend timeout when tool-stream data arrives (keeps long-running tools alive)
+      if (eventData.type === 'tool-stream') {
+        activityMonitor.extendTimeout();
+      }
       handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
         .catch(err => console.error('Error handling SSE event:', err));
     };
     world.eventEmitter.on(EventType.SSE, sseListener);
     listeners.set(EventType.SSE, sseListener);
+  } else {
+    // Pipeline mode: listen for tool-stream events to extend timeout on long-running commands
+    const sseTimeoutListener = (eventData: any) => {
+      if (eventData.type === 'tool-stream') {
+        activityMonitor.extendTimeout();
+      }
+    };
+    world.eventEmitter.on(EventType.SSE, sseTimeoutListener);
+    listeners.set(EventType.SSE, sseTimeoutListener);
   }
 
   // System events

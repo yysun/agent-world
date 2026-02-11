@@ -13,6 +13,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-02-11: Fixed publishSSE to include toolName and stream fields for tool-stream events
  * - 2026-02-08: Added core-level sender normalization for consistent user-role detection
  * - 2026-02-08: Removed legacy manual tool-result publishing helper from event API
  *
@@ -267,7 +268,9 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
     usage: data.usage,
     logEvent: data.logEvent,
-    tool_calls: data.tool_calls
+    tool_calls: data.tool_calls,
+    toolName: data.toolName,
+    stream: data.stream
   };
   world.eventEmitter.emit('sse', sseEvent);
 }

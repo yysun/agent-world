@@ -554,10 +554,33 @@ export async function processAgentMessage(
               command: toolArgs.command
             });
 
+            const aiToolCallId = toolCall.id;
             const result = await executeShellCommand(
               toolArgs.command,
               toolArgs.parameters || [],
-              toolArgs.directory || './'
+              toolArgs.directory || './',
+              {
+                onStdout: (chunk) => {
+                  publishSSE(world, {
+                    type: 'tool-stream',
+                    toolName: 'shell_cmd',
+                    content: chunk,
+                    stream: 'stdout',
+                    messageId: aiToolCallId,
+                    agentName: agent.id
+                  });
+                },
+                onStderr: (chunk) => {
+                  publishSSE(world, {
+                    type: 'tool-stream',
+                    toolName: 'shell_cmd',
+                    content: chunk,
+                    stream: 'stderr',
+                    messageId: aiToolCallId,
+                    agentName: agent.id
+                  });
+                }
+              }
             );
 
             const formattedResult = formatResultForLLM(result);
