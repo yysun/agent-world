@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-11: Log errors now render even without an active chat subscription by using a global log listener with status-bar fallback.
  * - 2026-02-11: Message list rendering now keys by unique `id` first to prevent duplicate-key collisions when loading session history.
  * - 2026-02-10: Tool output panels now default to collapsed state
  * - 2026-02-10: Sender labels now resolve reply chains to show HUMAN for final assistant replies after tool steps
@@ -259,6 +260,20 @@ function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function createLogMessage(logEvent) {
+  return {
+    id: `log-${logEvent?.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    messageId: `log-${Date.now()}`,
+    sender: 'system',
+    content: logEvent?.message || '',
+    text: logEvent?.message || '',
+    role: 'system',
+    type: 'log',
+    createdAt: logEvent?.timestamp || new Date().toISOString(),
+    logEvent
+  };
 }
 
 function safeMessage(error, fallback) {
@@ -978,6 +993,29 @@ export default function App() {
     setSessionSearch('');
   }, [loadedWorld?.id]);
 
+  // Global log listener (independent of chat session subscription)
+  useEffect(() => {
+    const removeListener = api.onChatEvent((payload) => {
+      if (!payload || payload.type !== 'log') return;
+      const logEvent = payload.logEvent;
+      if (!logEvent) return;
+
+      const hasActiveSession = Boolean(loadedWorld?.id && selectedSessionId);
+      if (hasActiveSession) {
+        setMessages((existing) => [...existing, createLogMessage(logEvent)]);
+      } else {
+        const category = String(logEvent?.category || 'system');
+        const message = String(logEvent?.message || 'Unknown error');
+        const level = String(logEvent?.level || '').toLowerCase();
+        setStatusText(`${category} - ${message}`, level === 'error' ? 'error' : 'info');
+      }
+    });
+
+    return () => {
+      removeListener();
+    };
+  }, [api, loadedWorld?.id, selectedSessionId, setStatusText]);
+
   useEffect(() => {
     if (!loadedWorld?.id || !selectedSessionId) {
       return undefined;
@@ -1030,27 +1068,6 @@ export default function App() {
         if (String(incomingMessage.role || '').toLowerCase() === 'assistant') {
           endAllToolStreams();
         }
-        return;
-      }
-
-      if (payload.type === 'log') {
-        const logEvent = payload.logEvent;
-        if (!logEvent) return;
-
-        // Create log message for inline display
-        const logMessage = {
-          id: `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          messageId: `log-${Date.now()}`,
-          sender: 'system',
-          content: logEvent.message,
-          text: logEvent.message,
-          role: 'system',
-          type: 'log',
-          createdAt: logEvent.timestamp || new Date().toISOString(),
-          logEvent: logEvent
-        };
-
-        setMessages((existing) => [...existing, logMessage]);
         return;
       }
 
