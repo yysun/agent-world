@@ -520,7 +520,7 @@ export default function WorldChat(props: WorldChatProps) {
 
               const baseMessageClass = senderType === SenderType.HUMAN ? 'user-message' : 'agent-message';
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
-              const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
+              const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage && senderType !== SenderType.HUMAN ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
               const toolClass = isToolResultMessage(message) ? 'tool-message' : '';
               const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass}`.trim();

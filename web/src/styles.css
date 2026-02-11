@@ -958,8 +958,8 @@ legend {
   background: none;
   color: var(--text-primary);
   border: 1px solid var(--border-secondary);
-  border-left: 3px solid #64b5f6;
-  /* Light blue for human messages */
+  border-left: 3px solid #ff9800;
+  /* Orange for human messages */
   width: 98%;
   max-width: 100%;
   padding-right: 3.5rem;
@@ -974,10 +974,10 @@ legend {
   color: var(--text-primary);
 }
 
-/* Tool result message styling: amber/orange border */
+/* Tool result message styling: purple border */
 .tool-message {
-  border-left: 3px solid #ff9800 !important;
-  /* Amber for tool outputs */
+  border-left: 3px solid #ab47bc !important;
+  /* Purple for tool outputs */
 }
 
 /* Cross-agent message styling: purple border for agent-to-agent messages */
@@ -989,9 +989,9 @@ legend {
 
 /* Phase 6: Role-Based Message Border Colors Summary
  * ================================================
- * - Human messages (.user-message): #64b5f6 (light blue) - subtle, friendly
+ * - Human messages (.user-message): #ff9800 (orange) - attention-grabbing
  * - Agent messages (.agent-message): #42a5f5 (sky blue) - primary agent color
- * - Tool outputs (.tool-message): #ff9800 (amber) - attention-grabbing for tool results
+ * - Tool outputs (.tool-message): #ab47bc (purple) - distinct tool results
  * - System messages (.system-message): #9e9e9e (gray) - neutral system info
  * - Cross-agent messages (.cross-agent-message): #ab47bc (purple) - distinct agent-to-agent
  * - Memory-only messages (.memory-only-message): #9e9e9e (gray) - hidden by default
