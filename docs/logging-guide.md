@@ -36,7 +36,7 @@ Agent World uses **scenario-based logging** to help you debug and monitor your a
 #### 1. Database Migration Issues
 
 ```bash
-LOG_STORAGE_MIGRATION=info npm run web:dev
+LOG_STORAGE_MIGRATION=info npm run dev:web
 ```
 
 **What you'll see:**
@@ -48,7 +48,7 @@ LOG_STORAGE_MIGRATION=info npm run web:dev
 #### 2. MCP Server Not Starting
 
 ```bash
-LOG_MCP_LIFECYCLE=info npm run web:dev
+LOG_MCP_LIFECYCLE=info npm run dev:web
 ```
 
 **What you'll see:**
@@ -60,7 +60,7 @@ LOG_MCP_LIFECYCLE=info npm run web:dev
 #### 3. Chat Session Problems
 
 ```bash
-LOG_CHAT_SESSION=info npm run web:dev
+LOG_CHAT_SESSION=info npm run dev:web
 ```
 
 **What you'll see:**
@@ -72,7 +72,7 @@ LOG_CHAT_SESSION=info npm run web:dev
 #### 4. Agent Response Delays
 
 ```bash
-LOG_LLM=debug npm run web:dev
+LOG_LLM=debug npm run dev:web
 ```
 
 **What you'll see:**
@@ -84,7 +84,7 @@ LOG_LLM=debug npm run web:dev
 #### 5. Storage Query Errors
 
 ```bash
-LOG_STORAGE_QUERY=debug npm run web:dev
+LOG_STORAGE_QUERY=debug npm run dev:web
 ```
 
 **What you'll see:**
@@ -148,16 +148,16 @@ You can enable entire domains with parent categories:
 
 ```bash
 # Enable ALL storage logs
-LOG_STORAGE=debug npm run web:dev
+LOG_STORAGE=debug npm run dev:web
 
 # Enable ALL MCP logs
-LOG_MCP=info npm run web:dev
+LOG_MCP=info npm run dev:web
 
 # Enable ALL event logs
-LOG_EVENTS=debug npm run web:dev
+LOG_EVENTS=debug npm run dev:web
 
 # Enable ALL logs (not recommended for production)
-LOG_LEVEL=debug npm run web:dev
+LOG_LEVEL=debug npm run dev:web
 ```
 
 ---
@@ -384,10 +384,10 @@ Sets the default log level for all categories.
 
 ```bash
 # Show all logs at info level or higher
-LOG_LEVEL=info npm run web:dev
+LOG_LEVEL=info npm run dev:web
 
 # Show all logs including debug
-LOG_LEVEL=debug npm run web:dev
+LOG_LEVEL=debug npm run dev:web
 ```
 
 ### Category-Specific Configuration
@@ -396,13 +396,13 @@ Enable specific categories with their own log levels:
 
 ```bash
 # Single category
-LOG_STORAGE_MIGRATION=info npm run web:dev
+LOG_STORAGE_MIGRATION=info npm run dev:web
 
 # Multiple categories
-LOG_STORAGE_MIGRATION=info LOG_MCP_LIFECYCLE=info npm run web:dev
+LOG_STORAGE_MIGRATION=info LOG_MCP_LIFECYCLE=info npm run dev:web
 
 # Parent category enables all children
-LOG_MCP=debug npm run web:dev  # Enables mcp.lifecycle, mcp.connection, mcp.tools, mcp.execution
+LOG_MCP=debug npm run dev:web  # Enables mcp.lifecycle, mcp.connection, mcp.tools, mcp.execution
 ```
 
 ### Hierarchical Control
@@ -421,14 +421,14 @@ mcp                      # Parent category
 
 ```bash
 # This enables all MCP subcategories at debug level
-LOG_MCP=debug npm run web:dev
+LOG_MCP=debug npm run dev:web
 ```
 
 **You can override specific children:**
 
 ```bash
 # All MCP at debug, but lifecycle at info
-LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run web:dev
+LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run dev:web
 ```
 
 ### Configuration File
@@ -459,7 +459,7 @@ LOG_EVENTS_AGENT=debug
 **Solution:**
 
 ```bash
-LOG_STORAGE_MIGRATION=info npm run web:dev
+LOG_STORAGE_MIGRATION=info npm run dev:web
 ```
 
 **Look for:**
@@ -476,7 +476,7 @@ LOG_STORAGE_MIGRATION=info npm run web:dev
 **Solution:**
 
 ```bash
-LOG_MCP=debug npm run web:dev
+LOG_MCP=debug npm run dev:web
 ```
 
 **Look for:**
@@ -493,7 +493,7 @@ LOG_MCP=debug npm run web:dev
 **Solution:**
 
 ```bash
-LOG_CHAT_SESSION=info LOG_STORAGE_QUERY=debug npm run web:dev
+LOG_CHAT_SESSION=info LOG_STORAGE_QUERY=debug npm run dev:web
 ```
 
 **Look for:**
@@ -509,7 +509,7 @@ LOG_CHAT_SESSION=info LOG_STORAGE_QUERY=debug npm run web:dev
 **Solution:**
 
 ```bash
-LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run dev:web
 ```
 
 **Look for:**
@@ -527,7 +527,7 @@ LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
 **Solution:**
 
 ```bash
-LOG_LLM=debug LOG_MCP_EXECUTION=debug npm run web:dev
+LOG_LLM=debug LOG_MCP_EXECUTION=debug npm run dev:web
 ```
 
 **Look for:**
@@ -544,7 +544,7 @@ LOG_LLM=debug LOG_MCP_EXECUTION=debug npm run web:dev
 **Solution:**
 
 ```bash
-LOG_STORAGE_INIT=info LOG_STORAGE_MIGRATION=info npm run web:dev
+LOG_STORAGE_INIT=info LOG_STORAGE_MIGRATION=info npm run dev:web
 ```
 
 **Look for:**
@@ -572,13 +572,13 @@ Enable only the categories you need:
 
 ```bash
 # Debugging chat features
-LOG_CHAT=debug LOG_STORAGE_QUERY=debug npm run web:dev
+LOG_CHAT=debug LOG_STORAGE_QUERY=debug npm run dev:web
 
 # Debugging agent responses
-LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run dev:web
 
 # Debugging MCP integration
-LOG_MCP=debug npm run web:dev
+LOG_MCP=debug npm run dev:web
 ```
 
 ### Log Streaming and Analysis
@@ -587,13 +587,13 @@ Logs use structured format suitable for log aggregation:
 
 ```bash
 # Save logs to file
-npm run web:dev 2>&1 | tee server.log
+npm run dev:web 2>&1 | tee server.log
 
 # Filter specific category
-npm run web:dev 2>&1 | grep "STORAGE.MIGRATION"
+npm run dev:web 2>&1 | grep "STORAGE.MIGRATION"
 
 # Parse structured logs with jq
-npm run web:dev 2>&1 | grep "STORAGE.MIGRATION" | jq .
+npm run dev:web 2>&1 | grep "STORAGE.MIGRATION" | jq .
 ```
 
 ### Testing with Logs

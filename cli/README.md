@@ -6,12 +6,12 @@ Command-line interface for creating and managing AI agent teams using natural la
 
 Start the CLI in development mode (with watch):
 ```bash
-npm run cli:dev
+npm run dev:cli
 ```
 
 Or run the compiled production version:
 ```bash
-npm run cli:start
+npm run start:cli
 ```
 
 ## Command Structure

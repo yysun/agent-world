@@ -14,7 +14,7 @@ This project now includes an Electron app that uses `core` directly through IPC.
 
 ```bash
 npm install
-npm run electron:dev
+npm run dev:electron
 # or simply: npm run dev
 ```
 

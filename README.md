@@ -144,17 +144,17 @@ Agent World provides simple, consistent npm scripts for three main applications:
 ### Development (hot reload)
 ```bash
 npm run dev              # Electron app (default)
-npm run web:dev          # Web app with server
-npm run cli:dev          # CLI with watch mode
-npm run electron:dev     # Electron app (explicit)
+npm run dev:web          # Web app with server
+npm run dev:cli          # CLI with watch mode
+npm run dev:electron     # Electron app (explicit)
 ```
 
 ### Production
 ```bash
 npm start                # Electron app (default)
-npm run web:start        # Web server (built)
-npm run cli:start        # CLI (built)
-npm run electron:start   # Electron app (explicit)
+npm run start:web        # Web server (built)
+npm run start:cli        # CLI (built)
+npm run start:electron   # Electron app (explicit)
 ```
 
 ### Behind the Scenes
@@ -218,13 +218,13 @@ Agent World uses **scenario-based logging** to help you debug specific issues wi
 
 ```bash
 # Database migration issues
-LOG_STORAGE_MIGRATION=info npm run web:dev
+LOG_STORAGE_MIGRATION=info npm run dev:web
 
 # MCP server problems  
-LOG_MCP=debug npm run web:dev
+LOG_MCP=debug npm run dev:web
 
 # Agent response debugging
-LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run dev:web
 ```
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
