@@ -9,12 +9,22 @@
  * - Comprehensive event processing (chunk, end, error)
  * - Tool streaming output display for shell_cmd (stdout/stderr)
  * - Color-coded streaming indicators and status messages
+ * - Enhanced tool display with Unicode icons and formatted names
+ * - Tool output truncation at 50K characters
  * - Modular design for reuse across CLI components
  * - Event-driven display (no timer dependencies)
  * CHANGES:
+ * - 2026-02-11: Enhanced tool display with icons, formatted names, stderr prefix, 50K truncation
  * - 2026-02-08: Added tool streaming support for shell_cmd real-time output display
  * - 2025-02-06: Track last streamed message to prevent duplicate MESSAGE events after streaming output
  */
+
+import {
+  formatToolName,
+  getToolIcon,
+  formatElapsed,
+  type StatusLineManager,
+} from './display.js';
 
 // Color helpers
 const gray = (text: string) => `\x1b[90m${text}\x1b[0m`;
@@ -53,7 +63,8 @@ export function createStreamingState(): StreamingState {
 // Streaming event handlers
 export function handleStreamingEvents(
   eventData: any,
-  streaming: StreamingState
+  streaming: StreamingState,
+  statusLine?: StatusLineManager
 ): void {
   // Handle tool streaming events first
   if (eventData.type === 'tool-stream') {
@@ -68,6 +79,11 @@ export function handleStreamingEvents(
       streaming.content = '';
       streaming.sender = eventData.agentName || eventData.sender;
       streaming.messageId = eventData.messageId; // Set new messageId for this stream
+
+      // Stop spinner — streaming content replaces the spinner
+      statusLine?.setSpinner(null);
+      statusLine?.pause();
+
       process.stdout.write(`\n${boldGreen(`● ${streaming.sender}`)} ${gray('is responding...')}`);
     }
 
@@ -97,6 +113,9 @@ export function handleStreamingEvents(
       streaming.content = '';
       streaming.sender = undefined;
       // Keep messageId temporarily to prevent duplicate display of the final message event
+
+      // Resume status line after streaming ends
+      statusLine?.resume();
     }
     return;
   }
@@ -110,6 +129,9 @@ export function handleStreamingEvents(
       streaming.content = '';
       streaming.sender = undefined;
       // Keep messageId temporarily to prevent duplicate display
+
+      // Resume status line after error
+      statusLine?.resume();
     }
     return;
   }
@@ -119,45 +141,79 @@ export function handleStreamingEvents(
 // PHASE 2.2 ENHANCEMENT: Handle tool execution events (from world channel)
 export function handleToolEvents(eventData: any): void {
   if (eventData.type === 'tool-start' && eventData.toolExecution) {
-    // Tool start events are now implicit - no console output needed
+    // Tool start events are now implicit — status line handles the indicator
+    resetToolStreamTracking();
     return;
   }
 
   if (eventData.type === 'tool-progress' && eventData.toolExecution) {
     const toolName = eventData.toolExecution.toolName;
+    const icon = getToolIcon(toolName);
+    const displayName = formatToolName(toolName);
     const agentName = eventData.agentName || eventData.sender || 'agent';
-    console.log(`${cyan(agentName)} ${gray('continuing tool -')} ${yellow(toolName)} ${gray('...')}`);
+    console.log(`${cyan(agentName)} ${gray('continuing tool')} ${icon} ${yellow(displayName)} ${gray('...')}`);
     return;
   }
 
   if (eventData.type === 'tool-result' && eventData.toolExecution) {
     const { toolName, duration, resultSize } = eventData.toolExecution;
-    const durationText = duration ? `${Math.round(duration)}ms` : 'completed';
+    const icon = getToolIcon(toolName);
+    const displayName = formatToolName(toolName);
+    const durationText = duration ? formatElapsed(duration) : 'done';
     const sizeText = resultSize ? `, ${resultSize} chars` : '';
     const agentName = eventData.agentName || eventData.sender || 'agent';
-    console.log(`${cyan(agentName)} ${gray('tool finished -')} ${yellow(toolName)} ${gray(`(${durationText}${sizeText})`)}`);
+    console.log(`${cyan(agentName)} ${green('\u2713')} ${icon} ${yellow(displayName)} ${gray(`(${durationText}${sizeText})`)}`);
     return;
   }
 
   if (eventData.type === 'tool-error' && eventData.toolExecution) {
     const { toolName, error: toolError } = eventData.toolExecution;
+    const icon = getToolIcon(toolName);
+    const displayName = formatToolName(toolName);
     const agentName = eventData.agentName || eventData.sender || 'agent';
-    console.log(`${error(`${agentName} tool failed - ${toolName}: ${toolError}`)}`);
+    console.log(`${error(`${agentName} ${icon} ${displayName} failed: ${toolError}`)}`);
     return;
   }
 }
 
 // Handle tool streaming events (real-time stdout/stderr from shell_cmd)
+// Note: Module-level counters track a single tool execution at a time.
+// resetToolStreamTracking() is called on each tool-start, so overlapping
+// concurrent tool streams share (and potentially reset) the same counter.
+const TOOL_STREAM_MAX_CHARS = 50_000;
+let toolStreamCharCount = 0;
+let toolStreamTruncated = false;
+
 export function handleToolStreamEvents(eventData: any): void {
   if (eventData.type === 'tool-stream' && eventData.toolName === 'shell_cmd') {
     const stream = eventData.stream === 'stderr' ? 'stderr' : 'stdout';
-    const color = stream === 'stderr' ? red : gray;
-    process.stdout.write(color(eventData.content));
+    const prefix = stream === 'stderr' ? red('[stderr] ') : gray('[stdout] ');
+    const content = eventData.content as string;
+
+    // Track cumulative output and truncate if over limit
+    if (toolStreamTruncated) return;
+
+    toolStreamCharCount += content.length;
+    if (toolStreamCharCount > TOOL_STREAM_MAX_CHARS) {
+      toolStreamTruncated = true;
+      process.stdout.write(`\n${yellow('[output truncated at 50K characters]')}\n`);
+      return;
+    }
+
+    process.stdout.write(`${prefix}${content}`);
     return;
   }
 }
 
+/** Reset tool stream tracking (call on tool-start or new tool execution). */
+export function resetToolStreamTracking(): void {
+  toolStreamCharCount = 0;
+  toolStreamTruncated = false;
+}
+
 // Handle world activity events (processing/idle states)
+// Note: In interactive mode with status line, these are largely replaced by
+// the status line manager. This function is kept for pipeline/debug scenarios.
 export function handleActivityEvents(eventData: any): void {
   // Check for valid event types
   if (!eventData || (eventData.type !== 'response-start' && eventData.type !== 'response-end' && eventData.type !== 'idle')) {
@@ -170,25 +226,25 @@ export function handleActivityEvents(eventData: any): void {
   const activeSources = eventData.activeSources || [];
   const sourceName = source.startsWith('agent:') ? source.slice('agent:'.length) : source;
 
-  // Display activity events with same format as web: [World] message | pending: N | activityId: N | source: name
+  // Debug-level activity logging — only outputs in debug/verbose scenarios.
+  // In interactive mode, the status line manager handles all visual feedback.
   if (eventData.type === 'response-start') {
-    const message = sourceName ? `${sourceName} started processing` : 'started';
-    console.log(`${gray('[World]')} ${message} ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
+    const message = sourceName ? `${sourceName} started` : 'started';
+    // Use stderr to avoid corrupting piped output in pipeline mode
+    process.stderr.write(`${gray('[World]')} ${message} ${gray(`| pending: ${pending} | id: ${activityId}`)}\n`);
   } else if (eventData.type === 'idle' && pending === 0) {
-    console.log(`${gray('[World]')} All processing complete ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
-  } else if (eventData.type === 'response-end' && pending > 0) {
-    // Show ongoing activity when one source finishes but others are still active
-    if (activeSources.length > 0) {
-      const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
-      console.log(`${gray('[World]')} Active: ${activeList} (${pending} pending) ${gray(`| pending: ${pending} | activityId: ${activityId} | source: ${sourceName}`)}`);
-    }
+    process.stderr.write(`${gray('[World]')} All complete ${gray(`| id: ${activityId}`)}\n`);
+  } else if (eventData.type === 'response-end' && pending > 0 && activeSources.length > 0) {
+    const activeList = activeSources.map((s: string) => s.startsWith('agent:') ? s.slice('agent:'.length) : s).join(', ');
+    process.stderr.write(`${gray('[World]')} Active: ${activeList} ${gray(`(${pending} pending)`)}\n`);
   }
 }
 
 export function handleWorldEventWithStreaming(
   eventType: string,
   eventData: any,
-  streaming: StreamingState
+  streaming: StreamingState,
+  statusLine?: StatusLineManager
 ): boolean {
   // Skip user messages to prevent echo
   if (eventData.sender && (eventData.sender === 'human' || eventData.sender.startsWith('user'))) {
@@ -197,7 +253,7 @@ export function handleWorldEventWithStreaming(
 
   // Handle streaming events
   if (eventType === 'sse') {
-    handleStreamingEvents(eventData, streaming);
+    handleStreamingEvents(eventData, streaming, statusLine);
     return true;
   }
 

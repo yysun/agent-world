@@ -97,9 +97,15 @@ import {
   createStreamingState,
   handleWorldEventWithStreaming,
   handleToolEvents,
-  handleActivityEvents,
 } from './stream.js';
 import { configureLLMProvider } from '../core/llm-config.js';
+import {
+  createStatusLineManager,
+  type StatusLineManager,
+  formatToolName,
+  getToolIcon,
+  log as statusLog,
+} from './display.js';
 
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
@@ -366,42 +372,6 @@ function parseActivitySource(source?: string): { type: 'agent' | 'message'; name
   return null;
 }
 
-class ActivityProgressRenderer {
-  private activeAgents = new Set<string>();
-
-  handle(event: WorldActivityEventPayload): void {
-    if (!event) return;
-
-    // Reset on idle
-    if (event.type === 'idle') {
-      this.reset();
-      return;
-    }
-
-    const details = parseActivitySource(event.source);
-    if (!details || details.type !== 'agent') {
-      return;
-    }
-
-    // Track agent start on response-start
-    if (event.type === 'response-start' && !this.activeAgents.has(details.name)) {
-      this.activeAgents.add(details.name);
-    }
-
-    // Track agent end on response-end
-    if (event.type === 'response-end' && this.activeAgents.has(details.name)) {
-      this.activeAgents.delete(details.name);
-    }
-  }
-
-  reset(): void {
-    if (this.activeAgents.size > 0) {
-      this.activeAgents.clear();
-      // console.log(gray('All agents finished.'));
-    }
-  }
-}
-
 // LLM Provider configuration from environment variables
 function configureLLMProvidersFromEnv(): void {
   // OpenAI
@@ -499,7 +469,7 @@ function printCLIResult(result: any) {
  * @param streaming - Streaming state for interactive mode (null for pipeline mode)
  * @param globalState - Global state for interactive mode (null for pipeline mode)
  * @param activityMonitor - Activity monitor for tracking world events
- * @param progressRenderer - Progress renderer for displaying activity
+ * @param statusLine - Status line manager for interactive display (null for pipeline mode)
  * @param rl - Readline interface for interactive mode (undefined for pipeline mode)
  * @returns Map of event types to listener functions for cleanup
  */
@@ -508,7 +478,7 @@ function attachCLIListeners(
   streaming: StreamingState | null,
   globalState: GlobalState | null,
   activityMonitor: WorldActivityMonitor,
-  progressRenderer: ActivityProgressRenderer,
+  statusLine: StatusLineManager | null,
   rl?: readline.Interface
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
@@ -517,9 +487,8 @@ function attachCLIListeners(
   const worldListener = (eventData: WorldActivityEventPayload) => {
     activityMonitor.handle(eventData);
     // Only render activity progress in interactive mode
-    if (streaming && globalState && rl) {
-      progressRenderer.handle(eventData);
-      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+    if (streaming && globalState && rl && statusLine) {
+      handleWorldEvent(EventType.WORLD, eventData, streaming, globalState, activityMonitor, statusLine, rl)
         .catch(err => console.error('Error handling world event:', err));
     }
     // Pipeline mode: silently track events for completion detection
@@ -533,8 +502,8 @@ function attachCLIListeners(
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
 
-    if (streaming && globalState && rl) {
-      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+    if (streaming && globalState && rl && statusLine) {
+      handleWorldEvent(EventType.MESSAGE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
         .catch(err => console.error('Error handling message event:', err));
     } else {
       // Pipeline mode: simple console output
@@ -550,13 +519,13 @@ function attachCLIListeners(
   listeners.set(EventType.MESSAGE, messageListener);
 
   // SSE events (interactive mode only - pipeline mode uses non-streaming LLM calls)
-  if (streaming && globalState && rl) {
+  if (streaming && globalState && rl && statusLine) {
     const sseListener = (eventData: any) => {
       // Extend timeout when tool-stream data arrives (keeps long-running tools alive)
       if (eventData.type === 'tool-stream') {
         activityMonitor.extendTimeout();
       }
-      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+      handleWorldEvent(EventType.SSE, eventData, streaming, globalState, activityMonitor, statusLine, rl)
         .catch(err => console.error('Error handling SSE event:', err));
     };
     world.eventEmitter.on(EventType.SSE, sseListener);
@@ -577,8 +546,8 @@ function attachCLIListeners(
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
-    if (streaming && globalState && rl) {
-      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, progressRenderer, rl)
+    if (streaming && globalState && rl && statusLine) {
+      handleWorldEvent(EventType.SYSTEM, eventData, streaming, globalState, activityMonitor, statusLine, rl)
         .catch(err => console.error('Error handling system event:', err));
     } else if (eventData.message || eventData.content) {
       // Pipeline mode: system messages are handled by message listener
@@ -612,7 +581,6 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
   let worldSubscription: any = null;
   let cliListeners: Map<string, (...args: any[]) => void> | null = null;
   const activityMonitor = new WorldActivityMonitor();
-  const progressRenderer = new ActivityProgressRenderer();
 
   try {
 
@@ -627,7 +595,7 @@ async function runPipelineMode(options: CLIOptions, messageFromArgs: string | nu
 
       // Attach direct listeners to the world.eventEmitter for pipeline handling
       // Note: Pipeline mode uses non-streaming LLM calls, so SSE events are not needed
-      cliListeners = attachCLIListeners(world, null, null, activityMonitor, progressRenderer);
+      cliListeners = attachCLIListeners(world, null, null, activityMonitor, null);
     }
 
     // Execute command from --command option
@@ -768,7 +736,7 @@ function cleanupWorldSubscription(worldState: WorldState | null): void {
  * @param streaming - Streaming state for real-time response display
  * @param globalState - Global state for timer management
  * @param activityMonitor - Activity monitor for tracking world events
- * @param progressRenderer - Progress renderer for displaying activity
+ * @param statusLine - Status line manager for interactive display
  * @param rl - Readline interface for interactive input
  * @returns WorldState with subscription and world instance
  */
@@ -778,7 +746,7 @@ async function handleSubscribe(
   streaming: StreamingState,
   globalState: GlobalState,
   activityMonitor: WorldActivityMonitor,
-  progressRenderer: ActivityProgressRenderer,
+  statusLine: StatusLineManager,
   rl?: readline.Interface
 ): Promise<WorldState | null> {
   // Subscribe to world lifecycle but do not request forwarding callbacks
@@ -794,7 +762,7 @@ async function handleSubscribe(
 
   // Attach direct listeners to the world.eventEmitter for CLI handling
   // Interactive mode needs all event types including SSE for streaming responses
-  attachCLIListeners(world, streaming, globalState, activityMonitor, progressRenderer, rl);
+  attachCLIListeners(world, streaming, globalState, activityMonitor, statusLine, rl);
 
   return { subscription, world };
 }
@@ -806,7 +774,7 @@ async function handleWorldEvent(
   streaming: StreamingState,
   globalState: GlobalState,
   activityMonitor: WorldActivityMonitor,
-  progressRenderer: ActivityProgressRenderer,
+  statusLine: StatusLineManager,
   rl?: readline.Interface
 ): Promise<void> {
   if (eventType === 'world') {
@@ -814,29 +782,80 @@ async function handleWorldEvent(
     // Handle activity events (new format: type = 'response-start' | 'response-end' | 'idle')
     if (payload.type === 'response-start' || payload.type === 'response-end' || payload.type === 'idle') {
       activityMonitor.handle(payload as WorldActivityEventPayload);
-      progressRenderer.handle(payload as WorldActivityEventPayload);
 
-      // Call handleActivityEvents for verbose activity logging
-      handleActivityEvents(payload);
+      // Update status line based on activity events
+      const details = parseActivitySource(payload.source);
+      const agentName = details?.type === 'agent' ? details.name : payload.source || '';
 
-      if (payload.type === 'idle' && rl && globalState.awaitingResponse) {
-        globalState.awaitingResponse = false;
-        console.log(); // Empty line before prompt
-        rl.prompt();
+      if (payload.type === 'response-start' && agentName) {
+        statusLine.setSpinner(`${agentName} is thinking...`);
+        statusLine.startElapsedTimer();
+        // Update agent list from activeSources
+        if (payload.activeSources) {
+          const agentEntries = payload.activeSources
+            .map((s: string) => parseActivitySource(s))
+            .filter((d: any) => d?.type === 'agent')
+            .map((d: any) => ({ name: d.name, active: true }));
+          statusLine.setAgents(agentEntries);
+        }
+      }
+
+      if (payload.type === 'response-end') {
+        // Update agent list — remove finished agent
+        if (payload.activeSources) {
+          const agentEntries = payload.activeSources
+            .map((s: string) => parseActivitySource(s))
+            .filter((d: any) => d?.type === 'agent')
+            .map((d: any) => ({ name: d.name, active: true }));
+          statusLine.setAgents(agentEntries);
+          // Update spinner label to next active agent if any
+          if (agentEntries.length > 0) {
+            statusLine.setSpinner(`${agentEntries[0].name} is thinking...`);
+          } else {
+            statusLine.setSpinner(null);
+            statusLine.stopElapsedTimer();
+          }
+        }
+      }
+
+      if (payload.type === 'idle') {
+        statusLine.reset();
+        if (rl && globalState.awaitingResponse) {
+          globalState.awaitingResponse = false;
+          statusLine.clear();
+          console.log(); // Empty line before prompt
+          rl.prompt();
+        }
       }
     }
     // Handle informational world messages.
     else if (payload.type === 'info' && payload.message) {
-      console.log(`${gray('[World]')} ${payload.message}`);
+      statusLog(statusLine, `${gray('[World]')} ${payload.message}`);
     }
     // Handle tool events (migrated from sse channel)
     else if (payload.type === 'tool-start' || payload.type === 'tool-result' || payload.type === 'tool-error' || payload.type === 'tool-progress') {
+      // Update status line with tool info
+      if (payload.type === 'tool-start' && payload.toolExecution) {
+        statusLine.addTool(payload.toolExecution.toolName);
+      } else if (payload.type === 'tool-result' && payload.toolExecution) {
+        statusLine.removeTool(payload.toolExecution.toolName, 'done');
+      } else if (payload.type === 'tool-error' && payload.toolExecution) {
+        statusLine.removeTool(payload.toolExecution.toolName, 'error');
+      }
+
+      // Print permanent tool event output
+      statusLine.pause();
       handleToolEvents(payload);
+      // Only resume status line if not actively streaming
+      // (streaming code manages its own pause/resume lifecycle)
+      if (!streaming.isActive) {
+        statusLine.resume();
+      }
     }
     return;
   }
 
-  if (handleWorldEventWithStreaming(eventType, eventData, streaming)) {
+  if (handleWorldEventWithStreaming(eventType, eventData, streaming, statusLine)) {
     return;
   }
 
@@ -871,13 +890,13 @@ async function handleWorldEvent(
 
     // Display system messages
     if (eventData.sender === 'system') {
-      console.log(`${boldRed('● system:')} ${eventData.content}`);
+      statusLog(statusLine, `${boldRed('● system:')} ${eventData.content}`);
       return;
     }
 
     // Display agent messages (fallback for non-streaming or missed messages)
     if (eventData.content) {
-      console.log(`\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
+      statusLog(statusLine, `\n${boldGreen(`● ${eventData.sender}:`)} ${eventData.content}\n`);
     }
     return;
   }
@@ -1282,7 +1301,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
   const globalState: GlobalState = createGlobalState();
   const streaming = createStreamingState();
   const activityMonitor = new WorldActivityMonitor();
-  const progressRenderer = new ActivityProgressRenderer();
+  const statusLine = createStatusLineManager();
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -1303,8 +1322,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       logger.debug(`Loading world: ${options.world}`);
       try {
         activityMonitor.reset();
-        progressRenderer.reset();
-        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, progressRenderer, rl);
+        statusLine.reset();
+        worldState = await handleSubscribe(rootPath, options.world, streaming, globalState, activityMonitor, statusLine, rl);
         currentWorldName = options.world;
         console.log(success(`Connected to world: ${currentWorldName}`));
 
@@ -1330,8 +1349,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
       logger.debug(`Loading world: ${selectedWorld.worldName} from ${effectiveRootPath}`);
       try {
         activityMonitor.reset();
-        progressRenderer.reset();
-        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
+        statusLine.reset();
+        worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
         currentWorldName = selectedWorld.worldName;
         console.log(success(`Connected to world: ${currentWorldName}`));
         if (selectedWorld.externalPath) {
@@ -1438,8 +1457,8 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
             // Subscribe to the new world
             logger.debug(`Subscribing to world: ${selectedWorld.worldName}...`);
             activityMonitor.reset();
-            progressRenderer.reset();
-            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, progressRenderer, rl);
+            statusLine.reset();
+            worldState = await handleSubscribe(effectiveRootPath, selectedWorld.worldName, streaming, globalState, activityMonitor, statusLine, rl);
             currentWorldName = selectedWorld.worldName;
             console.log(success(`Connected to world: ${currentWorldName}`));
             if (selectedWorld.externalPath) {
@@ -1665,6 +1684,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('close', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
+      statusLine.cleanup();
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
       process.exit(0);
@@ -1673,6 +1693,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.on('SIGINT', () => {
       if (isExiting) return; // Prevent duplicate cleanup
       isExiting = true;
+      statusLine.cleanup();
       console.log(`\n${boldCyan('Shutting down...')}`);
       console.log(`\n${boldCyan('Goodbye!')}`);
       if (worldState) cleanupWorldSubscription(worldState);
@@ -1682,6 +1703,7 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
 
   } catch (err) {
     console.error(boldRed('Error starting interactive mode:'), err instanceof Error ? err.message : err);
+    statusLine.cleanup();
     rl.close();
     process.exit(1);
   }
