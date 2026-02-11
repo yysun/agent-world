@@ -34,6 +34,9 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-11: Fixed OpenAI tool-call protocol integrity.
+ *   - Persist only the first executable tool_call when agent execution is single-call.
+ *   - Route JSON parse/tool lookup failures through tool-error persistence so each persisted tool_call gets a matching tool message.
  * - 2026-02-10: Upgrade generic LLM tool-call text (e.g., "Calling tool: shell_cmd") to include parsed parameters
  * - 2026-02-10: Made tool-call argument parsing more robust for both JSON strings and object-like payloads
  * - 2026-02-08: Enhanced tool call message formatting to include parameters
@@ -265,10 +268,21 @@ export async function processAgentMessage(
     // Handle tool calls - Execute tools through unified execution path
     // This works for both streaming and non-streaming modes
     if (llmResponse.type === 'tool_calls') {
+      const returnedToolCalls = llmResponse.tool_calls || [];
+      const executableToolCalls = returnedToolCalls.slice(0, 1);
+      if (returnedToolCalls.length > executableToolCalls.length) {
+        loggerAgent.warn('LLM returned multiple tool calls; processing first call only', {
+          agentId: agent.id,
+          returnedToolCallCount: returnedToolCalls.length,
+          processedToolCallIds: executableToolCalls.map(tc => tc.id),
+          droppedToolCallIds: returnedToolCalls.slice(1).map(tc => tc.id)
+        });
+      }
+
       loggerAgent.debug('LLM returned tool calls', {
         agentId: agent.id,
-        toolCallCount: llmResponse.tool_calls?.length || 0,
-        toolNames: llmResponse.tool_calls?.map(tc => tc.function.name)
+        toolCallCount: executableToolCalls.length,
+        toolNames: executableToolCalls.map(tc => tc.function.name)
       });
 
       // Save assistant message with tool_calls to agent memory FIRST
@@ -276,9 +290,9 @@ export async function processAgentMessage(
 
       // Format meaningful content for tool calls if LLM didn't provide text
       let messageContent = llmResponse.content || '';
-      if (llmResponse.tool_calls && llmResponse.tool_calls.length > 0 &&
-        shouldUpgradeToolCallMessage(messageContent, llmResponse.tool_calls as DisplayToolCall[])) {
-        messageContent = formatToolCallsMessage(llmResponse.tool_calls);
+      if (executableToolCalls.length > 0 &&
+        shouldUpgradeToolCallMessage(messageContent, executableToolCalls as DisplayToolCall[])) {
+        messageContent = formatToolCallsMessage(executableToolCalls as DisplayToolCall[]);
       }
 
       const assistantMessage: AgentMessage = {
@@ -289,10 +303,10 @@ export async function processAgentMessage(
         chatId: world.currentChatId || null,
         messageId,
         replyToMessageId: messageEvent.messageId,
-        tool_calls: llmResponse.tool_calls,
+        tool_calls: executableToolCalls,
         agentId: agent.id,
         // Mark tool calls as incomplete (waiting for execution)
-        toolCallStatus: llmResponse.tool_calls?.reduce((acc, tc) => {
+        toolCallStatus: executableToolCalls.reduce((acc, tc) => {
           acc[tc.id] = { complete: false, result: null };
           return acc;
         }, {} as Record<string, { complete: boolean; result: any }>)
@@ -307,8 +321,8 @@ export async function processAgentMessage(
         loggerAgent.debug('Assistant message with tool_calls saved to memory', {
           agentId: agent.id,
           messageId,
-          toolCallCount: llmResponse.tool_calls?.length || 0,
-          toolCallIds: llmResponse.tool_calls?.map(tc => tc.id)
+          toolCallCount: executableToolCalls.length,
+          toolCallIds: executableToolCalls.map(tc => tc.id)
         });
       } catch (error) {
         loggerAgent.error('Failed to save assistant message with tool_calls', {
@@ -334,7 +348,7 @@ export async function processAgentMessage(
 
       // Execute first tool call (only handle one at a time for now)
       // This is the UNIFIED tool execution path for both streaming and non-streaming
-      const toolCall = llmResponse.tool_calls?.[0];
+      const toolCall = executableToolCalls[0];
       if (toolCall) {
         loggerAgent.debug('Executing tool call', {
           agentId: agent.id,
@@ -345,111 +359,114 @@ export async function processAgentMessage(
         // Get MCP tools
         const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
         const mcpTools = await getMCPToolsForWorld(world.id);
-        const toolDef = mcpTools[toolCall.function.name];
-
-        if (!toolDef) {
-          loggerAgent.error('Tool not found', {
-            agentId: agent.id,
-            toolName: toolCall.function.name
-          });
-          return;
-        }
-
-        // Parse tool arguments
-        const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
-
-        // Handle special AI commands - bypass LLM and save result directly
-        if (toolCall.function.name === 'shell_cmd' && isAICommand(toolArgs.command)) {
-          loggerAgent.debug('AI command detected, bypassing LLM call', {
-            agentId: agent.id,
-            command: toolArgs.command
-          });
-
-          const result = await executeShellCommand(
-            toolArgs.command,
-            toolArgs.parameters || [],
-            toolArgs.directory || './'
-          );
-
-          const formattedResult = formatResultForLLM(result);
-
-          // Save the full tool result as a tool message (standard tool flow)
-          const toolResultMessage: AgentMessage = {
-            role: 'tool',
-            content: formattedResult,
-            tool_call_id: toolCall.id,
-            sender: agent.id,
-            createdAt: new Date(),
-            chatId: world.currentChatId || null,
-            messageId: generateId(),
-            replyToMessageId: messageId,
-            agentId: agent.id
-          };
-          agent.memory.push(toolResultMessage);
-
-          // Save assistant message (bypassing LLM)
-          // Exit code 0: Save only stdout (clean output)
-          // Exit code != 0: Save full formatted result (includes stderr, error details)
-          const assistantContent = result.exitCode === 0
-            ? (result.stdout || '(No output)')
-            : formattedResult;
-
-          const assistantReply: AgentMessage = {
-            role: 'assistant',
-            content: assistantContent,
-            sender: agent.id,
-            createdAt: new Date(),
-            chatId: world.currentChatId || null,
-            messageId: generateId(),
-            replyToMessageId: toolResultMessage.messageId,
-            agentId: agent.id
-          };
-          agent.memory.push(assistantReply);
-
-          // Mark original tool call as complete
-          const toolCallMsg = agent.memory.find(
-            m => m.role === 'assistant' && m.tool_calls?.some(tc => tc.id === toolCall.id)
-          );
-          if (toolCallMsg && toolCallMsg.toolCallStatus) {
-            toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: null };
-          }
-
-          // Save agent state
-          try {
-            const storage = await getStorageWrappers();
-            await storage.saveAgent(world.id, agent);
-            loggerAgent.debug('Saved agent memory with AI command result', { agentId: agent.id });
-          } catch (error) {
-            loggerAgent.error('Failed to save agent memory after AI command', {
-              agentId: agent.id,
-              error: error instanceof Error ? error.message : error
-            });
-          }
-
-          // Publish the assistant message event (what the user sees)
-          const aiCommandMessageEvent: WorldMessageEvent = {
-            content: assistantReply.content || '',
-            sender: agent.id,
-            timestamp: assistantReply.createdAt || new Date(),
-            messageId: assistantReply.messageId!,
-            chatId: assistantReply.chatId,
-            replyToMessageId: assistantReply.replyToMessageId,
-          };
-          (aiCommandMessageEvent as any).role = 'assistant';
-          world.eventEmitter.emit('message', aiCommandMessageEvent);
-
-          return; // End turn
-        }
-
-        // Execute tool with context
-        const toolContext = {
-          world,
-          messages: agent.memory,
-          toolCallId: toolCall.id,
-          workingDirectory: toolArgs.directory || process.cwd()
-        };
 
         try {
+          const toolDef = mcpTools[toolCall.function.name];
+          if (!toolDef) {
+            throw new Error(`Tool not found: ${toolCall.function.name}`);
+          }
+
+          let toolArgs: Record<string, any>;
+          const rawArgs = toolCall.function.arguments;
+          if (typeof rawArgs === 'string') {
+            toolArgs = JSON.parse(rawArgs || '{}');
+          } else if (rawArgs && typeof rawArgs === 'object') {
+            toolArgs = rawArgs as Record<string, any>;
+          } else {
+            toolArgs = {};
+          }
+
+          // Handle special AI commands - bypass LLM and save result directly
+          if (toolCall.function.name === 'shell_cmd' && isAICommand(toolArgs.command)) {
+            loggerAgent.debug('AI command detected, bypassing LLM call', {
+              agentId: agent.id,
+              command: toolArgs.command
+            });
+
+            const result = await executeShellCommand(
+              toolArgs.command,
+              toolArgs.parameters || [],
+              toolArgs.directory || './'
+            );
+
+            const formattedResult = formatResultForLLM(result);
+
+            // Save the full tool result as a tool message (standard tool flow)
+            const toolResultMessage: AgentMessage = {
+              role: 'tool',
+              content: formattedResult,
+              tool_call_id: toolCall.id,
+              sender: agent.id,
+              createdAt: new Date(),
+              chatId: world.currentChatId || null,
+              messageId: generateId(),
+              replyToMessageId: messageId,
+              agentId: agent.id
+            };
+            agent.memory.push(toolResultMessage);
+
+            // Save assistant message (bypassing LLM)
+            // Exit code 0: Save only stdout (clean output)
+            // Exit code != 0: Save full formatted result (includes stderr, error details)
+            const assistantContent = result.exitCode === 0
+              ? (result.stdout || '(No output)')
+              : formattedResult;
+
+            const assistantReply: AgentMessage = {
+              role: 'assistant',
+              content: assistantContent,
+              sender: agent.id,
+              createdAt: new Date(),
+              chatId: world.currentChatId || null,
+              messageId: generateId(),
+              replyToMessageId: toolResultMessage.messageId,
+              agentId: agent.id
+            };
+            agent.memory.push(assistantReply);
+
+            // Mark original tool call as complete
+            const toolCallMsg = agent.memory.find(
+              m => m.role === 'assistant' && m.tool_calls?.some(tc => tc.id === toolCall.id)
+            );
+            if (toolCallMsg && toolCallMsg.toolCallStatus) {
+              toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: null };
+            }
+
+            // Save agent state
+            try {
+              const storage = await getStorageWrappers();
+              await storage.saveAgent(world.id, agent);
+              loggerAgent.debug('Saved agent memory with AI command result', { agentId: agent.id });
+            } catch (error) {
+              loggerAgent.error('Failed to save agent memory after AI command', {
+                agentId: agent.id,
+                error: error instanceof Error ? error.message : error
+              });
+            }
+
+            // Publish the assistant message event (what the user sees)
+            const aiCommandMessageEvent: WorldMessageEvent = {
+              content: assistantReply.content || '',
+              sender: agent.id,
+              timestamp: assistantReply.createdAt || new Date(),
+              messageId: assistantReply.messageId!,
+              chatId: assistantReply.chatId,
+              replyToMessageId: assistantReply.replyToMessageId,
+            };
+            (aiCommandMessageEvent as any).role = 'assistant';
+            world.eventEmitter.emit('message', aiCommandMessageEvent);
+
+            return; // End turn
+          }
+
+          // Execute tool with context
+          const toolContext = {
+            world,
+            messages: agent.memory,
+            toolCallId: toolCall.id,
+            workingDirectory: toolArgs.directory || process.cwd()
+          };
+
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
 
           // Tool executed successfully - save result and continue LLM loop

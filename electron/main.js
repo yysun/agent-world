@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-11: Fixed chat-session message rendering by deduplicating user messages on load and enforcing unique message IDs for renderer keys.
  * - 2026-02-10: Fixed tool realtime event serialization to preserve stable tool IDs (`toolExecution.toolCallId`) across start/result/error
  * - 2026-02-10: Added explicit .env loading from project-root/cwd candidates so provider keys are available when Electron starts from `electron/`
  * - 2026-02-10: Added global log event streaming to forward logger.error/warn/info/debug/trace to renderer
@@ -429,6 +430,58 @@ function serializeMessage(message, fallbackIndex) {
     replyToMessageId: message.replyToMessageId || null,
     fromAgentId: message.agentId || null
   };
+}
+
+/**
+ * @param {string | null | undefined} sender
+ */
+function isHumanSender(sender) {
+  const normalized = String(sender || '').trim().toLowerCase();
+  return normalized === 'human' || normalized === 'user';
+}
+
+/**
+ * Deduplicate loaded session messages so user turns appear once even when mirrored
+ * across multiple agent memories. Also guarantees unique `id` values for React keys.
+ * @param {any[]} messages
+ */
+function normalizeSessionMessages(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  const seenUserMessageIds = new Set();
+  const deduplicated = [];
+
+  for (const message of source) {
+    const role = String(message?.role || '').trim().toLowerCase();
+    const messageId = String(message?.messageId || '').trim();
+    const isUserMessage = role === 'user' || isHumanSender(message?.sender);
+
+    if (isUserMessage && messageId) {
+      if (seenUserMessageIds.has(messageId)) continue;
+      seenUserMessageIds.add(messageId);
+    }
+
+    deduplicated.push(message);
+  }
+
+  const usedIds = new Set();
+  return deduplicated.map((message, index) => {
+    const baseIdRaw = String(message?.id || message?.messageId || `mem-${index}`).trim();
+    const baseId = baseIdRaw || `mem-${index}`;
+    let uniqueId = baseId;
+    let suffix = 1;
+
+    while (usedIds.has(uniqueId)) {
+      uniqueId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    usedIds.add(uniqueId);
+    if (message?.id === uniqueId) return message;
+    return {
+      ...message,
+      id: uniqueId
+    };
+  });
 }
 
 /**
@@ -1188,7 +1241,9 @@ async function getSessionMessages(worldId, chatId) {
   const memory = await getMemory(id, normalizedChatId);
   if (!memory) return [];
 
-  return memory.map((message, index) => serializeMessage(message, index));
+  return normalizeSessionMessages(
+    memory.map((message, index) => serializeMessage(message, index))
+  );
 }
 
 /**

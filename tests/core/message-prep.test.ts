@@ -7,6 +7,7 @@
  * - Uses OpenAI-style ChatMessage fixtures with mixed assistant/tool sequences
  * - Asserts ordering and orphaned tool-message cleanup after filtering
  * Recent changes:
+ * - 2026-02-11: Added regression coverage for unresolved assistant tool_calls cleanup.
  * - Removed legacy decision-flow wording and switched to neutral client tool names
  */
 
@@ -224,14 +225,17 @@ describe('filterClientSideMessages', () => {
           { id: 'call_1', type: 'function', function: { name: 'client.localAction', arguments: '{}' } },
           { id: 'call_2', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } }
         ]
-      }
+      },
+      { role: 'tool', tool_call_id: 'call_2', content: 'ok' }
     ];
 
     const result = filterClientSideMessages(messages);
 
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(3);
     expect(result[1].tool_calls).toHaveLength(1);
     expect(result[1].tool_calls![0].function.name).toBe('shell_cmd');
+    expect(result[2].role).toBe('tool');
+    expect(result[2].tool_call_id).toBe('call_2');
   });
 
   it('should drop assistant messages with only client.* tool calls', () => {
@@ -412,10 +416,9 @@ describe('filterClientSideMessages', () => {
 
     const result = filterClientSideMessages(messages);
 
-    // Should drop the invalid tool message
-    expect(result).toHaveLength(2);
+    // Should drop the invalid tool message and unresolved assistant tool_call
+    expect(result).toHaveLength(1);
     expect(result[0].role).toBe('user');
-    expect(result[1].role).toBe('assistant');
   });
 
   it('should drop tool messages that lack matching assistant tool_calls (legacy data)', () => {
@@ -458,5 +461,31 @@ describe('filterClientSideMessages', () => {
     expect(result[0].role).toBe('assistant');
     expect(result[1].role).toBe('tool');
     expect(result[1].tool_call_id).toBe('valid_call');
+  });
+
+  it('should prune unresolved assistant tool_calls that have no matching tool results', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: 'Calling tools',
+        tool_calls: [
+          { id: 'call_resolved', type: 'function', function: { name: 'shell_cmd', arguments: '{}' } },
+          { id: 'call_unresolved', type: 'function', function: { name: 'read_file', arguments: '{}' } }
+        ]
+      },
+      { role: 'tool', tool_call_id: 'call_resolved', content: 'ok' },
+      { role: 'assistant', content: 'Done' }
+    ];
+
+    const result = filterClientSideMessages(messages);
+
+    expect(result).toHaveLength(3);
+    expect(result[0].role).toBe('assistant');
+    expect(result[0].tool_calls).toHaveLength(1);
+    expect(result[0].tool_calls![0].id).toBe('call_resolved');
+    expect(result[1].role).toBe('tool');
+    expect(result[1].tool_call_id).toBe('call_resolved');
+    expect(result[2].role).toBe('assistant');
+    expect(result[2].content).toBe('Done');
   });
 });

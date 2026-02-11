@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-11: Message list rendering now keys by unique `id` first to prevent duplicate-key collisions when loading session history.
  * - 2026-02-10: Tool output panels now default to collapsed state
  * - 2026-02-10: Sender labels now resolve reply chains to show HUMAN for final assistant replies after tool steps
  * - 2026-02-10: Switched tool output expand/collapse controls to icon-only buttons (no text labels)
@@ -2332,7 +2333,7 @@ export default function App() {
                   ) : (
                     messages.map((message, messageIndex) => {
                       const senderLabel = getMessageSenderLabel(message, messagesById, messages, messageIndex);
-                      const messageKey = message.messageId || message.id;
+                      const messageKey = message.id || message.messageId || `message-${messageIndex}`;
                       return (
                         <article
                           key={messageKey}

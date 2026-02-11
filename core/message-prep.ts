@@ -15,6 +15,9 @@
  * - NOT used directly by llm-manager.ts (receives pre-filtered messages from utils.ts)
  *
  * Changes:
+ * - 2026-02-11: Added unresolved-tool-call cleanup.
+ * - Assistant `tool_calls` are pruned to only IDs that have matching tool-result messages.
+ * - Prevents OpenAI 400 errors from legacy/incomplete tool-call history.
  * - 2026-02-08: Removed stale manual tool-intervention terminology from message prep docs
  * - 2026-02-08: Fixed OpenAI API validation error - now filters orphaned tool messages
  * - Tool messages referencing removed client.* tool_call_ids are now properly filtered
@@ -205,9 +208,51 @@ export function filterClientSideMessages(messages: ChatMessage[]): ChatMessage[]
     prepared.push(clonedMessage);
   }
 
-  logger.debug(`Prepared ${prepared.length}/${messages.length} messages for LLM consumption`, {
+  const answeredToolCallIds = new Set<string>();
+  for (const message of prepared) {
+    if (message.role === 'tool' && message.tool_call_id) {
+      answeredToolCallIds.add(message.tool_call_id);
+    }
+  }
+
+  const finalized: ChatMessage[] = [];
+  for (const message of prepared) {
+    if (message.role !== 'assistant' || !message.tool_calls?.length) {
+      finalized.push(message);
+      continue;
+    }
+
+    const resolvedToolCalls = message.tool_calls.filter((toolCall) =>
+      answeredToolCallIds.has(toolCall.id)
+    );
+
+    if (resolvedToolCalls.length === message.tool_calls.length) {
+      finalized.push(message);
+      continue;
+    }
+
+    logger.debug('Pruning unresolved assistant tool_calls from message history', {
+      removedCount: message.tool_calls.length - resolvedToolCalls.length,
+      removedToolCallIds: message.tool_calls
+        .filter((toolCall) => !answeredToolCallIds.has(toolCall.id))
+        .map((toolCall) => toolCall.id)
+    });
+
+    if (resolvedToolCalls.length === 0 && !message.content) {
+      logger.debug('Dropping assistant message with only unresolved tool_calls');
+      continue;
+    }
+
+    finalized.push({
+      ...message,
+      tool_calls: resolvedToolCalls
+    });
+  }
+
+  logger.debug(`Prepared ${finalized.length}/${messages.length} messages for LLM consumption`, {
     removedToolCallIds: Array.from(removedToolCallIds),
-    validToolCallIds: Array.from(validToolCallIds)
+    validToolCallIds: Array.from(validToolCallIds),
+    answeredToolCallIds: Array.from(answeredToolCallIds)
   });
-  return prepared;
+  return finalized;
 }
