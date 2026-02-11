@@ -262,7 +262,8 @@ export function publishSSE(world: World, data: Partial<WorldSSEEvent>): void {
     error: data.error,
     messageId: data.messageId || generateId(),
     usage: data.usage,
-    logEvent: data.logEvent
+    logEvent: data.logEvent,
+    tool_calls: data.tool_calls
   };
   world.eventEmitter.emit('sse', sseEvent);
 }

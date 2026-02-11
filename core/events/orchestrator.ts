@@ -11,6 +11,7 @@
  * - Turn limit enforcement with automatic handoff to human
  * - AI command handling (gemini, copilot, codex) - results saved directly to memory
  * - Enhanced tool call message formatting with parameters display
+ * - SSE tool call data for web clients (streaming mode)
  * 
  * Implementation:
  * - AI commands executed via shell_cmd bypass LLM response flow
@@ -23,6 +24,9 @@
  * - Tool call messages show up to 3 parameters with truncation for readability
  *   * Single tool: "Calling tool: shell_cmd (command: "ls", directory: "./")"
  *   * Multiple tools: "Calling 2 tools: shell_cmd, read_file"
+ * - In streaming mode, formatted tool call content with tool_calls data is sent via SSE
+ *   * Ensures web/Electron clients display complete tool call info with parameters
+ *   * Prevents incomplete display (e.g., "Calling tool: shell_cmd" without params)
  * 
  * Dependencies (Layer 5):
  * - types.ts (Layer 1)
@@ -34,6 +38,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-11: Fixed tool call display in Electron/web - send formatted content with tool_calls via SSE
  * - 2026-02-11: Fixed OpenAI tool-call protocol integrity.
  *   - Persist only the first executable tool_call when agent execution is single-call.
  *   - Route JSON parse/tool lookup failures through tool-error persistence so each persisted tool_call gets a matching tool message.
@@ -293,6 +298,18 @@ export async function processAgentMessage(
       if (executableToolCalls.length > 0 &&
         shouldUpgradeToolCallMessage(messageContent, executableToolCalls as DisplayToolCall[])) {
         messageContent = formatToolCallsMessage(executableToolCalls as DisplayToolCall[]);
+      }
+
+      // For streaming mode, send the formatted tool call message via SSE
+      // This ensures web clients receive the complete tool call info with parameters
+      if (isStreamingEnabled()) {
+        publishSSE(world, {
+          agentName: agent.id,
+          type: 'chunk',
+          content: messageContent,
+          messageId,
+          tool_calls: executableToolCalls
+        });
       }
 
       const assistantMessage: AgentMessage = {

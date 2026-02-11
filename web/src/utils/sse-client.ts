@@ -10,6 +10,7 @@
  * - Tool execution event handling (start, progress, result, error)
  * - Log event processing
  * - Shell command output streaming (stdout/stderr) with real-time display
+ * - Tool call data preservation in streaming chunks
  * 
  * Implementation:
  * - Uses fetch API with ReadableStream for SSE
@@ -17,8 +18,10 @@
  * - Maintains active streaming messages Map
  * - Accumulates chunks for smooth streaming display
  * - Streams shell command output with stdout/stderr distinction
+ * - Preserves tool_calls metadata for complete tool call display with parameters
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2026-02-11 - Preserve tool_calls in handleStreamChunk for complete display
  * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers
  * Updated: 2026-02-08 - Added tool-stream event handler for shell command output streaming
  */
@@ -502,7 +505,7 @@ export const handleStreamStart = <T extends SSEComponentState>(state: T, data: S
 
 // Update streaming message content
 export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: StreamChunkData): T => {
-  const { messageId, sender, content } = data;
+  const { messageId, sender, content, tool_calls } = data;
   const messages = [...(state.messages || [])];
   const activeStreamMessageId = (state as any).activeStreamMessageId ?? messageId;
 
@@ -512,7 +515,9 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       messages[i] = {
         ...messages[i],
         text: content || '',
-        createdAt: new Date()
+        createdAt: new Date(),
+        // Preserve tool_calls if present
+        ...(tool_calls && { tool_calls })
       };
 
       return {
@@ -531,7 +536,9 @@ export const handleStreamChunk = <T extends SSEComponentState>(state: T, data: S
       sender: sender,
       text: content || '',
       isStreaming: true,
-      messageId: activeStreamMessageId
+      messageId: activeStreamMessageId,
+      // Include tool_calls if present
+      ...(tool_calls && { tool_calls })
     }],
     activeStreamMessageId,
     needScroll: true

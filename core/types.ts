@@ -518,6 +518,15 @@ export interface WorldSSEEvent {
   // Tool streaming fields
   toolName?: string;
   stream?: 'stdout' | 'stderr';
+  // Tool calls data for complete display with parameters
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string | Record<string, unknown>;
+    };
+  }>;
 }
 
 /**
