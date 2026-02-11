@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-11: Surface world subscription refresh/rebind warnings in the status bar for world/session mutations.
  * - 2026-02-11: Log errors now render even without an active chat subscription by using a global log listener with status-bar fallback.
  * - 2026-02-11: Message list rendering now keys by unique `id` first to prevent duplicate-key collisions when loading session history.
  * - 2026-02-10: Tool output panels now default to collapsed state
@@ -279,6 +280,13 @@ function createLogMessage(logEvent) {
 function safeMessage(error, fallback) {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function getRefreshWarning(result) {
+  const warning = result?.refreshWarning;
+  if (typeof warning !== 'string') return '';
+  const trimmed = warning.trim();
+  return trimmed.length > 0 ? trimmed : '';
 }
 
 function getMessageTimestamp(message) {
@@ -1276,11 +1284,71 @@ export default function App() {
       // Persist world selection
       await api.saveLastSelectedWorld(created.id);
 
+      setPanelOpen(false);
+      setPanelMode('create-world');
       setStatusText(`World created: ${created.name}`, 'success');
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to create world.'), 'error');
     }
   }, [api, creatingWorld, setStatusText]);
+
+  const hasUnsavedWorldChanges = useCallback(() => {
+    if (panelMode === 'create-world') {
+      const defaultForm = getDefaultWorldForm();
+      return creatingWorld.name !== defaultForm.name ||
+        creatingWorld.description !== defaultForm.description ||
+        creatingWorld.turnLimit !== defaultForm.turnLimit ||
+        creatingWorld.chatLLMProvider !== defaultForm.chatLLMProvider ||
+        creatingWorld.chatLLMModel !== defaultForm.chatLLMModel ||
+        creatingWorld.mcpConfig !== defaultForm.mcpConfig;
+    }
+    if (panelMode === 'edit-world' && loadedWorld) {
+      const originalForm = getWorldFormFromWorld(loadedWorld);
+      return editingWorld.name !== originalForm.name ||
+        editingWorld.description !== originalForm.description ||
+        editingWorld.turnLimit !== originalForm.turnLimit ||
+        editingWorld.chatLLMProvider !== originalForm.chatLLMProvider ||
+        editingWorld.chatLLMModel !== originalForm.chatLLMModel ||
+        editingWorld.mcpConfig !== originalForm.mcpConfig;
+    }
+    return false;
+  }, [panelMode, creatingWorld, editingWorld, loadedWorld]);
+
+  const hasUnsavedAgentChanges = useCallback(() => {
+    if (panelMode === 'create-agent') {
+      return creatingAgent.name !== DEFAULT_AGENT_FORM.name ||
+        creatingAgent.type !== DEFAULT_AGENT_FORM.type ||
+        creatingAgent.provider !== DEFAULT_AGENT_FORM.provider ||
+        creatingAgent.model !== DEFAULT_AGENT_FORM.model ||
+        creatingAgent.systemPrompt !== DEFAULT_AGENT_FORM.systemPrompt ||
+        creatingAgent.temperature !== DEFAULT_AGENT_FORM.temperature ||
+        creatingAgent.maxTokens !== DEFAULT_AGENT_FORM.maxTokens;
+    }
+    if (panelMode === 'edit-agent' && selectedAgentForPanel) {
+      return editingAgent.name !== selectedAgentForPanel.name ||
+        editingAgent.type !== selectedAgentForPanel.type ||
+        editingAgent.provider !== selectedAgentForPanel.provider ||
+        editingAgent.model !== selectedAgentForPanel.model ||
+        editingAgent.systemPrompt !== selectedAgentForPanel.systemPrompt ||
+        String(editingAgent.temperature ?? '') !== String(selectedAgentForPanel.temperature ?? '') ||
+        String(editingAgent.maxTokens ?? '') !== String(selectedAgentForPanel.maxTokens ?? '');
+    }
+    return false;
+  }, [panelMode, creatingAgent, editingAgent, selectedAgentForPanel]);
+
+  const closePanel = useCallback(() => {
+    const hasWorldChanges = hasUnsavedWorldChanges();
+    const hasAgentChanges = hasUnsavedAgentChanges();
+
+    if (hasWorldChanges || hasAgentChanges) {
+      const confirmed = window.confirm('You have unsaved changes. Are you sure you want to close this panel?');
+      if (!confirmed) return;
+    }
+
+    setPanelOpen(false);
+    setPanelMode('create-world');
+    setSelectedAgentId(null);
+  }, [hasUnsavedWorldChanges, hasUnsavedAgentChanges]);
 
   const onOpenCreateWorldPanel = useCallback(() => {
     setPanelMode('create-world');
@@ -1360,14 +1428,20 @@ export default function App() {
     setUpdatingWorld(true);
     try {
       const updated = await api.updateWorld(loadedWorld.id, validation.data);
+      const warning = getRefreshWarning(updated);
+      const updatedWorld = { ...updated };
+      delete updatedWorld.refreshWarning;
 
-      setLoadedWorld(updated);
+      setLoadedWorld(updatedWorld);
       setAvailableWorlds((worlds) =>
-        worlds.map((world) => (world.id === updated.id ? { id: updated.id, name: updated.name } : world))
+        worlds.map((world) => (world.id === updatedWorld.id ? { id: updatedWorld.id, name: updatedWorld.name } : world))
       );
       setPanelOpen(false);
       setPanelMode('create-world');
-      setStatusText(`World updated: ${updated.name}`, 'success');
+      setStatusText(
+        warning ? `World updated: ${updatedWorld.name}. ${warning}` : `World updated: ${updatedWorld.name}`,
+        warning ? 'error' : 'success'
+      );
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to update world.'), 'error');
     } finally {
@@ -1547,14 +1621,21 @@ export default function App() {
 
     try {
       const result = await api.createSession(loadedWorld.id);
+      const createWarning = getRefreshWarning(result);
       const nextSessions = sortSessionsByNewest(result.sessions || []);
       setSessions(nextSessions);
       const nextSessionId = result.currentChatId || nextSessions[0]?.id || null;
       setSelectedSessionId(nextSessionId);
+      let selectWarning = '';
       if (nextSessionId) {
-        await api.selectSession(loadedWorld.id, nextSessionId);
+        const selectResult = await api.selectSession(loadedWorld.id, nextSessionId);
+        selectWarning = getRefreshWarning(selectResult);
       }
-      setStatusText('Chat session created.', 'success');
+      const warning = [...new Set([createWarning, selectWarning].filter(Boolean))].join(' ');
+      setStatusText(
+        warning ? `Chat session created. ${warning}` : 'Chat session created.',
+        warning ? 'error' : 'success'
+      );
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to create session.'), 'error');
     }
@@ -1567,7 +1648,11 @@ export default function App() {
     setMessages([]);
     setSelectedSessionId(chatId);
     try {
-      await api.selectSession(loadedWorld.id, chatId);
+      const result = await api.selectSession(loadedWorld.id, chatId);
+      const warning = getRefreshWarning(result);
+      if (warning) {
+        setStatusText(`Session selected. ${warning}`, 'error');
+      }
     } catch (error) {
       setSelectedSessionId(previousSessionId);
       setStatusText(safeMessage(error, 'Failed to select session.'), 'error');
@@ -1585,11 +1670,15 @@ export default function App() {
     setDeletingSessionId(chatId);
     try {
       const result = await api.deleteChat(loadedWorld.id, chatId);
+      const warning = getRefreshWarning(result);
       const nextSessions = sortSessionsByNewest(result.sessions || []);
       setSessions(nextSessions);
       const nextSessionId = result.currentChatId || nextSessions[0]?.id || null;
       setSelectedSessionId(nextSessionId);
-      setStatusText('Chat session deleted.', 'success');
+      setStatusText(
+        warning ? `Chat session deleted. ${warning}` : 'Chat session deleted.',
+        warning ? 'error' : 'success'
+      );
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to delete session.'), 'error');
     } finally {
@@ -2580,15 +2669,28 @@ export default function App() {
             >
               {panelOpen ? (
                 <div className="flex h-full flex-col">
-                  <h2 className="mb-3 text-xs uppercase tracking-wide text-sidebar-foreground/70">
-                    {panelMode === 'edit-world'
-                      ? 'Edit World'
-                      : panelMode === 'create-agent'
-                        ? 'Create Agent'
-                        : panelMode === 'edit-agent'
-                          ? 'Edit Agent'
-                          : 'Create World'}
-                  </h2>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-xs uppercase tracking-wide text-sidebar-foreground/70">
+                      {panelMode === 'edit-world'
+                        ? 'Edit World'
+                        : panelMode === 'create-agent'
+                          ? 'Create Agent'
+                          : panelMode === 'edit-agent'
+                            ? 'Edit Agent'
+                            : 'Create World'}
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={closePanel}
+                      className="flex h-6 w-6 items-center justify-center rounded text-sidebar-foreground/70 transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                      title="Close panel"
+                      aria-label="Close panel"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
 
                   <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
                     {panelMode === 'edit-world' && loadedWorld ? (
@@ -2660,25 +2762,32 @@ export default function App() {
                               </button>
                             </div>
                           </div>
-                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                          <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setPanelMode('create-world');
-                                setPanelOpen(false);
-                              }}
-                              disabled={updatingWorld || deletingWorld}
-                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              onClick={onDeleteWorld}
+                              disabled={deletingWorld || updatingWorld}
+                              className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Cancel
+                              Delete
                             </button>
-                            <button
-                              type="submit"
-                              disabled={updatingWorld || deletingWorld}
-                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Save
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={closePanel}
+                                disabled={updatingWorld || deletingWorld}
+                                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={updatingWorld || deletingWorld}
+                                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Save
+                              </button>
+                            </div>
                           </div>
                         </form>
                       </>
@@ -2763,25 +2872,25 @@ export default function App() {
                               </button>
                             </div>
                           </div>
-                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPanelOpen(false);
-                                setPanelMode('create-world');
-                              }}
-                              disabled={savingAgent}
-                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={savingAgent}
-                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {savingAgent ? 'Creating...' : 'Create'}
-                            </button>
+                          <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <div></div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={closePanel}
+                                disabled={savingAgent}
+                                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={savingAgent}
+                                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingAgent ? 'Creating...' : 'Create'}
+                              </button>
+                            </div>
                           </div>
                         </form>
                       </>
@@ -2789,27 +2898,13 @@ export default function App() {
                       <>
                         <form onSubmit={onUpdateAgent} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                            <div className="flex items-center gap-2">
-                              <input
-                                value={editingAgent.name}
-                                onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
-                                placeholder="Agent name"
-                                className="flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent || deletingAgent}
-                              />
-                              <button
-                                type="button"
-                                onClick={onDeleteAgent}
-                                disabled={savingAgent || deletingAgent}
-                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-destructive/20 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
-                                title="Delete agent"
-                                aria-label="Delete agent"
-                              >
-                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M18 6L6 18M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
+                            <input
+                              value={editingAgent.name}
+                              onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
+                              placeholder="Agent name"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={savingAgent || deletingAgent}
+                            />
                             <input
                               value={editingAgent.type}
                               onChange={(event) => setEditingAgent((value) => ({ ...value, type: event.target.value }))}
@@ -2880,26 +2975,32 @@ export default function App() {
                               </button>
                             </div>
                           </div>
-                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                          <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                setPanelOpen(false);
-                                setPanelMode('create-world');
-                                setSelectedAgentId(null);
-                              }}
+                              onClick={onDeleteAgent}
                               disabled={savingAgent || deletingAgent}
-                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              className="rounded-xl border border-destructive/40 px-3 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                              Cancel
+                              Delete
                             </button>
-                            <button
-                              type="submit"
-                              disabled={savingAgent || deletingAgent}
-                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {savingAgent ? 'Saving...' : deletingAgent ? 'Deleting...' : 'Save'}
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={closePanel}
+                                disabled={savingAgent || deletingAgent}
+                                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={savingAgent || deletingAgent}
+                                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {savingAgent ? 'Saving...' : deletingAgent ? 'Deleting...' : 'Save'}
+                              </button>
+                            </div>
                           </div>
                         </form>
                       </>
@@ -2970,20 +3071,23 @@ export default function App() {
                               </button>
                             </div>
                           </div>
-                          <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
-                            <button
-                              type="button"
-                              onClick={() => setPanelOpen(false)}
-                              className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
-                            >
-                              Create
-                            </button>
+                          <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                            <div></div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={closePanel}
+                                className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                              >
+                                Create
+                              </button>
+                            </div>
                           </div>
                         </form>
                       </>

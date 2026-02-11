@@ -19,6 +19,9 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-11: Added IPC-level refresh warning payloads so renderer can show subscription refresh/rebind issues in the UI while keeping CLI-style best-effort mutation behavior.
+ * - 2026-02-11: Changed world subscription refresh/rebind to CLI-style best-effort behavior (warn on refresh/rebind issues without failing world/chat mutations).
+ * - 2026-02-11: Removed Electron-side world/chat ID canonicalization guards and added world subscription refresh + chat listener rebind after world/chat mutations (CLI/API parity).
  * - 2026-02-11: Fixed chat-session message rendering by deduplicating user messages on load and enforcing unique message IDs for renderer keys.
  * - 2026-02-10: Fixed tool realtime event serialization to preserve stable tool IDs (`toolExecution.toolCallId`) across start/result/error
  * - 2026-02-10: Added explicit .env loading from project-root/cwd candidates so provider keys are available when Electron starts from `electron/`
@@ -376,8 +379,8 @@ function serializeChat(chat) {
  * @param {any[]} chats
  */
 async function serializeChatsWithMessageCounts(worldId, chats) {
-  const normalizedWorldId = String(worldId || '').trim();
-  if (!normalizedWorldId) {
+  const worldKey = String(worldId || '');
+  if (!worldKey) {
     return [];
   }
 
@@ -385,11 +388,11 @@ async function serializeChatsWithMessageCounts(worldId, chats) {
   const messageCounts = new Map();
 
   await Promise.all(chatList.map(async (chat) => {
-    const chatId = String(chat?.id || '').trim();
+    const chatId = String(chat?.id || '');
     if (!chatId) return;
 
     try {
-      const messages = await getMemory(normalizedWorldId, chatId);
+      const messages = await getMemory(worldKey, chatId);
       const count = Array.isArray(messages) ? messages.length : 0;
       messageCounts.set(chatId, count);
     } catch {
@@ -399,7 +402,7 @@ async function serializeChatsWithMessageCounts(worldId, chats) {
   }));
 
   return chatList.map((chat) => {
-    const chatId = String(chat?.id || '').trim();
+    const chatId = String(chat?.id || '');
     const derivedCount = messageCounts.get(chatId);
     return serializeChat({
       ...chat,
@@ -837,7 +840,7 @@ async function createWorkspaceWorld(payload) {
  */
 async function updateWorkspaceWorld(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
+  const worldId = String(payload?.worldId || '');
   if (!worldId) {
     throw new Error('World ID is required.');
   }
@@ -891,7 +894,15 @@ async function updateWorkspaceWorld(payload) {
     throw new Error(`World not found: ${worldId}`);
   }
 
-  return serializeWorldInfo(updated);
+  const refreshWarning = await refreshWorldSubscription(worldId);
+  const serialized = serializeWorldInfo(updated);
+  if (refreshWarning) {
+    return {
+      ...serialized,
+      refreshWarning
+    };
+  }
+  return serialized;
 }
 
 /**
@@ -901,7 +912,7 @@ async function updateWorkspaceWorld(payload) {
  */
 async function createWorldAgent(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
+  const worldId = String(payload?.worldId || '');
   if (!worldId) throw new Error('World ID is required.');
 
   const name = String(payload?.name || '').trim();
@@ -944,8 +955,8 @@ async function createWorldAgent(payload) {
  */
 async function updateWorldAgent(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
-  const agentId = String(payload?.agentId || '').trim();
+  const worldId = String(payload?.worldId || '');
+  const agentId = String(payload?.agentId || '');
   if (!worldId) throw new Error('World ID is required.');
   if (!agentId) throw new Error('Agent ID is required.');
 
@@ -1007,8 +1018,8 @@ async function updateWorldAgent(payload) {
  */
 async function deleteWorldAgent(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
-  const agentId = String(payload?.agentId || '').trim();
+  const worldId = String(payload?.worldId || '');
+  const agentId = String(payload?.agentId || '');
   if (!worldId) throw new Error('World ID is required.');
   if (!agentId) throw new Error('Agent ID is required.');
 
@@ -1023,7 +1034,7 @@ async function deleteWorldAgent(payload) {
  */
 async function deleteWorkspaceWorld(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
+  const worldId = String(payload?.worldId || '');
   if (!worldId) {
     throw new Error('World ID is required.');
   }
@@ -1158,7 +1169,7 @@ async function importWorld() {
  */
 async function listWorldSessions(worldId) {
   ensureCoreReady();
-  const id = String(worldId || '').trim();
+  const id = String(worldId || '');
   if (!id) throw new Error('World ID is required.');
   const world = await getWorld(id);
   if (!world) throw new Error(`World not found: ${id}`);
@@ -1172,17 +1183,19 @@ async function listWorldSessions(worldId) {
  */
 async function createWorldSession(worldId) {
   ensureCoreReady();
-  const id = String(worldId || '').trim();
+  const id = String(worldId || '');
   if (!id) throw new Error('World ID is required.');
 
   const updatedWorld = await newChat(id);
   if (!updatedWorld) throw new Error(`World not found: ${id}`);
+  const refreshWarning = await refreshWorldSubscription(id);
 
   const chats = await listChats(id);
   const sessions = await serializeChatsWithMessageCounts(id, chats);
   return {
     currentChatId: updatedWorld.currentChatId || null,
-    sessions
+    sessions,
+    ...(refreshWarning ? { refreshWarning } : {})
   };
 }
 
@@ -1192,13 +1205,14 @@ async function createWorldSession(worldId) {
  */
 async function deleteWorldSession(worldId, chatId) {
   ensureCoreReady();
-  const id = String(worldId || '').trim();
-  const sessionId = String(chatId || '').trim();
+  const id = String(worldId || '');
+  const sessionId = String(chatId || '');
   if (!id) throw new Error('World ID is required.');
   if (!sessionId) throw new Error('Session ID is required.');
 
   const deleted = await deleteChat(id, sessionId);
   if (!deleted) throw new Error(`Session not found: ${sessionId}`);
+  const refreshWarning = await refreshWorldSubscription(id);
 
   const world = await getWorld(id);
   if (!world) throw new Error(`World not found: ${id}`);
@@ -1207,7 +1221,8 @@ async function deleteWorldSession(worldId, chatId) {
   const sessions = await serializeChatsWithMessageCounts(id, chats);
   return {
     currentChatId: world.currentChatId || null,
-    sessions
+    sessions,
+    ...(refreshWarning ? { refreshWarning } : {})
   };
 }
 
@@ -1217,15 +1232,20 @@ async function deleteWorldSession(worldId, chatId) {
  */
 async function selectWorldSession(worldId, chatId) {
   ensureCoreReady();
-  const id = String(worldId || '').trim();
-  const sessionId = String(chatId || '').trim();
+  const id = String(worldId || '');
+  const sessionId = String(chatId || '');
   if (!id) throw new Error('World ID is required.');
   if (!sessionId) throw new Error('Session ID is required.');
 
   const world = await restoreChat(id, sessionId);
   if (!world) throw new Error(`World or session not found: ${id}/${sessionId}`);
+  const refreshWarning = await refreshWorldSubscription(id);
 
-  return { worldId: id, chatId: world.currentChatId || sessionId };
+  return {
+    worldId: id,
+    chatId: world.currentChatId || sessionId,
+    ...(refreshWarning ? { refreshWarning } : {})
+  };
 }
 
 /**
@@ -1234,11 +1254,11 @@ async function selectWorldSession(worldId, chatId) {
  */
 async function getSessionMessages(worldId, chatId) {
   ensureCoreReady();
-  const id = String(worldId || '').trim();
+  const id = String(worldId || '');
   if (!id) throw new Error('World ID is required.');
 
-  const normalizedChatId = chatId ? String(chatId).trim() : null;
-  const memory = await getMemory(id, normalizedChatId);
+  const requestedChatId = chatId ? String(chatId) : null;
+  const memory = await getMemory(id, requestedChatId);
   if (!memory) return [];
 
   return normalizeSessionMessages(
@@ -1252,8 +1272,8 @@ async function getSessionMessages(worldId, chatId) {
 async function subscribeChatEvents(payload) {
   ensureCoreReady();
   const subscriptionId = toSubscriptionId(payload);
-  const worldId = String(payload?.worldId || '').trim();
-  const chatId = payload?.chatId ? String(payload.chatId).trim() : null;
+  const worldId = String(payload?.worldId || '');
+  const chatId = payload?.chatId ? String(payload.chatId) : null;
 
   // Ensure world is subscribed so agents can respond
   const world = await ensureWorldSubscribed(worldId);
@@ -1342,12 +1362,64 @@ async function ensureWorldSubscribed(worldId) {
 }
 
 /**
+ * Refresh cached world subscription after world/chat mutations.
+ * Rebinds active chat event listeners to the refreshed world instance.
+ * @param {string} worldId
+ */
+async function refreshWorldSubscription(worldId) {
+  const subscription = worldSubscriptions.get(worldId);
+  if (!subscription) return null;
+
+  const subscriptionsToRestore = Array.from(chatEventSubscriptions.entries())
+    .filter(([, value]) => value.worldId === worldId)
+    .map(([subscriptionId, value]) => ({
+      subscriptionId,
+      chatId: value.chatId
+    }));
+
+  for (const { subscriptionId } of subscriptionsToRestore) {
+    removeChatEventSubscription(subscriptionId);
+  }
+
+  try {
+    await subscription.refresh();
+  } catch (error) {
+    const warningMessage = `Failed to refresh world subscription for '${worldId}': ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(warningMessage);
+    return warningMessage;
+  }
+
+  const restoreFailures = [];
+  for (const { subscriptionId, chatId } of subscriptionsToRestore) {
+    if (canceledSubscriptionIds.has(subscriptionId)) continue;
+    try {
+      await subscribeChatEvents({ subscriptionId, worldId, chatId });
+    } catch (error) {
+      restoreFailures.push({
+        subscriptionId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  if (restoreFailures.length > 0) {
+    const failedSubscriptionIds = restoreFailures.map((item) => item.subscriptionId).join(', ');
+    const details = restoreFailures.map((item) => `${item.subscriptionId}: ${item.message}`).join('; ');
+    const warningMessage = `Failed to restore chat subscriptions for world '${worldId}' [${failedSubscriptionIds}]. Details: ${details}`;
+    console.warn(warningMessage);
+    return warningMessage;
+  }
+
+  return null;
+}
+
+/**
  * @param {any} payload
  */
 async function sendChatMessage(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
-  const chatId = payload?.chatId ? String(payload.chatId).trim() : null;
+  const worldId = String(payload?.worldId || '');
+  const chatId = payload?.chatId ? String(payload.chatId) : null;
   const content = String(payload?.content || '').trim();
   const sender = payload?.sender ? String(payload.sender).trim() : 'human';
 
@@ -1378,9 +1450,9 @@ async function sendChatMessage(payload) {
  */
 async function deleteMessageFromChat(payload) {
   ensureCoreReady();
-  const worldId = String(payload?.worldId || '').trim();
-  const messageId = String(payload?.messageId || '').trim();
-  const chatId = String(payload?.chatId || '').trim();
+  const worldId = String(payload?.worldId || '');
+  const messageId = String(payload?.messageId || '');
+  const chatId = String(payload?.chatId || '');
 
   if (!worldId) throw new Error('World ID is required.');
   if (!messageId) throw new Error('Message ID is required.');
