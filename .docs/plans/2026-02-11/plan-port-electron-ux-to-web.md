@@ -10,18 +10,40 @@ Port the superior UX features from the Electron app to the web app by implementi
 
 ## Architecture Decisions
 
-### Decision 1: Framework-Agnostic State Managers ✅
-**Choice**: Copy `streaming-state.js` and `activity-state.js` directly from Electron  
+### Decision 1: State Management Approach ✅
+**Choice**: Merge streaming state directly into World.tsx (SIMPLIFIED)  
 **Rationale**: 
-- Pure JavaScript, no framework dependencies
-- Factory function pattern works in any environment
-- Already proven and tested in Electron app
-- No changes needed to core logic
+- Only World.tsx needs streaming state (no reuse elsewhere)
+- AppRun's immutable updates work better without callback layers
+- Simpler architecture = easier to maintain
+- Can extract to module later if reuse is needed
+
+**Alternative Considered**: Separate streaming-state module (original plan)
+- Pros: Reusable, proven in Electron, easy to unit test
+- Cons: Callback wiring complexity, extra abstraction layer
+- **Decision**: Rejected in favor of simplicity since no reuse case exists
 
 **Implementation**:
-- Copy files to `/web/src/utils/`
-- Add TypeScript definitions (`.d.ts`)
-- Import and use with AppRun event system
+- Add streaming state directly to WorldComponentState
+- Implement RAF debouncing in World.tsx update handlers
+- Keep `activity-state.js` separate (used for tool tracking)
+
+**Comparison Table**:
+
+| Aspect | Original (Separate Module) | Simplified (Merged) |
+|--------|---------------------------|---------------------|
+| **Files** | +2 new modules | 0 new modules |
+| **Callbacks** | 7+ callback functions | 0 callbacks |
+| **State sources** | 3 (streaming, activity, World) | 1 (World.tsx only) |
+| **Code lines** | ~400 (modules) + wiring | ~100 (inline logic) |
+| **Testability** | Easy (unit test modules) | Harder (test component) |
+| **Reusability** | High (can reuse modules) | Low (World.tsx specific) |
+| **Complexity** | Medium (callback layer) | Low (direct updates) |
+| **AppRun fit** | Awkward (callbacks) | Natural (events → state) |
+| **Implementation time** | ~10 hours | ~8 hours |
+| **Maintenance** | More files to track | Simpler, fewer files |
+
+**Decision**: Simplified approach wins for this specific use case.
 
 ### Decision 2: AppRun Component Pattern ✅
 **Choice**: Create functional components returning JSX (AppRun style)  
@@ -74,28 +96,27 @@ border-border → var(--border-primary)
 3. State managers call back to update World component state
 4. World component passes state to child components
 
-## System Architecture
+## System Architecture (SIMPLIFIED)
 
 ```mermaid
 flowchart TD
     A[SSE Events] --> B[sse-streaming.ts]
-    B --> C[streaming-state.js]
-    B --> D[activity-state.js]
-    C --> E[Content Accumulator]
-    D --> F[Tool Tracker]
-    C --> G[RAF Debouncer]
-    D --> H[Elapsed Timer]
-    G --> I[World Component State]
-    H --> I
-    E --> I
-    F --> I
-    I --> J[world-chat.tsx]
-    J --> K[ThinkingIndicator]
-    J --> L[ActivityPulse]
-    J --> M[ElapsedTimeCounter]
-    J --> N[ToolExecutionStatus]
-    J --> O[Message Display]
+    B --> C[AppRun Events]
+    C --> D[World.tsx Update Handlers]
+    D --> E[State: messages, activeTools, etc.]
+    D --> F[RAF Debouncing]
+    D --> G[Elapsed Timer]
+    F --> E
+    G --> E
+    E --> H[world-chat.tsx]
+    H --> I[ThinkingIndicator]
+    H --> J[ActivityPulse]
+    H --> K[ElapsedTimeCounter]
+    H --> L[ToolExecutionStatus]
+    H --> M[Message Display]
 ```
+
+**Key Simplification**: No separate state manager layer. SSE → AppRun events → World.tsx state directly.
 
 ## Component Architecture
 
@@ -118,120 +139,168 @@ flowchart TD
     style F fill:#d4edda
 ```
 
-## Data Flow
+## Data Flow (SIMPLIFIED)
 
 ```mermaid
 sequenceDiagram
     participant SSE as SSE Stream
     participant Handler as sse-streaming.ts
-    participant Stream as streaming-state
-    participant Activity as activity-state
+    participant Events as AppRun Events
     participant World as World.tsx
     participant Chat as world-chat.tsx
     
     SSE->>Handler: Event: message-start
-    Handler->>Stream: handleStart()
-    Stream->>World: onStreamStart callback
+    Handler->>Events: app.run('sse:message-start')
+    Events->>World: Update handler
+    World->>World: Add message to array
     World->>Chat: Props update
     
     SSE->>Handler: Event: message-chunk
-    Handler->>Stream: handleChunk()
-    Note over Stream: Debounce 16ms
-    Stream->>World: onStreamUpdate callback
+    Handler->>Events: app.run('sse:message-chunk')
+    Events->>World: Update handler
+    World->>World: Add to pendingStreamUpdates
+    World->>World: Schedule RAF flush (16ms)
+    Note over World: RAF fires
+    World->>World: Flush updates immutably
     World->>Chat: Props update
     
     SSE->>Handler: Event: tool-start
-    Handler->>Activity: handleToolStart()
-    Activity->>World: onToolStart callback
+    Handler->>Events: app.run('sse:tool-start')
+    Events->>World: Update handler
+    World->>World: Add to activeTools[]
+    World->>World: Start elapsed timer
     World->>Chat: activeTools update
     Chat->>Chat: Render ToolExecutionStatus
     
     SSE->>Handler: Event: message-end
-    Handler->>Stream: handleEnd()
-    Stream->>World: onStreamEnd callback
-    Handler->>Activity: Cleanup tools
-    Activity->>World: onBusyChange(false)
+    Handler->>Events: app.run('sse:message-end')
+    Events->>World: Update handler
+    World->>World: Flush pending updates
+    World->>World: Finalize message
+    World->>World: Stop timer if idle
     World->>Chat: Props update
 ```
 
-## File Structure
+**Key Simplification**: No callback layer. Direct event → update handler → state flow.
+
+## File Structure (SIMPLIFIED)
 
 ```
 web/src/
-├── utils/
-│   ├── streaming-state.js          # NEW: Copy from electron
-│   ├── streaming-state.d.ts        # NEW: TypeScript definitions
-│   ├── activity-state.js           # NEW: Copy from electron
-│   └── activity-state.d.ts         # NEW: TypeScript definitions
 ├── components/
 │   ├── activity-indicators.tsx     # NEW: All indicator components
 │   ├── tool-execution-status.tsx   # NEW: Tool status display
 │   └── world-chat.tsx              # MODIFIED: Add new components
 ├── domain/
-│   └── sse-streaming.ts            # MODIFIED: Add activity tracking
+│   └── sse-streaming.ts            # MODIFIED: Emit AppRun events
 ├── pages/
-│   └── World.tsx                   # MODIFIED: Manage activity state
+│   └── World.tsx                   # MODIFIED: ALL state + debouncing logic here
 └── styles.css                      # MODIFIED: Add new styles
 ```
 
+**Note**: No separate state manager modules. All streaming/activity state managed directly in World.tsx.
+
 ## Implementation Phases
 
-### Phase 1: Foundation - State Managers ✅
-**Goal**: Set up core state management without UI changes  
+### Phase 1: Foundation - State Setup ✅ (SIMPLIFIED)
+**Goal**: Set up core state types without separate modules  
 **Risk**: Low  
-**Testing**: Unit tests for state managers
+**Testing**: Type checking
 
-- [ ] Copy `streaming-state.js` from electron to `/web/src/utils/`
 - [ ] Copy `activity-state.js` from electron to `/web/src/utils/`
-- [ ] Create TypeScript definitions:
-  - [ ] `streaming-state.d.ts`
-  - [ ] `activity-state.d.ts`
-- [ ] Add JSDoc comments for better IDE support
-- [ ] Test state managers work in web environment
-- [ ] Verify imports resolve correctly
-
-**Success Criteria**:
-- State manager files compile without errors
-- TypeScript recognizes all types
-- No console errors when imported
-
-### Phase 2: State Integration - Connect to SSE ✅
-**Goal**: Wire up state managers to existing SSE infrastructure  
-**Risk**: Medium (integration complexity)  
+- [ ] **RECOMMENDED**: Convert `activity-state.js` to TypeScript:
+  - [ ] Rename to `activity-state.ts`
+  - [ ] Add proper TypeScript types (no .d.ts files needed)
+  - [ ] Test compilation with AppRun types
+- [ ] Add streaming state types to `WorldComponentState`:
+  ```typescript
+  interface WorldComponentState {
+    // ... existing fields
+    
+    // Streaming state (merged, no separate module)
+    pendingStreamUpdates: Map<string, string>;  // messageId -> content
+    debounceFrameId: number | null;
+    
+    // Activity state (from activity-state module)
+    activeTools: ToolEntry[];
+    isBusy: boolean;
+    elapsedMs: number;
+  }
+  ```
+- [ ] Test TypSE Integration with Debouncing ✅ (SIMPLIFIED)
+**Goal**: Add debounced streaming directly in World.tsx  
+**Risk**: Low (simpler than callback wiring)  
 **Testing**: Manual testing with SSE events
 
-- [ ] Modify `World.tsx` to create state manager instances:
-  - [ ] Add `streamingStateRef` using factory function
-  - [ ] Add `activityStateRef` using factory function
-  - [ ] Initialize in component lifecycle
-- [ ] Add state properties to `WorldComponentState`:
+**CRITICAL: State Ownership Model** (AR Review - SIMPLIFIED)
+```
+World.tsx: Single source of truth for ALL state
+  - Owns: messages[], pendingStreamUpdates, debounceFrameId
+  - Owns: activeTools[], isBusy, elapsedMs
+  - Updates via immutable AppRun pattern (return new state object)
+  - RAF debouncing managed directly in update handlers
+```
+
+- [ ] Add debouncing state to `WorldComponentState`:
+  - [ ] `pendingStreamUpdates: Map<string, string>` (messageId -> content)
+  - [ ] `debounceFrameId: number | null` (RAF ID)
+- [ ] Add activity state to `WorldComponentState`:
   - [ ] `isBusy: boolean`
   - [ ] `elapsedMs: number`
   - [ ] `activeTools: ToolEntry[]`
-  - [ ] `activeStreamCount: number`
-- [ ] Update `sse-streaming.ts` to call state managers:
-  - [ ] On `message-start`: call `streaming.handleStart()`
-  - [ ] On `message-chunk`: call `streaming.handleChunk()`
-  - [ ] On `message-end`: call `streaming.handleEnd()`
-  - [ ] On `tool-start`: call `activity.handleToolStart()`
-  - [ ] On `tool-result`: call `activity.handleToolResult()`
-  - [ ] On `tool-stream`: call `streaming.handleToolStream*()`
-- [ ] Add callback functions in World.tsx:
-  - [ ] `onStreamStart`: update messages state
-  - [ ] `onStreamUpdate`: debounced message content update
-  - [ ] `onStreamEnd`: finalize message
-  - [ ] `onToolStart`: add to activeTools
-  - [ ] `onToolResult`: remove from activeTools
-  - [ ] `onBusyChange`: update isBusy state
-  - [ ] `onElapsedUpdate`: update elapsedMs state
+  - [ ] `activityStartTime: number | null`
+  - [ ] `elapsedIntervalId: number | null`
+- [ ] Update `sse-streaming.ts` event handlers in World.tsx:
+  - [ ] `'sse:message-start'`: Initialize message in array
+  - [ ] `'sse:message-chunk'`: Add to pendingStreamUpdates, schedule RAF
+  - [ ] `'sse:message-end'`: Flush pending updates, finalize message
+  - [ ] `'sse:tool-start'`: Add to activeTools, start elapsed timer
+  - [ ] `'sse:tool-result'`: Remove from activeTools, stop timer if idle
+- [ ] Implement RAF debouncing helper function in World.tsx:
+  ```typescript
+  scheduleStreamFlush(state: WorldComponentState): WorldComponentState {
+    if (state.debounceFrameId !== null) {
+      return state; // Already scheduled
+    }
+    
+    const frameId = requestAnimationFrame(() => {
+      app.run('flush-stream-updates');
+    });
+    
+    return { ...state, debounceFrameId: frameId };
+  }
+  ```
+- [ ] Add flush handler in update object:
+  - [ ] `'flush-stream-updates'`: Apply pendingStreamUpdates to messages immutably
+  - [ ] Clear pendingStreamUpdates Map
+  - [ ] Reset debounceFrameId to null
+- [ ] Add elapsed timer logic:
+  - [ ] Start timer when first tool/stream starts
+  - [ ] Update elapsedMs every 1 second
+  - [ ] Stop timer when all activity completes
+- [ ] Add cleanup handlers:
+  - [ ] `'change-chat'`: Clear pendingUpdates, cancel RAF, stop timer
+  - [ ] `unload()`: lifecycle hook to cancel RAF and stop timer
 - [ ] Pass new state props to `world-chat.tsx`
 - [ ] Test streaming still works (no visual changes yet)
 
 **Success Criteria**:
-- Messages still stream correctly
+- Messages stream correctly with debouncing
 - No console errors
-- State managers track activity (verify in DevTools)
-- Can see activeTools populate in React DevTools
+- Debouncing works (check frame rate in DevTools)
+- Cleanup works when switching chats (no RAF leaks)
+- Tools tracked in activeTools state
+
+**AR Note**: This simplified approach removes the callback layer and manages everything directly in World.tsx update handlers. Much simpler!
+
+// In update handlers
+'stream-update': (state, { messageId, content }) => ({
+  ...state,
+  messages: state.messages.map(msg =>
+    msg.messageId === messageId ? { ...msg, text: content } : msg
+  )
+})
+```
 
 ### Phase 3: Basic Indicators - Activity Feedback ✅
 **Goal**: Add simple activity indicators for immediate feedback  
@@ -394,17 +463,24 @@ web/src/
   - [ ] Ensure RAF updates at 16ms intervals
   - [ ] No blocking main thread
 - [ ] Optimize if needed:
-  - [ ] Use React.memo() equivalent if available
+  - [ ] Research AppRun's shouldUpdate or memoization patterns
   - [ ] Reduce unnecessary re-renders
   - [ ] Optimize CSS animations (use transform/opacity)
+  - [ ] Consider memoizing markdown rendering for completed messages
 - [ ] Test with long conversations:
   - [ ] 100+ messages
   - [ ] Multiple concurrent tools
   - [ ] Fast streaming (many chunks)
+  - [ ] **Consider virtual scrolling if >500 messages cause lag**
 - [ ] Memory leak check:
   - [ ] Profile memory over time
-  - [ ] Verify cleanup on session change
-  - [ ] Check for retained objects
+  - [ ] Verify cleanup on session change (cleanup() called)
+  - [ ] Check for retained objects (especially RAF IDs and intervals)
+  - [ ] Verify state managers are garbage collected after cleanup
+- [ ] Bundle size check:
+  - [ ] Measure before/after bundle sizes
+  - [ ] Verify <20KB addition claim (or update docs with actual size)
+  - [ ] Check for unnecessary dependencies
 
 **Success Criteria**:
 - 60fps maintained during streaming
@@ -412,6 +488,9 @@ web/src/
 - Memory stable over time
 - No memory leaks on session change
 - UI remains responsive
+- Bundle size increase documented and reasonable
+
+**AR Note**: AppRun doesn't have React.memo(). Research if AppRun has shouldUpdate lifecycle or similar optimization patterns. Consider memoizing expensive operations like markdown rendering.
 
 ### Phase 8: Polish & Accessibility ✅
 **Goal**: Final touches and accessibility improvements  
@@ -436,10 +515,13 @@ web/src/
   - [ ] Graceful degradation if state manager fails
   - [ ] Console warnings for missing props
   - [ ] Fallback UI for errors
+  - [ ] Try-catch around state manager callbacks
 - [ ] Documentation:
   - [ ] Add comments to new components
   - [ ] Update component README if exists
   - [ ] Document prop types
+  - [ ] **Document state ownership model in code comments**
+  - [ ] **Document cleanup lifecycle in World.tsx**
 
 **Success Criteria**:
 - Screen reader announces activity changes
@@ -447,6 +529,31 @@ web/src/
 - Focus indicators clear
 - Color contrast meets WCAG AA
 - No accessibility warnings in DevTools
+
+### Phase 8.5: Testing (NEW - AR Recommendation)
+**Goal**: Add unit and integration tests  
+**Risk**: Low  
+**Testing**: Automated test suite
+
+- [ ] Unit tests for state managers:
+  - [ ] Test streaming-state debouncing logic
+  - [ ] Test activity-state tool tracking
+  - [ ] Test cleanup() clears all state
+  - [ ] Test error handling
+- [ ] Integration tests:
+  - [ ] Create mock SSE event source
+  - [ ] Test SSE → state manager → AppRun event flow
+  - [ ] Test tool streaming end-to-end
+- [ ] Visual regression tests (optional):
+  - [ ] Snapshot tests for indicator components
+  - [ ] Screenshot comparison for message styling
+
+**Success Criteria**:
+- 80%+ code coverage for state managers
+- All integration tests pass
+- CI pipeline runs tests automatically
+
+**AR Note**: Testing was missing from original plan. Unit tests for state managers are critical for catching synchronization bugs early.
 
 ## Dependencies & Integration Points
 
@@ -542,28 +649,109 @@ If critical issues arise:
 
 ## Timeline Estimate
 
-- **Phase 1**: 30 minutes (copy files, add types)
-- **Phase 2**: 1 hour (SSE integration)
+- **Phase 1**: 30 minutes (copy files) + 1 hour (optional TS conversion) = 1.5 hours
+- **Phase 2**: 1.5 hours (SSE integration + cleanup lifecycle)
 - **Phase 3**: 45 minutes (basic indicators)
 - **Phase 4**: 1 hour (tool status)
 - **Phase 5**: 45 minutes (collapsible output)
 - **Phase 6**: 30 minutes (message styling)
-- **Phase 7**: 1 hour (performance tuning)
+- **Phase 7**: 1.5 hours (performance tuning + bundle size check)
 - **Phase 8**: 45 minutes (polish)
+- **Phase 8.5**: 2 hours (testing - NEW)
 
-**Total**: ~6 hours
+**Total**: ~10 hours (with TS conversion and testing)  
+**Minimum**: ~8 hours (skip TS conversion, minimal testing)
 
-## Related Work
+## Related Work (SIMPLIFIED)
 
-- Electron app implementation: `/electron/renderer/src/`
-- Web app current state: `/web/src/`
-- SSE infrastructure: `/web/src/domain/sse-streaming.ts`
-- AppRun documentation: Component patterns
+- **Phase 1**: 15 minutes (types only, no separate modules)
+- **Phase 2**: 1.5 hours (direct SSE + debouncing in World.tsx)
+- **Phase 3**: 45 minutes (basic indicators)
+- **Phase 4**: 1 hour (tool status)
+- **Phase 5**: 45 minutes (collapsible output)
+- **Phase 6**: 30 minutes (message styling)
+- **Phase 7**: 1.5 hours (performance tuning + bundle size check)
+- **Phase 8**: 45 minutes (polish)
+- **Phase 8.5**: 1.5 hours (testing - simpler without separate modules)
 
-## Notes
+**Total**: ~8.25 hours (with testing)  
+**Minimum**: ~6.5 hours (minimal testing)
 
-- Keep changes additive, no breaking changes
-- Maintain existing Short Stack font style
-- Follow AppRun patterns, not React patterns
-- Test after each phase before continuing
-- Profile performance early and often
+**Time Saved**: ~1.75 hours compared to original plan (no callback wiring, simpler
+### Critical Issues Addressed
+
+1. **State Synchronization** - Added clear ownership model in Phase 2
+2. **AppRun Immutable Updates** - Added examples and pattern documentation
+3. **Cleanup Lifecycle** - Added unload() and change-chat cleanup hooks
+4. **TypeScript Integration** - Recommended TS conversion for state managers
+5. **Testing Gap** - Added Phase 8.5 for unit/integration tests
+
+### Key Recommendations Implemented
+
+- **High Priority**:
+  - ✅ State ownership model documented (Phase 2)
+  - ✅ AppRun update pattern examples added (Phase 2)
+  - ✅ Cleanup lifecycle hooks added (Phase 2)
+  - ✅ TypeScript conversion recommended (Phase 1)
+- **Medium Priority**:
+  - ✅ Unit test phase added (Phase 8.5)
+  - ✅ Bundle size measurement - SIMPLIFIED APPROACH
+
+**Reviewer**: Architecture Review Process (AR)  
+**Date**: 2026-02-11  
+**Update**: 2026-02-11 (Simplified architecture based on user feedback)
+
+### Architecture Decision Change
+
+**Original**: Separate streaming-state and activity-state modules  
+**Revised**: Merge streaming state directly into World.tsx
+
+**Rationale**:
+- Only World.tsx needs streaming state (no reuse case)
+- Simpler architecture without callback wiring
+- Better alignment with AppRun's patterns
+- Easier to maintain and test
+- ~1.75 hours time savings
+
+### Critical Issues Addressed
+
+1. **State Synchronization** - ✅ Eliminated (single source of truth in World.tsx)
+2. **AppRun Immutable Updates** - ✅ Direct updates, no callback layer
+3. **Cleanup Lifecycle** - ✅ Added unload() and change-chat cleanup hooks
+4. **Testing Gap** - ✅ Added Phase 8.5, simpler without separate modules
+
+### Key Recommendations Implemented
+
+- **High Priority**:
+  - ✅ State ownership model: Everything in World.tsx (simplest)
+  - ✅ AppRun update pattern: Direct immutable updates
+  - ✅ Cleanup lifecycle hooks: RAF and timer cleanup
+  - ✅ **SIMPLIFIED**: No separate state manager modules
+- **Medium Priority**:
+  - ✅ Unit test phase added (Phase 8.5)
+  - ✅ Bundle size measurement added (Phase 7)
+  - ✅ Virtual scrolling consideration added (Phase 7)
+
+### Risk Assessment
+
+- **State Synchronization**: ~~Medium~~ → **Eliminated** (single state)
+- **AppRun Integration**: ~~Medium~~ → **Low** (direct integration)
+- **Memory Leaks**: Medium → Low (added cleanup hooks)
+- **Performance**: Low (good architecture, added testing)
+- **Testing**: ~~High~~ → **Low** (simpler without separate modules)
+
+### Alternative Approaches Considered
+
+1. **Separate state managers** (Original plan) - Rejected: unnecessary complexity
+2. **Merge streaming-state into World.tsx** (**SELECTED**) - Simpler, better fit
+3. **Keep activity-state separate** (Optional) - Can inline if also not reused
+
+### Outstanding Concerns
+
+- AppRun memoization patterns unclear (research in Phase 7)
+- Long conversation performance (test with 500+ messages)
+- ~~Tool stream state coordination~~ → Eliminated with merged state
+
+### Sign-off
+
+**Simplified architecture approved.** This approach is cleaner, faster to implement, and better aligned with AppRun patterns. Proceed with Phases 1-8.5 using the revised plan

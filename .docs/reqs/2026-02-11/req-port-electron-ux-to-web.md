@@ -87,27 +87,26 @@ Port the superior user experience (UX) features from the Electron desktop app to
 **Status**: Required  
 **Description**: Optimize streaming performance with debouncing
 
-**Modules Needed**:
-- [ ] streaming-state module:
-  - Map-based accumulator for concurrent streams
-  - 16ms debounce using requestAnimationFrame (60fps)
-  - Clean lifecycle: start → chunk → end/error
-  - Separate handling for assistant and tool streams
-  - Flush pending updates on end/error
-- [ ] activity-state module:
-  - Tool tracking by toolUseId
-  - 1-second interval for elapsed time
-  - Aggregated busy state from streams + tools
-  - Start/stop elapsed timer based on activity
+**Implementation Approach (SIMPLIFIED)**:
+- Merge streaming state directly into World.tsx (no separate module)
+- Implement RAF debouncing in update handlers
+- Keep activity tracking for tools and elapsed time
+
+**Features**:
+- [ ] Debounced content updates at 16ms intervals (60fps)
+- [ ] Clean lifecycle: start → chunk → end/error
+- [ ] Immutable state updates via AppRun pattern
+- [ ] Pending updates map for accumulation
+- [ ] RAF-based flush mechanism
 
 **Acceptance Criteria**:
 - UI updates smoothly at 60fps
 - No stuttering during streaming
 - Multiple concurrent streams handled correctly
-- Tool outputs tracked separately
-- Elapsed time accurate within 1 second
 - Activity state correctly reflects busy/idle
 - Clean cleanup when changing sessions
+
+**AR Note (SIMPLIFIED)**: No separate streaming-state module. All logic inline in World.tsx for simpler architecture.
 
 ### REQ-4: Enhanced Message Display
 **Status**: Required  
@@ -152,6 +151,7 @@ Port the superior user experience (UX) features from the Electron desktop app to
 - UI updates at 60fps during streaming (16ms frame budget)
 - No blocking operations during message rendering
 - Efficient memory usage for long conversations
+- Clean cleanup when switching sessions/chats (no memory leaks)
 
 ### Usability
 - Visual feedback for all user actions
@@ -164,11 +164,19 @@ Port the superior user experience (UX) features from the Electron desktop app to
 - Clear separation of concerns (state vs. UI)
 - AppRun component patterns followed
 - Type safety with TypeScript
+- **Clear state ownership model** (AR: prevent synchronization bugs)
+- **Immutable state updates** (AR: follow AppRun patterns)
 
 ### Compatibility
 - Works with existing SSE infrastructure
 - Compatible with AppRun framework
 - No breaking changes to existing features
+
+### Testability (AR: Added)
+- Unit tests for state managers
+- Integration tests for SSE → state manager → UI flow
+- Mock SSE infrastructure for testing
+- 80%+ code coverage for new modules
 
 ## Technical Constraints
 
@@ -185,6 +193,8 @@ Port the superior user experience (UX) features from the Electron desktop app to
 - Web uses AppRun (app.run, state management, event handling)
 - Need to convert React patterns to AppRun patterns
 - Factory functions work in both (streaming-state, activity-state)
+- **CRITICAL (AR)**: AppRun uses **immutable state updates** - callbacks must emit events, not mutate state
+- **CRITICAL (AR)**: Add cleanup lifecycle hooks (unload, change-chat) to prevent memory leaks
 
 ### Styling Approach
 - Electron uses Tailwind CSS with HSL tokens
@@ -197,13 +207,26 @@ Port the superior user experience (UX) features from the Electron desktop app to
 - Web uses direct SSE connection
 - Streaming state managers work the same way
 - Activity state tracking identical
+- **AR Note**: SSE integration should call state managers, which emit AppRun events for immutable updates
+
+### State Management (AR: Added)
+- **State Ownership**: Three layers with clear boundaries:
+  1. `streaming-state`: Temporary accumulator (pendingUpdates, RAF ID)
+  2. `activity-state`: Tool lifecycle (activeTools, timer ID)
+  3. `World.tsx`: Single source of truth (messages[], UI state)
+- **Update Flow**: State manager callback → AppRun event → immutable state update
+- **Cleanup**: Call cleanup() in unload() and change-chat handlers
 
 ## Dependencies & Risks
 
 ### Dependencies
 - Existing SSE infrastructure
 - AppRun framework
-- CSS custom properties support
+- CSS custom properties support + AR: Add unit/integration tests
+5. **State Synchronization Risk** (AR: Added): Three state sources could conflict
+   - Mitigation: Clear ownership model, immutable updates, defensive cleanup
+6. **Memory Leak Risk** (AR: Added): RAF IDs, intervals, pending updates not cleaned
+   - Mitigation: Add cleanup() in unload() and change-chat handlers
 - requestAnimationFrame API
 
 ### Risks
@@ -255,6 +278,22 @@ Port the superior user experience (UX) features from the Electron desktop app to
 - Components: `/electron/renderer/src/components/`
 
 ## Related Work
+
+---
+
+## Architecture Review Notes (AR - 2026-02-11)
+
+### AR Status: ✅ Approved with Recommendations
+
+Key updates from AR review:
+- Added state ownership model to clarify responsibilities
+- Added cleanup lifecycle requirements to prevent memory leaks
+- Added testability requirements (unit/integration tests)
+- Clarified AppRun immutable update pattern requirements
+- Added state synchronization risk and mitigation
+- Recommended TypeScript conversion for state managers
+
+See [plan-port-electron-ux-to-web.md](../../plans/2026-02-11/plan-port-electron-ux-to-web.md) for detailed implementation plan with AR updates.
 
 - Previous web app message display improvements
 - SSE streaming infrastructure
