@@ -16,6 +16,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Prevented wide markdown content from stretching the chat column by constraining overflow inside message content
  * - Fixed user-message edit/delete controls clipping by placing action buttons inside the message bubble
  * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
  * - Moved right-aligned message avatars to the message side and removed circular avatar mask
@@ -504,6 +505,8 @@ h2 {
   min-height: 650px;
   width: 100%;
   max-width: none;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Chat Column - takes up most of the space */
@@ -512,6 +515,7 @@ h2 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   width: auto;
   max-width: none;
   height: 100%;
@@ -524,6 +528,7 @@ h2 {
   flex-direction: column;
   min-width: 200px;
   max-width: 350px;
+  flex-shrink: 0;
   width: auto;
   height: 100%;
 }
@@ -845,6 +850,7 @@ legend {
   flex: 1;
   padding: 0.5rem 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -853,6 +859,7 @@ legend {
   padding: 1rem;
   margin-bottom: 0.5rem;
   min-height: 400px;
+  min-width: 0;
   width: 100%;
   max-width: none;
 }
@@ -1031,7 +1038,11 @@ legend {
   font-size: 1rem;
   line-height: 1.4;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   word-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Markdown content styles within messages */
@@ -1104,6 +1115,7 @@ legend {
   padding: 0.75rem;
   border-radius: 5px;
   overflow-x: auto;
+  max-width: 100%;
   margin: 0.5rem 0;
 }
 
@@ -1115,6 +1127,8 @@ legend {
 .message-content table {
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
   margin: 0.5rem 0;
   font-size: 0.9em;
 }
@@ -1124,6 +1138,14 @@ legend {
   border: 1px solid var(--border-primary);
   padding: 0.4rem 0.6rem;
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-content img,
+.message-content svg {
+  max-width: 100%;
+  height: auto;
 }
 
 .message-content th {
