@@ -8,7 +8,7 @@
  * - Event parsing and routing via AppRun
  * - Streaming message state management
  * - Tool execution event handling (start, progress, result, error)
- * - Log event processing
+ * - Log event processing with error detail extraction
  * - Shell command output streaming (stdout/stderr) with real-time display
  * - Tool call data preservation in streaming chunks
  * 
@@ -19,8 +19,10 @@
  * - Accumulates chunks for smooth streaming display
  * - Streams shell command output with stdout/stderr distinction
  * - Preserves tool_calls metadata for complete tool call display with parameters
+ * - Extracts error details from log data for better error visibility in UI
  * 
  * Created: 2025-10-25 - Initial SSE client implementation
+ * Updated: 2026-02-11 - Enhanced error log display to include error details from log data
  * Updated: 2026-02-11 - Preserve tool_calls in handleStreamChunk for complete display
  * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers
  * Updated: 2026-02-08 - Added tool-stream event handler for shell command output streaming
@@ -614,10 +616,20 @@ export const handleLogEvent = <T extends SSEComponentState>(state: T, data: any)
   // Generate unique ID to avoid duplicates
   const uniqueId = `log-${logEvent.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
+  // For error-level logs, include error details from logEvent.data if available
+  let displayText = logEvent.message;
+  if (logEvent.level === 'error' && logEvent.data) {
+    // Extract error message from data (could be in data.error, data.message, etc.)
+    const errorDetail = logEvent.data.error || logEvent.data.message || logEvent.data.errorMessage;
+    if (errorDetail) {
+      displayText = `${logEvent.message}: ${errorDetail}`;
+    }
+  }
+
   const logMessage = {
     id: uniqueId,
     sender: 'system',
-    text: logEvent.message,
+    text: displayText,
     createdAt: new Date(logEvent.timestamp),
     type: 'log',
     logEvent: logEvent,

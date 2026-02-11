@@ -12,6 +12,7 @@
  * - AI command handling (gemini, copilot, codex) - results saved directly to memory
  * - Enhanced tool call message formatting with parameters display
  * - SSE tool call data for web clients (streaming mode)
+ * - Robust JSON parsing with detailed error logging for malformed tool arguments
  * 
  * Implementation:
  * - AI commands executed via shell_cmd bypass LLM response flow
@@ -27,6 +28,11 @@
  * - In streaming mode, formatted tool call content with tool_calls data is sent via SSE
  *   * Ensures web/Electron clients display complete tool call info with parameters
  *   * Prevents incomplete display (e.g., "Calling tool: shell_cmd" without params)
+ * - JSON parse errors include detailed logging (preview, length, error position)
+ *   * Helps diagnose LLM-generated malformed JSON in tool arguments
+ * - JSON sanitization attempts to fix common LLM JSON issues before parsing
+ *   * Handles unterminated strings, trailing commas, truncation, unmatched braces
+ *   * Tries progressive fixes: trailing commas → close strings → truncate to valid
  * 
  * Dependencies (Layer 5):
  * - types.ts (Layer 1)
@@ -35,9 +41,11 @@
  * - memory-manager.ts (Layer 4)
  * - utils.ts, logger.ts
  * - llm-manager.ts (runtime)
- * - storage (runtime)
+ * - storage (runAdded JSON sanitization to fix common LLM-generated JSON issues (unterminated strings, trailing commas, truncation)
+ * - 2026-02-11: time)
  * 
  * Changes:
+ * - 2026-02-11: Enhanced JSON parse error logging with rawArgs preview and suffix
  * - 2026-02-11: Fixed tool call display in Electron/web - send formatted content with tool_calls via SSE
  * - 2026-02-11: Fixed OpenAI tool-call protocol integrity.
  *   - Persist only the first executable tool_call when agent execution is single-call.
@@ -99,6 +107,113 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+/**
+ * Sanitize and fix common JSON issues from LLM-generated tool arguments
+ * Handles: unterminated strings, unescaped quotes, trailing commas, truncation
+ */
+function sanitizeAndParseJSON(jsonString: string): Record<string, any> {
+  if (!jsonString || jsonString.trim() === '') {
+    return {};
+  }
+
+  // Try parsing as-is first
+  try {
+    return JSON.parse(jsonString);
+  } catch (firstError) {
+    loggerAgent.debug('Initial JSON parse failed, attempting sanitization', {
+      error: firstError instanceof Error ? firstError.message : String(firstError)
+    });
+  }
+
+  let sanitized = jsonString;
+
+  // Fix 1: Remove trailing commas (common LLM mistake)
+  sanitized = sanitized.replace(/,(\s*[}\]])/g, '$1');
+
+  // Fix 2: Handle unterminated strings at end (truncation)
+  // If the error is "Unterminated string", try to close it
+  const unterminatedMatch = sanitized.match(/"[^"]*$/);
+  if (unterminatedMatch) {
+    loggerAgent.debug('Detected unterminated string at end, attempting to close');
+    sanitized = sanitized + '"';
+
+    // Check if we need to close open braces/brackets
+    const openBraces = (sanitized.match(/{/g) || []).length;
+    const closeBraces = (sanitized.match(/}/g) || []).length;
+    const openBrackets = (sanitized.match(/\[/g) || []).length;
+    const closeBrackets = (sanitized.match(/\]/g) || []).length;
+
+    // Close any unclosed arrays
+    for (let i = 0; i < openBrackets - closeBrackets; i++) {
+      sanitized += ']';
+    }
+    // Close any unclosed objects
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      sanitized += '}';
+    }
+  }
+
+  // Try parsing sanitized version
+  try {
+    return JSON.parse(sanitized);
+  } catch (secondError) {
+    loggerAgent.debug('Sanitization failed, trying more aggressive fixes');
+  }
+
+  // Fix 3: Try to extract valid JSON from the beginning if there's garbage at the end
+  // Find the last valid closing brace/bracket
+  let lastValidIndex = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < sanitized.length; i++) {
+    const char = sanitized[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"' && !escaped) {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '{' || char === '[') {
+        depth++;
+      } else if (char === '}' || char === ']') {
+        depth--;
+        if (depth === 0) {
+          lastValidIndex = i;
+        }
+      }
+    }
+  }
+
+  if (lastValidIndex > 0) {
+    const truncated = sanitized.substring(0, lastValidIndex + 1);
+    try {
+      loggerAgent.debug('Attempting to parse truncated JSON', {
+        originalLength: sanitized.length,
+        truncatedLength: truncated.length
+      });
+      return JSON.parse(truncated);
+    } catch (truncError) {
+      loggerAgent.debug('Truncated parse also failed');
+    }
+  }
+
+  // If all else fails, throw the original error with the sanitized string
+  throw new Error(`Unable to parse or sanitize JSON. Original length: ${jsonString.length}, Sanitized length: ${sanitized.length}`);
 }
 
 /**
@@ -386,7 +501,34 @@ export async function processAgentMessage(
           let toolArgs: Record<string, any>;
           const rawArgs = toolCall.function.arguments;
           if (typeof rawArgs === 'string') {
-            toolArgs = JSON.parse(rawArgs || '{}');
+            try {
+              // Use sanitization function to handle common LLM JSON issues
+              toolArgs = sanitizeAndParseJSON(rawArgs);
+
+              // Log if sanitization was needed (successful parse after initial failure)
+              try {
+                JSON.parse(rawArgs);
+              } catch {
+                loggerAgent.warn('Tool arguments required JSON sanitization', {
+                  agentId: agent.id,
+                  toolCallId: toolCall.id,
+                  toolName: toolCall.function.name,
+                  rawArgsLength: rawArgs.length
+                });
+              }
+            } catch (parseError) {
+              // Enhanced error logging for JSON parse failures
+              loggerAgent.error('Failed to parse tool call arguments as JSON (even after sanitization)', {
+                agentId: agent.id,
+                toolCallId: toolCall.id,
+                toolName: toolCall.function.name,
+                error: parseError instanceof Error ? parseError.message : String(parseError),
+                rawArgsLength: rawArgs.length,
+                rawArgsPreview: rawArgs.substring(0, 500), // First 500 chars
+                rawArgsSuffix: rawArgs.length > 500 ? rawArgs.substring(rawArgs.length - 200) : '', // Last 200 chars
+              });
+              throw new Error(`Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+            }
           } else if (rawArgs && typeof rawArgs === 'object') {
             toolArgs = rawArgs as Record<string, any>;
           } else {
