@@ -251,14 +251,112 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
     });
 };
 
+// ========================================
+// PHASE 2: STREAMING STATE HELPERS (RAF Debouncing)
+// ========================================
+
+/**
+ * Schedule RAF flush for debounced stream updates (60fps)
+ * Returns new state with updated debounceFrameId
+ */
+const scheduleStreamFlush = (state: WorldComponentState): WorldComponentState => {
+  if (state.debounceFrameId !== null) {
+    return state; // Already scheduled
+  }
+
+  const frameId = requestAnimationFrame(() => {
+    app.run('flush-stream-updates');
+  });
+
+  return { ...state, debounceFrameId: frameId };
+};
+
+/**
+ * Start elapsed timer for activity tracking
+ * Returns new state with timer started
+ */
+const startElapsedTimer = (state: WorldComponentState): WorldComponentState => {
+  if (state.elapsedIntervalId !== null) {
+    return state; // Already running
+  }
+
+  const startTime = Date.now();
+  const intervalId = window.setInterval(() => {
+    app.run('update-elapsed-time');
+  }, 1000); // Update every second
+
+  return {
+    ...state,
+    activityStartTime: startTime,
+    elapsedIntervalId: intervalId,
+    elapsedMs: 0
+  };
+};
+
+/**
+ * Stop elapsed timer
+ * Returns new state with timer stopped
+ */
+const stopElapsedTimer = (state: WorldComponentState): WorldComponentState => {
+  if (state.elapsedIntervalId !== null) {
+    clearInterval(state.elapsedIntervalId);
+  }
+
+  return {
+    ...state,
+    elapsedIntervalId: null,
+    activityStartTime: null,
+    elapsedMs: 0
+  };
+};
+
+/**
+ * Check if any activity is in progress (tools or streams)
+ */
+const hasActivity = (state: WorldComponentState): boolean => {
+  return state.activeTools.length > 0 || state.pendingStreamUpdates.size > 0;
+};
+
+// ========================================
+// STREAM & TOOL HANDLERS (with debouncing)
+// ========================================
+
 const handleStreamError = (state: WorldComponentState, data: any): WorldComponentState => {
   return handleStreamErrorBase(state, data);
 };
 
+/**
+ * Handle tool start - track in activeTools and start elapsed timer (Phase 2)
+ */
 const handleToolStart = (state: WorldComponentState, data: any): WorldComponentState => {
-  // Tool events are informational - don't control spinner
-  // Spinner is controlled by world events (pending count)
-  return handleToolStartBase(state, data);
+  // Call base handler for message updates
+  let newState = handleToolStartBase(state, data);
+
+  // Add to activeTools array (Phase 2)
+  const toolEntry: import('../types').ToolEntry = {
+    toolUseId: data.messageId || `tool-${Date.now()}`,
+    toolName: data.toolExecution?.toolName || 'unknown',
+    toolInput: data.toolExecution?.input,
+    status: 'running',
+    result: null,
+    errorMessage: null,
+    progress: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null
+  };
+
+  newState = {
+    ...newState,
+    activeTools: [...newState.activeTools, toolEntry],
+    isBusy: true
+  };
+
+  // Start elapsed timer if not already running
+  if (newState.elapsedIntervalId === null) {
+    newState = startElapsedTimer(newState);
+  }
+
+  return newState;
 };
 
 const handleToolProgress = (state: WorldComponentState, data: any): WorldComponentState => {
@@ -267,16 +365,60 @@ const handleToolProgress = (state: WorldComponentState, data: any): WorldCompone
   return handleToolProgressBase(state, data);
 };
 
+/**
+ * Handle tool result - remove from activeTools and stop timer if idle (Phase 2)
+ */
 const handleToolResult = (state: WorldComponentState, data: any): WorldComponentState => {
-  // Tool events are informational - don't control spinner
-  // Spinner is controlled by world events (pending count)
-  return handleToolResultBase(state, data);
+  // Call base handler for message updates
+  let newState = handleToolResultBase(state, data);
+
+  // Remove from activeTools array (Phase 2)
+  const toolUseId = data.messageId;
+  newState = {
+    ...newState,
+    activeTools: newState.activeTools.filter(tool => tool.toolUseId !== toolUseId)
+  };
+
+  // Update busy state (safe check with optional chaining)
+  const stillBusy = hasActivity(newState);
+  newState = { ...newState, isBusy: stillBusy };
+
+  // Stop elapsed timer if no more activity
+  if (!stillBusy && newState.elapsedIntervalId !== null) {
+    newState = stopElapsedTimer(newState);
+  }
+
+  return newState;
 };
 
 const handleToolError = (state: WorldComponentState, data: any): WorldComponentState => {
   // Tool events are informational - don't control spinner
   // Spinner is controlled by world events (pending count)
   return handleToolErrorBase(state, data);
+};
+
+/**
+ * Handle stream chunk - add to pending updates and schedule RAF flush (Phase 2)
+ */
+const handleStreamChunkDebounced = (state: WorldComponentState, data: any): WorldComponentState => {
+  const { messageId, content } = data;
+
+  // Add to pending updates map
+  const pending = new Map(state.pendingStreamUpdates);
+  pending.set(messageId, content || '');
+
+  let newState = {
+    ...state,
+    pendingStreamUpdates: pending
+  };
+
+  // Schedule RAF flush if not already scheduled
+  newState = scheduleStreamFlush(newState);
+
+  // Also call base handler to ensure message exists in array
+  newState = handleStreamChunk(newState, data);
+
+  return newState;
 };
 
 const handleToolStream = (state: WorldComponentState, data: any): WorldComponentState => {
@@ -654,9 +796,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   // ========================================
   // SSE STREAMING EVENTS
   // ========================================
+  // SSE STREAMING HANDLERS
+  // ========================================
 
   'handleStreamStart': handleStreamStart,
-  'handleStreamChunk': handleStreamChunk,
+  'handleStreamChunk': handleStreamChunkDebounced, // Phase 2: Debounced version
   'handleStreamEnd': handleStreamEnd,
   'handleStreamError': handleStreamError,
   'handleLogEvent': handleLogEvent,
@@ -672,6 +816,45 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     return handleWorldActivity(state, activity);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
+
+  // ========================================
+  // PHASE 2: STREAMING STATE UPDATES
+  // ========================================
+
+  /**
+   * Flush pending stream updates (called by RAF)
+   */
+  'flush-stream-updates': (state: WorldComponentState): WorldComponentState => {
+    if (state.pendingStreamUpdates.size === 0) {
+      return { ...state, debounceFrameId: null };
+    }
+
+    // Apply all pending updates to messages immutably
+    const messages = state.messages.map(msg => {
+      const pending = state.pendingStreamUpdates.get(msg.messageId);
+      return pending ? { ...msg, text: pending } : msg;
+    });
+
+    return {
+      ...state,
+      messages,
+      pendingStreamUpdates: new Map(),
+      debounceFrameId: null,
+      needScroll: true
+    };
+  },
+
+  /**
+   * Update elapsed time (called by interval timer)
+   */
+  'update-elapsed-time': (state: WorldComponentState): WorldComponentState => {
+    if (state.activityStartTime === null) {
+      return state;
+    }
+
+    const elapsed = Date.now() - state.activityStartTime;
+    return { ...state, elapsedMs: elapsed };
+  },
 
   // ========================================
   // MESSAGE DISPLAY
@@ -694,6 +877,24 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'update-edit-text': (state: WorldComponentState, payload: WorldEventPayload<'update-edit-text'>): WorldComponentState =>
     EditingDomain.updateEditText(state, payload.target.value),
+
+  // Phase 5: Toggle tool output expansion
+  'toggle-tool-output': (state: WorldComponentState, messageId: string): WorldComponentState => {
+    const messages = state.messages.map(msg => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          isToolOutputExpanded: !msg.isToolOutputExpanded
+        };
+      }
+      return msg;
+    });
+
+    return {
+      ...state,
+      messages
+    };
+  },
 
   // ========================================
   // MESSAGE DELETION
@@ -966,11 +1167,30 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
   'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
-      yield ChatHistoryDomain.createChatLoadingState(state);
+      // Phase 2: Cleanup streaming state before loading new chat
+      if (state.debounceFrameId !== null) {
+        cancelAnimationFrame(state.debounceFrameId);
+      }
+      if (state.elapsedIntervalId !== null) {
+        clearInterval(state.elapsedIntervalId);
+      }
+
+      const cleanState = {
+        ...state,
+        pendingStreamUpdates: new Map(),
+        debounceFrameId: null,
+        activeTools: [],
+        isBusy: false,
+        elapsedMs: 0,
+        activityStartTime: null,
+        elapsedIntervalId: null
+      };
+
+      yield ChatHistoryDomain.createChatLoadingState(cleanState);
 
       const result = await api.setChat(state.worldName, chatId);
       if (!result.success) {
-        yield state;
+        yield cleanState;
       }
       const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, chatId);
       app.route(path);

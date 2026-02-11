@@ -64,7 +64,18 @@ export default class WorldComponent extends Component<WorldComponentState, World
     editingText: '',
     messageToDelete: null,
     activeAgentFilters: [] as string[],  // Per-agent badge toggle filter state
-    agentActivities: {}
+    agentActivities: {},
+
+    // Streaming state (Phase 1)
+    pendingStreamUpdates: new Map<string, string>(),
+    debounceFrameId: null,
+
+    // Activity state (Phase 1)
+    activeTools: [],
+    isBusy: false,
+    elapsedMs: 0,
+    activityStartTime: null,
+    elapsedIntervalId: null
   };
 
   override view = (state: WorldComponentState) => {
@@ -190,6 +201,9 @@ export default class WorldComponent extends Component<WorldComponentState, World
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}
+              isBusy={(state.activeTools?.length ?? 0) > 0}
+              elapsedMs={state.elapsedMs}
+              activeTools={state.activeTools}
             />
           </div>
 
@@ -325,6 +339,18 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
   // we could select events to be global, but for simplicity we keep them local
   override is_global_event = () => true;
+
+  /**
+   * Phase 2: Cleanup lifecycle - cancel RAF and timers on unmount
+   */
+  override unload = () => {
+    if (this.state.debounceFrameId !== null) {
+      cancelAnimationFrame(this.state.debounceFrameId);
+    }
+    if (this.state.elapsedIntervalId !== null) {
+      clearInterval(this.state.elapsedIntervalId);
+    }
+  };
 
   override update = {
     // Route handler and message handlers (merged)

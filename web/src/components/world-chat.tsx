@@ -16,9 +16,23 @@
  * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
  * - Left-side avatar rendering for message boxes using actual agent spriteIndex values
  * - Human messages keep an empty avatar slot (no sprite image)
+ * - Activity indicators: ActivityPulse and ElapsedTimeCounter in chat header
+ * - Tool execution status: ToolExecutionStatus showing active tools with icons
+ * - Collapsible tool output: Expand/collapse tool results with stdout/stderr styling
+ * - Tool output truncation: 50K character limit with truncation warning
+ * - Role-based message styling: Distinct left border colors for visual hierarchy
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-11: Phase 6 - Added role-based left border colors (human=light blue, agent=sky blue, tool=amber, system=gray, cross-agent=purple)
+ * - 2026-02-11: Phase 6 - Applied .tool-message class to tool result messages
+ * - 2026-02-11: Phase 5 - Added collapsible tool output with expand/collapse
+ * - 2026-02-11: Phase 5 - Added 50K character truncation for long tool outputs
+ * - 2026-02-11: Phase 5 - Distinguished stdout (terminal style) vs stderr (red-tinted)
+ * - 2026-02-11: Phase 5 - Tool messages now visible (no longer hidden by shouldHideMessage)
+ * - 2026-02-11: Phase 4 - Added ToolExecutionStatus showing running tools with icons
+ * - 2026-02-11: Phase 3 - Added ActivityPulse and ElapsedTimeCounter to chat header
+ * - 2026-02-11: Integrated isBusy and elapsedMs props from World.tsx state
  * - 2026-02-08: Removed legacy manual tool-intervention request and response box rendering
  * - 2026-02-08: Fixed undefined HUMAN_AVATAR_SPRITE_INDEX runtime error in avatar sprite resolver
  * - 2026-02-08: Left human message avatars empty while preserving avatar alignment slot
@@ -47,6 +61,8 @@ import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { renderMarkdown } from '../utils/markdown';
+import { ActivityPulse, ElapsedTimeCounter, ThinkingIndicator } from './activity-indicators';
+import { ToolExecutionStatus } from './tool-execution-status';
 
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
@@ -66,7 +82,10 @@ export default function WorldChat(props: WorldChatProps) {
     currentChat,
     editingMessageId = null,
     editingText = '',
-    agentFilters = []  // Agent IDs to filter by
+    agentFilters = [],  // Agent IDs to filter by
+    isBusy = false,
+    elapsedMs = 0,
+    activeTools = []
   } = props;
 
   const promptReady = !isWaiting;
@@ -150,11 +169,8 @@ export default function WorldChat(props: WorldChatProps) {
 
   // Helper function to check if message should be hidden from display.
   // Internal tool result protocol messages are not shown in the chat UI.
+  // Phase 5: Tool messages are now visible with collapsible output.
   const shouldHideMessage = (message: Message): boolean => {
-    if (message.type === 'tool') {
-      return true;
-    }
-
     try {
       const text = message.text.trim();
       const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
@@ -346,14 +362,52 @@ export default function WorldChat(props: WorldChatProps) {
     return SYSTEM_AVATAR_SPRITE_INDEX;
   };
 
+  // Phase 5: Helper functions for collapsible tool output
+
+  /**
+   * Check if message is a tool result message
+   */
+  const isToolResultMessage = (message: Message): boolean => {
+    return message.type === 'tool';
+  };
+
+  /**
+   * Truncate tool output if longer than 50K characters
+   */
+  const truncateToolOutput = (text: string): { content: string; wasTruncated: boolean } => {
+    const MAX_LENGTH = 50000;
+    if (text.length > MAX_LENGTH) {
+      return {
+        content: text.substring(0, MAX_LENGTH),
+        wasTruncated: true
+      };
+    }
+    return {
+      content: text,
+      wasTruncated: false
+    };
+  };
+
+  /**
+   * Detect if tool output is stderr based on message properties
+   */
+  const isStderrOutput = (message: Message): boolean => {
+    return message.streamType === 'stderr';
+  };
+
   return (
     <fieldset className="chat-fieldset">
       <legend>
         {worldName} {
           currentChat ? ` - ${currentChat}` :
             <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
+        <ActivityPulse isBusy={isBusy || false} />
+        {(isBusy || (elapsedMs && elapsedMs > 0)) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
       <div className="chat-container">
+        {/* Tool Execution Status */}
+        <ToolExecutionStatus activeTools={activeTools} />
+
         {/* Conversation Area */}
         <div
           className="conversation-area"
@@ -468,7 +522,8 @@ export default function WorldChat(props: WorldChatProps) {
               const systemClass = senderType === SenderType.SYSTEM ? 'system-message' : '';
               const crossAgentClass = isCrossAgentMessage && !isMemoryOnlyMessage ? 'cross-agent-message' : '';
               const memoryOnlyClass = isMemoryOnlyMessage ? 'memory-only-message' : '';
-              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass}`.trim();
+              const toolClass = isToolResultMessage(message) ? 'tool-message' : '';
+              const messageClasses = `message ${baseMessageClass} ${systemClass} ${crossAgentClass} ${memoryOnlyClass} ${toolClass}`.trim();
               const rowAlignmentClass = getMessageRowAlignmentClass(senderType, isCrossAgentMessage);
               const isHumanAvatar = senderType === SenderType.HUMAN;
               const avatarSpriteIndex = getMessageAvatarSpriteIndex(message);
@@ -561,6 +616,38 @@ export default function WorldChat(props: WorldChatProps) {
                               <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
                             </div>
                           </div>
+                        ) : isToolResultMessage(message) ? (
+                          /* Phase 5: Collapsible tool output for tool result messages */
+                          (() => {
+                            const { content, wasTruncated } = truncateToolOutput(message.text);
+                            const isExpanded = message.isToolOutputExpanded || false;
+                            const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
+
+                            return (
+                              <div className="tool-output-container">
+                                <div className="tool-output-header">
+                                  <button
+                                    className="tool-output-toggle"
+                                    $onclick={['toggle-tool-output', message.id]}
+                                    title={isExpanded ? 'Collapse output' : 'Expand output'}
+                                  >
+                                    <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
+                                    <span className="tool-label">{formatMessageText(message)}</span>
+                                  </button>
+                                </div>
+                                {isExpanded && (
+                                  <div className={`tool-output-content ${outputClass}`}>
+                                    <pre className="tool-output-text">{content}</pre>
+                                    {wasTruncated && (
+                                      <div className="tool-output-truncated">
+                                        ⚠️ Output truncated (exceeded 50,000 characters)
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()
                         ) : (
                           /* Regular message content */
                           <div className="message-content">

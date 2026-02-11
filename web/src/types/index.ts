@@ -106,6 +106,9 @@ export interface Message {
   expandable?: boolean;
   resultPreview?: string;
 
+  // Phase 5: Collapsible tool output
+  isToolOutputExpanded?: boolean;
+
 }
 
 // Web UI Agent Interface - matches server serialization with UI extensions
@@ -157,8 +160,21 @@ export interface Chat {
 }
 
 // ========================================
-// WORLD ACTIVITY STATUS
+// ACTIVITY STATE TYPES (Phase 1)
 // ========================================
+
+// Tool Entry - tracks tool execution state
+export interface ToolEntry {
+  toolUseId: string;
+  toolName: string;
+  toolInput?: any;
+  status: 'running' | 'completed' | 'error';
+  result: string | null;
+  errorMessage: string | null;
+  progress: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
 
 // ========================================
 // COMPONENT PROP INTERFACES
@@ -181,6 +197,13 @@ export interface WorldChatProps {
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
+
+  // Phase 3: Activity state props
+  isBusy?: boolean;
+  elapsedMs?: number;
+
+  // Phase 4: Tool execution status
+  activeTools?: ToolEntry[];
 }
 
 // World Settings Component Props
@@ -296,6 +319,17 @@ export interface WorldComponentState extends SSEComponentState {
   connectionStatus: string;
   needScroll: boolean;
   lastUserMessageText?: string | null;
+
+  // Streaming state (Phase 1 - merged into World.tsx)
+  pendingStreamUpdates: Map<string, string>;  // messageId -> accumulated content
+  debounceFrameId: number | null;             // RAF ID for debouncing
+
+  // Activity state (Phase 1 - tool tracking and elapsed time)
+  activeTools: ToolEntry[];                   // Currently executing tools
+  isBusy: boolean;                            // Any activity in progress
+  elapsedMs: number;                          // Elapsed time in milliseconds
+  activityStartTime: number | null;           // Activity start timestamp
+  elapsedIntervalId: number | null;           // Interval ID for elapsed updates
 }
 
 // ========================================

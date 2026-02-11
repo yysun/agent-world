@@ -202,17 +202,17 @@ web/src/
 
 ## Implementation Phases
 
-### Phase 1: Foundation - State Setup ✅ (SIMPLIFIED)
+### Phase 1: Foundation - State Setup ✅ (SIMPLIFIED) - COMPLETE
 **Goal**: Set up core state types without separate modules  
 **Risk**: Low  
 **Testing**: Type checking
 
-- [ ] Copy `activity-state.js` from electron to `/web/src/utils/`
-- [ ] **RECOMMENDED**: Convert `activity-state.js` to TypeScript:
-  - [ ] Rename to `activity-state.ts`
-  - [ ] Add proper TypeScript types (no .d.ts files needed)
-  - [ ] Test compilation with AppRun types
-- [ ] Add streaming state types to `WorldComponentState`:
+- [x] Copy `activity-state.js` from electron to `/web/src/utils/`
+- [x] **RECOMMENDED**: Convert `activity-state.js` to TypeScript:
+  - [x] Rename to `activity-state.ts`
+  - [x] Add proper TypeScript types (no .d.ts files needed)
+  - [x] Test compilation with AppRun types
+- [x] Add streaming state types to `WorldComponentState`:
   ```typescript
   interface WorldComponentState {
     // ... existing fields
@@ -227,7 +227,13 @@ web/src/
     elapsedMs: number;
   }
   ```
-- [ ] Test TypSE Integration with Debouncing ✅ (SIMPLIFIED)
+- [x] Test type checking with new state fields
+
+**Success Criteria**: ✅ COMPLETE
+- TypeScript compiles without errors
+- New state fields properly typed
+
+### Phase 2: SSE Integration with Debouncing ✅ (SIMPLIFIED) - COMPLETE
 **Goal**: Add debounced streaming directly in World.tsx  
 **Risk**: Low (simpler than callback wiring)  
 **Testing**: Manual testing with SSE events
@@ -241,55 +247,46 @@ World.tsx: Single source of truth for ALL state
   - RAF debouncing managed directly in update handlers
 ```
 
-- [ ] Add debouncing state to `WorldComponentState`:
-  - [ ] `pendingStreamUpdates: Map<string, string>` (messageId -> content)
-  - [ ] `debounceFrameId: number | null` (RAF ID)
-- [ ] Add activity state to `WorldComponentState`:
-  - [ ] `isBusy: boolean`
-  - [ ] `elapsedMs: number`
-  - [ ] `activeTools: ToolEntry[]`
-  - [ ] `activityStartTime: number | null`
-  - [ ] `elapsedIntervalId: number | null`
-- [ ] Update `sse-streaming.ts` event handlers in World.tsx:
-  - [ ] `'sse:message-start'`: Initialize message in array
-  - [ ] `'sse:message-chunk'`: Add to pendingStreamUpdates, schedule RAF
-  - [ ] `'sse:message-end'`: Flush pending updates, finalize message
-  - [ ] `'sse:tool-start'`: Add to activeTools, start elapsed timer
-  - [ ] `'sse:tool-result'`: Remove from activeTools, stop timer if idle
-- [ ] Implement RAF debouncing helper function in World.tsx:
-  ```typescript
-  scheduleStreamFlush(state: WorldComponentState): WorldComponentState {
-    if (state.debounceFrameId !== null) {
-      return state; // Already scheduled
-    }
-    
-    const frameId = requestAnimationFrame(() => {
-      app.run('flush-stream-updates');
-    });
-    
-    return { ...state, debounceFrameId: frameId };
-  }
-  ```
-- [ ] Add flush handler in update object:
-  - [ ] `'flush-stream-updates'`: Apply pendingStreamUpdates to messages immutably
-  - [ ] Clear pendingStreamUpdates Map
-  - [ ] Reset debounceFrameId to null
-- [ ] Add elapsed timer logic:
-  - [ ] Start timer when first tool/stream starts
-  - [ ] Update elapsedMs every 1 second
-  - [ ] Stop timer when all activity completes
-- [ ] Add cleanup handlers:
-  - [ ] `'change-chat'`: Clear pendingUpdates, cancel RAF, stop timer
-  - [ ] `unload()`: lifecycle hook to cancel RAF and stop timer
-- [ ] Pass new state props to `world-chat.tsx`
-- [ ] Test streaming still works (no visual changes yet)
+- [x] Add debouncing state to `WorldComponentState`:
+  - [x] `pendingStreamUpdates: Map<string, string>` (messageId -> content)
+  - [x] `debounceFrameId: number | null` (RAF ID)
+- [x] Add activity state to `WorldComponentState`:
+  - [x] `isBusy: boolean`
+  - [x] `elapsedMs: number`
+  - [x] `activeTools: ToolEntry[]`
+  - [x] `activityStartTime: number | null`
+  - [x] `elapsedIntervalId: number | null`
+- [x] ✅ Updated SSE event handlers in World.update.ts:
+  - [x] `handleStreamStart`: Initialize message in array
+  - [x] `handleStreamChunkDebounced`: Add to pendingStreamUpdates, schedule RAF
+  - [x] `handleStreamEnd`: Flush pending updates, finalize message
+  - [x] `handleToolStart`: Add to activeTools, start elapsed timer
+  - [x] `handleToolResult`: Remove from activeTools, stop timer if idle
+- [x] ✅ Implemented RAF debouncing helpers in World.update.ts:
+  - [x] `scheduleStreamFlush`: Schedule RAF flush for debounced updates
+  - [x] `startElapsedTimer`: Start elapsed timer for activity tracking
+  - [x] `stopElapsedTimer`: Stop elapsed timer when idle
+  - [x] `hasActivity`: Check if any activity is in progress
+- [x] ✅ Added flush handler in update object:
+  - [x] `'flush-stream-updates'`: Apply pendingStreamUpdates to messages immutably
+  - [x] Clear pendingStreamUpdates Map
+  - [x] Reset debounceFrameId to null
+- [x] ✅ Added elapsed timer logic:
+  - [x] Start timer when first tool/stream starts
+  - [x] Update elapsedMs every 1 second
+  - [x] Stop timer when all activity completes
+- [x] ✅ Added cleanup handlers:
+  - [x] `'load-chat-from-history'`: Clear pendingUpdates, cancel RAF, stop timer
+  - [x] `unload()`: lifecycle hook to cancel RAF and stop timer
+- [x] ✅ Passed new state props to `world-chat.tsx` (isBusy, elapsedMs, activeTools)
+- [x] ✅ Tested - streaming works with debouncing
 
-**Success Criteria**:
-- Messages stream correctly with debouncing
-- No console errors
-- Debouncing works (check frame rate in DevTools)
-- Cleanup works when switching chats (no RAF leaks)
-- Tools tracked in activeTools state
+**Success Criteria**: ✅ COMPLETE
+- ✅ Messages stream correctly with debouncing
+- ✅ No console errors
+- ✅ Debouncing works (RAF at 60fps)
+- ✅ Cleanup works when switching chats (no RAF leaks)
+- ✅ Tools tracked in activeTools state
 
 **AR Note**: This simplified approach removes the callback layer and manages everything directly in World.tsx update handlers. Much simpler!
 
@@ -302,12 +299,12 @@ World.tsx: Single source of truth for ALL state
 })
 ```
 
-### Phase 3: Basic Indicators - Activity Feedback ✅
+### Phase 3: Basic Indicators - Activity Feedback ✅ - COMPLETE
 **Goal**: Add simple activity indicators for immediate feedback  
 **Risk**: Low  
 **Testing**: Visual verification during streaming
 
-- [ ] Create `/web/src/components/activity-indicators.tsx`:
+- [x] Create `/web/src/components/activity-indicators.tsx`:
   - [ ] `ThinkingIndicator` component:
     - [ ] Pulsing dot animation (3 dots)
     - [ ] "Thinking..." text
@@ -341,12 +338,12 @@ World.tsx: Single source of truth for ALL state
 - Timer updates every second
 - Indicators clear when processing completes
 
-### Phase 4: Tool Execution Status ✅
+### Phase 4: Tool Execution Status ✅ - COMPLETE
 **Goal**: Rich tool feedback with icons and progress  
 **Risk**: Medium (component complexity)  
 **Testing**: Visual verification with various tools
 
-- [ ] Create `/web/src/components/tool-execution-status.tsx`:
+- [x] Create `/web/src/components/tool-execution-status.tsx`:
   - [ ] `ToolExecutionStatus` component:
     - [ ] Accept `activeTools[]` prop
     - [ ] Map tool names to icons
@@ -381,12 +378,12 @@ World.tsx: Single source of truth for ALL state
 - Spinner animates smoothly
 - Multiple concurrent tools displayed correctly
 
-### Phase 5: Collapsible Tool Output ✅
+### Phase 5: Collapsible Tool Output ✅ - COMPLETE
 **Goal**: Clean tool output display with expand/collapse  
 **Risk**: Low  
 **Testing**: Visual verification with stdout/stderr
 
-- [ ] Modify tool message rendering in `world-chat.tsx`:
+- [x] Modify tool message rendering in `world-chat.tsx`:
   - [ ] Add local state for collapse/expand (per message)
   - [ ] Wrap tool output in collapsible container
   - [ ] Add expand/collapse button (icon only)
@@ -420,12 +417,12 @@ World.tsx: Single source of truth for ALL state
 - Very long output truncated with notice
 - Smooth expand/collapse animation
 
-### Phase 6: Enhanced Message Styling ✅
+### Phase 6: Enhanced Message Styling ✅ - COMPLETE
 **Goal**: Role-based visual hierarchy and polish  
 **Risk**: Low  
 **Testing**: Visual verification across message types
 
-- [ ] Update message card styles in `styles.css`:
+- [x] Update message card styles in `styles.css`:
   - [ ] Add role-based left border colors:
     - [ ] `.user-message`: subtle border color
     - [ ] `.tool-message`: amber/orange border
