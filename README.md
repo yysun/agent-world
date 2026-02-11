@@ -137,42 +137,38 @@ echo "hi" | npx agent-world -w default-world
 
 See [Project Structure Documentation](project.md)
 
-## Development Scripts Convention
+## Development Scripts
 
-Agent World follows a consistent naming convention for all npm scripts:
+Agent World provides simple, consistent npm scripts for three main applications:
 
-| Script Pattern | Description | Example |
-|---------------|-------------|---------|
-| `<module>` | Shorthand for `<module>:start` | `npm run server` |
-| `<module>:start` | Run compiled code from `dist/` | `npm run server:start` |
-| `<module>:dev` | Run with tsx (no build needed) | `npm run server:dev` |
-| `<module>:watch` | Run with tsx in watch mode | `npm run server:watch` |
-
-**Available modules:** `server`, `cli`, `ws`, `tui`
-
-**Module Dependencies:**
-- `web:dev` / `web:watch` → Depends on `server` (waits for server to be ready)
-- `tui:dev` / `tui:watch` → Depends on `ws` (waits for WebSocket server)
-
-**Examples:**
+### Development (hot reload)
 ```bash
-# Production execution (requires build)
-npm run server        # Runs: node dist/server/index.js
-npm run cli           # Runs: node dist/cli/index.js
+npm run dev              # Electron app (default)
+npm run web:dev          # Web app with server
+npm run cli:dev          # CLI with watch mode
+npm run electron:dev     # Electron app (explicit)
+```
 
-# Development (no build needed)
-npm run server:dev    # Runs: npx tsx server/index.ts
-npm run ws:dev        # Runs: npx tsx ws/index.ts
+### Production
+```bash
+npm start                # Electron app (default)
+npm run web:start        # Web server (built)
+npm run cli:start        # CLI (built)
+npm run electron:start   # Electron app (explicit)
+```
 
-# Watch mode (auto-restart on changes)
-npm run server:watch  # Runs: npx tsx --watch server/index.ts
-npm run cli:watch     # Runs: npx tsx --watch cli/index.ts
+### Behind the Scenes
+The scripts handle dependencies automatically:
+- **Web**: Builds core, starts server in watch mode, launches Vite dev server
+- **CLI**: Runs with tsx watch mode for instant feedback
+- **Electron**: Builds core, launches Electron with Vite HMR
 
-# With dependencies (auto-start required services)
-npm run web:dev       # Waits for server, then starts web
-npm run web:watch     # Runs server:watch + web in parallel
-npm run tui:dev       # Waits for ws, then starts tui
-npm run tui:watch     # Runs ws:watch + tui in parallel
+### Other Useful Scripts
+```bash
+npm run build            # Build all (core + root + web)
+npm run check            # TypeScript type checking
+npm test                 # Run unit tests
+npm run test:watch       # Watch mode
 ```
 
 ### Environment Setup
@@ -222,13 +218,13 @@ Agent World uses **scenario-based logging** to help you debug specific issues wi
 
 ```bash
 # Database migration issues
-LOG_STORAGE_MIGRATION=info npm run server
+LOG_STORAGE_MIGRATION=info npm run web:dev
 
 # MCP server problems  
-LOG_MCP=debug npm run server
+LOG_MCP=debug npm run web:dev
 
 # Agent response debugging
-LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run server
+LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
 ```
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).

@@ -11,26 +11,26 @@ The MCP logging system uses scenario-based categories for granular control:
 ### Enable All MCP Logs
 
 ```bash
-LOG_MCP=debug npm run server
+LOG_MCP=debug npm run web:dev
 ```
 
 ### Enable Specific MCP Categories
 
 ```bash
 # Server lifecycle only (start/stop/ready)
-LOG_MCP_LIFECYCLE=info npm run server
+LOG_MCP_LIFECYCLE=info npm run web:dev
 
 # Connection details
-LOG_MCP_CONNECTION=debug npm run server
+LOG_MCP_CONNECTION=debug npm run web:dev
 
 # Tool discovery and caching
-LOG_MCP_TOOLS=debug npm run server
+LOG_MCP_TOOLS=debug npm run web:dev
 
 # Tool execution (request/response payloads)
-LOG_MCP_EXECUTION=debug npm run server
+LOG_MCP_EXECUTION=debug npm run web:dev
 
 # Multiple categories
-LOG_MCP_LIFECYCLE=info LOG_MCP_EXECUTION=debug npm run server
+LOG_MCP_LIFECYCLE=info LOG_MCP_EXECUTION=debug npm run web:dev
 ```
 
 ## Logging Categories
@@ -122,7 +122,7 @@ Shows tool call request/response payloads:
 ### 1. Troubleshooting Server Startup
 When MCP servers aren't starting:
 ```bash
-LOG_MCP_LIFECYCLE=info LOG_MCP_CONNECTION=debug npm run server
+LOG_MCP_LIFECYCLE=info LOG_MCP_CONNECTION=debug npm run web:dev
 ```
 You'll see:
 - Server initialization attempts
@@ -133,7 +133,7 @@ You'll see:
 ### 2. Debugging Tool Discovery
 When tools aren't appearing or being cached:
 ```bash
-LOG_MCP_TOOLS=debug npm run server
+LOG_MCP_TOOLS=debug npm run web:dev
 ```
 You'll see:
 - Tool fetching operations
@@ -144,7 +144,7 @@ You'll see:
 ### 3. Analyzing Tool Execution
 When tool calls aren't working as expected:
 ```bash
-LOG_MCP_EXECUTION=debug npm run server
+LOG_MCP_EXECUTION=debug npm run web:dev
 ```
 You'll see:
 - Exact arguments being sent
@@ -155,7 +155,7 @@ You'll see:
 ### 4. Full MCP Debugging
 For complete visibility into all MCP operations:
 ```bash
-LOG_MCP=debug npm run server
+LOG_MCP=debug npm run web:dev
 ```
 This enables all four categories at debug level.
 
@@ -170,7 +170,7 @@ export LOG_MCP_LIFECYCLE=info
 export LOG_MCP_EXECUTION=debug
 
 # Start the server
-npm run server
+npm run web:dev
 
 # Expected output:
 # [INFO] MCP.LIFECYCLE: Starting MCP server { serverName: "filesystem", transport: "stdio" }
@@ -196,19 +196,19 @@ The debug logs can be quite verbose. To filter for specific information:
 
 ```bash
 # Only show lifecycle events
-LOG_MCP_LIFECYCLE=info npm run server
+LOG_MCP_LIFECYCLE=info npm run web:dev
 
 # Only show tool execution
-LOG_MCP_EXECUTION=debug npm run server
+LOG_MCP_EXECUTION=debug npm run web:dev
 
 # Filter output with grep
-LOG_MCP=debug npm run server | grep "MCP.EXECUTION"
+LOG_MCP=debug npm run web:dev | grep "MCP.EXECUTION"
 
 # Show only errors
-LOG_MCP=debug npm run server | grep "ERROR"
+LOG_MCP=debug npm run web:dev | grep "ERROR"
 
 # Combine multiple filters
-LOG_MCP=debug npm run server | grep -E "(LIFECYCLE|EXECUTION)"
+LOG_MCP=debug npm run web:dev | grep -E "(LIFECYCLE|EXECUTION)"
 ```
 
 ## Hierarchical Control
@@ -227,17 +227,17 @@ Setting the parent category enables all children:
 
 ```bash
 # This enables all four MCP categories at debug level
-LOG_MCP=debug npm run server
+LOG_MCP=debug npm run web:dev
 
 # Equivalent to:
-LOG_MCP_LIFECYCLE=debug LOG_MCP_CONNECTION=debug LOG_MCP_TOOLS=debug LOG_MCP_EXECUTION=debug npm run server
+LOG_MCP_LIFECYCLE=debug LOG_MCP_CONNECTION=debug LOG_MCP_TOOLS=debug LOG_MCP_EXECUTION=debug npm run web:dev
 ```
 
 You can override specific children:
 
 ```bash
 # All MCP at debug, but lifecycle at info only
-LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run server
+LOG_MCP=debug LOG_MCP_LIFECYCLE=info npm run web:dev
 ```
 
 ## Important Notes

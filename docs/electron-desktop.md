@@ -15,9 +15,10 @@ This project now includes an Electron app that uses `core` directly through IPC.
 ```bash
 npm install
 npm run electron:dev
+# or simply: npm run dev
 ```
 
-This script builds `core` first, then launches Electron.
+This script builds `core` first, then launches Electron with hot module reloading.
 
 ## Workspace behavior
 
