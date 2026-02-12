@@ -19,6 +19,9 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-12: Canonicalized chat message serialization to use core-provided `messageId` for both `id` and `messageId`.
+ *   - Removed synthetic message-list fallback IDs (`mem-*`, `event-*`) from chat payloads.
+ *   - Session message normalization now drops entries without messageId and de-duplicates by canonical ID.
  * - 2026-02-11: Added IPC-level refresh warning payloads so renderer can show subscription refresh/rebind issues in the UI while keeping CLI-style best-effort mutation behavior.
  * - 2026-02-11: Changed world subscription refresh/rebind to CLI-style best-effort behavior (warn on refresh/rebind issues without failing world/chat mutations).
  * - 2026-02-11: Removed Electron-side world/chat ID canonicalization guards and added world subscription refresh + chat listener rebind after world/chat mutations (CLI/API parity).
@@ -413,9 +416,13 @@ async function serializeChatsWithMessageCounts(worldId, chats) {
 
 /**
  * @param {any} message
- * @param {number} fallbackIndex
  */
-function serializeMessage(message, fallbackIndex) {
+function serializeMessage(message) {
+  const messageId = String(message?.messageId || '').trim();
+  if (!messageId) {
+    return null;
+  }
+
   const timestamp = message.createdAt instanceof Date
     ? message.createdAt.toISOString()
     : message.createdAt
@@ -423,13 +430,13 @@ function serializeMessage(message, fallbackIndex) {
       : new Date().toISOString();
 
   return {
-    id: message.messageId || `mem-${fallbackIndex}`,
+    id: messageId,
     role: message.role,
     sender: message.sender || message.agentId || 'unknown',
     content: message.content || '',
     createdAt: timestamp,
     chatId: message.chatId || null,
-    messageId: message.messageId || null,
+    messageId,
     replyToMessageId: message.replyToMessageId || null,
     fromAgentId: message.agentId || null
   };
@@ -445,46 +452,39 @@ function isHumanSender(sender) {
 
 /**
  * Deduplicate loaded session messages so user turns appear once even when mirrored
- * across multiple agent memories. Also guarantees unique `id` values for React keys.
+ * across multiple agent memories.
  * @param {any[]} messages
  */
 function normalizeSessionMessages(messages) {
   const source = Array.isArray(messages) ? messages : [];
-  const seenUserMessageIds = new Set();
+  const seenMessageIds = new Set();
   const deduplicated = [];
 
-  for (const message of source) {
-    const role = String(message?.role || '').trim().toLowerCase();
-    const messageId = String(message?.messageId || '').trim();
+  for (const rawMessage of source) {
+    if (!rawMessage) continue;
+
+    const messageId = String(rawMessage?.messageId || '').trim();
+    if (!messageId) continue;
+
+    const message = {
+      ...rawMessage,
+      id: messageId,
+      messageId
+    };
+
+    const role = String(message.role || '').trim().toLowerCase();
     const isUserMessage = role === 'user' || isHumanSender(message?.sender);
 
-    if (isUserMessage && messageId) {
-      if (seenUserMessageIds.has(messageId)) continue;
-      seenUserMessageIds.add(messageId);
+    if (isUserMessage && seenMessageIds.has(messageId)) {
+      continue;
     }
+    if (seenMessageIds.has(messageId)) continue;
+    seenMessageIds.add(messageId);
 
     deduplicated.push(message);
   }
 
-  const usedIds = new Set();
-  return deduplicated.map((message, index) => {
-    const baseIdRaw = String(message?.id || message?.messageId || `mem-${index}`).trim();
-    const baseId = baseIdRaw || `mem-${index}`;
-    let uniqueId = baseId;
-    let suffix = 1;
-
-    while (usedIds.has(uniqueId)) {
-      uniqueId = `${baseId}-${suffix}`;
-      suffix += 1;
-    }
-
-    usedIds.add(uniqueId);
-    if (message?.id === uniqueId) return message;
-    return {
-      ...message,
-      id: uniqueId
-    };
-  });
+  return deduplicated;
 }
 
 /**
@@ -515,19 +515,24 @@ function deriveEventRole(event) {
  * @returns {any} Serialized event payload
  */
 function serializeRealtimeMessageEvent(worldId, event) {
+  const messageId = String(event?.messageId || '').trim();
+  if (!messageId) {
+    return null;
+  }
+
   const createdAt = toIsoTimestamp(event?.timestamp);
   return {
     type: 'message',
     worldId,
     chatId: event?.chatId || null,
     message: {
-      id: event?.messageId || `event-${Date.now()}`,
+      id: messageId,
       role: deriveEventRole(event),
       sender: event?.sender || 'unknown',
       content: event?.content || '',
       createdAt,
       chatId: event?.chatId || null,
-      messageId: event?.messageId || null,
+      messageId,
       replyToMessageId: event?.replyToMessageId || null
     }
   };
@@ -541,13 +546,14 @@ function serializeRealtimeMessageEvent(worldId, event) {
  * @returns {any} Serialized event payload
  */
 function serializeRealtimeSSEEvent(worldId, chatId, event) {
+  const messageId = typeof event?.messageId === 'string' ? event.messageId : null;
   return {
     type: 'sse',
     worldId,
     chatId: chatId || null,
     sse: {
       eventType: event?.type || 'chunk',
-      messageId: event?.messageId || `sse-${Date.now()}`,
+      messageId,
       agentName: event?.agentName || 'assistant',
       content: event?.content || '',
       error: event?.error || null,
@@ -1261,9 +1267,7 @@ async function getSessionMessages(worldId, chatId) {
   const memory = await getMemory(id, requestedChatId);
   if (!memory) return [];
 
-  return normalizeSessionMessages(
-    memory.map((message, index) => serializeMessage(message, index))
-  );
+  return normalizeSessionMessages(memory.map((message) => serializeMessage(message)));
 }
 
 /**
@@ -1294,8 +1298,10 @@ async function subscribeChatEvents(payload) {
   const messageHandler = (/** @type {any} */ event) => {
     const eventChatId = event?.chatId ? String(event.chatId) : null;
     if (chatId && eventChatId !== chatId) return;
+    const serializedEvent = serializeRealtimeMessageEvent(worldId, event);
+    if (!serializedEvent) return;
     sendRealtimeEventToRenderer({
-      ...serializeRealtimeMessageEvent(worldId, event),
+      ...serializedEvent,
       subscriptionId
     });
   };

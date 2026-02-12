@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-12: Removed renderer-side message ID fallback for chat messages.
+ *   - Chat message merge/render/edit/delete paths now rely on backend-provided `messageId` only.
+ *   - Delete flow now refreshes messages from canonical `chat:getMessages` payloads after removal.
+ * - 2026-02-12: Fixed edit-message flow to use stable message identity (`messageId` first) so edit always removes the edited user message and all following messages before resubmission.
  * - 2026-02-11: Surface world subscription refresh/rebind warnings in the status bar for world/session mutations.
  * - 2026-02-11: Log errors now render even without an active chat subscription by using a global log listener with status-bar fallback.
  * - 2026-02-11: Message list rendering now keys by unique `id` first to prevent duplicate-key collisions when loading session history.
@@ -297,88 +301,39 @@ function getMessageTimestamp(message) {
 }
 
 function upsertMessageList(existingMessages, incomingMessage) {
-  const incomingId = incomingMessage?.messageId || incomingMessage?.id;
+  const incomingId = String(incomingMessage?.messageId || '').trim();
+  if (!incomingId) return existingMessages;
+
   const next = [...existingMessages];
 
-  if (!incomingId) {
-    next.push(incomingMessage);
+  const existingIndex = next.findIndex((message) => String(message?.messageId || '').trim() === incomingId);
+  if (existingIndex >= 0) {
+    next[existingIndex] = {
+      ...next[existingIndex],
+      ...incomingMessage,
+      id: incomingId,
+      messageId: incomingId
+    };
   } else {
-    const existingIndex = next.findIndex((message) => (message.messageId || message.id) === incomingId);
-    if (existingIndex >= 0) {
-      next[existingIndex] = {
-        ...next[existingIndex],
-        ...incomingMessage,
-        id: next[existingIndex].id || incomingMessage.id || incomingId
-      };
-    } else {
-      next.push({
-        ...incomingMessage,
-        id: incomingMessage.id || incomingId
-      });
-    }
+    next.push({
+      ...incomingMessage,
+      id: incomingId,
+      messageId: incomingId
+    });
   }
 
   next.sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
   return next;
 }
 
-/**
- * Convert agent memory item to message for display
- */
-function createMessageFromMemory(memoryItem, agentName) {
-  const sender = memoryItem.sender || agentName;
-  const messageType =
-    sender === 'human' || sender === 'user' ? 'user' :
-      memoryItem.role === 'tool' ? 'tool' :
-        memoryItem.role === 'assistant' ? 'agent' : 'agent';
-
-  return {
-    id: `msg-${Date.now()}-${Math.random()}`,
-    sender,
-    content: memoryItem.content || '',
-    messageId: memoryItem.messageId,
-    replyToMessageId: memoryItem.replyToMessageId,
-    createdAt: memoryItem.createdAt || new Date(),
-    type: messageType,
-    fromAgentId: memoryItem.agentId,
-    role: memoryItem.role,
-    chatId: memoryItem.chatId
-  };
-}
-
-/**
- * Deduplicate user messages across agents (multi-agent scenarios)
- * User messages appear only once, agent messages remain separate
- */
-function deduplicateMessages(messages, agents = []) {
-  const messageMap = new Map();
-  const messagesWithoutId = [];
-
-  for (const msg of messages) {
-    const isUserMessage = msg.type === 'user' ||
-      msg.sender?.toLowerCase() === 'human' ||
-      msg.sender?.toLowerCase() === 'user';
-
-    if (isUserMessage && msg.messageId) {
-      if (!messageMap.has(msg.messageId)) {
-        messageMap.set(msg.messageId, {
-          ...msg,
-          seenByAgents: msg.fromAgentId ? [msg.fromAgentId] : []
-        });
-      }
-    } else {
-      messagesWithoutId.push(msg);
-    }
-  }
-
-  return [...messageMap.values(), ...messagesWithoutId]
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-}
-
 function isHumanMessage(message) {
   const role = String(message?.role || '').toLowerCase();
   const sender = String(message?.sender || '').toLowerCase();
   return role === 'user' || HUMAN_SENDER_VALUES.has(sender);
+}
+
+function getMessageIdentity(message) {
+  return String(message?.messageId || '').trim();
 }
 
 function getMessageCardClassName(message) {
@@ -665,7 +620,7 @@ export default function App() {
       },
       onStreamUpdate: (messageId, content) => {
         setMessages((existing) => {
-          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          const index = existing.findIndex((m) => String(m.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
           next[index] = { ...next[index], content };
@@ -674,7 +629,7 @@ export default function App() {
       },
       onStreamEnd: (messageId) => {
         setMessages((existing) => {
-          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          const index = existing.findIndex((m) => String(m.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
           next[index] = { ...next[index], isStreaming: false };
@@ -683,7 +638,7 @@ export default function App() {
       },
       onStreamError: (messageId, errorMessage) => {
         setMessages((existing) => {
-          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          const index = existing.findIndex((m) => String(m.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
           next[index] = { ...next[index], isStreaming: false, hasError: true, errorMessage };
@@ -704,7 +659,7 @@ export default function App() {
       },
       onToolStreamUpdate: (messageId, content, streamType) => {
         setMessages((existing) => {
-          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          const index = existing.findIndex((m) => String(m.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
           next[index] = { ...next[index], content, streamType };
@@ -713,7 +668,7 @@ export default function App() {
       },
       onToolStreamEnd: (messageId) => {
         setMessages((existing) => {
-          const index = existing.findIndex((m) => String(m.messageId || m.id) === String(messageId));
+          const index = existing.findIndex((m) => String(m.messageId || '') === String(messageId));
           if (index < 0) return existing;
           const next = [...existing];
           next[index] = { ...next[index], isToolStreaming: false, streamType: undefined };
@@ -862,7 +817,7 @@ export default function App() {
   const messagesById = useMemo(() => {
     const index = new Map();
     for (const message of messages) {
-      const id = message?.messageId || message?.id;
+      const id = message?.messageId;
       if (!id) continue;
       index.set(String(id), message);
     }
@@ -1730,9 +1685,11 @@ export default function App() {
    * Enter edit mode for a user message
    * Shows textarea with current message text and Save/Cancel buttons
    */
-  const onStartEditMessage = useCallback((messageId, currentText) => {
-    setEditingMessageId(messageId);
-    setEditingText(currentText || '');
+  const onStartEditMessage = useCallback((message) => {
+    const messageIdentity = getMessageIdentity(message);
+    if (!messageIdentity) return;
+    setEditingMessageId(messageIdentity);
+    setEditingText(message?.content || '');
   }, []);
 
   /**
@@ -1795,7 +1752,8 @@ export default function App() {
     }
 
     // Optimistic update: remove edited message and all subsequent messages
-    const editedIndex = messages.findIndex(m => m.id === message.id);
+    const targetIdentity = getMessageIdentity(message);
+    const editedIndex = messages.findIndex(m => getMessageIdentity(m) === targetIdentity);
     const optimisticMessages = editedIndex >= 0 ? messages.slice(0, editedIndex) : messages;
     setMessages(optimisticMessages);
     setEditingMessageId(null);
@@ -1862,9 +1820,8 @@ export default function App() {
    * Shows confirmation dialog with message preview before deletion
    * 
    * After successful deletion:
-   * 1. Reloads world data via loadWorld IPC
-   * 2. Rebuilds message list from agent memories
-   * 3. Applies deduplication for multi-agent scenarios
+   * 1. Calls DELETE to remove message chain from backend memory
+   * 2. Refreshes message list from canonical chat:getMessages IPC
    * 
    * Handles partial failures where some agents succeed and others fail.
    */
@@ -1878,7 +1835,8 @@ export default function App() {
     );
     if (!confirmed) return;
 
-    setDeletingMessageId(message.id);
+    const targetIdentity = getMessageIdentity(message);
+    setDeletingMessageId(targetIdentity);
     try {
       // Call DELETE via IPC
       const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, selectedSessionId);
@@ -1894,37 +1852,14 @@ export default function App() {
         }
       }
 
-      // Reload world via existing loadWorld IPC
-      const reloadResult = await api.loadWorld(loadedWorld.id);
-      if (!reloadResult.success) {
-        throw new Error('Failed to reload world after delete');
-      }
-
-      // Rebuild messages from agent memory
-      const world = reloadResult.world;
-      const agents = world.agents || [];
-      let newMessages = [];
-
-      for (const agent of agents) {
-        for (const memoryItem of agent.memory || []) {
-          if (memoryItem.chatId === selectedSessionId) {
-            newMessages.push(createMessageFromMemory(memoryItem, agent.name));
-          }
-        }
-      }
-
-      // Apply deduplication
-      newMessages = deduplicateMessages(newMessages, agents);
-
-      setMessages(newMessages);
-      setLoadedWorld(world);
+      await refreshMessages(loadedWorld.id, selectedSessionId);
       setStatusText('Message deleted successfully', 'success');
     } catch (error) {
       setStatusText(error.message || 'Failed to delete message', 'error');
     } finally {
       setDeletingMessageId(null);
     }
-  }, [api, loadedWorld, selectedSessionId, setStatusText]);
+  }, [api, loadedWorld, selectedSessionId, setStatusText, refreshMessages]);
 
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {
@@ -2450,8 +2385,9 @@ export default function App() {
                     </div>
                   ) : (
                     messages.map((message, messageIndex) => {
+                      if (!message?.messageId) return null;
                       const senderLabel = getMessageSenderLabel(message, messagesById, messages, messageIndex);
-                      const messageKey = message.id || message.messageId || `message-${messageIndex}`;
+                      const messageKey = message.messageId;
                       return (
                         <article
                           key={messageKey}
@@ -2462,7 +2398,7 @@ export default function App() {
                             <span>{formatTime(message.createdAt)}</span>
                           </div>
 
-                          {editingMessageId === message.id ? (
+                          {editingMessageId === getMessageIdentity(message) ? (
                             <div className="space-y-2">
                               <textarea
                                 value={editingText}
@@ -2504,11 +2440,11 @@ export default function App() {
                           ) : null}
 
                           {/* Action buttons - show on hover in lower right */}
-                          {isHumanMessage(message) && message.messageId && editingMessageId !== message.id ? (
+                          {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
                             <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 type="button"
-                                onClick={() => onStartEditMessage(message.id, message.content)}
+                                onClick={() => onStartEditMessage(message)}
                                 disabled={!message.messageId}
                                 className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
                                 title="Edit message"
@@ -2522,7 +2458,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => onDeleteMessage(message)}
-                                disabled={deletingMessageId === message.id}
+                                disabled={deletingMessageId === getMessageIdentity(message)}
                                 className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
                                 title="Delete message"
                                 aria-label="Delete message"

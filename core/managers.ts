@@ -26,6 +26,9 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-12: Hardened `getMemory` to auto-migrate legacy messages missing `messageId` before returning memory payloads.
+ *   - Detects missing IDs, runs idempotent `migrateMessageIds`, and re-reads memory.
+ *   - Ensures message-list consumers receive canonical `messageId` values from core.
  * - 2026-02-11: Made `deleteWorld` side-effect-free by removing `getWorld` usage.
  *   - `deleteWorld` now avoids world runtime hydration/chat creation paths during deletion.
  *   - Cleanup hooks are invoked only if present on directly loaded world data.
@@ -745,7 +748,21 @@ export async function getMemory(worldId: string, chatId?: string | null): Promis
     return null;
   }
 
-  return await storageWrappers!.getMemory(resolvedWorldId, chatId || world.currentChatId);
+  const resolvedChatId = chatId || world.currentChatId;
+  const memory = await storageWrappers!.getMemory(resolvedWorldId, resolvedChatId);
+
+  // Auto-repair legacy memories so downstream clients can rely on messageId without UI fallbacks.
+  if (memory.some(message => !message.messageId)) {
+    logger.warn('Detected messages without messageId in getMemory; running migration', {
+      worldId: resolvedWorldId,
+      chatId: resolvedChatId
+    });
+
+    await migrateMessageIds(resolvedWorldId);
+    return await storageWrappers!.getMemory(resolvedWorldId, resolvedChatId);
+  }
+
+  return memory;
 }
 
 /**
