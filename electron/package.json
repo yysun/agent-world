@@ -8,7 +8,7 @@
   "scripts": {
     "renderer:dev": "vite --config vite.config.js",
     "renderer:build": "vite build --config vite.config.js",
-    "electron:dev": "wait-on http://127.0.0.1:5181 && ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
+    "electron:dev": "wait-on http://127.0.0.1:5181 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
     "dev": "npm-run-all --parallel renderer:dev electron:dev",
     "start": "npm run renderer:build && electron ."
   },
@@ -24,6 +24,7 @@
     "@types/dompurify": "^3.0.5",
     "@types/marked": "^5.0.2",
     "@vitejs/plugin-react": "^5.1.2",
+    "cross-env": "^7.0.3",
     "electron": "^35.0.0"
   }
 }
