@@ -21,6 +21,12 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-12: Extended chat avatars to tool-call and system/log message cards.
+ *   - Non-human message avatars now resolve for assistant, tool, and system/log roles.
+ *   - Tool/system entries use role-aware fallback labels when no agent mapping is available.
+ * - 2026-02-12: Added per-message agent avatars on the left of assistant message cards.
+ *   - Assistant messages now resolve sender metadata via `fromAgentId` first, then sender-name matching.
+ *   - Chat rows now support avatar + bubble layout for assistant messages.
  * - 2026-02-12: Removed renderer-side message ID fallback for chat messages.
  *   - Chat message merge/render/edit/delete paths now rely on backend-provided `messageId` only.
  *   - Delete flow now refreshes messages from canonical `chat:getMessages` payloads after removal.
@@ -404,6 +410,45 @@ function getMessageSenderLabel(message, messagesById, messages, currentIndex) {
     inferReplyTargetFromHistory(message, messages, currentIndex);
   if (!replyTarget) return sender;
   return `${sender} (reply to ${replyTarget})`;
+}
+
+function resolveMessageAvatar(message, agentsById, agentsByName) {
+  if (isHumanMessage(message)) return null;
+
+  const role = String(message?.role || '').toLowerCase();
+  const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
+  const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
+
+  const fromAgentId = String(message?.fromAgentId || '').trim();
+  if (fromAgentId && agentsById.has(fromAgentId)) {
+    const byIdAgent = agentsById.get(fromAgentId);
+    return {
+      name: byIdAgent.name,
+      initials: byIdAgent.initials
+    };
+  }
+
+  const sender = String(message?.sender || '').trim();
+  const normalizedSender = sender.toLowerCase();
+  if (normalizedSender && agentsByName.has(normalizedSender)) {
+    const byNameAgent = agentsByName.get(normalizedSender);
+    return {
+      name: byNameAgent.name,
+      initials: byNameAgent.initials
+    };
+  }
+
+  const logCategory = String(message?.logEvent?.category || '').trim();
+  const fallbackName = isSystem
+    ? (logCategory || sender || 'System')
+    : isTool
+      ? (sender || 'Tool')
+      : (sender || 'Assistant');
+
+  return {
+    name: fallbackName,
+    initials: getAgentInitials(fallbackName)
+  };
 }
 
 function getAgentDisplayName(agent, fallbackIndex) {
@@ -801,6 +846,24 @@ export default function App() {
       };
     });
   }, [messageCountByAgentId, rawWorldAgents]);
+
+  const worldAgentsById = useMemo(() => {
+    const next = new Map();
+    for (const agent of worldAgents) {
+      next.set(agent.id, agent);
+    }
+    return next;
+  }, [worldAgents]);
+
+  const worldAgentsByName = useMemo(() => {
+    const next = new Map();
+    for (const agent of worldAgents) {
+      const normalizedName = String(agent?.name || '').trim().toLowerCase();
+      if (!normalizedName) continue;
+      next.set(normalizedName, agent);
+    }
+    return next;
+  }, [worldAgents]);
 
   const visibleWorldAgents = useMemo(
     () => worldAgents.slice(0, MAX_HEADER_AGENT_AVATARS),
@@ -2388,88 +2451,102 @@ export default function App() {
                       if (!message?.messageId) return null;
                       const senderLabel = getMessageSenderLabel(message, messagesById, messages, messageIndex);
                       const messageKey = message.messageId;
+                      const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
+                      const isHuman = isHumanMessage(message);
                       return (
-                        <article
+                        <div
                           key={messageKey}
-                          className={getMessageCardClassName(message)}
+                          className={`flex w-full items-start gap-2 ${isHuman ? 'justify-end' : 'justify-start'}`}
                         >
-                          <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                            <span>{senderLabel}</span>
-                            <span>{formatTime(message.createdAt)}</span>
-                          </div>
+                          {messageAvatar ? (
+                            <div
+                              className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-[10px] font-semibold text-secondary-foreground"
+                              title={messageAvatar.name}
+                              aria-label={`${messageAvatar.name} avatar`}
+                            >
+                              {messageAvatar.initials}
+                            </div>
+                          ) : null}
 
-                          {editingMessageId === getMessageIdentity(message) ? (
-                            <div className="space-y-2">
-                              <textarea
-                                value={editingText}
-                                onChange={(e) => setEditingText(e.target.value)}
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/20 resize-none transition-all"
-                                rows={3}
-                                autoFocus
-                                placeholder="Edit your message..."
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Escape') {
-                                    onCancelEditMessage();
-                                  }
-                                }}
-                              />
-                              <div className="flex gap-2">
+                          <article className={getMessageCardClassName(message)}>
+                            <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>{senderLabel}</span>
+                              <span>{formatTime(message.createdAt)}</span>
+                            </div>
+
+                            {editingMessageId === getMessageIdentity(message) ? (
+                              <div className="space-y-2">
+                                <textarea
+                                  value={editingText}
+                                  onChange={(e) => setEditingText(e.target.value)}
+                                  className="w-full rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground outline-none focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/20 resize-none transition-all"
+                                  rows={3}
+                                  autoFocus
+                                  placeholder="Edit your message..."
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                      onCancelEditMessage();
+                                    }
+                                  }}
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => onSaveEditMessage(message)}
+                                    disabled={!editingText.trim()}
+                                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={onCancelEditMessage}
+                                    className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <MessageContent message={message} />
+                            )}
+
+                            {message.isStreaming ? (
+                              <ThinkingIndicator className="mt-2" />
+                            ) : null}
+
+                            {/* Action buttons - show on hover in lower right */}
+                            {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
+                              <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                   type="button"
-                                  onClick={() => onSaveEditMessage(message)}
-                                  disabled={!editingText.trim()}
-                                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                  onClick={() => onStartEditMessage(message)}
+                                  disabled={!message.messageId}
+                                  className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                                  title="Edit message"
+                                  aria-label="Edit message"
                                 >
-                                  Save
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                  </svg>
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={onCancelEditMessage}
-                                  className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
+                                  onClick={() => onDeleteMessage(message)}
+                                  disabled={deletingMessageId === getMessageIdentity(message)}
+                                  className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
+                                  title="Delete message"
+                                  aria-label="Delete message"
                                 >
-                                  Cancel
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 6L6 18M6 6l12 12" />
+                                  </svg>
                                 </button>
                               </div>
-                            </div>
-                          ) : (
-                            <MessageContent message={message} />
-                          )}
-
-                          {message.isStreaming ? (
-                            <ThinkingIndicator className="mt-2" />
-                          ) : null}
-
-                          {/* Action buttons - show on hover in lower right */}
-                          {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
-                            <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                type="button"
-                                onClick={() => onStartEditMessage(message)}
-                                disabled={!message.messageId}
-                                className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
-                                title="Edit message"
-                                aria-label="Edit message"
-                              >
-                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onDeleteMessage(message)}
-                                disabled={deletingMessageId === getMessageIdentity(message)}
-                                className="rounded p-1 text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-destructive/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all bg-background/80 backdrop-blur-sm"
-                                title="Delete message"
-                                aria-label="Delete message"
-                              >
-                                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M18 6L6 18M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                          ) : null}
-                        </article>
+                            ) : null}
+                          </article>
+                        </div>
                       );
                     })
                   )}
