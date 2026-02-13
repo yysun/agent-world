@@ -7,6 +7,13 @@
  * - Success messaging with auto-close and parent component integration
  * - Global event publishing for coordinated modal management
  * - Standardized modal sizing via shared 'edit-modal' class (parity with World Edit)
+ *
+ * Implementation Notes:
+ * - Agent create/update payloads are normalized in this component before API submission.
+ * - The UI no longer submits `type`; backend defaults/retained values handle compatibility.
+ *
+ * Recent Changes:
+ * - 2026-02-13: Removed implicit `type` submission from web agent create/update UI payloads.
  */
 
 import { app, Component } from 'apprun';
@@ -37,6 +44,10 @@ export const defaultAgentData: Partial<Agent> = {
   systemPrompt: 'You are a helpful assistant.',
 };
 
+function normalizeAgentPayload(agent: Partial<Agent>): Partial<Agent> {
+  const { type: _ignoredType, ...payload } = agent as Partial<Agent> & { type?: string };
+  return payload;
+}
 
 // Save agent function (handles both create and update)
 export const saveAgent = async function* (state: AgentEditState): AsyncGenerator<AgentEditState> {
@@ -50,10 +61,11 @@ export const saveAgent = async function* (state: AgentEditState): AsyncGenerator
   yield { ...state, loading: true, error: null };
 
   try {
+    const payload = normalizeAgentPayload(state.agent);
     if (state.mode === 'create') {
-      await api.createAgent(state.worldName, state.agent);
+      await api.createAgent(state.worldName, payload);
     } else {
-      await api.updateAgent(state.worldName, state.agent.name, state.agent);
+      await api.updateAgent(state.worldName, state.agent.name, payload);
     }
 
     const successMessage = state.mode === 'create'

@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-13: Removed agent `type` from desktop create/edit forms and unsaved-change checks.
  * - 2026-02-13: Message edit flow now uses core-driven `message:edit` IPC so delete+resubmit+title-reset policy is shared across clients.
  * - 2026-02-13: Refreshes session list on realtime `chat-title-updated` system events so edited New Chat sessions immediately reflect generated titles.
  * - 2026-02-13: Reused the existing bottom status bar for live thinking/activity state (working/pending agents) without adding extra status rows.
@@ -107,7 +108,6 @@ const MAX_STATUS_AGENT_ITEMS = 6;
 const DEFAULT_AGENT_FORM = {
   id: '',
   name: '',
-  type: 'assistant',
   autoReply: true,
   provider: 'openai',
   model: 'gpt-4o-mini',
@@ -590,7 +590,6 @@ function validateAgentForm(agentForm) {
     valid: true,
     data: {
       name,
-      type: String(agentForm.type || 'assistant').trim() || 'assistant',
       autoReply: agentForm.autoReply !== false,
       provider: String(agentForm.provider || 'openai').trim() || 'openai',
       model,
@@ -871,7 +870,6 @@ export default function App() {
         id,
         name,
         initials: getAgentInitials(name),
-        type: String(agent?.type || 'assistant'),
         autoReply: agent?.autoReply !== false,
         provider: String(agent?.provider || 'openai'),
         model: String(agent?.model || 'gpt-4o-mini'),
@@ -1299,7 +1297,6 @@ export default function App() {
   const hasUnsavedAgentChanges = useCallback(() => {
     if (panelMode === 'create-agent') {
       return creatingAgent.name !== DEFAULT_AGENT_FORM.name ||
-        creatingAgent.type !== DEFAULT_AGENT_FORM.type ||
         creatingAgent.autoReply !== DEFAULT_AGENT_FORM.autoReply ||
         creatingAgent.provider !== DEFAULT_AGENT_FORM.provider ||
         creatingAgent.model !== DEFAULT_AGENT_FORM.model ||
@@ -1309,7 +1306,6 @@ export default function App() {
     }
     if (panelMode === 'edit-agent' && selectedAgentForPanel) {
       return editingAgent.name !== selectedAgentForPanel.name ||
-        editingAgent.type !== selectedAgentForPanel.type ||
         editingAgent.autoReply !== (selectedAgentForPanel.autoReply !== false) ||
         editingAgent.provider !== selectedAgentForPanel.provider ||
         editingAgent.model !== selectedAgentForPanel.model ||
@@ -1385,7 +1381,6 @@ export default function App() {
     setEditingAgent({
       id: targetAgent.id,
       name: targetAgent.name,
-      type: targetAgent.type || 'assistant',
       autoReply: targetAgent.autoReply !== false,
       provider: targetAgent.provider || 'openai',
       model: targetAgent.model || 'gpt-4o-mini',
@@ -2915,13 +2910,6 @@ export default function App() {
                               className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               disabled={savingAgent}
                             />
-                            <input
-                              value={creatingAgent.type}
-                              onChange={(event) => setCreatingAgent((value) => ({ ...value, type: event.target.value }))}
-                              placeholder="Agent type"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={savingAgent}
-                            />
                             <label className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
                               <input
                                 type="checkbox"
@@ -3024,13 +3012,6 @@ export default function App() {
                               value={editingAgent.name}
                               onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
                               placeholder="Agent name"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={savingAgent || deletingAgent}
-                            />
-                            <input
-                              value={editingAgent.type}
-                              onChange={(event) => setEditingAgent((value) => ({ ...value, type: event.target.value }))}
-                              placeholder="Agent type"
                               className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               disabled={savingAgent || deletingAgent}
                             />
