@@ -16,12 +16,13 @@
  * - beforeEach resets mocks and state
  *
  * Recent Changes:
+ * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-10: Added tests for tool stream bulk cleanup APIs (`getActiveToolStreamIds`, `endAllToolStreams`)
  * - 2026-02-10: Initial test suite
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createStreamingState } from '../../electron/renderer/src/streaming-state.js';
+import { createStreamingState } from '../../../electron/renderer/src/streaming-state.js';
 
 describe('createStreamingState', () => {
   let callbacks;

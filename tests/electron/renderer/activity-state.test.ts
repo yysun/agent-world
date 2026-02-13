@@ -17,11 +17,12 @@
  * - Uses fake timers for elapsed time tests
  *
  * Recent Changes:
+ * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-10: Initial test suite
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createActivityState } from '../../electron/renderer/src/activity-state.js';
+import { createActivityState } from '../../../electron/renderer/src/activity-state.js';
 
 describe('createActivityState', () => {
   let callbacks;

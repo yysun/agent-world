@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-12: Extracted renderer orchestration concerns into domain modules.
+ *   - Desktop bridge access + error normalization moved to `domain/desktop-api.js`.
+ *   - Message upsert/log conversion moved to `domain/message-updates.js`.
+ *   - Realtime log/chat event routing moved to `domain/chat-event-handlers.js`.
  * - 2026-02-12: Extended chat avatars to tool-call and system/log message cards.
  *   - Non-human message avatars now resolve for assistant, tool, and system/log roles.
  *   - Tool/system entries use role-aware fallback labels when no agent mapping is available.
@@ -78,6 +82,12 @@ import {
   ElapsedTimeCounter
 } from './components/index.js';
 import { renderMarkdown } from './utils/markdown';
+import { getDesktopApi, safeMessage } from './domain/desktop-api.js';
+import { upsertMessageList } from './domain/message-updates.js';
+import {
+  createGlobalLogEventHandler,
+  createChatSubscriptionEventHandler
+} from './domain/chat-event-handlers.js';
 
 const THEME_STORAGE_KEY = 'agent-world-desktop-theme';
 const COMPOSER_MAX_ROWS = 5;
@@ -242,23 +252,6 @@ function MessageContent({ message }) {
   );
 }
 
-function getDesktopApi() {
-  const api = window.agentWorldDesktop;
-  if (!api) {
-    throw new Error('Desktop API bridge is unavailable.');
-  }
-
-  // Compatibility: older preload bridges exposed `deleteSession` but not `deleteChat`.
-  if (typeof api.deleteChat !== 'function' && typeof api.deleteSession === 'function') {
-    return {
-      ...api,
-      deleteChat: api.deleteSession
-    };
-  }
-
-  return api;
-}
-
 function getStoredThemePreference() {
   if (typeof window === 'undefined') return 'system';
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -273,63 +266,11 @@ function formatTime(value) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function createLogMessage(logEvent) {
-  return {
-    id: `log-${logEvent?.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-    messageId: `log-${Date.now()}`,
-    sender: 'system',
-    content: logEvent?.message || '',
-    text: logEvent?.message || '',
-    role: 'system',
-    type: 'log',
-    createdAt: logEvent?.timestamp || new Date().toISOString(),
-    logEvent
-  };
-}
-
-function safeMessage(error, fallback) {
-  if (error instanceof Error && error.message) return error.message;
-  return fallback;
-}
-
 function getRefreshWarning(result) {
   const warning = result?.refreshWarning;
   if (typeof warning !== 'string') return '';
   const trimmed = warning.trim();
   return trimmed.length > 0 ? trimmed : '';
-}
-
-function getMessageTimestamp(message) {
-  const value = message?.createdAt;
-  if (!value) return 0;
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
-function upsertMessageList(existingMessages, incomingMessage) {
-  const incomingId = String(incomingMessage?.messageId || '').trim();
-  if (!incomingId) return existingMessages;
-
-  const next = [...existingMessages];
-
-  const existingIndex = next.findIndex((message) => String(message?.messageId || '').trim() === incomingId);
-  if (existingIndex >= 0) {
-    next[existingIndex] = {
-      ...next[existingIndex],
-      ...incomingMessage,
-      id: incomingId,
-      messageId: incomingId
-    };
-  } else {
-    next.push({
-      ...incomingMessage,
-      id: incomingId,
-      messageId: incomingId
-    });
-  }
-
-  next.sort((left, right) => getMessageTimestamp(left) - getMessageTimestamp(right));
-  return next;
 }
 
 function isHumanMessage(message) {
@@ -1024,21 +965,12 @@ export default function App() {
 
   // Global log listener (independent of chat session subscription)
   useEffect(() => {
-    const removeListener = api.onChatEvent((payload) => {
-      if (!payload || payload.type !== 'log') return;
-      const logEvent = payload.logEvent;
-      if (!logEvent) return;
-
-      const hasActiveSession = Boolean(loadedWorld?.id && selectedSessionId);
-      if (hasActiveSession) {
-        setMessages((existing) => [...existing, createLogMessage(logEvent)]);
-      } else {
-        const category = String(logEvent?.category || 'system');
-        const message = String(logEvent?.message || 'Unknown error');
-        const level = String(logEvent?.level || '').toLowerCase();
-        setStatusText(`${category} - ${message}`, level === 'error' ? 'error' : 'info');
-      }
-    });
+    const removeListener = api.onChatEvent(createGlobalLogEventHandler({
+      loadedWorldId: loadedWorld?.id,
+      selectedSessionId,
+      setMessages,
+      setStatusText
+    }));
 
     return () => {
       removeListener();
@@ -1052,135 +984,15 @@ export default function App() {
 
     const subscriptionId = `chat-${Date.now()}-${chatSubscriptionCounter.current++}`;
     let disposed = false;
-    const removeListener = api.onChatEvent((payload) => {
-      if (disposed || !payload) return;
-      if (payload.subscriptionId && payload.subscriptionId !== subscriptionId) return;
-      if (payload.worldId && payload.worldId !== loadedWorld.id) return;
-
-      const syncActiveStreamCount = () => {
-        const streaming = streamingStateRef.current;
-        if (!streaming) return;
-
-        const count = streaming.getActiveCount();
-        setActiveStreamCount(count);
-        if (activityStateRef.current) {
-          activityStateRef.current.setActiveStreamCount(count);
-        }
-      };
-
-      const endAllToolStreams = () => {
-        const streaming = streamingStateRef.current;
-        if (!streaming) return;
-
-        const endedIds = streaming.endAllToolStreams();
-        if (endedIds.length > 0) {
-          syncActiveStreamCount();
-        }
-      };
-
-      if (payload.type === 'message') {
-        const incomingMessage = payload.message;
-        if (!incomingMessage) return;
-
-        const incomingChatId = incomingMessage.chatId || payload.chatId || null;
-        if (selectedSessionId && incomingChatId && incomingChatId !== selectedSessionId) return;
-
-        setMessages((existing) => upsertMessageList(existing, {
-          ...incomingMessage,
-          isStreaming: false,
-          isToolStreaming: false,
-          streamType: undefined
-        }));
-
-        // Tool stream chunks can outlive their owning tool call in some flows.
-        // Once assistant output is finalized, close any lingering tool stream state.
-        if (String(incomingMessage.role || '').toLowerCase() === 'assistant') {
-          endAllToolStreams();
-        }
-        return;
-      }
-
-      if (payload.type === 'sse') {
-        const streamPayload = payload.sse;
-        if (!streamPayload) return;
-        const streamChatId = streamPayload.chatId || payload.chatId || null;
-        if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
-
-        const eventType = String(streamPayload.eventType || '').toLowerCase();
-        const messageId = streamPayload.messageId;
-        if (!messageId) return;
-
-        const streaming = streamingStateRef.current;
-        if (!streaming) return;
-
-        if (eventType === 'start') {
-          // A new assistant stream means previous tool execution phase is complete.
-          endAllToolStreams();
-          streaming.handleStart(messageId, streamPayload.agentName || 'assistant');
-          syncActiveStreamCount();
-        } else if (eventType === 'chunk') {
-          streaming.handleChunk(messageId, streamPayload.content || '');
-        } else if (eventType === 'end') {
-          streaming.handleEnd(messageId);
-          syncActiveStreamCount();
-        } else if (eventType === 'error') {
-          streaming.handleError(messageId, streamPayload.error || 'Stream error');
-          syncActiveStreamCount();
-        } else if (eventType === 'tool-stream') {
-          // Handle tool streaming events (shell command output)
-          const { content, stream } = streamPayload;
-
-          // Check if this is the first chunk (need to start)
-          if (!streaming.isActive(messageId)) {
-            streaming.handleToolStreamStart(
-              messageId,
-              streamPayload.agentName || 'shell_cmd',
-              stream || 'stdout'
-            );
-            syncActiveStreamCount();
-          }
-
-          streaming.handleToolStreamChunk(messageId, content || '', stream || 'stdout');
-        }
-      }
-
-      // Handle tool events 
-      if (payload.type === 'tool') {
-        const toolPayload = payload.tool;
-        if (!toolPayload) return;
-
-        const activity = activityStateRef.current;
-        if (!activity) return;
-
-        const toolEventType = String(toolPayload.eventType || '').toLowerCase();
-        const toolUseId = toolPayload.toolUseId;
-        if (!toolUseId) return;
-
-        if (toolEventType === 'tool-start') {
-          activity.handleToolStart(toolUseId, toolPayload.toolName || 'unknown', toolPayload.toolInput);
-        } else if (toolEventType === 'tool-result') {
-          activity.handleToolResult(toolUseId, toolPayload.result || '');
-          const streaming = streamingStateRef.current;
-          if (streaming?.isActive(toolUseId)) {
-            streaming.handleToolStreamEnd(toolUseId);
-            syncActiveStreamCount();
-          } else {
-            endAllToolStreams();
-          }
-        } else if (toolEventType === 'tool-error') {
-          activity.handleToolError(toolUseId, toolPayload.error || 'Tool error');
-          const streaming = streamingStateRef.current;
-          if (streaming?.isActive(toolUseId)) {
-            streaming.handleToolStreamEnd(toolUseId);
-            syncActiveStreamCount();
-          } else {
-            endAllToolStreams();
-          }
-        } else if (toolEventType === 'tool-progress') {
-          activity.handleToolProgress(toolUseId, toolPayload.progress || '');
-        }
-      }
-    });
+    const removeListener = api.onChatEvent(createChatSubscriptionEventHandler({
+      subscriptionId,
+      loadedWorldId: loadedWorld.id,
+      selectedSessionId,
+      streamingStateRef,
+      activityStateRef,
+      setMessages,
+      setActiveStreamCount
+    }));
 
     api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch((error) => {
       if (!disposed) {

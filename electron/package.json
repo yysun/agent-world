@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "main.js",
+  "main": "dist/main.js",
   "scripts": {
+    "main:build": "npx tsc --project tsconfig.electron.json",
+    "main:watch": "npx tsc --project tsconfig.electron.json --watch --preserveWatchOutput",
     "renderer:dev": "vite --config vite.config.js",
     "renderer:build": "vite build --config vite.config.js",
-    "electron:dev": "wait-on http://127.0.0.1:5181 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
-    "dev": "npm-run-all --parallel renderer:dev electron:dev",
-    "start": "npm run renderer:build && electron ."
+    "electron:dev": "wait-on http://127.0.0.1:5181 file:dist/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5181 electron .",
+    "dev": "npm-run-all --parallel main:watch renderer:dev electron:dev",
+    "start": "npm run main:build && npm run renderer:build && electron ."
   },
   "dependencies": {
     "dompurify": "^3.3.1",

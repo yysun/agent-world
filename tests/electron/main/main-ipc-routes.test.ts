@@ -1,0 +1,117 @@
+/**
+ * Unit Tests for Main IPC Route Wiring
+ *
+ * Features:
+ * - Verifies canonical channel list and registration order.
+ * - Confirms payload routing for channel handlers.
+ * - Ensures registration uses deterministic route definitions.
+ *
+ * Implementation Notes:
+ * - Uses injected handler mocks without real Electron runtime.
+ * - Tests route build + registration helpers together.
+ *
+ * Recent Changes:
+ * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
+ * - 2026-02-12: Added Phase 3 coverage for main-process IPC orchestration and channel wiring.
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import { buildMainIpcRoutes } from '../../../electron/main-process/ipc-routes';
+import { registerIpcRoutes } from '../../../electron/main-process/ipc-registration';
+
+function createHandlerMocks() {
+  return {
+    getWorkspaceState: vi.fn(async () => ({})),
+    openWorkspaceDialog: vi.fn(async () => ({})),
+    loadWorldsFromWorkspace: vi.fn(async () => ([])),
+    loadSpecificWorld: vi.fn(async () => ({})),
+    importWorld: vi.fn(async () => ({})),
+    listWorkspaceWorlds: vi.fn(async () => ([])),
+    createWorkspaceWorld: vi.fn(async () => ({})),
+    updateWorkspaceWorld: vi.fn(async () => ({})),
+    deleteWorkspaceWorld: vi.fn(async () => ({ deleted: true })),
+    createWorldAgent: vi.fn(async () => ({})),
+    updateWorldAgent: vi.fn(async () => ({})),
+    deleteWorldAgent: vi.fn(async () => ({ deleted: true })),
+    readWorldPreference: vi.fn(async () => 'world-1'),
+    writeWorldPreference: vi.fn(async () => true),
+    listWorldSessions: vi.fn(async () => ([])),
+    createWorldSession: vi.fn(async () => ({})),
+    deleteWorldSession: vi.fn(async () => ({ deleted: true })),
+    selectWorldSession: vi.fn(async () => true),
+    getSessionMessages: vi.fn(async () => ([])),
+    sendChatMessage: vi.fn(async () => ({})),
+    deleteMessageFromChat: vi.fn(async () => ({ deleted: true })),
+    subscribeChatEvents: vi.fn(async () => ({ subscribed: true })),
+    unsubscribeChatEvents: vi.fn(async () => ({ unsubscribed: true }))
+  };
+}
+
+describe('buildMainIpcRoutes', () => {
+  it('builds the expected canonical channel list in deterministic order', () => {
+    const handlers = createHandlerMocks();
+    const routes = buildMainIpcRoutes(handlers);
+
+    expect(routes.map((route) => route.channel)).toEqual([
+      'workspace:get',
+      'workspace:open',
+      'world:loadFromFolder',
+      'world:load',
+      'world:import',
+      'world:list',
+      'world:create',
+      'world:update',
+      'world:delete',
+      'agent:create',
+      'agent:update',
+      'agent:delete',
+      'world:getLastSelected',
+      'world:saveLastSelected',
+      'session:list',
+      'session:create',
+      'chat:delete',
+      'session:delete',
+      'session:select',
+      'chat:getMessages',
+      'chat:sendMessage',
+      'message:delete',
+      'chat:subscribeEvents',
+      'chat:unsubscribeEvents'
+    ]);
+  });
+
+  it('routes payloads to the correct dependencies', async () => {
+    const handlers = createHandlerMocks();
+    const routes = buildMainIpcRoutes(handlers);
+
+    await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
+    await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
+    await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+
+    expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
+    expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
+    expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
+  });
+});
+
+describe('registerIpcRoutes', () => {
+  it('registers all channels using ipcMain.handle', () => {
+    const handlers = createHandlerMocks();
+    const routes = buildMainIpcRoutes(handlers);
+    const ipcMainLike = { handle: vi.fn() };
+
+    registerIpcRoutes(ipcMainLike, routes);
+
+    expect(ipcMainLike.handle).toHaveBeenCalledTimes(routes.length);
+    expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
+      1,
+      'workspace:get',
+      expect.any(Function)
+    );
+    expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
+      routes.length,
+      'chat:unsubscribeEvents',
+      expect.any(Function)
+    );
+  });
+});
