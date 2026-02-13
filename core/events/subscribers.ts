@@ -36,6 +36,7 @@ import type {
   StorageAPI
 } from '../types.js';
 import { parseMessageContent } from '../message-prep.js';
+import { extractParagraphBeginningMentions } from '../utils.js';
 import { createCategoryLogger } from '../logger.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import {
@@ -71,6 +72,54 @@ function getTitleGenerationKey(worldId: string, chatId: string): string {
 function isHumanSender(sender?: string): boolean {
   const normalized = String(sender ?? '').trim().toLowerCase();
   return normalized === 'human' || normalized.startsWith('user');
+}
+
+function toMentionToken(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function resolveWorldMainAgentMention(world: World): string | null {
+  const raw = String(world.mainAgent || '').trim();
+  if (!raw) return null;
+
+  const normalized = toMentionToken(raw);
+  if (!normalized) return null;
+
+  if (world.agents.has(normalized)) return normalized;
+
+  for (const agent of world.agents.values()) {
+    if (toMentionToken(agent.id) === normalized || toMentionToken(agent.name) === normalized) {
+      return agent.id;
+    }
+  }
+
+  return null;
+}
+
+function applyMainAgentMentionRouting(world: World, messageEvent: WorldMessageEvent): WorldMessageEvent {
+  if (!isHumanSender(messageEvent.sender)) {
+    return messageEvent;
+  }
+
+  const mainAgent = resolveWorldMainAgentMention(world);
+  if (!mainAgent) {
+    return messageEvent;
+  }
+
+  const mentions = extractParagraphBeginningMentions(messageEvent.content || '');
+  if (mentions.length > 0) {
+    return messageEvent;
+  }
+
+  return {
+    ...messageEvent,
+    content: `@${mainAgent} ${messageEvent.content || ''}`.trim()
+  };
 }
 
 function scheduleNoActivityTitleUpdate(world: World, chatId: string, content: string): void {
@@ -184,24 +233,26 @@ async function tryGenerateAndApplyTitle(
  */
 export function subscribeAgentToMessages(world: World, agent: Agent): () => void {
   const handler = async (messageEvent: WorldMessageEvent) => {
+    const routedMessageEvent = applyMainAgentMentionRouting(world, messageEvent);
+
     loggerAgent.debug('[subscribeAgentToMessages] ENTRY - Agent received message', {
       agentId: agent.id,
-      sender: messageEvent.sender,
-      messageId: messageEvent.messageId,
-      contentPreview: messageEvent.content?.substring(0, 200)
+      sender: routedMessageEvent.sender,
+      messageId: routedMessageEvent.messageId,
+      contentPreview: routedMessageEvent.content?.substring(0, 200)
     });
 
-    if (!messageEvent.messageId) {
+    if (!routedMessageEvent.messageId) {
       loggerAgent.error('Received message WITHOUT messageId', {
         agentId: agent.id,
-        sender: messageEvent.sender,
+        sender: routedMessageEvent.sender,
         worldId: world.id
       });
     }
 
     // Check if this is a tool result message
     // Parse enhanced format first to detect tool messages
-    const { message: parsedMessage, targetAgentId } = parseMessageContent(messageEvent.content, 'user');
+    const { message: parsedMessage, targetAgentId } = parseMessageContent(routedMessageEvent.content, 'user');
 
     loggerAgent.debug('[subscribeAgentToMessages] After parseMessageContent', {
       agentId: agent.id,
@@ -222,28 +273,28 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     }
 
     // Skip messages from this agent itself
-    if (messageEvent.sender === agent.id) {
-      loggerAgent.debug('Skipping own message in handler', { agentId: agent.id, sender: messageEvent.sender });
+    if (routedMessageEvent.sender === agent.id) {
+      loggerAgent.debug('Skipping own message in handler', { agentId: agent.id, sender: routedMessageEvent.sender });
       return;
     }
 
     // Reset LLM call count if needed (for human/system messages)
-    await resetLLMCallCountIfNeeded(world, agent, messageEvent);
+    await resetLLMCallCountIfNeeded(world, agent, routedMessageEvent);
 
     // Process message if agent should respond
-    loggerAgent.debug('Checking if agent should respond', { agentId: agent.id, sender: messageEvent.sender });
-    const shouldRespond = await shouldAgentRespond(world, agent, messageEvent);
+    loggerAgent.debug('Checking if agent should respond', { agentId: agent.id, sender: routedMessageEvent.sender });
+    const shouldRespond = await shouldAgentRespond(world, agent, routedMessageEvent);
 
     if (shouldRespond) {
       // Save incoming messages to agent memory only when they plan to respond
-      await saveIncomingMessageToMemory(world, agent, messageEvent);
+      await saveIncomingMessageToMemory(world, agent, routedMessageEvent);
 
-      loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: messageEvent.sender });
-      await processAgentMessage(world, agent, messageEvent);
+      loggerAgent.debug('Agent will respond - processing message', { agentId: agent.id, sender: routedMessageEvent.sender });
+      await processAgentMessage(world, agent, routedMessageEvent);
     } else {
       loggerAgent.debug('Agent will NOT respond - skipping memory save and SSE publishing', {
         agentId: agent.id,
-        sender: messageEvent.sender
+        sender: routedMessageEvent.sender
       });
     }
   };

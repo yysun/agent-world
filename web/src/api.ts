@@ -124,6 +124,7 @@ async function createWorld(worldData: Partial<World>): Promise<World> {
     name: worldData.name,
     description: worldData.description || '',
     turnLimit: worldData.turnLimit ?? 5,
+    mainAgent: worldData.mainAgent ?? null,
     chatLLMProvider: worldData.chatLLMProvider,
     chatLLMModel: worldData.chatLLMModel,
     mcpConfig: worldData.mcpConfig,

@@ -29,6 +29,7 @@ const getStateFromProps = (props: AgentEditProps): AgentEditState => ({
 export const defaultAgentData: Partial<Agent> = {
   name: '',
   description: '',
+  autoReply: true,
   provider: 'ollama' as LLMProvider,
   model: 'llama3.2:3b',
   temperature: 0.7,
@@ -248,6 +249,20 @@ export default class AgentEdit extends Component<AgentEditState> {
 
                 {/* Model/Provider row (now above temperature/maxTokens) */}
                 <div className="form-section">
+                  <div className="form-group">
+                    <label htmlFor="agent-auto-reply">Auto Reply</label>
+                    <div className="form-checkbox-row">
+                      <input
+                        id="agent-auto-reply"
+                        type="checkbox"
+                        checked={state.agent.autoReply !== false}
+                        $bind="agent.autoReply"
+                        disabled={state.loading}
+                      />
+                      <span className="form-help-text">Automatically reply to sender when no explicit @mention is provided</span>
+                    </div>
+                  </div>
+
                   <div className="form-row">
                     <div className="form-group">
                       <label htmlFor="agent-provider">Provider</label>

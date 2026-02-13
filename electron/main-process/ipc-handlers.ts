@@ -204,6 +204,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const chatLLMModel = payload?.chatLLMModel == null
       ? undefined
       : String(payload.chatLLMModel || '').trim() || undefined;
+    const mainAgent = payload?.mainAgent == null
+      ? null
+      : String(payload.mainAgent || '').trim() || null;
     const mcpConfig = payload?.mcpConfig == null
       ? undefined
       : String(payload.mcpConfig);
@@ -215,6 +218,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       name,
       description: payload?.description ? String(payload.description) : undefined,
       turnLimit,
+      mainAgent,
       chatLLMProvider,
       chatLLMModel,
       mcpConfig,
@@ -255,6 +259,13 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         ? Math.floor(turnLimitRaw)
         : 5;
       updates.turnLimit = turnLimit;
+    }
+
+    if (payload?.mainAgent !== undefined) {
+      const mainAgent = payload.mainAgent == null
+        ? null
+        : String(payload.mainAgent || '').trim() || null;
+      updates.mainAgent = mainAgent;
     }
 
     if (payload?.chatLLMProvider !== undefined) {
@@ -322,6 +333,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       params.systemPrompt = String(payload.systemPrompt || '');
     }
 
+    if (payload?.autoReply !== undefined) {
+      params.autoReply = Boolean(payload.autoReply);
+    }
+
     if (payload?.temperature !== undefined) {
       const temperature = Number(payload.temperature);
       if (Number.isFinite(temperature)) params.temperature = temperature;
@@ -367,6 +382,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
     if (payload?.systemPrompt !== undefined) {
       updates.systemPrompt = String(payload.systemPrompt || '');
+    }
+    if (payload?.autoReply !== undefined) {
+      updates.autoReply = Boolean(payload.autoReply);
     }
     if (payload?.temperature !== undefined) {
       const temperature = Number(payload.temperature);

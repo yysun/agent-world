@@ -116,6 +116,7 @@ export interface Agent {
   id: string;
   name: string;
   type: string;
+  autoReply?: boolean;
   status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
@@ -138,6 +139,7 @@ export interface World {
   name: string;
   description?: string;
   turnLimit: number;
+  mainAgent?: string | null;
   chatLLMProvider?: string;
   chatLLMModel?: string;
   currentChatId: string | null;

@@ -26,6 +26,7 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-13: Added world-level `mainAgent` routing config and agent-level `autoReply` toggle support.
  * - 2026-02-13: Moved edit-resubmission title-regeneration reset into core `editUserMessage` so all clients share the same behavior.
  *   - Auto-generated chat titles are reset to `New Chat` before edit resubmission only when the latest persisted
  *     `chat-title-updated` payload title still matches the current chat name.
@@ -273,6 +274,7 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
     name: params.name,
     description: params.description,
     turnLimit: params.turnLimit || 5,
+    mainAgent: params.mainAgent ? String(params.mainAgent).trim() : null,
     chatLLMProvider: params.chatLLMProvider,
     chatLLMModel: params.chatLLMModel,
     mcpConfig: params.mcpConfig,
@@ -319,9 +321,14 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
     return null;
   }
 
+  const normalizedUpdates: UpdateWorldParams = {
+    ...updates,
+    ...(updates.mainAgent !== undefined ? { mainAgent: updates.mainAgent ? String(updates.mainAgent).trim() : null } : {})
+  };
+
   const updatedData: World = {
     ...existingData,
-    ...updates,
+    ...normalizedUpdates,
     lastUpdated: new Date()
   };
 
@@ -495,6 +502,7 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
     id: agentId,
     name: params.name,
     type: params.type,
+    autoReply: params.autoReply ?? true,
     status: 'inactive',
     provider: params.provider,
     model: params.model,
@@ -556,6 +564,7 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
     ...existingAgentData,
     name: updates.name || existingAgentData.name,
     type: updates.type || existingAgentData.type,
+    autoReply: updates.autoReply !== undefined ? updates.autoReply : (existingAgentData.autoReply ?? true),
     status: updates.status || existingAgentData.status,
     provider: updates.provider || existingAgentData.provider,
     model: updates.model || existingAgentData.model,

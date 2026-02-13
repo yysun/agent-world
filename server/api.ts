@@ -144,6 +144,7 @@ function serializeWorld(world: World) {
     name: world.name,
     description: world.description,
     turnLimit: world.turnLimit,
+    mainAgent: world.mainAgent || null,
     chatLLMProvider: world.chatLLMProvider,
     chatLLMModel: world.chatLLMModel,
     currentChatId: world.currentChatId || null,
@@ -158,6 +159,7 @@ function serializeAgent(agent: Agent) {
   return {
     id: agent.id,
     name: agent.name,
+    autoReply: agent.autoReply !== false,
     provider: agent.provider,
     model: agent.model,
     temperature: agent.temperature,
@@ -220,6 +222,7 @@ const WorldCreateSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().nullable().optional(),
   turnLimit: z.number().min(1).optional(),
+  mainAgent: z.string().nullable().optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional(),
   mcpConfig: z.string().nullable().optional(),
@@ -230,6 +233,7 @@ const WorldUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().nullable().optional(),
   turnLimit: z.number().min(1).optional(),
+  mainAgent: z.string().nullable().optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional(),
   mcpConfig: z.string().nullable().optional(),
@@ -239,6 +243,7 @@ const WorldUpdateSchema = z.object({
 const AgentCreateSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.string().optional().default('default'),
+  autoReply: z.boolean().optional().default(true),
   provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).default('openai'),
   model: z.string().default('gpt-4'),
   systemPrompt: z.string().optional(),
@@ -264,6 +269,7 @@ const MessageEditSchema = z.object({
 const AgentUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   type: z.string().optional(),
+  autoReply: z.boolean().optional(),
   status: z.enum(["active", "inactive", "error"]).optional(),
   provider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).optional(),
   model: z.string().optional(),
@@ -318,12 +324,13 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
-    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
+    const { name, description, turnLimit, mainAgent, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
     const worldId = toKebabCase(name);
     const world = await createWorld({
       name,
       description,
       turnLimit,
+      mainAgent: mainAgent || null,
       chatLLMProvider: (chatLLMProvider || undefined) as LLMProvider | undefined,
       chatLLMModel: chatLLMModel || undefined,
       mcpConfig: mcpConfig || null,
@@ -354,11 +361,12 @@ router.patch('/worlds/:worldName', validateWorld, async (req: Request, res: Resp
     }
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
     const currentWorld = (req as any).world;
-    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
+    const { name, description, turnLimit, mainAgent, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
     if (turnLimit !== undefined) updates.turnLimit = turnLimit;
+    if (mainAgent !== undefined) updates.mainAgent = mainAgent;
     if (chatLLMProvider !== undefined && chatLLMProvider !== null) updates.chatLLMProvider = chatLLMProvider;
     if (chatLLMModel !== undefined && chatLLMModel !== null) updates.chatLLMModel = chatLLMModel;
     if (mcpConfig !== undefined) updates.mcpConfig = mcpConfig;

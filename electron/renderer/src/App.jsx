@@ -108,6 +108,7 @@ const DEFAULT_AGENT_FORM = {
   id: '',
   name: '',
   type: 'assistant',
+  autoReply: true,
   provider: 'openai',
   model: 'gpt-4o-mini',
   systemPrompt: '',
@@ -510,6 +511,7 @@ function getDefaultWorldForm() {
     name: '',
     description: '',
     turnLimit: DEFAULT_TURN_LIMIT,
+    mainAgent: '',
     chatLLMProvider: DEFAULT_WORLD_CHAT_LLM_PROVIDER,
     chatLLMModel: DEFAULT_WORLD_CHAT_LLM_MODEL,
     mcpConfig: '',
@@ -526,11 +528,13 @@ function getWorldFormFromWorld(world) {
     : DEFAULT_TURN_LIMIT;
   const chatLLMProvider = String(world.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
   const chatLLMModel = String(world.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+  const mainAgent = String(world.mainAgent || '').trim();
 
   return {
     name: String(world.name || ''),
     description: String(world.description || ''),
     turnLimit,
+    mainAgent,
     chatLLMProvider,
     chatLLMModel,
     mcpConfig: world.mcpConfig == null ? '' : String(world.mcpConfig),
@@ -548,6 +552,7 @@ function validateWorldForm(worldForm) {
     : DEFAULT_TURN_LIMIT;
   const chatLLMProvider = String(worldForm.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
   const chatLLMModel = String(worldForm.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+  const mainAgent = String(worldForm.mainAgent || '').trim();
   const mcpConfig = worldForm.mcpConfig == null ? '' : String(worldForm.mcpConfig);
   const variables = worldForm.variables == null ? '' : String(worldForm.variables);
 
@@ -565,6 +570,7 @@ function validateWorldForm(worldForm) {
       name,
       description: String(worldForm.description || '').trim(),
       turnLimit,
+      mainAgent,
       chatLLMProvider,
       chatLLMModel,
       mcpConfig,
@@ -585,6 +591,7 @@ function validateAgentForm(agentForm) {
     data: {
       name,
       type: String(agentForm.type || 'assistant').trim() || 'assistant',
+      autoReply: agentForm.autoReply !== false,
       provider: String(agentForm.provider || 'openai').trim() || 'openai',
       model,
       systemPrompt: String(agentForm.systemPrompt || ''),
@@ -865,6 +872,7 @@ export default function App() {
         name,
         initials: getAgentInitials(name),
         type: String(agent?.type || 'assistant'),
+        autoReply: agent?.autoReply !== false,
         provider: String(agent?.provider || 'openai'),
         model: String(agent?.model || 'gpt-4o-mini'),
         systemPrompt: String(agent?.systemPrompt || ''),
@@ -1268,6 +1276,7 @@ export default function App() {
       return creatingWorld.name !== defaultForm.name ||
         creatingWorld.description !== defaultForm.description ||
         creatingWorld.turnLimit !== defaultForm.turnLimit ||
+        creatingWorld.mainAgent !== defaultForm.mainAgent ||
         creatingWorld.chatLLMProvider !== defaultForm.chatLLMProvider ||
         creatingWorld.chatLLMModel !== defaultForm.chatLLMModel ||
         creatingWorld.mcpConfig !== defaultForm.mcpConfig ||
@@ -1278,6 +1287,7 @@ export default function App() {
       return editingWorld.name !== originalForm.name ||
         editingWorld.description !== originalForm.description ||
         editingWorld.turnLimit !== originalForm.turnLimit ||
+        editingWorld.mainAgent !== originalForm.mainAgent ||
         editingWorld.chatLLMProvider !== originalForm.chatLLMProvider ||
         editingWorld.chatLLMModel !== originalForm.chatLLMModel ||
         editingWorld.mcpConfig !== originalForm.mcpConfig ||
@@ -1290,6 +1300,7 @@ export default function App() {
     if (panelMode === 'create-agent') {
       return creatingAgent.name !== DEFAULT_AGENT_FORM.name ||
         creatingAgent.type !== DEFAULT_AGENT_FORM.type ||
+        creatingAgent.autoReply !== DEFAULT_AGENT_FORM.autoReply ||
         creatingAgent.provider !== DEFAULT_AGENT_FORM.provider ||
         creatingAgent.model !== DEFAULT_AGENT_FORM.model ||
         creatingAgent.systemPrompt !== DEFAULT_AGENT_FORM.systemPrompt ||
@@ -1299,6 +1310,7 @@ export default function App() {
     if (panelMode === 'edit-agent' && selectedAgentForPanel) {
       return editingAgent.name !== selectedAgentForPanel.name ||
         editingAgent.type !== selectedAgentForPanel.type ||
+        editingAgent.autoReply !== (selectedAgentForPanel.autoReply !== false) ||
         editingAgent.provider !== selectedAgentForPanel.provider ||
         editingAgent.model !== selectedAgentForPanel.model ||
         editingAgent.systemPrompt !== selectedAgentForPanel.systemPrompt ||
@@ -1374,6 +1386,7 @@ export default function App() {
       id: targetAgent.id,
       name: targetAgent.name,
       type: targetAgent.type || 'assistant',
+      autoReply: targetAgent.autoReply !== false,
       provider: targetAgent.provider || 'openai',
       model: targetAgent.model || 'gpt-4o-mini',
       systemPrompt: targetAgent.systemPrompt || '',
@@ -2788,6 +2801,13 @@ export default function App() {
                               className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               disabled={updatingWorld || deletingWorld}
                             />
+                            <input
+                              value={editingWorld.mainAgent}
+                              onChange={(event) => setEditingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
+                              placeholder="Main agent (optional)"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              disabled={updatingWorld || deletingWorld}
+                            />
                             <div className="grid grid-cols-2 gap-2">
                               <select
                                 value={editingWorld.chatLLMProvider}
@@ -2902,6 +2922,15 @@ export default function App() {
                               className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               disabled={savingAgent}
                             />
+                            <label className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
+                              <input
+                                type="checkbox"
+                                checked={creatingAgent.autoReply !== false}
+                                onChange={(event) => setCreatingAgent((value) => ({ ...value, autoReply: event.target.checked }))}
+                                disabled={savingAgent}
+                              />
+                              <span>Auto Reply</span>
+                            </label>
                             <select
                               value={creatingAgent.provider}
                               onChange={(event) => setCreatingAgent((value) => ({ ...value, provider: event.target.value }))}
@@ -3005,6 +3034,15 @@ export default function App() {
                               className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               disabled={savingAgent || deletingAgent}
                             />
+                            <label className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
+                              <input
+                                type="checkbox"
+                                checked={editingAgent.autoReply !== false}
+                                onChange={(event) => setEditingAgent((value) => ({ ...value, autoReply: event.target.checked }))}
+                                disabled={savingAgent || deletingAgent}
+                              />
+                              <span>Auto Reply</span>
+                            </label>
                             <select
                               value={editingAgent.provider}
                               onChange={(event) => setEditingAgent((value) => ({ ...value, provider: event.target.value }))}
@@ -3112,6 +3150,12 @@ export default function App() {
                               onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
                               placeholder="Description (optional)"
                               className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            />
+                            <input
+                              value={creatingWorld.mainAgent}
+                              onChange={(event) => setCreatingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
+                              placeholder="Main agent (optional)"
+                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                             />
                             <div className="grid grid-cols-2 gap-2">
                               <select

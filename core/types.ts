@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-02-13: Added world-level `mainAgent` routing field and agent-level `autoReply` flag.
  * - 2026-02-13: Added optional storage compare-and-set helper for chat title updates (`updateChatNameIfCurrent`).
  * - 2026-02-13: Added optional `chatId` to world tool events for session-scoped realtime routing.
  * - 2026-02-08: Removed legacy manual tool-intervention result types from core API surface
@@ -88,6 +89,7 @@ export interface Agent {
   id: string; // kebab-case of agent name
   name: string;
   type: string;
+  autoReply?: boolean;
   status?: 'active' | 'inactive' | 'error';
   provider: LLMProvider;
   model: string;
@@ -230,6 +232,7 @@ export interface CreateAgentParams {
   id?: string; // Optional - will be auto-generated from name using toKebabCase if not provided
   name: string;
   type: string;
+  autoReply?: boolean;
   provider: LLMProvider;
   model: string;
   systemPrompt?: string;
@@ -330,6 +333,7 @@ export interface CreateWorldParams {
   name: string;
   description?: string | null;
   turnLimit?: number;
+  mainAgent?: string | null;
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   mcpConfig?: string | null; // MCP configuration JSON string
@@ -351,6 +355,7 @@ export interface World {
   name: string;
   description?: string | null;
   turnLimit: number;
+  mainAgent?: string | null;
   chatLLMProvider?: string; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   currentChatId?: string | null; // Track active chat session

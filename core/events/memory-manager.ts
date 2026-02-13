@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Added per-agent `autoReply` gate; disables sender auto-mention when set to false.
  * - 2026-02-13: Hardened title output normalization with markdown/prefix stripping and low-quality fallback hierarchy.
  * - 2026-02-13: Canceled title-generation calls now exit without fallback renaming.
  * - 2026-02-13: Added deterministic chat-title prompt shaping (role filtering, de-duplication, bounded window).
@@ -471,7 +472,7 @@ export async function handleTextResponse(
 
   // Apply auto-mention logic if needed
   let finalResponse = responseText;
-  if (shouldAutoMention(responseText, messageEvent.sender, agent.id)) {
+  if (agent.autoReply !== false && shouldAutoMention(responseText, messageEvent.sender, agent.id)) {
     finalResponse = addAutoMention(responseText, messageEvent.sender);
     loggerAutoMention.debug('Auto-mention applied', {
       agentId: agent.id,
@@ -481,6 +482,7 @@ export async function handleTextResponse(
   } else {
     loggerAutoMention.debug('Auto-mention not needed', {
       agentId: agent.id,
+      autoReply: agent.autoReply !== false,
       hasAnyMention: hasAnyMentionAtBeginning(responseText)
     });
   }

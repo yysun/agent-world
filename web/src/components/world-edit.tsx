@@ -10,6 +10,7 @@
  * - Standardized modal sizing via shared 'edit-modal' class
  *
  * Changes:
+ * - 2026-02-13: Added `mainAgent` field to world create/edit form for main-agent routing control.
  * - New fields: world.chatLLMProvider, world.chatLLMModel (with sensible defaults)
  * - Merge defaults with incoming props to ensure fields are present in edit mode
  * - Use common modal class to match Agent Edit popup size
@@ -37,6 +38,7 @@ const getDefaultWorldData = (): Partial<World> => ({
   name: '',
   description: '',
   turnLimit: 5,
+  mainAgent: null,
   // Defaults aligned with Agent Edit
   chatLLMProvider: 'ollama',
   chatLLMModel: 'llama3.2:3b',
@@ -261,6 +263,19 @@ export default class WorldEdit extends Component<WorldEditState> {
                       placeholder="Brief description of the world"
                       value={state.world.description}
                       $bind="world.description"
+                      disabled={state.loading}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="world-main-agent">Main Agent</label>
+                    <input
+                      id="world-main-agent"
+                      type="text"
+                      className="form-input"
+                      placeholder="Agent ID or name (optional)"
+                      value={state.world.mainAgent || ''}
+                      $bind="world.mainAgent"
                       disabled={state.loading}
                     />
                   </div>
