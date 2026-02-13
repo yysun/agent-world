@@ -509,7 +509,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Directory resolution priority: (1) explicit `directory` parameter, (2) world variable `working_directory`, (3) return error and DO NOT execute. If user says "current directory" or "here", use "./".',
+    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Directory resolution priority: (1) explicit `directory` parameter, (2) world variable `working_directory`, (3) default to "./". If user says "current directory" or "here", use "./".',
 
     parameters: {
       type: 'object',
@@ -525,7 +525,7 @@ export function createShellCmdToolDefinition() {
         },
         directory: {
           type: 'string',
-          description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory`. If neither is available, command is not executed and an error is returned. Examples: "./", "~/", "/tmp", "./src"'
+          description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory` and falls back to "./" when unset. Examples: "./", "~/", "/tmp", "./src"'
         },
         timeout: {
           type: 'number',
@@ -551,7 +551,7 @@ export function createShellCmdToolDefinition() {
           },
           directory: {
             type: 'string',
-            description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory`. If neither is available, command is not executed and an error is returned. Examples: "./", "~/", "/tmp", "./src"'
+            description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory` and falls back to "./" when unset. Examples: "./", "~/", "/tmp", "./src"'
           },
           timeout: {
             type: 'number',
@@ -593,21 +593,7 @@ export function createShellCmdToolDefinition() {
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
 
       const directoryFromWorld = getEnvValueFromText(world?.variables, 'working_directory');
-      const resolvedDirectory = directoryFromArgs || String(directoryFromWorld || '').trim();
-
-      if (!resolvedDirectory) {
-        return formatResultForLLM({
-          command,
-          parameters: validParameters,
-          exitCode: 1,
-          signal: null,
-          error: 'No working directory resolved. Provide `directory` parameter or set world variable `working_directory`. Command was not executed.',
-          stdout: '',
-          stderr: '',
-          executedAt: new Date(),
-          duration: 0
-        });
-      }
+      const resolvedDirectory = directoryFromArgs || String(directoryFromWorld || '').trim() || './';
 
       // Execute command with streaming callbacks if world is available
       const result = await executeShellCommand(command, validParameters, resolvedDirectory, {

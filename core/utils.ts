@@ -50,6 +50,10 @@ import { createCategoryLogger } from './logger.js';
 
 const logger = createCategoryLogger('core.utils');
 
+const DEFAULT_WORLD_ENV_VALUES: Record<string, string> = {
+  working_directory: './'
+};
+
 /**
  * Generate unique ID for messages and events
  */
@@ -145,7 +149,10 @@ export function getEnvValueFromText(variablesText: string | undefined, key: stri
     return undefined;
   }
   const envMap = parseEnvText(variablesText);
-  return envMap[key];
+  if (Object.prototype.hasOwnProperty.call(envMap, key)) {
+    return envMap[key];
+  }
+  return DEFAULT_WORLD_ENV_VALUES[key];
 }
 
 /**

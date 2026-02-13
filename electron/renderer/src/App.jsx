@@ -432,7 +432,7 @@ function getSessionTimestamp(session) {
 }
 
 function getEnvValueFromText(variablesText, key) {
-  if (!variablesText || !key) return undefined;
+  if (!key) return undefined;
   const lines = String(variablesText).split(/\r?\n/);
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -443,6 +443,7 @@ function getEnvValueFromText(variablesText, key) {
     if (envKey !== key) continue;
     return line.slice(eqIndex + 1).trim();
   }
+  if (key === 'working_directory') return './';
   return undefined;
 }
 
@@ -485,38 +486,6 @@ function upsertEnvVariable(variablesText, key, value) {
   }
 
   return updatedLines.join('\n');
-}
-
-function removeEnvVariable(variablesText, key) {
-  if (!key) return String(variablesText || '');
-
-  const lines = String(variablesText || '').split(/\r?\n/);
-  const filteredLines = [];
-
-  for (const rawLine of lines) {
-    const line = String(rawLine);
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#')) {
-      filteredLines.push(line);
-      continue;
-    }
-
-    const eqIndex = line.indexOf('=');
-    if (eqIndex <= 0) {
-      filteredLines.push(line);
-      continue;
-    }
-
-    const envKey = line.slice(0, eqIndex).trim();
-    if (envKey === key) {
-      continue;
-    }
-
-    filteredLines.push(line);
-  }
-
-  return filteredLines.join('\n');
 }
 
 function sortSessionsByNewest(sessions) {
@@ -1578,30 +1547,6 @@ export default function App() {
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to select project folder.'), 'error');
-    }
-  }, [api, loadedWorld, setStatusText]);
-
-  const onClearProject = useCallback(async () => {
-    if (!loadedWorld?.id) {
-      setStatusText('Load a world before clearing project folder.', 'error');
-      return;
-    }
-
-    try {
-      const nextVariables = removeEnvVariable(loadedWorld.variables || '', 'working_directory');
-      const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
-      const warning = getRefreshWarning(updated);
-      const updatedWorld = { ...updated };
-      delete updatedWorld.refreshWarning;
-
-      setLoadedWorld(updatedWorld);
-      setSelectedProjectPath(null);
-      setStatusText(
-        warning ? `Project cleared. ${warning}` : 'Project cleared',
-        warning ? 'error' : 'info'
-      );
-    } catch (error) {
-      setStatusText(safeMessage(error, 'Failed to clear project folder.'), 'error');
     }
   }, [api, loadedWorld, setStatusText]);
 
@@ -2668,7 +2613,7 @@ export default function App() {
                         onClick={onSelectProject}
                         className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         aria-label="Select project folder"
-                        title="Select project folder for context"
+                        title={selectedProjectPath ? `Project folder: ${selectedProjectPath}` : 'Select project folder for context'}
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -2719,47 +2664,6 @@ export default function App() {
                       )}
                     </button>
                   </div>
-                  {selectedProjectPath ? (
-                    <div className="flex items-center justify-between border-t border-border pt-2">
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-3.5 w-3.5 shrink-0"
-                        >
-                          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-                        </svg>
-                        <span className="truncate" title={selectedProjectPath}>
-                          Project: {selectedProjectPath}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={onClearProject}
-                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Clear project"
-                        title="Clear project"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-3.5 w-3.5"
-                        >
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               </form>
             </section>

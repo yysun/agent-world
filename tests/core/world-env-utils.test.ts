@@ -46,6 +46,11 @@ working_directory=/tmp
     expect(value).toBe('/workspace');
   });
 
+  it('defaults working_directory to current directory when missing', () => {
+    const value = getEnvValueFromText('', 'working_directory');
+    expect(value).toBe('./');
+  });
+
   it('interpolates template variables with optional spaces', () => {
     const text = interpolateTemplateVariables(
       'Project {{ project_name }} at {{working_directory}}',

@@ -94,7 +94,7 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('Exit code 0');
   });
 
-  test('should not execute command when directory is unresolved', async () => {
+  test('should default to ./ when directory is unresolved', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 
@@ -103,12 +103,13 @@ describe('shell_cmd integration with worlds', () => {
 
     const result = await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['should-not-run']
+      parameters: ['fallback-current-directory']
     });
 
     const afterCount = getExecutionHistory(1000).length;
-    expect(result).toContain('No working directory resolved');
-    expect(afterCount).toBe(beforeCount);
+    expect(result).toContain('fallback-current-directory');
+    expect(result).toContain('Exit code 0');
+    expect(afterCount).toBeGreaterThan(beforeCount);
   });
 
   test('should be available even without MCP config', async () => {
