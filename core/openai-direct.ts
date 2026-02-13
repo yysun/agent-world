@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2026-02-10: Added env-flagged Ollama tool attachment support via ENABLE_OLLAMA_TOOLS
  * - 2026-02-07: Disabled tool definitions for Ollama provider requests
  * - 2025-11-09: Phase 2 - Removed ALL tool execution logic (~200 lines)
@@ -176,7 +177,8 @@ export async function streamOpenAIResponse(
   mcpTools: Record<string, any>,
   world: World,
   onChunk: (content: string) => void,
-  messageId: string
+  messageId: string,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools =
@@ -199,12 +201,18 @@ export async function streamOpenAIResponse(
     toolCount: openaiTools?.length || 0,
   });
 
-  const stream = await client.chat.completions.create(requestParams);
+  const stream = await client.chat.completions.create(
+    requestParams,
+    abortSignal ? { signal: abortSignal } : undefined
+  );
   let fullResponse = '';
   let functionCalls: any[] = [];
 
   try {
     for await (const chunk of stream) {
+      if (abortSignal?.aborted) {
+        throw new DOMException('OpenAI stream aborted', 'AbortError');
+      }
       const delta = chunk.choices[0]?.delta;
 
       if (delta?.content) {
@@ -303,7 +311,8 @@ export async function generateOpenAIResponse(
   messages: ChatMessage[],
   agent: Agent,
   mcpTools: Record<string, any>,
-  world: World
+  world: World,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const openaiMessages = convertMessagesToOpenAI(messages);
   const openaiTools =
@@ -326,7 +335,10 @@ export async function generateOpenAIResponse(
   });
 
   try {
-    const response = await client.chat.completions.create(requestParams);
+    const response = await client.chat.completions.create(
+      requestParams,
+      abortSignal ? { signal: abortSignal } : undefined
+    );
     const message = response.choices[0]?.message;
 
     if (!message) {

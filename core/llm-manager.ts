@@ -94,6 +94,9 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-02-13: Reclassified stop-triggered aborts as cancellation/info logs (not errors) in queue and non-streaming paths.
+ * - 2026-02-13: Added merged external+queue abort-signal support so chat stop requests can cancel follow-up continuation calls.
+ * - 2026-02-13: Added chat-scoped LLM cancellation controls so Electron stop requests can abort active and queued calls by `worldId` + `chatId`.
  * - 2026-02-08: Removed stale manual tool-intervention terminology from internal comments
  * - 2025-11-09: Phase 5 - Updated to expect LLMResponse from all providers
  * - Removed old manual tool decision return type handling
@@ -197,29 +200,48 @@ interface QueuedLLMCall {
   id: string;
   agentId: string;
   worldId: string;
-  execute: () => Promise<any>;
+  chatId: string | null;
+  abortController: AbortController;
+  execute: (signal: AbortSignal) => Promise<any>;
+  canceled: boolean;
   resolve: (value: any) => void;
   reject: (error: any) => void;
+}
+
+function normalizeChatId(chatId: string | null | undefined): string {
+  if (chatId == null) return '__none__';
+  return String(chatId);
 }
 
 class LLMQueue {
   private queue: QueuedLLMCall[] = [];
   private processing = false;
+  private activeItem: QueuedLLMCall | null = null;
   private maxQueueSize = 100; // Prevent memory issues
   private processingTimeoutMs = 900000; // 15 minute max processing time per call (for long-running tools)
 
-  async add<T>(agentId: string, worldId: string, task: () => Promise<T>): Promise<T> {
+  async add<T>(
+    agentId: string,
+    worldId: string,
+    chatId: string | null,
+    task: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
     // Prevent queue overflow
     if (this.queue.length >= this.maxQueueSize) {
       throw new Error(`LLM queue is full (${this.maxQueueSize} items). Please try again later.`);
     }
 
-    loggerQueue.debug(`LLMQueue: Adding task for agent=${agentId}, world=${worldId}. Queue length before add: ${this.queue.length}`);
+    loggerQueue.debug(
+      `LLMQueue: Adding task for agent=${agentId}, world=${worldId}, chat=${normalizeChatId(chatId)}. Queue length before add: ${this.queue.length}`
+    );
     return new Promise<T>((resolve, reject) => {
       const queueItem: QueuedLLMCall = {
         id: generateId(),
         agentId,
         worldId,
+        chatId,
+        abortController: new AbortController(),
+        canceled: false,
         execute: task,
         resolve,
         reject
@@ -240,12 +262,18 @@ class LLMQueue {
     loggerQueue.debug(`LLMQueue: Starting queue processing. Queue length: ${this.queue.length}`);
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
+      if (item.canceled) {
+        continue;
+      }
 
       try {
+        this.activeItem = item;
         const taskStartTime = Date.now();
-        loggerQueue.debug(`LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
+        loggerQueue.debug(
+          `LLMQueue: Processing task for agent=${item.agentId}, world=${item.worldId}, chat=${normalizeChatId(item.chatId)}, queueItemId=${item.id}`
+        );
         // Add processing timeout to prevent stuck queue
-        const processPromise = item.execute();
+        const processPromise = item.execute(item.abortController.signal);
 
         // Store timeout ID so we can cancel it if process completes first
         let timeoutId: NodeJS.Timeout;
@@ -279,8 +307,27 @@ class LLMQueue {
         item.resolve(result);
         loggerQueue.debug(`LLMQueue: Finished processing task for agent=${item.agentId}, world=${item.worldId}, queueItemId=${item.id}`);
       } catch (error) {
-        loggerQueue.error('LLM queue error', { agentId: item.agentId, error: error instanceof Error ? error.message : error });
+        const wasCanceled = item.canceled || item.abortController.signal.aborted || isAbortError(error);
+        if (wasCanceled) {
+          loggerQueue.info('LLM queue call canceled', {
+            agentId: item.agentId,
+            worldId: item.worldId,
+            chatId: normalizeChatId(item.chatId),
+            queueItemId: item.id,
+            reason: error instanceof Error ? error.message : String(error)
+          });
+        } else {
+          loggerQueue.error('LLM queue error', {
+            agentId: item.agentId,
+            worldId: item.worldId,
+            chatId: normalizeChatId(item.chatId),
+            queueItemId: item.id,
+            error: error instanceof Error ? error.message : error
+          });
+        }
         item.reject(error);
+      } finally {
+        this.activeItem = null;
       }
     }
 
@@ -308,9 +355,45 @@ class LLMQueue {
   // Emergency method to clear stuck queue (for debugging/admin use)
   clearQueue(): number {
     const clearedCount = this.queue.length;
+    for (const item of this.queue) {
+      item.canceled = true;
+      item.abortController.abort();
+      item.reject(new Error('LLM queue item canceled by queue clear.'));
+    }
     this.queue.length = 0;
     loggerQueue.info('LLM queue cleared', { clearedCount });
     return clearedCount;
+  }
+
+  cancelByChat(worldId: string, chatId: string | null): { canceledPending: number; abortedActive: number } {
+    const targetChatId = normalizeChatId(chatId);
+    let canceledPending = 0;
+    let abortedActive = 0;
+
+    this.queue = this.queue.filter((item) => {
+      const matchesWorld = item.worldId === worldId;
+      const matchesChat = normalizeChatId(item.chatId) === targetChatId;
+      if (!matchesWorld || !matchesChat) {
+        return true;
+      }
+
+      item.canceled = true;
+      item.abortController.abort();
+      item.reject(new Error(`LLM call canceled for world '${worldId}' chat '${targetChatId}'.`));
+      canceledPending += 1;
+      return false;
+    });
+
+    if (this.activeItem) {
+      const matchesWorld = this.activeItem.worldId === worldId;
+      const matchesChat = normalizeChatId(this.activeItem.chatId) === targetChatId;
+      if (matchesWorld && matchesChat && !this.activeItem.abortController.signal.aborted) {
+        this.activeItem.abortController.abort();
+        abortedActive = 1;
+      }
+    }
+
+    return { canceledPending, abortedActive };
   }
 
   // Set processing timeout (useful for testing or adjusting for long-running operations)
@@ -345,6 +428,50 @@ export interface LLMConfig {
   ollamaBaseUrl?: string;
 }
 
+function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes('abort');
+}
+
+function createCombinedAbortSignal(
+  first?: AbortSignal,
+  second?: AbortSignal
+): { signal?: AbortSignal; dispose: () => void } {
+  const signals = [first, second].filter((value): value is AbortSignal => Boolean(value));
+  if (signals.length === 0) {
+    return { signal: undefined, dispose: () => { } };
+  }
+  if (signals.length === 1) {
+    return { signal: signals[0], dispose: () => { } };
+  }
+
+  const controller = new AbortController();
+  const onAbort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort();
+      break;
+    }
+    signal.addEventListener('abort', onAbort);
+  }
+
+  const dispose = () => {
+    for (const signal of signals) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+
+  return { signal: controller.signal, dispose };
+}
+
 /**
  * Streaming agent response with SSE events via world's eventEmitter (queued)
  */
@@ -352,11 +479,25 @@ export async function streamAgentResponse(
   world: World,
   agent: Agent,
   messages: AgentMessage[],
-  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
+  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  chatId: string | null = null,
+  abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
+  if (abortSignal?.aborted) {
+    throw new DOMException(`LLM call aborted before queue for agent ${agent.id}`, 'AbortError');
+  }
+
   // Queue the LLM call to ensure serialized execution
-  return llmQueue.add(agent.id, world.id, async () => {
-    return await executeStreamAgentResponse(world, agent, messages, publishSSE);
+  return llmQueue.add(agent.id, world.id, chatId, async (queueAbortSignal) => {
+    const { signal: mergedAbortSignal, dispose } = createCombinedAbortSignal(queueAbortSignal, abortSignal);
+    try {
+      if (mergedAbortSignal?.aborted) {
+        throw new DOMException(`LLM call aborted before execution for agent ${agent.id}`, 'AbortError');
+      }
+      return await executeStreamAgentResponse(world, agent, messages, publishSSE, mergedAbortSignal);
+    } finally {
+      dispose();
+    }
   });
 }
 
@@ -367,11 +508,16 @@ async function executeStreamAgentResponse(
   world: World,
   agent: Agent,
   messages: AgentMessage[],
-  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void
+  publishSSE: (world: World, data: Partial<WorldSSEEvent>) => void,
+  abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
   const messageId = generateId();
 
   try {
+    if (abortSignal?.aborted) {
+      throw new DOMException('LLM call aborted before start', 'AbortError');
+    }
+
     // Publish SSE start event via world's eventEmitter
     publishSSE(world, {
       agentName: agent.id,
@@ -417,7 +563,8 @@ async function executeStreamAgentResponse(
         mcpTools,
         world,
         (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
-        messageId
+        messageId,
+        abortSignal
       );
 
       // Emit end event after streaming completes
@@ -437,7 +584,8 @@ async function executeStreamAgentResponse(
         mcpTools,
         world,
         (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
-        messageId
+        messageId,
+        abortSignal
       );
 
       // Emit end event after streaming completes
@@ -457,7 +605,8 @@ async function executeStreamAgentResponse(
         mcpTools,
         world,
         (content: string) => publishSSE(world, { agentName: agent.id, type: 'chunk', content, messageId }),
-        messageId
+        messageId,
+        abortSignal
       );
 
       // Emit end event after streaming completes
@@ -470,6 +619,19 @@ async function executeStreamAgentResponse(
     throw new Error(`Unsupported provider: ${agent.provider}. All providers should use direct integrations.`);
 
   } catch (error) {
+    if (isAbortError(error) || abortSignal?.aborted) {
+      publishSSE(world, {
+        agentName: agent.id,
+        type: 'end',
+        messageId
+      });
+
+      loggerStreaming.info(
+        `LLM: Streaming response canceled for agent=${agent.id}, world=${world.id}, messageId=${messageId}`
+      );
+      throw new Error(`LLM call canceled for agent ${agent.id}`);
+    }
+
     // Publish SSE error event via world's eventEmitter
     publishSSE(world, {
       agentName: agent.id,
@@ -492,11 +654,25 @@ export async function generateAgentResponse(
   agent: Agent,
   messages: AgentMessage[],
   _publishSSE?: (world: World, data: Partial<WorldSSEEvent>) => void,
-  skipTools?: boolean
+  skipTools?: boolean,
+  chatId: string | null = null,
+  abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
+  if (abortSignal?.aborted) {
+    throw new DOMException(`LLM call aborted before queue for agent ${agent.id}`, 'AbortError');
+  }
+
   // Queue the LLM call to ensure serialized execution
-  return llmQueue.add(agent.id, world.id, async () => {
-    return await executeGenerateAgentResponse(world, agent, messages, skipTools);
+  return llmQueue.add(agent.id, world.id, chatId, async (queueAbortSignal) => {
+    const { signal: mergedAbortSignal, dispose } = createCombinedAbortSignal(queueAbortSignal, abortSignal);
+    try {
+      if (mergedAbortSignal?.aborted) {
+        throw new DOMException(`LLM call aborted before execution for agent ${agent.id}`, 'AbortError');
+      }
+      return await executeGenerateAgentResponse(world, agent, messages, skipTools, mergedAbortSignal);
+    } finally {
+      dispose();
+    }
   });
 }
 
@@ -507,8 +683,12 @@ async function executeGenerateAgentResponse(
   world: World,
   agent: Agent,
   messages: AgentMessage[],
-  skipTools?: boolean
+  skipTools?: boolean,
+  abortSignal?: AbortSignal
 ): Promise<{ response: LLMResponse; messageId: string }> {
+  if (abortSignal?.aborted) {
+    throw new DOMException('LLM call aborted before start', 'AbortError');
+  }
   const messageId = generateId();
   // Convert messages for LLM (strip custom fields)
   // Note: Client-side filtering already done by utils.ts prepareMessagesForLLM
@@ -552,7 +732,15 @@ async function executeGenerateAgentResponse(
     // Use direct OpenAI integration for OpenAI providers
     if (isOpenAIProvider(agent.provider)) {
       const client = createOpenAIClientForAgent(agent);
-      const response = await generateOpenAIResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateOpenAIResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        abortSignal
+      );
 
       // Update agent activity and LLM call count
       agent.lastActive = new Date();
@@ -572,7 +760,15 @@ async function executeGenerateAgentResponse(
     // Use direct Anthropic integration for Anthropic provider
     if (isAnthropicProvider(agent.provider)) {
       const client = createAnthropicClientForAgent(agent);
-      const response = await generateAnthropicResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateAnthropicResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        abortSignal
+      );
 
       // Update agent activity and LLM call count
       agent.lastActive = new Date();
@@ -592,7 +788,15 @@ async function executeGenerateAgentResponse(
     // Use direct Google integration for Google provider
     if (isGoogleProvider(agent.provider)) {
       const client = createGoogleClientForAgent(agent);
-      const response = await generateGoogleResponse(client, agent.model, preparedMessages, agent, mcpTools, world);
+      const response = await generateGoogleResponse(
+        client,
+        agent.model,
+        preparedMessages,
+        agent,
+        mcpTools,
+        world,
+        abortSignal
+      );
 
       // Update agent activity and LLM call count
       agent.lastActive = new Date();
@@ -613,6 +817,13 @@ async function executeGenerateAgentResponse(
     throw new Error(`Provider ${agent.provider} should use direct integration, not AI SDK`);
 
   } catch (error) {
+    if (isAbortError(error) || abortSignal?.aborted) {
+      loggerGeneration.info(
+        `LLM: Non-streaming response canceled for agent=${agent.id}, world=${world.id}, messageId=${messageId}`
+      );
+      throw new Error(`LLM call canceled for agent ${agent.id}`);
+    }
+
     loggerGeneration.error(`LLM: Error during non-streaming response for agent=${agent.id}, world=${world.id}, error=${(error as Error).message}`);
     throw error;
   }
@@ -637,6 +848,16 @@ export function getLLMQueueStatus(): {
  */
 export function clearLLMQueue(): number {
   return llmQueue.clearQueue();
+}
+
+/**
+ * Cancel active and pending LLM calls for a specific world/chat session.
+ */
+export function cancelLLMCallsForChat(
+  worldId: string,
+  chatId: string | null
+): { canceledPending: number; abortedActive: number } {
+  return llmQueue.cancelByChat(worldId, chatId);
 }
 
 /**

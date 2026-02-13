@@ -21,6 +21,8 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-13: Tightened send/stop mode to session-scoped pending state so concurrent sessions remain independent while stop is active.
+ * - 2026-02-13: Added session-scoped stop-message control and send/stop composer toggle behavior.
  * - 2026-02-12: Extracted renderer orchestration concerns into domain modules.
  *   - Desktop bridge access + error normalization moved to `domain/desktop-api.js`.
  *   - Message upsert/log conversion moved to `domain/message-updates.js`.
@@ -568,6 +570,10 @@ export default function App() {
   // Per-session send state for concurrent chat support
   // Tracks which sessions are currently sending messages (allows sending to multiple sessions simultaneously)
   const [sendingSessionIds, setSendingSessionIds] = useState(new Set());
+  // Per-session stop state to prevent duplicate stop requests
+  const [stoppingSessionIds, setStoppingSessionIds] = useState(new Set());
+  // Tracks sessions with in-flight response work for send/stop button mode
+  const [pendingResponseSessionIds, setPendingResponseSessionIds] = useState(new Set());
   // Message edit/delete state
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
@@ -960,6 +966,13 @@ export default function App() {
   }, [loadedWorld]);
 
   useEffect(() => {
+    if (loadedWorld?.id) return;
+    setSendingSessionIds(new Set());
+    setStoppingSessionIds(new Set());
+    setPendingResponseSessionIds(new Set());
+  }, [loadedWorld?.id]);
+
+  useEffect(() => {
     setSessionSearch('');
   }, [loadedWorld?.id]);
 
@@ -991,7 +1004,19 @@ export default function App() {
       streamingStateRef,
       activityStateRef,
       setMessages,
-      setActiveStreamCount
+      setActiveStreamCount,
+      onSessionResponseStateChange: (chatId, isActive) => {
+        if (!chatId) return;
+        setPendingResponseSessionIds((existing) => {
+          const next = new Set(existing);
+          if (isActive) {
+            next.add(chatId);
+          } else {
+            next.delete(chatId);
+          }
+          return next;
+        });
+      }
     }));
 
     api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch((error) => {
@@ -1529,6 +1554,8 @@ export default function App() {
     const content = composer.trim();
     if (!content) return;
 
+    // Mark this session as awaiting response so composer can switch to stop mode.
+    setPendingResponseSessionIds((prev) => new Set([...prev, selectedSessionId]));
     // Mark this session as sending (allows concurrent sends to different sessions)
     setSendingSessionIds((prev) => new Set([...prev, selectedSessionId]));
     try {
@@ -1540,6 +1567,11 @@ export default function App() {
       });
       setComposer('');
     } catch (error) {
+      setPendingResponseSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selectedSessionId);
+        return next;
+      });
       setStatusText(safeMessage(error, 'Failed to send message.'), 'error');
     } finally {
       // Remove this session from sending state
@@ -1551,10 +1583,75 @@ export default function App() {
     }
   }, [api, composer, selectedSessionId, loadedWorld, setStatusText, sendingSessionIds]);
 
+  const onStopMessage = useCallback(async () => {
+    if (!loadedWorld?.id || !selectedSessionId) {
+      setStatusText('Select a session before stopping messages.', 'error');
+      return;
+    }
+    if (stoppingSessionIds.has(selectedSessionId)) return;
+
+    setStoppingSessionIds((prev) => new Set([...prev, selectedSessionId]));
+    try {
+      const result = await api.stopMessage(loadedWorld.id, selectedSessionId);
+      const stopped = Boolean(result?.stopped);
+      const reason = String(result?.reason || '').trim();
+
+      setPendingResponseSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selectedSessionId);
+        return next;
+      });
+
+      if (stopped) {
+        if (streamingStateRef.current) {
+          streamingStateRef.current.cleanup();
+        }
+        if (activityStateRef.current) {
+          activityStateRef.current.cleanup();
+        }
+        setActiveStreamCount(0);
+        setActiveTools([]);
+        setIsBusy(false);
+      }
+
+      if (stopped) {
+        setStatusText('Stopped message processing.', 'success');
+      } else if (reason === 'no-active-process') {
+        setStatusText('No active message process to stop.', 'info');
+      } else {
+        setStatusText('Stop request completed.', 'info');
+      }
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to stop message processing.'), 'error');
+    } finally {
+      setStoppingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selectedSessionId);
+        return next;
+      });
+    }
+  }, [api, loadedWorld, selectedSessionId, setStatusText, stoppingSessionIds]);
+
   const onSubmitMessage = useCallback((event) => {
     event.preventDefault();
+    const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
+    const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
+    const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
+    const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && Boolean(isCurrentSessionPendingResponse);
+
+    if (canStopCurrentSession) {
+      onStopMessage();
+      return;
+    }
     onSendMessage();
-  }, [onSendMessage]);
+  }, [
+    onSendMessage,
+    onStopMessage,
+    selectedSessionId,
+    sendingSessionIds,
+    stoppingSessionIds,
+    pendingResponseSessionIds
+  ]);
 
   /**
    * Enter edit mode for a user message
@@ -1745,11 +1842,25 @@ export default function App() {
       event.preventDefault();
       // Check per-session sending state for concurrency support
       const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
+      const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
+      const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
+      const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && Boolean(isCurrentSessionPendingResponse);
+
+      if (canStopCurrentSession) {
+        return;
+      }
       if (composer.trim() && !isCurrentSessionSending) {
         onSendMessage();
       }
     }
-  }, [composer, selectedSessionId, sendingSessionIds, onSendMessage]);
+  }, [
+    composer,
+    selectedSessionId,
+    sendingSessionIds,
+    stoppingSessionIds,
+    pendingResponseSessionIds,
+    onSendMessage
+  ]);
 
   useEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -1782,6 +1893,11 @@ export default function App() {
     if (!composerTextarea) return;
     composerTextarea.focus({ preventScroll: true });
   }, [selectedSessionId]);
+
+  const isCurrentSessionSending = Boolean(selectedSessionId && sendingSessionIds.has(selectedSessionId));
+  const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
+  const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
+  const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -2437,22 +2553,36 @@ export default function App() {
                     </div>
                     <button
                       type="submit"
-                      disabled={(selectedSessionId && sendingSessionIds.has(selectedSessionId)) || !composer.trim()}
+                      disabled={canStopCurrentSession ? isCurrentSessionStopping : (isCurrentSessionSending || !composer.trim())}
                       className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Send message"
+                      aria-label={canStopCurrentSession ? 'Stop message processing' : 'Send message'}
+                      title={canStopCurrentSession ? 'Stop processing' : 'Send message'}
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-5 w-5"
-                      >
-                        <path d="M12 19V5M5 12l7-7 7 7" />
-                      </svg>
+                      {canStopCurrentSession ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="h-4 w-4"
+                          aria-hidden="true"
+                        >
+                          <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="h-5 w-5"
+                          aria-hidden="true"
+                        >
+                          <path d="M12 19V5M5 12l7-7 7 7" />
+                        </svg>
+                      )}
                     </button>
                   </div>
                   {selectedProjectPath ? (

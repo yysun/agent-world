@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-13: Added `stopMessage(worldId, chatId)` IPC bridge method for session-scoped stop control.
  * - 2026-02-12: Added dependency-injected bridge creation/exposure helpers for stable unit testing without Electron runtime module mocks.
  * - 2026-02-12: Added modular preload bridge composition for Phase 4 conversion.
  */
@@ -149,6 +150,12 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       ),
     sendMessage: (payload) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, payload),
+    stopMessage: (worldId, chatId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.CHAT_STOP_MESSAGE,
+        toWorldChatPayload(worldId, chatId)
+      ),
     deleteMessage: (worldId, messageId, chatId) =>
       invokeDesktopChannel(
         ipcRendererLike,

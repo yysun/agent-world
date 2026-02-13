@@ -11,6 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-13: Added coverage for tool lifecycle response-state transitions and chat-id filtering.
+ * - 2026-02-13: Added coverage for session response-state callback transitions on SSE lifecycle events.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 5 tests for extracted chat event orchestration handlers.
  */
@@ -180,6 +182,7 @@ describe('createChatSubscriptionEventHandler', () => {
         handleToolProgress: vi.fn()
       }
     };
+    const onSessionResponseStateChange = vi.fn();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
@@ -188,7 +191,8 @@ describe('createChatSubscriptionEventHandler', () => {
       streamingStateRef,
       activityStateRef,
       setMessages: harness.setMessages,
-      setActiveStreamCount
+      setActiveStreamCount,
+      onSessionResponseStateChange
     });
 
     handler({
@@ -207,6 +211,7 @@ describe('createChatSubscriptionEventHandler', () => {
       type: 'tool',
       subscriptionId: 'sub-1',
       worldId: 'world-1',
+      chatId: 'chat-1',
       tool: {
         eventType: 'tool-start',
         toolUseId: 'tool-1',
@@ -215,8 +220,23 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'tool-1',
+        result: 'done'
+      }
+    });
+
     expect(streamingStateRef.current.handleStart).toHaveBeenCalledWith('m-1', 'assistant-1');
     expect(activityStateRef.current.handleToolStart).toHaveBeenCalledWith('tool-1', 'read_file', { path: '/tmp' });
+    expect(activityStateRef.current.handleToolResult).toHaveBeenCalledWith('tool-1', 'done');
     expect(setActiveStreamCount).toHaveBeenCalledWith(1);
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', true);
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
   });
 });

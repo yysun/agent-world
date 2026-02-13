@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-02-13: Added optional `chatId` to world tool events for session-scoped realtime routing.
  * - 2026-02-08: Removed legacy manual tool-intervention result types from core API surface
  */
 
@@ -552,6 +553,7 @@ export interface WorldToolEvent {
   agentName: string;
   type: 'tool-start' | 'tool-result' | 'tool-error' | 'tool-progress';
   messageId: string;
+  chatId?: string | null;
   toolExecution: {
     toolName: string;
     toolCallId: string;
@@ -749,4 +751,3 @@ export function validateMessageThreading(
     }
   }
 }
-

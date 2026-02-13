@@ -20,6 +20,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Added abort-signal guards so stop requests prevent post-tool LLM continuation and suppress cancellation noise.
+ * - 2026-02-13: Passed explicit `chatId` through LLM calls for chat-scoped stop cancellation support.
  * - 2026-02-08: Removed stale manual tool-intervention terminology from comments and transient types
  * - 2026-02-06: Renamed resumeLLMAfterManualDecision to continueLLMAfterToolExecution
  * - 2025-01-09: Extracted from events.ts for modular architecture
@@ -39,6 +41,10 @@ import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import { generateAgentResponse } from '../llm-manager.js';
+import {
+  isMessageProcessingCanceledError,
+  throwIfMessageProcessingStopped
+} from '../message-processing-control.js';
 import {
   shouldAutoMention,
   addAutoMention,
@@ -127,9 +133,18 @@ export async function saveIncomingMessageToMemory(
  * Calls the LLM with the updated memory (including tool result) to continue the execution loop
  * Used for auto-execution flow where tools are executed automatically
  */
-export async function continueLLMAfterToolExecution(world: World, agent: Agent, chatId?: string | null): Promise<void> {
+export async function continueLLMAfterToolExecution(
+  world: World,
+  agent: Agent,
+  chatId?: string | null,
+  options?: {
+    abortSignal?: AbortSignal;
+  }
+): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
+    throwIfMessageProcessingStopped(options?.abortSignal);
+
     // Use explicit chatId when provided, fallback to world.currentChatId.
     const targetChatId = chatId !== undefined ? chatId : world.currentChatId;
 
@@ -160,6 +175,7 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
       agent,
       targetChatId ?? null
     );
+    throwIfMessageProcessingStopped(options?.abortSignal);
 
     loggerAgent.debug('Calling LLM with memory after tool execution', {
       agentId: agent.id,
@@ -205,15 +221,31 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
 
     if (isStreamingEnabled()) {
       const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(world, agent, messages as any, publishSSEWithChatId);
+      const result = await streamAgentResponse(
+        world,
+        agent,
+        messages as any,
+        publishSSEWithChatId,
+        targetChatId ?? null,
+        options?.abortSignal
+      );
       llmResponse = result.response;
       messageId = result.messageId;
     } else {
       const { generateAgentResponse } = await import('../llm-manager.js');
-      const result = await generateAgentResponse(world, agent, messages as any);
+      const result = await generateAgentResponse(
+        world,
+        agent,
+        messages as any,
+        undefined,
+        false,
+        targetChatId ?? null,
+        options?.abortSignal
+      );
       llmResponse = result.response;
       messageId = result.messageId;
     }
+    throwIfMessageProcessingStopped(options?.abortSignal);
 
     loggerAgent.debug('LLM response received after tool execution', {
       agentId: agent.id,
@@ -271,6 +303,15 @@ export async function continueLLMAfterToolExecution(world: World, agent: Agent, 
       responseLength: responseText.length
     });
   } catch (error) {
+    if (isMessageProcessingCanceledError(error) || options?.abortSignal?.aborted) {
+      loggerAgent.info('Skipped continuation after stop request', {
+        agentId: agent.id,
+        chatId: chatId ?? world.currentChatId ?? null,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return;
+    }
+
     loggerAgent.error('Failed to continue LLM after tool execution', {
       agentId: agent.id,
       error: error instanceof Error ? error.message : error
@@ -415,7 +456,14 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
       `
     };
 
-    const { response: titleResponse } = await generateAgentResponse(world, tempAgent, [userPrompt], undefined, true); // skipTools = true for title generation
+    const { response: titleResponse } = await generateAgentResponse(
+      world,
+      tempAgent,
+      [userPrompt],
+      undefined,
+      true,
+      null
+    ); // skipTools = true for title generation
     // Title generation should return plain text when skipTools=true; keep a guard for safety.
     title = typeof titleResponse === 'string' ? titleResponse : '';
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });

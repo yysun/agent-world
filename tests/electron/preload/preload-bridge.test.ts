@@ -12,6 +12,7 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-02-13: Added coverage for `stopMessage` bridge wiring and invoke payload contract.
  * - 2026-02-12: Switched to dependency-injected bridge API tests for stable coverage outside Electron runtime.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Updated for TypeScript preload entry conversion and modular bridge wiring.
@@ -47,6 +48,7 @@ describe('electron preload bridge', () => {
       loadWorldFromFolder: expect.any(Function),
       listWorlds: expect.any(Function),
       sendMessage: expect.any(Function),
+      stopMessage: expect.any(Function),
       subscribeChatEvents: expect.any(Function),
       unsubscribeChatEvents: expect.any(Function),
       onChatEvent: expect.any(Function)
@@ -63,16 +65,21 @@ describe('electron preload bridge', () => {
 
     const sendPayload = { worldId: 'world-1', chatId: 'chat-1', content: 'Hello' };
     api.sendMessage(sendPayload);
+    api.stopMessage('world-1', 'chat-1');
     api.subscribeChatEvents('world-1', 'chat-1', 'sub-1');
     api.unsubscribeChatEvents('sub-1');
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'chat:stopMessage', {
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
   });

@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-13: Added channel/order/payload assertions for `chat:stopMessage` route wiring.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 3 coverage for main-process IPC orchestration and channel wiring.
  */
@@ -41,6 +42,7 @@ function createHandlerMocks() {
     selectWorldSession: vi.fn(async () => true),
     getSessionMessages: vi.fn(async () => ([])),
     sendChatMessage: vi.fn(async () => ({})),
+    stopChatMessage: vi.fn(async () => ({ stopped: true })),
     deleteMessageFromChat: vi.fn(async () => ({ deleted: true })),
     subscribeChatEvents: vi.fn(async () => ({ subscribed: true })),
     unsubscribeChatEvents: vi.fn(async () => ({ unsubscribed: true }))
@@ -74,6 +76,7 @@ describe('buildMainIpcRoutes', () => {
       'session:select',
       'chat:getMessages',
       'chat:sendMessage',
+      'chat:stopMessage',
       'message:delete',
       'chat:subscribeEvents',
       'chat:unsubscribeEvents'
@@ -87,10 +90,12 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'chat:stopMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
+    expect(handlers.stopChatMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
   });
 });
 

@@ -13,6 +13,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-02-13: Added chat-scoped tool-event propagation (`chatId`) so realtime tool updates remain session-isolated.
  * - 2026-02-11: Fixed publishSSE to include toolName and stream fields for tool-stream events
  * - 2026-02-08: Added core-level sender normalization for consistent user-role detection
  * - 2026-02-08: Removed legacy manual tool-result publishing helper from event API
@@ -283,6 +284,7 @@ export function publishToolEvent(world: World, data: Partial<WorldToolEvent>): v
     agentName: data.agentName!,
     type: data.type!,
     messageId: data.messageId || generateId(),
+    chatId: data.chatId !== undefined ? data.chatId : (world.currentChatId ?? null),
     toolExecution: data.toolExecution!
   };
   world.eventEmitter.emit('world', toolEvent);

@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-13: Wired `chat:stopMessage` IPC to core stop-processing runtime controls.
  * - 2026-02-13: Removed `@ts-nocheck` and tightened local typings for main-window/runtime wiring.
  * - 2026-02-12: Moved workspace/world/agent/session/chat IPC handler implementations into `main-process/ipc-handlers.ts`; `main.ts` now focuses on runtime composition and lifecycle bootstrap.
  * - 2026-02-12: Extracted workspace-core state and realtime subscription orchestration into dedicated modules (`workspace-runtime`, `realtime-events`).
@@ -102,6 +103,7 @@ const {
   listWorlds,
   newChat,
   publishMessage,
+  stopMessageProcessing,
   restoreChat,
   subscribeWorld,
   updateWorld,
@@ -176,6 +178,7 @@ const ipcHandlers = createMainIpcHandlers({
   listWorlds,
   newChat,
   publishMessage,
+  stopMessageProcessing,
   restoreChat,
   updateWorld,
   removeMessagesFrom
@@ -206,6 +209,7 @@ function registerIpcHandlers() {
     selectWorldSession: ipcHandlers.selectWorldSession,
     getSessionMessages: ipcHandlers.getSessionMessages,
     sendChatMessage: ipcHandlers.sendChatMessage,
+    stopChatMessage: ipcHandlers.stopChatMessage,
     deleteMessageFromChat: ipcHandlers.deleteMessageFromChat,
     subscribeChatEvents,
     unsubscribeChatEvents

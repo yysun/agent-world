@@ -19,6 +19,8 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
+ * - 2026-02-13: Added abort-signal checks for streaming and non-streaming execution paths.
  * - 2025-11-09: Phase 4 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
  * - Returns LLMResponse interface with type discriminator
@@ -140,7 +142,8 @@ export async function streamGoogleResponse(
   mcpTools: Record<string, any>,
   world: World,
   onChunk: (content: string) => void,
-  messageId: string
+  messageId: string,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
@@ -161,9 +164,18 @@ export async function streamGoogleResponse(
   let functionCalls: any[] = [];
 
   try {
-    const result = await generativeModel.generateContentStream({ contents: googleMessages });
+    if (abortSignal?.aborted) {
+      throw new DOMException('Google stream aborted before start', 'AbortError');
+    }
+    const result = await generativeModel.generateContentStream(
+      { contents: googleMessages },
+      abortSignal ? { signal: abortSignal } : undefined
+    );
 
     for await (const chunk of result.stream) {
+      if (abortSignal?.aborted) {
+        throw new DOMException('Google stream aborted', 'AbortError');
+      }
       const chunkText = chunk.text();
       if (chunkText) {
         fullResponse += chunkText;
@@ -247,7 +259,8 @@ export async function generateGoogleResponse(
   messages: ChatMessage[],
   agent: Agent,
   mcpTools: Record<string, any>,
-  world: World
+  world: World,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const googleTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToGoogle(mcpTools) : undefined;
   const { messages: googleMessages, systemInstruction } = convertMessagesToGoogle(messages);
@@ -269,7 +282,13 @@ export async function generateGoogleResponse(
   });
 
   try {
-    const result = await generativeModel.generateContent({ contents: googleMessages });
+    if (abortSignal?.aborted) {
+      throw new DOMException('Google generation aborted before start', 'AbortError');
+    }
+    const result = await generativeModel.generateContent(
+      { contents: googleMessages },
+      abortSignal ? { signal: abortSignal } : undefined
+    );
     const response = result.response;
 
     let content = response.text() || '';

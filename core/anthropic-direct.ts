@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2025-11-09: Phase 3 - Removed ALL tool execution logic (~200 lines)
  * - Provider is now a pure client - only API calls and data transformation
  * - Returns LLMResponse interface with type discriminator
@@ -128,7 +129,8 @@ export async function streamAnthropicResponse(
   mcpTools: Record<string, any>,
   world: World,
   onChunk: (content: string) => void,
-  messageId: string
+  messageId: string,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
@@ -150,12 +152,18 @@ export async function streamAnthropicResponse(
     toolCount: anthropicTools?.length || 0,
   });
 
-  const stream = await client.messages.create(requestParams);
+  const stream = await client.messages.create(
+    requestParams,
+    abortSignal ? { signal: abortSignal as any } : undefined
+  );
   let fullResponse = '';
   let toolUses: any[] = [];
 
   try {
     for await (const chunk of stream) {
+      if (abortSignal?.aborted) {
+        throw new DOMException('Anthropic stream aborted', 'AbortError');
+      }
       if (chunk.type === 'content_block_delta') {
         if (chunk.delta.type === 'text_delta') {
           const textDelta = chunk.delta.text;
@@ -236,7 +244,8 @@ export async function generateAnthropicResponse(
   messages: ChatMessage[],
   agent: Agent,
   mcpTools: Record<string, any>,
-  world: World
+  world: World,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const anthropicMessages = convertMessagesToAnthropic(messages);
   const anthropicTools = Object.keys(mcpTools).length > 0 ? convertMCPToolsToAnthropic(mcpTools) : undefined;
@@ -258,7 +267,10 @@ export async function generateAnthropicResponse(
   });
 
   try {
-    const response = await client.messages.create(requestParams);
+    const response = await client.messages.create(
+      requestParams,
+      abortSignal ? { signal: abortSignal as any } : undefined
+    );
 
     let content = '';
     let toolUses: any[] = [];

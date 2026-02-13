@@ -41,10 +41,12 @@
  * - memory-manager.ts (Layer 4)
  * - utils.ts, logger.ts
  * - llm-manager.ts (runtime)
- * - storage (runAdded JSON sanitization to fix common LLM-generated JSON issues (unterminated strings, trailing commas, truncation)
- * - 2026-02-11: time)
+ * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Added chat-scoped `tool-start/tool-result/tool-error` event publishing so renderer session state stays accurate during tool execution.
+ * - 2026-02-13: Added session processing-handle guards so stop requests abort active tool/continuation flow without spawning new LLM work.
+ * - 2026-02-13: Propagated explicit `chatId` and stop abort-signal context through LLM/tool execution paths.
  * - 2026-02-11: Enhanced JSON parse error logging with rawArgs preview and suffix
  * - 2026-02-11: Fixed tool call display in Electron/web - send formatted content with tool_calls via SSE
  * - 2026-02-11: Fixed OpenAI tool-call protocol integrity.
@@ -82,10 +84,15 @@ import {
   addAutoMention,
   hasAnyMentionAtBeginning
 } from './mention-logic.js';
-import { publishMessage, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
+import { publishMessage, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
 import { isAICommand } from '../ai-commands.js';
 import { executeShellCommand, formatResultForLLM } from '../shell-cmd-tool.js';
+import {
+  beginChatMessageProcessing,
+  isMessageProcessingCanceledError,
+  throwIfMessageProcessingStopped
+} from '../message-processing-control.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
@@ -317,10 +324,15 @@ export async function processAgentMessage(
   messageEvent: WorldMessageEvent
 ): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  let processingHandle: ReturnType<typeof beginChatMessageProcessing> | null = null;
   try {
     // Derive target chatId from the originating message event for concurrency-safe processing
     // This ensures processing stays bound to the originating session even if world.currentChatId changes
     const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+    if (targetChatId) {
+      processingHandle = beginChatMessageProcessing(world.id, targetChatId);
+    }
+    throwIfMessageProcessingStopped(processingHandle?.signal);
 
     // Prepare messages for LLM - loads fresh data from storage
     // The user message is already saved in subscribeAgentToMessages, so it's in storage
@@ -329,6 +341,7 @@ export async function processAgentMessage(
       agent,
       targetChatId
     );
+    throwIfMessageProcessingStopped(processingHandle?.signal);
 
     // Log prepared messages for debugging
     loggerAgent.debug('Prepared messages for LLM', {
@@ -364,15 +377,31 @@ export async function processAgentMessage(
 
     if (isStreamingEnabled()) {
       const { streamAgentResponse } = await import('../llm-manager.js');
-      const result = await streamAgentResponse(world, agent, filteredMessages, publishSSEWithChatId);
+      const result = await streamAgentResponse(
+        world,
+        agent,
+        filteredMessages,
+        publishSSEWithChatId,
+        targetChatId ?? null,
+        processingHandle?.signal
+      );
       llmResponse = result.response;
       messageId = result.messageId;
     } else {
       const { generateAgentResponse } = await import('../llm-manager.js');
-      const result = await generateAgentResponse(world, agent, filteredMessages);
+      const result = await generateAgentResponse(
+        world,
+        agent,
+        filteredMessages,
+        undefined,
+        false,
+        targetChatId ?? null,
+        processingHandle?.signal
+      );
       llmResponse = result.response;
       messageId = result.messageId;
     }
+    throwIfMessageProcessingStopped(processingHandle?.signal);
 
     loggerAgent.debug('LLM response received', {
       agentId: agent.id,
@@ -392,6 +421,7 @@ export async function processAgentMessage(
 
       // Process text response (existing logic below)
       // Pass targetChatId explicitly for concurrency-safe processing
+      throwIfMessageProcessingStopped(processingHandle?.signal);
       await handleTextResponse(world, agent, responseText, messageId, messageEvent, targetChatId);
       return;
     }
@@ -494,6 +524,7 @@ export async function processAgentMessage(
       // This is the UNIFIED tool execution path for both streaming and non-streaming
       const toolCall = executableToolCalls[0];
       if (toolCall) {
+        throwIfMessageProcessingStopped(processingHandle?.signal);
         loggerAgent.debug('Executing tool call', {
           agentId: agent.id,
           toolCallId: toolCall.id,
@@ -547,6 +578,21 @@ export async function processAgentMessage(
             toolArgs = {};
           }
 
+          publishToolEvent(world, {
+            agentName: agent.id,
+            type: 'tool-start',
+            messageId: toolCall.id,
+            chatId: targetChatId,
+            toolExecution: {
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              input: toolArgs,
+              metadata: {
+                isStreaming: isStreamingEnabled()
+              }
+            }
+          });
+
           // Handle special AI commands - bypass LLM and save result directly
           if (toolCall.function.name === 'shell_cmd' && isAICommand(toolArgs.command)) {
             loggerAgent.debug('AI command detected, bypassing LLM call', {
@@ -560,6 +606,9 @@ export async function processAgentMessage(
               toolArgs.parameters || [],
               toolArgs.directory || './',
               {
+                abortSignal: processingHandle?.signal,
+                worldId: world.id,
+                chatId: targetChatId ?? undefined,
                 onStdout: (chunk) => {
                   publishSSE(world, {
                     type: 'tool-stream',
@@ -582,6 +631,42 @@ export async function processAgentMessage(
                 }
               }
             );
+
+            if (processingHandle?.isStopped()) {
+              const toolCallMsg = agent.memory.find(
+                m => m.role === 'assistant' && m.tool_calls?.some(tc => tc.id === toolCall.id)
+              );
+              if (toolCallMsg && toolCallMsg.toolCallStatus) {
+                toolCallMsg.toolCallStatus[toolCall.id] = { complete: true, result: 'canceled' };
+              }
+              try {
+                const storage = await getStorageWrappers();
+                await storage.saveAgent(world.id, agent);
+              } catch (error) {
+                loggerAgent.error('Failed to save canceled AI command state', {
+                  agentId: agent.id,
+                  error: error instanceof Error ? error.message : error
+                });
+              }
+              loggerAgent.info('AI command execution canceled by stop request', {
+                agentId: agent.id,
+                toolCallId: toolCall.id,
+                targetChatId
+              });
+              publishToolEvent(world, {
+                agentName: agent.id,
+                type: 'tool-error',
+                messageId: toolCall.id,
+                chatId: targetChatId,
+                toolExecution: {
+                  toolName: toolCall.function.name,
+                  toolCallId: toolCall.id,
+                  input: toolArgs,
+                  error: 'Tool execution canceled by user'
+                }
+              });
+              return;
+            }
 
             const formattedResult = formatResultForLLM(result);
 
@@ -650,6 +735,21 @@ export async function processAgentMessage(
             (aiCommandMessageEvent as any).role = 'assistant';
             world.eventEmitter.emit('message', aiCommandMessageEvent);
 
+            publishToolEvent(world, {
+              agentName: agent.id,
+              type: 'tool-result',
+              messageId: toolCall.id,
+              chatId: targetChatId,
+              toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                input: toolArgs,
+                result: assistantContent,
+                resultType: 'string',
+                resultSize: assistantContent.length
+              }
+            });
+
             return; // End turn
           }
 
@@ -658,10 +758,47 @@ export async function processAgentMessage(
             world,
             messages: agent.memory,
             toolCallId: toolCall.id,
+            chatId: targetChatId,
+            abortSignal: processingHandle?.signal,
             workingDirectory: toolArgs.directory || process.cwd()
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
+          if (processingHandle?.isStopped()) {
+            const toolCallMsg = agent.memory.find(
+              m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
+            );
+            if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
+              (toolCallMsg as any).toolCallStatus[toolCall.id] = { complete: true, result: 'canceled' };
+            }
+            try {
+              const storage = await getStorageWrappers();
+              await storage.saveAgent(world.id, agent);
+            } catch (error) {
+              loggerAgent.error('Failed to save canceled tool state', {
+                agentId: agent.id,
+                error: error instanceof Error ? error.message : error
+              });
+            }
+            loggerAgent.info('Tool execution canceled by stop request before continuation', {
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              targetChatId
+            });
+            publishToolEvent(world, {
+              agentName: agent.id,
+              type: 'tool-error',
+              messageId: toolCall.id,
+              chatId: targetChatId,
+              toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                input: toolArgs,
+                error: 'Tool execution canceled by user'
+              }
+            });
+            return;
+          }
 
           // Tool executed successfully - save result and continue LLM loop
           loggerAgent.debug('Tool executed successfully', {
@@ -671,7 +808,6 @@ export async function processAgentMessage(
           });
 
           // Publish tool-execution event
-          const { publishEvent } = await import('./publishers.js');
           publishEvent(world, 'tool-execution', {
             agentId: agent.id,
             toolName: toolCall.function.name,
@@ -681,11 +817,35 @@ export async function processAgentMessage(
             ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
             ...(toolArgs.directory && { directory: toolArgs.directory })
           });
+          const serializedToolResult = typeof toolResult === 'string'
+            ? toolResult
+            : JSON.stringify(toolResult) ?? String(toolResult);
+          const toolResultPreview = serializedToolResult.slice(0, 4000);
+          publishToolEvent(world, {
+            agentName: agent.id,
+            type: 'tool-result',
+            messageId: toolCall.id,
+            chatId: targetChatId,
+            toolExecution: {
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              input: toolArgs,
+              result: toolResultPreview,
+              resultType: typeof toolResult === 'string'
+                ? 'string'
+                : Array.isArray(toolResult)
+                  ? 'array'
+                  : toolResult === null
+                    ? 'null'
+                    : 'object',
+              resultSize: toolResultPreview.length
+            }
+          });
 
           // Save tool result to agent memory
           const toolResultMessage: AgentMessage = {
             role: 'tool',
-            content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+            content: serializedToolResult,
             tool_call_id: toolCall.id,
             sender: agent.id,
             createdAt: new Date(),
@@ -731,14 +891,63 @@ export async function processAgentMessage(
 
           // Continue the LLM execution loop with the tool result
           // Pass explicit chatId for concurrency-safe continuation
+          throwIfMessageProcessingStopped(processingHandle?.signal);
           const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
-          await continueLLMAfterToolExecution(world, agent, targetChatId);
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            abortSignal: processingHandle?.signal
+          });
 
         } catch (error) {
+          if (isMessageProcessingCanceledError(error) || processingHandle?.isStopped()) {
+            loggerAgent.info('Tool execution canceled', {
+              agentId: agent.id,
+              toolCallId: toolCall.id,
+              error: error instanceof Error ? error.message : String(error)
+            });
+            const toolCallMsg = agent.memory.find(
+              m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
+            );
+            if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
+              (toolCallMsg as any).toolCallStatus[toolCall.id] = { complete: true, result: 'canceled' };
+            }
+            try {
+              const storage = await getStorageWrappers();
+              await storage.saveAgent(world.id, agent);
+            } catch (saveError) {
+              loggerAgent.error('Failed to save canceled tool state', {
+                agentId: agent.id,
+                error: saveError instanceof Error ? saveError.message : saveError
+              });
+            }
+            publishToolEvent(world, {
+              agentName: agent.id,
+              type: 'tool-error',
+              messageId: toolCall.id,
+              chatId: targetChatId,
+              toolExecution: {
+                toolName: toolCall.function.name,
+                toolCallId: toolCall.id,
+                error: 'Tool execution canceled by user'
+              }
+            });
+            return;
+          }
+
           loggerAgent.error('Tool execution error', {
             agentId: agent.id,
             toolCallId: toolCall.id,
             error: error instanceof Error ? error.message : error
+          });
+          publishToolEvent(world, {
+            agentName: agent.id,
+            type: 'tool-error',
+            messageId: toolCall.id,
+            chatId: targetChatId,
+            toolExecution: {
+              toolName: toolCall.function.name,
+              toolCallId: toolCall.id,
+              error: error instanceof Error ? error.message : String(error)
+            }
           });
 
           // Save error as tool result
@@ -771,6 +980,15 @@ export async function processAgentMessage(
       return;
     }
   } catch (error) {
+    if (isMessageProcessingCanceledError(error) || processingHandle?.isStopped()) {
+      loggerAgent.info('Agent message processing canceled', {
+        agentId: agent.id,
+        chatId: messageEvent.chatId ?? world.currentChatId ?? null,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return;
+    }
+
     loggerAgent.error('Error processing agent message', {
       agentId: agent.id,
       error: error instanceof Error ? error.message : String(error),
@@ -778,6 +996,7 @@ export async function processAgentMessage(
     });
     throw error;
   } finally {
+    processingHandle?.complete();
     completeActivity();
   }
 }

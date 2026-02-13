@@ -31,6 +31,7 @@
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
  * Recent Changes:
+ * - 2026-02-13: Exported chat-scoped stop-message processing controls for Electron IPC stop action.
  * - 2026-02-08: Exported LLM provider configuration helpers for npm core library consumers
  *
  * Version: 3.1.0
@@ -76,8 +77,14 @@ export {
   executeShellCommand,
   getExecutionHistory,
   clearExecutionHistory,
+  stopShellCommandsForChat,
   type CommandExecutionResult
 } from './shell-cmd-tool.js';
+
+export {
+  stopMessageProcessing,
+  type StopMessageProcessingResult
+} from './message-processing-control.js';
 
 // === CHAT MANAGEMENT ===
 export {

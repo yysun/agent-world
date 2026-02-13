@@ -13,6 +13,8 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-13: Extended response-state callbacks to include tool lifecycle events for reliable stop-mode behavior during tool execution.
+ * - 2026-02-13: Added session response-state callbacks so composer send/stop mode can follow realtime start/end lifecycle.
  * - 2026-02-12: Extracted App realtime event orchestration into domain module.
  */
 
@@ -50,7 +52,8 @@ export function createChatSubscriptionEventHandler({
   streamingStateRef,
   activityStateRef,
   setMessages,
-  setActiveStreamCount
+  setActiveStreamCount,
+  onSessionResponseStateChange
 }) {
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
@@ -95,6 +98,9 @@ export function createChatSubscriptionEventHandler({
       // Tool stream chunks can outlive their owning tool call in some flows.
       // Once assistant output is finalized, close any lingering tool stream state.
       if (String(incomingMessage.role || '').toLowerCase() === 'assistant') {
+        if (typeof onSessionResponseStateChange === 'function' && incomingChatId) {
+          onSessionResponseStateChange(incomingChatId, false);
+        }
         endAllToolStreams();
       }
       return;
@@ -115,15 +121,24 @@ export function createChatSubscriptionEventHandler({
       if (!streaming) return;
 
       if (eventType === 'start') {
+        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
+          onSessionResponseStateChange(streamChatId, true);
+        }
         endAllToolStreams();
         streaming.handleStart(messageId, streamPayload.agentName || 'assistant');
         syncActiveStreamCount();
       } else if (eventType === 'chunk') {
         streaming.handleChunk(messageId, streamPayload.content || '');
       } else if (eventType === 'end') {
+        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
+          onSessionResponseStateChange(streamChatId, false);
+        }
         streaming.handleEnd(messageId);
         syncActiveStreamCount();
       } else if (eventType === 'error') {
+        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
+          onSessionResponseStateChange(streamChatId, false);
+        }
         streaming.handleError(messageId, streamPayload.error || 'Stream error');
         syncActiveStreamCount();
       } else if (eventType === 'tool-stream') {
@@ -144,6 +159,8 @@ export function createChatSubscriptionEventHandler({
     if (payload.type === 'tool') {
       const toolPayload = payload.tool;
       if (!toolPayload) return;
+      const toolChatId = payload.chatId || toolPayload.chatId || null;
+      if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
 
       const activity = activityStateRef.current;
       if (!activity) return;
@@ -153,8 +170,14 @@ export function createChatSubscriptionEventHandler({
       if (!toolUseId) return;
 
       if (toolEventType === 'tool-start') {
+        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
+          onSessionResponseStateChange(toolChatId, true);
+        }
         activity.handleToolStart(toolUseId, toolPayload.toolName || 'unknown', toolPayload.toolInput);
       } else if (toolEventType === 'tool-result') {
+        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
+          onSessionResponseStateChange(toolChatId, false);
+        }
         activity.handleToolResult(toolUseId, toolPayload.result || '');
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {
@@ -164,6 +187,9 @@ export function createChatSubscriptionEventHandler({
           endAllToolStreams();
         }
       } else if (toolEventType === 'tool-error') {
+        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
+          onSessionResponseStateChange(toolChatId, false);
+        }
         activity.handleToolError(toolUseId, toolPayload.error || 'Tool error');
         const streaming = streamingStateRef.current;
         if (streaming?.isActive(toolUseId)) {

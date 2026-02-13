@@ -32,6 +32,8 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-13: Added explicit command-cancellation detection and AbortError propagation in tool execution to prevent post-stop continuation.
+ * - 2026-02-13: Added chat-scoped shell process tracking and stop controls for Electron stop-message support.
  * - 2026-02-08: Added streaming callback support for real-time output
  *   * Added onStdout and onStderr callbacks to executeShellCommand options
  *   * Callbacks invoked in real-time as data arrives from child process
@@ -62,7 +64,7 @@
  * - Initial implementation for shell_cmd LLM tool
  */
 
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
 import { createCategoryLogger } from './logger.js';
@@ -95,6 +97,7 @@ export interface CommandExecutionResult {
   exitCode: number | null;
   signal: string | null;
   error?: string;
+  canceled?: boolean;
   executedAt: Date;
   duration: number; // milliseconds
 }
@@ -105,6 +108,57 @@ export interface CommandExecutionResult {
  */
 const executionHistory: CommandExecutionResult[] = [];
 const MAX_HISTORY_SIZE = 1000; // Limit history size to prevent memory issues
+const activeProcessesByChat = new Map<string, Set<ChildProcess>>();
+
+function toChatProcessKey(worldId: string, chatId: string): string {
+  return `${worldId}::${chatId}`;
+}
+
+function registerActiveProcess(worldId: string, chatId: string, process: ChildProcess): () => void {
+  const key = toChatProcessKey(worldId, chatId);
+  const existing = activeProcessesByChat.get(key) ?? new Set<ChildProcess>();
+  existing.add(process);
+  activeProcessesByChat.set(key, existing);
+
+  return () => {
+    const processes = activeProcessesByChat.get(key);
+    if (!processes) return;
+    processes.delete(process);
+    if (processes.size === 0) {
+      activeProcessesByChat.delete(key);
+    }
+  };
+}
+
+export function stopShellCommandsForChat(worldId: string, chatId: string): { killed: number } {
+  const key = toChatProcessKey(worldId, chatId);
+  const processes = activeProcessesByChat.get(key);
+  if (!processes || processes.size === 0) {
+    return { killed: 0 };
+  }
+
+  let killed = 0;
+  for (const process of processes) {
+    if (process.killed) continue;
+    try {
+      process.kill('SIGTERM');
+      killed += 1;
+    } catch (error) {
+      logger.warn('Failed to stop shell process', {
+        worldId,
+        chatId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  return { killed };
+}
+
+export function isCommandExecutionCanceled(result: CommandExecutionResult): boolean {
+  if (result.canceled) return true;
+  return result.error === 'Command execution canceled by user';
+}
 
 /**
  * Execute a shell command with parameters and capture output
@@ -123,6 +177,9 @@ export async function executeShellCommand(
     timeout?: number; // Timeout in milliseconds (default: 600000 = 10 minutes)
     onStdout?: (data: string) => void; // Real-time stdout callback
     onStderr?: (data: string) => void; // Real-time stderr callback
+    abortSignal?: AbortSignal;
+    worldId?: string;
+    chatId?: string;
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
@@ -141,7 +198,9 @@ export async function executeShellCommand(
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let aborted = false;
     let processExited = false;
+    let unregisterProcess: (() => void) | null = null;
 
     const result: CommandExecutionResult = {
       command,
@@ -171,6 +230,10 @@ export async function executeShellCommand(
         timeout: timeout
       });
 
+      if (options.worldId && options.chatId) {
+        unregisterProcess = registerActiveProcess(options.worldId, options.chatId, childProcess);
+      }
+
       // Set up timeout handler
       const timeoutHandle = setTimeout(() => {
         if (!processExited) {
@@ -179,6 +242,20 @@ export async function executeShellCommand(
           logger.warn('Command execution timeout', { command, parameters, timeout, directory });
         }
       }, timeout);
+
+      const abortHandler = () => {
+        if (processExited) return;
+        aborted = true;
+        childProcess.kill('SIGTERM');
+        logger.info('Shell command aborted by request', {
+          command,
+          parameters,
+          directory,
+          worldId: options.worldId || null,
+          chatId: options.chatId || null
+        });
+      };
+      options.abortSignal?.addEventListener('abort', abortHandler, { once: true });
 
       // Capture stdout with optional streaming
       childProcess.stdout?.on('data', (data) => {
@@ -218,6 +295,9 @@ export async function executeShellCommand(
       childProcess.on('close', (code, signal) => {
         processExited = true;
         clearTimeout(timeoutHandle);
+        options.abortSignal?.removeEventListener('abort', abortHandler);
+        unregisterProcess?.();
+        unregisterProcess = null;
 
         const duration = Date.now() - startTime;
 
@@ -229,6 +309,9 @@ export async function executeShellCommand(
 
         if (timedOut) {
           result.error = `Command execution timed out after ${timeout}ms`;
+        } else if (aborted) {
+          result.error = 'Command execution canceled by user';
+          result.canceled = true;
         } else if (code !== 0) {
           result.error = `Command exited with code ${code}`;
         }
@@ -255,6 +338,9 @@ export async function executeShellCommand(
       childProcess.on('error', (error) => {
         processExited = true;
         clearTimeout(timeoutHandle);
+        options.abortSignal?.removeEventListener('abort', abortHandler);
+        unregisterProcess?.();
+        unregisterProcess = null;
 
         const duration = Date.now() - startTime;
 
@@ -277,6 +363,8 @@ export async function executeShellCommand(
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      unregisterProcess?.();
+      unregisterProcess = null;
 
       result.duration = duration;
       result.error = error instanceof Error ? error.message : String(error);
@@ -497,10 +585,15 @@ export function createShellCmdToolDefinition() {
       // Extract world and messageId from context for streaming
       const world = context?.world;
       const currentMessageId = context?.toolCallId;
+      const chatId = context?.chatId ? String(context.chatId) : undefined;
+      const abortSignal = context?.abortSignal as AbortSignal | undefined;
 
       // Execute command with streaming callbacks if world is available
       const result = await executeShellCommand(command, validParameters, directory, {
         timeout,
+        abortSignal,
+        worldId: world?.id,
+        chatId,
         onStdout: world ? (chunk) => {
           // Publish streaming events to world event system
           publishSSE(world, {
@@ -524,6 +617,10 @@ export function createShellCmdToolDefinition() {
           });
         } : undefined
       });
+
+      if (isCommandExecutionCanceled(result)) {
+        throw new DOMException('Shell command execution canceled by user', 'AbortError');
+      }
 
       // Return formatted result for LLM
       return formatResultForLLM(result);

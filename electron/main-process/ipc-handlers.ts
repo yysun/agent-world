@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-13: Added stop-message IPC handler to cancel active session processing by `worldId` and `chatId`.
  * - 2026-02-13: Tightened workspace-state dependency typing to avoid unsafe casts at composition boundaries.
  * - 2026-02-13: Awaited core-runtime readiness in all handlers to serialize workspace/runtime transitions before IPC work.
  * - 2026-02-12: Extracted IPC handler implementations from `electron/main.ts`.
@@ -58,6 +59,7 @@ interface MainIpcHandlerFactoryDependencies {
   listWorlds: () => Promise<any[]>;
   newChat: (worldId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
+  stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
@@ -83,6 +85,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     listWorlds,
     newChat,
     publishMessage,
+    stopMessageProcessing,
     restoreChat,
     updateWorld,
     removeMessagesFrom
@@ -618,6 +621,17 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return removeMessagesFrom(worldId, messageId, chatId);
   }
 
+  async function stopChatMessage(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const chatId = String(payload?.chatId || '');
+
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+
+    return stopMessageProcessing(worldId, chatId);
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -636,6 +650,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     selectWorldSession,
     getSessionMessages,
     sendChatMessage,
+    stopChatMessage,
     deleteMessageFromChat
   };
 }
