@@ -71,6 +71,24 @@ import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 import { publishSSE } from './events/index.js';
 import { getEnvValueFromText } from './utils.js';
+import {
+  createShellProcessExecution,
+  transitionShellProcessExecution,
+  attachShellProcessHandle,
+  markShellProcessCancelRequested,
+  listShellProcessExecutions,
+  getShellProcessExecution,
+  cancelShellProcessExecution,
+  deleteShellProcessExecution,
+  stopShellProcessesForChatScope,
+  subscribeShellProcessStatus,
+  clearShellProcessRegistryForTests,
+  type ShellProcessExecutionRecord,
+  type ShellProcessStatusEvent,
+  type ListShellProcessExecutionsOptions,
+  type CancelShellProcessResult,
+  type DeleteShellProcessResult
+} from './shell-process-registry.js';
 
 const logger = createCategoryLogger('shell-cmd');
 
@@ -91,6 +109,7 @@ function resolveDirectory(directory: string): string {
  * Command execution result
  */
 export interface CommandExecutionResult {
+  executionId: string;
   command: string;
   parameters: string[];
   stdout: string;
@@ -109,51 +128,9 @@ export interface CommandExecutionResult {
  */
 const executionHistory: CommandExecutionResult[] = [];
 const MAX_HISTORY_SIZE = 1000; // Limit history size to prevent memory issues
-const activeProcessesByChat = new Map<string, Set<ChildProcess>>();
-
-function toChatProcessKey(worldId: string, chatId: string): string {
-  return `${worldId}::${chatId}`;
-}
-
-function registerActiveProcess(worldId: string, chatId: string, process: ChildProcess): () => void {
-  const key = toChatProcessKey(worldId, chatId);
-  const existing = activeProcessesByChat.get(key) ?? new Set<ChildProcess>();
-  existing.add(process);
-  activeProcessesByChat.set(key, existing);
-
-  return () => {
-    const processes = activeProcessesByChat.get(key);
-    if (!processes) return;
-    processes.delete(process);
-    if (processes.size === 0) {
-      activeProcessesByChat.delete(key);
-    }
-  };
-}
 
 export function stopShellCommandsForChat(worldId: string, chatId: string): { killed: number } {
-  const key = toChatProcessKey(worldId, chatId);
-  const processes = activeProcessesByChat.get(key);
-  if (!processes || processes.size === 0) {
-    return { killed: 0 };
-  }
-
-  let killed = 0;
-  for (const process of processes) {
-    if (process.killed) continue;
-    try {
-      process.kill('SIGTERM');
-      killed += 1;
-    } catch (error) {
-      logger.warn('Failed to stop shell process', {
-        worldId,
-        chatId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-
-  return { killed };
+  return stopShellProcessesForChatScope(worldId, chatId);
 }
 
 export function isCommandExecutionCanceled(result: CommandExecutionResult): boolean {
@@ -181,11 +158,25 @@ export async function executeShellCommand(
     abortSignal?: AbortSignal;
     worldId?: string;
     chatId?: string;
+    onStatusChange?: (event: ShellProcessStatusEvent) => void;
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
   const timeout = options.timeout || 600000; // Default 10 minute timeout for long-running commands
   const resolvedDirectory = resolveDirectory(directory);
+  const executionRecord = createShellProcessExecution({
+    command,
+    parameters,
+    directory: resolvedDirectory,
+    worldId: options.worldId,
+    chatId: options.chatId
+  });
+  const executionId = executionRecord.executionId;
+  options.onStatusChange?.({
+    executionId,
+    status: executionRecord.status,
+    record: executionRecord
+  });
 
   logger.debug('Executing shell command', {
     command,
@@ -201,9 +192,10 @@ export async function executeShellCommand(
     let timedOut = false;
     let aborted = false;
     let processExited = false;
-    let unregisterProcess: (() => void) | null = null;
+    let unsubscribeStatusListener: (() => void) | null = null;
 
     const result: CommandExecutionResult = {
+      executionId,
       command,
       parameters,
       stdout: '',
@@ -213,6 +205,13 @@ export async function executeShellCommand(
       executedAt: new Date(),
       duration: 0
     };
+
+    if (options.onStatusChange) {
+      unsubscribeStatusListener = subscribeShellProcessStatus((event) => {
+        if (event.executionId !== executionId) return;
+        options.onStatusChange?.(event);
+      });
+    }
 
     try {
       // Quote parameters that contain spaces, tabs, or newlines for shell execution
@@ -224,16 +223,20 @@ export async function executeShellCommand(
         return param;
       });
 
+      transitionShellProcessExecution(executionId, 'starting', {
+        startedAt: new Date().toISOString()
+      });
+
       // Spawn the child process
       const childProcess = spawn(command, quotedParams, {
         cwd: resolvedDirectory,
         shell: true, // Use shell to enable PATH resolution and shell features
         timeout: timeout
       });
-
-      if (options.worldId && options.chatId) {
-        unregisterProcess = registerActiveProcess(options.worldId, options.chatId, childProcess);
-      }
+      attachShellProcessHandle(executionId, childProcess);
+      transitionShellProcessExecution(executionId, 'running', {
+        startedAt: new Date().toISOString()
+      });
 
       // Set up timeout handler
       const timeoutHandle = setTimeout(() => {
@@ -247,8 +250,10 @@ export async function executeShellCommand(
       const abortHandler = () => {
         if (processExited) return;
         aborted = true;
+        markShellProcessCancelRequested(executionId);
         childProcess.kill('SIGTERM');
         logger.info('Shell command aborted by request', {
+          executionId,
           command,
           parameters,
           directory,
@@ -297,8 +302,8 @@ export async function executeShellCommand(
         processExited = true;
         clearTimeout(timeoutHandle);
         options.abortSignal?.removeEventListener('abort', abortHandler);
-        unregisterProcess?.();
-        unregisterProcess = null;
+        unsubscribeStatusListener?.();
+        unsubscribeStatusListener = null;
 
         const duration = Date.now() - startTime;
 
@@ -308,13 +313,53 @@ export async function executeShellCommand(
         result.signal = signal;
         result.duration = duration;
 
+        const latestRecord = getShellProcessExecution(executionId);
+        const canceledByControlRequest = Boolean(latestRecord?.cancelRequested);
+
         if (timedOut) {
           result.error = `Command execution timed out after ${timeout}ms`;
-        } else if (aborted) {
+          transitionShellProcessExecution(executionId, 'timed_out', {
+            finishedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+            error: result.error,
+            durationMs: duration
+          });
+        } else if (aborted || canceledByControlRequest) {
           result.error = 'Command execution canceled by user';
           result.canceled = true;
+          transitionShellProcessExecution(executionId, 'canceled', {
+            finishedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+            error: result.error,
+            durationMs: duration
+          });
         } else if (code !== 0) {
           result.error = `Command exited with code ${code}`;
+          transitionShellProcessExecution(executionId, 'failed', {
+            finishedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+            error: result.error,
+            durationMs: duration
+          });
+        } else {
+          transitionShellProcessExecution(executionId, 'completed', {
+            finishedAt: new Date().toISOString(),
+            exitCode: code,
+            signal,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+            durationMs: duration,
+            error: null
+          });
         }
 
         // Persist to history
@@ -322,6 +367,7 @@ export async function executeShellCommand(
 
         logger.debug('Command execution completed', {
           command,
+          executionId,
           parameters,
           directory,
           exitCode: code,
@@ -340,8 +386,8 @@ export async function executeShellCommand(
         processExited = true;
         clearTimeout(timeoutHandle);
         options.abortSignal?.removeEventListener('abort', abortHandler);
-        unregisterProcess?.();
-        unregisterProcess = null;
+        unsubscribeStatusListener?.();
+        unsubscribeStatusListener = null;
 
         const duration = Date.now() - startTime;
 
@@ -349,6 +395,16 @@ export async function executeShellCommand(
         result.stderr = stderr;
         result.duration = duration;
         result.error = error.message;
+
+        transitionShellProcessExecution(executionId, 'failed', {
+          finishedAt: new Date().toISOString(),
+          exitCode: null,
+          signal: null,
+          stdoutLength: stdout.length,
+          stderrLength: stderr.length,
+          error: result.error,
+          durationMs: duration
+        });
 
         // Persist to history
         persistExecutionResult(result);
@@ -364,11 +420,21 @@ export async function executeShellCommand(
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      unregisterProcess?.();
-      unregisterProcess = null;
+      unsubscribeStatusListener?.();
+      unsubscribeStatusListener = null;
 
       result.duration = duration;
       result.error = error instanceof Error ? error.message : String(error);
+
+      transitionShellProcessExecution(executionId, 'failed', {
+        finishedAt: new Date().toISOString(),
+        exitCode: null,
+        signal: null,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+        error: result.error,
+        durationMs: duration
+      });
 
       // Persist to history
       persistExecutionResult(result);
@@ -384,6 +450,70 @@ export async function executeShellCommand(
       resolve(result);
     }
   });
+}
+
+export interface DeleteExecutionHistoryResult {
+  executionId: string;
+  outcome: DeleteShellProcessResult['outcome'];
+  removedHistoryEntries: number;
+}
+
+export function getProcessExecution(executionId: string): ShellProcessExecutionRecord | null {
+  return getShellProcessExecution(executionId);
+}
+
+export function listProcessExecutions(
+  options: ListShellProcessExecutionsOptions = {}
+): ShellProcessExecutionRecord[] {
+  return listShellProcessExecutions(options);
+}
+
+export function cancelProcessExecution(executionId: string): CancelShellProcessResult {
+  return cancelShellProcessExecution(executionId);
+}
+
+export function deleteProcessExecution(executionId: string): DeleteExecutionHistoryResult {
+  const deleteResult = deleteShellProcessExecution(executionId);
+  if (deleteResult.outcome !== 'deleted') {
+    return {
+      executionId,
+      outcome: deleteResult.outcome,
+      removedHistoryEntries: 0
+    };
+  }
+
+  let removedHistoryEntries = 0;
+  for (let index = executionHistory.length - 1; index >= 0; index -= 1) {
+    if (executionHistory[index]?.executionId !== executionId) continue;
+    executionHistory.splice(index, 1);
+    removedHistoryEntries += 1;
+  }
+
+  return {
+    executionId,
+    outcome: 'deleted',
+    removedHistoryEntries
+  };
+}
+
+export function subscribeProcessExecutionStatus(
+  listener: (event: ShellProcessStatusEvent) => void
+): () => void {
+  return subscribeShellProcessStatus(listener);
+}
+
+export function clearProcessExecutionStateForTests(): {
+  historyCleared: number;
+  registryExecutionCount: number;
+  registryActiveCount: number;
+} {
+  const historyCleared = clearExecutionHistory();
+  const registry = clearShellProcessRegistryForTests();
+  return {
+    historyCleared,
+    registryExecutionCount: registry.executionCount,
+    registryActiveCount: registry.activeCount
+  };
 }
 
 /**

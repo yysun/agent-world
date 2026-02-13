@@ -82,6 +82,12 @@ export {
   getExecutionHistory,
   clearExecutionHistory,
   stopShellCommandsForChat,
+  getProcessExecution,
+  listProcessExecutions,
+  cancelProcessExecution,
+  deleteProcessExecution,
+  subscribeProcessExecutionStatus,
+  clearProcessExecutionStateForTests,
   type CommandExecutionResult
 } from './shell-cmd-tool.js';
 
