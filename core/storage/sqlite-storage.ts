@@ -35,6 +35,7 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-02-13: Fixed migration directory resolution so Electron runtimes launched from `electron/` still run root `migrations/`.
  * - 2025-08-01: Added proper TypeScript types for all chat operations
  * - 2025-08-01: Implemented restoreFromSnapshot with atomic transactions
  * - 2025-08-01: Enhanced type safety removing any types
@@ -56,6 +57,8 @@ import {
 } from './sqlite-schema.js';
 import { runMigrations } from './migration-runner.js';
 import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import type { StorageAPI, World, Agent, AgentMessage, Chat, CreateChatParams, UpdateChatParams, WorldChat } from '../types.js';
 import { toKebabCase } from '../utils.js';
 
@@ -131,9 +134,27 @@ export async function createSQLiteStorageContext(config: SQLiteConfig): Promise<
   };
 }
 
+function resolveMigrationsDir(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(process.cwd(), 'migrations'),
+    path.resolve(process.cwd(), '..', 'migrations'),
+    path.resolve(moduleDir, '../../migrations'),
+    path.resolve(moduleDir, '../../../migrations')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
 async function ensureInitialized(ctx: SQLiteStorageContext): Promise<void> {
   if (!ctx.isInitialized) {
-    const migrationsDir = path.join(process.cwd(), 'migrations');
+    const migrationsDir = resolveMigrationsDir();
 
     // Always run migrations - this handles both fresh databases (starting with 0000)
     // and existing databases that need updates
