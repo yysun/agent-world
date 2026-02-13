@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-13: Refreshed world subscriptions after message-chain deletion so runtime agent memory stays aligned with persisted storage during edit resubmits.
  * - 2026-02-13: Added stop-message IPC handler to cancel active session processing by `worldId` and `chatId`.
  * - 2026-02-13: Tightened workspace-state dependency typing to avoid unsafe casts at composition boundaries.
  * - 2026-02-13: Awaited core-runtime readiness in all handlers to serialize workspace/runtime transitions before IPC work.
@@ -626,7 +627,17 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!messageId) throw new Error('Message ID is required.');
     if (!chatId) throw new Error('Chat ID is required.');
 
-    return removeMessagesFrom(worldId, messageId, chatId);
+    const result = await removeMessagesFrom(worldId, messageId, chatId);
+    const refreshWarning = await refreshWorldSubscription(worldId);
+
+    if (refreshWarning && result && typeof result === 'object' && !Array.isArray(result)) {
+      return {
+        ...result,
+        refreshWarning
+      };
+    }
+
+    return result;
   }
 
   async function stopChatMessage(payload: any) {

@@ -1,0 +1,100 @@
+/**
+ * Unit Tests for Main IPC Handler Behaviors
+ *
+ * Features:
+ * - Verifies message deletion delegates to core removal API.
+ * - Verifies world subscription refresh runs after message deletion.
+ * - Verifies refresh warnings are propagated in delete-message responses.
+ *
+ * Implementation Notes:
+ * - Uses dependency-injected IPC handlers with fully mocked core APIs.
+ * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
+ *
+ * Recent Changes:
+ * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
+ */
+
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  dialog: {
+    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] }))
+  }
+}), { virtual: true });
+
+function createDependencies(overrides: Record<string, unknown> = {}) {
+  return {
+    ensureCoreReady: vi.fn(async () => undefined),
+    getWorkspaceState: vi.fn(() => ({
+      workspacePath: '/workspace',
+      storagePath: '/workspace',
+      coreInitialized: true
+    })),
+    getMainWindow: vi.fn(() => null),
+    removeWorldSubscriptions: vi.fn(async () => undefined),
+    refreshWorldSubscription: vi.fn(async () => null),
+    ensureWorldSubscribed: vi.fn(async () => ({})),
+    createAgent: vi.fn(async () => ({})),
+    createWorld: vi.fn(async () => ({})),
+    deleteAgent: vi.fn(async () => true),
+    deleteChat: vi.fn(async () => true),
+    updateAgent: vi.fn(async () => ({})),
+    deleteWorld: vi.fn(async () => true),
+    getMemory: vi.fn(async () => []),
+    getWorld: vi.fn(async () => null),
+    listChats: vi.fn(async () => []),
+    listWorlds: vi.fn(async () => []),
+    newChat: vi.fn(async () => null),
+    publishMessage: vi.fn(() => ({})),
+    stopMessageProcessing: vi.fn(async () => ({ stopped: true })),
+    restoreChat: vi.fn(async () => null),
+    updateWorld: vi.fn(async () => ({})),
+    removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
+    ...overrides
+  };
+}
+
+async function createHandlers(overrides: Record<string, unknown> = {}) {
+  const { createMainIpcHandlers } = await import('../../../electron/main-process/ipc-handlers');
+  const dependencies = createDependencies(overrides);
+  return {
+    handlers: createMainIpcHandlers(dependencies as any),
+    dependencies
+  };
+}
+
+describe('createMainIpcHandlers.deleteMessageFromChat', () => {
+  it('refreshes the world subscription after deleting messages from storage', async () => {
+    const removeMessagesFrom = vi.fn(async () => ({ success: true, messagesRemovedTotal: 4 }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const { handlers } = await createHandlers({ removeMessagesFrom, refreshWorldSubscription });
+
+    const result = await handlers.deleteMessageFromChat({
+      worldId: 'world-1',
+      messageId: 'msg-1',
+      chatId: 'chat-1'
+    });
+
+    expect(removeMessagesFrom).toHaveBeenCalledWith('world-1', 'msg-1', 'chat-1');
+    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(result).toEqual({ success: true, messagesRemovedTotal: 4 });
+  });
+
+  it('returns refresh warning when subscription refresh reports one', async () => {
+    const removeMessagesFrom = vi.fn(async () => ({ success: true, messagesRemovedTotal: 2 }));
+    const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
+    const { handlers } = await createHandlers({ removeMessagesFrom, refreshWorldSubscription });
+
+    const result = await handlers.deleteMessageFromChat({
+      worldId: 'world-2',
+      messageId: 'msg-9',
+      chatId: 'chat-3'
+    });
+
+    expect(result).toEqual({
+      success: true,
+      messagesRemovedTotal: 2,
+      refreshWarning: 'refresh failed'
+    });
+  });
+});
