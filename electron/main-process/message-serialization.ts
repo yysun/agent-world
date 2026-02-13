@@ -267,6 +267,33 @@ export function serializeRealtimeToolEvent(
   };
 }
 
+export function serializeRealtimeActivityEvent(
+  worldId: string,
+  chatId: string | null,
+  event: any
+): Record<string, unknown> {
+  const activeSources = Array.isArray(event?.activeSources)
+    ? event.activeSources
+      .map((source: unknown) => String(source || '').trim())
+      .filter(Boolean)
+    : [];
+
+  return {
+    type: 'activity',
+    worldId,
+    chatId: chatId || null,
+    activity: {
+      eventType: event?.type || 'response-end',
+      pendingOperations: Number(event?.pendingOperations) || 0,
+      activityId: Number(event?.activityId) || 0,
+      source: event?.source ? String(event.source) : null,
+      activeSources,
+      queue: event?.queue || null,
+      createdAt: new Date().toISOString()
+    }
+  };
+}
+
 export function serializeRealtimeLogEvent(logEvent: any): Record<string, unknown> {
   return {
     type: 'log',

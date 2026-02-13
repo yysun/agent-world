@@ -239,4 +239,74 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', true);
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
   });
+
+  it('forwards activity events to session activity callback', () => {
+    const harness = createMessageStateHarness();
+    const onSessionActivityUpdate = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionActivityUpdate
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'response-start',
+        pendingOperations: 2,
+        activityId: 42,
+        source: 'agent:planner',
+        activeSources: ['agent:planner', 'agent:coder']
+      }
+    });
+
+    expect(onSessionActivityUpdate).toHaveBeenCalledWith({
+      eventType: 'response-start',
+      pendingOperations: 2,
+      activityId: 42,
+      source: 'agent:planner',
+      activeSources: ['agent:planner', 'agent:coder']
+    });
+  });
+
+  it('ignores activity events for non-selected chat', () => {
+    const harness = createMessageStateHarness();
+    const onSessionActivityUpdate = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionActivityUpdate
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-2',
+      activity: {
+        eventType: 'response-start',
+        pendingOperations: 1,
+        activityId: 7,
+        source: 'agent:planner',
+        activeSources: ['agent:planner']
+      }
+    });
+
+    expect(onSessionActivityUpdate).not.toHaveBeenCalled();
+  });
 });

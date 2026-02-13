@@ -13,12 +13,14 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-13: Global log fallback now publishes via shared status-bar service so any module can surface footer status without App callback threading.
  * - 2026-02-13: Extended response-state callbacks to include tool lifecycle events for reliable stop-mode behavior during tool execution.
  * - 2026-02-13: Added session response-state callbacks so composer send/stop mode can follow realtime start/end lifecycle.
  * - 2026-02-12: Extracted App realtime event orchestration into domain module.
  */
 
 import { createLogMessage, upsertMessageList } from './message-updates.js';
+import { publishStatusBarStatus } from './status-bar.js';
 
 export function createGlobalLogEventHandler({
   loadedWorldId,
@@ -41,7 +43,8 @@ export function createGlobalLogEventHandler({
     const category = String(logEvent?.category || 'system');
     const message = String(logEvent?.message || 'Unknown error');
     const level = String(logEvent?.level || '').toLowerCase();
-    setStatusText(`${category} - ${message}`, level === 'error' ? 'error' : 'info');
+    const emitStatus = typeof setStatusText === 'function' ? setStatusText : publishStatusBarStatus;
+    emitStatus(`${category} - ${message}`, level === 'error' ? 'error' : 'info');
   };
 }
 
@@ -53,7 +56,8 @@ export function createChatSubscriptionEventHandler({
   activityStateRef,
   setMessages,
   setActiveStreamCount,
-  onSessionResponseStateChange
+  onSessionResponseStateChange,
+  onSessionActivityUpdate
 }) {
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
@@ -200,6 +204,24 @@ export function createChatSubscriptionEventHandler({
         }
       } else if (toolEventType === 'tool-progress') {
         activity.handleToolProgress(toolUseId, toolPayload.progress || '');
+      }
+    }
+
+    if (payload.type === 'activity') {
+      const activityPayload = payload.activity;
+      if (!activityPayload) return;
+
+      const activityChatId = payload.chatId || null;
+      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
+
+      if (typeof onSessionActivityUpdate === 'function') {
+        onSessionActivityUpdate({
+          eventType: String(activityPayload.eventType || ''),
+          pendingOperations: Number(activityPayload.pendingOperations) || 0,
+          activityId: Number(activityPayload.activityId) || 0,
+          source: activityPayload.source || null,
+          activeSources: Array.isArray(activityPayload.activeSources) ? activityPayload.activeSources : []
+        });
       }
     }
   };

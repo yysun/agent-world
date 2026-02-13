@@ -21,6 +21,7 @@
  */
 
 import {
+  serializeRealtimeActivityEvent,
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
   serializeRealtimeSSEEvent,
@@ -225,20 +226,30 @@ export function createRealtimeEventsRuntime(
       });
     };
 
-    const toolHandler = (event: any) => {
+    const worldHandler = (event: any) => {
       const eventType = event?.type || '';
-      if (!eventType.startsWith('tool-')) return;
+      if (!eventType.startsWith('tool-') && eventType !== 'response-start' && eventType !== 'response-end' && eventType !== 'idle') {
+        return;
+      }
       const eventChatId = event?.chatId ? String(event.chatId) : null;
       if (chatId && eventChatId && eventChatId !== chatId) return;
+      if (eventType.startsWith('tool-')) {
+        sendRealtimeEventToRenderer({
+          ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
+          subscriptionId
+        });
+        return;
+      }
+
       sendRealtimeEventToRenderer({
-        ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
+        ...serializeRealtimeActivityEvent(worldId, eventChatId || chatId, event),
         subscriptionId
       });
     };
 
     world.eventEmitter.on('message', messageHandler);
     world.eventEmitter.on('sse', sseHandler);
-    world.eventEmitter.on('world', toolHandler);
+    world.eventEmitter.on('world', worldHandler);
     const subscription: ChatEventSubscription = {
       version: subscriptionVersion,
       worldId,
@@ -246,7 +257,7 @@ export function createRealtimeEventsRuntime(
       unsubscribe: () => {
         world.eventEmitter.off('message', messageHandler);
         world.eventEmitter.off('sse', sseHandler);
-        world.eventEmitter.off('world', toolHandler);
+        world.eventEmitter.off('world', worldHandler);
       }
     };
     chatEventSubscriptions.set(subscriptionId, subscription);

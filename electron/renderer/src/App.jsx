@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-13: Reused the existing bottom status bar for live thinking/activity state (working/pending agents) without adding extra status rows.
  * - 2026-02-13: Tightened send/stop mode to session-scoped pending state so concurrent sessions remain independent while stop is active.
  * - 2026-02-13: Added session-scoped stop-message control and send/stop composer toggle behavior.
  * - 2026-02-12: Extracted renderer orchestration concerns into domain modules.
@@ -77,14 +78,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createStreamingState } from './streaming-state.js';
 import { createActivityState } from './activity-state.js';
 import {
-  ThinkingIndicator,
-  ToolExecutionStatus,
   ActivityPulse,
-  AgentQueueDisplay,
   ElapsedTimeCounter
 } from './components/index.js';
 import { renderMarkdown } from './utils/markdown';
 import { getDesktopApi, safeMessage } from './domain/desktop-api.js';
+import {
+  getStatusBarStatus,
+  publishStatusBarStatus,
+  subscribeStatusBarStatus
+} from './domain/status-bar.js';
 import { upsertMessageList } from './domain/message-updates.js';
 import {
   createGlobalLogEventHandler,
@@ -98,6 +101,7 @@ const MIN_TURN_LIMIT = 1;
 const MAX_HEADER_AGENT_AVATARS = 8;
 const DEFAULT_WORLD_CHAT_LLM_PROVIDER = 'ollama';
 const DEFAULT_WORLD_CHAT_LLM_MODEL = 'llama3.2:3b';
+const MAX_STATUS_AGENT_ITEMS = 6;
 const DEFAULT_AGENT_FORM = {
   id: '',
   name: '',
@@ -431,6 +435,12 @@ function getSessionTimestamp(session) {
   return 0;
 }
 
+function normalizeActivitySourceLabel(source) {
+  const raw = String(source || '').trim();
+  if (!raw) return '';
+  return raw.startsWith('agent:') ? raw.slice('agent:'.length) : raw;
+}
+
 function getEnvValueFromText(variablesText, key) {
   if (!key) return undefined;
   const lines = String(variablesText).split(/\r?\n/);
@@ -611,7 +621,7 @@ export default function App() {
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [status, setStatus] = useState({ text: '', kind: 'info' });
+  const [status, setStatus] = useState(() => getStatusBarStatus());
   const [creatingWorld, setCreatingWorld] = useState(getDefaultWorldForm);
   const [editingWorld, setEditingWorld] = useState(getDefaultWorldForm);
   const [creatingAgent, setCreatingAgent] = useState(DEFAULT_AGENT_FORM);
@@ -644,6 +654,13 @@ export default function App() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [activeTools, setActiveTools] = useState([]);
   const [activeStreamCount, setActiveStreamCount] = useState(0);
+  const [sessionActivity, setSessionActivity] = useState({
+    eventType: 'idle',
+    pendingOperations: 0,
+    activityId: 0,
+    source: null,
+    activeSources: []
+  });
   // Prompt editor modal state
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorValue, setPromptEditorValue] = useState('');
@@ -654,7 +671,11 @@ export default function App() {
   const [mcpEditorTarget, setMcpEditorTarget] = useState(null); // 'create' or 'edit'
 
   const setStatusText = useCallback((text, kind = 'info') => {
-    setStatus({ text, kind });
+    publishStatusBarStatus(text, kind);
+  }, []);
+
+  useEffect(() => {
+    return subscribeStatusBarStatus(setStatus);
   }, []);
 
   // Initialize streaming state manager
@@ -1036,6 +1057,13 @@ export default function App() {
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
     setPendingResponseSessionIds(new Set());
+    setSessionActivity({
+      eventType: 'idle',
+      pendingOperations: 0,
+      activityId: 0,
+      source: null,
+      activeSources: []
+    });
   }, [loadedWorld?.id]);
 
   useEffect(() => {
@@ -1047,14 +1075,13 @@ export default function App() {
     const removeListener = api.onChatEvent(createGlobalLogEventHandler({
       loadedWorldId: loadedWorld?.id,
       selectedSessionId,
-      setMessages,
-      setStatusText
+      setMessages
     }));
 
     return () => {
       removeListener();
     };
-  }, [api, loadedWorld?.id, selectedSessionId, setStatusText]);
+  }, [api, loadedWorld?.id, selectedSessionId]);
 
   useEffect(() => {
     if (!loadedWorld?.id || !selectedSessionId) {
@@ -1082,6 +1109,9 @@ export default function App() {
           }
           return next;
         });
+      },
+      onSessionActivityUpdate: (activity) => {
+        setSessionActivity(activity);
       }
     }));
 
@@ -1103,6 +1133,13 @@ export default function App() {
         activityStateRef.current.cleanup();
       }
       setActiveStreamCount(0);
+      setSessionActivity({
+        eventType: 'idle',
+        pendingOperations: 0,
+        activityId: 0,
+        source: null,
+        activeSources: []
+      });
     };
   }, [api, selectedSessionId, loadedWorld, setStatusText]);
 
@@ -1691,6 +1728,13 @@ export default function App() {
         setActiveStreamCount(0);
         setActiveTools([]);
         setIsBusy(false);
+        setSessionActivity({
+          eventType: 'idle',
+          pendingOperations: 0,
+          activityId: 0,
+          source: null,
+          activeSources: []
+        });
       }
 
       if (stopped) {
@@ -1977,6 +2021,57 @@ export default function App() {
   const isCurrentSessionStopping = Boolean(selectedSessionId && stoppingSessionIds.has(selectedSessionId));
   const isCurrentSessionPendingResponse = Boolean(selectedSessionId && pendingResponseSessionIds.has(selectedSessionId));
   const canStopCurrentSession = Boolean(selectedSessionId) && !isCurrentSessionSending && !isCurrentSessionStopping && isCurrentSessionPendingResponse;
+  const activeAgentSources = useMemo(() => {
+    if (!Array.isArray(sessionActivity.activeSources)) return [];
+
+    const unique = new Set();
+    for (const source of sessionActivity.activeSources) {
+      const normalized = normalizeActivitySourceLabel(source);
+      if (normalized) unique.add(normalized);
+    }
+
+    return Array.from(unique);
+  }, [sessionActivity.activeSources]);
+  const workingAgentCount = activeAgentSources.length;
+  const pendingAgentCount = Math.max(0, Number(sessionActivity.pendingOperations || 0) - workingAgentCount);
+  const isAgentWorkInProgress = workingAgentCount > 0;
+  const agentStatusText = useMemo(() => {
+    if (!Array.isArray(worldAgents) || worldAgents.length === 0) {
+      return isAgentWorkInProgress
+        ? `${workingAgentCount} working · ${pendingAgentCount} pending`
+        : 'done';
+    }
+
+    const activeSourceSet = new Set(activeAgentSources.map((source) => String(source).toLowerCase()));
+    const statuses = worldAgents.map((agent, index) => {
+      const label = String(agent?.name || '').trim() || `Agent ${index + 1}`;
+      const normalizedId = String(agent?.id || '').trim().toLowerCase();
+      const normalizedName = String(agent?.name || '').trim().toLowerCase();
+      const isWorking =
+        (normalizedId && activeSourceSet.has(normalizedId)) ||
+        (normalizedName && activeSourceSet.has(normalizedName));
+      return `${label} ${isWorking ? 'working' : 'done'}`;
+    });
+
+    if (statuses.length <= MAX_STATUS_AGENT_ITEMS) {
+      return statuses.join(', ');
+    }
+
+    const remaining = statuses.length - MAX_STATUS_AGENT_ITEMS;
+    return `${statuses.slice(0, MAX_STATUS_AGENT_ITEMS).join(', ')}, +${remaining} more`;
+  }, [
+    worldAgents,
+    activeAgentSources,
+    isAgentWorkInProgress,
+    pendingAgentCount,
+    workingAgentCount
+  ]);
+  const hasComposerActivity =
+    isCurrentSessionPendingResponse ||
+    Number(sessionActivity.pendingOperations || 0) > 0 ||
+    activeTools.length > 0 ||
+    activeStreamCount > 0 ||
+    isBusy;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -2518,10 +2613,6 @@ export default function App() {
                               <MessageContent message={message} />
                             )}
 
-                            {message.isStreaming ? (
-                              <ThinkingIndicator className="mt-2" />
-                            ) : null}
-
                             {/* Action buttons - show on hover in lower right */}
                             {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
                               <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2557,26 +2648,10 @@ export default function App() {
                       );
                     })
                   )}
-                  {/* Activity indicators at bottom of messages */}
-                  {isBusy ? (
-                    <div className="mt-4 space-y-3 rounded-lg border border-border/50 bg-card/50 p-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <ActivityPulse isActive={isBusy} />
-                          <span className="text-xs font-medium text-foreground">Processing...</span>
-                          <AgentQueueDisplay count={activeStreamCount} />
-                        </div>
-                        <ElapsedTimeCounter elapsedMs={elapsedMs} />
-                      </div>
-                      {activeTools.length > 0 ? (
-                        <ToolExecutionStatus tools={activeTools} />
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
               </div>
 
-              <form onSubmit={onSubmitMessage} className="p-4">
+              <form onSubmit={onSubmitMessage} className="px-4 pt-4 pb-2">
                 <div className="mx-auto flex w-full max-w-[750px] flex-col gap-2 rounded-lg border border-input bg-card p-3">
                   <textarea
                     ref={composerTextareaRef}
@@ -3126,16 +3201,50 @@ export default function App() {
             </aside>
           </div>
 
-          {status.text ? (
+          {(status.text || hasComposerActivity) ? (
             <div
-              className={`border-t px-5 py-2 text-xs ${status.kind === 'error'
-                ? 'border-destructive/40 bg-destructive/15 text-destructive'
-                : status.kind === 'success'
-                  ? 'border-secondary/40 bg-secondary/20 text-secondary-foreground'
-                  : 'border-border bg-card text-muted-foreground'
+              className={`px-5 pt-1 pb-2 text-xs ${hasComposerActivity
+                ? 'bg-card text-muted-foreground'
+                : status.kind === 'error'
+                  ? 'bg-destructive/15 text-destructive'
+                  : status.kind === 'success'
+                    ? 'bg-secondary/20 text-secondary-foreground'
+                    : 'bg-card text-muted-foreground'
                 }`}
             >
-              {status.text}
+              <div className="mx-auto w-full max-w-[750px]">
+                {hasComposerActivity ? (
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-card/40 px-3 py-1.5">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ActivityPulse isActive={isAgentWorkInProgress} />
+                      <span className="truncate text-foreground/90">
+                        {agentStatusText}
+                      </span>
+                      {activeTools.length > 0 ? (
+                        <span className="shrink-0 text-muted-foreground/80">
+                          · {activeTools.length} tool{activeTools.length === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
+                      {status.text ? (
+                        <span
+                          className={`truncate ${status.kind === 'error'
+                            ? 'text-destructive'
+                            : status.kind === 'success'
+                              ? 'text-secondary-foreground'
+                              : 'text-muted-foreground'}`}
+                        >
+                          · {status.text}
+                        </span>
+                      ) : null}
+                    </div>
+                    <ElapsedTimeCounter elapsedMs={elapsedMs} />
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-background/30 px-3 py-1.5">
+                    {status.text}
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
         </main>
