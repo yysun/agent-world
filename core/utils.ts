@@ -46,6 +46,9 @@
 
 import { nanoid } from 'nanoid';
 import { filterClientSideMessages } from './message-prep.js';
+import { createCategoryLogger } from './logger.js';
+
+const logger = createCategoryLogger('core.utils');
 
 /**
  * Generate unique ID for messages and events
@@ -91,6 +94,75 @@ export function toKebabCase(str: string): string {
     .replace(/-+/g, '-')            // Replace multiple hyphens with single
     .replace(/^-|-$/g, '')          // Remove leading/trailing hyphens
     .toLowerCase();                 // Convert to lowercase
+}
+
+/**
+ * Parse .env-style text into key-value map.
+ * Supported:
+ * - Comments: # comment
+ * - Blank lines
+ * - KEY=value entries (optional whitespace around '=')
+ * Invalid lines are ignored.
+ */
+export function parseEnvText(variablesText?: string): Record<string, string> {
+  const envMap: Record<string, string> = {};
+  if (!variablesText || typeof variablesText !== 'string') {
+    return envMap;
+  }
+
+  const lines = variablesText.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      logger.debug('Ignoring invalid env line', { line: rawLine });
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (!key) {
+      logger.debug('Ignoring env line with empty key', { line: rawLine });
+      continue;
+    }
+
+    envMap[key] = value;
+  }
+
+  return envMap;
+}
+
+/**
+ * Get a single env value from .env-style text
+ */
+export function getEnvValueFromText(variablesText: string | undefined, key: string): string | undefined {
+  if (!key) {
+    return undefined;
+  }
+  const envMap = parseEnvText(variablesText);
+  return envMap[key];
+}
+
+/**
+ * Interpolate template variables in form {{ variable }} from env map.
+ * Missing variables are replaced with empty string.
+ */
+export function interpolateTemplateVariables(template: string, envMap: Record<string, string>): string {
+  if (!template) {
+    return '';
+  }
+
+  return template.replace(/\{\{\s*([A-Za-z0-9_\-]+)\s*\}\}/g, (_match, variableName: string) => {
+    if (Object.prototype.hasOwnProperty.call(envMap, variableName)) {
+      return envMap[variableName] ?? '';
+    }
+    return '';
+  });
 }
 
 // Import types for utility functions
@@ -272,6 +344,7 @@ export async function prepareMessagesForLLM(
   includeCurrentMessage?: MessageData
 ): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
+  let worldEnvMap: Record<string, string> = {};
 
   // Load FRESH agent from storage to get original system prompt (not patched)
   // This ensures we always use the clean system prompt from storage
@@ -281,6 +354,8 @@ export async function prepareMessagesForLLM(
     const storage = await createStorageWithWrappers();
     const freshAgent = await storage.loadAgent(worldId, agent.id);
     freshSystemPrompt = freshAgent?.systemPrompt;
+    const world = await storage.loadWorld(worldId);
+    worldEnvMap = parseEnvText(world?.variables);
   } catch (error) {
     const { logger } = await import('./logger.js');
     logger.error('Could not load agent from storage for system prompt', {
@@ -297,7 +372,7 @@ export async function prepareMessagesForLLM(
   if (freshSystemPrompt) {
     messages.push({
       role: 'system',
-      content: freshSystemPrompt,
+      content: interpolateTemplateVariables(freshSystemPrompt, worldEnvMap),
       createdAt: new Date()
     });
   }

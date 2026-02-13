@@ -46,7 +46,7 @@ describe('Event Persistence Integration', () => {
     expect(events[0].id).toBe(messageEvent.messageId);
     expect(events[0].type).toBe('message');
     expect(events[0].payload.content).toBe('Hello World');
-    expect(events[0].payload.sender).toBe('user-1');
+    expect(events[0].payload.sender).toBe('human');
     expect(events[0].worldId).toBe(worldId());
     expect(events[0].chatId).toBe(world!.currentChatId);
   });
@@ -340,7 +340,7 @@ describe('Event Persistence Integration', () => {
 
       const events = await world!.eventStorage!.getEventsByWorldAndChat(worldId(), chatId, { types: ['sse'] });
       const sseEvent = events.find((e: any) => e.id === 'sse-default-chatid-sse-start');
-      
+
       expect(sseEvent).toBeDefined();
       expect(sseEvent!.chatId).toBe(chatId);
     });

@@ -40,7 +40,8 @@ const getDefaultWorldData = (): Partial<World> => ({
   // Defaults aligned with Agent Edit
   chatLLMProvider: 'ollama',
   chatLLMModel: 'llama3.2:3b',
-  mcpConfig: null
+  mcpConfig: null,
+  variables: ''
 });
 
 // Save world function (handles both create and update)
@@ -314,6 +315,22 @@ export default class WorldEdit extends Component<WorldEditState> {
                   </div>
 
                   <div className="form-section">
+                    <div className="form-group">
+                      <label htmlFor="world-variables">Variables (.env)</label>
+                      <textarea
+                        id="world-variables"
+                        className="form-textarea world-mcp-textarea"
+                        placeholder="working_directory=/path/to/project\nproject_name=agent-world"
+                        rows={8}
+                        value={state.world.variables || ''}
+                        $bind="world.variables"
+                        disabled={state.loading}
+                      />
+                      <small className="form-help-text">
+                        Example: <code>working_directory=/path/to/project</code>
+                      </small>
+                    </div>
+
                     <div className="form-group">
                       <label htmlFor="world-mcp">MCP Servers</label>
                       <textarea

@@ -70,6 +70,7 @@ import { homedir } from 'os';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 import { publishSSE } from './events/index.js';
+import { getEnvValueFromText } from './utils.js';
 
 const logger = createCategoryLogger('shell-cmd');
 
@@ -261,7 +262,7 @@ export async function executeShellCommand(
       childProcess.stdout?.on('data', (data) => {
         const chunk = data.toString();
         stdout += chunk;
-        
+
         // Call streaming callback if provided (with error handling)
         if (options.onStdout) {
           try {
@@ -278,7 +279,7 @@ export async function executeShellCommand(
       childProcess.stderr?.on('data', (data) => {
         const chunk = data.toString();
         stderr += chunk;
-        
+
         // Call streaming callback if provided (with error handling)
         if (options.onStderr) {
           try {
@@ -508,7 +509,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. The command output, errors, and execution metadata are persisted for tracking. CRITICAL: This tool REQUIRES a "directory" parameter. If user says "current directory" or "here", use "./". If user specifies a path, use that. Only ask for clarification if the location is truly ambiguous.',
+    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Directory resolution priority: (1) explicit `directory` parameter, (2) world variable `working_directory`, (3) return error and DO NOT execute. If user says "current directory" or "here", use "./".',
 
     parameters: {
       type: 'object',
@@ -524,14 +525,14 @@ export function createShellCmdToolDefinition() {
         },
         directory: {
           type: 'string',
-          description: 'REQUIRED: Working directory where the command should be executed. Use "./" for current directory when user says "current", "here", or "this directory". Use "~/" for home directory. Use specified path if provided. Only ask for clarification if truly ambiguous. Examples: "./", "~/", "/tmp", "./src"'
+          description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory`. If neither is available, command is not executed and an error is returned. Examples: "./", "~/", "/tmp", "./src"'
         },
         timeout: {
           type: 'number',
           description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
         }
       },
-      required: ['command', 'directory'],
+      required: ['command'],
       additionalProperties: false
     },
     execute: async (args: any, sequenceId?: string, parentToolCall?: string, context?: any) => {
@@ -550,14 +551,14 @@ export function createShellCmdToolDefinition() {
           },
           directory: {
             type: 'string',
-            description: 'REQUIRED: Working directory where the command should be executed. Use "./" for current directory when user says "current", "here", or "this directory". Use "~/" for home directory. Use specified path if provided. Only ask for clarification if truly ambiguous. Examples: "./", "~/", "/tmp", "./src"'
+            description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory`. If neither is available, command is not executed and an error is returned. Examples: "./", "~/", "/tmp", "./src"'
           },
           timeout: {
             type: 'number',
             description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
           }
         },
-        required: ['command', 'directory']
+        required: ['command']
       };
 
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
@@ -575,7 +576,10 @@ export function createShellCmdToolDefinition() {
         });
       }
 
-      const { command, parameters = [], directory, timeout } = validation.correctedArgs;
+      const { command, parameters = [], timeout } = validation.correctedArgs;
+      const directoryFromArgs = typeof validation.correctedArgs.directory === 'string'
+        ? String(validation.correctedArgs.directory).trim()
+        : '';
 
       // Ensure parameters is always an array
       const validParameters = Array.isArray(parameters) ?
@@ -588,8 +592,25 @@ export function createShellCmdToolDefinition() {
       const chatId = context?.chatId ? String(context.chatId) : undefined;
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
 
+      const directoryFromWorld = getEnvValueFromText(world?.variables, 'working_directory');
+      const resolvedDirectory = directoryFromArgs || String(directoryFromWorld || '').trim();
+
+      if (!resolvedDirectory) {
+        return formatResultForLLM({
+          command,
+          parameters: validParameters,
+          exitCode: 1,
+          signal: null,
+          error: 'No working directory resolved. Provide `directory` parameter or set world variable `working_directory`. Command was not executed.',
+          stdout: '',
+          stderr: '',
+          executedAt: new Date(),
+          duration: 0
+        });
+      }
+
       // Execute command with streaming callbacks if world is available
-      const result = await executeShellCommand(command, validParameters, directory, {
+      const result = await executeShellCommand(command, validParameters, resolvedDirectory, {
         timeout,
         abortSignal,
         worldId: world?.id,

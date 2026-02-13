@@ -100,7 +100,7 @@ describe('Agent Message Persistence', () => {
     // Should have both messages
     expect(events.length).toBeGreaterThanOrEqual(2);
 
-    const humanMsg = events.find((e: any) => e.payload.sender === 'HUMAN');
+    const humanMsg = events.find((e: any) => e.payload.sender === 'human');
     const agentMsg = events.find((e: any) => e.payload.sender === agent.id);
 
     expect(humanMsg).toBeDefined();

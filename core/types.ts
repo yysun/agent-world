@@ -332,6 +332,7 @@ export interface CreateWorldParams {
   chatLLMProvider?: LLMProvider; // For chat summarization
   chatLLMModel?: string; // For chat summarization
   mcpConfig?: string | null; // MCP configuration JSON string
+  variables?: string; // .env-style world variables text
 }
 
 /**
@@ -353,6 +354,7 @@ export interface World {
   chatLLMModel?: string; // For chat summarization
   currentChatId?: string | null; // Track active chat session
   mcpConfig?: string | null; // MCP configuration JSON string
+  variables?: string; // .env-style world variables text
   isProcessing?: boolean; // Flag to prevent edits during agent processing
   createdAt: Date;
   lastUpdated: Date;

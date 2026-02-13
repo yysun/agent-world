@@ -431,6 +431,94 @@ function getSessionTimestamp(session) {
   return 0;
 }
 
+function getEnvValueFromText(variablesText, key) {
+  if (!variablesText || !key) return undefined;
+  const lines = String(variablesText).split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) continue;
+    const envKey = line.slice(0, eqIndex).trim();
+    if (envKey !== key) continue;
+    return line.slice(eqIndex + 1).trim();
+  }
+  return undefined;
+}
+
+function upsertEnvVariable(variablesText, key, value) {
+  const lines = String(variablesText || '').split(/\r?\n/);
+  const updatedLines = [];
+  let replaced = false;
+
+  for (const rawLine of lines) {
+    const line = String(rawLine);
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) {
+      updatedLines.push(line);
+      continue;
+    }
+
+    const envKey = line.slice(0, eqIndex).trim();
+    if (envKey === key) {
+      if (!replaced) {
+        updatedLines.push(`${key}=${value}`);
+        replaced = true;
+      }
+      continue;
+    }
+
+    updatedLines.push(line);
+  }
+
+  if (!replaced) {
+    if (updatedLines.length > 0 && updatedLines[updatedLines.length - 1].trim() !== '') {
+      updatedLines.push('');
+    }
+    updatedLines.push(`${key}=${value}`);
+  }
+
+  return updatedLines.join('\n');
+}
+
+function removeEnvVariable(variablesText, key) {
+  if (!key) return String(variablesText || '');
+
+  const lines = String(variablesText || '').split(/\r?\n/);
+  const filteredLines = [];
+
+  for (const rawLine of lines) {
+    const line = String(rawLine);
+    const trimmed = line.trim();
+
+    if (!trimmed || trimmed.startsWith('#')) {
+      filteredLines.push(line);
+      continue;
+    }
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) {
+      filteredLines.push(line);
+      continue;
+    }
+
+    const envKey = line.slice(0, eqIndex).trim();
+    if (envKey === key) {
+      continue;
+    }
+
+    filteredLines.push(line);
+  }
+
+  return filteredLines.join('\n');
+}
+
 function sortSessionsByNewest(sessions) {
   if (!Array.isArray(sessions)) return [];
   return [...sessions].sort((left, right) => getSessionTimestamp(right) - getSessionTimestamp(left));
@@ -443,7 +531,8 @@ function getDefaultWorldForm() {
     turnLimit: DEFAULT_TURN_LIMIT,
     chatLLMProvider: DEFAULT_WORLD_CHAT_LLM_PROVIDER,
     chatLLMModel: DEFAULT_WORLD_CHAT_LLM_MODEL,
-    mcpConfig: ''
+    mcpConfig: '',
+    variables: ''
   };
 }
 
@@ -463,7 +552,8 @@ function getWorldFormFromWorld(world) {
     turnLimit,
     chatLLMProvider,
     chatLLMModel,
-    mcpConfig: world.mcpConfig == null ? '' : String(world.mcpConfig)
+    mcpConfig: world.mcpConfig == null ? '' : String(world.mcpConfig),
+    variables: world.variables == null ? '' : String(world.variables)
   };
 }
 
@@ -478,6 +568,7 @@ function validateWorldForm(worldForm) {
   const chatLLMProvider = String(worldForm.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
   const chatLLMModel = String(worldForm.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
   const mcpConfig = worldForm.mcpConfig == null ? '' : String(worldForm.mcpConfig);
+  const variables = worldForm.variables == null ? '' : String(worldForm.variables);
 
   if (mcpConfig.trim()) {
     try {
@@ -495,7 +586,8 @@ function validateWorldForm(worldForm) {
       turnLimit,
       chatLLMProvider,
       chatLLMModel,
-      mcpConfig
+      mcpConfig,
+      variables
     }
   };
 }
@@ -966,6 +1058,11 @@ export default function App() {
   }, [loadedWorld]);
 
   useEffect(() => {
+    const workingDirectory = getEnvValueFromText(loadedWorld?.variables, 'working_directory');
+    setSelectedProjectPath(workingDirectory || null);
+  }, [loadedWorld?.id, loadedWorld?.variables]);
+
+  useEffect(() => {
     if (loadedWorld?.id) return;
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
@@ -1158,7 +1255,8 @@ export default function App() {
         creatingWorld.turnLimit !== defaultForm.turnLimit ||
         creatingWorld.chatLLMProvider !== defaultForm.chatLLMProvider ||
         creatingWorld.chatLLMModel !== defaultForm.chatLLMModel ||
-        creatingWorld.mcpConfig !== defaultForm.mcpConfig;
+        creatingWorld.mcpConfig !== defaultForm.mcpConfig ||
+        creatingWorld.variables !== defaultForm.variables;
     }
     if (panelMode === 'edit-world' && loadedWorld) {
       const originalForm = getWorldFormFromWorld(loadedWorld);
@@ -1167,7 +1265,8 @@ export default function App() {
         editingWorld.turnLimit !== originalForm.turnLimit ||
         editingWorld.chatLLMProvider !== originalForm.chatLLMProvider ||
         editingWorld.chatLLMModel !== originalForm.chatLLMModel ||
-        editingWorld.mcpConfig !== originalForm.mcpConfig;
+        editingWorld.mcpConfig !== originalForm.mcpConfig ||
+        editingWorld.variables !== originalForm.variables;
     }
     return false;
   }, [panelMode, creatingWorld, editingWorld, loadedWorld]);
@@ -1455,21 +1554,56 @@ export default function App() {
   }, [api, setStatusText]);
 
   const onSelectProject = useCallback(async () => {
+    if (!loadedWorld?.id) {
+      setStatusText('Load a world before selecting a project folder.', 'error');
+      return;
+    }
+
     try {
       const result = await api.openWorkspace();
       if (!result.canceled && result.workspacePath) {
-        setSelectedProjectPath(result.workspacePath);
-        setStatusText(`Project selected: ${result.workspacePath}`, 'info');
+        const selectedPath = String(result.workspacePath).trim();
+        const nextVariables = upsertEnvVariable(loadedWorld.variables || '', 'working_directory', selectedPath);
+        const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
+        const warning = getRefreshWarning(updated);
+        const updatedWorld = { ...updated };
+        delete updatedWorld.refreshWarning;
+
+        setLoadedWorld(updatedWorld);
+        setSelectedProjectPath(selectedPath);
+        setStatusText(
+          warning ? `Project selected: ${selectedPath}. ${warning}` : `Project selected: ${selectedPath}`,
+          warning ? 'error' : 'info'
+        );
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to select project folder.'), 'error');
     }
-  }, [api, setStatusText]);
+  }, [api, loadedWorld, setStatusText]);
 
-  const onClearProject = useCallback(() => {
-    setSelectedProjectPath(null);
-    setStatusText('Project cleared', 'info');
-  }, [setStatusText]);
+  const onClearProject = useCallback(async () => {
+    if (!loadedWorld?.id) {
+      setStatusText('Load a world before clearing project folder.', 'error');
+      return;
+    }
+
+    try {
+      const nextVariables = removeEnvVariable(loadedWorld.variables || '', 'working_directory');
+      const updated = await api.updateWorld(loadedWorld.id, { variables: nextVariables });
+      const warning = getRefreshWarning(updated);
+      const updatedWorld = { ...updated };
+      delete updatedWorld.refreshWarning;
+
+      setLoadedWorld(updatedWorld);
+      setSelectedProjectPath(null);
+      setStatusText(
+        warning ? `Project cleared. ${warning}` : 'Project cleared',
+        warning ? 'error' : 'info'
+      );
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to clear project folder.'), 'error');
+    }
+  }, [api, loadedWorld, setStatusText]);
 
   const onCreateSession = useCallback(async () => {
     if (!loadedWorld?.id) {
@@ -2707,6 +2841,18 @@ export default function App() {
                             />
                             <div className="relative flex-1 flex flex-col">
                               <textarea
+                                value={editingWorld.variables}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, variables: event.target.value }))}
+                                placeholder="Variables (.env), e.g. working_directory=/path/to/project"
+                                className="min-h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                disabled={updatingWorld || deletingWorld}
+                              />
+                              <p className="mt-1 text-[11px] text-sidebar-foreground/60">
+                                Example: <span className="font-mono">working_directory=/path/to/project</span>
+                              </p>
+                            </div>
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
                                 value={editingWorld.mcpConfig}
                                 onChange={(event) => setEditingWorld((value) => ({ ...value, mcpConfig: event.target.value }))}
                                 placeholder="Enter MCP servers configuration as JSON..."
@@ -3015,6 +3161,17 @@ export default function App() {
                               onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
                               className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                             />
+                            <div className="relative flex-1 flex flex-col">
+                              <textarea
+                                value={creatingWorld.variables}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, variables: event.target.value }))}
+                                placeholder="Variables (.env), e.g. working_directory=/path/to/project"
+                                className="min-h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              />
+                              <p className="mt-1 text-[11px] text-sidebar-foreground/60">
+                                Example: <span className="font-mono">working_directory=/path/to/project</span>
+                              </p>
+                            </div>
                             <div className="relative flex-1 flex flex-col">
                               <textarea
                                 value={creatingWorld.mcpConfig}

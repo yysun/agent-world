@@ -143,6 +143,7 @@ function serializeWorld(world: World) {
     chatLLMModel: world.chatLLMModel,
     currentChatId: world.currentChatId || null,
     mcpConfig: world.mcpConfig || null,
+    variables: typeof world.variables === 'string' ? world.variables : '',
     agents: Array.from(world.agents.values()).map(serializeAgent),
     chats: Array.from(world.chats.values()).map(serializeChat)
   };
@@ -216,7 +217,8 @@ const WorldCreateSchema = z.object({
   turnLimit: z.number().min(1).optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional(),
-  mcpConfig: z.string().nullable().optional()
+  mcpConfig: z.string().nullable().optional(),
+  variables: z.string().nullable().optional()
 });
 
 const WorldUpdateSchema = z.object({
@@ -225,7 +227,8 @@ const WorldUpdateSchema = z.object({
   turnLimit: z.number().min(1).optional(),
   chatLLMProvider: z.enum(['openai', 'anthropic', 'azure', 'google', 'xai', 'openai-compatible', 'ollama']).nullable().optional(),
   chatLLMModel: z.string().nullable().optional(),
-  mcpConfig: z.string().nullable().optional()
+  mcpConfig: z.string().nullable().optional(),
+  variables: z.string().nullable().optional()
 });
 
 const AgentCreateSchema = z.object({
@@ -304,7 +307,7 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
       return;
     }
-    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig } = validation.data;
+    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
     const worldId = toKebabCase(name);
     const world = await createWorld({
       name,
@@ -312,7 +315,8 @@ router.post('/worlds', async (req: Request, res: Response): Promise<void> => {
       turnLimit,
       chatLLMProvider: (chatLLMProvider || undefined) as LLMProvider | undefined,
       chatLLMModel: chatLLMModel || undefined,
-      mcpConfig: mcpConfig || null
+      mcpConfig: mcpConfig || null,
+      variables: variables || undefined
     });
     if (world) {
       res.status(201).json({ name: world.name, id: worldId });
@@ -339,7 +343,7 @@ router.patch('/worlds/:worldName', validateWorld, async (req: Request, res: Resp
     }
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
     const currentWorld = (req as any).world;
-    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig } = validation.data;
+    const { name, description, turnLimit, chatLLMProvider, chatLLMModel, mcpConfig, variables } = validation.data;
     const updates: any = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
@@ -347,6 +351,7 @@ router.patch('/worlds/:worldName', validateWorld, async (req: Request, res: Resp
     if (chatLLMProvider !== undefined && chatLLMProvider !== null) updates.chatLLMProvider = chatLLMProvider;
     if (chatLLMModel !== undefined && chatLLMModel !== null) updates.chatLLMModel = chatLLMModel;
     if (mcpConfig !== undefined) updates.mcpConfig = mcpConfig;
+    if (variables !== undefined) updates.variables = variables;
 
     let updatedWorld = currentWorld;
     if (Object.keys(updates).length > 0) {

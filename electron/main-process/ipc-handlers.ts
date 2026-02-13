@@ -203,6 +203,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const mcpConfig = payload?.mcpConfig == null
       ? undefined
       : String(payload.mcpConfig);
+    const variables = payload?.variables == null
+      ? undefined
+      : String(payload.variables);
 
     const created = await createWorld({
       name,
@@ -210,7 +213,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       turnLimit,
       chatLLMProvider,
       chatLLMModel,
-      mcpConfig
+      mcpConfig,
+      variables
     });
 
     if (!created) {
@@ -265,6 +269,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
     if (payload?.mcpConfig !== undefined) {
       updates.mcpConfig = payload.mcpConfig == null ? null : String(payload.mcpConfig);
+    }
+
+    if (payload?.variables !== undefined) {
+      updates.variables = payload.variables == null ? '' : String(payload.variables);
     }
 
     if (Object.keys(updates).length === 0) {

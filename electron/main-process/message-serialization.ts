@@ -76,6 +76,7 @@ export function serializeWorldInfo(world: any): Record<string, unknown> {
     chatLLMProvider: world.chatLLMProvider || null,
     chatLLMModel: world.chatLLMModel || null,
     mcpConfig: world.mcpConfig || null,
+    variables: typeof world.variables === 'string' ? world.variables : '',
     totalAgents: world.totalAgents,
     totalMessages: world.totalMessages,
     agents: serializeWorldAgents(world)

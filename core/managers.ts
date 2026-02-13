@@ -195,6 +195,7 @@ export async function createWorld(params: CreateWorldParams): Promise<World | nu
     chatLLMProvider: params.chatLLMProvider,
     chatLLMModel: params.chatLLMModel,
     mcpConfig: params.mcpConfig,
+    variables: params.variables,
     createdAt: new Date(),
     lastUpdated: new Date(),
     totalAgents: 0,
@@ -245,6 +246,48 @@ export async function updateWorld(worldId: string, updates: UpdateWorldParams): 
 
   await storageWrappers!.saveWorld(updatedData);
   return getWorld(resolvedWorldId);
+}
+
+/**
+ * Set the raw .env-style variables text for a world
+ */
+export async function setWorldVariablesText(worldId: string, variablesText: string): Promise<World | null> {
+  await ensureInitialization();
+  return updateWorld(worldId, { variables: variablesText });
+}
+
+/**
+ * Get the raw .env-style variables text for a world
+ */
+export async function getWorldVariablesText(worldId: string): Promise<string> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const world = await storageWrappers!.loadWorld(resolvedWorldId);
+  if (!world) {
+    return '';
+  }
+  return typeof world.variables === 'string' ? world.variables : '';
+}
+
+/**
+ * Get parsed environment map from world variables text
+ */
+export async function getWorldEnvMap(worldId: string): Promise<Record<string, string>> {
+  await ensureInitialization();
+  const variablesText = await getWorldVariablesText(worldId);
+  return utils.parseEnvText(variablesText);
+}
+
+/**
+ * Get a single env value from world variables text
+ */
+export async function getWorldEnvValue(worldId: string, key: string): Promise<string | undefined> {
+  await ensureInitialization();
+  if (!key) {
+    return undefined;
+  }
+  const envMap = await getWorldEnvMap(worldId);
+  return envMap[key];
 }
 
 /**

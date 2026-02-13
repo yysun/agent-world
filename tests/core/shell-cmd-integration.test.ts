@@ -18,6 +18,7 @@ import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
+import { clearExecutionHistory, getExecutionHistory } from '../../core/shell-cmd-tool.js';
 
 describe('shell_cmd integration with worlds', () => {
   const { worldId, getWorld: getTestWorld } = setupTestWorld({
@@ -50,7 +51,7 @@ describe('shell_cmd integration with worlds', () => {
     expect(shellCmdTool.parameters.properties).toHaveProperty('directory');
     expect(shellCmdTool.parameters.properties).toHaveProperty('timeout');
     expect(shellCmdTool.parameters.required).toContain('command');
-    expect(shellCmdTool.parameters.required).toContain('directory');
+    expect(shellCmdTool.parameters.required).not.toContain('directory');
   });
 
   test('should execute shell_cmd tool through tool interface', async () => {
@@ -68,6 +69,46 @@ describe('shell_cmd integration with worlds', () => {
     expect(result).toContain('**Command:** `echo "Hello from test"`');
     expect(result).toContain('Exit code 0');
     expect(result).toContain('Hello from test');
+  });
+
+  test('should use world working_directory when directory parameter is omitted', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const result = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['fallback-directory-test']
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: 'working_directory=/tmp'
+        }
+      }
+    );
+
+    expect(result).toContain('fallback-directory-test');
+    expect(result).toContain('Exit code 0');
+  });
+
+  test('should not execute command when directory is unresolved', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    clearExecutionHistory();
+    const beforeCount = getExecutionHistory(1000).length;
+
+    const result = await shellCmdTool.execute({
+      command: 'echo',
+      parameters: ['should-not-run']
+    });
+
+    const afterCount = getExecutionHistory(1000).length;
+    expect(result).toContain('No working directory resolved');
+    expect(afterCount).toBe(beforeCount);
   });
 
   test('should be available even without MCP config', async () => {
