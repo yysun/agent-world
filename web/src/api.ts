@@ -1,14 +1,16 @@
 /**
  * API Service Module - Complete REST API Client
- * 
+ *
  * Provides comprehensive REST API client for agent-world:
  * - World management (CRUD operations, export)
  * - Agent operations (CRUD, memory management)
  * - Chat history management (create, load, restore state)
- * - Message editing (remove + resubmit with backend memory update)
+ * - Message management:
+ *   - Message deletion (remove from target point forward)
+ *   - Core-managed message editing (remove + resubmit in one backend call)
  * - Error handling with structured responses
  * - TypeScript support with consolidated types
- * 
+ *
  * Simplified API Usage:
  * - Use getWorld() to get complete world data including agents[] and chats[]
  * - Removed redundant getAgents() and getAgent() - use world.agents instead
@@ -16,10 +18,11 @@
  * - Agent memory available via world.agents[].memory instead of separate endpoint
  * - Clear agent memory uses existing DELETE endpoint with clearMemory flag
  * - Chat summarization handled by core, no separate API needed
- * - Message editing uses DELETE /worlds/:worldName/messages/:messageId endpoint
+ * - Message editing uses PUT /worlds/:worldName/messages/:messageId endpoint
+ * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
- * - 2025-10-21: Added editMessage() function for message edit backend integration
+ * - 2026-02-13: Added core-managed editMessage() API call and separated delete/edit semantics
  */
 
 import type {
@@ -314,7 +317,7 @@ async function newChat(worldName: string): Promise<{
 }
 
 /**
- * Edit a message by removing it and subsequent messages, then resubmitting with new content
+ * Delete a message and all subsequent messages from the target chat.
  */
 async function deleteMessage(
   worldName: string,
@@ -330,6 +333,30 @@ async function deleteMessage(
     {
       method: 'DELETE',
       body: JSON.stringify({ chatId }),
+    }
+  );
+  return response.json();
+}
+
+/**
+ * Edit a user message using core-managed flow:
+ * remove target message chain, resubmit edited content, and trigger downstream responses.
+ */
+async function editMessage(
+  worldName: string,
+  messageId: string,
+  newContent: string,
+  chatId: string
+): Promise<any> {
+  if (!worldName || !messageId || !chatId || !newContent?.trim()) {
+    throw new Error('World name, message ID, chat ID, and new content are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ chatId, newContent, stream: false }),
     }
   );
   return response.json();
@@ -382,10 +409,9 @@ export default {
 
   // Message management
   deleteMessage,
+  editMessage,
   sendMessage,
 };
-
-
 
 
 

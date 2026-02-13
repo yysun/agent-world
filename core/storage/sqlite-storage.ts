@@ -35,6 +35,7 @@
  * - Complete type safety with proper TypeScript interfaces
  *
  * Recent Changes:
+ * - 2026-02-13: Added atomic compare-and-set chat title update helper (`updateChatNameIfCurrent`).
  * - 2026-02-13: Fixed migration directory resolution so Electron runtimes launched from `electron/` still run root `migrations/`.
  * - 2025-08-01: Added proper TypeScript types for all chat operations
  * - 2025-08-01: Implemented restoreFromSnapshot with atomic transactions
@@ -588,6 +589,22 @@ export async function updateChatData(ctx: SQLiteStorageContext, worldId: string,
   `, ...params);
 
   return await loadChatData(ctx, worldId, chatId);
+}
+
+export async function updateChatNameIfCurrent(
+  ctx: SQLiteStorageContext,
+  worldId: string,
+  chatId: string,
+  expectedName: string,
+  nextName: string
+): Promise<boolean> {
+  await ensureInitialized(ctx);
+  const result = await run(ctx, `
+    UPDATE world_chats
+    SET name = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND world_id = ? AND name = ?
+  `, nextName, chatId, worldId, expectedName);
+  return (result.changes || 0) > 0;
 }
 
 // CHAT OPERATIONS

@@ -13,6 +13,7 @@
  * - Emits events synchronously through world-scoped EventEmitter channels
  *
  * Recent Changes:
+ * - 2026-02-13: Added optional explicit `chatId` override for `publishEvent` to preserve session context across async flows.
  * - 2026-02-13: Added chat-scoped tool-event propagation (`chatId`) so realtime tool updates remain session-isolated.
  * - 2026-02-11: Fixed publishSSE to include toolName and stream fields for tool-stream events
  * - 2026-02-08: Added core-level sender normalization for consistent user-role detection
@@ -92,12 +93,13 @@ export function publishCRUDEvent(
 /**
  * Publish event to a specific channel using World.eventEmitter
  */
-export function publishEvent(world: World, type: string, content: any): void {
+export function publishEvent(world: World, type: string, content: any, chatId?: string | null): void {
+  const targetChatId = chatId !== undefined ? chatId : (world.currentChatId || null);
   const event: WorldSystemEvent = {
     content,
     timestamp: new Date(),
     messageId: generateId(),
-    chatId: world.currentChatId || null
+    chatId: targetChatId
   };
   world.eventEmitter.emit(type, event);
 }

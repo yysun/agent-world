@@ -20,6 +20,11 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Hardened title output normalization with markdown/prefix stripping and low-quality fallback hierarchy.
+ * - 2026-02-13: Canceled title-generation calls now exit without fallback renaming.
+ * - 2026-02-13: Added deterministic chat-title prompt shaping (role filtering, de-duplication, bounded window).
+ * - 2026-02-13: Made chat-title generation explicitly chat-scoped by requiring target `chatId`.
+ * - 2026-02-13: Title generation LLM calls now use chat-scoped queue context for cancellation alignment.
  * - 2026-02-13: Added abort-signal guards so stop requests prevent post-tool LLM continuation and suppress cancellation noise.
  * - 2026-02-13: Passed explicit `chatId` through LLM calls for chat-scoped stop cancellation support.
  * - 2026-02-08: Removed stale manual tool-intervention terminology from comments and transient types
@@ -57,6 +62,8 @@ const loggerAgent = createCategoryLogger('agent');
 const loggerTurnLimit = createCategoryLogger('turnlimit');
 const loggerChatTitle = createCategoryLogger('chattitle');
 const loggerAutoMention = createCategoryLogger('automention');
+const TITLE_PROMPT_MAX_TURNS = 24;
+const TITLE_PROMPT_MAX_CHARS_PER_TURN = 240;
 
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
@@ -65,6 +72,128 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+type TitlePromptMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+const GENERIC_TITLES = new Set([
+  'chat',
+  'new chat',
+  'conversation',
+  'untitled',
+  'title',
+  'assistant chat',
+  'user chat',
+  'chat title'
+]);
+
+function normalizeTitlePromptText(content: string): string {
+  return content
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function clipTitlePromptText(content: string): string {
+  if (content.length <= TITLE_PROMPT_MAX_CHARS_PER_TURN) {
+    return content;
+  }
+  return `${content.substring(0, TITLE_PROMPT_MAX_CHARS_PER_TURN - 3)}...`;
+}
+
+function buildTitlePromptMessages(messages: AgentMessage[]): TitlePromptMessage[] {
+  const dedupKeys = new Set<string>();
+  const filtered: TitlePromptMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') {
+      continue;
+    }
+    if (typeof message.content !== 'string') {
+      continue;
+    }
+
+    const normalized = normalizeTitlePromptText(message.content);
+    if (!normalized) {
+      continue;
+    }
+
+    const clipped = clipTitlePromptText(normalized);
+    const dedupKey = message.messageId
+      ? `id:${message.messageId}`
+      : `${message.role}:${clipped.toLowerCase()}`;
+    if (dedupKeys.has(dedupKey)) {
+      continue;
+    }
+
+    dedupKeys.add(dedupKey);
+    filtered.push({
+      role: message.role,
+      content: clipped
+    });
+  }
+
+  return filtered.slice(-TITLE_PROMPT_MAX_TURNS);
+}
+
+function sanitizeGeneratedTitle(rawTitle: string): string {
+  const firstLine = String(rawTitle || '').split(/\r?\n/).find((line) => line.trim()) || '';
+
+  let title = firstLine
+    .trim()
+    .replace(/^#+\s*/, '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/^\d+[.)]\s+/, '')
+    .replace(/^title\s*[:\-]\s*/i, '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/[\r\n\*`_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  title = title.replace(/[.!?]+$/g, '').trim();
+  return title;
+}
+
+function isLowQualityTitle(title: string): boolean {
+  if (!title) return true;
+  const normalized = title.trim().toLowerCase();
+  if (!normalized) return true;
+  if (GENERIC_TITLES.has(normalized)) return true;
+  if (normalized.length < 3) return true;
+  return false;
+}
+
+function pickFallbackTitle(content: string, promptMessages: TitlePromptMessage[]): string {
+  const contentCandidate = sanitizeGeneratedTitle(content);
+  if (!isLowQualityTitle(contentCandidate)) {
+    return contentCandidate;
+  }
+
+  for (const message of promptMessages) {
+    if (message.role !== 'user') continue;
+    const candidate = sanitizeGeneratedTitle(message.content);
+    if (!isLowQualityTitle(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'Chat Session';
+}
+
+function isTitleGenerationCanceledError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  if (error instanceof Error) {
+    const message = error.message || '';
+    if (message.includes('LLM call canceled for world')) return true;
+    if (message.includes('LLM call canceled for agent')) return true;
+    if (message.includes('Message processing canceled by user')) return true;
+    return false;
+  }
+  return false;
 }
 
 /**
@@ -419,11 +548,21 @@ export async function resetLLMCallCountIfNeeded(
 /**
  * Generate chat title from message content with LLM support and fallback
  */
-export async function generateChatTitleFromMessages(world: World, content: string): Promise<string> {
-  loggerChatTitle.debug('Generating chat title', { worldId: world.id, contentStart: content.substring(0, 50) });
+export async function generateChatTitleFromMessages(
+  world: World,
+  content: string,
+  targetChatId: string | null
+): Promise<string> {
+  loggerChatTitle.debug('Generating chat title', {
+    worldId: world.id,
+    targetChatId,
+    contentStart: content.substring(0, 50)
+  });
 
   let title = '';
-  let messages: any[] = [];
+  let messages: AgentMessage[] = [];
+  let promptMessages: TitlePromptMessage[] = [];
+  let titleGenerationCanceled = false;
 
   const maxLength = 100; // Max title length
 
@@ -431,12 +570,17 @@ export async function generateChatTitleFromMessages(world: World, content: strin
     const firstAgent = Array.from(world.agents.values())[0];
 
     const storage = await getStorageWrappers();
-    // Load messages for current chat only, not all messages
-    messages = await storage.getMemory(world.id, world.currentChatId);
-    if (content) messages.push({ role: 'user', content });
+    // Load messages for the target chat only, not all messages.
+    messages = targetChatId ? await storage.getMemory(world.id, targetChatId) : [];
+    if (content) {
+      messages.push({ role: 'user', content } as AgentMessage);
+    }
+    promptMessages = buildTitlePromptMessages(messages);
 
     loggerChatTitle.debug('Calling LLM for title generation', {
       messageCount: messages.length,
+      promptMessageCount: promptMessages.length,
+      targetChatId,
       provider: world.chatLLMProvider || firstAgent?.provider,
       model: world.chatLLMModel || firstAgent?.model
     });
@@ -452,7 +596,7 @@ export async function generateChatTitleFromMessages(world: World, content: strin
       role: 'user' as const,
       content: `Below is a conversation between a user and an assistant. Generate a short, punchy title (3–6 words) that captures its main topic.
 
-${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
+${promptMessages.map(msg => `-${msg.role}: ${msg.content}`).join('\n')}
       `
     };
 
@@ -462,31 +606,38 @@ ${messages.filter(msg => msg.role !== 'tool').map(msg => `-${msg.role}: ${msg.co
       [userPrompt],
       undefined,
       true,
-      null
+      targetChatId
     ); // skipTools = true for title generation
     // Title generation should return plain text when skipTools=true; keep a guard for safety.
     title = typeof titleResponse === 'string' ? titleResponse : '';
     loggerChatTitle.debug('LLM generated title', { rawTitle: title });
 
   } catch (error) {
-    loggerChatTitle.warn('Failed to generate LLM title, using fallback', {
-      error: error instanceof Error ? error.message : error
-    });
-  }
-
-  if (!title) {
-    // Fallback: use content if provided, otherwise extract from first user message
-    title = content.trim();
-    if (!title && messages?.length > 0) {
-      const firstUserMsg = messages.find((msg: any) => msg.role === 'user');
-      title = firstUserMsg?.content?.substring(0, 50) || 'Chat';
+    if (isTitleGenerationCanceledError(error)) {
+      titleGenerationCanceled = true;
+      loggerChatTitle.info('Title generation canceled', {
+        worldId: world.id,
+        targetChatId,
+        error: error instanceof Error ? error.message : error
+      });
+    } else {
+      loggerChatTitle.warn('Failed to generate LLM title, using fallback', {
+        error: error instanceof Error ? error.message : error
+      });
     }
-    if (!title) title = 'Chat';
   }
 
-  title = title.trim().replace(/^["']|["']$/g, ''); // Remove quotes
-  title = title.replace(/[\n\r\*]+/g, ' '); // Replace newlines with spaces
-  title = title.replace(/\s+/g, ' '); // Normalize whitespace
+  if (titleGenerationCanceled) {
+    return '';
+  }
+
+  title = sanitizeGeneratedTitle(title);
+
+  if (isLowQualityTitle(title)) {
+    title = pickFallbackTitle(content, promptMessages);
+  }
+
+  title = sanitizeGeneratedTitle(title);
 
   // Truncate if too long
   if (title.length > maxLength) {

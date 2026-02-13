@@ -5,6 +5,10 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-13: Added core-managed message edit endpoint `PUT /worlds/:worldName/messages/:messageId`
+ *   - Delegates edit/remove/resubmit flow to `core.editUserMessage` for cross-client consistency
+ *   - Streams edit-resubmission follow-up events over SSE by default (`stream: true`)
+ *   - Keeps DELETE endpoint focused on removal-only behavior
  * - 2026-02-11: Extended non-streaming timeout on tool-stream events to prevent premature timeout during long-running tools
  * - Standardized world-scoped routes to use validateWorld middleware to load and attach worldCtx/world
  * - Removed ad-hoc world loading and undefined getWorldOrError usage; handlers now use (req as any).worldCtx and (req as any).world
@@ -67,6 +71,7 @@ import {
   getMemory as coreGetMemory,
   exportWorldToMarkdown,
   removeMessagesFrom,
+  editUserMessage,
   type World,
   type Agent,
   type Chat,
@@ -248,6 +253,12 @@ const ChatMessageSchema = z.object({
   sender: z.string().default("human"),
   stream: z.boolean().optional().default(true),
   messages: z.array(z.any()).optional()
+});
+
+const MessageEditSchema = z.object({
+  chatId: z.string().min(1),
+  newContent: z.string().min(1),
+  stream: z.boolean().optional().default(true)
 });
 
 const AgentUpdateSchema = z.object({
@@ -788,6 +799,112 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
   }
 });
 
+router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { messageId } = req.params;
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const world = (req as any).world as World;
+
+    const validation = MessageEditSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { chatId, stream } = validation.data;
+    const newContent = validation.data.newContent.trim();
+    if (!newContent) {
+      sendError(res, 400, 'Message content cannot be empty', 'VALIDATION_ERROR');
+      return;
+    }
+
+    if (world.isProcessing) {
+      sendError(res, 423, 'World is currently processing another message', 'WORLD_LOCKED');
+      return;
+    }
+
+    if (stream === false) {
+      const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId);
+
+      if (!result.success) {
+        sendError(res, 500, 'Failed to edit message', 'MESSAGE_EDIT_ERROR', result.failedAgents);
+        return;
+      }
+
+      res.json({
+        ...result,
+        message: `Successfully edited message in ${result.processedAgents.length} agent(s)`
+      });
+      return;
+    }
+
+    const subscription = await subscribeWorld(worldCtx.id, { isOpen: true });
+    if (!subscription?.world) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.write(`data: ${JSON.stringify({ type: 'error', message: 'Failed to subscribe to world for edit streaming' })}\n\n`);
+      res.end();
+      return;
+    }
+
+    const sseHandler = createSSEHandler(req, res, subscription.world, 'edit');
+
+    const finalizeWithError = (message: string, data?: any): void => {
+      sseHandler.sendSSE({
+        type: 'error',
+        message,
+        data
+      });
+      setTimeout(() => {
+        sseHandler.endResponse();
+        subscription?.unsubscribe();
+      }, 500);
+    };
+
+    const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId);
+    if (!result.success) {
+      finalizeWithError('Failed to edit message', {
+        code: 'MESSAGE_EDIT_ERROR',
+        failedAgents: result.failedAgents
+      });
+      return;
+    }
+
+    if (result.resubmissionStatus !== 'success') {
+      finalizeWithError(
+        `Messages removed but resubmission failed: ${String(result.resubmissionError || result.resubmissionStatus || 'unknown')}`,
+        {
+          code: 'MESSAGE_RESUBMISSION_FAILED',
+          result
+        }
+      );
+      return;
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (errorMessage.includes('Cannot edit message while world is processing')) {
+      sendError(res, 423, 'World is currently processing another message', 'WORLD_LOCKED');
+      return;
+    }
+
+    if (errorMessage.includes("World '") && errorMessage.includes('not found')) {
+      sendError(res, 404, 'World not found', 'WORLD_NOT_FOUND');
+      return;
+    }
+
+    loggerChat.error('Error editing message', {
+      error: errorMessage,
+      worldName: req.params.worldName,
+      messageId: req.params.messageId
+    });
+    if (!res.headersSent) {
+      sendError(res, 500, 'Failed to edit message', 'MESSAGE_EDIT_ERROR');
+    }
+  }
+});
+
 router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (req: Request, res: Response): Promise<void> => {
   try {
     const { messageId } = req.params;
@@ -845,7 +962,7 @@ router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (re
       message: `Successfully removed ${result.messagesRemovedTotal} message(s) from ${result.processedAgents.length} agent(s)`
     });
   } catch (error) {
-    loggerChat.error('Error editing message', {
+    loggerChat.error('Error deleting message', {
       error: error instanceof Error ? error.message : error,
       worldName: req.params.worldName,
       messageId: req.params.messageId

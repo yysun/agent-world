@@ -24,6 +24,7 @@
  * - Runtime property exclusion: eventEmitter, agents, chats, eventStorage are not persisted
  * 
  * Changes:
+ * - 2026-02-13: Added compare-and-set chat title update helper (`updateChatNameIfCurrent`) for race-safe title commits.
  * - 2025-11-01: Exclude runtime properties from saveWorld to prevent storing EventEmitter and Map instances
  * - Batch operations with atomic-like behavior
  * - Memory archiving and cleanup operations
@@ -401,6 +402,20 @@ export class MemoryStorage implements StorageAPI {
 
     await this.saveChatData(worldId, chat);
     return deepClone(chat);
+  }
+
+  async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+    const worldChats = this.chats.get(worldId);
+    if (!worldChats) return false;
+
+    const chat = worldChats.get(chatId);
+    if (!chat) return false;
+    if (chat.name !== expectedName) return false;
+
+    chat.name = nextName;
+    chat.updatedAt = new Date();
+    worldChats.set(chatId, deepClone(chat));
+    return true;
   }
 
   // World chat operations

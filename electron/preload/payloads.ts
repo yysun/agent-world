@@ -13,11 +13,13 @@
  * - Main-process handlers remain responsible for hard validation.
  *
  * Recent Changes:
+ * - 2026-02-13: Added message-edit payload helper (`toMessageEditPayload`) for core-driven edit IPC.
  * - 2026-02-12: Added preload payload helpers for Phase 4 bridge modularization.
  */
 
 import type {
   AgentPayload,
+  MessageEditPayload,
   ChatSubscribePayload,
   ChatUnsubscribePayload,
   MessageDeletePayload,
@@ -75,6 +77,20 @@ export function toMessageDeletePayload(
   return {
     worldId: toId(worldId),
     messageId: toId(messageId),
+    chatId: toId(chatId)
+  };
+}
+
+export function toMessageEditPayload(
+  worldId: unknown,
+  messageId: unknown,
+  newContent: unknown,
+  chatId: unknown
+): MessageEditPayload {
+  return {
+    worldId: toId(worldId),
+    messageId: toId(messageId),
+    newContent: String(newContent ?? ''),
     chatId: toId(chatId)
   };
 }

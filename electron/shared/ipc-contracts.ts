@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
  * - 2026-02-13: Added chat stop-message invoke contract for session-scoped processing interruption.
  * - 2026-02-12: Added shared IPC contract definitions for Phase 4 typed bridge hardening.
  */
@@ -44,6 +45,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   SESSION_SELECT: 'session:select',
   CHAT_GET_MESSAGES: 'chat:getMessages',
   CHAT_SEND_MESSAGE: 'chat:sendMessage',
+  MESSAGE_EDIT: 'message:edit',
   CHAT_STOP_MESSAGE: 'chat:stopMessage',
   MESSAGE_DELETE: 'message:delete',
   CHAT_SUBSCRIBE_EVENTS: 'chat:subscribeEvents',
@@ -74,6 +76,11 @@ export interface AgentPayload extends WorldIdPayload {
 
 export interface MessageDeletePayload extends WorldChatPayload {
   messageId: string;
+}
+
+export interface MessageEditPayload extends WorldChatPayload {
+  messageId: string;
+  newContent: string;
 }
 
 export interface ChatSubscribePayload extends WorldChatPayload {
@@ -113,6 +120,7 @@ export interface DesktopApi {
   selectSession: (worldId: string, chatId: string) => Promise<unknown>;
   getMessages: (worldId: string, chatId: string) => Promise<unknown>;
   sendMessage: (payload: Record<string, unknown>) => Promise<unknown>;
+  editMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<unknown>;
   stopMessage: (worldId: string, chatId: string) => Promise<unknown>;
   deleteMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;

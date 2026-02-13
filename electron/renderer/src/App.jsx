@@ -16,11 +16,13 @@
  * - Window drag regions are explicit (`drag` + `no-drag`) for custom title rows
  * - Composer textarea auto-resizes and supports Enter-to-send (Shift+Enter newline)
  * - Loads all worlds from workspace folder, displays in dropdown for selection
- * - Message edit uses two-phase approach: DELETE (remove messages) → POST (resubmit edited content)
- * - Edit creates localStorage backup before deletion for recovery
+ * - Message edit delegates to core-managed delete+resubmit flow via `message:edit` IPC
+ * - Edit creates localStorage backup before mutation for recovery
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-13: Message edit flow now uses core-driven `message:edit` IPC so delete+resubmit+title-reset policy is shared across clients.
+ * - 2026-02-13: Refreshes session list on realtime `chat-title-updated` system events so edited New Chat sessions immediately reflect generated titles.
  * - 2026-02-13: Reused the existing bottom status bar for live thinking/activity state (working/pending agents) without adding extra status rows.
  * - 2026-02-13: Tightened send/stop mode to session-scoped pending state so concurrent sessions remain independent while stop is active.
  * - 2026-02-13: Added session-scoped stop-message control and send/stop composer toggle behavior.
@@ -1112,6 +1114,13 @@ export default function App() {
       },
       onSessionActivityUpdate: (activity) => {
         setSessionActivity(activity);
+      },
+      onSessionSystemEvent: (systemEvent) => {
+        if (!loadedWorld?.id) return;
+        const eventType = String(systemEvent?.eventType || '').trim();
+        if (eventType !== 'chat-title-updated') return;
+        const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
+        refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
       }
     }));
 
@@ -1141,7 +1150,7 @@ export default function App() {
         activeSources: []
       });
     };
-  }, [api, selectedSessionId, loadedWorld, setStatusText]);
+  }, [api, selectedSessionId, loadedWorld, setStatusText, refreshSessions]);
 
   useEffect(() => () => {
     api.unsubscribeChatEvents('default').catch(() => { });
@@ -1797,12 +1806,11 @@ export default function App() {
   }, []);
 
   /**
-   * Save edited message using two-phase approach:
-   * Phase 1: DELETE - Removes edited message and all subsequent messages from agent memories
-   * Phase 2: POST - Resubmits edited content, triggering new agent responses via SSE streaming
-   * 
-   * This approach reuses existing SSE infrastructure and maintains conversation flow integrity.
-   * localStorage backup created before DELETE for recovery if POST fails.
+   * Save edited message using core-managed edit flow:
+   * - Removes edited message and subsequent messages from agent memories
+   * - Resubmits edited content from core to restart downstream responses
+   *
+   * localStorage backup created before mutation for recovery if edit fails.
    * 
    * Error handling:
    * - 423 Locked: World is processing, user should retry
@@ -1855,44 +1863,37 @@ export default function App() {
     setEditingText('');
 
     try {
-      // Phase 1: DELETE - remove messages from backend
-      const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, selectedSessionId);
+      // Core-managed edit path: delete + resubmission + title policy
+      const editResult = await api.editMessage(loadedWorld.id, message.messageId, editedText, selectedSessionId);
 
-      // Check for failures
-      if (!deleteResult.success) {
-        const failedAgents = deleteResult.failedAgents || [];
+      // Check for removal failures
+      if (!editResult.success) {
+        const failedAgents = editResult.failedAgents || [];
         if (failedAgents.length > 0) {
           const errors = failedAgents.map(f => `${f.agentId}: ${f.error}`).join(', ');
-          throw new Error(`Delete failed for some agents: ${errors}`);
+          throw new Error(`Edit failed for some agents: ${errors}`);
         }
-        throw new Error('Failed to delete message');
+        throw new Error('Failed to edit message');
       }
 
-      // Phase 2: POST - resubmit edited message
-      try {
-        await api.sendMessage({
-          worldId: loadedWorld.id,
-          chatId: selectedSessionId,
-          content: editedText,
-          sender: 'human'
-        });
-
-        // Clear backup on success
-        try {
-          localStorage.removeItem('agent-world-desktop-edit-backup');
-        } catch (e) {
-          console.warn('Failed to clear edit backup:', e);
-        }
-
-        setStatusText('Message edited successfully', 'success');
-      } catch (resubmitError) {
+      if (editResult.resubmissionStatus !== 'success') {
+        const details = String(editResult.resubmissionError || editResult.resubmissionStatus || 'unknown');
         setStatusText(
-          `Messages removed but resubmission failed: ${resubmitError.message}. Please try editing again.`,
+          `Messages removed but resubmission failed: ${details}. Please try editing again.`,
           'error'
         );
-        // Reload messages on POST error
         await refreshMessages(loadedWorld.id, selectedSessionId);
+        return;
       }
+
+      // Clear backup on success
+      try {
+        localStorage.removeItem('agent-world-desktop-edit-backup');
+      } catch (e) {
+        console.warn('Failed to clear edit backup:', e);
+      }
+
+      setStatusText('Message edited successfully', 'success');
     } catch (error) {
       let errorMessage = error.message || 'Failed to edit message';
 

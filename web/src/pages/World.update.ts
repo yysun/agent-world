@@ -13,19 +13,16 @@
  * - Settings and chat history navigation with modal management
  * - Markdown export functionality with HTML rendering
  * - Smooth streaming indicator management (removed after final message displayed)
- * - Message editing with backend API integration (remove + resubmit)
+ * - Message editing with core-managed backend integration (single edit request)
  * - Memory-only message streaming for agent→agent messages saved without response
  *
- * Message Edit Feature (Frontend-Driven):
+ * Message Edit Feature (Core-Driven):
  * - Uses backend messageId (server-generated) for message identification
- * - Two-phase edit: 1) DELETE removes messages, 2) POST resubmits edited content
- * - Phase 1: Calls DELETE /worlds/:worldName/messages/:messageId (removal only)
- * - Phase 2: Reuses POST /messages with existing SSE streaming (agents respond naturally)
- * - LocalStorage backup before DELETE for recovery if POST fails
- * - Validates session mode BEFORE DELETE (not after)
+ * - Single-phase edit: PUT /worlds/:worldName/messages/:messageId with chatId + newContent
+ * - Core handles removal + resubmission + title-regeneration reset consistently across clients
+ * - LocalStorage backup retained for recovery in case backend edit flow fails
  * - Optimistic UI updates with error rollback
- * - Comprehensive error handling (423 Locked, 404 Not Found, 400 Bad Request)
- * - Recovery mechanism: "Resume Edit" on POST failure
+ * - Handles removal failures and resubmission-status failures from core result payload
  * - User messages updated with backend messageId when message event received
  *
  * Message Deduplication (Multi-Agent):
@@ -47,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
  * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
  * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
  * - 2025-11-11: Simplified spinner control to use pending operations count from world events (pending > 0 = show, pending === 0 = hide)
@@ -84,6 +82,7 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import {
   sendChatMessage,
+  editChatMessage,
   handleStreamStart,
   handleStreamChunk,
   handleStreamEnd,
@@ -534,6 +533,15 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
 
 // Event handlers for SSE and system events
 const handleSystemEvent = async (state: WorldComponentState, data: any): Promise<WorldComponentState> => {
+  const envelope = (data && typeof data === 'object') ? (data as Record<string, any>) : null;
+  const contentPayload = envelope && 'content' in envelope ? envelope.content : data;
+  const structuredPayload =
+    contentPayload && typeof contentPayload === 'object' ? contentPayload : null;
+  const eventType =
+    (structuredPayload && typeof structuredPayload.eventType === 'string' && structuredPayload.eventType) ||
+    (typeof contentPayload === 'string' ? contentPayload : null) ||
+    (typeof data === 'string' ? data : null);
+
   // Create a log-style message for system events
   const systemMessage: Message = {
     id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -544,9 +552,13 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     worldEvent: {
       type: 'system',
       category: 'system',
-      message: typeof data === 'string' ? data : (data.content || data.message || 'System event'),
+      message:
+        (typeof contentPayload === 'string' && contentPayload) ||
+        (typeof eventType === 'string' && eventType) ||
+        (envelope && typeof envelope.message === 'string' ? envelope.message : '') ||
+        'System event',
       timestamp: new Date().toISOString(),
-      data: typeof data === 'object' ? data : undefined,
+      data: envelope || undefined,
       messageId: `system-${Date.now()}`
     },
     isLogExpanded: false
@@ -559,8 +571,10 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
   };
 
   // Handle specific system events
-  if (data.content === 'chat-title-updated' || data === 'chat-title-updated') {
-    const updates = initWorld(newState, newState.worldName, data.chatId);
+  if (eventType === 'chat-title-updated') {
+    // Refresh current chat context to update chat list/title without switching sessions.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
     for await (const update of updates) {
       return { ...newState, ...update };
     }
@@ -1012,17 +1026,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       };
     }
 
-    // Check session mode before proceeding
-    if (!state.world?.currentChatId) {
-      return {
-        ...state,
-        error: 'Cannot edit message: session mode is OFF. Please enable session mode first.',
-        editingMessageId: null,
-        editingText: ''
-      };
-    }
-
-    // Store edit backup in localStorage before DELETE
+    // Store edit backup before backend mutation for local recovery.
     const editBackup = {
       messageId: message.messageId,
       chatId: state.currentChat.id,
@@ -1051,56 +1055,24 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     };
 
     try {
-      // PHASE 1: Call DELETE to remove messages
-      const deleteResult = await api.deleteMessage(
+      // Core-managed edit with SSE streaming for downstream responses.
+      await editChatMessage(
         state.worldName,
         message.messageId,
+        editedText,
         state.currentChat.id
       );
 
-      // Check DELETE result
-      if (!deleteResult.success) {
-        // Partial failure - some agents failed
-        const failedAgentNames = deleteResult.failedAgents?.map((f: any) => f.agentId).join(', ');
-        return {
-          ...state,
-          isSending: false,
-          error: `Message removal partially failed for agents: ${failedAgentNames}. ${deleteResult.messagesRemovedTotal || 0} messages removed.`
-        };
-      }
-
-      // PHASE 2: Call POST to resubmit edited message (reuses existing SSE streaming)
-      try {
-        await sendChatMessage(state.worldName, editedText, {
-          sender: 'human'
-        });
-
-        // Clear localStorage backup on successful resubmission
-        try {
-          localStorage.removeItem('agent-world-edit-backup');
-        } catch (e) {
-          console.warn('Failed to clear edit backup:', e);
-        }
-
-        // Success - message will arrive via SSE
-        return {
-          ...optimisticState,
-          isSending: false
-        };
-      } catch (resubmitError: any) {
-        // POST failed after DELETE succeeded
-        return {
-          ...optimisticState,
-          isSending: false,
-          error: `Messages removed but resubmission failed: ${resubmitError.message || 'Unknown error'}. Please try editing again.`
-        };
-      }
-
+      // Success - new user message/agent responses will arrive via SSE.
+      return {
+        ...optimisticState,
+        isSending: false
+      };
     } catch (error: any) {
-      // Handle DELETE errors
+      // Handle backend edit request errors.
       let errorMessage = error.message || 'Failed to edit message';
 
-      if (error.message?.includes('423')) {
+      if (error.message?.includes('423') || error.message?.includes('WORLD_LOCKED')) {
         errorMessage = 'Cannot edit message: world is currently processing. Please try again in a moment.';
       } else if (error.message?.includes('404')) {
         errorMessage = 'Message not found in agent memories. It may have been already deleted.';
@@ -1108,7 +1080,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         errorMessage = 'Invalid message: only user messages can be edited.';
       }
 
-      // Restore original messages on DELETE error
+      // Restore original messages when edit request fails.
       return {
         ...state,
         isSending: false,

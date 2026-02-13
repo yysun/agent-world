@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.
  * - 2026-02-13: Preserved unsubscribe tombstones across runtime resets and lifecycle cleanup to keep subscription IDs non-reusable.
  * - 2026-02-13: Moved reused-subscription validation ahead of world subscription to prevent invalid subscribe side effects.
  * - 2026-02-13: Duplicate/reused subscription IDs now raise explicit subscribe errors for callers.
@@ -25,6 +26,7 @@ import {
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
   serializeRealtimeSSEEvent,
+  serializeRealtimeSystemEvent,
   serializeRealtimeToolEvent
 } from './message-serialization.js';
 
@@ -247,9 +249,19 @@ export function createRealtimeEventsRuntime(
       });
     };
 
+    const systemHandler = (event: any) => {
+      const eventChatId = event?.chatId ? String(event.chatId) : null;
+      if (chatId && eventChatId && eventChatId !== chatId) return;
+      sendRealtimeEventToRenderer({
+        ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
+        subscriptionId
+      });
+    };
+
     world.eventEmitter.on('message', messageHandler);
     world.eventEmitter.on('sse', sseHandler);
     world.eventEmitter.on('world', worldHandler);
+    world.eventEmitter.on('system', systemHandler);
     const subscription: ChatEventSubscription = {
       version: subscriptionVersion,
       worldId,
@@ -258,6 +270,7 @@ export function createRealtimeEventsRuntime(
         world.eventEmitter.off('message', messageHandler);
         world.eventEmitter.off('sse', sseHandler);
         world.eventEmitter.off('world', worldHandler);
+        world.eventEmitter.off('system', systemHandler);
       }
     };
     chatEventSubscriptions.set(subscriptionId, subscription);

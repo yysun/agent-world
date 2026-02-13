@@ -1,6 +1,18 @@
 /**
  * Message Edit Feature Tests
  * 
+ * Features:
+ * - Tests message ID migration behavior for legacy memory records.
+ * - Tests core edit workflows (delete + resubmit) and guardrails.
+ * - Tests edit-driven chat-title reset behavior for auto-generated titles.
+ *
+ * Implementation Notes:
+ * - Uses in-memory storage only.
+ * - Uses in-memory event storage to emulate persisted system events.
+ *
+ * Recent Changes:
+ * - 2026-02-13: Added coverage for core-managed edit resubmission title reset based on persisted `chat-title-updated` events.
+ *
  * Tests for message ID migration, edit workflows, and error handling.
  * Uses in-memory storage for testing.
  */
@@ -10,6 +22,7 @@ import type { Agent, AgentMessage, World, StorageAPI } from '../../core/types.js
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
 import { createMemoryStorage } from '../../core/storage/memory-storage.js';
+import { createMemoryEventStorage } from '../../core/storage/eventStorage/index.js';
 
 // Mock nanoid to provide predictable IDs
 vi.mock('nanoid', () => ({
@@ -42,7 +55,7 @@ vi.mock('../../core/storage/storage-factory.js', async (importOriginal) => {
   };
 });
 
-import { migrateMessageIds, editUserMessage } from '../../core/index.js';
+import { getWorld, migrateMessageIds, editUserMessage } from '../../core/index.js';
 
 // Helper to create a test world
 function createTestWorld(overrides: Partial<World> = {}): World {
@@ -83,6 +96,10 @@ function createTestAgent(overrides: Partial<Agent> = {}): Agent {
 describe('Message Edit Feature', () => {
   beforeEach(async () => {
     // Storage will be created on first access via getMemoryStorage()
+    const storage = getMemoryStorage();
+    if (!(storage as any).eventStorage) {
+      (storage as any).eventStorage = createMemoryEventStorage();
+    }
   });
 
   afterEach(async () => {
@@ -280,6 +297,72 @@ describe('Message Edit Feature', () => {
       expect(result.resubmissionStatus).toBe('failed');
       expect(result).toHaveProperty('resubmissionError');
       expect(result.resubmissionError).toMatch(/Cannot resubmit.*current chat/);
+    });
+
+    test('should reset auto-generated title to New Chat before edit resubmission', async () => {
+      const world = createTestWorld({ isProcessing: false, currentChatId: 'chat-1' });
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'hi', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'hi', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
+      const runtimeWorld = await getWorld('test-world');
+      await runtimeWorld!.eventStorage!.saveEvent({
+        id: 'evt-title-1',
+        worldId: 'test-world',
+        chatId: 'chat-1',
+        type: 'system',
+        payload: {
+          eventType: 'chat-title-updated',
+          title: 'hi',
+          source: 'idle'
+        },
+        createdAt: new Date()
+      });
+
+      const result = await editUserMessage('test-world', 'msg-1', 'list files', 'chat-1');
+
+      expect(result.resubmissionStatus).toBe('success');
+      const updatedChat = await getMemoryStorage().loadChatData('test-world', 'chat-1');
+      expect(updatedChat?.name).toBe('New Chat');
+    });
+
+    test('should not reset manual title when it does not match latest generated title', async () => {
+      const world = createTestWorld({ isProcessing: false, currentChatId: 'chat-1' });
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'hi', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
+        ]
+      });
+      const chat = { id: 'chat-1', name: 'Manual title', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+
+      await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
+      await getMemoryStorage().saveChatData('test-world', chat);
+      const runtimeWorld = await getWorld('test-world');
+      await runtimeWorld!.eventStorage!.saveEvent({
+        id: 'evt-title-2',
+        worldId: 'test-world',
+        chatId: 'chat-1',
+        type: 'system',
+        payload: {
+          eventType: 'chat-title-updated',
+          title: 'hi',
+          source: 'idle'
+        },
+        createdAt: new Date()
+      });
+
+      const result = await editUserMessage('test-world', 'msg-1', 'list files', 'chat-1');
+
+      expect(result.resubmissionStatus).toBe('success');
+      const updatedChat = await getMemoryStorage().loadChatData('test-world', 'chat-1');
+      expect(updatedChat?.name).toBe('Manual title');
     });
   });
 });

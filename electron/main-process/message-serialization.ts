@@ -12,6 +12,7 @@
  * - Runtime validation remains in higher-level handlers.
  *
  * Recent Changes:
+ * - 2026-02-13: Added realtime system-event serialization so renderer can react to chat title updates.
  * - 2026-02-12: Extracted world/chat/message/event serialization helpers from `electron/main.ts`.
  */
 
@@ -263,6 +264,34 @@ export function serializeRealtimeToolEvent(
       progress: event?.progress || null,
       agentId: event?.agentId || null,
       createdAt: new Date().toISOString()
+    }
+  };
+}
+
+export function serializeRealtimeSystemEvent(
+  worldId: string,
+  chatId: string | null,
+  event: any
+): Record<string, unknown> {
+  const content = event?.content;
+  const normalizedEventType = typeof content === 'string'
+    ? content
+    : typeof content?.eventType === 'string'
+      ? content.eventType
+      : typeof content?.type === 'string'
+        ? content.type
+        : 'system';
+
+  return {
+    type: 'system',
+    worldId,
+    chatId: chatId || null,
+    system: {
+      eventType: normalizedEventType,
+      content,
+      messageId: typeof event?.messageId === 'string' ? event.messageId : null,
+      createdAt: toIsoTimestamp(event?.timestamp),
+      chatId: chatId || null
     }
   };
 }

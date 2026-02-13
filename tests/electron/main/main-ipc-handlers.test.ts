@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-13: Added `message:edit` handler coverage for core-driven edit + resubmission delegation.
  * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
  */
 
@@ -49,6 +50,7 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     stopMessageProcessing: vi.fn(async () => ({ stopped: true })),
     restoreChat: vi.fn(async () => null),
     updateWorld: vi.fn(async () => ({})),
+    editUserMessage: vi.fn(async () => ({ success: true, resubmissionStatus: 'success' })),
     removeMessagesFrom: vi.fn(async () => ({ success: true, messagesRemovedTotal: 3 })),
     ...overrides
   };
@@ -94,6 +96,57 @@ describe('createMainIpcHandlers.deleteMessageFromChat', () => {
     expect(result).toEqual({
       success: true,
       messagesRemovedTotal: 2,
+      refreshWarning: 'refresh failed'
+    });
+  });
+});
+
+describe('createMainIpcHandlers.editMessageInChat', () => {
+  it('delegates edit operations to core and refreshes subscriptions', async () => {
+    const editUserMessage = vi.fn(async () => ({
+      success: true,
+      messagesRemovedTotal: 2,
+      resubmissionStatus: 'success',
+      newMessageId: 'new-msg-1'
+    }));
+    const refreshWorldSubscription = vi.fn(async () => null);
+    const { handlers } = await createHandlers({ editUserMessage, refreshWorldSubscription });
+
+    const result = await handlers.editMessageInChat({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      messageId: 'msg-1',
+      newContent: 'updated prompt'
+    });
+
+    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
+    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(result).toMatchObject({
+      success: true,
+      resubmissionStatus: 'success',
+      newMessageId: 'new-msg-1'
+    });
+  });
+
+  it('adds refresh warnings to edit responses', async () => {
+    const editUserMessage = vi.fn(async () => ({
+      success: true,
+      resubmissionStatus: 'failed',
+      resubmissionError: 'Cannot resubmit in current session'
+    }));
+    const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
+    const { handlers } = await createHandlers({ editUserMessage, refreshWorldSubscription });
+
+    const result = await handlers.editMessageInChat({
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      messageId: 'msg-1',
+      newContent: 'updated prompt'
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      resubmissionStatus: 'failed',
       refreshWarning: 'refresh failed'
     });
   });

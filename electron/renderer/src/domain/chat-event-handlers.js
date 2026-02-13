@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-13: Added system-event routing callback support so session metadata (chat titles) can refresh on realtime updates.
  * - 2026-02-13: Global log fallback now publishes via shared status-bar service so any module can surface footer status without App callback threading.
  * - 2026-02-13: Extended response-state callbacks to include tool lifecycle events for reliable stop-mode behavior during tool execution.
  * - 2026-02-13: Added session response-state callbacks so composer send/stop mode can follow realtime start/end lifecycle.
@@ -57,7 +58,8 @@ export function createChatSubscriptionEventHandler({
   setMessages,
   setActiveStreamCount,
   onSessionResponseStateChange,
-  onSessionActivityUpdate
+  onSessionActivityUpdate,
+  onSessionSystemEvent
 }) {
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
@@ -221,6 +223,24 @@ export function createChatSubscriptionEventHandler({
           activityId: Number(activityPayload.activityId) || 0,
           source: activityPayload.source || null,
           activeSources: Array.isArray(activityPayload.activeSources) ? activityPayload.activeSources : []
+        });
+      }
+    }
+
+    if (payload.type === 'system') {
+      const systemPayload = payload.system;
+      if (!systemPayload) return;
+
+      const systemChatId = payload.chatId || systemPayload.chatId || null;
+      if (selectedSessionId && systemChatId && systemChatId !== selectedSessionId) return;
+
+      if (typeof onSessionSystemEvent === 'function') {
+        onSessionSystemEvent({
+          eventType: String(systemPayload.eventType || ''),
+          chatId: systemChatId,
+          messageId: systemPayload.messageId || null,
+          createdAt: systemPayload.createdAt || null,
+          content: systemPayload.content
         });
       }
     }

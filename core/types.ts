@@ -9,6 +9,7 @@
  * - Comprehensive LLM provider enumeration (OpenAI, Anthropic, Azure, Google, XAI, Ollama)
  *
  * Recent Changes:
+ * - 2026-02-13: Added optional storage compare-and-set helper for chat title updates (`updateChatNameIfCurrent`).
  * - 2026-02-13: Added optional `chatId` to world tool events for session-scoped realtime routing.
  * - 2026-02-08: Removed legacy manual tool-intervention result types from core API surface
  */
@@ -401,6 +402,7 @@ export interface StorageAPI {
   deleteChatData(worldId: string, chatId: string): Promise<boolean>;
   listChats(worldId: string): Promise<Chat[]>;
   updateChatData(worldId: string, chatId: string, updates: UpdateChatParams): Promise<Chat | null>;
+  updateChatNameIfCurrent?(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean>;
 
   // Chat operations
   saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void>;

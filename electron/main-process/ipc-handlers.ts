@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-13: Added `message:edit` IPC handler that delegates user-message edit/resubmission to core so client flows stay thin.
  * - 2026-02-13: Refreshed world subscriptions after message-chain deletion so runtime agent memory stays aligned with persisted storage during edit resubmits.
  * - 2026-02-13: Added stop-message IPC handler to cancel active session processing by `worldId` and `chatId`.
  * - 2026-02-13: Tightened workspace-state dependency typing to avoid unsafe casts at composition boundaries.
@@ -63,6 +64,7 @@ interface MainIpcHandlerFactoryDependencies {
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
+  editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
 }
 
@@ -89,6 +91,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     stopMessageProcessing,
     restoreChat,
     updateWorld,
+    editUserMessage,
     removeMessagesFrom
   } = dependencies;
 
@@ -617,6 +620,31 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     };
   }
 
+  async function editMessageInChat(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '');
+    const messageId = String(payload?.messageId || '');
+    const chatId = String(payload?.chatId || '');
+    const newContent = String(payload?.newContent || '').trim();
+
+    if (!worldId) throw new Error('World ID is required.');
+    if (!messageId) throw new Error('Message ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
+    if (!newContent) throw new Error('New content is required.');
+
+    const result = await editUserMessage(worldId, messageId, newContent, chatId);
+    const refreshWarning = await refreshWorldSubscription(worldId);
+
+    if (refreshWarning && result && typeof result === 'object' && !Array.isArray(result)) {
+      return {
+        ...result,
+        refreshWarning
+      };
+    }
+
+    return result;
+  }
+
   async function deleteMessageFromChat(payload: any) {
     await ensureCoreReady();
     const worldId = String(payload?.worldId || '');
@@ -669,6 +697,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     selectWorldSession,
     getSessionMessages,
     sendChatMessage,
+    editMessageInChat,
     stopChatMessage,
     deleteMessageFromChat
   };

@@ -11,6 +11,8 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-02-13: Updated system-event forwarding coverage to structured payload content.
+ * - 2026-02-13: Added system-event forwarding coverage for chat title update notifications.
  * - 2026-02-13: Enforced strict non-reuse coverage across runtime resets.
  * - 2026-02-13: Added regression to ensure reused subscription IDs fail before world subscription side effects.
  * - 2026-02-13: Updated reuse behavior coverage to assert explicit errors for duplicate subscription IDs.
@@ -296,5 +298,56 @@ describe('createRealtimeEventsRuntime', () => {
         chatId: 'chat-1'
       })
     ).rejects.toThrow("Subscription ID 'sub-reset' cannot be reused after unsubscribe.");
+  });
+
+  it('forwards system events for subscribed chats', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => {},
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => {}
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-system',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('system', {
+      content: {
+        eventType: 'chat-title-updated',
+        title: 'Scoped Chat Title',
+        source: 'idle'
+      },
+      messageId: 'sys-1',
+      timestamp: new Date('2026-02-13T00:00:00.000Z'),
+      chatId: 'chat-1'
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'system',
+        subscriptionId: 'sub-system',
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        system: expect.objectContaining({
+          eventType: 'chat-title-updated',
+          messageId: 'sys-1',
+          content: expect.objectContaining({
+            title: 'Scoped Chat Title',
+            source: 'idle'
+          })
+        })
+      })
+    );
   });
 });

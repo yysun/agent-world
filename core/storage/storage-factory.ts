@@ -31,6 +31,7 @@
  * - Centralized environment detection and error handling
  *
  * Changes:
+ * - 2026-02-13: Added compare-and-set chat title helper wiring (`updateChatNameIfCurrent`) across wrappers and backends.
  * - 2025-08-07: Added memory storage for non-Node environments
  * - 2025-08-05: Consolidated code and removed redundant comments
  * - 2025-08-01: Added full chat CRUD and snapshot support
@@ -195,6 +196,21 @@ export function createStorageWrappers(storageInstance: StorageAPI | null): Stora
       } catch (err) {
         throw new Error(`Failed to update chat history: ${err instanceof Error ? err.message : String(err)}`);
       }
+    },
+
+    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+      if (!storageInstance) return false;
+      if (typeof storageInstance.updateChatNameIfCurrent === 'function') {
+        return storageInstance.updateChatNameIfCurrent(worldId, chatId, expectedName, nextName);
+      }
+
+      // Fallback path for backends without compare-and-set support.
+      const current = await storageInstance.loadChatData(worldId, chatId);
+      if (!current || current.name !== expectedName) {
+        return false;
+      }
+      const updated = await storageInstance.updateChatData(worldId, chatId, { name: nextName });
+      return !!updated;
     },
 
     async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
@@ -507,6 +523,18 @@ function createFileStorageAdapter(rootPath: string): StorageAPI {
       }
       return null;
     },
+    async updateChatNameIfCurrent(worldId: string, chatId: string, expectedName: string, nextName: string): Promise<boolean> {
+      await ensureModulesLoaded();
+      if (worldStorage?.updateChatNameIfCurrent) {
+        return worldStorage.updateChatNameIfCurrent(rootPath, worldId, chatId, expectedName, nextName);
+      }
+      const current = await this.loadChatData(worldId, chatId);
+      if (!current || current.name !== expectedName) {
+        return false;
+      }
+      const updated = await this.updateChatData(worldId, chatId, { name: nextName });
+      return !!updated;
+    },
     async saveWorldChat(worldId: string, chatId: string, chat: WorldChat): Promise<void> {
       await ensureModulesLoaded();
       if (worldStorage?.saveWorldChat) {
@@ -669,6 +697,7 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       deleteChatData,
       listChatHistories,
       updateChatData,
+      updateChatNameIfCurrent,
       saveWorldChat,
       loadWorldChat,
       loadWorldChatFull,
@@ -705,6 +734,8 @@ export async function createStorage(config: StorageConfig): Promise<StorageAPI> 
       deleteChatData: (worldId: string, chatId: string) => deleteChatData(ctx, worldId, chatId),
       listChats: (worldId: string) => listChatHistories(ctx, worldId),
       updateChatData: (worldId: string, chatId: string, updates: any) => updateChatData(ctx, worldId, chatId, updates),
+      updateChatNameIfCurrent: (worldId: string, chatId: string, expectedName: string, nextName: string) =>
+        updateChatNameIfCurrent(ctx, worldId, chatId, expectedName, nextName),
       saveWorldChat: (worldId: string, chatId: string, chat: any) => saveWorldChat(ctx, worldId, chatId, chat),
       loadWorldChat: (worldId: string, chatId: string) => loadWorldChat(ctx, worldId, chatId),
       loadWorldChatFull: (worldId: string, chatId: string) => loadWorldChatFull(ctx, worldId, chatId),

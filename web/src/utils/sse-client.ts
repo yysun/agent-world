@@ -26,6 +26,7 @@
  * Updated: 2026-02-11 - Preserve tool_calls in handleStreamChunk for complete display
  * Updated: 2026-02-08 - Removed legacy manual tool-intervention request and tool-result submission helpers
  * Updated: 2026-02-08 - Added tool-stream event handler for shell command output streaming
+ * Updated: 2026-02-13 - Added editChatMessage() SSE helper for core-managed message edit streaming
  */
 
 import app from 'apprun';
@@ -403,16 +404,76 @@ export async function sendChatMessage(
     throw new Error('World name and non-empty message are required');
   }
 
-  streamingState.currentWorldName = worldName;
-
   const requestPayload: Record<string, any> = { message, sender };
   if (historyMessages && historyMessages.length > 0) {
     requestPayload.messages = historyMessages;
   }
 
-  const response = await apiRequest(`/worlds/${encodeURIComponent(worldName)}/messages`, {
-    method: 'POST',
-    body: JSON.stringify(requestPayload),
+  return streamSSERequest(
+    worldName,
+    `/worlds/${encodeURIComponent(worldName)}/messages`,
+    {
+      method: 'POST',
+      requestPayload,
+      onMessage,
+      onError,
+      onComplete
+    }
+  );
+}
+
+/**
+ * Edit a user message using core-managed backend flow with SSE streaming:
+ * remove target chain, resubmit edited content, then stream follow-up events.
+ */
+export async function editChatMessage(
+  worldName: string,
+  messageId: string,
+  newContent: string,
+  chatId: string,
+  onMessage?: (data: SSEData) => void,
+  onError?: (error: Error) => void,
+  onComplete?: (data: any) => void
+): Promise<() => void> {
+  if (!worldName || !messageId || !chatId || !newContent?.trim()) {
+    throw new Error('World name, message ID, chat ID, and new content are required');
+  }
+
+  return streamSSERequest(
+    worldName,
+    `/worlds/${encodeURIComponent(worldName)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PUT',
+      requestPayload: {
+        chatId,
+        newContent,
+        stream: true
+      },
+      onMessage,
+      onError,
+      onComplete
+    }
+  );
+}
+
+type StreamSSERequestOptions = {
+  method: 'POST' | 'PUT';
+  requestPayload: Record<string, any>;
+  onMessage?: (data: SSEData) => void;
+  onError?: (error: Error) => void;
+  onComplete?: (data: any) => void;
+};
+
+async function streamSSERequest(
+  worldName: string,
+  endpoint: string,
+  options: StreamSSERequestOptions
+): Promise<() => void> {
+  streamingState.currentWorldName = worldName;
+
+  const response = await apiRequest(endpoint, {
+    method: options.method,
+    body: JSON.stringify(options.requestPayload),
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
@@ -436,39 +497,34 @@ export async function sendChatMessage(
     }
   };
 
-  // Process SSE stream
   const processStream = async (): Promise<void> => {
     try {
       while (isActive) {
         const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
+        if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.trim() === '' || !line.startsWith('data: ')) continue; try {
+          if (line.trim() === '' || !line.startsWith('data: ')) continue;
+          try {
             const dataContent = line.slice(6).trim();
             if (dataContent === '') continue;
 
             const data: SSEData = JSON.parse(dataContent);
-
             handleSSEData(data);
 
-            // Legacy callback support
-            onMessage?.(data);
+            options.onMessage?.(data);
             if (data.type === 'complete') {
-              onComplete?.(data.payload || data);
+              options.onComplete?.(data.payload || data);
             }
-
           } catch (error) {
             console.error('Error parsing SSE data:', error);
             const errorObj = { message: 'Failed to parse SSE data' };
             publishEvent('handleError', errorObj);
-            onError?.(new Error(errorObj.message));
+            options.onError?.(new Error(errorObj.message));
           }
         }
       }
@@ -476,7 +532,7 @@ export async function sendChatMessage(
       console.error('SSE stream error:', error);
       const errorObj = { message: (error as Error).message || 'SSE stream error' };
       publishEvent('handleError', errorObj);
-      onError?.(error as Error);
+      options.onError?.(error as Error);
     } finally {
       cleanup();
     }

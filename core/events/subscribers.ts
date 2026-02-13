@@ -7,8 +7,9 @@
  * Features:
  * - Agent message subscription with automatic response processing
  * - Tool message subscription with security checks
- * - World message subscription for title generation
+ * - World message subscription for title generation (idle and no-activity user-message fallback)
  * - World activity listener for chat title updates on idle
+ * - In-flight title generation guard to avoid duplicate concurrent updates per chat
  * 
  * Dependencies (Layer 6):
  * - types.ts (Layer 1)
@@ -19,6 +20,11 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Updated `chat-title-updated` system event to structured payload (`eventType`, `title`, `source`) for stable consumer parsing.
+ * - 2026-02-13: Added no-activity user-message fallback title scheduling to cover edited chats with no agent response.
+ * - 2026-02-13: Switched title commit path to compare-and-set storage update to avoid concurrent overwrite races.
+ * - 2026-02-13: Added conditional commit checks and in-flight dedupe for idle title updates.
+ * - 2026-02-13: Made idle title updates chat-scoped with captured `targetChatId` to prevent cross-session renames.
  * - 2026-02-08: Removed legacy manual tool-intervention request handling from message subscription
  * - 2025-11-09: Extracted from events.ts for modular architecture
  */
@@ -42,9 +48,12 @@ import {
   generateChatTitleFromMessages
 } from './memory-manager.js';
 import { processAgentMessage, shouldAgentRespond } from './orchestrator.js';
+import { isDefaultChatTitle, NEW_CHAT_TITLE } from '../chat-constants.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerChatTitle = createCategoryLogger('chattitle');
+const titleGenerationInFlight = new Set<string>();
+const titleGenerationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // Storage wrapper instance - initialized lazily
 let storageWrappers: StorageAPI | null = null;
@@ -53,6 +62,121 @@ async function getStorageWrappers(): Promise<StorageAPI> {
     storageWrappers = await createStorageWithWrappers();
   }
   return storageWrappers!;
+}
+
+function getTitleGenerationKey(worldId: string, chatId: string): string {
+  return `${worldId}:${chatId}`;
+}
+
+function isHumanSender(sender?: string): boolean {
+  const normalized = String(sender ?? '').trim().toLowerCase();
+  return normalized === 'human' || normalized.startsWith('user');
+}
+
+function scheduleNoActivityTitleUpdate(world: World, chatId: string, content: string): void {
+  const key = getTitleGenerationKey(world.id, chatId);
+  const existingTimer = titleGenerationTimers.get(key);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const timer = setTimeout(async () => {
+    titleGenerationTimers.delete(key);
+    if (world.isProcessing) {
+      return;
+    }
+    await tryGenerateAndApplyTitle(world, chatId, content, 'message-no-activity');
+  }, 120);
+
+  titleGenerationTimers.set(key, timer);
+}
+
+async function commitChatTitleIfDefault(
+  world: World,
+  chatId: string,
+  nextTitle: string
+): Promise<boolean> {
+  const storage = await getStorageWrappers();
+
+  if (typeof storage.updateChatNameIfCurrent === 'function') {
+    return storage.updateChatNameIfCurrent(world.id, chatId, NEW_CHAT_TITLE, nextTitle);
+  }
+
+  // Legacy fallback when storage backend does not provide compare-and-set helper.
+  const persistedChat = await storage.loadChatData(world.id, chatId);
+  if (!persistedChat || !isDefaultChatTitle(persistedChat.name)) {
+    return false;
+  }
+
+  const updated = await storage.updateChatData(world.id, chatId, { name: nextTitle });
+  return !!updated;
+}
+
+async function tryGenerateAndApplyTitle(
+  world: World,
+  targetChatId: string,
+  content: string,
+  source: 'idle' | 'message-no-activity'
+): Promise<void> {
+  const inFlightKey = getTitleGenerationKey(world.id, targetChatId);
+  if (titleGenerationInFlight.has(inFlightKey)) {
+    loggerChatTitle.debug('Skipping title update because generation is already in flight', {
+      worldId: world.id,
+      chatId: targetChatId,
+      source
+    });
+    return;
+  }
+
+  const chat = world.chats.get(targetChatId);
+  if (!chat || !isDefaultChatTitle(chat.name)) {
+    return;
+  }
+
+  titleGenerationInFlight.add(inFlightKey);
+
+  try {
+    const title = await generateChatTitleFromMessages(world, content, targetChatId);
+    if (!title) {
+      return;
+    }
+
+    // Re-check in-memory state before commit.
+    const currentChat = world.chats.get(targetChatId);
+    if (!currentChat || !isDefaultChatTitle(currentChat.name)) {
+      loggerChatTitle.debug('Skipping title commit because in-memory chat title is no longer default', {
+        worldId: world.id,
+        chatId: targetChatId,
+        source,
+        currentName: currentChat?.name
+      });
+      return;
+    }
+
+    const committed = await commitChatTitleIfDefault(world, targetChatId, title);
+    if (!committed) {
+      loggerChatTitle.debug('Skipping title commit because persisted chat title no longer matches default', {
+        worldId: world.id,
+        chatId: targetChatId,
+        source
+      });
+      return;
+    }
+
+    currentChat.name = title;
+    publishEvent(
+      world,
+      'system',
+      {
+        eventType: 'chat-title-updated',
+        title,
+        source
+      },
+      targetChatId
+    );
+  } finally {
+    titleGenerationInFlight.delete(inFlightKey);
+  }
 }
 
 /**
@@ -131,8 +255,15 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
  * Subscribe world to messages with cleanup function
  */
 export function subscribeWorldToMessages(world: World): () => void {
-  return subscribeToMessages(world, async (_event: WorldMessageEvent) => {
-    // No-op - title updates handled by setupWorldActivityListener on idle
+  return subscribeToMessages(world, async (event: WorldMessageEvent) => {
+    const targetChatId = event.chatId ?? world.currentChatId ?? null;
+    if (!targetChatId) return;
+    if (!isHumanSender(event.sender)) return;
+
+    const chat = world.chats.get(targetChatId);
+    if (!chat || !isDefaultChatTitle(chat.name)) return;
+
+    scheduleNoActivityTitleUpdate(world, targetChatId, event.content || '');
   });
 }
 
@@ -144,20 +275,10 @@ export function setupWorldActivityListener(world: World): () => void {
   const handler = async (event: any) => {
     // Only update title when world becomes idle (all agents done)
     if (event.type === 'idle' && event.pendingOperations === 0) {
+      const targetChatId = world.currentChatId;
+      if (!targetChatId) return;
       try {
-        if (!world.currentChatId) return;
-        const chat = world.chats.get(world.currentChatId);
-        if (!chat) return;
-        // Only update if still default title
-        if (chat.name === 'New Chat') {
-          const title = await generateChatTitleFromMessages(world, '');
-          if (title) {
-            chat.name = title;
-            const storage = await getStorageWrappers();
-            await storage.updateChatData(world.id, world.currentChatId, { name: title });
-            publishEvent(world, 'system', `chat-title-updated`);
-          }
-        }
+        await tryGenerateAndApplyTitle(world, targetChatId, '', 'idle');
       } catch (err) {
         loggerChatTitle.warn('Activity-based title update failed', { error: err instanceof Error ? err.message : err });
       }
@@ -165,5 +286,14 @@ export function setupWorldActivityListener(world: World): () => void {
   };
 
   world.eventEmitter.on('world', handler);
-  return () => world.eventEmitter.off('world', handler);
+  return () => {
+    world.eventEmitter.off('world', handler);
+    for (const [key, timer] of titleGenerationTimers.entries()) {
+      if (!key.startsWith(`${world.id}:`)) {
+        continue;
+      }
+      clearTimeout(timer);
+      titleGenerationTimers.delete(key);
+    }
+  };
 }

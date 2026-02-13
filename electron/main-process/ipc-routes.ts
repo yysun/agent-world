@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-13: Added `message:edit` route wiring for core-driven message edit/resubmission.
  * - 2026-02-13: Added `chat:stopMessage` route wiring for session-scoped stop requests.
  * - 2026-02-12: Switched route channel strings to shared IPC constants and typed payload contracts.
  * - 2026-02-12: Added extracted IPC route builder for main-process modularization.
@@ -20,6 +21,7 @@ import {
   DESKTOP_INVOKE_CHANNELS,
   type ChatSubscribePayload,
   type ChatUnsubscribePayload,
+  type MessageEditPayload,
   type MessageDeletePayload,
   type WorldChatPayload,
   type WorldIdPayload
@@ -46,6 +48,7 @@ export interface MainIpcHandlers {
   selectWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   getSessionMessages: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   sendChatMessage: (payload: unknown) => Promise<unknown> | unknown;
+  editMessageInChat: (payload: unknown) => Promise<unknown> | unknown;
   stopChatMessage: (payload: unknown) => Promise<unknown> | unknown;
   deleteMessageFromChat: (payload: unknown) => Promise<unknown> | unknown;
   subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
@@ -105,6 +108,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
       }
     },
     { channel: DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE, handler: async (_event, payload) => handlers.sendChatMessage(payload) },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.MESSAGE_EDIT,
+      handler: async (_event, payload) => handlers.editMessageInChat(payload as MessageEditPayload)
+    },
     { channel: DESKTOP_INVOKE_CHANNELS.CHAT_STOP_MESSAGE, handler: async (_event, payload) => handlers.stopChatMessage(payload) },
     {
       channel: DESKTOP_INVOKE_CHANNELS.MESSAGE_DELETE,

@@ -11,6 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
+ * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
  * - 2026-02-13: Added coverage for tool lifecycle response-state transitions and chat-id filtering.
  * - 2026-02-13: Added coverage for session response-state callback transitions on SSE lifecycle events.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
@@ -308,5 +310,78 @@ describe('createChatSubscriptionEventHandler', () => {
     });
 
     expect(onSessionActivityUpdate).not.toHaveBeenCalled();
+  });
+
+  it('forwards system events to session system callback', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      system: {
+        eventType: 'chat-title-updated',
+        messageId: 'sys-1',
+        createdAt: '2026-02-13T00:00:00.000Z',
+        content: {
+          eventType: 'chat-title-updated',
+          title: 'Scoped Chat Title',
+          source: 'idle'
+        }
+      }
+    });
+
+    expect(onSessionSystemEvent).toHaveBeenCalledWith({
+      eventType: 'chat-title-updated',
+      chatId: 'chat-1',
+      messageId: 'sys-1',
+      createdAt: '2026-02-13T00:00:00.000Z',
+      content: {
+        eventType: 'chat-title-updated',
+        title: 'Scoped Chat Title',
+        source: 'idle'
+      }
+    });
+  });
+
+  it('ignores system events for non-selected chat', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-2',
+      system: {
+        eventType: 'chat-title-updated'
+      }
+    });
+
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 });
