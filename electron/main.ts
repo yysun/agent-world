@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-14: Routed Electron edit-message path back to core-managed `editUserMessage` flow (no main-process subscription refresh logic).
  * - 2026-02-13: Routed message edit/resubmission through core `editUserMessage` via new IPC `message:edit` handler.
  * - 2026-02-13: Wired `chat:stopMessage` IPC to core stop-processing runtime controls.
  * - 2026-02-13: Removed `@ts-nocheck` and tightened local typings for main-window/runtime wiring.

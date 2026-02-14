@@ -11,6 +11,7 @@
  * - Uses in-memory event storage to emulate persisted system events.
  *
  * Recent Changes:
+ * - 2026-02-14: Updated edit-message expectations for core-managed clear+resend behavior that no longer gates resubmission on `world.currentChatId`.
  * - 2026-02-13: Added coverage for core-managed edit resubmission title reset based on persisted `chat-title-updated` events.
  *
  * Tests for message ID migration, edit workflows, and error handling.
@@ -103,11 +104,14 @@ describe('Message Edit Feature', () => {
   });
 
   afterEach(async () => {
-    // Clean up by deleting test world if it exists
+    // Clean up all worlds between tests to avoid cross-test async bleed.
     try {
-      await getMemoryStorage().deleteWorld('test-world');
+      const worlds = await getMemoryStorage().listWorlds();
+      for (const world of worlds) {
+        await getMemoryStorage().deleteWorld(world.id);
+      }
     } catch (e) {
-      // Ignore errors if world doesn't exist
+      // Ignore cleanup errors
     }
   });
 
@@ -257,28 +261,31 @@ describe('Message Edit Feature', () => {
       expect(result).toHaveProperty('resubmissionStatus');
     });
 
-    test('should skip resubmission when session mode is OFF', async () => {
-      const world = createTestWorld({ isProcessing: false, currentChatId: null });
+    test('should resubmit when currentChatId is null and chatId is provided', async () => {
+      const world = createTestWorld({
+        id: 'test-world-null-current',
+        name: 'Test World Null Current',
+        isProcessing: false,
+        currentChatId: null
+      });
       const agent = createTestAgent({
         memory: [
           { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
         ]
       });
-      const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+      const chat = { id: 'chat-1', name: 'Chat 1', worldId: world.id, messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
       await getMemoryStorage().saveWorld(world);
-      await getMemoryStorage().saveAgent('test-world', agent);
-      await getMemoryStorage().saveChatData('test-world', chat);
+      await getMemoryStorage().saveAgent(world.id, agent);
+      await getMemoryStorage().saveChatData(world.id, chat);
 
-      const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
+      const result = await editUserMessage(world.id, 'msg-1', 'new content', 'chat-1');
 
-      // Verify resubmission was skipped
-      expect(result.resubmissionStatus).toBe('skipped');
-      expect(result).toHaveProperty('resubmissionError');
-      expect(result.resubmissionError).toMatch(/Session mode is OFF/);
+      expect(result.resubmissionStatus).toBe('success');
+      expect(result).toHaveProperty('newMessageId');
     });
 
-    test('should fail resubmission when chat does not match current chat', async () => {
+    test('should resubmit for explicit chatId even when it differs from currentChatId', async () => {
       const world = createTestWorld({ isProcessing: false, currentChatId: 'chat-2' });
       const agent = createTestAgent({
         memory: [
@@ -293,28 +300,31 @@ describe('Message Edit Feature', () => {
 
       const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
 
-      // Verify resubmission failed with appropriate error
-      expect(result.resubmissionStatus).toBe('failed');
-      expect(result).toHaveProperty('resubmissionError');
-      expect(result.resubmissionError).toMatch(/Cannot resubmit.*current chat/);
+      expect(result.resubmissionStatus).toBe('success');
+      expect(result).toHaveProperty('newMessageId');
     });
 
     test('should reset auto-generated title to New Chat before edit resubmission', async () => {
-      const world = createTestWorld({ isProcessing: false, currentChatId: 'chat-1' });
+      const world = createTestWorld({
+        id: 'test-world-title-reset',
+        name: 'Test World Title Reset',
+        isProcessing: false,
+        currentChatId: 'chat-1'
+      });
       const agent = createTestAgent({
         memory: [
           { role: 'user', content: 'hi', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
         ]
       });
-      const chat = { id: 'chat-1', name: 'hi', worldId: 'test-world', messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
+      const chat = { id: 'chat-1', name: 'hi', worldId: world.id, messageCount: 1, createdAt: new Date(), updatedAt: new Date() };
 
       await getMemoryStorage().saveWorld(world);
-      await getMemoryStorage().saveAgent('test-world', agent);
-      await getMemoryStorage().saveChatData('test-world', chat);
-      const runtimeWorld = await getWorld('test-world');
+      await getMemoryStorage().saveAgent(world.id, agent);
+      await getMemoryStorage().saveChatData(world.id, chat);
+      const runtimeWorld = await getWorld(world.id);
       await runtimeWorld!.eventStorage!.saveEvent({
         id: 'evt-title-1',
-        worldId: 'test-world',
+        worldId: world.id,
         chatId: 'chat-1',
         type: 'system',
         payload: {
@@ -325,10 +335,10 @@ describe('Message Edit Feature', () => {
         createdAt: new Date()
       });
 
-      const result = await editUserMessage('test-world', 'msg-1', 'list files', 'chat-1');
+      const result = await editUserMessage(world.id, 'msg-1', 'list files', 'chat-1');
 
       expect(result.resubmissionStatus).toBe('success');
-      const updatedChat = await getMemoryStorage().loadChatData('test-world', 'chat-1');
+      const updatedChat = await getMemoryStorage().loadChatData(world.id, 'chat-1');
       expect(updatedChat?.name).toBe('New Chat');
     });
 

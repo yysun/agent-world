@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-14: Updated edit-message IPC coverage to validate pure core delegation (no main-process runtime refresh/rebind side effects).
  * - 2026-02-13: Added `message:edit` handler coverage for core-driven edit + resubmission delegation.
  * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
  */
@@ -102,7 +103,7 @@ describe('createMainIpcHandlers.deleteMessageFromChat', () => {
 });
 
 describe('createMainIpcHandlers.editMessageInChat', () => {
-  it('delegates edit operations to core and refreshes subscriptions', async () => {
+  it('delegates edit operations to core editUserMessage without runtime refresh', async () => {
     const editUserMessage = vi.fn(async () => ({
       success: true,
       messagesRemovedTotal: 2,
@@ -120,7 +121,7 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     });
 
     expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
-    expect(refreshWorldSubscription).toHaveBeenCalledWith('world-1');
+    expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
       resubmissionStatus: 'success',
@@ -128,11 +129,11 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     });
   });
 
-  it('adds refresh warnings to edit responses', async () => {
+  it('propagates core edit failures without subscription warnings', async () => {
     const editUserMessage = vi.fn(async () => ({
       success: true,
       resubmissionStatus: 'failed',
-      resubmissionError: 'Cannot resubmit in current session'
+      resubmissionError: 'resubmit failed'
     }));
     const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
     const { handlers } = await createHandlers({ editUserMessage, refreshWorldSubscription });
@@ -144,10 +145,12 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       newContent: 'updated prompt'
     });
 
+    expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
+    expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
       resubmissionStatus: 'failed',
-      refreshWarning: 'refresh failed'
+      resubmissionError: 'resubmit failed'
     });
   });
 });

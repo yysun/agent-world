@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
  * - 2026-02-13: Added `message:edit` IPC handler that delegates user-message edit/resubmission to core so client flows stay thin.
  * - 2026-02-13: Refreshed world subscriptions after message-chain deletion so runtime agent memory stays aligned with persisted storage during edit resubmits.
  * - 2026-02-13: Added stop-message IPC handler to cancel active session processing by `worldId` and `chatId`.
@@ -650,17 +651,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!chatId) throw new Error('Chat ID is required.');
     if (!newContent) throw new Error('New content is required.');
 
-    const result = await editUserMessage(worldId, messageId, newContent, chatId);
-    const refreshWarning = await refreshWorldSubscription(worldId);
-
-    if (refreshWarning && result && typeof result === 'object' && !Array.isArray(result)) {
-      return {
-        ...result,
-        refreshWarning
-      };
-    }
-
-    return result;
+    return editUserMessage(worldId, messageId, newContent, chatId);
   }
 
   async function deleteMessageFromChat(payload: any) {
