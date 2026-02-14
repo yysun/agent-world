@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
  * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
  *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
  * - Enhanced comment documentation with detailed feature descriptions
@@ -352,6 +353,7 @@ export async function prepareMessagesForLLM(
 ): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
   let worldEnvMap: Record<string, string> = {};
+  let worldVariablesText = '';
 
   // Load FRESH agent from storage to get original system prompt (not patched)
   // This ensures we always use the clean system prompt from storage
@@ -362,7 +364,8 @@ export async function prepareMessagesForLLM(
     const freshAgent = await storage.loadAgent(worldId, agent.id);
     freshSystemPrompt = freshAgent?.systemPrompt;
     const world = await storage.loadWorld(worldId);
-    worldEnvMap = parseEnvText(world?.variables);
+    worldVariablesText = world?.variables || '';
+    worldEnvMap = parseEnvText(worldVariablesText);
   } catch (error) {
     const { logger } = await import('./logger.js');
     logger.error('Could not load agent from storage for system prompt', {
@@ -377,9 +380,15 @@ export async function prepareMessagesForLLM(
   // IDEMPOTENCE: Always add system message first (if available)
   // System messages are NEVER saved to storage
   if (freshSystemPrompt) {
+    const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt, worldEnvMap);
+    const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || './';
+    const promptWithWorkingDirectory = interpolatedPrompt.endsWith('\n')
+      ? `${interpolatedPrompt}working directory: ${workingDirectory}`
+      : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`;
+
     messages.push({
       role: 'system',
-      content: interpolateTemplateVariables(freshSystemPrompt, worldEnvMap),
+      content: promptWithWorkingDirectory,
       createdAt: new Date()
     });
   }

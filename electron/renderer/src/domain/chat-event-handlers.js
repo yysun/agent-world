@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-13: Enhanced log-derived status text to include structured error details (error/message/toolCallId) instead of generic category-message only.
  * - 2026-02-13: Added system-event routing callback support so session metadata (chat titles) can refresh on realtime updates.
  * - 2026-02-13: Global log fallback now publishes via shared status-bar service so any module can surface footer status without App callback threading.
  * - 2026-02-13: Extended response-state callbacks to include tool lifecycle events for reliable stop-mode behavior during tool execution.
@@ -22,6 +23,34 @@
 
 import { createLogMessage, upsertMessageList } from './message-updates.js';
 import { publishStatusBarStatus } from './status-bar.js';
+
+function buildLogStatusText(logEvent) {
+  const category = String(logEvent?.category || 'system');
+  const baseMessage = String(logEvent?.message || 'Unknown error');
+  const data = logEvent?.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+
+  if (!data) {
+    return `${category} - ${baseMessage}`;
+  }
+
+  const detailParts = [];
+  const detailText = data.error || data.errorMessage || data.message;
+  if (detailText) {
+    detailParts.push(String(detailText));
+  }
+  if (data.toolCallId) {
+    detailParts.push(`toolCallId=${String(data.toolCallId)}`);
+  }
+  if (data.agentId) {
+    detailParts.push(`agent=${String(data.agentId)}`);
+  }
+
+  if (detailParts.length === 0) {
+    return `${category} - ${baseMessage}`;
+  }
+
+  return `${category} - ${baseMessage}: ${detailParts.join(' | ')}`;
+}
 
 export function createGlobalLogEventHandler({
   loadedWorldId,
@@ -41,11 +70,10 @@ export function createGlobalLogEventHandler({
       return;
     }
 
-    const category = String(logEvent?.category || 'system');
-    const message = String(logEvent?.message || 'Unknown error');
+    const statusText = buildLogStatusText(logEvent);
     const level = String(logEvent?.level || '').toLowerCase();
     const emitStatus = typeof setStatusText === 'function' ? setStatusText : publishStatusBarStatus;
-    emitStatus(`${category} - ${message}`, level === 'error' ? 'error' : 'info');
+    emitStatus(statusText, level === 'error' ? 'error' : 'info');
   };
 }
 

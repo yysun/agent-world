@@ -21,6 +21,9 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Removed monospace font override from desktop log/system lines so tool error text matches agent message typography.
+ * - 2026-02-13: Unified desktop log-line typography so category and detailed error text render with a single consistent font style.
+ * - 2026-02-13: Expanded desktop log-message rendering to include structured error details (error/message/toolCallId) instead of generic "Tool execution error" text.
  * - 2026-02-13: Removed agent `type` from desktop create/edit forms and unsaved-change checks.
  * - 2026-02-13: Message edit flow now uses core-driven `message:edit` IPC so delete+resubmit+title-reset policy is shared across clients.
  * - 2026-02-13: Refreshes session list on realtime `chat-title-updated` system events so edited New Chat sessions immediately reflect generated titles.
@@ -127,6 +130,27 @@ const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' };
 const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' };
 const HUMAN_SENDER_VALUES = new Set(['human', 'user', 'you']);
 
+function formatLogMessage(logEvent) {
+  const baseMessage = String(logEvent?.message || '');
+  const data = logEvent?.data && typeof logEvent.data === 'object' ? logEvent.data : null;
+  if (!data) return baseMessage;
+
+  const detailParts = [];
+  const detailText = data.error || data.errorMessage || data.message;
+  if (detailText) {
+    detailParts.push(String(detailText));
+  }
+  if (data.toolCallId) {
+    detailParts.push(`toolCallId=${String(data.toolCallId)}`);
+  }
+  if (data.agentId) {
+    detailParts.push(`agent=${String(data.agentId)}`);
+  }
+
+  if (detailParts.length === 0) return baseMessage;
+  return `${baseMessage}: ${detailParts.join(' | ')}`;
+}
+
 /**
  * Message Content Renderer Component
  * Renders message content with markdown support for regular messages
@@ -153,8 +177,9 @@ function MessageContent({ message }) {
 
   // Log message rendering with level-based colored dot
   if (message.logEvent) {
+    const logLineText = `${message.logEvent.category} - ${formatLogMessage(message.logEvent)}`;
     return (
-      <div className="flex items-start gap-2 text-xs font-mono" style={{ color: 'hsl(var(--muted-foreground))' }}>
+      <div className="flex items-start gap-2 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
         <span
           className="inline-block rounded-full mt-0.5"
           style={{
@@ -169,12 +194,8 @@ function MessageContent({ message }) {
                       '#9ca3af'
           }}
         />
-        <div className="flex-1">
-          <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-            {message.logEvent.category}
-          </span>
-          {' - '}
-          <span>{message.logEvent.message}</span>
+        <div className="flex-1" style={{ color: 'hsl(var(--foreground))' }}>
+          {logLineText}
         </div>
       </div>
     );

@@ -13,8 +13,8 @@
  *   * No additional LLM call to process the output
  * - Error handling and exception tracking
  * - Long-running command support with 10-minute default timeout
- * - Required directory parameter for explicit working directory control
- * - LLM guidance to ask user for directory if not provided
+ * - Trusted working-directory enforcement from world/tool context
+ * - Explicit rejection when LLM-supplied directory conflicts with trusted working directory
  * - Graceful error handling for invalid tool calls
  * - Universal parameter validation for consistent execution
  * - Explicit execution safety configuration using structured metadata
@@ -26,12 +26,19 @@
  * - Provides MCP-compatible tool interface for LLM integration
  * - Timeout support to prevent hanging processes (default: 10 minutes)
  * - Resource cleanup on process completion
- * - Requires explicit directory parameter for security and clarity
- * - Tool description instructs LLM to ask user for directory if missing
+ * - Resolves command cwd from trusted world/tool context, not LLM args
+ * - Rejects directory mismatch instead of silently overriding requested path
  * - Returns error results instead of throwing to prevent agent crashes
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-14: Added inline-script execution guard (e.g. `sh -c`, `node -e`) to prevent embedded path bypass outside trusted cwd.
+ * - 2026-02-14: Hardened cwd containment checks by canonicalizing absolute paths and validating additional path argument forms (`./`, `../`, and `--flag=/path`).
+ * - 2026-02-13: Updated directory-request validation to allow requested folders inside world working_directory and reject only outside paths.
+ * - 2026-02-13: Added command/parameter path scope validation so shell_cmd rejects path targets outside trusted world working_directory.
+ * - 2026-02-13: Added strict directory-mismatch guard for shell_cmd; mismatched LLM directory requests now fail with explicit error.
+ * - 2026-02-13: Fixed validation error result typing by including `executionId` when formatting failed shell_cmd calls.
+ * - 2026-02-13: Stopped trusting LLM-provided `directory`; shell commands now resolve working directory from trusted world/tool context only.
  * - 2026-02-13: Added explicit command-cancellation detection and AbortError propagation in tool execution to prevent post-stop continuation.
  * - 2026-02-13: Added chat-scoped shell process tracking and stop controls for Electron stop-message support.
  * - 2026-02-08: Added streaming callback support for real-time output
@@ -67,6 +74,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
+import { realpathSync } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 import { publishSSE } from './events/index.js';
@@ -128,6 +136,356 @@ export interface CommandExecutionResult {
  */
 const executionHistory: CommandExecutionResult[] = [];
 const MAX_HISTORY_SIZE = 1000; // Limit history size to prevent memory issues
+
+export function resolveTrustedShellWorkingDirectory(context?: {
+  world?: { variables?: string };
+  workingDirectory?: string;
+}): string {
+  const contextDirectory = typeof context?.workingDirectory === 'string'
+    ? context.workingDirectory.trim()
+    : '';
+  if (contextDirectory) {
+    return contextDirectory;
+  }
+
+  const worldDirectory = getEnvValueFromText(context?.world?.variables, 'working_directory');
+  const trimmedWorldDirectory = typeof worldDirectory === 'string' ? worldDirectory.trim() : '';
+  return trimmedWorldDirectory || './';
+}
+
+export function validateShellDirectoryRequest(
+  requestedDirectory: unknown,
+  trustedWorkingDirectory: string
+): { valid: true } | { valid: false; error: string } {
+  if (typeof requestedDirectory !== 'string') {
+    return { valid: true };
+  }
+
+  const requested = requestedDirectory.trim();
+  if (!requested) {
+    return { valid: true };
+  }
+
+  const trusted = String(trustedWorkingDirectory || '').trim() || './';
+  if (isPathWithinTrustedDirectory(requested, trusted)) {
+    return { valid: true };
+  }
+
+  return {
+    valid: false,
+    error: `Working directory mismatch: requested directory "${requested}" is outside world working directory "${trusted}". Update world working_directory first.`
+  };
+}
+
+function stripWrappingQuotes(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function trimTrailingSeparators(pathValue: string): string {
+  const root = getPathRoot(pathValue);
+  if (!root || pathValue === root) {
+    return pathValue;
+  }
+
+  let trimmed = pathValue;
+  while (trimmed.endsWith('/') || trimmed.endsWith('\\')) {
+    trimmed = trimmed.slice(0, -1);
+    if (trimmed === root) {
+      return trimmed;
+    }
+  }
+
+  return trimmed;
+}
+
+function getPathRoot(pathValue: string): string {
+  const normalized = pathValue.replace(/\\/g, '/');
+  const driveMatch = normalized.match(/^[A-Za-z]:\//);
+  if (driveMatch) {
+    return driveMatch[0];
+  }
+  if (normalized.startsWith('/')) {
+    return '/';
+  }
+  return '';
+}
+
+function collapseDotSegments(pathValue: string): string {
+  const normalized = pathValue.replace(/\\/g, '/');
+  const root = getPathRoot(normalized);
+  const segments = normalized.slice(root.length).split('/');
+  const collapsed: string[] = [];
+
+  for (const segment of segments) {
+    if (!segment || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (collapsed.length > 0 && collapsed[collapsed.length - 1] !== '..') {
+        collapsed.pop();
+      } else if (!root) {
+        collapsed.push('..');
+      }
+      continue;
+    }
+    collapsed.push(segment);
+  }
+
+  const joined = collapsed.join('/');
+  if (root) {
+    return `${root}${joined}` || root;
+  }
+  return joined || '.';
+}
+
+function canonicalizePath(pathValue: string): string {
+  const absolute = resolveDirectory(pathValue);
+  try {
+    const canonical = realpathSync.native ? realpathSync.native(absolute) : realpathSync(absolute);
+    return trimTrailingSeparators(collapseDotSegments(canonical));
+  } catch {
+    return trimTrailingSeparators(collapseDotSegments(absolute));
+  }
+}
+
+function normalizeForPlatformComparison(pathValue: string): string {
+  return process.platform === 'win32' ? pathValue.toLowerCase() : pathValue;
+}
+
+function isPathWithinTrustedDirectory(candidatePath: string, trustedWorkingDirectory: string): boolean {
+  const normalizedCandidate = normalizeForPlatformComparison(canonicalizePath(candidatePath));
+  const normalizedTrusted = normalizeForPlatformComparison(canonicalizePath(trustedWorkingDirectory));
+  const trustedRoot = normalizeForPlatformComparison(getPathRoot(normalizedTrusted));
+
+  if (normalizedTrusted === trustedRoot) {
+    return normalizedCandidate.startsWith(normalizedTrusted);
+  }
+
+  return normalizedCandidate === normalizedTrusted ||
+    normalizedCandidate.startsWith(`${normalizedTrusted}/`);
+}
+
+function looksLikePathToken(token: string): boolean {
+  if (!token) return false;
+  return token === '~' ||
+    token === '.' ||
+    token.startsWith('~/') ||
+    token.startsWith('~\\') ||
+    token.startsWith('/') ||
+    token.startsWith('\\') ||
+    token.startsWith('./') ||
+    token.startsWith('.\\') ||
+    token === '..' ||
+    token.startsWith('../') ||
+    token.startsWith('..\\') ||
+    token.includes('/') ||
+    token.includes('\\');
+}
+
+function resolveTokenPath(token: string, trustedWorkingDirectory: string): string {
+  if (token.startsWith('~')) {
+    return resolveDirectory(token);
+  }
+  if (token.startsWith('/')) {
+    return resolveDirectory(token);
+  }
+  return resolveDirectory(resolve(trustedWorkingDirectory, token));
+}
+
+function extractPathTokenFromOptionPrefix(token: string): string | null {
+  if (!token.startsWith('-') || token.includes('=')) {
+    return null;
+  }
+
+  const pathStart = token.search(/(~|\/|\\|\.|[A-Za-z]:[\\/])/);
+  if (pathStart <= 1) {
+    return null;
+  }
+
+  const optionPart = token.slice(0, pathStart);
+  const candidate = token.slice(pathStart);
+  if (!/^-{1,2}[A-Za-z][A-Za-z0-9_-]*$/.test(optionPart)) {
+    return null;
+  }
+  if (!looksLikePathToken(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function extractPathTokenFromOptionAssignment(token: string): string | null {
+  if (!token.startsWith('-')) {
+    return null;
+  }
+
+  const equalsIndex = token.indexOf('=');
+  if (equalsIndex <= 0) {
+    return null;
+  }
+
+  const assignedValue = stripWrappingQuotes(token.slice(equalsIndex + 1));
+  if (!assignedValue || !looksLikePathToken(assignedValue)) {
+    return null;
+  }
+
+  return assignedValue;
+}
+
+function extractPathToken(rawToken: string): string | null {
+  const token = stripWrappingQuotes(rawToken);
+  if (!token) {
+    return null;
+  }
+
+  const fromAssignment = extractPathTokenFromOptionAssignment(token);
+  if (fromAssignment) {
+    return fromAssignment;
+  }
+  const fromOptionPrefix = extractPathTokenFromOptionPrefix(token);
+  if (fromOptionPrefix) {
+    return fromOptionPrefix;
+  }
+
+  if (token.startsWith('-')) {
+    return null;
+  }
+
+  return looksLikePathToken(token) ? token : null;
+}
+
+function tokenizeInlineCommandArgs(command: string): string[] {
+  const tokens = command.match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^\s]+/g) ?? [];
+  if (tokens.length <= 1) return [];
+  return tokens.slice(1);
+}
+
+function tokenizeCommand(command: string): string[] {
+  return command.match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^\s]+/g) ?? [];
+}
+
+function getExecutableName(command: string): string {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length === 0) return '';
+  const executable = stripWrappingQuotes(tokens[0]).replace(/\\/g, '/');
+  const parts = executable.split('/').filter(Boolean);
+  return String(parts[parts.length - 1] || executable).toLowerCase();
+}
+
+function getInterpreterInlineScriptFlags(executable: string): Set<string> {
+  if (['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'cmd.exe'].includes(executable)) {
+    return new Set(['-c', '/c', '/k']);
+  }
+  if (['powershell', 'powershell.exe', 'pwsh', 'pwsh.exe'].includes(executable)) {
+    return new Set(['-c', '-command']);
+  }
+  if (['node', 'node.exe', 'deno', 'python', 'python3', 'python.exe', 'python3.exe'].includes(executable)) {
+    return new Set(['-c', '-e', '--eval']);
+  }
+  if (['perl', 'ruby', 'php'].includes(executable)) {
+    return new Set(['-e', '-r']);
+  }
+  return new Set();
+}
+
+function findInlineScriptExecutionFlag(
+  command: unknown,
+  parameters: unknown
+): { executable: string; flag: string } | null {
+  if (typeof command !== 'string' || !command.trim()) {
+    return null;
+  }
+
+  const commandTokens = tokenizeCommand(command).map(stripWrappingQuotes).filter(Boolean);
+  const commandArgs = commandTokens.slice(1);
+  const parameterArgs = Array.isArray(parameters)
+    ? parameters.filter((p): p is string => typeof p === 'string').map(stripWrappingQuotes).filter(Boolean)
+    : [];
+
+  const directExecutable = getExecutableName(command);
+  let executable = directExecutable;
+  let args = [...commandArgs, ...parameterArgs];
+
+  // Handle wrappers like `env bash -c ...`
+  if (directExecutable === 'env') {
+    const envArgs = [...args];
+    while (envArgs.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(envArgs[0])) {
+      envArgs.shift();
+    }
+    if (envArgs.length > 0) {
+      executable = getExecutableName(envArgs[0]);
+      args = envArgs.slice(1);
+    }
+  }
+
+  const scriptFlags = getInterpreterInlineScriptFlags(executable);
+  if (scriptFlags.size === 0) {
+    return null;
+  }
+
+  for (const rawArg of args) {
+    const arg = rawArg.toLowerCase();
+    if (scriptFlags.has(arg)) {
+      return { executable, flag: rawArg };
+    }
+    for (const scriptFlag of scriptFlags) {
+      if ((scriptFlag.startsWith('-') || scriptFlag.startsWith('/')) &&
+          arg.startsWith(scriptFlag) &&
+          arg.length > scriptFlag.length) {
+        return { executable, flag: rawArg };
+      }
+    }
+  }
+
+  return null;
+}
+
+export function validateShellCommandScope(
+  command: unknown,
+  parameters: unknown,
+  trustedWorkingDirectory: string
+): { valid: true } | { valid: false; error: string } {
+  const inlineScriptUsage = findInlineScriptExecutionFlag(command, parameters);
+  if (inlineScriptUsage) {
+    return {
+      valid: false,
+      error: `Working directory mismatch: inline script execution "${inlineScriptUsage.executable} ${inlineScriptUsage.flag}" is not allowed. Use direct command + parameters inside world working directory "${trustedWorkingDirectory}".`
+    };
+  }
+
+  const tokens: string[] = [];
+
+  if (typeof command === 'string' && command.trim()) {
+    tokens.push(...tokenizeInlineCommandArgs(command));
+  }
+
+  if (Array.isArray(parameters)) {
+    for (const parameter of parameters) {
+      if (typeof parameter === 'string') {
+        tokens.push(parameter);
+      }
+    }
+  }
+
+  for (const rawToken of tokens) {
+    const token = extractPathToken(rawToken);
+    if (!token) continue;
+
+    const resolvedPath = resolveTokenPath(token, trustedWorkingDirectory);
+    if (!isPathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory)) {
+      return {
+        valid: false,
+        error: `Working directory mismatch: path "${token}" is outside world working directory "${trustedWorkingDirectory}".`
+      };
+    }
+  }
+
+  return { valid: true };
+}
 
 export function stopShellCommandsForChat(worldId: string, chatId: string): { killed: number } {
   return stopShellProcessesForChatScope(worldId, chatId);
@@ -639,7 +997,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Directory resolution priority: (1) explicit `directory` parameter, (2) world variable `working_directory`, (3) default to "./". If user says "current directory" or "here", use "./".',
+    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Working directory is controlled by trusted world context (`working_directory`) and defaults to "./" when unset. If the model provides a different `directory`, execution is rejected with an error. When the user asks to run in a different folder, put that folder in `directory` (not in command/parameters paths).',
 
     parameters: {
       type: 'object',
@@ -655,7 +1013,7 @@ export function createShellCmdToolDefinition() {
         },
         directory: {
           type: 'string',
-          description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory` and falls back to "./" when unset. Examples: "./", "~/", "/tmp", "./src"'
+          description: 'Optional model-provided directory. Runtime only allows this when it resolves to the same path as trusted world `working_directory`; mismatches are rejected. If user asks for a target folder, set it here.'
         },
         timeout: {
           type: 'number',
@@ -681,7 +1039,7 @@ export function createShellCmdToolDefinition() {
           },
           directory: {
             type: 'string',
-            description: 'Optional explicit working directory. If omitted, tool uses world variable `working_directory` and falls back to "./" when unset. Examples: "./", "~/", "/tmp", "./src"'
+            description: 'Optional model-provided directory. Runtime only allows this when it resolves to the same path as trusted world `working_directory`; mismatches are rejected. If user asks for a target folder, set it here.'
           },
           timeout: {
             type: 'number',
@@ -694,6 +1052,7 @@ export function createShellCmdToolDefinition() {
       const validation = validateToolParameters(args, toolSchema, 'shell_cmd');
       if (!validation.valid) {
         return formatResultForLLM({
+          executionId: 'validation-error',
           command: args?.command || '<invalid>',
           parameters: [],
           exitCode: 1,
@@ -707,9 +1066,6 @@ export function createShellCmdToolDefinition() {
       }
 
       const { command, parameters = [], timeout } = validation.correctedArgs;
-      const directoryFromArgs = typeof validation.correctedArgs.directory === 'string'
-        ? String(validation.correctedArgs.directory).trim()
-        : '';
 
       // Ensure parameters is always an array
       const validParameters = Array.isArray(parameters) ?
@@ -721,9 +1077,22 @@ export function createShellCmdToolDefinition() {
       const currentMessageId = context?.toolCallId;
       const chatId = context?.chatId ? String(context.chatId) : undefined;
       const abortSignal = context?.abortSignal as AbortSignal | undefined;
-
-      const directoryFromWorld = getEnvValueFromText(world?.variables, 'working_directory');
-      const resolvedDirectory = directoryFromArgs || String(directoryFromWorld || '').trim() || './';
+      const resolvedDirectory = resolveTrustedShellWorkingDirectory(context);
+      const directoryValidation = validateShellDirectoryRequest(
+        validation.correctedArgs.directory,
+        resolvedDirectory
+      );
+      if (!directoryValidation.valid) {
+        throw new Error(directoryValidation.error);
+      }
+      const scopeValidation = validateShellCommandScope(
+        command,
+        validParameters,
+        resolvedDirectory
+      );
+      if (!scopeValidation.valid) {
+        throw new Error(scopeValidation.error);
+      }
 
       // Execute command with streaming callbacks if world is available
       const result = await executeShellCommand(command, validParameters, resolvedDirectory, {

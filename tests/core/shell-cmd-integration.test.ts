@@ -8,9 +8,16 @@
  * - Command execution through tool interface
  * - Error handling and reporting
  * - Execution history persistence
+ *
+ * Implementation notes:
+ * - Uses setupTestWorld helper for consistent world fixture setup.
+ * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-14: Added hard-fail coverage for inline script execution (`sh -c`) and short-option path prefixes (`-I/path`) outside world working_directory.
+ * - 2026-02-14: Added hard-fail coverage for path-escape argument forms (`./../../...` and `--flag=/...`) against world working_directory.
  * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
+ * - 2026-02-13: Updated mismatch coverage: mismatched LLM `directory` and out-of-scope path arguments now hard-fail against world `working_directory`.
  */
 
 import { describe, test, expect } from 'vitest';
@@ -61,8 +68,7 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a simple command through the tool
     const result = await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['Hello from test'],
-      directory: '/tmp'
+      parameters: ['Hello from test']
     });
 
     // Verify result format
@@ -92,6 +98,138 @@ describe('shell_cmd integration with worlds', () => {
 
     expect(result).toContain('fallback-directory-test');
     expect(result).toContain('Exit code 0');
+  });
+
+  test('should fail when model-provided directory differs from world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'pwd',
+          directory: '/'
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when parameters target path outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['-la', '~/']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when relative escape path parameters resolve outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'ls',
+          parameters: ['./../../etc']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when option assignment paths target outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['--output=/tmp/outside']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when short-option path prefixes target outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'clang',
+          parameters: ['-I/tmp/outside']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
+  });
+
+  test('should fail when inline script execution is requested', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'sh',
+          parameters: ['-c', 'cat /etc/passwd']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: 'working_directory=/tmp/project'
+          }
+        }
+      )
+    ).rejects.toThrow('inline script execution');
   });
 
   test('should default to ./ when directory is unresolved', async () => {
@@ -140,12 +278,11 @@ describe('shell_cmd integration with worlds', () => {
     // Execute a command that will fail
     const result = await shellCmdTool.execute({
       command: 'ls',
-      parameters: ['/this-directory-does-not-exist-xyz'],
-      directory: '/tmp'
+      parameters: ['./this-directory-does-not-exist-xyz']
     });
 
     // Verify error is captured in result
-    expect(result).toContain('**Command:** `ls /this-directory-does-not-exist-xyz`');
+    expect(result).toContain('**Command:** `ls ./this-directory-does-not-exist-xyz`');
     expect(result).toContain('Error:');
     expect(result.toLowerCase()).toContain('no such file');
   });
@@ -157,14 +294,12 @@ describe('shell_cmd integration with worlds', () => {
     // Execute multiple commands
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test1'],
-      directory: '/tmp'
+      parameters: ['test1']
     });
 
     await shellCmdTool.execute({
       command: 'echo',
-      parameters: ['test2'],
-      directory: '/tmp'
+      parameters: ['test2']
     });
 
     // History should be available via the API

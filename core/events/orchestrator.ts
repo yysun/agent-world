@@ -44,6 +44,10 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-13: Fixed shell_cmd mismatch handling by validating path targets in command parameters (e.g. `~/`) against world working_directory before execution.
+ * - 2026-02-13: Added hard-stop guard for shell_cmd directory mismatches (LLM-requested `directory` must match world `working_directory`).
+ * - 2026-02-13: Enriched displayed `shell_cmd` tool-call arguments with trusted world cwd so UI tool-call messages show the actual execution directory.
+ * - 2026-02-13: Forced shell tool cwd to trusted world `working_directory`; mismatched LLM `directory` requests now stop execution with explicit error.
  * - 2026-02-13: Added chat-scoped `tool-start/tool-result/tool-error` event publishing so renderer session state stays accurate during tool execution.
  * - 2026-02-13: Added session processing-handle guards so stop requests abort active tool/continuation flow without spawning new LLM work.
  * - 2026-02-13: Propagated explicit `chatId` and stop abort-signal context through LLM/tool execution paths.
@@ -73,7 +77,8 @@ import {
   prepareMessagesForLLM,
   getWorldTurnLimit,
   extractMentions,
-  extractParagraphBeginningMentions
+  extractParagraphBeginningMentions,
+  getEnvValueFromText
 } from '../utils.js';
 import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
@@ -87,7 +92,12 @@ import {
 import { publishMessage, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
 import { handleTextResponse } from './memory-manager.js';
 import { isAICommand } from '../ai-commands.js';
-import { executeShellCommand, formatResultForLLM } from '../shell-cmd-tool.js';
+import {
+  executeShellCommand,
+  formatResultForLLM,
+  validateShellDirectoryRequest,
+  validateShellCommandScope
+} from '../shell-cmd-tool.js';
 import {
   beginChatMessageProcessing,
   isMessageProcessingCanceledError,
@@ -103,7 +113,7 @@ type DisplayToolCall = {
   type: 'function';
   function: {
     name: string;
-    arguments: unknown;
+    arguments: string;
   };
 };
 
@@ -315,6 +325,53 @@ function formatToolCallsMessage(toolCalls: DisplayToolCall[]): string {
   }
 }
 
+function withTrustedShellDirectory(
+  toolCalls: DisplayToolCall[],
+  trustedWorkingDirectory: string
+): DisplayToolCall[] {
+  return toolCalls.map((toolCall) => {
+    if (toolCall.function?.name !== 'shell_cmd') {
+      return toolCall;
+    }
+
+    try {
+      const args = parseToolCallArgs(toolCall.function.arguments);
+      if (!args) {
+        return toolCall;
+      }
+
+      const orderedArgs: Record<string, unknown> = {};
+      if (Object.prototype.hasOwnProperty.call(args, 'command')) {
+        orderedArgs.command = args.command;
+      }
+      if (Object.prototype.hasOwnProperty.call(args, 'parameters')) {
+        orderedArgs.parameters = args.parameters;
+      }
+      const requestedDirectory = typeof args.directory === 'string' ? args.directory.trim() : '';
+      if (requestedDirectory) {
+        // Preserve what the model requested; mismatch handling happens at execution guard.
+        orderedArgs.directory = args.directory;
+      }
+      orderedArgs.workingDirectory = trustedWorkingDirectory;
+
+      for (const [key, value] of Object.entries(args)) {
+        if (key === 'command' || key === 'parameters' || key === 'directory' || key === 'workingDirectory') continue;
+        orderedArgs[key] = value;
+      }
+
+      return {
+        ...toolCall,
+        function: {
+          ...toolCall.function,
+          arguments: JSON.stringify(orderedArgs)
+        }
+      };
+    } catch {
+      return toolCall;
+    }
+  });
+}
+
 /**
  * Agent message processing with LLM response generation and auto-mention logic
  */
@@ -431,6 +488,13 @@ export async function processAgentMessage(
     if (llmResponse.type === 'tool_calls') {
       const returnedToolCalls = llmResponse.tool_calls || [];
       const executableToolCalls = returnedToolCalls.slice(0, 1);
+      const trustedWorkingDirectory = String(
+        getEnvValueFromText(world.variables, 'working_directory') || './'
+      ).trim() || './';
+      const displayToolCalls = withTrustedShellDirectory(
+        executableToolCalls as DisplayToolCall[],
+        trustedWorkingDirectory
+      );
       if (returnedToolCalls.length > executableToolCalls.length) {
         loggerAgent.warn('LLM returned multiple tool calls; processing first call only', {
           agentId: agent.id,
@@ -451,9 +515,9 @@ export async function processAgentMessage(
 
       // Format meaningful content for tool calls if LLM didn't provide text
       let messageContent = llmResponse.content || '';
-      if (executableToolCalls.length > 0 &&
-        shouldUpgradeToolCallMessage(messageContent, executableToolCalls as DisplayToolCall[])) {
-        messageContent = formatToolCallsMessage(executableToolCalls as DisplayToolCall[]);
+      if (displayToolCalls.length > 0 &&
+        shouldUpgradeToolCallMessage(messageContent, displayToolCalls)) {
+        messageContent = formatToolCallsMessage(displayToolCalls);
       }
 
       // For streaming mode, send the formatted tool call message via SSE
@@ -465,7 +529,7 @@ export async function processAgentMessage(
           type: 'chunk',
           content: messageContent,
           messageId,
-          tool_calls: executableToolCalls
+          tool_calls: displayToolCalls
         });
       }
 
@@ -477,10 +541,10 @@ export async function processAgentMessage(
         chatId: targetChatId,
         messageId,
         replyToMessageId: messageEvent.messageId,
-        tool_calls: executableToolCalls,
+        tool_calls: displayToolCalls,
         agentId: agent.id,
         // Mark tool calls as incomplete (waiting for execution)
-        toolCallStatus: executableToolCalls.reduce((acc, tc) => {
+        toolCallStatus: displayToolCalls.reduce((acc, tc) => {
           acc[tc.id] = { complete: false, result: null };
           return acc;
         }, {} as Record<string, { complete: boolean; result: any }>)
@@ -593,6 +657,24 @@ export async function processAgentMessage(
             }
           });
 
+          if (toolCall.function.name === 'shell_cmd') {
+            const directoryValidation = validateShellDirectoryRequest(
+              toolArgs.directory,
+              trustedWorkingDirectory
+            );
+            if (!directoryValidation.valid) {
+              throw new Error(directoryValidation.error);
+            }
+            const scopeValidation = validateShellCommandScope(
+              toolArgs.command,
+              toolArgs.parameters,
+              trustedWorkingDirectory
+            );
+            if (!scopeValidation.valid) {
+              throw new Error(scopeValidation.error);
+            }
+          }
+
           // Handle special AI commands - bypass LLM and save result directly
           if (toolCall.function.name === 'shell_cmd' && isAICommand(toolArgs.command)) {
             loggerAgent.debug('AI command detected, bypassing LLM call', {
@@ -604,7 +686,7 @@ export async function processAgentMessage(
             const result = await executeShellCommand(
               toolArgs.command,
               toolArgs.parameters || [],
-              toolArgs.directory || './',
+              trustedWorkingDirectory,
               {
                 abortSignal: processingHandle?.signal,
                 worldId: world.id,
@@ -760,7 +842,7 @@ export async function processAgentMessage(
             toolCallId: toolCall.id,
             chatId: targetChatId,
             abortSignal: processingHandle?.signal,
-            workingDirectory: toolArgs.directory || process.cwd()
+            workingDirectory: trustedWorkingDirectory
           };
 
           const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
@@ -815,7 +897,8 @@ export async function processAgentMessage(
             chatId: targetChatId,
             ...(toolArgs.command && { command: toolArgs.command }),
             ...(toolArgs.parameters && { parameters: toolArgs.parameters }),
-            ...(toolArgs.directory && { directory: toolArgs.directory })
+            ...(toolCall.function.name === 'shell_cmd' && { directory: trustedWorkingDirectory }),
+            ...(toolCall.function.name !== 'shell_cmd' && toolArgs.directory && { directory: toolArgs.directory })
           });
           const serializedToolResult = typeof toolResult === 'string'
             ? toolResult

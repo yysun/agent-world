@@ -16,6 +16,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - Matched system/log message typography with regular agent message font in world chat
  * - Prevented wide markdown content from stretching the chat column by constraining overflow inside message content
  * - Fixed user-message edit/delete controls clipping by placing action buttons inside the message bubble
  * - Matched chat avatar size to top agent sprites, kept avatars on the left, and constrained widths to prevent horizontal scroll
@@ -2671,7 +2672,7 @@ legend {
   max-width: 80% !important;
   font-size: 0.75rem !important;
   color: var(--text-tertiary) !important;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
+  font-family: inherit !important;
 }
 
 .log-message .message-sender {
@@ -2734,7 +2735,7 @@ legend {
   font-size: 0.72rem;
   line-height: 1.3;
   color: var(--text-secondary);
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: inherit;
 }
 
 .log-dot {

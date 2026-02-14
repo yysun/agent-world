@@ -10,11 +10,18 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-02-14: Added inline-script guard coverage (`sh -c`) and short-option path-prefix checks (`-I/path`).
+ * - 2026-02-14: Added scope-regression tests for relative escape paths (`./../../...`) and option assignment paths (`--flag=/...`).
+ * - 2026-02-13: Added directory-request scope validation coverage (inside world cwd allowed, outside rejected).
  * - 2026-02-08: Initial test suite for streaming callback functionality
  */
 
 import { describe, test, expect } from 'vitest';
-import { executeShellCommand } from '../../core/shell-cmd-tool.js';
+import {
+  executeShellCommand,
+  validateShellDirectoryRequest,
+  validateShellCommandScope
+} from '../../core/shell-cmd-tool.js';
 
 describe('shell command execution', () => {
   test('should execute command and return result', async () => {
@@ -158,5 +165,82 @@ describe('shell command error handling with streaming', () => {
     // Execution should complete despite callback error
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('test');
+  });
+});
+
+describe('shell command directory request validation', () => {
+  test('should allow requested directory inside world working_directory', () => {
+    const result = validateShellDirectoryRequest(
+      '/tmp/project/subdir',
+      '/tmp/project'
+    );
+
+    expect(result.valid).toBe(true);
+  });
+
+  test('should reject requested directory outside world working_directory', () => {
+    const result = validateShellDirectoryRequest(
+      '/Users/esun',
+      '/Users/esun/Documents/Projects/test-agent-world'
+    );
+
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('outside world working directory');
+    }
+  });
+});
+
+describe('shell command argument scope validation', () => {
+  test('should reject relative escape path tokens like ./../../etc', () => {
+    const result = validateShellCommandScope(
+      'ls',
+      ['./../../etc'],
+      '/tmp/project'
+    );
+
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('outside world working directory');
+    }
+  });
+
+  test('should reject option assignment path tokens like --output=/tmp/outside', () => {
+    const result = validateShellCommandScope(
+      'echo',
+      ['--output=/tmp/outside'],
+      '/tmp/project'
+    );
+
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('outside world working directory');
+    }
+  });
+
+  test('should reject short-option prefixed path tokens like -I/tmp/include', () => {
+    const result = validateShellCommandScope(
+      'clang',
+      ['-I/tmp/include'],
+      '/tmp/project'
+    );
+
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('outside world working directory');
+    }
+  });
+
+  test('should reject inline script execution patterns like sh -c', () => {
+    const result = validateShellCommandScope(
+      'sh',
+      ['-c', 'cat /etc/passwd'],
+      '/tmp/project'
+    );
+
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('inline script execution');
+    }
   });
 });
