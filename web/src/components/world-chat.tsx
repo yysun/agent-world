@@ -17,7 +17,6 @@
  * - Human messages keep an empty avatar slot (no sprite image)
  * - Activity indicators: ActivityPulse and ElapsedTimeCounter in chat header
  * - Agent queue indicator in chat header (active + queued agents)
- * - Tool execution status: ToolExecutionStatus showing active tools with icons
  * - Collapsible tool output: Expand/collapse tool results with stdout/stderr styling
  * - Tool output truncation: 50K character limit with truncation warning
  * - Role-based message styling: Distinct left border colors for visual hierarchy
@@ -33,7 +32,6 @@
  * - 2026-02-11: Phase 5 - Added 50K character truncation for long tool outputs
  * - 2026-02-11: Phase 5 - Distinguished stdout (terminal style) vs stderr (red-tinted)
  * - 2026-02-11: Phase 5 - Tool messages now visible (no longer hidden by shouldHideMessage)
- * - 2026-02-11: Phase 4 - Added ToolExecutionStatus showing running tools with icons
  * - 2026-02-11: Phase 3 - Added ActivityPulse and ElapsedTimeCounter to chat header
  * - 2026-02-11: Integrated isBusy and elapsedMs props from World.tsx state
  * - 2026-02-08: Removed legacy manual tool-intervention request and response box rendering
@@ -61,7 +59,6 @@ import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
 import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
 import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
-import { ToolExecutionStatus } from './tool-execution-status';
 import { AgentQueueDisplay } from './agent-queue-display';
 
 const debug = false;
@@ -84,8 +81,7 @@ export default function WorldChat(props: WorldChatProps) {
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
     isBusy = false,
-    elapsedMs = 0,
-    activeTools = []
+    elapsedMs = 0
   } = props;
 
   const promptReady = !isWaiting;
@@ -175,6 +171,10 @@ export default function WorldChat(props: WorldChatProps) {
   // Internal tool result protocol messages are not shown in the chat UI.
   // Phase 5: Tool messages are now visible with collapsible output.
   const shouldHideMessage = (message: Message): boolean => {
+    if (message.isToolEvent && !message.isToolStreaming) {
+      return true;
+    }
+
     try {
       const text = message.text.trim();
       const jsonText = text.startsWith('@') ? text.substring(text.indexOf(',') + 1).trim() : text;
@@ -242,9 +242,6 @@ export default function WorldChat(props: WorldChatProps) {
         {(isBusy || (elapsedMs && elapsedMs > 0)) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
       <div className="chat-container">
-        {/* Tool Execution Status */}
-        <ToolExecutionStatus activeTools={activeTools} />
-
         {/* Conversation Area */}
         <div
           className="conversation-area"

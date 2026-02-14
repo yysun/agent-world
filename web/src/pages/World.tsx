@@ -207,7 +207,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}
-              isBusy={(state.activeTools?.length ?? 0) > 0}
+              isBusy={state.isBusy || state.isWaiting}
               elapsedMs={state.elapsedMs}
               activeTools={state.activeTools}
             />

@@ -608,7 +608,7 @@ export const handleStreamEnd = <T extends SSEComponentState>(state: T, data: Str
   const activeStreamMessageId = (state as any).activeStreamMessageId;
   const targetId = activeStreamMessageId ?? data.messageId;
 
-  state.messages = state.messages.filter(msg => msg.messageId !== targetId);
+  state.messages = state.messages.filter(msg => !(msg.isStreaming && msg.messageId === targetId));
   return { ...state, activeStreamMessageId: undefined, needScroll: false };
 };
 
@@ -727,7 +727,6 @@ export const handleToolStart = <T extends SSEComponentState>(state: T, data: any
   return {
     ...state,
     messages: [...(state.messages || []), toolStartMessage],
-    activeStreamMessageId: messageId,
     needScroll: true
   };
 };
@@ -759,7 +758,6 @@ export const handleToolProgress = <T extends SSEComponentState>(state: T, data: 
   return {
     ...state,
     messages,
-    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true
   };
 };
@@ -797,7 +795,6 @@ export const handleToolResult = <T extends SSEComponentState>(state: T, data: an
   return {
     ...state,
     messages,
-    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true
   };
 };
@@ -842,7 +839,6 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
     return {
       ...state,
       messages: [...messages, toolErrorMessage],
-      activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
       needScroll: true
     };
   }
@@ -850,7 +846,6 @@ export const handleToolError = <T extends SSEComponentState>(state: T, data: any
   return {
     ...state,
     messages,
-    activeStreamMessageId: (state as any).activeStreamMessageId ?? messageId,
     needScroll: true
   };
 };
