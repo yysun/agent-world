@@ -774,6 +774,7 @@ export default function App() {
   const [selectedProjectPath, setSelectedProjectPath] = useState(null);
   const [updatingWorld, setUpdatingWorld] = useState(false);
   const [deletingWorld, setDeletingWorld] = useState(false);
+  const [refreshingWorldInfo, setRefreshingWorldInfo] = useState(false);
   const [savingAgent, setSavingAgent] = useState(false);
   const [deletingAgent, setDeletingAgent] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState(null);
@@ -1614,7 +1615,31 @@ export default function App() {
           : nextSessions[0]?.id || null
       );
     }
+    return result.world;
   }, [api]);
+
+  const onRefreshWorldInfo = useCallback(async () => {
+    if (!loadedWorld?.id) {
+      return;
+    }
+
+    setRefreshingWorldInfo(true);
+    try {
+      const refreshedWorld = await refreshWorldDetails(loadedWorld.id);
+      setAvailableWorlds((worlds) =>
+        worlds.map((world) =>
+          world.id === refreshedWorld.id
+            ? { id: refreshedWorld.id, name: refreshedWorld.name }
+            : world
+        )
+      );
+      setStatusText('World info refreshed.', 'success');
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to refresh world info.'), 'error');
+    } finally {
+      setRefreshingWorldInfo(false);
+    }
+  }, [loadedWorld?.id, refreshWorldDetails, setStatusText]);
 
   const onOpenCreateAgentPanel = useCallback(() => {
     if (!loadedWorld?.id) {
@@ -2522,8 +2547,10 @@ export default function App() {
             <WorldInfoCard
               loadedWorld={loadedWorld}
               worldInfoStats={worldInfoStats}
+              refreshingWorldInfo={refreshingWorldInfo}
               updatingWorld={updatingWorld}
               deletingWorld={deletingWorld}
+              onRefreshWorldInfo={onRefreshWorldInfo}
               onOpenWorldEditPanel={onOpenWorldEditPanel}
               onDeleteWorld={onDeleteWorld}
             />
