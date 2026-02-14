@@ -394,9 +394,9 @@ function getMessageCardClassName(message, messagesById, messages, currentIndex) 
       ? 'mr-auto w-[92%] border-l-amber-500/50'
       : isCrossAgent
         ? 'mr-auto w-[86%] border-l-violet-500/50'
-      : isSystem
-        ? 'mr-auto w-[90%] border-l-border bg-muted/40'
-        : 'mr-auto w-[86%] border-l-sky-500/40';
+        : isSystem
+          ? 'mr-auto w-[90%] border-l-border bg-muted/40'
+          : 'mr-auto w-[86%] border-l-sky-500/40';
 
   return `group relative rounded-lg border-l p-3 ${roleClassName}`;
 }
