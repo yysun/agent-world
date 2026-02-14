@@ -279,18 +279,18 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
         {activeHitlPrompt && (
           <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-lg w-full" onclick={(e: Event) => e.stopPropagation()}>
-              <h3 className="text-lg font-semibold mb-2">{activeHitlPrompt.title || 'Approval required'}</h3>
-              <p className="text-sm text-text-secondary whitespace-pre-wrap mb-4">
-                {activeHitlPrompt.message || 'Please choose an option to continue.'}
+            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
+              <h3 className="text-xl font-bold mb-4">{activeHitlPrompt.title || 'Approval required'}</h3>
+              <p className="delete-confirmation-text whitespace-pre-wrap mb-4">
+                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
               </p>
-              <div className="flex flex-col gap-2">
+              <div className="form-actions flex gap-2 justify-end flex-nowrap overflow-x-auto pb-1">
                 {activeHitlPrompt.options.map((option) => {
                   const isSubmitting = state.submittingHitlRequestId === activeHitlPrompt.requestId;
                   return (
                     <button
                       key={option.id}
-                      className="btn-secondary text-left px-3 py-2 rounded border"
+                      className="btn-secondary px-4 py-2 rounded shrink-0"
                       disabled={isSubmitting}
                       $onclick={['respond-hitl-option', {
                         requestId: activeHitlPrompt.requestId,
@@ -298,10 +298,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
                         chatId: activeHitlPrompt.chatId
                       }]}
                     >
-                      <div className="font-medium">{option.label}</div>
-                      {option.description ? (
-                        <div className="text-xs text-text-secondary mt-1">{option.description}</div>
-                      ) : null}
+                      <div className="font-bold">{option.label}</div>
                     </button>
                   );
                 })}

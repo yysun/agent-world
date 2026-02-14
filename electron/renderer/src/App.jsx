@@ -3400,7 +3400,7 @@ export default function App() {
               {activeHitlPrompt.title || 'Approval required'}
             </h3>
             <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
-              {activeHitlPrompt.message || 'Please choose an option to continue.'}
+              {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
             </p>
             <div className="mt-4 flex flex-col gap-2">
               {activeHitlPrompt.options.map((option) => {

@@ -1485,6 +1485,7 @@ legend {
 
 .send-button:hover:not(:disabled) {
   background-color: var(--accent-secondary);
+  color: white;
   transform: translateY(-1px);
 }
 
@@ -1494,6 +1495,7 @@ legend {
 
 .send-button.stop-button:hover:not(:disabled) {
   background-color: var(--text-primary);
+  color: white;
 }
 
 .send-button:disabled {
