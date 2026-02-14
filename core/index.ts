@@ -76,6 +76,17 @@ export {
   clearToolsCache
 } from './mcp-server-registry.js';
 
+export {
+  skillRegistry,
+  syncSkills,
+  getSkills,
+  getSkill,
+  clearSkillsForTests,
+  type SkillRegistryEntry,
+  type SyncSkillsOptions,
+  type SyncSkillsResult,
+} from './skill-registry.js';
+
 // === SHELL COMMAND TOOL ===
 export {
   executeShellCommand,
