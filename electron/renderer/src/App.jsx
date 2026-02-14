@@ -21,6 +21,23 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Fixed world-info fallback parsing so null/blank totals no longer coerce to zero and now correctly use derived stats/default turn limit.
+ * - 2026-02-14: Restored accessible switch labeling by wiring agent Auto Reply text to the switch control via aria-labelledby in extracted form fields.
+ * - 2026-02-14: Broke renderer monolith into reusable components (`WorldInfoCard`, `ComposerBar`, `AgentFormFields`, `PromptEditorModal`, `WorldConfigEditorModal`) to simplify App.jsx.
+ * - 2026-02-14: Fixed left-sidebar World Info stats to always show numeric agent/message counts using derived fallbacks when backend totals are absent.
+ * - 2026-02-14: Updated composer toolbar visuals by switching the attachment icon to `+` and reducing attachment/project control sizing.
+ * - 2026-02-14: Removed left padding from Auto Reply rows in agent create/edit forms.
+ * - 2026-02-14: Updated agent Auto Reply rows to borderless styling and lighter switch tracks.
+ * - 2026-02-14: Made form labels bold and standardized provider/model labels to `LLM Provider` and `LLM model` in world/agent create-edit forms.
+ * - 2026-02-14: Darkened form label contrast to `text-sidebar-foreground/90`.
+ * - 2026-02-14: Aligned agent Auto Reply label and switch on one row and removed explicit enabled/disabled text.
+ * - 2026-02-14: Reduced agent Auto Reply switch size and made agent System Prompt editors consume available vertical form space.
+ * - 2026-02-14: Switched world/agent form labels to non-capitalized medium-contrast styling (`text-sidebar-foreground/75`) for clearer readability.
+ * - 2026-02-14: Updated agent create/edit forms with sidebar-style labels, switch-based Auto Reply control, and provider/model on a single row.
+ * - 2026-02-14: Lightened world-form label color for better visual hierarchy in create/edit side panel.
+ * - 2026-02-14: Styled world-form field labels to match left-sidebar caps/gray label treatment.
+ * - 2026-02-14: Added explicit field labels to world create/edit forms (except Variables/MCP config rows) and moved Main Agent above Variables/MCP in edit mode.
+ * - 2026-02-14: Updated world create/edit panel behavior: hide Variables/MCP on create; show label + popup expand editors on edit; moved Main Agent to the last field.
  * - 2026-02-14: Removed renderer-local `working_directory=./` fallback; missing values now rely on core default working-directory behavior.
  * - 2026-02-14: Removed monospace font override from desktop log/system lines so tool error text matches agent message typography.
  * - 2026-02-13: Unified desktop log-line typography so category and detailed error text render with a single consistent font style.
@@ -86,7 +103,12 @@ import { createStreamingState } from './streaming-state.js';
 import { createActivityState } from './activity-state.js';
 import {
   ActivityPulse,
-  ElapsedTimeCounter
+  ElapsedTimeCounter,
+  WorldInfoCard,
+  ComposerBar,
+  AgentFormFields,
+  PromptEditorModal,
+  WorldConfigEditorModal
 } from './components/index.js';
 import { renderMarkdown } from './utils/markdown';
 import { getDesktopApi, safeMessage } from './domain/desktop-api.js';
@@ -452,6 +474,14 @@ function parseOptionalNumber(value) {
   return parsed;
 }
 
+function parseOptionalInteger(value, min = 0) {
+  if (value == null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(min, Math.floor(parsed));
+}
+
 function getSessionTimestamp(session) {
   const updatedAt = session?.updatedAt ? new Date(session.updatedAt).getTime() : Number.NaN;
   if (Number.isFinite(updatedAt)) return updatedAt;
@@ -694,10 +724,11 @@ export default function App() {
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [promptEditorValue, setPromptEditorValue] = useState('');
   const [promptEditorTarget, setPromptEditorTarget] = useState(null); // 'create' or 'edit'
-  // MCP config editor modal state
-  const [mcpEditorOpen, setMcpEditorOpen] = useState(false);
-  const [mcpEditorValue, setMcpEditorValue] = useState('');
-  const [mcpEditorTarget, setMcpEditorTarget] = useState(null); // 'create' or 'edit'
+  // World config editor modal state (edit-world only: variables | mcpConfig)
+  const [worldConfigEditorOpen, setWorldConfigEditorOpen] = useState(false);
+  const [worldConfigEditorValue, setWorldConfigEditorValue] = useState('');
+  const [worldConfigEditorField, setWorldConfigEditorField] = useState('mcpConfig');
+  const [worldConfigEditorTarget, setWorldConfigEditorTarget] = useState(null); // 'edit'
 
   const setStatusText = useCallback((text, kind = 'info') => {
     publishStatusBarStatus(text, kind);
@@ -828,6 +859,25 @@ export default function App() {
     () => sessions.find((session) => session.id === selectedSessionId) || null,
     [sessions, selectedSessionId]
   );
+
+  const worldInfoStats = useMemo(() => {
+    const totalAgentsParsed = parseOptionalInteger(loadedWorld?.totalAgents, 0);
+    const totalMessagesParsed = parseOptionalInteger(loadedWorld?.totalMessages, 0);
+    const turnLimitParsed = parseOptionalInteger(loadedWorld?.turnLimit, MIN_TURN_LIMIT);
+
+    const fallbackTotalAgents = Array.isArray(loadedWorld?.agents) ? loadedWorld.agents.length : 0;
+    const fallbackTotalMessages = sessions.reduce((sum, session) => {
+      const next = Number(session?.messageCount);
+      return sum + (Number.isFinite(next) ? Math.max(0, Math.floor(next)) : 0);
+    }, 0);
+
+    return {
+      totalAgents: totalAgentsParsed ?? fallbackTotalAgents,
+      totalMessages: totalMessagesParsed ?? fallbackTotalMessages,
+      turnLimit: turnLimitParsed ?? DEFAULT_TURN_LIMIT
+    };
+  }, [loadedWorld, sessions]);
+
   const filteredSessions = useMemo(() => {
     const query = String(sessionSearch || '').trim().toLowerCase();
     if (!query) return sessions;
@@ -2247,53 +2297,14 @@ export default function App() {
               </div>
             </div>
           ) : loadedWorld ? (
-            <div className="mb-4 shrink-0 space-y-2 text-xs">
-              <div className="uppercase tracking-wide text-sidebar-foreground/70">World Info</div>
-              <div className="rounded-md border border-sidebar-border bg-sidebar-accent p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-sidebar-foreground truncate" title={loadedWorld.name}>
-                    {loadedWorld.name}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={onOpenWorldEditPanel}
-                      disabled={updatingWorld || deletingWorld}
-                      className="rounded p-1 text-sidebar-foreground transition-colors hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Edit world"
-                      aria-label="Edit world"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onDeleteWorld}
-                      disabled={deletingWorld || updatingWorld}
-                      className="rounded p-1 text-sidebar-foreground transition-colors hover:bg-destructive/20 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Delete world"
-                      aria-label="Delete world"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 6L6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-                {loadedWorld.description ? (
-                  <div className="mb-2 text-sidebar-foreground/80">
-                    {loadedWorld.description}
-                  </div>
-                ) : null}
-                <div className="space-y-1 text-sidebar-foreground/80">
-                  <div>
-                    Agents: {loadedWorld.totalAgents} | Turn Limit: {loadedWorld.turnLimit} | Messages: {loadedWorld.totalMessages}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <WorldInfoCard
+              loadedWorld={loadedWorld}
+              worldInfoStats={worldInfoStats}
+              updatingWorld={updatingWorld}
+              deletingWorld={deletingWorld}
+              onOpenWorldEditPanel={onOpenWorldEditPanel}
+              onDeleteWorld={onDeleteWorld}
+            />
           ) : availableWorlds.length > 0 ? (
             <div className="mb-4 shrink-0 rounded-md border border-dashed border-sidebar-border p-3 text-xs text-sidebar-foreground/70">
               Select a world from the dropdown above
@@ -2681,96 +2692,18 @@ export default function App() {
                 </div>
               </div>
 
-              <form onSubmit={onSubmitMessage} className="px-4 pt-4 pb-2">
-                <div className="mx-auto flex w-full max-w-[750px] flex-col gap-2 rounded-lg border border-input bg-card p-3">
-                  <textarea
-                    ref={composerTextareaRef}
-                    value={composer}
-                    onChange={(event) => setComposer(event.target.value)}
-                    onKeyDown={onComposerKeyDown}
-                    rows={1}
-                    placeholder="Send a message..."
-                    className="w-full resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                    aria-label="Message input"
-                  />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Attach file"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-5 w-5"
-                        >
-                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onSelectProject}
-                        className="flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                        aria-label="Select project folder"
-                        title={selectedProjectPath ? `Project folder: ${selectedProjectPath}` : 'Select project folder for context'}
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-                        </svg>
-                        <span>Project</span>
-                      </button>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={canStopCurrentSession ? isCurrentSessionStopping : (isCurrentSessionSending || !composer.trim())}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label={canStopCurrentSession ? 'Stop message processing' : 'Send message'}
-                      title={canStopCurrentSession ? 'Stop processing' : 'Send message'}
-                    >
-                      {canStopCurrentSession ? (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          className="h-4 w-4"
-                          aria-hidden="true"
-                        >
-                          <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                        </svg>
-                      ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-5 w-5"
-                          aria-hidden="true"
-                        >
-                          <path d="M12 19V5M5 12l7-7 7 7" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </form>
+              <ComposerBar
+                onSubmitMessage={onSubmitMessage}
+                composerTextareaRef={composerTextareaRef}
+                composer={composer}
+                onComposerChange={setComposer}
+                onComposerKeyDown={onComposerKeyDown}
+                onSelectProject={onSelectProject}
+                selectedProjectPath={selectedProjectPath}
+                canStopCurrentSession={canStopCurrentSession}
+                isCurrentSessionStopping={isCurrentSessionStopping}
+                isCurrentSessionSending={isCurrentSessionSending}
+              />
             </section>
 
             <aside
@@ -2807,83 +2740,104 @@ export default function App() {
                       <>
                         <form onSubmit={onUpdateWorld} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                            <div className="rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground/80">
-                              Name: {editingWorld.name}
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">World Name</label>
+                              <div className="rounded-md border border-sidebar-border bg-sidebar px-3 py-2 text-xs text-sidebar-foreground/80">
+                                {editingWorld.name}
+                              </div>
                             </div>
-                            <textarea
-                              value={editingWorld.description}
-                              onChange={(event) => setEditingWorld((value) => ({ ...value, description: event.target.value }))}
-                              placeholder="Description (optional)"
-                              className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={updatingWorld || deletingWorld}
-                            />
-                            <input
-                              value={editingWorld.mainAgent}
-                              onChange={(event) => setEditingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
-                              placeholder="Main agent (optional)"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={updatingWorld || deletingWorld}
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                              <select
-                                value={editingWorld.chatLLMProvider}
-                                onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Description</label>
+                              <textarea
+                                value={editingWorld.description}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, description: event.target.value }))}
+                                placeholder="Description (optional)"
+                                className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                                 disabled={updatingWorld || deletingWorld}
-                              >
-                                <option value="">Select provider</option>
-                                {WORLD_PROVIDER_OPTIONS.map((provider) => (
-                                  <option key={provider.value} value={provider.value}>
-                                    {provider.label}
-                                  </option>
-                                ))}
-                              </select>
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-sidebar-foreground/90">LLM Provider</label>
+                                <select
+                                  value={editingWorld.chatLLMProvider}
+                                  onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
+                                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                                  disabled={updatingWorld || deletingWorld}
+                                >
+                                  <option value="">Select provider</option>
+                                  {WORLD_PROVIDER_OPTIONS.map((provider) => (
+                                    <option key={provider.value} value={provider.value}>
+                                      {provider.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-sidebar-foreground/90">LLM model</label>
+                                <input
+                                  value={editingWorld.chatLLMModel}
+                                  onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
+                                  placeholder="Chat LLM model"
+                                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                  disabled={updatingWorld || deletingWorld}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Turn Limit</label>
                               <input
-                                value={editingWorld.chatLLMModel}
-                                onChange={(event) => setEditingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
-                                placeholder="Chat LLM model"
+                                type="number"
+                                min={MIN_TURN_LIMIT}
+                                max="50"
+                                value={editingWorld.turnLimit}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
                                 className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                                 disabled={updatingWorld || deletingWorld}
                               />
                             </div>
-                            <input
-                              type="number"
-                              min={MIN_TURN_LIMIT}
-                              max="50"
-                              value={editingWorld.turnLimit}
-                              onChange={(event) => setEditingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={updatingWorld || deletingWorld}
-                            />
-                            <div className="relative flex-1 flex flex-col">
-                              <textarea
-                                value={editingWorld.variables}
-                                onChange={(event) => setEditingWorld((value) => ({ ...value, variables: event.target.value }))}
-                                placeholder="Variables (.env), e.g. working_directory=/path/to/project"
-                                className="min-h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Main Agent</label>
+                              <input
+                                value={editingWorld.mainAgent}
+                                onChange={(event) => setEditingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
+                                placeholder="Main agent (optional)"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                                 disabled={updatingWorld || deletingWorld}
                               />
-                              <p className="mt-1 text-[11px] text-sidebar-foreground/60">
-                                Example: <span className="font-mono">working_directory=/path/to/project</span>
-                              </p>
                             </div>
-                            <div className="relative flex-1 flex flex-col">
-                              <textarea
-                                value={editingWorld.mcpConfig}
-                                onChange={(event) => setEditingWorld((value) => ({ ...value, mcpConfig: event.target.value }))}
-                                placeholder="Enter MCP servers configuration as JSON..."
-                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={updatingWorld || deletingWorld}
-                              />
+                            <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
+                              <span>Variables (.env): {String(editingWorld.variables || '').trim() ? 'Configured' : 'Not configured'}</span>
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setMcpEditorValue(editingWorld.mcpConfig);
-                                  setMcpEditorTarget('edit');
-                                  setMcpEditorOpen(true);
+                                  setWorldConfigEditorField('variables');
+                                  setWorldConfigEditorValue(editingWorld.variables || '');
+                                  setWorldConfigEditorTarget('edit');
+                                  setWorldConfigEditorOpen(true);
                                 }}
-                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
-                                title="Expand editor"
+                                className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand variables editor"
+                                disabled={updatingWorld || deletingWorld}
+                              >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
+                              <span>MCP Config: {String(editingWorld.mcpConfig || '').trim() ? 'Configured' : 'Not configured'}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setWorldConfigEditorField('mcpConfig');
+                                  setWorldConfigEditorValue(editingWorld.mcpConfig || '');
+                                  setWorldConfigEditorTarget('edit');
+                                  setWorldConfigEditorOpen(true);
+                                }}
+                                className="rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
+                                title="Expand MCP editor"
+                                disabled={updatingWorld || deletingWorld}
                               >
                                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
@@ -2924,84 +2878,17 @@ export default function App() {
                       <>
                         <form onSubmit={onCreateAgent} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                            <input
-                              value={creatingAgent.name}
-                              onChange={(event) => setCreatingAgent((value) => ({ ...value, name: event.target.value }))}
-                              placeholder="Agent name"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            <AgentFormFields
+                              agent={creatingAgent}
+                              setAgent={setCreatingAgent}
                               disabled={savingAgent}
+                              providerOptions={AGENT_PROVIDER_OPTIONS}
+                              onExpandPrompt={() => {
+                                setPromptEditorValue(creatingAgent.systemPrompt);
+                                setPromptEditorTarget('create');
+                                setPromptEditorOpen(true);
+                              }}
                             />
-                            <label className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
-                              <input
-                                type="checkbox"
-                                checked={creatingAgent.autoReply !== false}
-                                onChange={(event) => setCreatingAgent((value) => ({ ...value, autoReply: event.target.checked }))}
-                                disabled={savingAgent}
-                              />
-                              <span>Auto Reply</span>
-                            </label>
-                            <select
-                              value={creatingAgent.provider}
-                              onChange={(event) => setCreatingAgent((value) => ({ ...value, provider: event.target.value }))}
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
-                              disabled={savingAgent}
-                            >
-                              {AGENT_PROVIDER_OPTIONS.map((provider) => (
-                                <option key={provider} value={provider}>
-                                  {provider}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              value={creatingAgent.model}
-                              onChange={(event) => setCreatingAgent((value) => ({ ...value, model: event.target.value }))}
-                              placeholder="Model (for example: gpt-4o-mini)"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={savingAgent}
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={creatingAgent.temperature}
-                                onChange={(event) => setCreatingAgent((value) => ({ ...value, temperature: event.target.value }))}
-                                placeholder="Temperature"
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent}
-                              />
-                              <input
-                                type="number"
-                                min="1"
-                                value={creatingAgent.maxTokens}
-                                onChange={(event) => setCreatingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
-                                placeholder="Max tokens"
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent}
-                              />
-                            </div>
-                            <div className="relative flex-1 flex flex-col">
-                              <textarea
-                                value={creatingAgent.systemPrompt}
-                                onChange={(event) => setCreatingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
-                                placeholder="System prompt (optional)"
-                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPromptEditorValue(creatingAgent.systemPrompt);
-                                  setPromptEditorTarget('create');
-                                  setPromptEditorOpen(true);
-                                }}
-                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
-                                title="Expand editor"
-                              >
-                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </button>
-                            </div>
                           </div>
                           <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
                             <div></div>
@@ -3029,84 +2916,17 @@ export default function App() {
                       <>
                         <form onSubmit={onUpdateAgent} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                            <input
-                              value={editingAgent.name}
-                              onChange={(event) => setEditingAgent((value) => ({ ...value, name: event.target.value }))}
-                              placeholder="Agent name"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            <AgentFormFields
+                              agent={editingAgent}
+                              setAgent={setEditingAgent}
                               disabled={savingAgent || deletingAgent}
+                              providerOptions={AGENT_PROVIDER_OPTIONS}
+                              onExpandPrompt={() => {
+                                setPromptEditorValue(editingAgent.systemPrompt);
+                                setPromptEditorTarget('edit');
+                                setPromptEditorOpen(true);
+                              }}
                             />
-                            <label className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground">
-                              <input
-                                type="checkbox"
-                                checked={editingAgent.autoReply !== false}
-                                onChange={(event) => setEditingAgent((value) => ({ ...value, autoReply: event.target.checked }))}
-                                disabled={savingAgent || deletingAgent}
-                              />
-                              <span>Auto Reply</span>
-                            </label>
-                            <select
-                              value={editingAgent.provider}
-                              onChange={(event) => setEditingAgent((value) => ({ ...value, provider: event.target.value }))}
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
-                              disabled={savingAgent || deletingAgent}
-                            >
-                              {AGENT_PROVIDER_OPTIONS.map((provider) => (
-                                <option key={provider} value={provider}>
-                                  {provider}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              value={editingAgent.model}
-                              onChange={(event) => setEditingAgent((value) => ({ ...value, model: event.target.value }))}
-                              placeholder="Model (for example: gpt-4o-mini)"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                              disabled={savingAgent || deletingAgent}
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={editingAgent.temperature}
-                                onChange={(event) => setEditingAgent((value) => ({ ...value, temperature: event.target.value }))}
-                                placeholder="Temperature"
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent || deletingAgent}
-                              />
-                              <input
-                                type="number"
-                                min="1"
-                                value={editingAgent.maxTokens}
-                                onChange={(event) => setEditingAgent((value) => ({ ...value, maxTokens: event.target.value }))}
-                                placeholder="Max tokens"
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent || deletingAgent}
-                              />
-                            </div>
-                            <div className="relative flex-1 flex flex-col">
-                              <textarea
-                                value={editingAgent.systemPrompt}
-                                onChange={(event) => setEditingAgent((value) => ({ ...value, systemPrompt: event.target.value }))}
-                                placeholder="System prompt (optional)"
-                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                                disabled={savingAgent || deletingAgent}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setPromptEditorValue(editingAgent.systemPrompt);
-                                  setPromptEditorTarget('edit');
-                                  setPromptEditorOpen(true);
-                                }}
-                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
-                                title="Expand editor"
-                              >
-                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </button>
-                            </div>
                           </div>
                           <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
                             <button
@@ -3141,84 +2961,69 @@ export default function App() {
                       <>
                         <form onSubmit={onCreateWorld} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                            <input
-                              value={creatingWorld.name}
-                              onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
-                              placeholder="World name"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            />
-                            <textarea
-                              value={creatingWorld.description}
-                              onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
-                              placeholder="Description (optional)"
-                              className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            />
-                            <input
-                              value={creatingWorld.mainAgent}
-                              onChange={(event) => setCreatingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
-                              placeholder="Main agent (optional)"
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                              <select
-                                value={creatingWorld.chatLLMProvider}
-                                onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
-                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
-                              >
-                                <option value="">Select provider</option>
-                                {WORLD_PROVIDER_OPTIONS.map((provider) => (
-                                  <option key={provider.value} value={provider.value}>
-                                    {provider.label}
-                                  </option>
-                                ))}
-                              </select>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">World Name</label>
                               <input
-                                value={creatingWorld.chatLLMModel}
-                                onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
-                                placeholder="Chat LLM model"
+                                value={creatingWorld.name}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, name: event.target.value }))}
+                                placeholder="World name"
                                 className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               />
                             </div>
-                            <input
-                              type="number"
-                              min={MIN_TURN_LIMIT}
-                              max="50"
-                              value={creatingWorld.turnLimit}
-                              onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
-                              className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
-                            />
-                            <div className="relative flex-1 flex flex-col">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Description</label>
                               <textarea
-                                value={creatingWorld.variables}
-                                onChange={(event) => setCreatingWorld((value) => ({ ...value, variables: event.target.value }))}
-                                placeholder="Variables (.env), e.g. working_directory=/path/to/project"
-                                className="min-h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                value={creatingWorld.description}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, description: event.target.value }))}
+                                placeholder="Description (optional)"
+                                className="h-20 w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               />
-                              <p className="mt-1 text-[11px] text-sidebar-foreground/60">
-                                Example: <span className="font-mono">working_directory=/path/to/project</span>
-                              </p>
                             </div>
-                            <div className="relative flex-1 flex flex-col">
-                              <textarea
-                                value={creatingWorld.mcpConfig}
-                                onChange={(event) => setCreatingWorld((value) => ({ ...value, mcpConfig: event.target.value }))}
-                                placeholder="Enter MCP servers configuration as JSON..."
-                                className="min-h-24 w-full flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 font-mono text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-sidebar-foreground/90">LLM Provider</label>
+                                <select
+                                  value={creatingWorld.chatLLMProvider}
+                                  onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMProvider: event.target.value }))}
+                                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none focus:border-sidebar-ring"
+                                >
+                                  <option value="">Select provider</option>
+                                  {WORLD_PROVIDER_OPTIONS.map((provider) => (
+                                    <option key={provider.value} value={provider.value}>
+                                      {provider.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-sidebar-foreground/90">LLM model</label>
+                                <input
+                                  value={creatingWorld.chatLLMModel}
+                                  onChange={(event) => setCreatingWorld((value) => ({ ...value, chatLLMModel: event.target.value }))}
+                                  placeholder="Chat LLM model"
+                                  className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Turn Limit</label>
+                              <input
+                                type="number"
+                                min={MIN_TURN_LIMIT}
+                                max="50"
+                                value={creatingWorld.turnLimit}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, turnLimit: Number(event.target.value) || MIN_TURN_LIMIT }))}
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
                               />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setMcpEditorValue(creatingWorld.mcpConfig);
-                                  setMcpEditorTarget('create');
-                                  setMcpEditorOpen(true);
-                                }}
-                                className="absolute right-2 top-2 rounded p-1 text-sidebar-foreground/50 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground"
-                                title="Expand editor"
-                              >
-                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </button>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-bold text-sidebar-foreground/90">Main Agent</label>
+                              <input
+                                value={creatingWorld.mainAgent}
+                                onChange={(event) => setCreatingWorld((value) => ({ ...value, mainAgent: event.target.value }))}
+                                placeholder="Main agent (optional)"
+                                className="w-full rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/70 focus:border-sidebar-ring"
+                              />
                             </div>
                           </div>
                           <div className="mt-auto flex justify-between gap-2 border-t border-sidebar-border bg-sidebar pt-2">
@@ -3297,109 +3102,37 @@ export default function App() {
         </main>
       </div>
 
-      {/* Prompt Editor Modal */}
-      {promptEditorOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="flex h-[80vh] w-[80vw] max-w-4xl flex-col rounded-lg border border-border bg-background shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h3 className="text-sm font-medium text-foreground">Edit System Prompt</h3>
-              <button
-                type="button"
-                onClick={() => setPromptEditorOpen(false)}
-                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 p-4">
-              <textarea
-                value={promptEditorValue}
-                onChange={(event) => setPromptEditorValue(event.target.value)}
-                placeholder="Enter system prompt..."
-                className="h-full w-full resize-none rounded-md border border-input bg-card p-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
-                autoFocus
-              />
-            </div>
-            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
-              <button
-                type="button"
-                onClick={() => setPromptEditorOpen(false)}
-                className="rounded-md border border-input px-4 py-2 text-sm text-foreground hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (promptEditorTarget === 'create') {
-                    setCreatingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
-                  } else if (promptEditorTarget === 'edit') {
-                    setEditingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
-                  }
-                  setPromptEditorOpen(false);
-                }}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <PromptEditorModal
+        open={promptEditorOpen}
+        value={promptEditorValue}
+        onChange={setPromptEditorValue}
+        onClose={() => setPromptEditorOpen(false)}
+        onApply={() => {
+          if (promptEditorTarget === 'create') {
+            setCreatingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
+          } else if (promptEditorTarget === 'edit') {
+            setEditingAgent((value) => ({ ...value, systemPrompt: promptEditorValue }));
+          }
+          setPromptEditorOpen(false);
+        }}
+      />
 
-      {/* MCP Config Editor Modal */}
-      {mcpEditorOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="flex h-[80vh] w-[80vw] max-w-4xl flex-col rounded-lg border border-border bg-background shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <h3 className="text-sm font-medium text-foreground">Edit MCP Configuration</h3>
-              <button
-                type="button"
-                onClick={() => setMcpEditorOpen(false)}
-                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 p-4">
-              <textarea
-                value={mcpEditorValue}
-                onChange={(event) => setMcpEditorValue(event.target.value)}
-                placeholder="Enter MCP servers configuration as JSON..."
-                className="h-full w-full resize-none rounded-md border border-input bg-card p-4 font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring"
-                autoFocus
-              />
-            </div>
-            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
-              <button
-                type="button"
-                onClick={() => setMcpEditorOpen(false)}
-                className="rounded-md border border-input px-4 py-2 text-sm text-foreground hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (mcpEditorTarget === 'create') {
-                    setCreatingWorld((value) => ({ ...value, mcpConfig: mcpEditorValue }));
-                  } else if (mcpEditorTarget === 'edit') {
-                    setEditingWorld((value) => ({ ...value, mcpConfig: mcpEditorValue }));
-                  }
-                  setMcpEditorOpen(false);
-                }}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <WorldConfigEditorModal
+        open={worldConfigEditorOpen}
+        field={worldConfigEditorField}
+        value={worldConfigEditorValue}
+        onChange={setWorldConfigEditorValue}
+        onClose={() => setWorldConfigEditorOpen(false)}
+        onApply={() => {
+          if (worldConfigEditorTarget === 'edit') {
+            setEditingWorld((value) => ({
+              ...value,
+              [worldConfigEditorField]: worldConfigEditorValue
+            }));
+          }
+          setWorldConfigEditorOpen(false);
+        }}
+      />
     </div>
   );
 }
