@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Made the new-chat welcome card more compact/simple and added a scrollable skill list for large registries.
+ * - 2026-02-14: Simplified new-chat welcome layout by removing nested border layers for a cleaner single-surface design.
+ * - 2026-02-14: Refined welcome empty-state copy by removing session-name greeting and shortening helper text.
+ * - 2026-02-14: Replaced empty-session placeholder with a centered welcome screen that lists skill-registry entries (name + description) in a muted, onboarding-style layout.
  * - 2026-02-14: Fixed world-info fallback parsing so null/blank totals no longer coerce to zero and now correctly use derived stats/default turn limit.
  * - 2026-02-14: Restored accessible switch labeling by wiring agent Auto Reply text to the switch control via aria-labelledby in extracted form fields.
  * - 2026-02-14: Broke renderer monolith into reusable components (`WorldInfoCard`, `ComposerBar`, `AgentFormFields`, `PromptEditorModal`, `WorldConfigEditorModal`) to simplify App.jsx.
@@ -651,6 +655,29 @@ function validateAgentForm(agentForm) {
   };
 }
 
+function normalizeSkillSummaryEntries(rawEntries) {
+  if (!Array.isArray(rawEntries)) return [];
+
+  const normalized = rawEntries
+    .map((entry) => {
+      const skillId = String(entry?.skill_id || entry?.name || '').trim();
+      if (!skillId) return null;
+      const description = String(entry?.description || '').trim();
+      return { skillId, description };
+    })
+    .filter(Boolean);
+
+  normalized.sort((left, right) => left.skillId.localeCompare(right.skillId));
+  return normalized;
+}
+
+function compactSkillDescription(description) {
+  const normalized = String(description || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'No description provided.';
+  if (normalized.length <= 160) return normalized;
+  return `${normalized.slice(0, 157)}...`;
+}
+
 export default function App() {
   const api = useMemo(() => getDesktopApi(), []);
   const chatSubscriptionCounter = useRef(0);
@@ -671,6 +698,7 @@ export default function App() {
   const [loadingWorld, setLoadingWorld] = useState(false);
   const [availableWorlds, setAvailableWorlds] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [skillRegistryEntries, setSkillRegistryEntries] = useState([]);
   const [sessionSearch, setSessionSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -1082,6 +1110,27 @@ export default function App() {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  useEffect(() => {
+    let isCanceled = false;
+
+    async function loadSkillRegistry() {
+      try {
+        const rawEntries = await api.listSkills();
+        if (isCanceled) return;
+        setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
+      } catch {
+        if (!isCanceled) {
+          setSkillRegistryEntries([]);
+        }
+      }
+    }
+
+    loadSkillRegistry();
+    return () => {
+      isCanceled = true;
+    };
+  }, [api]);
 
   useEffect(() => {
     refreshSessions(loadedWorld?.id);
@@ -2582,13 +2631,66 @@ export default function App() {
           <div className="flex min-h-0 flex-1">
             <section className="flex min-w-0 flex-1 flex-col">
               <div ref={messagesContainerRef} className="flex-1 overflow-auto p-5">
-                <div className="mx-auto w-full max-w-[750px] space-y-3">
+                <div
+                  className={
+                    messages.length === 0 && selectedSession
+                      ? 'mx-auto flex h-full w-full max-w-[920px] items-center justify-center'
+                      : 'mx-auto w-full max-w-[750px] space-y-3'
+                  }
+                >
                   {messages.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                      {selectedSession
-                        ? 'No message yet. Send your first message.'
-                        : 'Select a session from the left column.'}
-                    </div>
+                    selectedSession ? (
+                      <section className="w-full max-w-[620px] rounded-xl border border-border/60 bg-muted/15 px-6 py-6 text-muted-foreground shadow-sm">
+                        <p className="text-center text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground/80">
+                          Welcome
+                        </p>
+                        <h2 className="mt-2 text-center text-xl font-semibold text-foreground/80">
+                          Let's talk.
+                        </h2>
+                        <p className="mx-auto mt-2 max-w-[500px] text-center text-sm leading-5 text-muted-foreground">
+                          Here are the skills available in this workspace.
+                        </p>
+
+                        <div className="mt-5">
+                          <div className="mb-2 flex items-center justify-between">
+                            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+                              Skill Registry
+                            </h3>
+                            <span className="text-xs text-muted-foreground/75">
+                              {skillRegistryEntries.length} total
+                            </span>
+                          </div>
+
+                          {skillRegistryEntries.length > 0 ? (
+                            <div className="max-h-64 overflow-y-auto pr-1">
+                              <ul className="divide-y divide-border/40">
+                                {skillRegistryEntries.map((entry) => (
+                                  <li
+                                    key={entry.skillId}
+                                    className="py-2 first:pt-0 last:pb-0"
+                                  >
+                                    <p className="text-sm font-medium text-foreground/75">
+                                      {entry.skillId}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                      {compactSkillDescription(entry.description)}
+                                    </p>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              No skills discovered yet.
+                            </p>
+                          )}
+                        </div>
+                      </section>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                        Select a session from the left column.
+                      </div>
+                    )
                   ) : (
                     messages.map((message, messageIndex) => {
                       if (!message?.messageId) return null;

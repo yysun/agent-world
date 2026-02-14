@@ -13,6 +13,7 @@
  * - Guard is intentionally lightweight and non-breaking for valid callers.
  *
  * Recent Changes:
+ * - 2026-02-14: Added generic return typing for invoke helper so bridge methods can request precise IPC response types.
  * - 2026-02-12: Added preload invoke guard helper for Phase 4 bridge hardening.
  */
 
@@ -35,12 +36,22 @@ export function invokeDesktopChannel(
   ipcRendererLike: IpcRendererInvokeLike,
   channel: DesktopInvokeChannel,
   payload?: unknown
-): Promise<unknown> {
+): Promise<unknown>;
+export function invokeDesktopChannel<TResponse>(
+  ipcRendererLike: IpcRendererInvokeLike,
+  channel: DesktopInvokeChannel,
+  payload?: unknown
+): Promise<TResponse>;
+export function invokeDesktopChannel<TResponse = unknown>(
+  ipcRendererLike: IpcRendererInvokeLike,
+  channel: DesktopInvokeChannel,
+  payload?: unknown
+): Promise<TResponse> {
   if (!isAllowedDesktopChannel(channel)) {
     throw new Error(`Blocked unsupported IPC channel: ${channel}`);
   }
   if (typeof payload === 'undefined') {
-    return ipcRendererLike.invoke(channel);
+    return ipcRendererLike.invoke(channel) as Promise<TResponse>;
   }
-  return ipcRendererLike.invoke(channel, payload);
+  return ipcRendererLike.invoke(channel, payload) as Promise<TResponse>;
 }

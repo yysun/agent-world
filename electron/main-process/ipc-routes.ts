@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `skill:list` route wiring for renderer welcome-screen skill registry hydration.
  * - 2026-02-13: Added `message:edit` route wiring for core-driven message edit/resubmission.
  * - 2026-02-13: Added `chat:stopMessage` route wiring for session-scoped stop requests.
  * - 2026-02-12: Switched route channel strings to shared IPC constants and typed payload contracts.
@@ -34,6 +35,7 @@ export interface MainIpcHandlers {
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
   importWorld: () => Promise<unknown> | unknown;
   listWorkspaceWorlds: () => Promise<unknown> | unknown;
+  listSkillRegistry: () => Promise<unknown> | unknown;
   createWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
   updateWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
   deleteWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
@@ -63,6 +65,7 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, handler: async (_event, worldId) => handlers.loadSpecificWorld(worldId) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, handler: async () => handlers.importWorld() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LIST, handler: async () => handlers.listWorkspaceWorlds() },
+    { channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST, handler: async () => handlers.listSkillRegistry() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, handler: async (_event, payload) => handlers.createWorkspaceWorld(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_UPDATE, handler: async (_event, payload) => handlers.updateWorkspaceWorld(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_DELETE, handler: async (_event, payload) => handlers.deleteWorkspaceWorld(payload) },

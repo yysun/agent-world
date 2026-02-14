@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
  * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
  * - 2026-02-13: Added chat stop-message invoke contract for session-scoped processing interruption.
  * - 2026-02-12: Added shared IPC contract definitions for Phase 4 typed bridge hardening.
@@ -30,6 +31,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
   WORLD_LIST: 'world:list',
+  SKILL_LIST: 'skill:list',
   WORLD_CREATE: 'world:create',
   WORLD_UPDATE: 'world:update',
   WORLD_DELETE: 'world:delete',
@@ -98,6 +100,13 @@ export interface ChatEventPayload {
   [key: string]: unknown;
 }
 
+export interface SkillRegistrySummary {
+  skill_id: string;
+  description: string;
+  hash: string;
+  lastUpdated: string;
+}
+
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
   openWorkspace: () => Promise<unknown>;
@@ -105,6 +114,7 @@ export interface DesktopApi {
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: () => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
+  listSkills: () => Promise<SkillRegistrySummary[]>;
   createWorld: (payload: Record<string, unknown>) => Promise<unknown>;
   updateWorld: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;
   deleteWorld: (worldId: string) => Promise<unknown>;

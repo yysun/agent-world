@@ -14,6 +14,8 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-14: Typed `listSkills()` bridge invoke response as `SkillRegistrySummary[]` to satisfy DesktopApi contract.
+ * - 2026-02-14: Added `listSkills()` bridge method for renderer welcome-screen skill registry cards.
  * - 2026-02-13: Added `editMessage(worldId, messageId, newContent, chatId)` IPC bridge method for core-driven message edit flow.
  * - 2026-02-13: Added `stopMessage(worldId, chatId)` IPC bridge method for session-scoped stop control.
  * - 2026-02-12: Added dependency-injected bridge creation/exposure helpers for stable unit testing without Electron runtime module mocks.
@@ -26,7 +28,8 @@ import {
   DESKTOP_BRIDGE_KEY,
   DESKTOP_INVOKE_CHANNELS,
   type ChatEventPayload,
-  type DesktopApi
+  type DesktopApi,
+  type SkillRegistrySummary
 } from '../shared/ipc-contracts.js';
 import { invokeDesktopChannel } from './invoke.js';
 import {
@@ -74,6 +77,11 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, worldId),
     importWorld: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT),
     listWorlds: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),
+    listSkills: () =>
+      invokeDesktopChannel<SkillRegistrySummary[]>(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.SKILL_LIST
+      ),
     createWorld: (payload) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, payload),
     updateWorld: (worldId, payload) =>

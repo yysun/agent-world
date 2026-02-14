@@ -1,39 +1,44 @@
 /**
- * Skill Registry - Singleton registry and synchronization for agent skills
+ * Skill Registry - Singleton registry and synchronization for agent skills.
  *
  * Purpose:
- * - Maintain an in-memory singleton registry of discovered skills from SKILL.md files
- * - Synchronize registry entries from user and project skill directories
+ * - Maintain one in-memory registry keyed by `skill_id`
+ * - Sync registry entries from discovered SKILL.md files in user/project roots
  *
  * Key Features:
- * - Singleton module-level registry with query helpers
- * - Recursive SKILL.md discovery across configurable roots
- * - Content hashing for change detection
- * - Incremental sync based on file modified time
- * - Automatic pruning of removed skills
+ * - Singleton module-level registry with exported helpers
+ * - Recursive SKILL.md discovery with deterministic ordering
+ * - Hash-based update checks using full SKILL.md content
+ * - Automatic initial sync on module load so core starts with up-to-date skills
+ * - Automatic pruning of entries whose files no longer exist
  *
- * Notes on Implementation:
- * - Default scan roots include user-level and project-level skill folders
- * - Skill ID is derived from YAML front matter `name` when present; falls back to directory name
- * - Project skills are scanned after user skills and can override by skill ID
+ * Implementation Notes:
+ * - `skill_id` is sourced from front-matter `name`
+ * - `description` is sourced from front-matter `description`
+ * - `hash` is computed from full SKILL.md content (front matter + body)
+ * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
- * - 2026-02-14: Parse SKILL.md YAML front matter for metadata-driven `name` and `description`.
- * - 2026-02-14: Added initial singleton skill registry with syncSkills support.
+ * - 2026-02-14: Added `~/.codex/skills` to default user skill roots for Codex-managed skills discovery.
+ * - 2026-02-14: Removed timestamp-gated update blocking so project-scope collisions always override user-scope entries when hashes differ.
+ * - 2026-02-14: Fixed skill collision precedence so project-root skills override user-root skills for the same `skill_id`.
+ * - 2026-02-14: Added `waitForInitialSkillSync` and startup sync tracking promise for deterministic core-load sync completion.
+ * - 2026-02-14: Added module-load auto-sync so each core load refreshes the skill registry.
+ * - 2026-02-14: Switched skill hash generation to use full SKILL.md content instead of metadata-only fields.
+ * - 2026-02-14: Switched registry metadata source to SKILL.md front matter (`name` + `description`).
+ * - 2026-02-14: Use front-matter `name` as canonical `skill_id`.
  */
 
 import { createHash } from 'crypto';
+import { promises as fs, type Dirent, type Stats } from 'fs';
 import { homedir } from 'os';
-import path from 'path';
-import { promises as fs } from 'fs';
+import * as path from 'path';
 
 export interface SkillRegistryEntry {
-  name: string;
   skill_id: string;
   description: string;
   hash: string;
   lastUpdated: string;
-  skillFilePath: string;
 }
 
 export interface SyncSkillsOptions {
@@ -50,7 +55,6 @@ export interface SyncSkillsResult {
 }
 
 interface DiscoveredSkill {
-  inferredSkillId: string;
   skillFilePath: string;
   lastUpdated: string;
 }
@@ -63,15 +67,13 @@ interface SkillFrontMatter {
 function buildDefaultUserSkillRoots(): string[] {
   return [
     path.join(homedir(), '.agents', 'skills'),
+    path.join(homedir(), '.codex', 'skills'),
   ];
 }
 
 function buildDefaultProjectSkillRoots(): string[] {
   const cwd = process.cwd();
-  return [
-    path.join(cwd, '.agents', 'skills'),
-    path.join(cwd, 'skills'),
-  ];
+  return [path.join(cwd, '.agents', 'skills'), path.join(cwd, 'skills')];
 }
 
 function normalizeRoots(roots: string[]): string[] {
@@ -79,50 +81,7 @@ function normalizeRoots(roots: string[]): string[] {
     .map((candidate) => candidate.trim())
     .filter((candidate) => candidate.length > 0)
     .map((candidate) => path.resolve(candidate));
-
   return [...new Set(resolved)];
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function findSkillMarkdownFiles(rootPath: string): Promise<string[]> {
-  const output: string[] = [];
-  const pending: string[] = [rootPath];
-
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (!current) {
-      continue;
-    }
-
-    let entries: fs.Dirent[];
-    try {
-      entries = await fs.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      const absolutePath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(absolutePath);
-        continue;
-      }
-
-      if (entry.isFile() && entry.name === 'SKILL.md') {
-        output.push(absolutePath);
-      }
-    }
-  }
-
-  return output;
 }
 
 function createContentHash(content: string): string {
@@ -154,52 +113,118 @@ function parseSkillFrontMatter(content: string): SkillFrontMatter {
 
   const lines = frontMatterMatch[1].split(/\r?\n/);
   const metadata: SkillFrontMatter = {};
-  let currentKey: keyof SkillFrontMatter | null = null;
+  let currentMultilineKey: keyof SkillFrontMatter | null = null;
+  let blockStyle: 'literal' | 'folded' | null = null;
 
   for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    if (!line || line.trimStart().startsWith('#')) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
       continue;
     }
 
-    const keyValueMatch = line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
+    const keyValueMatch = rawLine.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
     if (keyValueMatch) {
       const rawKey = keyValueMatch[1].trim();
       const rawValue = keyValueMatch[2] ?? '';
 
-      if (rawKey === 'name' || rawKey === 'description') {
-        const normalized = normalizeFrontMatterValue(rawValue);
-        metadata[rawKey] = normalized;
-        currentKey = rawKey;
-      } else {
-        currentKey = null;
-      }
-
-      continue;
-    }
-
-    const isContinuation = /^\s+/.test(rawLine);
-    if (isContinuation && currentKey === 'description') {
-      const continuation = normalizeFrontMatterValue(rawLine);
-      if (!continuation) {
+      if (rawKey !== 'name' && rawKey !== 'description') {
+        currentMultilineKey = null;
+        blockStyle = null;
         continue;
       }
 
-      const existing = metadata.description ?? '';
-      metadata.description = existing ? `${existing} ${continuation}` : continuation;
+      if ((rawValue === '|' || rawValue === '>') && rawKey === 'description') {
+        metadata.description = '';
+        currentMultilineKey = rawKey;
+        blockStyle = rawValue === '|' ? 'literal' : 'folded';
+        continue;
+      }
+
+      metadata[rawKey] = normalizeFrontMatterValue(rawValue);
+      currentMultilineKey = null;
+      blockStyle = null;
+      continue;
+    }
+
+    if (!currentMultilineKey || currentMultilineKey !== 'description') {
+      continue;
+    }
+
+    if (!/^\s+/.test(rawLine)) {
+      currentMultilineKey = null;
+      blockStyle = null;
+      continue;
+    }
+
+    const chunk = rawLine.trim();
+    if (!chunk) {
+      continue;
+    }
+
+    if (blockStyle === 'literal') {
+      metadata.description = metadata.description
+        ? `${metadata.description}\n${chunk}`
+        : chunk;
+    } else {
+      metadata.description = metadata.description
+        ? `${metadata.description} ${chunk}`
+        : chunk;
     }
   }
 
   return metadata;
 }
 
-function parseTimestamp(isoTimestamp: string | undefined): number {
-  if (!isoTimestamp) {
-    return 0;
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readDirectoryEntries(directoryPath: string): Promise<Dirent[]> {
+  try {
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    return entries.sort((left, right) => left.name.localeCompare(right.name));
+  } catch {
+    return [];
+  }
+}
+
+async function findSkillMarkdownFiles(rootPath: string): Promise<string[]> {
+  const output: string[] = [];
+  const queue: string[] = [rootPath];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    const entries = await readDirectoryEntries(current);
+    for (const entry of entries) {
+      const absolutePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(absolutePath);
+        continue;
+      }
+      if (entry.isFile() && entry.name === 'SKILL.md') {
+        output.push(absolutePath);
+      }
+    }
   }
 
-  const timestamp = Date.parse(isoTimestamp);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
+  return output.sort((left, right) => left.localeCompare(right));
+}
+
+async function readSkillStats(skillFilePath: string): Promise<Stats | null> {
+  try {
+    return await fs.stat(skillFilePath);
+  } catch {
+    return null;
+  }
 }
 
 async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSkill>> {
@@ -213,20 +238,12 @@ async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSk
 
     const skillFiles = await findSkillMarkdownFiles(rootPath);
     for (const skillFilePath of skillFiles) {
-      const skillId = path.basename(path.dirname(skillFilePath));
-      if (!skillId) {
+      const stats = await readSkillStats(skillFilePath);
+      if (!stats) {
         continue;
       }
 
-      let stats: fs.Stats;
-      try {
-        stats = await fs.stat(skillFilePath);
-      } catch {
-        continue;
-      }
-
-      discovered.set(skillId, {
-        inferredSkillId: skillId,
+      discovered.set(skillFilePath, {
         skillFilePath,
         lastUpdated: stats.mtime.toISOString(),
       });
@@ -246,11 +263,13 @@ function createSkillRegistrySingleton() {
     ]);
 
     const discovered = await discoverSkills(roots);
-    const resolvedDiscovered = new Map<string, { skillFilePath: string; lastUpdated: string; content: string; name: string; description: string }>();
+    const discoveredIds = new Set<string>();
+
     let added = 0;
     let updated = 0;
     let unchanged = 0;
 
+    const resolvedDiscovered = new Map<string, { description: string; hash: string; lastUpdated: string }>();
     for (const discoveredSkill of discovered.values()) {
       let content: string;
       try {
@@ -260,50 +279,36 @@ function createSkillRegistrySingleton() {
       }
 
       const metadata = parseSkillFrontMatter(content);
-      const resolvedName = (metadata.name || discoveredSkill.inferredSkillId).trim();
-      if (!resolvedName) {
+      const skillId = (metadata.name ?? '').trim();
+      if (!skillId) {
         continue;
       }
 
-      resolvedDiscovered.set(resolvedName, {
-        skillFilePath: discoveredSkill.skillFilePath,
+      const description = (metadata.description ?? '').trim();
+      resolvedDiscovered.set(skillId, {
+        description,
+        hash: createContentHash(content),
         lastUpdated: discoveredSkill.lastUpdated,
-        content,
-        name: resolvedName,
-        description: (metadata.description || '').trim(),
       });
     }
 
-    for (const [skillId, discoveredSkill] of resolvedDiscovered.entries()) {
+    for (const [skillId, discoveredSkill] of [...resolvedDiscovered.entries()].sort(([leftId], [rightId]) =>
+      leftId.localeCompare(rightId),
+    )) {
+      discoveredIds.add(skillId);
+
       const existing = registry.get(skillId);
-      const discoveredTimestamp = parseTimestamp(discoveredSkill.lastUpdated);
-      const existingTimestamp = parseTimestamp(existing?.lastUpdated);
-
-      if (existing && discoveredTimestamp <= existingTimestamp) {
-        unchanged += 1;
-        continue;
-      }
-
-      const nextHash = createContentHash(discoveredSkill.content);
+      const nextHash = discoveredSkill.hash;
       if (existing && existing.hash === nextHash) {
-        registry.set(skillId, {
-          ...existing,
-          lastUpdated: discoveredSkill.lastUpdated,
-          skillFilePath: discoveredSkill.skillFilePath,
-          name: discoveredSkill.name,
-          description: discoveredSkill.description,
-        });
         unchanged += 1;
         continue;
       }
 
       registry.set(skillId, {
-        name: discoveredSkill.name,
         skill_id: skillId,
         description: discoveredSkill.description,
         hash: nextHash,
         lastUpdated: discoveredSkill.lastUpdated,
-        skillFilePath: discoveredSkill.skillFilePath,
       });
 
       if (existing) {
@@ -315,7 +320,7 @@ function createSkillRegistrySingleton() {
 
     let removed = 0;
     for (const skillId of [...registry.keys()]) {
-      if (!resolvedDiscovered.has(skillId)) {
+      if (!discoveredIds.has(skillId)) {
         registry.delete(skillId);
         removed += 1;
       }
@@ -331,7 +336,9 @@ function createSkillRegistrySingleton() {
   }
 
   function getSkills(): SkillRegistryEntry[] {
-    return [...registry.values()].sort((left, right) => left.skill_id.localeCompare(right.skill_id));
+    return [...registry.values()].sort((left, right) =>
+      left.skill_id.localeCompare(right.skill_id),
+    );
   }
 
   function getSkill(skillId: string): SkillRegistryEntry | undefined {
@@ -342,17 +349,35 @@ function createSkillRegistrySingleton() {
     registry.clear();
   }
 
-  return {
-    syncSkills,
-    getSkills,
-    getSkill,
-    clearSkillsForTests,
-  };
+  return { syncSkills, getSkills, getSkill, clearSkillsForTests };
 }
 
 export const skillRegistry = createSkillRegistrySingleton();
-
 export const syncSkills = skillRegistry.syncSkills;
 export const getSkills = skillRegistry.getSkills;
 export const getSkill = skillRegistry.getSkill;
 export const clearSkillsForTests = skillRegistry.clearSkillsForTests;
+
+const EMPTY_SYNC_RESULT: SyncSkillsResult = {
+  added: 0,
+  updated: 0,
+  removed: 0,
+  unchanged: 0,
+  total: 0,
+};
+
+let initialSkillSyncPromise: Promise<SyncSkillsResult> | null = null;
+
+function ensureInitialSkillSyncStarted(): Promise<SyncSkillsResult> {
+  if (!initialSkillSyncPromise) {
+    initialSkillSyncPromise = syncSkills().catch(() => EMPTY_SYNC_RESULT);
+  }
+  return initialSkillSyncPromise;
+}
+
+export function waitForInitialSkillSync(): Promise<SyncSkillsResult> {
+  return ensureInitialSkillSyncStarted();
+}
+
+// Keep the registry warm when core loads, without breaking module import flows on sync errors.
+void ensureInitialSkillSyncStarted();

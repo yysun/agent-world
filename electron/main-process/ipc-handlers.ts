@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `listSkillRegistry` IPC handler to sync/read core skill registry entries for empty-chat welcome rendering.
  * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
  * - 2026-02-13: Added `message:edit` IPC handler that delegates user-message edit/resubmission to core so client flows stay thin.
  * - 2026-02-13: Refreshed world subscriptions after message-chain deletion so runtime agent memory stays aligned with persisted storage during edit resubmits.
@@ -60,6 +61,8 @@ interface MainIpcHandlerFactoryDependencies {
   getWorld: (worldId: string) => Promise<any>;
   listChats: (worldId: string) => Promise<any[]>;
   listWorlds: () => Promise<any[]>;
+  getSkills: () => any[];
+  syncSkills: () => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
@@ -87,6 +90,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getWorld,
     listChats,
     listWorlds,
+    getSkills,
+    syncSkills,
     newChat,
     publishMessage,
     stopMessageProcessing,
@@ -186,6 +191,20 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     await ensureCoreReady();
     const worlds = await listWorlds();
     return worlds.map((world) => serializeWorldInfo(world));
+  }
+
+  async function listSkillRegistry() {
+    await ensureCoreReady();
+    await syncSkills();
+    const skills = Array.isArray(getSkills()) ? getSkills() : [];
+    return skills
+      .map((skill) => ({
+        skill_id: String(skill?.skill_id || '').trim(),
+        description: String(skill?.description || '').trim(),
+        hash: String(skill?.hash || '').trim(),
+        lastUpdated: String(skill?.lastUpdated || '').trim()
+      }))
+      .filter((skill) => skill.skill_id.length > 0);
   }
 
   async function createWorkspaceWorld(payload: any) {
@@ -693,6 +712,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     loadSpecificWorld,
     openWorkspaceDialog,
     listWorkspaceWorlds,
+    listSkillRegistry,
     createWorkspaceWorld,
     updateWorkspaceWorld,
     createWorldAgent,

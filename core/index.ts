@@ -31,6 +31,7 @@
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
  * Recent Changes:
+ * - 2026-02-14: Exported `waitForInitialSkillSync` to allow callers to await startup skill-registry auto-sync completion.
  * - 2026-02-13: Exported chat-scoped stop-message processing controls for Electron IPC stop action.
  * - 2026-02-08: Exported LLM provider configuration helpers for npm core library consumers
  *
@@ -79,6 +80,7 @@ export {
 export {
   skillRegistry,
   syncSkills,
+  waitForInitialSkillSync,
   getSkills,
   getSkill,
   clearSkillsForTests,

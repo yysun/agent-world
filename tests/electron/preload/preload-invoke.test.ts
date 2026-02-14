@@ -13,6 +13,7 @@
  * - Keeps tests deterministic and in-memory.
  *
  * Recent Changes:
+ * - 2026-02-14: Added allowlist assertion for `skill:list` channel.
  * - 2026-02-12: Corrected unsupported-channel assertion to validate synchronous throw semantics.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 4 tests for preload invoke channel guard behavior.
@@ -26,6 +27,7 @@ describe('preload invoke channel guards', () => {
   it('accepts known desktop invoke channels', () => {
     expect(isAllowedDesktopChannel(DESKTOP_INVOKE_CHANNELS.CHAT_SEND_MESSAGE)).toBe(true);
     expect(isAllowedDesktopChannel(DESKTOP_INVOKE_CHANNELS.WORLD_LIST)).toBe(true);
+    expect(isAllowedDesktopChannel(DESKTOP_INVOKE_CHANNELS.SKILL_LIST)).toBe(true);
   });
 
   it('rejects unknown channels', () => {

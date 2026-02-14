@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-14: Added channel/order/payload assertions for `skill:list` route wiring.
  * - 2026-02-13: Added channel/order/payload assertions for `message:edit` route wiring.
  * - 2026-02-13: Added channel/order/payload assertions for `chat:stopMessage` route wiring.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
@@ -29,6 +30,7 @@ function createHandlerMocks() {
     loadSpecificWorld: vi.fn(async () => ({})),
     importWorld: vi.fn(async () => ({})),
     listWorkspaceWorlds: vi.fn(async () => ([])),
+    listSkillRegistry: vi.fn(async () => ([])),
     createWorkspaceWorld: vi.fn(async () => ({})),
     updateWorkspaceWorld: vi.fn(async () => ({})),
     deleteWorkspaceWorld: vi.fn(async () => ({ deleted: true })),
@@ -63,6 +65,7 @@ describe('buildMainIpcRoutes', () => {
       'world:load',
       'world:import',
       'world:list',
+      'skill:list',
       'world:create',
       'world:update',
       'world:delete',
@@ -91,12 +94,14 @@ describe('buildMainIpcRoutes', () => {
     const routes = buildMainIpcRoutes(handlers);
 
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
+    await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'message:edit')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     await routes.find((route) => route.channel === 'chat:stopMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
+    expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
     expect(handlers.editMessageInChat).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
