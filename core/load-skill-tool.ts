@@ -5,7 +5,8 @@
  * - Exposes `load_skill` tool definition for model-visible tool catalogs
  * - Resolves skills by `skill_id` from core skill registry state
  * - Reads full SKILL.md content only on demand
- * - Executes instruction-referenced skill scripts under HITL approval
+ * - Enforces HITL approval before applying skill instructions in interactive runtimes
+ * - Executes instruction-referenced skill scripts under validated scope checks
  * - Returns structured success, not-found, and read-error payloads
  *
  * Implementation Notes:
@@ -13,9 +14,11 @@
  * - Reads file content from registry-provided source path (no directory rescans)
  * - Reuses shell tool safeguards (`validateShellCommandScope`) for script execution safety
  * - Uses generic HITL option requests for user approval (`yes_once`, `yes_in_session`, `no`)
+ * - Session approvals are scoped by world/chat/skill to avoid accidental cross-session reuse
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
  * - 2026-02-14: Added HITL-gated safe script execution and `<active_resources>` payload rendering.
  */
 
@@ -72,6 +75,17 @@ function buildReadErrorResult(skillId: string, message: string): string {
     `<skill_context id="${escapedSkillId}">`,
     '  <error>',
     `    Failed to load SKILL.md for "${escapedSkillId}": ${escapedMessage}`,
+    '  </error>',
+    '</skill_context>',
+  ].join('\n');
+}
+
+function buildDeclinedResult(skillId: string): string {
+  const escapedSkillId = escapeXmlText(skillId);
+  return [
+    `<skill_context id="${escapedSkillId}">`,
+    '  <error>',
+    `    User declined HITL approval for skill "${escapedSkillId}". Skill instructions were not loaded.`,
     '  </error>',
     '</skill_context>',
   ].join('\n');
@@ -211,13 +225,64 @@ function createSessionApprovalKey(worldId: string, chatId: string | null, skillI
   return `${worldId}::${chatId ?? 'global'}::${skillId}`;
 }
 
-async function executeSkillScripts(options: {
+async function requestSkillExecutionApproval(options: {
   skillId: string;
-  markdown: string;
+  scriptPaths: string[];
+  context?: LoadSkillToolContext;
+}): Promise<boolean> {
+  const worldId = String(options.context?.world?.id || '').trim();
+  const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  if (!worldId || !options.context?.world) {
+    return true;
+  }
+
+  const sessionApprovalKey = createSessionApprovalKey(worldId, chatId, options.skillId);
+  if (skillSessionApprovals.has(sessionApprovalKey)) {
+    return true;
+  }
+
+  const scriptSummary = options.scriptPaths.length > 0
+    ? `The skill references local scripts:\n${options.scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n')}`
+    : 'No instruction-referenced local scripts were detected for this skill.';
+
+  const approval = await requestWorldOption(options.context.world as any, {
+    title: `Run skill ${options.skillId}?`,
+    message: [
+      `Skill "${options.skillId}" requested execution.`,
+      scriptSummary,
+      'Approve applying this skill now?',
+    ].join('\n\n'),
+    chatId,
+    defaultOptionId: APPROVAL_OPTION_NO,
+    options: [
+      { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once', description: 'Allow this skill for this call only.' },
+      {
+        id: APPROVAL_OPTION_YES_IN_SESSION,
+        label: 'Yes in this session',
+        description: 'Allow this skill for the current chat session.',
+      },
+      { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not apply this skill now.' },
+    ],
+    metadata: { skillId: options.skillId, scriptPaths: options.scriptPaths },
+  });
+
+  if (approval.optionId === APPROVAL_OPTION_NO) {
+    return false;
+  }
+
+  if (approval.optionId === APPROVAL_OPTION_YES_IN_SESSION) {
+    skillSessionApprovals.add(sessionApprovalKey);
+  }
+
+  return true;
+}
+
+async function executeSkillScripts(options: {
+  scriptPaths: string[];
   skillRoot: string;
   context?: LoadSkillToolContext;
 }): Promise<Array<{ source: string; output: string }>> {
-  const scriptPaths = extractReferencedScriptPaths(options.markdown);
+  const scriptPaths = options.scriptPaths;
   if (scriptPaths.length === 0) {
     return [{ source: 'none', output: 'No instruction-referenced scripts were found for this skill.' }];
   }
@@ -230,40 +295,6 @@ async function executeSkillScripts(options: {
       source: 'approval',
       output: 'HITL approval channel is unavailable in this runtime. Script execution skipped.',
     }];
-  }
-
-  const sessionApprovalKey = createSessionApprovalKey(worldId, chatId, options.skillId);
-  const hasSessionApproval = skillSessionApprovals.has(sessionApprovalKey);
-
-  if (!hasSessionApproval) {
-    const scriptListText = scriptPaths.map((scriptPath) => `- ${scriptPath}`).join('\n');
-    const approval = await requestWorldOption(options.context.world as any, {
-      title: `Run skill scripts for ${options.skillId}?`,
-      message: `Skill "${options.skillId}" requested script execution:\n${scriptListText}`,
-      chatId,
-      defaultOptionId: APPROVAL_OPTION_NO,
-      options: [
-        { id: APPROVAL_OPTION_YES_ONCE, label: 'Yes once', description: 'Run scripts for this call only.' },
-        {
-          id: APPROVAL_OPTION_YES_IN_SESSION,
-          label: 'Yes in this session',
-          description: 'Approve script runs for this skill in the current session.',
-        },
-        { id: APPROVAL_OPTION_NO, label: 'No', description: 'Do not run skill scripts.' },
-      ],
-      metadata: { skillId: options.skillId, scriptPaths },
-    });
-
-    if (approval.optionId === APPROVAL_OPTION_NO) {
-      return [{
-        source: 'approval',
-        output: 'User declined skill script execution. Scripts were not run.',
-      }];
-    }
-
-    if (approval.optionId === APPROVAL_OPTION_YES_IN_SESSION) {
-      skillSessionApprovals.add(sessionApprovalKey);
-    }
   }
 
   const scriptOutputs: Array<{ source: string; output: string }> = [];
@@ -413,9 +444,17 @@ export function createLoadSkillToolDefinition() {
       try {
         const markdown = await fs.readFile(sourcePath, 'utf8');
         const skillRoot = path.dirname(sourcePath);
-        const scriptOutputs = await executeSkillScripts({
+        const scriptPaths = extractReferencedScriptPaths(markdown);
+        const isApproved = await requestSkillExecutionApproval({
           skillId: requestedSkillId,
-          markdown,
+          scriptPaths,
+          context,
+        });
+        if (!isApproved) {
+          return buildDeclinedResult(requestedSkillId);
+        }
+        const scriptOutputs = await executeSkillScripts({
+          scriptPaths,
           skillRoot,
           context,
         });
