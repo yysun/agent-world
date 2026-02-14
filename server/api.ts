@@ -73,6 +73,7 @@ import {
   exportWorldToMarkdown,
   removeMessagesFrom,
   editUserMessage,
+  stopMessageProcessing,
   submitWorldOptionResponse,
   type World,
   type Agent,
@@ -266,6 +267,10 @@ const MessageEditSchema = z.object({
   chatId: z.string().min(1),
   newContent: z.string().min(1),
   stream: z.boolean().optional().default(true)
+});
+
+const StopMessageProcessingSchema = z.object({
+  chatId: z.string().min(1)
 });
 
 const HitlResponseSchema = z.object({
@@ -774,6 +779,12 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat');
 
+  // Clean up subscription when the HTTP response finishes to prevent stale world
+  // instances from accumulating in activeSubscribedWorlds.
+  res.on('finish', () => {
+    subscription?.unsubscribe();
+  });
+
   try {
     // Publish message - events will be automatically streamed
     publishMessage(world, message, sender);
@@ -785,7 +796,6 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
     });
     setTimeout(() => {
       sseHandler.endResponse();
-      subscription?.unsubscribe();
     }, 1000);
   }
 }
@@ -812,6 +822,27 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to process chat request', 'CHAT_ERROR');
     }
+  }
+});
+
+router.post('/worlds/:worldName/messages/stop', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const validation = StopMessageProcessingSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const { chatId } = validation.data;
+    const result = stopMessageProcessing(worldCtx.id, chatId);
+    res.json(result);
+  } catch (error) {
+    loggerChat.error('Error stopping message processing', {
+      error: error instanceof Error ? error.message : error,
+      worldName: req.params.worldName
+    });
+    sendError(res, 500, 'Failed to stop message processing', 'MESSAGE_STOP_ERROR');
   }
 });
 
@@ -871,7 +902,14 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       }, 500);
     };
 
-    const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId);
+    // Clean up subscription when the HTTP response finishes.
+    res.on('finish', () => {
+      subscription?.unsubscribe();
+    });
+
+    // Pass subscription.world so editUserMessage emits on the same eventEmitter
+    // that the SSE handler is listening on, avoiding stale-world mismatch.
+    const result = await editUserMessage(worldCtx.id, messageId, newContent, chatId, subscription.world);
     if (!result.success) {
       finalizeWithError('Failed to edit message', {
         code: 'MESSAGE_EDIT_ERROR',

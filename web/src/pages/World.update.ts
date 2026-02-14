@@ -45,6 +45,7 @@
  *
  * Changes:
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
+ * - 2026-02-14: Added `stop-message-processing` event handler for chat-scoped processing cancellation from web composer.
  * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
  * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
  * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
@@ -165,6 +166,7 @@ const createMessageFromMemory = (memoryItem: AgentMessage, agentName: string): M
     sender: displaySender,
     text: memoryItem.content || '',
     messageId: memoryItem.messageId,
+    chatId: memoryItem.chatId,
     replyToMessageId: memoryItem.replyToMessageId, // Preserve parent message reference
     createdAt: memoryItem.createdAt || new Date(),
     type: messageType,
@@ -647,6 +649,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
     createdAt: messageData.createdAt || new Date().toISOString(),
     fromAgentId,
     messageId: messageData.messageId,
+    chatId: messageData.chatId,
     replyToMessageId: messageData.replyToMessageId,
     role: messageData.role, // Preserve role for filtering
   };
@@ -681,6 +684,7 @@ const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any):
           return {
             ...msg,
             messageId: messageData.messageId,
+            chatId: messageData.chatId ?? msg.chatId,
             createdAt: messageData.createdAt || msg.createdAt,
             userEntered: false, // No longer temporary
             seenByAgents: fromAgentId ? [fromAgentId] : [] // Initialize with first agent or empty
@@ -814,6 +818,63 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return InputDomain.createSentState(newState);
     } catch (error: any) {
       return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
+    }
+  },
+
+  'stop-message-processing': async function* (state: WorldComponentState): AsyncGenerator<WorldComponentState> {
+    const chatId = state.currentChat?.id || state.world?.currentChatId || null;
+    if (!chatId) {
+      yield {
+        ...state,
+        error: 'No active chat session to stop.'
+      };
+      return;
+    }
+
+    if (state.isStopping) {
+      return;
+    }
+
+    const stoppingState: WorldComponentState = {
+      ...state,
+      isStopping: true,
+      error: null
+    };
+    yield stoppingState;
+
+    try {
+      const result = await api.stopMessageProcessing(state.worldName, chatId);
+      const shouldResetProcessingState = Boolean(result?.stopped) || result?.reason === 'no-active-process';
+
+      if (shouldResetProcessingState) {
+        if (stoppingState.debounceFrameId !== null) {
+          cancelAnimationFrame(stoppingState.debounceFrameId);
+        }
+        if (stoppingState.elapsedIntervalId !== null) {
+          clearInterval(stoppingState.elapsedIntervalId);
+        }
+      }
+
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        isWaiting: shouldResetProcessingState ? false : stoppingState.isWaiting,
+        isBusy: shouldResetProcessingState ? false : stoppingState.isBusy,
+        activeTools: shouldResetProcessingState ? [] : stoppingState.activeTools,
+        pendingStreamUpdates: shouldResetProcessingState ? new Map() : stoppingState.pendingStreamUpdates,
+        debounceFrameId: shouldResetProcessingState ? null : stoppingState.debounceFrameId,
+        elapsedIntervalId: shouldResetProcessingState ? null : stoppingState.elapsedIntervalId,
+        activityStartTime: shouldResetProcessingState ? null : stoppingState.activityStartTime,
+        elapsedMs: shouldResetProcessingState ? 0 : stoppingState.elapsedMs,
+        needScroll: shouldResetProcessingState ? true : stoppingState.needScroll,
+        error: null
+      };
+    } catch (error: any) {
+      yield {
+        ...stoppingState,
+        isStopping: false,
+        error: error?.message || 'Failed to stop message processing.'
+      };
     }
   },
 
@@ -1058,45 +1119,50 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
-  'save-edit-message': async (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): Promise<WorldComponentState> => {
+  'save-edit-message': async function* (state: WorldComponentState, messageId: WorldEventPayload<'save-edit-message'>): AsyncGenerator<WorldComponentState> {
     const editedText = state.editingText?.trim();
-    if (!editedText) return state;
+    if (!editedText) return;
 
     // Find the message by frontend ID
     const message = state.messages.find(msg => msg.id === messageId);
     if (!message) {
-      return {
+      yield {
         ...state,
         error: 'Message not found',
         editingMessageId: null,
         editingText: ''
       };
+      return;
     }
 
     // Check if message has backend messageId
     if (!message.messageId) {
-      return {
+      yield {
         ...state,
         error: 'Cannot edit message: missing message ID. Message may not be saved yet.',
         editingMessageId: null,
         editingText: ''
       };
+      return;
     }
 
-    // Check if we have a current chat
-    if (!state.currentChat?.id) {
-      return {
+    const targetChatId = message.chatId || state.currentChat?.id;
+
+    // Check if we have a target chat
+    if (!targetChatId) {
+      yield {
         ...state,
         error: 'Cannot edit message: no active chat session',
         editingMessageId: null,
         editingText: ''
       };
+      return;
     }
 
     // Store edit backup before backend mutation for local recovery.
     const editBackup = {
       messageId: message.messageId,
-      chatId: state.currentChat.id,
+      chatId: targetChatId,
       newContent: editedText,
       timestamp: Date.now(),
       worldName: state.worldName
@@ -1121,19 +1187,30 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       lastUserMessageText: editedText
     };
 
+    // Yield optimistic state immediately so the editing UI closes right away
+    yield optimisticState;
+
     try {
-      // Core-managed edit with SSE streaming for downstream responses.
+      // Use edit streaming endpoint so post-edit responses stream back into the web UI.
       await editChatMessage(
         state.worldName,
         message.messageId,
         editedText,
-        state.currentChat.id
+        targetChatId,
+        { awaitCompletion: false }
       );
 
-      // Success - new user message/agent responses will arrive via SSE.
-      return {
+      try {
+        localStorage.removeItem('agent-world-edit-backup');
+      } catch (e) {
+        console.warn('Failed to clear edit backup from localStorage:', e);
+      }
+
+      // SSE events will stream edited message + responses.
+      yield {
         ...optimisticState,
-        isSending: false
+        isSending: false,
+        error: null
       };
     } catch (error: any) {
       // Handle backend edit request errors.
@@ -1148,29 +1225,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         errorMessage = 'Invalid message: only user messages can be edited.';
       }
 
-      if (isWorldLockedError) {
-        const transientErrorMessage = {
-          id: `edit-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: 'error',
-          sender: 'System',
-          text: errorMessage,
-          createdAt: new Date(),
-          worldName: state.worldName,
-          hasError: true
-        };
-
-        return {
-          ...state,
-          isSending: false,
-          editingMessageId: null,
-          editingText: '',
-          messages: [...(state.messages || []), transientErrorMessage],
-          needScroll: true
-        };
-      }
-
       // Restore original messages when edit request fails.
-      return {
+      yield {
         ...state,
         isSending: false,
         editingMessageId: null,

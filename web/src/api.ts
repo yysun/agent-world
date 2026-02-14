@@ -23,6 +23,7 @@
  *
  * Changes:
  * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
+ * - 2026-02-14: Added stopMessageProcessing() API call to cancel active chat processing from web UI.
  * - 2026-02-13: Added core-managed editMessage() API call and separated delete/edit semantics
  */
 
@@ -409,6 +410,29 @@ async function sendMessage(
   );
 }
 
+async function stopMessageProcessing(
+  worldName: string,
+  chatId: string
+): Promise<{
+  success: boolean;
+  stopped: boolean;
+  reason: 'stopped' | 'no-active-process';
+  stoppedOperations: number;
+}> {
+  if (!worldName || !chatId) {
+    throw new Error('World name and chat ID are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/messages/stop`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ chatId }),
+    }
+  );
+  return response.json();
+}
+
 // Export the API functions
 export default {
   // Core API function
@@ -440,6 +464,7 @@ export default {
   deleteMessage,
   editMessage,
   respondHitlOption,
+  stopMessageProcessing,
   sendMessage,
 };
 

@@ -431,6 +431,7 @@ export async function editChatMessage(
   messageId: string,
   newContent: string,
   chatId: string,
+  options?: { awaitCompletion?: boolean },
   onMessage?: (data: SSEData) => void,
   onError?: (error: Error) => void,
   onComplete?: (data: any) => void
@@ -451,7 +452,8 @@ export async function editChatMessage(
       },
       onMessage,
       onError,
-      onComplete
+      onComplete,
+      awaitCompletion: options?.awaitCompletion ?? false
     }
   );
 }
@@ -462,6 +464,7 @@ type StreamSSERequestOptions = {
   onMessage?: (data: SSEData) => void;
   onError?: (error: Error) => void;
   onComplete?: (data: any) => void;
+  awaitCompletion?: boolean;
 };
 
 async function streamSSERequest(
@@ -485,6 +488,14 @@ async function streamSSERequest(
   const decoder = new TextDecoder();
   let buffer = '';
   let isActive = true;
+  let settleCompletion: ((value: void) => void) | null = null;
+  let rejectCompletion: ((reason?: any) => void) | null = null;
+  const completionPromise = options.awaitCompletion
+    ? new Promise<void>((resolve, reject) => {
+      settleCompletion = resolve;
+      rejectCompletion = reject;
+    })
+    : null;
 
   const cleanup = (): void => {
     if (isActive) {
@@ -514,17 +525,27 @@ async function streamSSERequest(
             if (dataContent === '') continue;
 
             const data: SSEData = JSON.parse(dataContent);
+            if (options.awaitCompletion && data.type === 'error') {
+              const error = new Error(data.message || 'Failed to edit message');
+              options.onError?.(error);
+              rejectCompletion?.(error);
+              cleanup();
+              return;
+            }
+
             handleSSEData(data);
 
             options.onMessage?.(data);
             if (data.type === 'complete') {
               options.onComplete?.(data.payload || data);
+              settleCompletion?.();
             }
           } catch (error) {
             console.error('Error parsing SSE data:', error);
             const errorObj = { message: 'Failed to parse SSE data' };
             publishEvent('handleError', errorObj);
             options.onError?.(new Error(errorObj.message));
+            rejectCompletion?.(new Error(errorObj.message));
           }
         }
       }
@@ -533,12 +554,18 @@ async function streamSSERequest(
       const errorObj = { message: (error as Error).message || 'SSE stream error' };
       publishEvent('handleError', errorObj);
       options.onError?.(error as Error);
+      rejectCompletion?.(error as Error);
     } finally {
       cleanup();
     }
   };
 
   processStream();
+
+  if (completionPromise) {
+    await completionPromise;
+  }
+
   return cleanup;
 }
 

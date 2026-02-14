@@ -228,18 +228,25 @@ describe('Message Edit Feature', () => {
       ).rejects.toThrow(/not found/);
     });
 
-    test('should throw error when target chat has active processing', async () => {
+    test('should stop active processing and continue edit for target chat', async () => {
       const world = createTestWorld({ isProcessing: false });
+      const agent = createTestAgent({
+        memory: [
+          { role: 'user', content: 'msg1', messageId: 'msg-1', chatId: 'chat-1', createdAt: new Date(), agentId: 'agent-1' }
+        ]
+      });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
       await getMemoryStorage().saveWorld(world);
+      await getMemoryStorage().saveAgent('test-world', agent);
       await getMemoryStorage().saveChatData('test-world', chat);
 
       const processingHandle = beginChatMessageProcessing('test-world', 'chat-1');
 
-      await expect(
-        editUserMessage('test-world', 'msg-1', 'new content', 'chat-1')
-      ).rejects.toThrow(/Cannot edit message while target chat is processing/);
+      const result = await editUserMessage('test-world', 'msg-1', 'new content', 'chat-1');
+
+      expect(result.success).toBe(true);
+      expect(result.resubmissionStatus).toBe('success');
 
       processingHandle.complete();
     });

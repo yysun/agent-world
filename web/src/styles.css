@@ -1488,6 +1488,14 @@ legend {
   transform: translateY(-1px);
 }
 
+.send-button.stop-button {
+  background-color: var(--text-secondary);
+}
+
+.send-button.stop-button:hover:not(:disabled) {
+  background-color: var(--text-primary);
+}
+
 .send-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

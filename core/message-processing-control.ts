@@ -93,8 +93,24 @@ export function beginChatMessageProcessing(
 }
 
 export function hasActiveChatMessageProcessing(worldId: string, chatId: string): boolean {
-  const operations = activeProcessingByChat.get(toChatKey(worldId, chatId));
-  return !!operations && operations.size > 0;
+  const chatKey = toChatKey(worldId, chatId);
+  const operations = activeProcessingByChat.get(chatKey);
+  if (!operations || operations.size === 0) {
+    return false;
+  }
+
+  for (const [operationId, controller] of operations.entries()) {
+    if (controller.signal.aborted) {
+      operations.delete(operationId);
+    }
+  }
+
+  if (operations.size === 0) {
+    activeProcessingByChat.delete(chatKey);
+    return false;
+  }
+
+  return true;
 }
 
 export function throwIfMessageProcessingStopped(signal?: AbortSignal): void {

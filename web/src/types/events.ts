@@ -26,6 +26,7 @@
  * 
  * Changes:
  * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
+ * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
  * - 2026-02-08: Removed legacy manual tool-intervention event variants
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
@@ -61,6 +62,9 @@ export type WorldEvents =
 
   /** Send message to agents */
   | { name: 'send-message'; payload: void }
+
+  /** Stop active message processing for current chat */
+  | { name: 'stop-message-processing'; payload: void }
 
   // ========================================
   // MESSAGE EDITING EVENTS

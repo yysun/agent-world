@@ -24,6 +24,7 @@
  *
  * Changes:
  * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
+ * - 2026-02-14: Added send/stop composer toggle so web users can stop active chat processing.
  * - 2026-02-14: Removed legacy 3-tier tool call reconstruction in favor of canonical message text rendering
  * - 2026-02-14: Added AgentQueueDisplay in chat header for active/queued visibility
  * - 2026-02-11: Phase 6 - Added role-based left border colors (human=light blue, agent=sky blue, tool=amber, system=gray, cross-agent=purple)
@@ -64,6 +65,47 @@ import { AgentQueueDisplay } from './agent-queue-display';
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
 
+export interface ComposerActionState {
+  canStopCurrentSession: boolean;
+  actionButtonDisabled: boolean;
+  actionButtonClass: string;
+  actionButtonText: string;
+}
+
+export function getComposerActionState(params: {
+  currentChatId: string | null;
+  isWaiting: boolean;
+  isBusy: boolean;
+  isStopping: boolean;
+  isSending: boolean;
+  userInput: string;
+}): ComposerActionState {
+  const {
+    currentChatId,
+    isWaiting,
+    isBusy,
+    isStopping,
+    isSending,
+    userInput,
+  } = params;
+
+  const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
+  const actionButtonDisabled = canStopCurrentSession
+    ? isStopping
+    : (!userInput.trim() || isSending || isWaiting || isStopping);
+  const actionButtonClass = canStopCurrentSession ? 'send-button stop-button' : 'send-button';
+  const actionButtonText = canStopCurrentSession
+    ? (isStopping ? 'Stopping...' : 'Stop')
+    : (isSending ? 'Sending...' : 'Send');
+
+  return {
+    canStopCurrentSession,
+    actionButtonDisabled,
+    actionButtonClass,
+    actionButtonText,
+  };
+}
+
 export default function WorldChat(props: WorldChatProps) {
   const {
     worldName,
@@ -77,18 +119,27 @@ export default function WorldChat(props: WorldChatProps) {
     activeAgent,
     agents = [],
     currentChat,
+    currentChatId = null,
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
     isBusy = false,
-    elapsedMs = 0
+    elapsedMs = 0,
+    isStopping = false
   } = props;
 
   const promptReady = !isWaiting;
   const promptIndicator = promptReady ? '>' : '…';
   const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
-  const inputDisabled = isSending || isWaiting;
-  const disableSend = !userInput.trim() || isSending || isWaiting;
+  const inputDisabled = isSending || isWaiting || isStopping;
+  const { canStopCurrentSession, actionButtonDisabled, actionButtonClass, actionButtonText } = getComposerActionState({
+    currentChatId,
+    isWaiting,
+    isBusy,
+    isStopping,
+    isSending,
+    userInput,
+  });
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
@@ -526,11 +577,12 @@ export default function WorldChat(props: WorldChatProps) {
               disabled={inputDisabled}
             />
             <button
-              className="send-button"
-              $onclick="send-message"
-              disabled={disableSend}
+              className={actionButtonClass}
+              $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
+              disabled={actionButtonDisabled}
+              title={canStopCurrentSession ? 'Stop processing' : 'Send message'}
             >
-              {isSending ? 'Sending...' : 'Send'}
+              {actionButtonText}
             </button>
           </div>
         </div>

@@ -19,6 +19,7 @@
  * 
  * Changes:
  * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
+ * - 2026-02-14: Added stop-processing UI state and currentChatId prop support for send/stop composer toggle.
  * - 2026-02-08: Removed legacy manual tool-intervention message and state types
  * - 2026-02-08: Added WorldChatProps.agents for avatar sprite resolution in chat messages
  * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
@@ -88,6 +89,7 @@ export interface Message {
   hasError?: boolean;
   errorMessage?: string;
   messageId?: string;
+  chatId?: string;
   replyToMessageId?: string; // Parent message reference for threading
   role?: string; // Backend role field preserved for sorting
   userEntered?: boolean;
@@ -213,9 +215,11 @@ export interface WorldChatProps {
   agents?: Agent[];
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
+  currentChatId?: string | null;
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
+  isStopping?: boolean;
 
   // Phase 3: Activity state props
   isBusy?: boolean;
@@ -305,6 +309,7 @@ export interface WorldComponentState extends SSEComponentState {
   error: string | null;
   messagesLoading: boolean;
   isSending: boolean;
+  isStopping: boolean;
   isWaiting: boolean;
   selectedSettingsTarget: 'world' | 'agent' | 'chat' | null;
   selectedAgent: Agent | null;

@@ -16,6 +16,7 @@
  * 
  * Recent Changes:
  * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
+ * - 2026-02-14: Added web send/stop composer wiring via `currentChatId` and `isStopping` props.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
  * - 2026-02-08: Pass world agents into WorldChat for correct per-agent message avatars
  * - Integrated Tailwind CSS utilities for layout and spacing
@@ -47,6 +48,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     error: null,
     messagesLoading: false,
     isSending: false,
+    isStopping: false,
     isWaiting: false,
     selectedSettingsTarget: 'chat' as const,
     selectedAgent: null,
@@ -204,12 +206,14 @@ export default class WorldComponent extends Component<WorldComponentState, World
               agents={state.world?.agents || []}
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
+              currentChatId={state.currentChat?.id || null}
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}
               isBusy={state.isBusy || state.isWaiting}
               elapsedMs={state.elapsedMs}
               activeTools={state.activeTools}
+              isStopping={state.isStopping}
             />
           </div>
 

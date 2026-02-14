@@ -77,7 +77,7 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { publishCRUDEvent } from './events/index.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
-import { hasActiveChatMessageProcessing } from './message-processing-control.js';
+import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
 
 // Type imports
 import type {
@@ -1007,49 +1007,11 @@ export async function removeMessagesFrom(
   // Get all agents
   const agents = await listAgents(resolvedWorldId);
 
-  // Get all memory for this chat to find the target message and its timestamp
-  const memory = await storageWrappers!.getMemory(resolvedWorldId, chatId);
-
-  if (!memory || memory.length === 0) {
-    return {
-      success: false,
-      messageId,
-      totalAgents: agents.length,
-      processedAgents: [],
-      failedAgents: agents.map(a => ({ agentId: a.id, error: 'No messages found in chat' })),
-      messagesRemovedTotal: 0,
-      requiresRetry: false,
-      resubmissionStatus: 'skipped',
-      newMessageId: undefined
-    };
-  }
-
-  // Find the target message to get its timestamp
-  const targetMessage = memory.find(m => m.messageId === messageId);
-  if (!targetMessage) {
-    logger.error('Target message not found', { messageId, chatId, availableMessageIds: memory.map(m => m.messageId) });
-    return {
-      success: false,
-      messageId,
-      totalAgents: agents.length,
-      processedAgents: [],
-      failedAgents: agents.map(a => ({ agentId: a.id, error: `Message with ID '${messageId}' not found` })),
-      messagesRemovedTotal: 0,
-      requiresRetry: false,
-      resubmissionStatus: 'skipped',
-      newMessageId: undefined
-    };
-  }
-
-  // Handle optional createdAt field with fallback to current time
-  const targetTimestamp = targetMessage.createdAt
-    ? new Date(targetMessage.createdAt).getTime()
-    : Date.now();
-
   // Track results per agent
   const processedAgents: string[] = [];
   const failedAgents: Array<{ agentId: string; error: string }> = [];
   let messagesRemovedTotal = 0;
+  let foundTargetInAnyAgent = false;
 
   // Process each agent
   for (const agent of agents) {
@@ -1066,9 +1028,10 @@ export async function removeMessagesFrom(
 
       if (targetIndex === -1) {
         // Target message not found in this agent's memory - skip this agent
-        processedAgents.push(agent.id);
         continue;
       }
+
+      foundTargetInAnyAgent = true;
 
       // Get the target message timestamp
       const targetMsg = fullAgent.memory[targetIndex];
@@ -1130,6 +1093,27 @@ export async function removeMessagesFrom(
     messagesRemovedTotal
   });
 
+  if (!foundTargetInAnyAgent) {
+    const notFoundFailures = agents.length > 0
+      ? [
+        ...failedAgents,
+        { agentId: 'all', error: `Message with ID '${messageId}' not found in chat '${chatId}'` }
+      ]
+      : failedAgents;
+
+    return {
+      success: false,
+      messageId,
+      totalAgents: agents.length,
+      processedAgents,
+      failedAgents: notFoundFailures,
+      messagesRemovedTotal,
+      requiresRetry: false,
+      resubmissionStatus: 'skipped',
+      newMessageId: undefined
+    };
+  }
+
   return {
     success: failedAgents.length === 0,
     messageId,
@@ -1157,20 +1141,21 @@ export async function editUserMessage(
   worldId: string,
   messageId: string,
   newContent: string,
-  chatId: string
+  chatId: string,
+  targetWorld?: World
 ): Promise<RemovalResult> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
 
   const { getActiveSubscribedWorld } = await import('./subscription.js');
-  const activeSubscribedWorld = getActiveSubscribedWorld(resolvedWorldId);
+  const activeSubscribedWorld = targetWorld || getActiveSubscribedWorld(resolvedWorldId);
   const world = activeSubscribedWorld || await getWorld(resolvedWorldId);
   if (!world) {
     throw new Error(`World '${worldId}' not found`);
   }
 
   if (hasActiveChatMessageProcessing(resolvedWorldId, chatId)) {
-    throw new Error('Cannot edit message while target chat is processing');
+    stopMessageProcessing(resolvedWorldId, chatId);
   }
 
   // Step 1: Remove the message and all subsequent messages
