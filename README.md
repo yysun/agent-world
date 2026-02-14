@@ -29,6 +29,7 @@ Paste that prompt. Agents come alive instantly.
 - ✅ No Code Required - Agents are defined entirely in natural language
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
+- ✅ Progressive Agent Skills - Skills are discovered and loaded on demand
 - ✅ Multiple AI Providers - Use different models for different agents
 - ✅ Modern Web Interface - Clean, responsive UI with real-time chat
 
@@ -247,6 +248,7 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 - **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
+- **[HITL Approval Flow](docs/hitl-approval-flow.md)** - Option-based approval flow across Core/Electron/Web/CLI
 - **[Using Core from npm](docs/core-npm-usage.md)** - Integration guide for server and browser apps
 - **[Electron Desktop App](docs/electron-desktop.md)** - Open-folder workflow and local world creation
 
@@ -267,6 +269,37 @@ Execute shell commands with full output capture and execution history. Perfect f
 ```
 
 See [Shell Command Tool Documentation](docs/shell-cmd-tool.md) for complete details.
+
+### load_skill (Agent Skills)
+
+Agent World includes progressive skill loading through the `load_skill` built-in tool.
+
+- Skills are discovered from `SKILL.md` files in:
+  - Project roots: `.agents/skills`, `skills`
+  - User roots: `~/.agents/skills`, `~/.codex/skills`
+- The model receives compact skill summaries first, then calls `load_skill` only when full instructions are needed.
+- Skill activation in interactive runtimes is HITL-gated.
+
+Minimal `SKILL.md` example:
+
+```md
+---
+name: sql-review
+description: Review SQL migrations for safety and rollback compatibility.
+---
+
+# SQL Review Skill
+
+1. Check for destructive DDL.
+2. Verify index and lock impact.
+3. Validate rollback path.
+```
+
+HITL options for skill activation:
+
+- `yes_once`: approve this call only
+- `yes_in_session`: approve this `skill_id` in the current world/chat session
+- `no`: decline
 
 ## Experimental Features
 
