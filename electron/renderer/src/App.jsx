@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Reduced welcome skill-list vertical footprint (denser two-column cards + compact descriptions) so the new-chat welcome view avoids unnecessary vertical scrolling.
+ * - 2026-02-14: Removed outer welcome-card borders and switched skills to a full single-column list so all skills remain visible without hidden overflow rows.
+ * - 2026-02-14: Refreshed the new-chat welcome empty state with a cleaner minimal layout and compact skill cards.
+ * - 2026-02-14: Added robust skill-registry loading states (loading/error/retry) and automatic refresh when workspace/world context changes.
  * - 2026-02-14: Added generic HITL option prompt modal flow driven by system events (`hitl-option-request`) with renderer response submission.
  * - 2026-02-14: Made the new-chat welcome card more compact/simple and added a scrollable skill list for large registries.
  * - 2026-02-14: Simplified new-chat welcome layout by removing nested border layers for a cleaner single-surface design.
@@ -675,8 +679,8 @@ function normalizeSkillSummaryEntries(rawEntries) {
 function compactSkillDescription(description) {
   const normalized = String(description || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return 'No description provided.';
-  if (normalized.length <= 160) return normalized;
-  return `${normalized.slice(0, 157)}...`;
+  if (normalized.length <= 96) return normalized;
+  return `${normalized.slice(0, 93)}...`;
 }
 
 export default function App() {
@@ -700,6 +704,8 @@ export default function App() {
   const [availableWorlds, setAvailableWorlds] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [skillRegistryEntries, setSkillRegistryEntries] = useState([]);
+  const [loadingSkillRegistry, setLoadingSkillRegistry] = useState(false);
+  const [skillRegistryError, setSkillRegistryError] = useState('');
   const [sessionSearch, setSessionSearch] = useState('');
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -1103,6 +1109,26 @@ export default function App() {
     }
   }, [api, setStatusText]);
 
+  const refreshSkillRegistry = useCallback(async () => {
+    if (typeof api?.listSkills !== 'function') {
+      setSkillRegistryEntries([]);
+      setSkillRegistryError('Skills are not available in this desktop build.');
+      return;
+    }
+
+    setLoadingSkillRegistry(true);
+    setSkillRegistryError('');
+    try {
+      const rawEntries = await api.listSkills();
+      setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
+    } catch (error) {
+      setSkillRegistryEntries([]);
+      setSkillRegistryError(safeMessage(error, 'Failed to load skill registry.'));
+    } finally {
+      setLoadingSkillRegistry(false);
+    }
+  }, [api]);
+
   const initialize = useCallback(async () => {
     try {
       const nextWorkspace = await api.getWorkspace();
@@ -1146,25 +1172,8 @@ export default function App() {
   }, [initialize]);
 
   useEffect(() => {
-    let isCanceled = false;
-
-    async function loadSkillRegistry() {
-      try {
-        const rawEntries = await api.listSkills();
-        if (isCanceled) return;
-        setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
-      } catch {
-        if (!isCanceled) {
-          setSkillRegistryEntries([]);
-        }
-      }
-    }
-
-    loadSkillRegistry();
-    return () => {
-      isCanceled = true;
-    };
-  }, [api]);
+    refreshSkillRegistry();
+  }, [refreshSkillRegistry, workspace.workspacePath, loadedWorld?.id]);
 
   useEffect(() => {
     refreshSessions(loadedWorld?.id);
@@ -2719,45 +2728,53 @@ export default function App() {
                 >
                   {messages.length === 0 ? (
                     selectedSession ? (
-                      <section className="w-full max-w-[620px] rounded-xl border border-border/60 bg-muted/15 px-6 py-6 text-muted-foreground shadow-sm">
-                        <p className="text-center text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground/80">
-                          Welcome
-                        </p>
-                        <h2 className="mt-2 text-center text-xl font-semibold text-foreground/80">
-                          Let's talk.
-                        </h2>
-                        <p className="mx-auto mt-2 max-w-[500px] text-center text-sm leading-5 text-muted-foreground">
-                          Here are the skills available in this workspace.
-                        </p>
+                      <section className="w-full max-w-[680px] rounded-xl bg-card/60 px-6 py-5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h2 className="text-lg font-semibold text-foreground">Welcome</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Start chatting below. Available skills are listed here.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={refreshSkillRegistry}
+                            disabled={loadingSkillRegistry}
+                            className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Refresh skills"
+                          >
+                            {loadingSkillRegistry ? 'Refreshing...' : 'Refresh'}
+                          </button>
+                        </div>
 
-                        <div className="mt-5">
+                        <div className="mt-4 pt-2">
                           <div className="mb-2 flex items-center justify-between">
-                            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
-                              Skill Registry
-                            </h3>
-                            <span className="text-xs text-muted-foreground/75">
-                              {skillRegistryEntries.length} total
+                            <h3 className="text-sm font-medium text-foreground/90">Skills</h3>
+                            <span className="text-xs text-muted-foreground">
+                              {skillRegistryEntries.length}
                             </span>
                           </div>
 
-                          {skillRegistryEntries.length > 0 ? (
-                            <div className="max-h-64 overflow-y-auto pr-1">
-                              <ul className="divide-y divide-border/40">
+                          {loadingSkillRegistry ? (
+                            <p className="text-sm text-muted-foreground">Loading skills...</p>
+                          ) : skillRegistryEntries.length > 0 ? (
+                            <div className="pr-1">
+                              <ul className="grid gap-1.5 sm:grid-cols-2">
                                 {skillRegistryEntries.map((entry) => (
                                   <li
                                     key={entry.skillId}
-                                    className="py-2 first:pt-0 last:pb-0"
+                                    className="rounded-md bg-muted/20 px-2.5 py-2"
                                   >
-                                    <p className="text-sm font-medium text-foreground/75">
-                                      {entry.skillId}
-                                    </p>
-                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                    <p className="text-[13px] font-medium leading-4 text-foreground">{entry.skillId}</p>
+                                    <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
                                       {compactSkillDescription(entry.description)}
                                     </p>
                                   </li>
                                 ))}
                               </ul>
                             </div>
+                          ) : skillRegistryError ? (
+                            <p className="text-sm text-muted-foreground">{skillRegistryError}</p>
                           ) : (
                             <p className="text-sm text-muted-foreground">
                               No skills discovered yet.
