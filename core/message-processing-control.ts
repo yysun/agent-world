@@ -17,6 +17,7 @@
  *
  * Recent Changes:
  * - 2026-02-13: Added chat-scoped processing handle registry with abort signals so stop requests also prevent follow-up continuation work.
+ * - 2026-02-14: Added `hasActiveChatMessageProcessing()` for chat-scoped lock checks (e.g., message edit guards).
  */
 
 import { cancelLLMCallsForChat } from './llm-manager.js';
@@ -89,6 +90,11 @@ export function beginChatMessageProcessing(
       unregisterProcessingHandle(worldId, chatId, operationId);
     }
   };
+}
+
+export function hasActiveChatMessageProcessing(worldId: string, chatId: string): boolean {
+  const operations = activeProcessingByChat.get(toChatKey(worldId, chatId));
+  return !!operations && operations.size > 0;
 }
 
 export function throwIfMessageProcessingStopped(signal?: AbortSignal): void {

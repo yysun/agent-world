@@ -77,6 +77,7 @@ import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
 import { publishCRUDEvent } from './events/index.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
+import { hasActiveChatMessageProcessing } from './message-processing-control.js';
 
 // Type imports
 import type {
@@ -1168,8 +1169,8 @@ export async function editUserMessage(
     throw new Error(`World '${worldId}' not found`);
   }
 
-  if (world.isProcessing) {
-    throw new Error('Cannot edit message while world is processing');
+  if (hasActiveChatMessageProcessing(resolvedWorldId, chatId)) {
+    throw new Error('Cannot edit message while target chat is processing');
   }
 
   // Step 1: Remove the message and all subsequent messages

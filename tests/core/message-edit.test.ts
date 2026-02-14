@@ -57,6 +57,7 @@ vi.mock('../../core/storage/storage-factory.js', async (importOriginal) => {
 });
 
 import { getWorld, migrateMessageIds, editUserMessage } from '../../core/index.js';
+import { beginChatMessageProcessing } from '../../core/message-processing-control.js';
 
 // Helper to create a test world
 function createTestWorld(overrides: Partial<World> = {}): World {
@@ -227,16 +228,20 @@ describe('Message Edit Feature', () => {
       ).rejects.toThrow(/not found/);
     });
 
-    test('should throw error when world.isProcessing is true', async () => {
-      const world = createTestWorld({ isProcessing: true });
+    test('should throw error when target chat has active processing', async () => {
+      const world = createTestWorld({ isProcessing: false });
       const chat = { id: 'chat-1', name: 'Chat 1', worldId: 'test-world', messageCount: 0, createdAt: new Date(), updatedAt: new Date() };
 
       await getMemoryStorage().saveWorld(world);
       await getMemoryStorage().saveChatData('test-world', chat);
 
+      const processingHandle = beginChatMessageProcessing('test-world', 'chat-1');
+
       await expect(
         editUserMessage('test-world', 'msg-1', 'new content', 'chat-1')
-      ).rejects.toThrow(/Cannot edit message while world is processing/);
+      ).rejects.toThrow(/Cannot edit message while target chat is processing/);
+
+      processingHandle.complete();
     });
 
     test('should call removeMessagesFrom and resolve when successful', async () => {

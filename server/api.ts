@@ -819,8 +819,6 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
   try {
     const { messageId } = req.params;
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-    const world = (req as any).world as World;
-
     const validation = MessageEditSchema.safeParse(req.body);
     if (!validation.success) {
       sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
@@ -831,11 +829,6 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
     const newContent = validation.data.newContent.trim();
     if (!newContent) {
       sendError(res, 400, 'Message content cannot be empty', 'VALIDATION_ERROR');
-      return;
-    }
-
-    if (world.isProcessing) {
-      sendError(res, 423, 'World is currently processing another message', 'WORLD_LOCKED');
       return;
     }
 
@@ -900,7 +893,10 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    if (errorMessage.includes('Cannot edit message while world is processing')) {
+    if (
+      errorMessage.includes('Cannot edit message while world is processing') ||
+      errorMessage.includes('Cannot edit message while target chat is processing')
+    ) {
       sendError(res, 423, 'World is currently processing another message', 'WORLD_LOCKED');
       return;
     }

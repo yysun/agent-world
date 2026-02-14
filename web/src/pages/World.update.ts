@@ -1138,13 +1138,35 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     } catch (error: any) {
       // Handle backend edit request errors.
       let errorMessage = error.message || 'Failed to edit message';
+      const isWorldLockedError = error.message?.includes('423') || error.message?.includes('WORLD_LOCKED');
 
-      if (error.message?.includes('423') || error.message?.includes('WORLD_LOCKED')) {
+      if (isWorldLockedError) {
         errorMessage = 'Cannot edit message: world is currently processing. Please try again in a moment.';
       } else if (error.message?.includes('404')) {
         errorMessage = 'Message not found in agent memories. It may have been already deleted.';
       } else if (error.message?.includes('400')) {
         errorMessage = 'Invalid message: only user messages can be edited.';
+      }
+
+      if (isWorldLockedError) {
+        const transientErrorMessage = {
+          id: `edit-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'error',
+          sender: 'System',
+          text: errorMessage,
+          createdAt: new Date(),
+          worldName: state.worldName,
+          hasError: true
+        };
+
+        return {
+          ...state,
+          isSending: false,
+          editingMessageId: null,
+          editingText: '',
+          messages: [...(state.messages || []), transientErrorMessage],
+          needScroll: true
+        };
       }
 
       // Restore original messages when edit request fails.
