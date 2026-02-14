@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
  * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
  * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
  * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
@@ -49,6 +50,7 @@
 import { nanoid } from 'nanoid';
 import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
+import { getSkills, waitForInitialSkillSync } from './skill-registry.js';
 import { createCategoryLogger } from './logger.js';
 
 const logger = createCategoryLogger('core.utils');
@@ -201,6 +203,41 @@ export function interpolateTemplateVariables(template: string, envMap: Record<st
     }
     return '';
   });
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function buildAgentSkillsPromptSection(): Promise<string> {
+  await waitForInitialSkillSync();
+
+  const availableSkills = [...getSkills()].sort((left, right) =>
+    left.skill_id.localeCompare(right.skill_id),
+  );
+
+  const lines: string[] = [
+    '## Agent Skills',
+    'You have access to a library of agent skills. Find skill by:',
+    '1. Review the <available_skills> list below.',
+    "2. If the user's request matches a skill's purpose, use the load_skill with skill id tool",
+    '   to fetch the full instructions.',
+    '',
+    '<available_skills>',
+  ];
+
+  for (const skill of availableSkills) {
+    lines.push('  <skill>');
+    lines.push(`    <id>${escapeXmlText(skill.skill_id)}</id>`);
+    lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);
+    lines.push('  </skill>');
+  }
+
+  lines.push('</available_skills>');
+  return lines.join('\n');
 }
 
 // Import types for utility functions
@@ -415,10 +452,14 @@ export async function prepareMessagesForLLM(
     const promptWithWorkingDirectory = interpolatedPrompt.endsWith('\n')
       ? `${interpolatedPrompt}working directory: ${workingDirectory}`
       : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`;
+    const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
+    const promptWithSkills = promptWithWorkingDirectory.endsWith('\n')
+      ? `${promptWithWorkingDirectory}\n${agentSkillsPromptSection}`
+      : `${promptWithWorkingDirectory}\n\n${agentSkillsPromptSection}`;
 
     messages.push({
       role: 'system',
-      content: promptWithWorkingDirectory,
+      content: promptWithSkills,
       createdAt: new Date()
     });
   }

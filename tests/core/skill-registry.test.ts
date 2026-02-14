@@ -12,6 +12,7 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-02-14: Added source-path lookup coverage for `load_skill` runtime resolution.
  * - 2026-02-14: Added default-root coverage for `~/.codex/skills` and precedence regression for project overrides even with older mtimes.
  * - 2026-02-14: Added precedence coverage ensuring project-root skill definitions override user-root collisions by shared front-matter `name`.
  * - 2026-02-14: Updated hash-change coverage to assert full-file-content hashing (body changes now update entries).
@@ -23,6 +24,7 @@ import * as fsModule from 'fs';
 import {
   clearSkillsForTests,
   getSkill,
+  getSkillSourcePath,
   getSkills,
   syncSkills,
 } from '../../core/skill-registry.js';
@@ -214,6 +216,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('shared-skill')?.description).toBe('From user root');
+    expect(getSkillSourcePath('shared-skill')).toContain('user-root/shared/SKILL.md');
 
     const mergedResult = await syncSkills({
       userSkillRoots: ['user-root'],
@@ -228,6 +231,7 @@ describe('core/skill-registry', () => {
       total: 1,
     });
     expect(getSkill('shared-skill')?.description).toBe('From project root');
+    expect(getSkillSourcePath('shared-skill')).toContain('project-root/shared/SKILL.md');
   });
 
   it('includes both .agents and .codex directories in default user roots', async () => {

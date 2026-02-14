@@ -4,6 +4,7 @@
  * 
  * Features tested:
  * - shell_cmd tool availability in all worlds
+ * - load_skill built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
  * - Error handling and reporting
@@ -14,6 +15,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-14: Added assertion that built-in `load_skill` tool is registered alongside `shell_cmd`.
  * - 2026-02-14: Updated unresolved-cwd fallback test to reflect core default working directory behavior (user home fallback) instead of `./`.
  * - 2026-02-14: Added hard-fail coverage for inline script execution (`sh -c`) and short-option path prefixes (`-I/path`) outside world working_directory.
  * - 2026-02-14: Added hard-fail coverage for path-escape argument forms (`./../../...` and `--flag=/...`) against world working_directory.
@@ -46,6 +48,23 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.shell_cmd.description).toBeDefined();
     expect(tools.shell_cmd.parameters).toBeDefined();
     expect(tools.shell_cmd.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('load_skill');
+    expect(tools.load_skill).toBeDefined();
+    expect(tools.load_skill.parameters).toBeDefined();
+    expect(tools.load_skill.execute).toBeInstanceOf(Function);
+  });
+
+  test('should execute load_skill tool through tool interface', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const loadSkillTool = tools.load_skill;
+
+    const result = await loadSkillTool.execute({
+      skill_id: '__missing_skill_for_integration_test__'
+    });
+
+    expect(result).toContain('<skill_context id="__missing_skill_for_integration_test__">');
+    expect(result).toContain('not found');
   });
 
   test('should have correct tool schema', async () => {

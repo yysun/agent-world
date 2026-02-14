@@ -19,6 +19,7 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-02-14: Added `getSkillSourcePath` API and source-path tracking map for on-demand `SKILL.md` loading.
  * - 2026-02-14: Added `~/.codex/skills` to default user skill roots for Codex-managed skills discovery.
  * - 2026-02-14: Removed timestamp-gated update blocking so project-scope collisions always override user-scope entries when hashes differ.
  * - 2026-02-14: Fixed skill collision precedence so project-root skills override user-root skills for the same `skill_id`.
@@ -255,6 +256,7 @@ async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSk
 
 function createSkillRegistrySingleton() {
   const registry = new Map<string, SkillRegistryEntry>();
+  const registrySourcePaths = new Map<string, string>();
 
   async function syncSkills(options: SyncSkillsOptions = {}): Promise<SyncSkillsResult> {
     const roots = normalizeRoots([
@@ -269,7 +271,10 @@ function createSkillRegistrySingleton() {
     let updated = 0;
     let unchanged = 0;
 
-    const resolvedDiscovered = new Map<string, { description: string; hash: string; lastUpdated: string }>();
+    const resolvedDiscovered = new Map<
+      string,
+      { description: string; hash: string; lastUpdated: string; skillFilePath: string }
+    >();
     for (const discoveredSkill of discovered.values()) {
       let content: string;
       try {
@@ -289,6 +294,7 @@ function createSkillRegistrySingleton() {
         description,
         hash: createContentHash(content),
         lastUpdated: discoveredSkill.lastUpdated,
+        skillFilePath: discoveredSkill.skillFilePath,
       });
     }
 
@@ -299,6 +305,7 @@ function createSkillRegistrySingleton() {
 
       const existing = registry.get(skillId);
       const nextHash = discoveredSkill.hash;
+      registrySourcePaths.set(skillId, discoveredSkill.skillFilePath);
       if (existing && existing.hash === nextHash) {
         unchanged += 1;
         continue;
@@ -322,6 +329,7 @@ function createSkillRegistrySingleton() {
     for (const skillId of [...registry.keys()]) {
       if (!discoveredIds.has(skillId)) {
         registry.delete(skillId);
+        registrySourcePaths.delete(skillId);
         removed += 1;
       }
     }
@@ -345,17 +353,23 @@ function createSkillRegistrySingleton() {
     return registry.get(skillId);
   }
 
-  function clearSkillsForTests(): void {
-    registry.clear();
+  function getSkillSourcePath(skillId: string): string | undefined {
+    return registrySourcePaths.get(skillId);
   }
 
-  return { syncSkills, getSkills, getSkill, clearSkillsForTests };
+  function clearSkillsForTests(): void {
+    registry.clear();
+    registrySourcePaths.clear();
+  }
+
+  return { syncSkills, getSkills, getSkill, getSkillSourcePath, clearSkillsForTests };
 }
 
 export const skillRegistry = createSkillRegistrySingleton();
 export const syncSkills = skillRegistry.syncSkills;
 export const getSkills = skillRegistry.getSkills;
 export const getSkill = skillRegistry.getSkill;
+export const getSkillSourcePath = skillRegistry.getSkillSourcePath;
 export const clearSkillsForTests = skillRegistry.clearSkillsForTests;
 
 const EMPTY_SYNC_RESULT: SyncSkillsResult = {

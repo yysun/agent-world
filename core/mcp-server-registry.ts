@@ -103,6 +103,7 @@
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
  */
 
 import { createHash } from 'crypto';
@@ -114,6 +115,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
+import { createLoadSkillToolDefinition } from './load-skill-tool.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
 
@@ -1592,14 +1594,17 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * These tools don't require MCP server configuration
  * Built-in tools:
  * - shell_cmd: Execute shell commands
+ * - load_skill: Load full SKILL.md instructions by registry skill_id
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
+  const loadSkillTool = createLoadSkillToolDefinition();
 
   return {
-    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd')
+    'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
+    'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
   };
 }
 
@@ -1609,7 +1614,7 @@ function getBuiltInTools(): Record<string, any> {
 /**
  * Get MCP tools available for a world with registry-level caching
  * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
- * Includes built-in tools (shell_cmd) in addition to MCP server tools
+ * Includes built-in tools (`shell_cmd`, `load_skill`) in addition to MCP server tools
  */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
   const startTime = performance.now();
