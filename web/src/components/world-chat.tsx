@@ -89,7 +89,7 @@ export default function WorldChat(props: WorldChatProps) {
   const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
   const inputDisabled = isSending || isWaiting;
   const disableSend = !userInput.trim() || isSending || isWaiting;
-  const waitingAgentName = activeAgent?.name?.trim() || 'Agent';
+  const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
 
@@ -503,7 +503,10 @@ export default function WorldChat(props: WorldChatProps) {
               </div>
               <div className="message user-message waiting-message">
                 <div className="message-content">
-                  <div>{waitingAgentName} is working...</div>
+                  <div className="waiting-inline-status">
+                    <span className="waiting-inline-dot" aria-hidden="true"></span>
+                    <span>{waitingAgentName} is working...</span>
+                  </div>
                 </div>
               </div>
             </div>

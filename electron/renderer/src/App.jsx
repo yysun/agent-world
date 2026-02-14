@@ -21,6 +21,9 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Fixed inline `<agent> is working...` visibility to hide immediately when agent activity completes (no longer held open by residual stream-count state).
+ * - 2026-02-14: Refined inline chat working indicator with borderless text row, flashing dot, active-work-only visibility, and stronger agent-name fallback resolution.
+ * - 2026-02-14: Added inline chat activity indicator (`<agent> is working...`) under the message list to match web waiting UX.
  * - 2026-02-14: Reduced welcome skill-list vertical footprint (denser two-column cards + compact descriptions) so the new-chat welcome view avoids unnecessary vertical scrolling.
  * - 2026-02-14: Removed outer welcome-card borders and switched skills to a full single-column list so all skills remain visible without hidden overflow rows.
  * - 2026-02-14: Refreshed the new-chat welcome empty state with a cleaner minimal layout and compact skill cards.
@@ -2335,6 +2338,41 @@ export default function App() {
     activeTools.length > 0 ||
     activeStreamCount > 0 ||
     isBusy;
+  const showInlineWorkingIndicator =
+    Boolean(selectedSessionId) && isAgentWorkInProgress;
+  const inlineWorkingAgentLabel = useMemo(() => {
+    const resolveAgentName = (source) => {
+      const rawSource = String(source || '').trim();
+      if (!rawSource) return '';
+
+      const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
+      if (!normalizedSource) return '';
+      if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
+
+      const matchedAgent = worldAgents.find((agent) => {
+        const normalizedId = String(agent?.id || '').trim().toLowerCase();
+        const normalizedName = String(agent?.name || '').trim().toLowerCase();
+        return normalizedSource === normalizedId || normalizedSource === normalizedName;
+      });
+
+      return String(matchedAgent?.name || rawSource);
+    };
+
+    if (Array.isArray(activeAgentSources) && activeAgentSources.length > 0) {
+      const firstResolved = resolveAgentName(activeAgentSources[0]);
+      if (firstResolved) return firstResolved;
+    }
+
+    const mainAgentResolved = resolveAgentName(loadedWorld?.mainAgent);
+    if (mainAgentResolved) return mainAgentResolved;
+
+    if (Array.isArray(worldAgents) && worldAgents.length > 0) {
+      const firstAgentName = String(worldAgents[0]?.name || '').trim();
+      if (firstAgentName) return firstAgentName;
+    }
+
+    return 'Agent';
+  }, [activeAgentSources, worldAgents, loadedWorld?.mainAgent]);
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
 
   return (
@@ -2934,6 +2972,17 @@ export default function App() {
                       );
                     })
                   )}
+
+                  {showInlineWorkingIndicator ? (
+                    <div className="flex w-full items-start gap-2 justify-start">
+                      <div className="flex items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
+                        <span className="inline-block h-2 w-2 rounded-full bg-foreground/70 animate-pulse" aria-hidden="true"></span>
+                        <div className="text-[13px]">
+                          {inlineWorkingAgentLabel} is working...
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -3314,9 +3363,6 @@ export default function App() {
                   <div className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-card/40 px-3 py-1.5">
                     <div className="flex min-w-0 items-center gap-2">
                       <ActivityPulse isActive={isAgentWorkInProgress} />
-                      <span className="truncate text-foreground/90">
-                        {agentStatusText}
-                      </span>
                       {activeTools.length > 0 ? (
                         <span className="shrink-0 text-muted-foreground/80">
                           · {activeTools.length} tool{activeTools.length === 1 ? '' : 's'}

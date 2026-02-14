@@ -1869,7 +1869,23 @@ legend {
   padding: 0 !important;
   background: none !important;
   border: none !important;
-  height: 20px;
+  min-height: 20px;
+}
+
+.waiting-inline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 1rem;
+}
+
+.waiting-inline-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--accent-primary);
+  animation: prompt-waiting-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 
 .waiting-dots {
