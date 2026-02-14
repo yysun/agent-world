@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
  * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
  * - 2026-01-09: Added --streaming flag for explicit streaming control (overrides TTY auto-detection)
@@ -81,6 +82,7 @@ import readline from 'readline';
 import {
   listWorlds,
   subscribeWorld,
+  submitWorldOptionResponse,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
@@ -106,6 +108,12 @@ import {
   getToolIcon,
   log as statusLog,
 } from './display.js';
+import {
+  parseHitlOptionRequest,
+  resolveHitlOptionSelectionInput,
+  type HitlOptionPayload,
+  type HitlOptionRequestPayload,
+} from './hitl.js';
 
 // Create CLI category logger after logger auto-initialization
 const logger = createCategoryLogger('cli');
@@ -130,18 +138,21 @@ interface MessageEventPayload {
 interface SystemEventPayload {
   message?: string;
   content?: string;
+  chatId?: string | null;
   [key: string]: any;
 }
 
 // State management for interactive mode
 interface GlobalState {
   awaitingResponse: boolean;
+  hitlPromptActive: boolean;
   world?: any;
 }
 
 function createGlobalState(): GlobalState {
   return {
-    awaitingResponse: false
+    awaitingResponse: false,
+    hitlPromptActive: false
   };
 }
 
@@ -372,6 +383,50 @@ function parseActivitySource(source?: string): { type: 'agent' | 'message'; name
   return null;
 }
 
+async function promptHitlOptionSelection(
+  request: HitlOptionRequestPayload,
+  statusLine: StatusLineManager,
+  rl: readline.Interface
+): Promise<string> {
+  const fallbackOptionId = request.defaultOptionId;
+  statusLine.pause();
+  try {
+    while (true) {
+      console.log(`\n${boldMagenta('Approval Required')}`);
+      console.log(`${boldCyan(request.title)}`);
+      if (request.message) {
+        console.log(gray(request.message));
+      }
+      console.log(gray('Select an option:'));
+      request.options.forEach((option, index) => {
+        const isDefault = option.id === fallbackOptionId;
+        const defaultSuffix = isDefault ? gray(' (default)') : '';
+        console.log(`  ${yellow(String(index + 1) + '.')} ${option.label}${defaultSuffix}`);
+        if (option.description) {
+          console.log(`     ${gray(option.description)}`);
+        }
+      });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(`${boldMagenta('Choice (number or option id):')} `, (input) => resolve(input.trim()));
+      });
+
+      const resolvedOptionId = resolveHitlOptionSelectionInput(
+        request.options,
+        answer,
+        fallbackOptionId
+      );
+      if (resolvedOptionId) {
+        return resolvedOptionId;
+      }
+
+      console.log(boldRed('Invalid selection. Please choose a listed option.'));
+    }
+  } finally {
+    statusLine.resume();
+  }
+}
+
 // LLM Provider configuration from environment variables
 function configureLLMProvidersFromEnv(): void {
   // OpenAI
@@ -482,6 +537,7 @@ function attachCLIListeners(
   rl?: readline.Interface
 ): Map<string, (...args: any[]) => void> {
   const listeners = new Map<string, (...args: any[]) => void>();
+  let hitlPromptChain: Promise<void> = Promise.resolve();
 
   // World activity events
   const worldListener = (eventData: WorldActivityEventPayload) => {
@@ -543,6 +599,52 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
+    const hitlRequest = parseHitlOptionRequest(eventData);
+    if (hitlRequest) {
+      hitlPromptChain = hitlPromptChain
+        .then(async () => {
+          if (streaming && globalState && rl && statusLine) {
+            globalState.hitlPromptActive = true;
+            try {
+              const selectedOptionId = await promptHitlOptionSelection(hitlRequest, statusLine, rl);
+              const result = submitWorldOptionResponse({
+                worldId: world.id,
+                requestId: hitlRequest.requestId,
+                optionId: selectedOptionId
+              });
+              if (!result.accepted) {
+                statusLine.pause();
+                console.log(boldRed(`Failed to submit approval response: ${result.reason || 'unknown error'}`));
+                statusLine.resume();
+                return;
+              }
+              statusLine.pause();
+              console.log(green(`Approved option: ${selectedOptionId}`));
+              statusLine.resume();
+              return;
+            } finally {
+              globalState.hitlPromptActive = false;
+            }
+          }
+
+          // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
+          const result = submitWorldOptionResponse({
+            worldId: world.id,
+            requestId: hitlRequest.requestId,
+            optionId: hitlRequest.defaultOptionId
+          });
+          if (!result.accepted) {
+            console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));
+            return;
+          }
+          console.log(`${gray('● system:')} Auto-selected HITL option "${hitlRequest.defaultOptionId}"`);
+        })
+        .catch((error) => {
+          console.error(boldRed(`Error handling HITL request: ${error instanceof Error ? error.message : String(error)}`));
+        });
+      return;
+    }
+
     if (eventData.content &&
       typeof eventData.content === 'string' &&
       eventData.content.includes('Success message sent')) return;
@@ -1387,6 +1489,10 @@ async function runInteractiveMode(options: CLIOptions): Promise<void> {
     rl.prompt();
 
     rl.on('line', async (input) => {
+      if (globalState.hitlPromptActive) {
+        return;
+      }
+
       const trimmedInput = input.trim();
 
       if (!trimmedInput) {

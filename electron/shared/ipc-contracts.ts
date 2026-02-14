@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
  * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
  * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
  * - 2026-02-13: Added chat stop-message invoke contract for session-scoped processing interruption.
@@ -48,6 +49,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   CHAT_GET_MESSAGES: 'chat:getMessages',
   CHAT_SEND_MESSAGE: 'chat:sendMessage',
   MESSAGE_EDIT: 'message:edit',
+  HITL_RESPOND: 'hitl:respond',
   CHAT_STOP_MESSAGE: 'chat:stopMessage',
   MESSAGE_DELETE: 'message:delete',
   CHAT_SUBSCRIBE_EVENTS: 'chat:subscribeEvents',
@@ -83,6 +85,12 @@ export interface MessageDeletePayload extends WorldChatPayload {
 export interface MessageEditPayload extends WorldChatPayload {
   messageId: string;
   newContent: string;
+}
+
+export interface HitlResponsePayload extends WorldIdPayload {
+  requestId: string;
+  optionId: string;
+  chatId?: string | null;
 }
 
 export interface ChatSubscribePayload extends WorldChatPayload {
@@ -131,6 +139,7 @@ export interface DesktopApi {
   getMessages: (worldId: string, chatId: string) => Promise<unknown>;
   sendMessage: (payload: Record<string, unknown>) => Promise<unknown>;
   editMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<unknown>;
+  respondHitlOption: (worldId: string, requestId: string, optionId: string, chatId?: string | null) => Promise<unknown>;
   stopMessage: (worldId: string, chatId: string) => Promise<unknown>;
   deleteMessage: (worldId: string, messageId: string, chatId: string) => Promise<unknown>;
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;

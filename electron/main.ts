@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-14: Added `hitl:respond` IPC wiring so renderer approvals can resolve core HITL option requests.
  * - 2026-02-14: Added `skill:list` IPC wiring backed by core `syncSkills/getSkills` for empty-session welcome skill cards in renderer.
  * - 2026-02-14: Set `AGENT_WORLD_DEFAULT_WORKING_DIRECTORY` from `app.getPath('home')` at startup so core cwd fallback is stable in packaged Electron runs.
  * - 2026-02-14: Routed Electron edit-message path back to core-managed `editUserMessage` flow (no main-process subscription refresh logic).
@@ -108,6 +109,7 @@ const {
   listWorlds,
   newChat,
   publishMessage,
+  submitWorldOptionResponse,
   stopMessageProcessing,
   restoreChat,
   syncSkills,
@@ -187,6 +189,7 @@ const ipcHandlers = createMainIpcHandlers({
   syncSkills,
   newChat,
   publishMessage,
+  submitWorldOptionResponse,
   stopMessageProcessing,
   restoreChat,
   updateWorld,
@@ -221,6 +224,7 @@ function registerIpcHandlers() {
     getSessionMessages: ipcHandlers.getSessionMessages,
     sendChatMessage: ipcHandlers.sendChatMessage,
     editMessageInChat: ipcHandlers.editMessageInChat,
+    respondHitlOption: ipcHandlers.respondHitlOption,
     stopChatMessage: ipcHandlers.stopChatMessage,
     deleteMessageFromChat: ipcHandlers.deleteMessageFromChat,
     subscribeChatEvents,

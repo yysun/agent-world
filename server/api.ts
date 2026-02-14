@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
  * - 2026-02-13: Added core-managed message edit endpoint `PUT /worlds/:worldName/messages/:messageId`
  *   - Delegates edit/remove/resubmit flow to `core.editUserMessage` for cross-client consistency
  *   - Streams edit-resubmission follow-up events over SSE by default (`stream: true`)
@@ -72,6 +73,7 @@ import {
   exportWorldToMarkdown,
   removeMessagesFrom,
   editUserMessage,
+  submitWorldOptionResponse,
   type World,
   type Agent,
   type Chat,
@@ -264,6 +266,12 @@ const MessageEditSchema = z.object({
   chatId: z.string().min(1),
   newContent: z.string().min(1),
   stream: z.boolean().optional().default(true)
+});
+
+const HitlResponseSchema = z.object({
+  requestId: z.string().min(1),
+  optionId: z.string().min(1),
+  chatId: z.string().nullable().optional()
 });
 
 const AgentUpdateSchema = z.object({
@@ -978,6 +986,31 @@ router.delete('/worlds/:worldName/messages/:messageId', validateWorld, async (re
     if (!res.headersSent) {
       sendError(res, 500, 'Failed to edit message', 'MESSAGE_EDIT_ERROR');
     }
+  }
+});
+
+router.post('/worlds/:worldName/hitl/respond', validateWorld, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validation = HitlResponseSchema.safeParse(req.body);
+    if (!validation.success) {
+      sendError(res, 400, 'Invalid request body', 'VALIDATION_ERROR', validation.error.issues);
+      return;
+    }
+
+    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
+    const { requestId, optionId } = validation.data;
+    const result = submitWorldOptionResponse({
+      worldId: worldCtx.id,
+      requestId,
+      optionId
+    });
+    res.json(result);
+  } catch (error) {
+    loggerChat.error('Error submitting HITL response', {
+      error: error instanceof Error ? error.message : error,
+      worldName: req.params.worldName
+    });
+    sendError(res, 500, 'Failed to submit HITL response', 'HITL_RESPONSE_ERROR');
   }
 });
 

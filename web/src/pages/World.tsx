@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
  * - 2026-02-08: Pass world agents into WorldChat for correct per-agent message avatars
  * - Integrated Tailwind CSS utilities for layout and spacing
@@ -75,10 +76,15 @@ export default class WorldComponent extends Component<WorldComponentState, World
     isBusy: false,
     elapsedMs: 0,
     activityStartTime: null,
-    elapsedIntervalId: null
+    elapsedIntervalId: null,
+
+    // HITL approval prompt state
+    hitlPromptQueue: [],
+    submittingHitlRequestId: null
   };
 
   override view = (state: WorldComponentState) => {
+    const activeHitlPrompt = state.hitlPromptQueue?.length ? state.hitlPromptQueue[0] : null;
 
     // Guard clauses for loading and error states
     // if (state.loading) {
@@ -266,6 +272,39 @@ export default class WorldComponent extends Component<WorldComponentState, World
             parentComponent={this}
           />
         }
+
+        {activeHitlPrompt && (
+          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-lg w-full" onclick={(e: Event) => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold mb-2">{activeHitlPrompt.title || 'Approval required'}</h3>
+              <p className="text-sm text-text-secondary whitespace-pre-wrap mb-4">
+                {activeHitlPrompt.message || 'Please choose an option to continue.'}
+              </p>
+              <div className="flex flex-col gap-2">
+                {activeHitlPrompt.options.map((option) => {
+                  const isSubmitting = state.submittingHitlRequestId === activeHitlPrompt.requestId;
+                  return (
+                    <button
+                      key={option.id}
+                      className="btn-secondary text-left px-3 py-2 rounded border"
+                      disabled={isSubmitting}
+                      $onclick={['respond-hitl-option', {
+                        requestId: activeHitlPrompt.requestId,
+                        optionId: option.id,
+                        chatId: activeHitlPrompt.chatId
+                      }]}
+                    >
+                      <div className="font-medium">{option.label}</div>
+                      {option.description ? (
+                        <div className="text-xs text-text-secondary mt-1">{option.description}</div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Chat Delete Confirmation Modal */}
         {state.chatToDelete && (

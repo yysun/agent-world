@@ -13,12 +13,14 @@
  * - Main-process handlers remain responsible for hard validation.
  *
  * Recent Changes:
+ * - 2026-02-14: Added HITL-response payload helper (`toHitlResponsePayload`) for generic world option prompts.
  * - 2026-02-13: Added message-edit payload helper (`toMessageEditPayload`) for core-driven edit IPC.
  * - 2026-02-12: Added preload payload helpers for Phase 4 bridge modularization.
  */
 
 import type {
   AgentPayload,
+  HitlResponsePayload,
   MessageEditPayload,
   ChatSubscribePayload,
   ChatUnsubscribePayload,
@@ -92,6 +94,20 @@ export function toMessageEditPayload(
     messageId: toId(messageId),
     newContent: String(newContent ?? ''),
     chatId: toId(chatId)
+  };
+}
+
+export function toHitlResponsePayload(
+  worldId: unknown,
+  requestId: unknown,
+  optionId: unknown,
+  chatId?: unknown
+): HitlResponsePayload {
+  return {
+    worldId: toId(worldId),
+    requestId: toId(requestId),
+    optionId: toId(optionId),
+    chatId: typeof chatId === 'undefined' ? undefined : toId(chatId) || null
   };
 }
 

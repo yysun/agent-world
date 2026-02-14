@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
  * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
  * - 2026-02-08: Removed legacy manual tool-intervention request detection and response submission flow
  * - 2025-11-11: Fixed createMessageFromMemory to pass through tool_calls and tool_call_id for frontend formatting
@@ -80,6 +81,7 @@ import * as SSEStreamingDomain from '../domain/sse-streaming';
 import * as AgentManagementDomain from '../domain/agent-management';
 import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
+import * as HitlDomain from '../domain/hitl';
 import {
   sendChatMessage,
   editChatMessage,
@@ -580,6 +582,14 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     }
   }
 
+  const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
+  if (hitlPrompt) {
+    return {
+      ...newState,
+      hitlPromptQueue: HitlDomain.enqueueHitlPrompt(newState.hitlPromptQueue || [], hitlPrompt)
+    };
+  }
+
   return newState;
 };
 
@@ -820,6 +830,63 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleLogEvent': handleLogEvent,
   'handleMessageEvent': handleMessageEvent,
   'handleSystemEvent': handleSystemEvent,
+  'respond-hitl-option': async function* (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'respond-hitl-option'>
+  ): AsyncGenerator<WorldComponentState> {
+    const requestId = String(payload?.requestId || '').trim();
+    const optionId = String(payload?.optionId || '').trim();
+    if (!requestId || !optionId) {
+      yield {
+        ...state,
+        error: 'Invalid HITL response payload.'
+      };
+      return;
+    }
+
+    const prompt = (state.hitlPromptQueue || []).find((entry) => entry.requestId === requestId);
+    if (!prompt) {
+      yield {
+        ...state,
+        error: `HITL request '${requestId}' not found.`
+      };
+      return;
+    }
+
+    yield {
+      ...state,
+      submittingHitlRequestId: requestId,
+      error: null
+    };
+
+    try {
+      const result = await api.respondHitlOption(
+        state.worldName,
+        requestId,
+        optionId,
+        payload?.chatId ?? prompt.chatId ?? null
+      );
+      if (!result?.accepted) {
+        yield {
+          ...state,
+          submittingHitlRequestId: null,
+          error: result?.reason || 'HITL response was not accepted.'
+        };
+        return;
+      }
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId)
+      };
+    } catch (error: any) {
+      yield {
+        ...state,
+        submittingHitlRequestId: null,
+        error: error?.message || 'Failed to submit HITL response.'
+      };
+    }
+  },
   'handleError': handleError,
   'handleToolError': handleToolError,
   'handleToolStart': handleToolStart,
@@ -1155,7 +1222,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         isBusy: false,
         elapsedMs: 0,
         activityStartTime: null,
-        elapsedIntervalId: null
+        elapsedIntervalId: null,
+        hitlPromptQueue: [],
+        submittingHitlRequestId: null
       };
 
       yield ChatHistoryDomain.createChatLoadingState(cleanState);

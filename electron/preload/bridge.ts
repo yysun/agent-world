@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `respondHitlOption()` bridge method for renderer resolution of world HITL option requests.
  * - 2026-02-14: Typed `listSkills()` bridge invoke response as `SkillRegistrySummary[]` to satisfy DesktopApi contract.
  * - 2026-02-14: Added `listSkills()` bridge method for renderer welcome-screen skill registry cards.
  * - 2026-02-13: Added `editMessage(worldId, messageId, newContent, chatId)` IPC bridge method for core-driven message edit flow.
@@ -34,6 +35,7 @@ import {
 import { invokeDesktopChannel } from './invoke.js';
 import {
   toAgentPayload,
+  toHitlResponsePayload,
   toMessageEditPayload,
   toMessageDeletePayload,
   toSubscribePayload,
@@ -165,6 +167,12 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
         ipcRendererLike,
         DESKTOP_INVOKE_CHANNELS.MESSAGE_EDIT,
         toMessageEditPayload(worldId, messageId, newContent, chatId)
+      ),
+    respondHitlOption: (worldId, requestId, optionId, chatId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
+        toHitlResponsePayload(worldId, requestId, optionId, chatId)
       ),
     stopMessage: (worldId, chatId) =>
       invokeDesktopChannel(

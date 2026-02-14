@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
  * - 2026-02-08: Removed legacy manual tool-intervention event variants
  * - 2025-10-26: Initial creation with 40+ typed events for World component
  */
@@ -175,6 +176,9 @@ export type WorldEvents =
 
   /** Handle system event from SSE */
   | { name: 'handleSystemEvent'; payload: any }
+
+  /** Submit selected HITL option response */
+  | { name: 'respond-hitl-option'; payload: { requestId: string; optionId: string; chatId?: string | null } }
 
   /** Handle general error */
   | { name: 'handleError'; payload: any }

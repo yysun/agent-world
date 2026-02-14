@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-14: Added channel/order/payload assertions for `hitl:respond` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `skill:list` route wiring.
  * - 2026-02-13: Added channel/order/payload assertions for `message:edit` route wiring.
  * - 2026-02-13: Added channel/order/payload assertions for `chat:stopMessage` route wiring.
@@ -46,6 +47,7 @@ function createHandlerMocks() {
     getSessionMessages: vi.fn(async () => ([])),
     sendChatMessage: vi.fn(async () => ({})),
     editMessageInChat: vi.fn(async () => ({})),
+    respondHitlOption: vi.fn(async () => ({ accepted: true })),
     stopChatMessage: vi.fn(async () => ({ stopped: true })),
     deleteMessageFromChat: vi.fn(async () => ({ deleted: true })),
     subscribeChatEvents: vi.fn(async () => ({ subscribed: true })),
@@ -82,6 +84,7 @@ describe('buildMainIpcRoutes', () => {
       'chat:getMessages',
       'chat:sendMessage',
       'message:edit',
+      'hitl:respond',
       'chat:stopMessage',
       'message:delete',
       'chat:subscribeEvents',
@@ -98,6 +101,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'message:edit')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
+    await routes.find((route) => route.channel === 'hitl:respond')?.handler({}, { worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     await routes.find((route) => route.channel === 'chat:stopMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
@@ -105,6 +109,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
     expect(handlers.editMessageInChat).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
+    expect(handlers.respondHitlOption).toHaveBeenCalledWith({ worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     expect(handlers.stopChatMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
   });
 });

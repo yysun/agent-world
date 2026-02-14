@@ -31,6 +31,7 @@
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
  * Recent Changes:
+ * - 2026-02-14: Exported generic HITL option request/response APIs for world-scoped user approval flows.
  * - 2026-02-14: Exported `waitForInitialSkillSync` to allow callers to await startup skill-registry auto-sync completion.
  * - 2026-02-13: Exported chat-scoped stop-message processing controls for Electron IPC stop action.
  * - 2026-02-08: Exported LLM provider configuration helpers for npm core library consumers
@@ -88,6 +89,15 @@ export {
   type SyncSkillsOptions,
   type SyncSkillsResult,
 } from './skill-registry.js';
+
+export {
+  requestWorldOption,
+  submitWorldOptionResponse,
+  clearHitlStateForTests,
+  type HitlOption,
+  type HitlOptionRequest,
+  type HitlOptionResolution,
+} from './hitl.js';
 
 // === SHELL COMMAND TOOL ===
 export {

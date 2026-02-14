@@ -12,6 +12,7 @@
  * - Keeps all assertions in-memory with no file-system dependencies.
  *
  * Recent Changes:
+ * - 2026-02-14: Added coverage for `respondHitlOption` bridge wiring and `hitl:respond` invoke payload contract.
  * - 2026-02-14: Added coverage for `listSkills` bridge wiring and `skill:list` channel invoke.
  * - 2026-02-13: Added coverage for `editMessage` bridge wiring and invoke payload contract.
  * - 2026-02-13: Added coverage for `stopMessage` bridge wiring and invoke payload contract.
@@ -52,6 +53,7 @@ describe('electron preload bridge', () => {
       listSkills: expect.any(Function),
       sendMessage: expect.any(Function),
       editMessage: expect.any(Function),
+      respondHitlOption: expect.any(Function),
       stopMessage: expect.any(Function),
       subscribeChatEvents: expect.any(Function),
       unsubscribeChatEvents: expect.any(Function),
@@ -71,6 +73,7 @@ describe('electron preload bridge', () => {
     api.sendMessage(sendPayload);
     api.listSkills();
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
+    api.respondHitlOption('world-1', 'req-1', 'yes_once', 'chat-1');
     api.stopMessage('world-1', 'chat-1');
     api.subscribeChatEvents('world-1', 'chat-1', 'sub-1');
     api.unsubscribeChatEvents('sub-1');
@@ -83,16 +86,22 @@ describe('electron preload bridge', () => {
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'hitl:respond', {
+      worldId: 'world-1',
+      requestId: 'req-1',
+      optionId: 'yes_once',
+      chatId: 'chat-1'
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
   });

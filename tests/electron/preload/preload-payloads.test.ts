@@ -13,6 +13,7 @@
  * - Keeps expectations aligned with main-process payload contracts.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `toHitlResponsePayload` coverage for HITL option-response invoke payloads.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 4 tests for preload payload shape normalization.
  */
@@ -20,6 +21,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   toAgentPayload,
+  toHitlResponsePayload,
   toMessageDeletePayload,
   toSubscribePayload,
   toUnsubscribePayload,
@@ -68,6 +70,21 @@ describe('preload payload helpers', () => {
     });
     expect(toUnsubscribePayload('sub')).toEqual({
       subscriptionId: 'sub'
+    });
+  });
+
+  it('builds HITL response payload', () => {
+    expect(toHitlResponsePayload('w', 'req-1', 'yes_once', 'c')).toEqual({
+      worldId: 'w',
+      requestId: 'req-1',
+      optionId: 'yes_once',
+      chatId: 'c'
+    });
+    expect(toHitlResponsePayload('w', 'req-1', 'no')).toEqual({
+      worldId: 'w',
+      requestId: 'req-1',
+      optionId: 'no',
+      chatId: undefined
     });
   });
 });

@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `hitl:respond` route wiring for world HITL option responses from renderer.
  * - 2026-02-14: Added `skill:list` route wiring for renderer welcome-screen skill registry hydration.
  * - 2026-02-13: Added `message:edit` route wiring for core-driven message edit/resubmission.
  * - 2026-02-13: Added `chat:stopMessage` route wiring for session-scoped stop requests.
@@ -22,6 +23,7 @@ import {
   DESKTOP_INVOKE_CHANNELS,
   type ChatSubscribePayload,
   type ChatUnsubscribePayload,
+  type HitlResponsePayload,
   type MessageEditPayload,
   type MessageDeletePayload,
   type WorldChatPayload,
@@ -51,6 +53,7 @@ export interface MainIpcHandlers {
   getSessionMessages: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   sendChatMessage: (payload: unknown) => Promise<unknown> | unknown;
   editMessageInChat: (payload: unknown) => Promise<unknown> | unknown;
+  respondHitlOption: (payload: unknown) => Promise<unknown> | unknown;
   stopChatMessage: (payload: unknown) => Promise<unknown> | unknown;
   deleteMessageFromChat: (payload: unknown) => Promise<unknown> | unknown;
   subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
@@ -114,6 +117,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.MESSAGE_EDIT,
       handler: async (_event, payload) => handlers.editMessageInChat(payload as MessageEditPayload)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.HITL_RESPOND,
+      handler: async (_event, payload) => handlers.respondHitlOption(payload as HitlResponsePayload)
     },
     { channel: DESKTOP_INVOKE_CHANNELS.CHAT_STOP_MESSAGE, handler: async (_event, payload) => handlers.stopChatMessage(payload) },
     {

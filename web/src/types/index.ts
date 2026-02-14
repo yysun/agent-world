@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
  * - 2026-02-08: Removed legacy manual tool-intervention message and state types
  * - 2026-02-08: Added WorldChatProps.agents for avatar sprite resolution in chat messages
  * - 2025-10-26: Aligned seenByAgents calculation with export.ts - incremental from actual data
@@ -57,6 +58,21 @@ export interface WorldEvent {
   level?: 'trace' | 'debug' | 'info' | 'warn' | 'error'; // Log level for visual styling
   data?: any;
   messageId: string;
+}
+
+export interface HitlPromptOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface HitlPromptRequest {
+  requestId: string;
+  chatId: string | null;
+  title: string;
+  message: string;
+  options: HitlPromptOption[];
+  defaultOptionId: string;
 }
 
 // Web UI Message Interface - extends core with streaming states
@@ -333,6 +349,10 @@ export interface WorldComponentState extends SSEComponentState {
   elapsedMs: number;                          // Elapsed time in milliseconds
   activityStartTime: number | null;           // Activity start timestamp
   elapsedIntervalId: number | null;           // Interval ID for elapsed updates
+
+  // HITL option prompts
+  hitlPromptQueue: HitlPromptRequest[];
+  submittingHitlRequestId: string | null;
 }
 
 // ========================================

@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Added generic HITL option prompt modal flow driven by system events (`hitl-option-request`) with renderer response submission.
  * - 2026-02-14: Made the new-chat welcome card more compact/simple and added a scrollable skill list for large registries.
  * - 2026-02-14: Simplified new-chat welcome layout by removing nested border layers for a cleaner single-surface design.
  * - 2026-02-14: Refined welcome empty-state copy by removing session-name greeting and shortening helper text.
@@ -757,6 +758,9 @@ export default function App() {
   const [worldConfigEditorValue, setWorldConfigEditorValue] = useState('');
   const [worldConfigEditorField, setWorldConfigEditorField] = useState('mcpConfig');
   const [worldConfigEditorTarget, setWorldConfigEditorTarget] = useState(null); // 'edit'
+  // HITL option prompt queue (generic world option requests)
+  const [hitlPromptQueue, setHitlPromptQueue] = useState([]);
+  const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState(null);
 
   const setStatusText = useCallback((text, kind = 'info') => {
     publishStatusBarStatus(text, kind);
@@ -765,6 +769,36 @@ export default function App() {
   useEffect(() => {
     return subscribeStatusBarStatus(setStatus);
   }, []);
+
+  const respondToHitlPrompt = useCallback(async (prompt, optionId) => {
+    if (!prompt || !optionId) return;
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('No world loaded to respond to approval request.', 'error');
+      return;
+    }
+
+    const requestId = String(prompt.requestId || '').trim();
+    if (!requestId) {
+      setStatusText('Invalid approval request.', 'error');
+      return;
+    }
+
+    setSubmittingHitlRequestId(requestId);
+    try {
+      await api.respondHitlOption(worldId, requestId, optionId, prompt.chatId || null);
+      setHitlPromptQueue((existing) => existing.filter((entry) => entry.requestId !== requestId));
+      if (optionId === 'no') {
+        setStatusText('Skill execution was declined.', 'info');
+      } else {
+        setStatusText('Skill execution approved.', 'success');
+      }
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to submit approval response.'), 'error');
+    } finally {
+      setSubmittingHitlRequestId((current) => (current === requestId ? null : current));
+    }
+  }, [api, loadedWorld?.id, setStatusText]);
 
   // Initialize streaming state manager
   useEffect(() => {
@@ -1185,6 +1219,8 @@ export default function App() {
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
     setPendingResponseSessionIds(new Set());
+    setHitlPromptQueue([]);
+    setSubmittingHitlRequestId(null);
     setSessionActivity({
       eventType: 'idle',
       pendingOperations: 0,
@@ -1244,9 +1280,51 @@ export default function App() {
       onSessionSystemEvent: (systemEvent) => {
         if (!loadedWorld?.id) return;
         const eventType = String(systemEvent?.eventType || '').trim();
-        if (eventType !== 'chat-title-updated') return;
-        const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
-        refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
+        if (eventType === 'chat-title-updated') {
+          const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
+          refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
+          return;
+        }
+        if (eventType !== 'hitl-option-request') {
+          return;
+        }
+
+        const content = systemEvent?.content && typeof systemEvent.content === 'object'
+          ? systemEvent.content
+          : null;
+        const requestId = String(content?.requestId || '').trim();
+        if (!requestId) {
+          return;
+        }
+
+        const options = Array.isArray(content?.options)
+          ? content.options
+            .map((option) => ({
+              id: String(option?.id || '').trim(),
+              label: String(option?.label || '').trim(),
+              description: option?.description ? String(option.description) : ''
+            }))
+            .filter((option) => option.id && option.label)
+          : [];
+        if (options.length === 0) {
+          return;
+        }
+
+        setHitlPromptQueue((existing) => {
+          if (existing.some((entry) => entry.requestId === requestId)) {
+            return existing;
+          }
+          return [
+            ...existing,
+            {
+              requestId,
+              chatId: systemEvent?.chatId || selectedSessionId || null,
+              title: String(content?.title || 'Approval required').trim() || 'Approval required',
+              message: String(content?.message || '').trim(),
+              options
+            }
+          ];
+        });
       }
     }));
 
@@ -2201,6 +2279,7 @@ export default function App() {
     activeTools.length > 0 ||
     activeStreamCount > 0 ||
     isBusy;
+  const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -3203,6 +3282,38 @@ export default function App() {
           ) : null}
         </main>
       </div>
+
+      {activeHitlPrompt ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-4 shadow-2xl">
+            <h3 className="text-sm font-semibold text-foreground">
+              {activeHitlPrompt.title || 'Approval required'}
+            </h3>
+            <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
+              {activeHitlPrompt.message || 'Please choose an option to continue.'}
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              {activeHitlPrompt.options.map((option) => {
+                const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => respondToHitlPrompt(activeHitlPrompt, option.id)}
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-left text-xs hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="font-medium text-foreground">{option.label}</div>
+                    {option.description ? (
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">{option.description}</div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <PromptEditorModal
         open={promptEditorOpen}

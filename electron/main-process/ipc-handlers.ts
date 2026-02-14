@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `hitl:respond` IPC handler to resolve core pending HITL option requests from renderer selections.
  * - 2026-02-14: Added `listSkillRegistry` IPC handler to sync/read core skill registry entries for empty-chat welcome rendering.
  * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
  * - 2026-02-13: Added `message:edit` IPC handler that delegates user-message edit/resubmission to core so client flows stay thin.
@@ -65,6 +66,10 @@ interface MainIpcHandlerFactoryDependencies {
   syncSkills: () => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
+  submitWorldOptionResponse: (params: { worldId: string; requestId: string; optionId: string }) => {
+    accepted: boolean;
+    reason?: string;
+  };
   stopMessageProcessing: (worldId: string, chatId: string) => Promise<any> | any;
   restoreChat: (worldId: string, chatId: string) => Promise<any>;
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
@@ -94,6 +99,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     syncSkills,
     newChat,
     publishMessage,
+    submitWorldOptionResponse,
     stopMessageProcessing,
     restoreChat,
     updateWorld,
@@ -707,6 +713,17 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return stopMessageProcessing(worldId, chatId);
   }
 
+  async function respondHitlOption(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    const requestId = String(payload?.requestId || '').trim();
+    const optionId = String(payload?.optionId || '').trim();
+    if (!worldId) throw new Error('World ID is required.');
+    if (!requestId) throw new Error('requestId is required.');
+    if (!optionId) throw new Error('optionId is required.');
+    return submitWorldOptionResponse({ worldId, requestId, optionId });
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
@@ -727,6 +744,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getSessionMessages,
     sendChatMessage,
     editMessageInChat,
+    respondHitlOption,
     stopChatMessage,
     deleteMessageFromChat
   };

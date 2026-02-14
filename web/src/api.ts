@@ -22,6 +22,7 @@
  * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
+ * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
  * - 2026-02-13: Added core-managed editMessage() API call and separated delete/edit semantics
  */
 
@@ -363,6 +364,33 @@ async function editMessage(
   return response.json();
 }
 
+/**
+ * Submit a user-selected HITL option response for a pending world request.
+ */
+async function respondHitlOption(
+  worldName: string,
+  requestId: string,
+  optionId: string,
+  chatId?: string | null
+): Promise<{ accepted: boolean; reason?: string }> {
+  if (!worldName || !requestId || !optionId) {
+    throw new Error('World name, request ID, and option ID are required');
+  }
+
+  const response = await apiRequest(
+    `/worlds/${encodeURIComponent(worldName)}/hitl/respond`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId,
+        optionId,
+        chatId: chatId ?? null
+      }),
+    }
+  );
+  return response.json();
+}
+
 async function sendMessage(
   worldName: string,
   message: string,
@@ -411,8 +439,8 @@ export default {
   // Message management
   deleteMessage,
   editMessage,
+  respondHitlOption,
   sendMessage,
 };
-
 
 

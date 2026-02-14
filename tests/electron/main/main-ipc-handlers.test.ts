@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-14: Added `hitl:respond` handler coverage for core HITL option resolution delegation.
  * - 2026-02-14: Updated edit-message IPC coverage to validate pure core delegation (no main-process runtime refresh/rebind side effects).
  * - 2026-02-13: Added `message:edit` handler coverage for core-driven edit + resubmission delegation.
  * - 2026-02-13: Added regression coverage for delete-message flow to refresh subscribed world runtime after storage deletion.
@@ -48,6 +49,7 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     listWorlds: vi.fn(async () => []),
     newChat: vi.fn(async () => null),
     publishMessage: vi.fn(() => ({})),
+    submitWorldOptionResponse: vi.fn(() => ({ accepted: true })),
     stopMessageProcessing: vi.fn(async () => ({ stopped: true })),
     restoreChat: vi.fn(async () => null),
     updateWorld: vi.fn(async () => ({})),
@@ -152,5 +154,25 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionStatus: 'failed',
       resubmissionError: 'resubmit failed'
     });
+  });
+});
+
+describe('createMainIpcHandlers.respondHitlOption', () => {
+  it('delegates option responses to core submitWorldOptionResponse', async () => {
+    const submitWorldOptionResponse = vi.fn(() => ({ accepted: true }));
+    const { handlers } = await createHandlers({ submitWorldOptionResponse });
+
+    const result = await handlers.respondHitlOption({
+      worldId: 'world-1',
+      requestId: 'req-1',
+      optionId: 'yes_once'
+    });
+
+    expect(submitWorldOptionResponse).toHaveBeenCalledWith({
+      worldId: 'world-1',
+      requestId: 'req-1',
+      optionId: 'yes_once'
+    });
+    expect(result).toEqual({ accepted: true });
   });
 });
