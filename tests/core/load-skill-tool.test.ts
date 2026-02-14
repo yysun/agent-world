@@ -16,6 +16,8 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-02-14: Added coverage ensuring SKILL.md YAML front matter is stripped from injected `<instructions>`.
+ * - 2026-02-14: Added coverage ensuring `<active_resources>` is omitted when no instruction-referenced scripts are present.
  * - 2026-02-14: Added coverage for skill-level HITL gating when skills have no local script references.
  * - 2026-02-14: Added HITL approval + script execution coverage for `load_skill` active resource outputs.
  * - 2026-02-14: Added initial unit coverage for the built-in `load_skill` tool.
@@ -286,5 +288,70 @@ describe('core/load-skill-tool', () => {
     expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
     expect(result).toContain('User declined HITL approval for skill');
     expect(result).not.toContain('<instructions>');
+  });
+
+  it('omits active resources section when skill has no referenced scripts', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue('# Skill Instructions\nDo analysis only.' as any);
+    mockedRequestWorldOption.mockResolvedValue({
+      worldId: 'world-1',
+      requestId: 'req-1',
+      chatId: 'chat-1',
+      optionId: 'yes_once',
+      source: 'user',
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+      },
+    );
+
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
+    expect(result).toContain('<instructions>');
+    expect(result).not.toContain('<active_resources>');
+    expect(result).not.toContain('No instruction-referenced scripts were found for this skill.');
+    expect(result).toContain('Use the skill instructions to complete the user\'s specific request.');
+  });
+
+  it('strips yaml front matter from injected instructions', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'find-skills',
+      description: 'Find skills',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/find-skills/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '---',
+      'name: find-skills',
+      'description: Helps users discover skills.',
+      '---',
+      '',
+      '## Find Skill',
+      '',
+      'Use the available catalog to choose a skill.',
+    ].join('\n') as any);
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute({ skill_id: 'find-skills' });
+
+    expect(result).toContain('<instructions>');
+    expect(result).toContain('## Find Skill');
+    expect(result).not.toContain('name: find-skills');
+    expect(result).not.toContain('description: Helps users discover skills.');
+    expect(result).not.toContain('\n---\n');
   });
 });

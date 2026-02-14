@@ -18,6 +18,8 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
+ * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
  * - 2026-02-14: Added HITL-gated safe script execution and `<active_resources>` payload rendering.
  */
@@ -93,6 +95,11 @@ function buildDeclinedResult(skillId: string): string {
 
 function normalizeScriptPath(scriptPath: string): string {
   return scriptPath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
+}
+
+function stripYamlFrontMatter(markdown: string): string {
+  const frontMatterPattern = /^\uFEFF?---\s*\r?\n[\s\S]*?\r?\n---\s*(?:\r?\n|$)/;
+  return markdown.replace(frontMatterPattern, '');
 }
 
 function isPathWithinRoot(skillRoot: string, targetPath: string): boolean {
@@ -284,7 +291,7 @@ async function executeSkillScripts(options: {
 }): Promise<Array<{ source: string; output: string }>> {
   const scriptPaths = options.scriptPaths;
   if (scriptPaths.length === 0) {
-    return [{ source: 'none', output: 'No instruction-referenced scripts were found for this skill.' }];
+    return [];
   }
 
   const worldId = String(options.context?.world?.id || '').trim();
@@ -378,15 +385,37 @@ function buildSuccessResult(options: {
   const { skillId, skillName, markdown, scriptOutputs, referenceFiles } = options;
   const escapedSkillId = escapeXmlText(skillId);
   const escapedSkillName = escapeXmlText(skillName);
-  const normalizedScriptOutputs = scriptOutputs.length > 0
-    ? scriptOutputs
-    : [{ source: 'none', output: 'No script outputs were generated.' }];
-  const scriptBlocks = normalizedScriptOutputs.flatMap((scriptOutput) => ([
+  const hasActiveResources = scriptOutputs.length > 0;
+  const scriptBlocks = scriptOutputs.flatMap((scriptOutput) => ([
     `    <script_output source="${escapeXmlText(scriptOutput.source)}">`,
     `${escapeXmlText(scriptOutput.output)}`,
     '    </script_output>',
   ]));
   const referenceFilesBlock = escapeXmlText(formatReferenceFilesBlock(referenceFiles));
+
+  const activeResourcesBlock = hasActiveResources
+    ? [
+      '  <active_resources>',
+      ...scriptBlocks,
+      '',
+      '    <reference_files>',
+      referenceFilesBlock,
+      '    </reference_files>',
+      '  </active_resources>',
+      '',
+    ]
+    : [];
+
+  const executionDirective = [
+    '  <execution_directive>',
+    `    You are now operating under the specialized ${escapedSkillName} protocol.`,
+    '    1. Prioritize the logic in <instructions> over generic behavior.',
+    hasActiveResources
+      ? '    2. Use the data in <active_resources> to complete the user\'s specific request.'
+      : '    2. Use the skill instructions to complete the user\'s specific request.',
+    '    3. If the workflow is multi-step, explicitly state your plan before executing.',
+    '  </execution_directive>',
+  ];
 
   return [
     `<skill_context id="${escapedSkillId}">`,
@@ -394,20 +423,8 @@ function buildSuccessResult(options: {
     markdown,
     '  </instructions>',
     '',
-    '  <active_resources>',
-    ...scriptBlocks,
-    '',
-    '    <reference_files>',
-    referenceFilesBlock,
-    '    </reference_files>',
-    '  </active_resources>',
-    '',
-    '  <execution_directive>',
-    `    You are now operating under the specialized ${escapedSkillName} protocol.`,
-    '    1. Prioritize the logic in <instructions> over generic behavior.',
-    '    2. Use the data in <active_resources> to complete the user\'s specific request.',
-    '    3. If the workflow is multi-step, explicitly state your plan before executing.',
-    '  </execution_directive>',
+    ...activeResourcesBlock,
+    ...executionDirective,
     '</skill_context>',
   ].join('\n');
 }
@@ -443,8 +460,9 @@ export function createLoadSkillToolDefinition() {
 
       try {
         const markdown = await fs.readFile(sourcePath, 'utf8');
+        const instructionsMarkdown = stripYamlFrontMatter(markdown);
         const skillRoot = path.dirname(sourcePath);
-        const scriptPaths = extractReferencedScriptPaths(markdown);
+        const scriptPaths = extractReferencedScriptPaths(instructionsMarkdown);
         const isApproved = await requestSkillExecutionApproval({
           skillId: requestedSkillId,
           scriptPaths,
@@ -458,11 +476,11 @@ export function createLoadSkillToolDefinition() {
           skillRoot,
           context,
         });
-        const referenceFiles = await collectReferenceFiles(skillRoot, markdown);
+        const referenceFiles = await collectReferenceFiles(skillRoot, instructionsMarkdown);
         return buildSuccessResult({
           skillId: requestedSkillId,
           skillName: entry.skill_id,
-          markdown,
+          markdown: instructionsMarkdown,
           scriptOutputs,
           referenceFiles,
         });
