@@ -11,10 +11,18 @@
  *
  * Notes:
  * - Tests are pure utility tests with no storage/LLM dependencies.
+ *
+ * Recent changes:
+ * - 2026-02-14: Updated missing `working_directory` default expectation to use core default working directory resolver (user home in Node runtimes).
  */
 
 import { describe, expect, it } from 'vitest';
-import { getEnvValueFromText, interpolateTemplateVariables, parseEnvText } from '../../core/utils.js';
+import {
+  getDefaultWorkingDirectory,
+  getEnvValueFromText,
+  interpolateTemplateVariables,
+  parseEnvText
+} from '../../core/utils.js';
 
 describe('world env utilities', () => {
   it('parses .env text with comments, blanks, and whitespace around =', () => {
@@ -46,9 +54,9 @@ working_directory=/tmp
     expect(value).toBe('/workspace');
   });
 
-  it('defaults working_directory to current directory when missing', () => {
+  it('defaults working_directory to core default working directory when missing', () => {
     const value = getEnvValueFromText('', 'working_directory');
-    expect(value).toBe('./');
+    expect(value).toBe(getDefaultWorkingDirectory());
   });
 
   it('interpolates template variables with optional spaces', () => {

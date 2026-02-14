@@ -32,6 +32,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-14: Default trusted cwd now falls back to shared core default working directory (user home by default) instead of `./` when world variable is unset.
  * - 2026-02-14: Added inline-script execution guard (e.g. `sh -c`, `node -e`) to prevent embedded path bypass outside trusted cwd.
  * - 2026-02-14: Hardened cwd containment checks by canonicalizing absolute paths and validating additional path argument forms (`./`, `../`, and `--flag=/path`).
  * - 2026-02-13: Updated directory-request validation to allow requested folders inside world working_directory and reject only outside paths.
@@ -78,7 +79,7 @@ import { realpathSync } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 import { publishSSE } from './events/index.js';
-import { getEnvValueFromText } from './utils.js';
+import { getDefaultWorkingDirectory, getEnvValueFromText } from './utils.js';
 import {
   createShellProcessExecution,
   transitionShellProcessExecution,
@@ -150,7 +151,7 @@ export function resolveTrustedShellWorkingDirectory(context?: {
 
   const worldDirectory = getEnvValueFromText(context?.world?.variables, 'working_directory');
   const trimmedWorldDirectory = typeof worldDirectory === 'string' ? worldDirectory.trim() : '';
-  return trimmedWorldDirectory || './';
+  return trimmedWorldDirectory || getDefaultWorkingDirectory();
 }
 
 export function validateShellDirectoryRequest(
@@ -166,7 +167,7 @@ export function validateShellDirectoryRequest(
     return { valid: true };
   }
 
-  const trusted = String(trustedWorkingDirectory || '').trim() || './';
+  const trusted = String(trustedWorkingDirectory || '').trim() || getDefaultWorkingDirectory();
   if (isPathWithinTrustedDirectory(requested, trusted)) {
     return { valid: true };
   }
@@ -997,7 +998,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Working directory is controlled by trusted world context (`working_directory`) and defaults to "./" when unset. If the model provides a different `directory`, execution is rejected with an error. When the user asks to run in a different folder, put that folder in `directory` (not in command/parameters paths).',
+    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Working directory is controlled by trusted world context (`working_directory`) and defaults to the user home directory when unset. If the model provides a different `directory`, execution is rejected with an error. When the user asks to run in a different folder, put that folder in `directory` (not in command/parameters paths).',
 
     parameters: {
       type: 'object',

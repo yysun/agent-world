@@ -14,6 +14,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-14: Updated unresolved-cwd fallback test to reflect core default working directory behavior (user home fallback) instead of `./`.
  * - 2026-02-14: Added hard-fail coverage for inline script execution (`sh -c`) and short-option path prefixes (`-I/path`) outside world working_directory.
  * - 2026-02-14: Added hard-fail coverage for path-escape argument forms (`./../../...` and `--flag=/...`) against world working_directory.
  * - 2025-11-07: Refactored to use setupTestWorld helper (test deduplication initiative)
@@ -232,7 +233,7 @@ describe('shell_cmd integration with worlds', () => {
     ).rejects.toThrow('inline script execution');
   });
 
-  test('should default to ./ when directory is unresolved', async () => {
+  test('should use core default working directory when directory is unresolved', async () => {
     const tools = await getMCPToolsForWorld(worldId());
     const shellCmdTool = tools.shell_cmd;
 

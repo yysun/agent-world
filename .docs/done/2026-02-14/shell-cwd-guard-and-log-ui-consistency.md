@@ -27,8 +27,18 @@ Implemented strict `shell_cmd` working-directory enforcement so runtime executio
 
 - Prompt context:
   - Updated `prepareMessagesForLLM` in `core/utils.ts` to append:
-    - `working directory: <world working_directory or ./ fallback>`
+    - `working directory: <world working_directory or default working directory fallback>`
   - Ensures the model consistently receives explicit cwd context.
+  - Added shared core fallback resolver for missing `working_directory`:
+    - `AGENT_WORLD_DEFAULT_WORKING_DIRECTORY` (if set)
+    - otherwise OS home directory
+    - final fallback `./` only if needed
+
+- Runtime defaults across apps:
+  - Updated core shell trusted cwd fallback to use shared core default working directory (home by default), not `./`.
+  - Updated orchestrator fallback path resolution to same shared core default.
+  - Electron main now sets `AGENT_WORLD_DEFAULT_WORKING_DIRECTORY` from `app.getPath('home')` on startup for packaged-app stability.
+  - Electron renderer removed local `working_directory=./` fallback to avoid conflicting with core behavior.
 
 - Electron/Web UI:
   - Added structured tool error detail formatting in Electron log message rendering and status-bar fallback:
@@ -49,8 +59,9 @@ Implemented strict `shell_cmd` working-directory enforcement so runtime executio
   - covers directory mismatch rejection, out-of-scope paths, short-option path prefixes, and inline script guard rejection.
 
 - Validation commands run:
-  - `npx vitest run tests/core/shell-cmd-tool.test.ts tests/core/shell-cmd-integration.test.ts tests/core/prepare-messages-for-llm.test.ts`
+  - `npx vitest run tests/core/world-env-utils.test.ts tests/core/shell-cmd-tool.test.ts tests/core/shell-cmd-integration.test.ts tests/core/prepare-messages-for-llm.test.ts`
   - `npm run check --workspace=core`
+  - `npm run main:build --prefix electron`
   - `npm run check --workspace=web`
   - `npm run renderer:build --prefix electron`
 

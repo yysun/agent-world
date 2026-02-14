@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-14: Set `AGENT_WORLD_DEFAULT_WORKING_DIRECTORY` from `app.getPath('home')` at startup so core cwd fallback is stable in packaged Electron runs.
  * - 2026-02-14: Routed Electron edit-message path back to core-managed `editUserMessage` flow (no main-process subscription refresh logic).
  * - 2026-02-13: Routed message edit/resubmission through core `editUserMessage` via new IPC `message:edit` handler.
  * - 2026-02-13: Wired `chat:stopMessage` IPC to core stop-processing runtime controls.
@@ -269,6 +270,13 @@ function setupAppLifecycle() {
 
 async function bootstrap() {
   await app.whenReady();
+  if (!process.env.AGENT_WORLD_DEFAULT_WORKING_DIRECTORY) {
+    const homePath = app.getPath('home');
+    const trimmedHomePath = typeof homePath === 'string' ? homePath.trim() : '';
+    if (trimmedHomePath) {
+      process.env.AGENT_WORLD_DEFAULT_WORKING_DIRECTORY = trimmedHomePath;
+    }
+  }
   initializeWorkspace();
   subscribeToLogEvents();
   registerIpcHandlers();

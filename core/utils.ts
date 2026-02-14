@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
  * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
  * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
  *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
@@ -46,14 +47,40 @@
  */
 
 import { nanoid } from 'nanoid';
+import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
 import { createCategoryLogger } from './logger.js';
 
 const logger = createCategoryLogger('core.utils');
 
-const DEFAULT_WORLD_ENV_VALUES: Record<string, string> = {
-  working_directory: './'
-};
+/**
+ * Resolve default working directory when world variable is not configured.
+ * Priority:
+ * 1) AGENT_WORLD_DEFAULT_WORKING_DIRECTORY (runtime override)
+ * 2) OS user home directory
+ * 3) "./" hard fallback
+ */
+export function getDefaultWorkingDirectory(): string {
+  const envValue = typeof process !== 'undefined'
+    ? process.env?.AGENT_WORLD_DEFAULT_WORKING_DIRECTORY
+    : undefined;
+  const trimmedEnvValue = typeof envValue === 'string' ? envValue.trim() : '';
+  if (trimmedEnvValue) {
+    return trimmedEnvValue;
+  }
+
+  try {
+    const homePath = homedir();
+    const trimmedHomePath = typeof homePath === 'string' ? homePath.trim() : '';
+    if (trimmedHomePath) {
+      return trimmedHomePath;
+    }
+  } catch {
+    // Fall through to final static fallback.
+  }
+
+  return './';
+}
 
 /**
  * Generate unique ID for messages and events
@@ -153,7 +180,10 @@ export function getEnvValueFromText(variablesText: string | undefined, key: stri
   if (Object.prototype.hasOwnProperty.call(envMap, key)) {
     return envMap[key];
   }
-  return DEFAULT_WORLD_ENV_VALUES[key];
+  if (key === 'working_directory') {
+    return getDefaultWorkingDirectory();
+  }
+  return undefined;
 }
 
 /**
@@ -381,7 +411,7 @@ export async function prepareMessagesForLLM(
   // System messages are NEVER saved to storage
   if (freshSystemPrompt) {
     const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt, worldEnvMap);
-    const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || './';
+    const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
     const promptWithWorkingDirectory = interpolatedPrompt.endsWith('\n')
       ? `${interpolatedPrompt}working directory: ${workingDirectory}`
       : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`;

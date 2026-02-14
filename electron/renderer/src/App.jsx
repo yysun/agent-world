@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-14: Removed renderer-local `working_directory=./` fallback; missing values now rely on core default working-directory behavior.
  * - 2026-02-14: Removed monospace font override from desktop log/system lines so tool error text matches agent message typography.
  * - 2026-02-13: Unified desktop log-line typography so category and detailed error text render with a single consistent font style.
  * - 2026-02-13: Expanded desktop log-message rendering to include structured error details (error/message/toolCallId) instead of generic "Tool execution error" text.
@@ -477,7 +478,6 @@ function getEnvValueFromText(variablesText, key) {
     if (envKey !== key) continue;
     return line.slice(eqIndex + 1).trim();
   }
-  if (key === 'working_directory') return './';
   return undefined;
 }
 

@@ -44,6 +44,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-14: Shell tool trusted cwd fallback now uses core default working directory (user home) when world `working_directory` is missing.
  * - 2026-02-13: Fixed shell_cmd mismatch handling by validating path targets in command parameters (e.g. `~/`) against world working_directory before execution.
  * - 2026-02-13: Added hard-stop guard for shell_cmd directory mismatches (LLM-requested `directory` must match world `working_directory`).
  * - 2026-02-13: Enriched displayed `shell_cmd` tool-call arguments with trusted world cwd so UI tool-call messages show the actual execution directory.
@@ -78,6 +79,7 @@ import {
   getWorldTurnLimit,
   extractMentions,
   extractParagraphBeginningMentions,
+  getDefaultWorkingDirectory,
   getEnvValueFromText
 } from '../utils.js';
 import { createCategoryLogger } from '../logger.js';
@@ -489,8 +491,8 @@ export async function processAgentMessage(
       const returnedToolCalls = llmResponse.tool_calls || [];
       const executableToolCalls = returnedToolCalls.slice(0, 1);
       const trustedWorkingDirectory = String(
-        getEnvValueFromText(world.variables, 'working_directory') || './'
-      ).trim() || './';
+        getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
+      ).trim() || getDefaultWorkingDirectory();
       const displayToolCalls = withTrustedShellDirectory(
         executableToolCalls as DisplayToolCall[],
         trustedWorkingDirectory

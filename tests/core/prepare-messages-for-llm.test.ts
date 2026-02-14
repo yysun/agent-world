@@ -14,13 +14,14 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-02-14: Updated default cwd expectation to core default working directory (user home fallback), replacing `./`.
  * - 2026-02-13: Added coverage for required working-directory system prompt suffix.
  */
 
 import { describe, expect, test } from 'vitest';
 import { createAgent, updateWorld } from '../../core/managers.js';
 import { LLMProvider } from '../../core/types.js';
-import { prepareMessagesForLLM } from '../../core/utils.js';
+import { getDefaultWorkingDirectory, prepareMessagesForLLM } from '../../core/utils.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 describe('prepareMessagesForLLM', () => {
@@ -48,7 +49,7 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.content).toContain('working directory: /tmp/agent-world');
   });
 
-  test('appends default working directory when world value is missing', async () => {
+  test('appends core default working directory when world value is missing', async () => {
     await updateWorld(worldId(), {
       variables: 'project_name=agent-world'
     });
@@ -63,6 +64,6 @@ describe('prepareMessagesForLLM', () => {
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain('working directory: ./');
+    expect(messages[0]?.content).toContain(`working directory: ${getDefaultWorkingDirectory()}`);
   });
 });
