@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+release/
+*.tgz
 
 # Environment variables
 .env
@@ -40,3 +42,9 @@ docs/requirements/
 docs/ideas/
 docs/done/
 public/
+
+# Electron packaging output
+electron/release/
+electron/builder-effective-config.yaml
+electron/.cache/
+electron/.electron-builder/
