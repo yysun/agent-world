@@ -92,3 +92,30 @@ export function renderMarkdown(markdownText: string | null | undefined): string 
       .replace(/'/g, '&#x27;');
   }
 }
+
+/**
+ * Check if text appears to contain markdown syntax
+ * @param text - Text to check
+ * @returns true when common markdown patterns are detected
+ */
+export function hasMarkdown(text: string | null | undefined): boolean {
+  if (!text || typeof text !== 'string') {
+    return false;
+  }
+
+  const markdownPatterns = [
+    /^#{1,6}\s+/m,
+    /\*\*[^*]+\*\*/,
+    /\*[^*]+\*/,
+    /`[^`]+`/,
+    /```[\s\S]*?```/,
+    /^\s*[-*+]\s+/m,
+    /^\s*\d+\.\s+/m,
+    /^>\s+/m,
+    /\[[^\]]+\]\([^)]+\)/,
+    /^\|.+\|$/m,
+    /^---+$/m,
+  ];
+
+  return markdownPatterns.some(pattern => pattern.test(text));
+}

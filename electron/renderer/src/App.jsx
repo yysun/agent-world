@@ -192,6 +192,7 @@ function MessageContent({ message }) {
   const role = String(message?.role || '').toLowerCase();
   const isToolMessage = role === 'tool' || message.isToolStreaming;
   const [isToolCollapsed, setIsToolCollapsed] = useState(true);
+  const MAX_TOOL_OUTPUT_LENGTH = 50000;
 
   // Use useMemo to cache markdown rendering and avoid re-parsing on every render
   const renderedContent = useMemo(() => {
@@ -235,6 +236,10 @@ function MessageContent({ message }) {
 
   // Tool output with stdout/stderr distinction
   if (isToolMessage) {
+    const toolContent = String(message.content || '');
+    const isTruncated = toolContent.length > MAX_TOOL_OUTPUT_LENGTH;
+    const visibleContent = isTruncated ? toolContent.slice(0, MAX_TOOL_OUTPUT_LENGTH) : toolContent;
+
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
@@ -297,8 +302,13 @@ function MessageContent({ message }) {
                 wordBreak: 'break-all'
               }}
             >
-              {message.content || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
+              {visibleContent || (message.isToolStreaming ? '(waiting for output...)' : '(no output)')}
             </pre>
+            {isTruncated ? (
+              <div className="border-t border-border/40 px-3 py-2 text-[11px] text-amber-400">
+                ⚠️ Output truncated (exceeded 50,000 characters)
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -345,16 +355,45 @@ function getMessageIdentity(message) {
   return String(message?.messageId || '').trim();
 }
 
-function getMessageCardClassName(message) {
+function isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex) {
+  const role = String(message?.role || '').toLowerCase();
+  if (role !== 'assistant') return false;
+
+  const sender = String(message?.sender || '').trim().toLowerCase();
+  if (!sender) return false;
+
+  const replyToMessageId = String(message?.replyToMessageId || '').trim();
+  if (replyToMessageId) {
+    const parentMessage = messagesById.get(replyToMessageId);
+    if (!parentMessage || isHumanMessage(parentMessage)) return false;
+    const parentSender = String(parentMessage?.sender || '').trim().toLowerCase();
+    return Boolean(parentSender) && parentSender !== sender;
+  }
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (!candidate || isHumanMessage(candidate)) continue;
+    const candidateSender = String(candidate?.sender || '').trim().toLowerCase();
+    if (!candidateSender) continue;
+    return candidateSender !== sender;
+  }
+
+  return false;
+}
+
+function getMessageCardClassName(message, messagesById, messages, currentIndex) {
   const role = String(message?.role || '').toLowerCase();
   const isUser = role === 'user';
   const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
+  const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
 
   const roleClassName = isUser
     ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
     : isTool
       ? 'mr-auto w-[92%] border-l-amber-500/50'
+      : isCrossAgent
+        ? 'mr-auto w-[86%] border-l-violet-500/50'
       : isSystem
         ? 'mr-auto w-[90%] border-l-border bg-muted/40'
         : 'mr-auto w-[86%] border-l-sky-500/40';
@@ -409,6 +448,14 @@ function inferReplyTargetFromHistory(message, messages, currentIndex) {
 function getMessageSenderLabel(message, messagesById, messages, currentIndex) {
   if (isHumanMessage(message)) return 'HUMAN';
   const sender = message?.sender || 'unknown';
+  if (isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex)) {
+    const replyToMessageId = String(message?.replyToMessageId || '').trim();
+    const parentMessage = replyToMessageId ? messagesById.get(replyToMessageId) : null;
+    const parentSender = String(parentMessage?.sender || '').trim();
+    const fromAgentId = String(message?.fromAgentId || '').trim();
+    const source = parentSender || fromAgentId || 'Agent';
+    return `${source} → ${sender}`;
+  }
   const replyTarget = getReplyTarget(message, messagesById) ||
     inferReplyTargetFromHistory(message, messages, currentIndex);
   if (!replyTarget) return sender;
@@ -2809,7 +2856,7 @@ export default function App() {
                             </div>
                           ) : null}
 
-                          <article className={getMessageCardClassName(message)}>
+                          <article className={getMessageCardClassName(message, messagesById, messages, messageIndex)}>
                             <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                               <span>{senderLabel}</span>
                               <span>{formatTime(message.createdAt)}</span>

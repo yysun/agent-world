@@ -12,11 +12,11 @@
  * - Displays only the first/intended recipient agent, not all who received it
  * - Agent activity display for world events (response-start, tool-start)
  * - Tool result message filtering (hides internal tool result protocol messages)
- * - Detailed tool call display: "Calling tool: shell_cmd (command: x, params: y)" format
- * - Detailed tool result display: "Tool result: shell_cmd (command: x, params: y)" format
+ * - Message body rendering delegated to domain module (`renderMessageContent`)
  * - Left-side avatar rendering for message boxes using actual agent spriteIndex values
  * - Human messages keep an empty avatar slot (no sprite image)
  * - Activity indicators: ActivityPulse and ElapsedTimeCounter in chat header
+ * - Agent queue indicator in chat header (active + queued agents)
  * - Tool execution status: ToolExecutionStatus showing active tools with icons
  * - Collapsible tool output: Expand/collapse tool results with stdout/stderr styling
  * - Tool output truncation: 50K character limit with truncation warning
@@ -24,6 +24,9 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
+ * - 2026-02-14: Removed legacy 3-tier tool call reconstruction in favor of canonical message text rendering
+ * - 2026-02-14: Added AgentQueueDisplay in chat header for active/queued visibility
  * - 2026-02-11: Phase 6 - Added role-based left border colors (human=light blue, agent=sky blue, tool=amber, system=gray, cross-agent=purple)
  * - 2026-02-11: Phase 6 - Applied .tool-message class to tool result messages
  * - 2026-02-11: Phase 5 - Added collapsible tool output with expand/collapse
@@ -38,10 +41,6 @@
  * - 2026-02-08: Left human message avatars empty while preserving avatar alignment slot
  * - 2026-02-08: Mapped message avatars to world agents' assigned spriteIndex values
  * - 2026-02-08: Added left-side avatars for world chat message boxes
- * - 2025-11-11: Fixed tool call display to prioritize tool_calls data over pre-saved text (upgrades old messages)
- * - 2025-11-11: Updated tool call/result display to show full argument details without truncation
- * - 2025-11-11: Enhanced tool call request preview to show tool name and arguments
- * - 2025-11-11: Enhanced tool result preview to show tool name and arguments instead of just tool_call_id
  * - 2025-11-03: Display agent activities (response-start, tool-start) instead of waiting dots
  * - 2025-10-27: Fixed message labeling to match export format - consistent reply detection
  * - 2025-10-27: Removed confusing '[in-memory, no reply]' labels from display
@@ -56,13 +55,14 @@
  * - 2025-10-21: Integrated message edit functionality with remove-and-resubmit flow
  */
 
-import { app, safeHTML } from 'apprun';
+import { app } from 'apprun';
 import type { WorldChatProps, Message } from '../types';
 import toKebabCase from '../utils/toKebabCase';
 import { SenderType, getSenderType } from '../utils/sender-type.js';
-import { renderMarkdown } from '../utils/markdown';
-import { ActivityPulse, ElapsedTimeCounter, ThinkingIndicator } from './activity-indicators';
+import { isToolResultMessage, renderMessageContent } from '../domain/message-content';
+import { ActivityPulse, ElapsedTimeCounter } from './activity-indicators';
 import { ToolExecutionStatus } from './tool-execution-status';
+import { AgentQueueDisplay } from './agent-queue-display';
 
 const debug = false;
 const SYSTEM_AVATAR_SPRITE_INDEX = 4;
@@ -102,6 +102,10 @@ export default function WorldChat(props: WorldChatProps) {
     agentSpriteByName.set(normalizedName, agent.spriteIndex);
     agentSpriteById.set(normalizedId, agent.spriteIndex);
   }
+
+  const queuedAgents = agents
+    .filter((agent) => agent.name !== activeAgent?.name)
+    .map((agent) => ({ name: agent.name, spriteIndex: agent.spriteIndex }));
 
   // Helper function to determine if a message has sender/agent mismatch
   const hasSenderAgentMismatch = (message: Message): boolean => {
@@ -188,144 +192,6 @@ export default function WorldChat(props: WorldChatProps) {
     return false;
   };
 
-  // Helper function to detect and format tool calls (3-tier detection matching export logic)
-  const formatMessageText = (message: Message): string => {
-    // Tier 1: Check for tool_calls array FIRST (prioritize regenerating from data over using pre-saved text)
-    // This allows old messages with simple "Calling tool: name" to be upgraded to detailed format
-    if ((message as any).tool_calls) {
-      // Parse tool_calls if it's a JSON string (from database)
-      let toolCalls = (message as any).tool_calls;
-      if (typeof toolCalls === 'string') {
-        try {
-          toolCalls = JSON.parse(toolCalls);
-        } catch {
-          toolCalls = [];
-        }
-      }
-
-      if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-        // Format tool calls with details
-        const toolCallDetails = toolCalls.map((tc: any) => {
-          const toolName = tc.function?.name || 'unknown';
-          let toolArgs = '';
-          try {
-            const args = JSON.parse(tc.function?.arguments || '{}');
-            const argKeys = Object.keys(args);
-            if (argKeys.length > 0) {
-              // Show all arguments without truncation for better visibility
-              const argSummary = argKeys.map((key: string) => {
-                const val = args[key];
-                const strVal = typeof val === 'string' ? val : JSON.stringify(val);
-                return `${key}: ${strVal}`;
-              }).join(', ');
-              toolArgs = ` (${argSummary})`;
-            }
-          } catch {
-            toolArgs = '';
-          }
-          return `${toolName}${toolArgs}`;
-        });
-
-        if (toolCalls.length === 1) {
-          return `Calling tool: ${toolCallDetails[0]}`;
-        } else {
-          return `Calling tools:\n${toolCallDetails.map((td, i) => `${i + 1}. ${td}`).join('\n')}`;
-        }
-      }
-    }
-
-    const text = message.text;
-
-    // Tier 2: Check if this is a tool result message
-    if (message.type === 'tool') {
-      const toolCallId = (message as any).tool_call_id || 'unknown';
-
-      // Find the tool call details from previous assistant messages
-      let toolName = 'unknown';
-      let toolArgs = '';
-      const currentIndex = messages.findIndex(m => m.messageId === message.messageId);
-      if (currentIndex >= 0) {
-        for (let i = currentIndex - 1; i >= 0; i--) {
-          const prevMsg = messages[i];
-          if (prevMsg.type === 'assistant' && (prevMsg as any).tool_calls) {
-            // Parse tool_calls if it's a JSON string (from database)
-            let prevToolCalls = (prevMsg as any).tool_calls;
-            if (typeof prevToolCalls === 'string') {
-              try {
-                prevToolCalls = JSON.parse(prevToolCalls);
-              } catch {
-                prevToolCalls = [];
-              }
-            }
-            if (!Array.isArray(prevToolCalls)) continue;
-
-            const toolCall = prevToolCalls.find((tc: any) => tc.id === toolCallId);
-            if (toolCall) {
-              toolName = toolCall.function?.name || 'unknown';
-              try {
-                const args = JSON.parse(toolCall.function?.arguments || '{}');
-                const argKeys = Object.keys(args);
-                if (argKeys.length > 0) {
-                  // Show all arguments without truncation
-                  const argSummary = argKeys.map((key: string) => {
-                    const val = args[key];
-                    const strVal = typeof val === 'string' ? val : JSON.stringify(val);
-                    return `${key}: ${strVal}`;
-                  }).join(', ');
-                  toolArgs = ` (${argSummary})`;
-                }
-              } catch {
-                toolArgs = '';
-              }
-              break;
-            }
-          }
-        }
-      }
-
-      return `Tool result: ${toolName}${toolArgs}`;
-    }
-
-    // Tier 3: Fallback - check if message content is all JSON tool call objects
-    const lines = text.trim().split('\n');
-    const jsonLines = lines.filter(line => line.trim().startsWith('{') && line.trim().endsWith('}'));
-
-    if (jsonLines.length > 0 && jsonLines.length === lines.length) {
-      // All lines are JSON objects - check if they're tool calls
-      const validToolCalls = jsonLines.filter(line => {
-        try {
-          const parsed = JSON.parse(line.trim());
-          return parsed.hasOwnProperty('name') || parsed.hasOwnProperty('parameters') ||
-            parsed.hasOwnProperty('arguments') || parsed.hasOwnProperty('function');
-        } catch {
-          return false;
-        }
-      });
-
-      if (validToolCalls.length > 0) {
-        // Extract tool names
-        const toolNames = validToolCalls
-          .map(line => {
-            try {
-              const parsed = JSON.parse(line.trim());
-              return parsed.function?.name || parsed.name || '';
-            } catch {
-              return '';
-            }
-          })
-          .filter(name => name !== '');
-
-        if (toolNames.length > 0) {
-          return `[${toolNames.length} tool call${toolNames.length > 1 ? 's' : ''}: ${toolNames.join(', ')}]`;
-        } else {
-          return `[${validToolCalls.length} tool call${validToolCalls.length > 1 ? 's' : ''}]`;
-        }
-      }
-    }
-
-    return text;
-  };
-
   const getMessageRowAlignmentClass = (senderType: SenderType, isCrossAgentMessage: boolean): string => {
     if (senderType === SenderType.HUMAN || isCrossAgentMessage) {
       return 'message-row-left';
@@ -362,45 +228,16 @@ export default function WorldChat(props: WorldChatProps) {
     return SYSTEM_AVATAR_SPRITE_INDEX;
   };
 
-  // Phase 5: Helper functions for collapsible tool output
-
-  /**
-   * Check if message is a tool result message
-   */
-  const isToolResultMessage = (message: Message): boolean => {
-    return message.type === 'tool';
-  };
-
-  /**
-   * Truncate tool output if longer than 50K characters
-   */
-  const truncateToolOutput = (text: string): { content: string; wasTruncated: boolean } => {
-    const MAX_LENGTH = 50000;
-    if (text.length > MAX_LENGTH) {
-      return {
-        content: text.substring(0, MAX_LENGTH),
-        wasTruncated: true
-      };
-    }
-    return {
-      content: text,
-      wasTruncated: false
-    };
-  };
-
-  /**
-   * Detect if tool output is stderr based on message properties
-   */
-  const isStderrOutput = (message: Message): boolean => {
-    return message.streamType === 'stderr';
-  };
-
   return (
     <fieldset className="chat-fieldset">
       <legend>
         {worldName} {
           currentChat ? ` - ${currentChat}` :
             <span className="unsaved-indicator" title="Unsaved chat"> ●</span>}
+        <AgentQueueDisplay
+          activeAgent={activeAgent ? { name: activeAgent.name, spriteIndex: activeAgent.spriteIndex } : null}
+          queuedAgents={queuedAgents}
+        />
         <ActivityPulse isBusy={isBusy || false} />
         {(isBusy || (elapsedMs && elapsedMs > 0)) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
@@ -606,54 +443,7 @@ export default function WorldChat(props: WorldChatProps) {
                       </div>
                     ) : (
                       <>
-                        {message.isToolStreaming ? (
-                          /* Render streaming tool output with stdout/stderr distinction */
-                          <div className="tool-stream-output">
-                            <div className="tool-stream-header">
-                              ⚙️ Executing...
-                            </div>
-                            <div className={`tool-stream-content ${message.streamType === 'stderr' ? 'stderr' : 'stdout'}`}>
-                              <pre className="tool-output-text">{message.text || '(waiting for output...)'}</pre>
-                            </div>
-                          </div>
-                        ) : isToolResultMessage(message) ? (
-                          /* Phase 5: Collapsible tool output for tool result messages */
-                          (() => {
-                            const { content, wasTruncated } = truncateToolOutput(message.text);
-                            const isExpanded = message.isToolOutputExpanded || false;
-                            const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
-
-                            return (
-                              <div className="tool-output-container">
-                                <div className="tool-output-header">
-                                  <button
-                                    className="tool-output-toggle"
-                                    $onclick={['toggle-tool-output', message.id]}
-                                    title={isExpanded ? 'Collapse output' : 'Expand output'}
-                                  >
-                                    <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
-                                    <span className="tool-label">{formatMessageText(message)}</span>
-                                  </button>
-                                </div>
-                                {isExpanded && (
-                                  <div className={`tool-output-content ${outputClass}`}>
-                                    <pre className="tool-output-text">{content}</pre>
-                                    {wasTruncated && (
-                                      <div className="tool-output-truncated">
-                                        ⚠️ Output truncated (exceeded 50,000 characters)
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          /* Regular message content */
-                          <div className="message-content">
-                            {safeHTML(renderMarkdown(formatMessageText(message)))}
-                          </div>
-                        )}
+                        {renderMessageContent(message)}
                         {isUserMessage && !message.isStreaming && (
                           <div className="message-actions">
                             <button

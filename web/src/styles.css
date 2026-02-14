@@ -814,6 +814,51 @@ legend {
   font-weight: bold;
 }
 
+.agent-queue-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.6rem;
+  vertical-align: middle;
+}
+
+.agent-queue-active {
+  position: relative;
+  display: inline-flex;
+}
+
+.agent-queue-active .message-avatar,
+.agent-queue-item .message-avatar {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.agent-queue-active-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 9999px;
+  background: #22c55e;
+  border: 1px solid #0f172a;
+}
+
+.agent-queue-list {
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-queue-item {
+  margin-left: -0.25rem;
+}
+
+.agent-queue-overflow {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  margin-left: 0.15rem;
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;

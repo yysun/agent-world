@@ -54,7 +54,7 @@ export function ActivityPulse(props: ActivityPulseProps) {
   const pulseClass = isBusy ? 'activity-pulse active' : 'activity-pulse idle';
 
   return (
-    <div className="activity-pulse-container">
+    <div className="activity-pulse-container" role="status" aria-live="polite">
       <div className={pulseClass} role="status" aria-label={isBusy ? 'Busy' : 'Idle'}></div>
       {label && <span className="activity-label">{label}</span>}
     </div>

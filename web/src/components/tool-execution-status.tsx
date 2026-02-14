@@ -94,7 +94,7 @@ export function ToolExecutionStatus({ activeTools }: ToolExecutionStatusProps) {
   }
 
   return (
-    <div className="tool-execution-status">
+    <div className="tool-execution-status" role="status" aria-live="polite">
       {activeTools.map(tool => (
         <div key={tool.toolUseId} className="tool-entry">
           <span className="tool-icon">{getToolIcon(tool.toolName)}</span>
