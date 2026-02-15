@@ -126,6 +126,39 @@ Windows signing:
 
 If required signing/notarization prerequisites are missing, release publishing should fail.
 
+### How to set these in GitHub Actions
+
+1. Open repository **Settings**.
+2. Go to **Secrets and variables** → **Actions**.
+3. In **Repository secrets**, click **New repository secret** and add each secret name/value:
+   - `CSC_LINK`
+   - `CSC_KEY_PASSWORD`
+   - `APPLE_ID`
+   - `APPLE_APP_SPECIFIC_PASSWORD`
+   - `APPLE_TEAM_ID`
+   - `WIN_CSC_LINK`
+   - `WIN_CSC_KEY_PASSWORD`
+4. Ensure workflow permissions allow release publishing (`contents: write`), as configured in `.github/workflows/electron-release.yml`.
+
+Notes:
+- This workflow maps `secrets.GITHUB_TOKEN` to `GH_TOKEN` in the release steps, so a separate `GH_TOKEN` repository secret is typically not required for this pipeline.
+- If you run release commands locally (outside GitHub Actions), you must export these as shell environment variables before running packaging/publish commands.
+
+### Local shell example (manual publish)
+
+```bash
+export GH_TOKEN="<github-token>"
+
+export CSC_LINK="<base64-or-file-url-to-mac-cert>"
+export CSC_KEY_PASSWORD="<mac-cert-password>"
+export APPLE_ID="<apple-id-email>"
+export APPLE_APP_SPECIFIC_PASSWORD="<app-specific-password>"
+export APPLE_TEAM_ID="<team-id>"
+
+export WIN_CSC_LINK="<base64-or-file-url-to-windows-cert>"
+export WIN_CSC_KEY_PASSWORD="<windows-cert-password>"
+```
+
 ## Recommended Release Sequence (Manual)
 
 ```bash
@@ -155,3 +188,11 @@ Installer is for fresh install. `latest*.yml` is for updater version resolution.
 
 ### Why sync versions between root and electron package?
 To prevent release drift and updater confusion.
+
+### Do local builds require GitHub setup/secrets?
+No for local-only distribution builds. The local dist scripts use `--publish never`, so GitHub release setup/secrets are not required for `npm run electron:dist:mac`, `npm run electron:dist:win`, or `npm run electron:dist:all`.
+
+### What happens if I do not sign the build?
+- macOS: artifacts may build locally, but users should expect Gatekeeper warnings and/or manual bypass prompts; missing notarization further reduces install trust for distribution.
+- Windows: artifacts may build locally, but users should expect SmartScreen warnings because the installer binary has no trusted code-signing identity.
+- CI production publishing is intentionally guarded and should fail when required signing secrets are missing.

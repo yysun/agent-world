@@ -47,11 +47,13 @@ Define the release/version contract for Agent World desktop distribution so pack
 - Code signing required
 - Notarization required for production release artifacts
 - Release publish must fail when signing/notarization prerequisites are unavailable
+- Unsigned/notarization-missing builds may still be produced locally, but are expected to trigger Gatekeeper warnings and/or manual bypass prompts.
 
 ### Windows
 
 - Code signing required for production release artifacts
 - Release publish must fail when signing prerequisites are unavailable
+- Unsigned builds may still run, but users should expect SmartScreen warnings and reduced trust signals.
 
 ## CI Secret Baseline
 
@@ -65,6 +67,10 @@ Define the release/version contract for Agent World desktop distribution so pack
 - Windows signing:
   - `WIN_CSC_LINK`
   - `WIN_CSC_KEY_PASSWORD`
+
+Notes:
+- In GitHub Actions for this repo, `secrets.GITHUB_TOKEN` is mapped to `GH_TOKEN` in publish steps.
+- Local-only dist builds (`--publish never`) do not require GitHub release setup/secrets.
 
 ## Guardrails
 
