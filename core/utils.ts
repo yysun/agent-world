@@ -193,7 +193,7 @@ function buildAgentMentionFormatRule(): string {
   return [
     'Always use this format when addressing a specific agent: @<agent>, <message>.',
     'Put @<agent> at the very start of the reply.',
-    'Do not use other addressing styles (e.g. To @<agent>, Hi @<agent> or Hey @<agent> or mid-sentence mentions).'
+    'Do not use other addressing styles (e.g. To @<agent>, Hi @<agent>, Hey @<agent>, Hello @<agent>, or mid-sentence mentions).'
   ].join('\n');
 }
 
@@ -299,16 +299,16 @@ export function extractParagraphBeginningMentions(content: string): string[] {
   if (!content) return [];
 
   const validMentions: string[] = [];
-  const mentionPattern = /^@(\w+(?:[-_]\w+)*)/;
+  const mentionPattern = /^(?:hey|hi|hello|to)\s+@(\w+(?:[-_]\w+)*)\b|^@(\w+(?:[-_]\w+)*)\b/i;
   const lines = content.split(/\n/);
 
   for (const line of lines) {
     const trimmed = line.trimStart();
-    // Only match if @ is the very first character after trimming
-    if (trimmed.startsWith('@')) {
-      const match = mentionPattern.exec(trimmed);
-      if (match && match[1]) {
-        validMentions.push(match[1].toLowerCase());
+    const match = mentionPattern.exec(trimmed);
+    if (match) {
+      const mention = match[1] || match[2];
+      if (mention) {
+        validMentions.push(mention.toLowerCase());
       }
     }
   }

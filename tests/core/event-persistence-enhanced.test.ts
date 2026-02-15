@@ -35,7 +35,7 @@ describe('Enhanced Event Persistence', () => {
       llmCallCount: 0,
       memory: []
     };
-    
+
     agent2 = {
       id: 'agent2',
       name: 'Agent2',
@@ -45,9 +45,9 @@ describe('Enhanced Event Persistence', () => {
       llmCallCount: 0,
       memory: []
     };
-    
+
     const eventStorage = await createMemoryEventStorage();
-    
+
     world = {
       id: 'test-world',
       name: 'Test World',
@@ -65,7 +65,7 @@ describe('Enhanced Event Persistence', () => {
       chats: new Map(),
       eventStorage
     };
-    
+
     cleanup = setupEventPersistence(world);
   });
 
@@ -75,13 +75,13 @@ describe('Enhanced Event Persistence', () => {
 
   it('should persist human message with all agents in ownerAgentIds', async () => {
     publishMessage(world, 'Hello everyone', 'human');
-    
+
     // Wait for async persistence
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const messageEvent = events.find(e => e.type === 'message');
-    
+
     expect(messageEvent).toBeDefined();
     expect(messageEvent.meta.ownerAgentIds).toHaveLength(2);
     expect(messageEvent.meta.ownerAgentIds).toContain('agent1');
@@ -98,14 +98,14 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: 'chat-1'
     };
-    
+
     world.eventEmitter.emit('message', messageEvent);
-    
+
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const stored = events.find((e: StoredEvent) => e.id === 'msg-1');
-    
+
     expect(stored).toBeDefined();
     expect(stored.meta.recipientAgentId).toBe('agent2');
     expect(stored.meta.ownerAgentIds).toContain('agent1');
@@ -123,14 +123,14 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: 'chat-1'
     };
-    
+
     world.eventEmitter.emit('message', messageEvent);
-    
+
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const stored = events.find((e: StoredEvent) => e.id === 'msg-2');
-    
+
     expect(stored).toBeDefined();
     expect(stored.meta.recipientAgentId).toBeNull();
     expect(stored.meta.ownerAgentIds).toHaveLength(2);
@@ -147,10 +147,10 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: 'chat-1'
     };
-    
+
     world.eventEmitter.emit('message', rootMessage);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const replyMessage: WorldMessageEvent = {
       content: 'Reply to root',
       sender: 'agent1',
@@ -159,13 +159,13 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: 'chat-1'
     };
-    
+
     world.eventEmitter.emit('message', replyMessage);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const reply = events.find((e: StoredEvent) => e.id === 'msg-reply');
-    
+
     expect(reply).toBeDefined();
     expect(reply.meta.isReply).toBe(true);
     expect(reply.meta.threadDepth).toBe(1);
@@ -191,13 +191,13 @@ describe('Enhanced Event Persistence', () => {
         }
       ]
     };
-    
+
     world.eventEmitter.emit('message', messageEvent);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const stored = events.find((e: StoredEvent) => e.id === 'msg-3');
-    
+
     expect(stored).toBeDefined();
     expect(stored.meta.hasToolCalls).toBe(true);
     expect(stored.meta.toolCallCount).toBe(1);
@@ -214,13 +214,13 @@ describe('Enhanced Event Persistence', () => {
       role: 'tool',
       tool_call_id: 'call-1'
     };
-    
+
     world.eventEmitter.emit('message', messageEvent);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const stored = events.find((e: StoredEvent) => e.id === 'msg-4');
-    
+
     expect(stored).toBeDefined();
     expect(stored.payload.role).toBe('tool');
     expect(stored.payload.tool_call_id).toBe('call-1');
@@ -234,22 +234,43 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: 'chat-1'
     };
-    
+
     world.eventEmitter.emit('message', crossAgentMessage);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const stored = events.find((e: StoredEvent) => e.id === 'msg-5');
-    
+
     expect(stored).toBeDefined();
     expect(stored.meta.isCrossAgentMessage).toBe(true);
     expect(stored.meta.isMemoryOnly).toBe(true);
     expect(stored.meta.isHumanMessage).toBe(false);
   });
 
+  it('should resolve recipient for Hello-prefixed direct mention with punctuation', async () => {
+    const crossAgentMessage: WorldMessageEvent = {
+      content: 'Hello @Agent2, here is the data you requested',
+      sender: 'agent1',
+      messageId: 'msg-hello-mention',
+      timestamp: new Date(),
+      chatId: 'chat-1'
+    };
+
+    world.eventEmitter.emit('message', crossAgentMessage);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
+    const stored = events.find((e: StoredEvent) => e.id === 'msg-hello-mention');
+
+    expect(stored).toBeDefined();
+    expect(stored.meta.recipientAgentId).toBe('agent2');
+    expect(stored.meta.isCrossAgentMessage).toBe(true);
+    expect(stored.meta.isMemoryOnly).toBe(true);
+  });
+
   it('should handle null chatId correctly', async () => {
     world.currentChatId = null;
-    
+
     const messageEvent: WorldMessageEvent = {
       content: 'Message without chat',
       sender: 'human',
@@ -257,13 +278,13 @@ describe('Enhanced Event Persistence', () => {
       timestamp: new Date(),
       chatId: null
     };
-    
+
     world.eventEmitter.emit('message', messageEvent);
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, null);
     const stored = events.find((e: StoredEvent) => e.id === 'msg-6');
-    
+
     expect(stored).toBeDefined();
     expect(stored.chatId).toBeNull();
     expect(stored.meta.chatId).toBeNull();
@@ -271,12 +292,12 @@ describe('Enhanced Event Persistence', () => {
 
   it('should calculate deliveredToAgents same as ownerAgentIds', async () => {
     publishMessage(world, 'Test message', 'human');
-    
+
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const events = await world.eventStorage.getEventsByWorldAndChat(world.id, 'chat-1');
     const messageEvent = events.find(e => e.type === 'message');
-    
+
     expect(messageEvent.meta.deliveredToAgents).toEqual(messageEvent.meta.ownerAgentIds);
   });
 
