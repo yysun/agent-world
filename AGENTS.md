@@ -30,6 +30,11 @@ These rules override all other testing instructions unless the user explicitly o
 
 3. Use vitest conventions: `describe`, `it`, `expect`, and mock functions.
 
+4. **Keep web app and Election Separated**
+   Do not create cross-app shared modules between the web app and the electron app.
+
+
+
 ---
 
 ## Code Style Rules (Strict)

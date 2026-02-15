@@ -21,6 +21,8 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-15: Hardened message edit/delete chat targeting to require message-bound chat IDs and removed selected-session fallback for mutation requests.
+ * - 2026-02-15: Fixed chat-id drift by preserving selected session during refresh and binding message/edit/delete actions to stable target chat IDs.
  * - 2026-02-14: Fixed inline `<agent> is working...` visibility to hide immediately when agent activity completes (no longer held open by residual stream-count state).
  * - 2026-02-14: Refined inline chat working indicator with borderless text row, flashing dot, active-work-only visibility, and stronger agent-name fallback resolution.
  * - 2026-02-14: Added inline chat activity indicator (`<agent> is working...`) under the message list to match web waiting UX.
@@ -134,6 +136,7 @@ import {
   createGlobalLogEventHandler,
   createChatSubscriptionEventHandler
 } from './domain/chat-event-handlers.js';
+import { resolveSelectedSessionId } from './domain/session-selection.js';
 
 const THEME_STORAGE_KEY = 'agent-world-desktop-theme';
 const COMPOSER_MAX_ROWS = 5;
@@ -1128,11 +1131,13 @@ export default function App() {
     try {
       const nextSessions = sortSessionsByNewest(await api.listSessions(worldId));
       setSessions(nextSessions);
-      const nextSelected =
-        preferredSessionId && nextSessions.some((session) => session.id === preferredSessionId)
-          ? preferredSessionId
-          : nextSessions[0]?.id || null;
-      setSelectedSessionId(nextSelected);
+      setSelectedSessionId((currentSelectedSessionId) =>
+        resolveSelectedSessionId({
+          sessions: nextSessions,
+          backendCurrentChatId: preferredSessionId,
+          currentSelectedSessionId
+        })
+      );
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to load sessions.'), 'error');
     } finally {
@@ -1229,8 +1234,8 @@ export default function App() {
   }, [refreshSkillRegistry, workspace.workspacePath, loadedWorld?.id]);
 
   useEffect(() => {
-    refreshSessions(loadedWorld?.id);
-  }, [loadedWorld, refreshSessions]);
+    refreshSessions(loadedWorld?.id, loadedWorld?.currentChatId || null);
+  }, [loadedWorld?.id, loadedWorld?.currentChatId, refreshSessions]);
 
   useEffect(() => {
     refreshMessages(loadedWorld?.id, selectedSessionId);
@@ -1418,10 +1423,6 @@ export default function App() {
     };
   }, [api, selectedSessionId, loadedWorld, setStatusText, refreshSessions]);
 
-  useEffect(() => () => {
-    api.unsubscribeChatEvents('default').catch(() => { });
-  }, [api]);
-
   useEffect(() => {
     if (!workspaceMenuOpen) return undefined;
 
@@ -1489,10 +1490,17 @@ export default function App() {
 
       if (result.success) {
         const nextSessions = sortSessionsByNewest(result.sessions || []);
+        const backendCurrentChatId = String(result.world?.currentChatId || '').trim();
         setLoadedWorld(result.world);
         setSelectedAgentId(null);
         setSessions(nextSessions);
-        setSelectedSessionId(nextSessions[0]?.id || null);
+        setSelectedSessionId(
+          resolveSelectedSessionId({
+            sessions: nextSessions,
+            backendCurrentChatId,
+            currentSelectedSessionId: null
+          })
+        );
         setWorldLoadError(null);
         setStatusText(`World loaded: ${result.world.id}`, 'success');
         // Persist world selection
@@ -1531,8 +1539,15 @@ export default function App() {
       setLoadedWorld(created);
       setSelectedAgentId(null);
       const nextSessions = sortSessionsByNewest(await api.listSessions(created.id));
+      const backendCurrentChatId = String(created?.currentChatId || '').trim();
       setSessions(nextSessions);
-      setSelectedSessionId(nextSessions[0]?.id || null);
+      setSelectedSessionId(
+        resolveSelectedSessionId({
+          sessions: nextSessions,
+          backendCurrentChatId,
+          currentSelectedSessionId: null
+        })
+      );
       setWorldLoadError(null);
       // Persist world selection
       await api.saveLastSelectedWorld(created.id);
@@ -1677,10 +1692,13 @@ export default function App() {
     if (Array.isArray(result.sessions)) {
       const nextSessions = sortSessionsByNewest(result.sessions);
       setSessions(nextSessions);
+      const backendCurrentChatId = String(result.world?.currentChatId || '').trim();
       setSelectedSessionId((currentId) =>
-        currentId && nextSessions.some((session) => session.id === currentId)
-          ? currentId
-          : nextSessions[0]?.id || null
+        resolveSelectedSessionId({
+          sessions: nextSessions,
+          backendCurrentChatId,
+          currentSelectedSessionId: currentId
+        })
       );
     }
     return result.world;
@@ -1909,10 +1927,17 @@ export default function App() {
 
         // Auto-select the imported world
         const nextSessions = sortSessionsByNewest(result.sessions || []);
+        const backendCurrentChatId = String(result.world?.currentChatId || '').trim();
         setLoadedWorld(result.world);
         setSelectedAgentId(null);
         setSessions(nextSessions);
-        setSelectedSessionId(nextSessions[0]?.id || null);
+        setSelectedSessionId(
+          resolveSelectedSessionId({
+            sessions: nextSessions,
+            backendCurrentChatId,
+            currentSelectedSessionId: null
+          })
+        );
         setWorldLoadError(null);
 
         setStatusText(`World imported: ${result.world.name}`, 'success');
@@ -2028,9 +2053,10 @@ export default function App() {
   }, [api, loadedWorld, sessions, setStatusText]);
 
   const onSendMessage = useCallback(async () => {
+    const activeSessionId = String(selectedSessionId || '').trim() || null;
     // Check if this specific session is already sending (per-session concurrency support)
-    if (selectedSessionId && sendingSessionIds.has(selectedSessionId)) return;
-    if (!loadedWorld?.id || !selectedSessionId) {
+    if (activeSessionId && sendingSessionIds.has(activeSessionId)) return;
+    if (!loadedWorld?.id || !activeSessionId) {
       setStatusText('Select a session before sending messages.', 'error');
       return;
     }
@@ -2038,13 +2064,13 @@ export default function App() {
     if (!content) return;
 
     // Mark this session as awaiting response so composer can switch to stop mode.
-    setPendingResponseSessionIds((prev) => new Set([...prev, selectedSessionId]));
+    setPendingResponseSessionIds((prev) => new Set([...prev, activeSessionId]));
     // Mark this session as sending (allows concurrent sends to different sessions)
-    setSendingSessionIds((prev) => new Set([...prev, selectedSessionId]));
+    setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
     try {
       await api.sendMessage({
         worldId: loadedWorld.id,
-        chatId: selectedSessionId,
+        chatId: activeSessionId,
         content,
         sender: 'human'
       });
@@ -2052,7 +2078,7 @@ export default function App() {
     } catch (error) {
       setPendingResponseSessionIds((prev) => {
         const next = new Set(prev);
-        next.delete(selectedSessionId);
+        next.delete(activeSessionId);
         return next;
       });
       setStatusText(safeMessage(error, 'Failed to send message.'), 'error');
@@ -2060,7 +2086,7 @@ export default function App() {
       // Remove this session from sending state
       setSendingSessionIds((prev) => {
         const next = new Set(prev);
-        next.delete(selectedSessionId);
+        next.delete(activeSessionId);
         return next;
       });
     }
@@ -2154,6 +2180,22 @@ export default function App() {
     setEditingText(message?.content || '');
   }, []);
 
+  const resolveMessageTargetChatId = useCallback((message) => {
+    const directChatId = String(message?.chatId || '').trim();
+    if (directChatId) {
+      return directChatId;
+    }
+
+    const messageId = String(message?.messageId || '').trim();
+    if (!messageId) {
+      return null;
+    }
+
+    const indexedMessage = messagesById.get(messageId);
+    const indexedChatId = String(indexedMessage?.chatId || '').trim();
+    return indexedChatId || null;
+  }, [messagesById]);
+
   /**
    * Cancel edit mode and discard changes
    * Returns to normal message display
@@ -2188,8 +2230,9 @@ export default function App() {
       return;
     }
 
-    if (!selectedSessionId) {
-      setStatusText('Cannot edit: no active chat session', 'error');
+    const targetChatId = resolveMessageTargetChatId(message);
+    if (!targetChatId) {
+      setStatusText('Cannot edit: message is not bound to a chat session', 'error');
       return;
     }
 
@@ -2201,7 +2244,7 @@ export default function App() {
     // Store backup in localStorage
     const backup = {
       messageId: message.messageId,
-      chatId: selectedSessionId,
+      chatId: targetChatId,
       newContent: editedText,
       timestamp: Date.now(),
       worldId: loadedWorld.id
@@ -2222,7 +2265,7 @@ export default function App() {
 
     try {
       // Core-managed edit path: delete + resubmission + title policy
-      const editResult = await api.editMessage(loadedWorld.id, message.messageId, editedText, selectedSessionId);
+      const editResult = await api.editMessage(loadedWorld.id, message.messageId, editedText, targetChatId);
 
       // Check for removal failures
       if (!editResult.success) {
@@ -2240,7 +2283,7 @@ export default function App() {
           `Messages removed but resubmission failed: ${details}. Please try editing again.`,
           'error'
         );
-        await refreshMessages(loadedWorld.id, selectedSessionId);
+        await refreshMessages(loadedWorld.id, targetChatId);
         return;
       }
 
@@ -2265,9 +2308,9 @@ export default function App() {
 
       setStatusText(errorMessage, 'error');
       // Reload messages on error
-      await refreshMessages(loadedWorld.id, selectedSessionId);
+      await refreshMessages(loadedWorld.id, targetChatId);
     }
-  }, [api, editingText, loadedWorld, selectedSessionId, messages, setStatusText, refreshMessages]);
+  }, [api, editingText, loadedWorld, messages, setStatusText, refreshMessages, resolveMessageTargetChatId]);
 
   /**
    * Delete user message and all subsequent messages from conversation
@@ -2280,7 +2323,8 @@ export default function App() {
    * Handles partial failures where some agents succeed and others fail.
    */
   const onDeleteMessage = useCallback(async (message) => {
-    if (!message.messageId || !selectedSessionId) return;
+    const targetChatId = resolveMessageTargetChatId(message);
+    if (!message.messageId || !targetChatId) return;
 
     const preview = (message.content || '').substring(0, 100);
     const previewText = preview.length < (message.content || '').length ? `${preview}...` : preview;
@@ -2293,7 +2337,7 @@ export default function App() {
     setDeletingMessageId(targetIdentity);
     try {
       // Call DELETE via IPC
-      const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, selectedSessionId);
+      const deleteResult = await api.deleteMessage(loadedWorld.id, message.messageId, targetChatId);
 
       // Check for failures
       if (!deleteResult.success) {
@@ -2306,14 +2350,14 @@ export default function App() {
         }
       }
 
-      await refreshMessages(loadedWorld.id, selectedSessionId);
+      await refreshMessages(loadedWorld.id, targetChatId);
       setStatusText('Message deleted successfully', 'success');
     } catch (error) {
       setStatusText(error.message || 'Failed to delete message', 'error');
     } finally {
       setDeletingMessageId(null);
     }
-  }, [api, loadedWorld, selectedSessionId, setStatusText, refreshMessages]);
+  }, [api, loadedWorld, setStatusText, refreshMessages, resolveMessageTargetChatId]);
 
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {

@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
  * - 2026-02-14: Added `stop-message-processing` event handler for chat-scoped processing cancellation from web composer.
  * - 2026-02-13: Switched web edit flow to core-managed `api.editMessage` and updated system-event handling for structured `chat-title-updated` payloads
@@ -83,6 +84,7 @@ import * as AgentManagementDomain from '../domain/agent-management';
 import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import * as HitlDomain from '../domain/hitl';
+import { resolveActiveChatId } from '../domain/chat-selection';
 import {
   sendChatMessage,
   editChatMessage,
@@ -485,9 +487,7 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
       throw new Error('World not found: ' + worldName);
     }
 
-    if (!chatId || !(chatId in world.chats)) {
-      chatId = world.currentChatId || undefined;
-    }
+    chatId = resolveActiveChatId(world, chatId) || undefined;
 
     if (world.currentChatId !== chatId && chatId) {
       await api.setChat(worldName, chatId);
