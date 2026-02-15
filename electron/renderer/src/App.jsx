@@ -21,6 +21,8 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-15: Updated welcome-card visibility to depend on user/assistant conversation messages only, so tool/system/error-only event rows do not hide onboarding content.
+ * - 2026-02-15: Stabilized desktop chat layout by constraining horizontal overflow, top-aligning empty-session welcome content, and adding a bounded scroll area for long skill lists.
  * - 2026-02-15: Hardened message edit/delete chat targeting to require message-bound chat IDs and removed selected-session fallback for mutation requests.
  * - 2026-02-15: Fixed chat-id drift by preserving selected session during refresh and binding message/edit/delete actions to stable target chat IDs.
  * - 2026-02-14: Fixed inline `<agent> is working...` visibility to hide immediately when agent activity completes (no longer held open by residual stream-count state).
@@ -233,7 +235,7 @@ function MessageContent({ message }) {
                       '#9ca3af'
           }}
         />
-        <div className="flex-1" style={{ color: 'hsl(var(--foreground))' }}>
+        <div className="flex-1 break-words" style={{ color: 'hsl(var(--foreground))' }}>
           {logLineText}
         </div>
       </div>
@@ -324,7 +326,7 @@ function MessageContent({ message }) {
   // Regular message content with markdown rendering
   return (
     <div
-      className="prose prose-invert max-w-none text-foreground"
+      className="prose prose-invert max-w-none break-words text-foreground"
       dangerouslySetInnerHTML={{ __html: renderedContent }}
     />
   );
@@ -2511,6 +2513,12 @@ export default function App() {
     return 'Agent';
   }, [activeAgentSources, worldAgents, loadedWorld?.mainAgent]);
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
+  const hasConversationMessages = useMemo(() => {
+    return messages.some((message) => {
+      const role = String(message?.role || '').toLowerCase();
+      return role === 'user' || role === 'assistant';
+    });
+  }, [messages]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -2899,15 +2907,15 @@ export default function App() {
 
           <div className="flex min-h-0 flex-1">
             <section className="flex min-w-0 flex-1 flex-col">
-              <div ref={messagesContainerRef} className="flex-1 overflow-auto p-5">
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
                 <div
                   className={
-                    messages.length === 0 && selectedSession
-                      ? 'mx-auto flex h-full w-full max-w-[920px] items-center justify-center'
+                    !hasConversationMessages && selectedSession
+                      ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
                       : 'mx-auto w-full max-w-[750px] space-y-3'
                   }
                 >
-                  {messages.length === 0 ? (
+                  {!hasConversationMessages ? (
                     selectedSession ? (
                       <section className="w-full max-w-[680px] rounded-xl bg-card/60 px-6 py-5">
                         <div className="flex items-start justify-between gap-3">
@@ -2939,7 +2947,7 @@ export default function App() {
                           {loadingSkillRegistry ? (
                             <p className="text-sm text-muted-foreground">Loading skills...</p>
                           ) : skillRegistryEntries.length > 0 ? (
-                            <div className="pr-1">
+                            <div className="max-h-[48vh] overflow-y-auto pr-1">
                               <ul className="grid gap-1.5 sm:grid-cols-2">
                                 {skillRegistryEntries.map((entry) => (
                                   <li
@@ -2978,7 +2986,7 @@ export default function App() {
                       return (
                         <div
                           key={messageKey}
-                          className={`flex w-full items-start gap-2 ${isHuman ? 'justify-end' : 'justify-start'}`}
+                          className={`flex min-w-0 w-full items-start gap-2 ${isHuman ? 'justify-end' : 'justify-start'}`}
                         >
                           {messageAvatar ? (
                             <div
@@ -2990,7 +2998,7 @@ export default function App() {
                             </div>
                           ) : null}
 
-                          <article className={getMessageCardClassName(message, messagesById, messages, messageIndex)}>
+                          <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, messages, messageIndex)}`}>
                             <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                               <span>{senderLabel}</span>
                               <span>{formatTime(message.createdAt)}</span>
