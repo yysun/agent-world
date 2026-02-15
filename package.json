@@ -26,7 +26,8 @@
   },
   "scripts": {
     "dev": "npm run web:dev",
-    "web:dev": "npm-run-all --parallel server:watch web:vite",
+    "dev:reset": "for p in 3000 8080; do pids=$(lsof -tiTCP:$p -sTCP:LISTEN 2>/dev/null || true); if [ -n \"$pids\" ]; then kill $pids; fi; done",
+    "web:dev": "npm-run-all --parallel server:watch web:vite:wait",
     "cli:dev": "npx tsx --watch cli/index.ts",
     "electron:dev": "npm-run-all --sequential build:core electron:dev:watch",
     "electron:dev:watch": "npm-run-all --parallel build:core:watch electron:vite",
@@ -42,6 +43,7 @@
     "server:watch": "npx tsx --watch server/index.ts",
     "server:start": "node dist/server/index.js",
     "web:vite": "npm run dev --workspace=web",
+    "web:vite:wait": "wait-on tcp:127.0.0.1:3000 && npm run web:vite",
     "electron:vite": "npm run dev --prefix electron",
     "test": "vitest run",
     "test:watch": "vitest",
