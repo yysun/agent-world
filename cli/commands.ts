@@ -2201,12 +2201,30 @@ export async function processCLIInput(
   }
 
   try {
-    publishMessage(world as any, input, sender);
+    const currentChatId = String((world as any)?.currentChatId || '').trim();
+    if (!currentChatId) {
+      return {
+        success: false,
+        message: 'Cannot send message - no active chat session',
+        technicalDetails: 'Message requires an active chat context'
+      };
+    }
+
+    const restoredWorld = await restoreChat(world.id, currentChatId);
+    if (!restoredWorld || restoredWorld.currentChatId !== currentChatId) {
+      return {
+        success: false,
+        message: `Cannot send message - chat not found: ${currentChatId}`,
+        technicalDetails: `Failed to restore active chat '${currentChatId}' before message publish`
+      };
+    }
+
+    publishMessage(world as any, input, sender, currentChatId);
     return {
       success: true,
       message: '',
-      data: { sender },
-      technicalDetails: `Message published to world '${world.name}'`
+      data: { sender, chatId: currentChatId },
+      technicalDetails: `Message published to world '${world.name}' (chat '${currentChatId}')`
     };
   } catch (error) {
     return {
