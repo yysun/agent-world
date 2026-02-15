@@ -19,6 +19,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-15: Stopped replaying historical tool call/response parts as Google `functionCall`/`functionResponse` in conversation conversion to avoid 400 errors requiring `thought_signature` on replayed calls.
  * - 2026-02-13: Added transport-level AbortSignal wiring to Google SDK request options where supported.
  * - 2026-02-13: Added abort-signal checks for streaming and non-streaming execution paths.
  * - 2025-11-09: Phase 4 - Removed ALL tool execution logic (~200 lines)
@@ -70,37 +71,31 @@ function convertMessagesToGoogle(messages: ChatMessage[]): { messages: any[], sy
     }
 
     if (msg.role === 'tool') {
-      // Tool responses are handled as function responses in Google format
+      // Replay compatibility: avoid functionResponse replay because Gemini
+      // expects metadata coupling with prior functionCall traces.
+      // Keep tool outcomes as plain text context.
+      if (!msg.content?.trim()) {
+        continue;
+      }
       googleMessages.push({
-        role: 'function',
-        parts: [{
-          functionResponse: {
-            name: msg.tool_call_id, // Use tool_call_id as the function name reference
-            response: {
-              result: msg.content
-            }
-          }
-        }]
+        role: 'user',
+        parts: [{ text: `[Tool result]\n${msg.content}` }]
       });
       continue;
     }
 
     if (msg.role === 'assistant' && msg.tool_calls) {
-      // Assistant message with function calls
+      // Replay compatibility: do NOT replay historical functionCall parts.
+      // Gemini may reject replayed calls without provider-issued thought_signature.
       const parts: any[] = [];
 
       if (msg.content) {
         parts.push({ text: msg.content });
       }
 
-      msg.tool_calls.forEach(toolCall => {
-        parts.push({
-          functionCall: {
-            name: toolCall.function.name,
-            args: JSON.parse(toolCall.function.arguments || '{}')
-          }
-        });
-      });
+      if (parts.length === 0) {
+        parts.push({ text: '[Tool call history omitted for Google replay compatibility]' });
+      }
 
       googleMessages.push({
         role: 'model',
