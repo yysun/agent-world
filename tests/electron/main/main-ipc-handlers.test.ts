@@ -176,3 +176,29 @@ describe('createMainIpcHandlers.respondHitlOption', () => {
     expect(result).toEqual({ accepted: true });
   });
 });
+
+describe('createMainIpcHandlers.sendChatMessage', () => {
+  it('rejects sending when provided chatId cannot be restored', async () => {
+    const restoreChat = vi.fn(async () => null);
+    const publishMessage = vi.fn();
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+
+    const { handlers } = await createHandlers({
+      restoreChat,
+      publishMessage,
+      ensureWorldSubscribed
+    });
+
+    await expect(
+      handlers.sendChatMessage({
+        worldId: 'world-1',
+        chatId: 'chat-missing',
+        content: 'hello',
+        sender: 'human'
+      })
+    ).rejects.toThrow('Chat not found: chat-missing');
+
+    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
+    expect(publishMessage).not.toHaveBeenCalled();
+  });
+});

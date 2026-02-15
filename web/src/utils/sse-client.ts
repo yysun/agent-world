@@ -72,6 +72,7 @@ interface SSEMessageData extends SSEBaseData {
     content?: string;
     message?: string;
     messageId?: string;
+    chatId?: string;
     replyToMessageId?: string; // Threading: parent message reference
     createdAt?: string;
     worldName?: string;
@@ -128,6 +129,7 @@ interface StreamingState {
 
 interface SendChatMessageOptions {
   sender?: string;
+  chatId?: string;
   historyMessages?: Array<Record<string, any>>;
   onMessage?: (data: SSEData) => void;
   onError?: (error: Error) => void;
@@ -383,6 +385,7 @@ export async function sendChatMessage(
   legacyOnComplete?: (data: any) => void
 ): Promise<() => void> {
   let sender = 'HUMAN';
+  let chatId: string | undefined;
   let historyMessages: Array<Record<string, any>> | undefined;
   let onMessage = legacyOnMessage;
   let onError = legacyOnError;
@@ -394,6 +397,7 @@ export async function sendChatMessage(
     sender = 'HUMAN';
   } else {
     sender = senderOrOptions.sender ?? 'HUMAN';
+    chatId = senderOrOptions.chatId;
     historyMessages = senderOrOptions.historyMessages;
     onMessage = senderOrOptions.onMessage ?? onMessage;
     onError = senderOrOptions.onError ?? onError;
@@ -405,6 +409,9 @@ export async function sendChatMessage(
   }
 
   const requestPayload: Record<string, any> = { message, sender };
+  if (chatId) {
+    requestPayload.chatId = chatId;
+  }
   if (historyMessages && historyMessages.length > 0) {
     requestPayload.messages = historyMessages;
   }

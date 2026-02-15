@@ -598,6 +598,13 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
 const handleMessageEvent = <T extends WorldComponentState>(state: T, data: any): T => {
 
   const messageData = data || {};
+  const activeChatId = state.currentChat?.id || state.world?.currentChatId || null;
+  const incomingChatId = messageData.chatId ?? null;
+
+  if (activeChatId && (!incomingChatId || incomingChatId !== activeChatId)) {
+    return state;
+  }
+
   const senderName = messageData.sender;
 
   // Filter out internal protocol messages (tool results with __type marker)
@@ -811,7 +818,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     try {
       // Send the message via SSE stream
       await sendChatMessage(state.worldName, prepared.text, {
-        sender: 'HUMAN'
+        sender: 'HUMAN',
+        chatId: state.currentChat?.id || state.world?.currentChatId || undefined
       });
 
       // Note: isWaiting is controlled by world events (pending count), not send/stream events

@@ -120,7 +120,7 @@ export function createChatSubscriptionEventHandler({
       if (!incomingMessage) return;
 
       const incomingChatId = incomingMessage.chatId || payload.chatId || null;
-      if (selectedSessionId && incomingChatId && incomingChatId !== selectedSessionId) return;
+      if (selectedSessionId && incomingChatId !== selectedSessionId) return;
 
       setMessages((existing) => upsertMessageList(existing, {
         ...incomingMessage,
@@ -145,7 +145,7 @@ export function createChatSubscriptionEventHandler({
       if (!streamPayload) return;
 
       const streamChatId = streamPayload.chatId || payload.chatId || null;
-      if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
+      if (selectedSessionId && streamChatId !== selectedSessionId) return;
 
       const eventType = String(streamPayload.eventType || '').toLowerCase();
       const messageId = streamPayload.messageId;
@@ -194,7 +194,7 @@ export function createChatSubscriptionEventHandler({
       const toolPayload = payload.tool;
       if (!toolPayload) return;
       const toolChatId = payload.chatId || toolPayload.chatId || null;
-      if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
+      if (selectedSessionId && toolChatId !== selectedSessionId) return;
 
       const activity = activityStateRef.current;
       if (!activity) return;
@@ -242,7 +242,7 @@ export function createChatSubscriptionEventHandler({
       if (!activityPayload) return;
 
       const activityChatId = payload.chatId || null;
-      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
+      if (selectedSessionId && activityChatId !== selectedSessionId) return;
 
       if (typeof onSessionActivityUpdate === 'function') {
         onSessionActivityUpdate({
@@ -260,7 +260,7 @@ export function createChatSubscriptionEventHandler({
       if (!systemPayload) return;
 
       const systemChatId = payload.chatId || systemPayload.chatId || null;
-      if (selectedSessionId && systemChatId && systemChatId !== selectedSessionId) return;
+      if (selectedSessionId && systemChatId !== selectedSessionId) return;
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({

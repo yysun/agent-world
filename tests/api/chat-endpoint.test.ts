@@ -19,7 +19,8 @@ import { z } from 'zod';
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
   sender: z.string().default("human"),
-  stream: z.boolean().optional().default(true)
+  stream: z.boolean().optional().default(true),
+  chatId: z.string().min(1).optional()
 });
 
 describe('Chat Message Schema with Stream Flag', () => {
@@ -117,7 +118,8 @@ describe('Chat Message Schema with Stream Flag', () => {
       const complexMessage = {
         message: 'Complex message with special characters: @agent, #tag, 你好',
         sender: 'TestUser123',
-        stream: false
+        stream: false,
+        chatId: 'chat-123'
       };
 
       const result = ChatMessageSchema.safeParse(complexMessage);
@@ -126,7 +128,19 @@ describe('Chat Message Schema with Stream Flag', () => {
         expect(result.data.message).toBe(complexMessage.message);
         expect(result.data.sender).toBe(complexMessage.sender);
         expect(result.data.stream).toBe(false);
+        expect(result.data.chatId).toBe('chat-123');
       }
+    });
+
+    it('should reject empty chatId when provided', () => {
+      const invalidMessage = {
+        message: 'Hello world',
+        sender: 'USER',
+        chatId: ''
+      };
+
+      const result = ChatMessageSchema.safeParse(invalidMessage);
+      expect(result.success).toBe(false);
     });
   });
 

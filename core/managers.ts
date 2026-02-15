@@ -500,7 +500,9 @@ export async function createAgent(worldId: string, params: CreateAgentParams): P
   const resolvedWorldId = await getResolvedWorldId(worldId);
 
   // Check if world is processing to prevent agent creation during concurrent chat sessions
-  const world = await getWorld(resolvedWorldId);
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  const activeSubscribedWorld = getActiveSubscribedWorld(resolvedWorldId);
+  const world = activeSubscribedWorld || await getWorld(resolvedWorldId);
   if (world?.isProcessing) {
     throw new Error('Cannot create agent while world is processing');
   }
@@ -564,7 +566,9 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
   // Check if world is processing to prevent agent modification during concurrent chat sessions
-  const world = await getWorld(resolvedWorldId);
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  const activeSubscribedWorld = getActiveSubscribedWorld(resolvedWorldId);
+  const world = activeSubscribedWorld || await getWorld(resolvedWorldId);
   if (world?.isProcessing) {
     throw new Error('Cannot update agent while world is processing');
   }
@@ -593,8 +597,15 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
 
   // Emit CRUD event for real-time updates
   if (world) {
-    world.agents.set(resolvedAgentId, updatedAgent);
-    publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, updatedAgent);
+    const runtimeAgent = world.agents.get(resolvedAgentId);
+    if (runtimeAgent) {
+      Object.assign(runtimeAgent, updatedAgent);
+      world.agents.set(resolvedAgentId, runtimeAgent);
+      publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, runtimeAgent);
+    } else {
+      world.agents.set(resolvedAgentId, updatedAgent);
+      publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, updatedAgent);
+    }
   }
 
   return updatedAgent;
@@ -609,7 +620,9 @@ export async function deleteAgent(worldId: string, agentId: string): Promise<boo
   const resolvedAgentId = await getResolvedAgentId(resolvedWorldId, agentId);
 
   // Check if world is processing to prevent agent deletion during concurrent chat sessions
-  const world = await getWorld(resolvedWorldId);
+  const { getActiveSubscribedWorld } = await import('./subscription.js');
+  const activeSubscribedWorld = getActiveSubscribedWorld(resolvedWorldId);
+  const world = activeSubscribedWorld || await getWorld(resolvedWorldId);
   if (world?.isProcessing) {
     throw new Error('Cannot delete agent while world is processing');
   }
@@ -879,6 +892,15 @@ export async function restoreChat(worldId: string, chatId: string): Promise<Worl
 
   if (world.currentChatId === chatId) {
     return world;
+  }
+
+  const runtimeChatExists = world.chats.has(chatId);
+  const persistedChatExists = runtimeChatExists
+    ? true
+    : !!(await storageWrappers!.loadChatData(resolvedWorldId, chatId));
+
+  if (!persistedChatExists) {
+    return null;
   }
 
   world = await updateWorld(resolvedWorldId, {

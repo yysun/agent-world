@@ -221,7 +221,7 @@ export function createRealtimeEventsRuntime(
 
     const sseHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      if (chatId && eventChatId && eventChatId !== chatId) return;
+      if (chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
         ...serializeRealtimeSSEEvent(worldId, eventChatId || chatId, event),
         subscriptionId
@@ -234,7 +234,7 @@ export function createRealtimeEventsRuntime(
         return;
       }
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      if (chatId && eventChatId && eventChatId !== chatId) return;
+      if (chatId && eventChatId !== chatId) return;
       if (eventType.startsWith('tool-')) {
         sendRealtimeEventToRenderer({
           ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
@@ -251,7 +251,7 @@ export function createRealtimeEventsRuntime(
 
     const systemHandler = (event: any) => {
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      if (chatId && eventChatId && eventChatId !== chatId) return;
+      if (chatId && eventChatId !== chatId) return;
       sendRealtimeEventToRenderer({
         ...serializeRealtimeSystemEvent(worldId, eventChatId || chatId, event),
         subscriptionId

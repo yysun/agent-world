@@ -48,6 +48,7 @@ interface MessageEventPayload {
   content: string;
   timestamp?: Date;
   messageId: string;
+  chatId?: string | null;
   replyToMessageId?: string;
   role?: string;
   tool_calls?: any[];
@@ -57,12 +58,14 @@ interface MessageEventPayload {
 interface SSEEventPayload {
   type: string;
   agentName?: string;
+  chatId?: string | null;
   [key: string]: any;
 }
 
 interface SystemEventPayload {
   message?: string;
   content?: string;
+  chatId?: string | null;
   [key: string]: any;
 }
 
@@ -107,7 +110,8 @@ export function createSSEHandler(
   req: Request,
   res: Response,
   world: World,
-  context: string = 'sse'
+  context: string = 'sse',
+  scopedChatId?: string | null
 ): SSEHandler {
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -179,6 +183,13 @@ export function createSSEHandler(
   };
 
   const listeners = new Map<string, (...args: any[]) => void>();
+  const normalizedScopedChatId = scopedChatId === undefined ? undefined : (scopedChatId === null ? null : String(scopedChatId));
+  const isChatEventInScope = (eventChatId: unknown, includeUnscopedWhenScoped: boolean = false): boolean => {
+    if (normalizedScopedChatId === undefined) return true;
+    if (eventChatId === undefined) return includeUnscopedWhenScoped;
+    const normalizedEventChatId = eventChatId === null ? null : String(eventChatId);
+    return normalizedEventChatId === normalizedScopedChatId;
+  };
 
   // Attach direct listeners to world.eventEmitter
   const worldListener = (eventData: any) => {
@@ -186,6 +197,9 @@ export function createSSEHandler(
     const isToolEvent = eventData?.type && ['tool-start', 'tool-result', 'tool-error', 'tool-progress'].includes(eventData.type);
 
     if (isToolEvent) {
+      if (!isChatEventInScope(eventData?.chatId, false)) {
+        return;
+      }
       // Forward tool events as SSE events for frontend consumption
       sendSSE({
         type: EventType.SSE,
@@ -193,7 +207,8 @@ export function createSSEHandler(
           type: eventData.type,
           messageId: eventData.messageId,
           agentName: eventData.agentName,
-          toolExecution: eventData.toolExecution
+          toolExecution: eventData.toolExecution,
+          chatId: eventData.chatId
         }
       });
       return;
@@ -219,12 +234,17 @@ export function createSSEHandler(
       return;
     }
 
-    sendSSE({ type: EventType.WORLD, data: eventData });
+    if (isChatEventInScope(eventData?.chatId, true)) {
+      sendSSE({ type: EventType.WORLD, data: eventData });
+    }
   };
   world.eventEmitter.on(EventType.WORLD, worldListener);
   listeners.set(EventType.WORLD, worldListener);
 
   const messageListener = (eventData: MessageEventPayload) => {
+    if (!isChatEventInScope(eventData?.chatId, false)) {
+      return;
+    }
     // Enhance message event data with structured format
     // CRITICAL: replyToMessageId must be included for frontend threading display
     // Include tool_calls to preserve complete assistant tool-call context on the client.
@@ -233,6 +253,7 @@ export function createSSEHandler(
       sender: eventData.sender,
       content: eventData.content,
       messageId: eventData.messageId,
+      chatId: eventData.chatId,
       replyToMessageId: eventData.replyToMessageId,
       createdAt: eventData.timestamp || new Date().toISOString(),
       role: eventData.role,
@@ -244,6 +265,9 @@ export function createSSEHandler(
   listeners.set(EventType.MESSAGE, messageListener);
 
   const sseListener = (eventData: SSEEventPayload) => {
+    if (!isChatEventInScope(eventData?.chatId, false)) {
+      return;
+    }
     // Extend fallback timeout when tool-stream data arrives (keeps long-running tools alive)
     if (eventData.type === 'tool-stream') {
       startTimeoutFallback();
@@ -254,6 +278,9 @@ export function createSSEHandler(
   listeners.set(EventType.SSE, sseListener);
 
   const systemListener = (eventData: SystemEventPayload) => {
+    if (!isChatEventInScope(eventData?.chatId, true)) {
+      return;
+    }
     sendSSE({ type: EventType.SYSTEM, data: eventData });
   };
   world.eventEmitter.on(EventType.SYSTEM, systemListener);

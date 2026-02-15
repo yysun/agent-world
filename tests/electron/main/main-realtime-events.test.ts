@@ -44,7 +44,7 @@ function createWorldSubscription(unsubscribePromise?: Promise<void>) {
         await unsubscribePromise;
       }
     }),
-    refresh: vi.fn(async () => {})
+    refresh: vi.fn(async () => { })
   };
 }
 
@@ -71,9 +71,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld,
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     const firstSubscribe = runtime.subscribeChatEvents({
@@ -148,9 +148,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld,
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     await runtime.subscribeChatEvents({
@@ -207,9 +207,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send: vi.fn() }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld,
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     const firstResult = await runtime.subscribeChatEvents({
@@ -246,9 +246,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send: vi.fn() }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld,
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     await runtime.subscribeChatEvents({
@@ -277,9 +277,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send: vi.fn() }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld: async () => createWorldSubscription(),
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     await runtime.subscribeChatEvents({
@@ -310,9 +310,9 @@ describe('createRealtimeEventsRuntime', () => {
         webContents: { send }
       }),
       chatEventChannel: 'chat:event',
-      addLogStreamCallback: () => () => {},
+      addLogStreamCallback: () => () => { },
       subscribeWorld: async () => worldSubscription,
-      ensureCoreReady: async () => {}
+      ensureCoreReady: async () => { }
     });
 
     await runtime.subscribeChatEvents({
@@ -349,5 +349,46 @@ describe('createRealtimeEventsRuntime', () => {
         })
       })
     );
+  });
+
+  it('does not forward unscoped realtime events into chat-scoped subscription', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-chat-scope',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    worldSubscription.world.eventEmitter.emit('sse', {
+      type: 'chunk',
+      messageId: 'sse-1',
+      agentName: 'assistant',
+      content: 'unscoped'
+    });
+    worldSubscription.world.eventEmitter.emit('world', {
+      type: 'tool-start',
+      messageId: 'tool-1',
+      toolExecution: { toolName: 'read_file', toolCallId: 'tool-1' }
+    });
+    worldSubscription.world.eventEmitter.emit('system', {
+      content: { eventType: 'chat-title-updated', title: 'Unscoped' },
+      messageId: 'sys-unscoped',
+      timestamp: new Date('2026-02-13T00:00:00.000Z')
+    });
+
+    expect(send).not.toHaveBeenCalled();
   });
 });

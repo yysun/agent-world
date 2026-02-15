@@ -158,6 +158,32 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(harness.getMessages()).toHaveLength(0);
   });
 
+  it('ignores message events without chatId when a session is selected', () => {
+    const harness = createMessageStateHarness();
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn()
+    });
+
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'm-unscoped',
+        role: 'assistant',
+        content: 'should be ignored'
+      }
+    });
+
+    expect(harness.getMessages()).toHaveLength(0);
+  });
+
   it('delegates SSE and tool lifecycle events to state managers', () => {
     const harness = createMessageStateHarness();
     const setActiveStreamCount = vi.fn();
@@ -379,6 +405,34 @@ describe('createChatSubscriptionEventHandler', () => {
       chatId: 'chat-2',
       system: {
         eventType: 'chat-title-updated'
+      }
+    });
+
+    expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('ignores system events without chatId when a session is selected', () => {
+    const harness = createMessageStateHarness();
+    const onSessionSystemEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionSystemEvent
+    });
+
+    handler({
+      type: 'system',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      system: {
+        eventType: 'chat-title-updated',
+        messageId: 'sys-unscoped'
       }
     });
 

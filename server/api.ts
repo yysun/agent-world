@@ -202,6 +202,11 @@ async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>
   return !existingAgent;
 }
 
+async function chatExists(worldCtx: ReturnType<typeof createWorldContext>, chatId: string): Promise<boolean> {
+  const chats = await worldCtx.listChats();
+  return chats.some(chat => chat.id === chatId);
+}
+
 // Validation middleware for world existence
 function validateWorld(req: Request, res: Response, next: Function) {
   const worldName = req.params.worldName;
@@ -260,6 +265,7 @@ const ChatMessageSchema = z.object({
   message: z.string().min(1),
   sender: z.string().default("human"),
   stream: z.boolean().optional().default(true),
+  chatId: z.string().min(1).optional(),
   messages: z.array(z.any()).optional()
 });
 
@@ -621,7 +627,13 @@ router.delete('/worlds/:worldName/agents/:agentName/memory', validateWorld, asyn
  * @param sender - Agent name sending the message
  * @returns Promise that resolves when chat is complete
  */
-async function handleNonStreamingChat(res: Response, worldName: string, message: string, sender: string): Promise<void> {
+async function handleNonStreamingChat(
+  res: Response,
+  worldName: string,
+  message: string,
+  sender: string,
+  chatId?: string
+): Promise<void> {
   disableStreaming();
   let subscription: any = null;
   let listeners: Map<string, (...args: any[]) => void> = new Map();
@@ -708,7 +720,7 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
         listeners.set(EventType.SSE, sseListener);
 
         // Publish message
-        publishMessage(world, message, sender);
+        publishMessage(world, message, sender, chatId);
       }).catch(error => {
         hasError = true;
         errorMessage = `Failed to connect to world: ${error instanceof Error ? error.message : error}`;
@@ -763,7 +775,14 @@ async function handleNonStreamingChat(res: Response, worldName: string, message:
  * @param sender - Agent name sending the message
  * @returns Promise that resolves when stream is complete
  */
-async function handleStreamingChat(req: Request, res: Response, worldName: string, message: string, sender: string): Promise<void> {
+async function handleStreamingChat(
+  req: Request,
+  res: Response,
+  worldName: string,
+  message: string,
+  sender: string,
+  chatId?: string
+): Promise<void> {
   // Subscribe to world to get the world instance
   const subscription = await subscribeWorld(worldName, { isOpen: true });
   if (!subscription) {
@@ -777,7 +796,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
   const world = subscription.world;
 
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
-  const sseHandler = createSSEHandler(req, res, world, 'chat');
+  const sseHandler = createSSEHandler(req, res, world, 'chat', chatId);
 
   // Clean up subscription when the HTTP response finishes to prevent stale world
   // instances from accumulating in activeSubscribedWorlds.
@@ -787,7 +806,7 @@ async function handleStreamingChat(req: Request, res: Response, worldName: strin
 
   try {
     // Publish message - events will be automatically streamed
-    publishMessage(world, message, sender);
+    publishMessage(world, message, sender, chatId);
   } catch (error) {
     sseHandler.sendSSE({
       type: 'error',
@@ -810,12 +829,17 @@ router.post('/worlds/:worldName/messages', validateWorld, async (req: Request, r
       return;
     }
 
-    const { message, sender, stream } = validation.data;
+    const { message, sender, stream, chatId } = validation.data;
+
+    if (chatId && !(await chatExists(worldCtx, chatId))) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
 
     if (stream === false) {
-      await handleNonStreamingChat(res, worldCtx.id, message, sender);
+      await handleNonStreamingChat(res, worldCtx.id, message, sender, chatId);
     } else {
-      await handleStreamingChat(req, res, worldCtx.id, message, sender);
+      await handleStreamingChat(req, res, worldCtx.id, message, sender, chatId);
     }
   } catch (error) {
     loggerChat.error('Error in chat endpoint', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
@@ -858,6 +882,12 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
 
     const { chatId, stream } = validation.data;
     const newContent = validation.data.newContent.trim();
+
+    if (!(await chatExists(worldCtx, chatId))) {
+      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
+      return;
+    }
+
     if (!newContent) {
       sendError(res, 400, 'Message content cannot be empty', 'VALIDATION_ERROR');
       return;
@@ -888,7 +918,7 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       return;
     }
 
-    const sseHandler = createSSEHandler(req, res, subscription.world, 'edit');
+    const sseHandler = createSSEHandler(req, res, subscription.world, 'edit', chatId);
 
     const finalizeWithError = (message: string, data?: any): void => {
       sseHandler.sendSSE({

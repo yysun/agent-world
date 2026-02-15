@@ -667,7 +667,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!content) throw new Error('Message content is required.');
 
     if (chatId) {
-      await restoreChat(worldId, chatId);
+      const restoredWorld = await restoreChat(worldId, chatId);
+      if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
+        throw new Error(`Chat not found: ${chatId}`);
+      }
     }
 
     const world = await ensureWorldSubscribed(worldId);
