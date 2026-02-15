@@ -179,7 +179,8 @@ export function normalizeSessionMessages(messages: any[]): any[] {
     };
 
     const role = String(message.role || '').trim().toLowerCase();
-    const isUserMessage = role === 'user' || isHumanSender(message?.sender);
+    const normalizedSender = String(message?.sender || '').trim();
+    const isUserMessage = isHumanSender(normalizedSender) || (role === 'user' && !normalizedSender);
 
     if (isUserMessage && seenMessageIds.has(messageId)) {
       continue;

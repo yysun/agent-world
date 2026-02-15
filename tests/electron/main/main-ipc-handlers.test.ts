@@ -11,6 +11,7 @@
  * - Mocks the Electron `dialog` module virtually to avoid runtime Electron dependency.
  *
  * Recent Changes:
+ * - 2026-02-15: Added edit-message guardrail coverage for chat existence and user-role-only enforcement parity with web/API.
  * - 2026-02-14: Added `hitl:respond` handler coverage for core HITL option resolution delegation.
  * - 2026-02-14: Updated edit-message IPC coverage to validate pure core delegation (no main-process runtime refresh/rebind side effects).
  * - 2026-02-13: Added `message:edit` handler coverage for core-driven edit + resubmission delegation.
@@ -112,8 +113,17 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionStatus: 'success',
       newMessageId: 'new-msg-1'
     }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const getMemory = vi.fn(async () => ([
+      { messageId: 'msg-1', role: 'user', chatId: 'chat-1' }
+    ]));
     const refreshWorldSubscription = vi.fn(async () => null);
-    const { handlers } = await createHandlers({ editUserMessage, refreshWorldSubscription });
+    const { handlers } = await createHandlers({
+      editUserMessage,
+      refreshWorldSubscription,
+      restoreChat,
+      getMemory
+    });
 
     const result = await handlers.editMessageInChat({
       worldId: 'world-1',
@@ -123,6 +133,8 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
     });
 
     expect(editUserMessage).toHaveBeenCalledWith('world-1', 'msg-1', 'updated prompt', 'chat-1');
+    expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-1');
+    expect(getMemory).toHaveBeenCalledWith('world-1', 'chat-1');
     expect(refreshWorldSubscription).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       success: true,
@@ -138,7 +150,16 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionError: 'resubmit failed'
     }));
     const refreshWorldSubscription = vi.fn(async () => 'refresh failed');
-    const { handlers } = await createHandlers({ editUserMessage, refreshWorldSubscription });
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const getMemory = vi.fn(async () => ([
+      { messageId: 'msg-1', role: 'user', chatId: 'chat-1' }
+    ]));
+    const { handlers } = await createHandlers({
+      editUserMessage,
+      refreshWorldSubscription,
+      restoreChat,
+      getMemory
+    });
 
     const result = await handlers.editMessageInChat({
       worldId: 'world-1',
@@ -154,6 +175,44 @@ describe('createMainIpcHandlers.editMessageInChat', () => {
       resubmissionStatus: 'failed',
       resubmissionError: 'resubmit failed'
     });
+  });
+
+  it('rejects edit when target chat cannot be restored', async () => {
+    const editUserMessage = vi.fn(async () => ({ success: true }));
+    const restoreChat = vi.fn(async () => null);
+    const getMemory = vi.fn(async () => []);
+    const { handlers } = await createHandlers({ editUserMessage, restoreChat, getMemory });
+
+    await expect(
+      handlers.editMessageInChat({
+        worldId: 'world-1',
+        chatId: 'chat-missing',
+        messageId: 'msg-1',
+        newContent: 'updated prompt'
+      })
+    ).rejects.toThrow('404 Chat not found: chat-missing');
+
+    expect(editUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects edit when target message is not a user message', async () => {
+    const editUserMessage = vi.fn(async () => ({ success: true }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const getMemory = vi.fn(async () => ([
+      { messageId: 'msg-1', role: 'assistant', chatId: 'chat-1' }
+    ]));
+    const { handlers } = await createHandlers({ editUserMessage, restoreChat, getMemory });
+
+    await expect(
+      handlers.editMessageInChat({
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        messageId: 'msg-1',
+        newContent: 'updated prompt'
+      })
+    ).rejects.toThrow('400 Can only edit user messages');
+
+    expect(editUserMessage).not.toHaveBeenCalled();
   });
 });
 

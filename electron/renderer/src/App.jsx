@@ -357,7 +357,10 @@ function getRefreshWarning(result) {
 function isHumanMessage(message) {
   const role = String(message?.role || '').toLowerCase();
   const sender = String(message?.sender || '').toLowerCase();
-  return role === 'user' || HUMAN_SENDER_VALUES.has(sender);
+  if (HUMAN_SENDER_VALUES.has(sender)) {
+    return true;
+  }
+  return role === 'user' && !sender;
 }
 
 function getMessageIdentity(message) {
@@ -392,7 +395,7 @@ function isCrossAgentAssistantMessage(message, messagesById, messages, currentIn
 
 function getMessageCardClassName(message, messagesById, messages, currentIndex) {
   const role = String(message?.role || '').toLowerCase();
-  const isUser = role === 'user';
+  const isUser = isHumanMessage(message);
   const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);

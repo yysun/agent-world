@@ -1034,69 +1034,44 @@ export async function removeMessagesFrom(
   const failedAgents: Array<{ agentId: string; error: string }> = [];
   let messagesRemovedTotal = 0;
   let foundTargetInAnyAgent = false;
+  let targetTimestampValue: number | null = null;
+  const loadedAgentsById = new Map<string, Agent>();
 
-  // Process each agent
+  const toTimestamp = (value: unknown): number => {
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+
+    if (value) {
+      const parsed = new Date(value as string).getTime();
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return Date.now();
+  };
+
+  // First pass: load each agent and discover the deletion cutoff timestamp
   for (const agent of agents) {
     try {
-      // Load the agent's full memory (all chats)
       const fullAgent = await storageWrappers!.loadAgent(resolvedWorldId, agent.id);
       if (!fullAgent || !fullAgent.memory || fullAgent.memory.length === 0) {
-        processedAgents.push(agent.id);
         continue;
       }
 
-      // Find the target message in this chat
-      const targetIndex = fullAgent.memory.findIndex(m => m.messageId === messageId && m.chatId === chatId);
+      loadedAgentsById.set(agent.id, fullAgent);
 
-      if (targetIndex === -1) {
-        // Target message not found in this agent's memory - skip this agent
-        continue;
-      }
+      // Find the target message in this chat for global cutoff derivation
+      const targetMsg = fullAgent.memory.find(m => m.messageId === messageId && m.chatId === chatId);
 
-      foundTargetInAnyAgent = true;
-
-      // Get the target message timestamp
-      const targetMsg = fullAgent.memory[targetIndex];
-      const targetTimestampValue = targetMsg.createdAt instanceof Date
-        ? targetMsg.createdAt.getTime()
-        : targetMsg.createdAt ? new Date(targetMsg.createdAt).getTime() : Date.now();
-
-      // Keep messages that are either:
-      // 1. From different chats (chatId !== chatId), OR
-      // 2. From this chat but before the target timestamp
-      const messagesToKeep = fullAgent.memory.filter(m => {
-        if (m.chatId !== chatId) {
-          return true; // Keep messages from other chats
+      if (targetMsg) {
+        foundTargetInAnyAgent = true;
+        const candidateTimestamp = toTimestamp(targetMsg.createdAt);
+        if (targetTimestampValue === null || candidateTimestamp < targetTimestampValue) {
+          targetTimestampValue = candidateTimestamp;
         }
-
-        const msgTimestamp = m.createdAt instanceof Date
-          ? m.createdAt.getTime()
-          : m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
-        return msgTimestamp < targetTimestampValue; // Keep only messages before target
-      });
-
-      const removedCount = fullAgent.memory.length - messagesToKeep.length;
-      const removedIds = fullAgent.memory
-        .filter(m => m.chatId === chatId)
-        .filter(m => {
-          const msgTimestamp = m.createdAt instanceof Date
-            ? m.createdAt.getTime()
-            : m.createdAt ? new Date(m.createdAt).getTime() : Date.now();
-          return msgTimestamp >= targetTimestampValue;
-        })
-        .map(m => m.messageId);
-
-      if (removedCount === 0) {
-        processedAgents.push(agent.id);
-        continue;
       }
-
-      // Save updated memory
-      await storageWrappers!.saveAgentMemory(resolvedWorldId, agent.id, messagesToKeep);
-
-      messagesRemovedTotal += removedCount;
-      processedAgents.push(agent.id);
-
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       failedAgents.push({
@@ -1106,16 +1081,7 @@ export async function removeMessagesFrom(
     }
   }
 
-  logger.info('Message removal completed', {
-    messageId,
-    success: failedAgents.length === 0,
-    totalAgents: agents.length,
-    processedAgents: processedAgents.length,
-    failedAgents: failedAgents.length,
-    messagesRemovedTotal
-  });
-
-  if (!foundTargetInAnyAgent) {
+  if (!foundTargetInAnyAgent || targetTimestampValue === null) {
     const notFoundFailures = agents.length > 0
       ? [
         ...failedAgents,
@@ -1135,6 +1101,57 @@ export async function removeMessagesFrom(
       newMessageId: undefined
     };
   }
+
+  // Second pass: apply cutoff to all agents in the target chat
+  for (const agent of agents) {
+    if (failedAgents.some(entry => entry.agentId === agent.id)) {
+      continue;
+    }
+
+    const fullAgent = loadedAgentsById.get(agent.id);
+    if (!fullAgent || !Array.isArray(fullAgent.memory) || fullAgent.memory.length === 0) {
+      processedAgents.push(agent.id);
+      continue;
+    }
+
+    try {
+      const messagesToKeep = fullAgent.memory.filter(m => {
+        if (m.chatId !== chatId) {
+          return true;
+        }
+
+        const msgTimestamp = toTimestamp(m.createdAt);
+        return msgTimestamp < targetTimestampValue;
+      });
+
+      const removedCount = fullAgent.memory.length - messagesToKeep.length;
+
+      if (removedCount === 0) {
+        processedAgents.push(agent.id);
+        continue;
+      }
+
+      await storageWrappers!.saveAgentMemory(resolvedWorldId, agent.id, messagesToKeep);
+
+      messagesRemovedTotal += removedCount;
+      processedAgents.push(agent.id);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      failedAgents.push({
+        agentId: agent.id,
+        error: errorMsg
+      });
+    }
+  }
+
+  logger.info('Message removal completed', {
+    messageId,
+    success: failedAgents.length === 0,
+    totalAgents: agents.length,
+    processedAgents: processedAgents.length,
+    failedAgents: failedAgents.length,
+    messagesRemovedTotal
+  });
 
   return {
     success: failedAgents.length === 0,

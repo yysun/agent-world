@@ -12,6 +12,9 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
+ *   - Validates chat existence before edit delegation.
+ *   - Validates target message exists in chat and is a user-role message.
  * - 2026-02-14: Added `hitl:respond` IPC handler to resolve core pending HITL option requests from renderer selections.
  * - 2026-02-14: Added `listSkillRegistry` IPC handler to sync/read core skill registry entries for empty-chat welcome rendering.
  * - 2026-02-14: Simplified edit-message IPC flow to delegate to core `editUserMessage` without runtime subscription refresh/rebind side effects.
@@ -696,6 +699,25 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!messageId) throw new Error('Message ID is required.');
     if (!chatId) throw new Error('Chat ID is required.');
     if (!newContent) throw new Error('New content is required.');
+
+    const restoredWorld = await restoreChat(worldId, chatId);
+    if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
+      throw new Error(`404 Chat not found: ${chatId}`);
+    }
+
+    const memory = await getMemory(worldId, chatId);
+    const targetMessage = Array.isArray(memory)
+      ? memory.find((entry: any) => String(entry?.messageId || '') === messageId)
+      : null;
+
+    if (!targetMessage) {
+      throw new Error(`404 Message not found: ${messageId}`);
+    }
+
+    const targetRole = String(targetMessage?.role || '').toLowerCase();
+    if (targetRole !== 'user') {
+      throw new Error('400 Can only edit user messages');
+    }
 
     return editUserMessage(worldId, messageId, newContent, chatId);
   }
