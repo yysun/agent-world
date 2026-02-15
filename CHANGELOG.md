@@ -1,3 +1,33 @@
+v0.11.0
+
+**Desktop & Workspace Experience**
+- Added Electron desktop app workspace flow with recents, folder-based world loading, and improved world info refresh behavior
+- Improved Electron chat UX with markdown rendering, better modal styling, streamlined stream display, and active-agent/working indicators
+- Added full user message edit/delete support in Electron with safer processing guards and resend routing through core
+- Modularized Electron runtime into TypeScript main/preload modules and reorganized related runtime/testing structure
+
+**Chat Sessions, Routing & Runtime Controls**
+- Added concurrent chat session isolation with `chatId`-based event routing and session-scoped stop processing
+- Added world-level `mainAgent` routing and agent-level `autoReply` controls across core, web, and Electron
+- Centralized chat title and edit behavior in core for consistent cross-client behavior
+- Added world variable (`.env` text) support with runtime interpolation and UI integration
+
+**Skills, HITL & Tooling**
+- Added progressive skill loading via `load_skill` with compact prompt summaries and on-demand `SKILL.md` retrieval
+- Added singleton skill registry sync with metadata/front-matter parsing and project-over-user precedence
+- Added HITL option flow for skill script execution across core, web, Electron, and CLI, plus related docs
+- Hardened shell command execution with trusted CWD enforcement, path-scope validation, and lifecycle control APIs
+
+**CLI, Streaming & Reliability**
+- Improved CLI streaming UX with richer status-line feedback and real-time tool stream visibility
+- Extended SSE/tool-stream timeout behavior to reduce premature idle timeouts on long-running commands
+- Improved tool-call/result rendering consistency across web and Electron, including argument parsing and deduplication cleanup
+- Added side-effect-free world deletion behavior and improved subscription refresh warning handling
+
+**Docs & Developer Experience**
+- Expanded architecture and implementation docs for concurrent chat, HITL approval flow, and event channel rules
+- Updated scripts/dependencies for Electron and web development workflow consistency
+
 v0.10.0
 
 **Streaming & Tooling**

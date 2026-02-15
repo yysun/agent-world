@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Icon: Agent World desktop app icon (mascot-based)
+  Features: Solid-color tile with centered mascot inspired by attached reference image
+  Notes: 1024x1024 vector source for png/ico export in packaging workflows
+  Recent changes: 2026-02-14 switched to solid dark-mode-friendly background with strong line-art contrast
+-->
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="64" y="64" width="896" height="896" rx="192" fill="#4F46E5"/>
+  <rect x="64" y="64" width="896" height="896" rx="192" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="10"/>
+
+  <!-- Mascot body -->
+  <g transform="translate(-60 0)" stroke="#0B1020" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M360 740V418C360 301 454 208 572 208C689 208 784 303 784 420V740Z" fill="#A5B4FC" stroke="none"/>
+    <path d="M360 740V418C360 301 454 208 572 208C689 208 784 303 784 420V734"/>
+    <path d="M360 742H784"/>
+
+    <!-- Eyes -->
+    <circle cx="520" cy="390" r="66" fill="#FFFFFF"/>
+    <circle cx="654" cy="390" r="66" fill="#FFFFFF"/>
+    <circle cx="530" cy="396" r="19" fill="#111827"/>
+    <circle cx="664" cy="396" r="19" fill="#111827"/>
+
+    <!-- Smile -->
+    <path d="M526 538C552 572 626 572 652 538"/>
+    <path d="M555 560H622"/>
+
+    <!-- Left arm raised waving hi -->
+    <path d="M360 500L310 440L280 360" fill="none"/>
+    <path d="M280 360L258 340" fill="none"/>
+    <path d="M280 360L264 370" fill="none"/>
+
+    <!-- Right arm resting on hip -->
+    <path d="M784 530L840 560C860 572 870 610 856 640L830 680" fill="none"/>
+
+    <!-- Legs -->
+    <path d="M470 742V816"/>
+    <path d="M690 742V816"/>
+    <path d="M434 816H506"/>
+    <path d="M654 816H726"/>
+  </g>
+</svg>

@@ -1,5 +1,11 @@
 # Agent World
 
+[![Latest Release](https://img.shields.io/github/v/release/yysun/agent-world?label=release)](https://github.com/yysun/agent-world/releases)
+
+<p align="center">
+	<img src="electron/assets/icons/agent-world-icon.svg" alt="Agent World Logo" width="120" />
+</p>
+
 *Build AI agent teams with just words—no coding required.*
 
 ## Why Agent World?
@@ -29,9 +35,27 @@ Paste that prompt. Agents come alive instantly.
 - ✅ No Code Required - Agents are defined entirely in natural language
 - ✅ Natural Communication - Agents understand context and conversations
 - ✅ Built-in Rules for Messages - Turn limits to prevent loops
-- ✅ Progressive Agent Skills - Skills are discovered and loaded on demand
+- ✅ Concurrent Chat Sessions - Isolated `chatId` routing enables parallel conversations
+- ✅ Progressive Agent Skills - Skills are discovered and loaded on demand via `load_skill`
+- ✅ Cross-Client HITL Approval - Option-based approvals in CLI, Web, and Electron
+- ✅ Runtime Controls - Session-scoped send/stop flows and tool lifecycle visibility
+- ✅ Safer Tool Execution - Trusted-CWD and argument-scope guards for `shell_cmd`
 - ✅ Multiple AI Providers - Use different models for different agents
-- ✅ Modern Web Interface - Clean, responsive UI with real-time chat
+- ✅ Web + CLI + Electron - Modern interfaces with real-time streaming and status feedback
+
+## Latest Highlights (v0.11.0)
+
+- Electron desktop app with workspace-folder world loading, recents, and improved world info
+- Concurrent chat session isolation with chat-scoped event routing and stop controls
+- World-level `mainAgent` routing and agent-level `autoReply` configuration
+- Core-owned edit/resubmit and chat-title flows for consistent behavior across clients
+- World variables as `.env` text with runtime interpolation support
+- Progressive skills (`load_skill`) with skill registry sync and HITL-gated activation
+
+## Release Notes
+
+- **v0.11.0** - Electron desktop workflow, concurrent chat sessions, main-agent routing, progressive skills + HITL, and runtime safety hardening
+- Full history: [CHANGELOG.md](CHANGELOG.md)
 
 ## What You Can Build
 
@@ -134,6 +158,11 @@ npx agent-world -w default-world "hi"
 echo "hi" | npx agent-world -w default-world
 ```
 
+**Option 3: Electron Desktop App (repo)**
+```bash
+npm run electron:dev
+```
+
 ## Project Structure
 
 See [Project Structure Documentation](project.md)
@@ -188,6 +217,13 @@ export OLLAMA_BASE_URL="http://localhost:11434"
 
 Or create a `.env` file in your working directory with:
 
+```bash
+OPENAI_API_KEY=your-key-here
+ANTHROPIC_API_KEY=your-key-here
+GOOGLE_API_KEY=your-key-here
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
 ## Testing
 
 **Run all tests:**
@@ -230,7 +266,7 @@ LOG_EVENTS_AGENT=debug LOG_LLM=debug npm run web:dev
 
 **For complete logging documentation**, see [Logging Guide](docs/logging-guide.md).
 
-## Learn More
+## Storage Configuration
 
 ### World Database Setup
 
@@ -246,6 +282,7 @@ export AGENT_WORLD_DATA_PATH=./data/worlds
 
 ## Learn More
 
+- **[Docs Home](docs/docs-home.md)** - Central navigation page for all major documentation
 - **[Building Agents with Just Words](docs/Building%20Agents%20with%20Just%20Words.md)** - Complete guide with examples
 - **[Shell Command Tool (shell_cmd)](docs/shell-cmd-tool.md)** - Built-in tool for executing shell commands
 - **[HITL Approval Flow](docs/hitl-approval-flow.md)** - Option-based approval flow across Core/Electron/Web/CLI
@@ -259,6 +296,10 @@ Agent World includes built-in tools that are automatically available to all agen
 
 ### shell_cmd
 Execute shell commands with full output capture and execution history. Perfect for file operations, system information, and automation tasks.
+
+- Enforces trusted working-directory scope from world/tool context
+- Validates command/path arguments to prevent out-of-scope traversal patterns
+- Supports lifecycle tracking and session-scoped cancellation in active runtimes
 
 ```typescript
 // Available to LLMs as 'shell_cmd' tool
