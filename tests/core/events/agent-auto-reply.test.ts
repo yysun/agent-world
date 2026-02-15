@@ -110,4 +110,23 @@ describe('handleTextResponse autoReply', () => {
       'msg-user-1'
     );
   });
+
+  it('removes self-mention and mentions sender instead', async () => {
+    const { handleTextResponse } = await import('../../../core/events/memory-manager.js');
+    const world = createWorld();
+    const agent = createAgent(true);
+    const messageEvent = createMessageEvent();
+
+    await handleTextResponse(world, agent, '@agent-a Good day to you too!', 'msg-assistant-3', messageEvent, 'chat-1');
+
+    expect(agent.memory[0]?.content).toBe('@agent-b Good day to you too!');
+    expect(publishMessageWithIdMock).toHaveBeenCalledWith(
+      world,
+      '@agent-b Good day to you too!',
+      'agent-a',
+      'msg-assistant-3',
+      'chat-1',
+      'msg-user-1'
+    );
+  });
 });

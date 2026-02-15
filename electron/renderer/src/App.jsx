@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-15: Suppressed reply-target sender labels when the replying agent has `autoReply` disabled; chat rows now show plain sender names in that mode.
  * - 2026-02-15: Updated welcome-card visibility to depend on user/assistant conversation messages only, so tool/system/error-only event rows do not hide onboarding content.
  * - 2026-02-15: Stabilized desktop chat layout by constraining horizontal overflow, top-aligning empty-session welcome content, and adding a bounded scroll area for long skill lists.
  * - 2026-02-15: Hardened message edit/delete chat targeting to require message-bound chat IDs and removed selected-session fallback for mutation requests.
@@ -453,16 +454,33 @@ function inferReplyTargetFromHistory(message, messages, currentIndex) {
   return null;
 }
 
-function getMessageSenderLabel(message, messagesById, messages, currentIndex) {
+function isSenderAutoReplyDisabled(message, agentsById, agentsByName) {
+  const fromAgentId = String(message?.fromAgentId || '').trim();
+  if (fromAgentId && agentsById?.has(fromAgentId)) {
+    return agentsById.get(fromAgentId)?.autoReply === false;
+  }
+
+  const sender = String(message?.sender || '').trim().toLowerCase();
+  if (sender && agentsByName?.has(sender)) {
+    return agentsByName.get(sender)?.autoReply === false;
+  }
+
+  return false;
+}
+
+function getMessageSenderLabel(message, messagesById, messages, currentIndex, agentsById, agentsByName) {
   if (isHumanMessage(message)) return 'HUMAN';
   const sender = message?.sender || 'unknown';
+  if (isSenderAutoReplyDisabled(message, agentsById, agentsByName)) {
+    return sender;
+  }
   if (isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex)) {
     const replyToMessageId = String(message?.replyToMessageId || '').trim();
     const parentMessage = replyToMessageId ? messagesById.get(replyToMessageId) : null;
     const parentSender = String(parentMessage?.sender || '').trim();
     const fromAgentId = String(message?.fromAgentId || '').trim();
     const source = parentSender || fromAgentId || 'Agent';
-    return `${source} → ${sender}`;
+    return `${sender} (reply to ${source})`;
   }
   const replyTarget = getReplyTarget(message, messagesById) ||
     inferReplyTargetFromHistory(message, messages, currentIndex);
@@ -2979,7 +2997,14 @@ export default function App() {
                   ) : (
                     messages.map((message, messageIndex) => {
                       if (!message?.messageId) return null;
-                      const senderLabel = getMessageSenderLabel(message, messagesById, messages, messageIndex);
+                      const senderLabel = getMessageSenderLabel(
+                        message,
+                        messagesById,
+                        messages,
+                        messageIndex,
+                        worldAgentsById,
+                        worldAgentsByName
+                      );
                       const messageKey = message.messageId;
                       const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
                       const isHuman = isHumanMessage(message);

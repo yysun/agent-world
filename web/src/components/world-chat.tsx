@@ -23,6 +23,7 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-15: Suppressed reply-target sender labels when the sender agent has `autoReply` disabled; now shows plain sender for parity with Electron.
  * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
  * - 2026-02-14: Added send/stop composer toggle so web users can stop active chat processing.
  * - 2026-02-14: Removed legacy 3-tier tool call reconstruction in favor of canonical message text rendering
@@ -160,6 +161,24 @@ export default function WorldChat(props: WorldChatProps) {
     const senderLower = toKebabCase(message.sender);
     const agentIdLower = toKebabCase(message.fromAgentId);
     return senderLower !== agentIdLower && !message.isStreaming;
+  };
+
+  const isSenderAutoReplyDisabled = (message: Message): boolean => {
+    const fromAgentId = toKebabCase(message.fromAgentId || '');
+    if (fromAgentId) {
+      const fromAgent = agents.find(agent => toKebabCase(agent.id) === fromAgentId);
+      if (fromAgent) {
+        return fromAgent.autoReply === false;
+      }
+    }
+
+    const normalizedSender = toKebabCase(message.sender || '');
+    if (!normalizedSender) return false;
+
+    const senderAgent = agents.find(
+      agent => toKebabCase(agent.id) === normalizedSender || toKebabCase(agent.name) === normalizedSender
+    );
+    return senderAgent?.autoReply === false;
   };
 
   // Helper function to resolve reply target from replyToMessageId
@@ -427,29 +446,33 @@ export default function WorldChat(props: WorldChatProps) {
                 }
                 // Note: If seenByAgents is empty, don't show 'To:' line (will be populated by duplicates)
               } else if (senderType === SenderType.AGENT) {
-                // Check if this is a reply message (has replyToMessageId) or incoming message
-                if (isReplyMessage) {
-                  // Cross-agent reply: user message with replyToMessageId from another agent
-                  const replyTarget = getReplyTarget(message, filteredMessages);
-                  if (replyTarget) {
-                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
-                  } else {
-                    displayLabel = `Agent: ${message.sender} (reply)`;
-                  }
-                } else if (message.type === 'assistant' || message.type === 'agent') {
-                  // Regular assistant/agent message
-                  const replyTarget = getReplyTarget(message, filteredMessages);
-                  if (replyTarget) {
-                    displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
-                  } else {
-                    displayLabel = `Agent: ${message.sender} (reply)`;
-                  }
-                } else if (isCrossAgentMessage && isIncomingMessage) {
-                  // Non-reply cross-agent message (rare - most should have replyToMessageId)
-                  displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
+                if (isSenderAutoReplyDisabled(message)) {
+                  displayLabel = message.sender;
                 } else {
-                  // Fallback
-                  displayLabel = `Agent: ${message.sender}`;
+                  // Check if this is a reply message (has replyToMessageId) or incoming message
+                  if (isReplyMessage) {
+                    // Cross-agent reply: user message with replyToMessageId from another agent
+                    const replyTarget = getReplyTarget(message, filteredMessages);
+                    if (replyTarget) {
+                      displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
+                    } else {
+                      displayLabel = `Agent: ${message.sender} (reply)`;
+                    }
+                  } else if (message.type === 'assistant' || message.type === 'agent') {
+                    // Regular assistant/agent message
+                    const replyTarget = getReplyTarget(message, filteredMessages);
+                    if (replyTarget) {
+                      displayLabel = `Agent: ${message.sender} (reply to ${replyTarget})`;
+                    } else {
+                      displayLabel = `Agent: ${message.sender} (reply)`;
+                    }
+                  } else if (isCrossAgentMessage && isIncomingMessage) {
+                    // Non-reply cross-agent message (rare - most should have replyToMessageId)
+                    displayLabel = `Agent: ${message.sender} (message from ${message.fromAgentId || message.sender})`;
+                  } else {
+                    // Fallback
+                    displayLabel = `Agent: ${message.sender}`;
+                  }
                 }
               } else if (senderType === SenderType.SYSTEM) {
                 displayLabel = message.sender;

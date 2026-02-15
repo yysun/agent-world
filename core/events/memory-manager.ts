@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-15: Sanitized agent self-mentions in `handleTextResponse` before auto-mentioning to prevent `@self` prefixes.
  * - 2026-02-13: Added per-agent `autoReply` gate; disables sender auto-mention when set to false.
  * - 2026-02-13: Hardened title output normalization with markdown/prefix stripping and low-quality fallback hierarchy.
  * - 2026-02-13: Canceled title-generation calls now exit without fallback renaming.
@@ -54,7 +55,8 @@ import {
 import {
   shouldAutoMention,
   addAutoMention,
-  hasAnyMentionAtBeginning
+  hasAnyMentionAtBeginning,
+  removeSelfMentions
 } from './mention-logic.js';
 import { publishMessage, publishMessageWithId, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
 
@@ -397,11 +399,12 @@ export async function continueLLMAfterToolExecution(
     }
 
     const responseText = llmResponse.content;
+    const sanitizedResponse = removeSelfMentions(responseText, agent.id);
 
     // Save response to agent memory with all required fields
     agent.memory.push({
       role: 'assistant',
-      content: responseText,
+      content: sanitizedResponse,
       messageId,
       sender: agent.id,
       createdAt: new Date(),
@@ -425,12 +428,12 @@ export async function continueLLMAfterToolExecution(
     }
 
     // Publish the response message using the same messageId from streaming
-    publishMessageWithId(world, responseText, agent.id, messageId, targetChatId, undefined);
+    publishMessageWithId(world, sanitizedResponse, agent.id, messageId, targetChatId, undefined);
 
     loggerAgent.debug('Agent response published after tool execution', {
       agentId: agent.id,
       messageId,
-      responseLength: responseText.length
+      responseLength: sanitizedResponse.length
     });
   } catch (error) {
     if (isMessageProcessingCanceledError(error) || options?.abortSignal?.aborted) {
@@ -470,10 +473,12 @@ export async function handleTextResponse(
   // Derive target chatId: explicit parameter > message event > world.currentChatId
   const targetChatId = chatId !== undefined ? chatId : (messageEvent.chatId ?? world.currentChatId ?? null);
 
+  const sanitizedResponse = removeSelfMentions(responseText, agent.id);
+
   // Apply auto-mention logic if needed
-  let finalResponse = responseText;
-  if (agent.autoReply !== false && shouldAutoMention(responseText, messageEvent.sender, agent.id)) {
-    finalResponse = addAutoMention(responseText, messageEvent.sender);
+  let finalResponse = sanitizedResponse;
+  if (agent.autoReply !== false && shouldAutoMention(sanitizedResponse, messageEvent.sender, agent.id)) {
+    finalResponse = addAutoMention(sanitizedResponse, messageEvent.sender);
     loggerAutoMention.debug('Auto-mention applied', {
       agentId: agent.id,
       originalSender: messageEvent.sender,
@@ -483,7 +488,7 @@ export async function handleTextResponse(
     loggerAutoMention.debug('Auto-mention not needed', {
       agentId: agent.id,
       autoReply: agent.autoReply !== false,
-      hasAnyMention: hasAnyMentionAtBeginning(responseText)
+      hasAnyMention: hasAnyMentionAtBeginning(sanitizedResponse)
     });
   }
 
