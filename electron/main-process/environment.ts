@@ -42,6 +42,18 @@ export function loadEnvironmentVariables(baseDir: string): void {
   }
 }
 
+export function applySystemSettings(settings: { storageType?: string; dataPath?: string; sqliteDatabase?: string }): void {
+  if (settings.storageType) {
+    process.env.AGENT_WORLD_STORAGE_TYPE = settings.storageType;
+  }
+  if (settings.dataPath) {
+    process.env.AGENT_WORLD_DATA_PATH = settings.dataPath;
+  }
+  if (settings.sqliteDatabase) {
+    process.env.AGENT_WORLD_SQLITE_DATABASE = settings.sqliteDatabase;
+  }
+}
+
 export function workspaceFromCommandLine(argv: string[]): string | null {
   const arg = argv.find((item) => item.startsWith('--workspace='));
   if (!arg) return null;

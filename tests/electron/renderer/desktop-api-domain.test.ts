@@ -31,10 +31,22 @@ describe('desktop-api domain helpers', () => {
     expect(() => getDesktopApi()).toThrow('Desktop API bridge is unavailable.');
   });
 
-  it('returns API as-is when deleteChat exists', () => {
-    const api = { deleteChat: () => true, ping: () => 'ok' };
+  it('returns a normalized API copy when deleteChat exists', () => {
+    const api = { deleteChat: () => true, openWorkspace: () => true, ping: () => 'ok' };
     globalWindow.agentWorldDesktop = api;
-    expect(getDesktopApi()).toBe(api);
+    const normalized = getDesktopApi() as typeof api & { pickDirectory?: () => boolean };
+    expect(normalized).not.toBe(api);
+    expect(normalized.deleteChat).toBe(api.deleteChat);
+    expect(normalized.pickDirectory).toBe(api.openWorkspace);
+  });
+
+  it('creates compatibility openWorkspace fallback from pickDirectory', () => {
+    const pickDirectory = () => true;
+    const api = { pickDirectory, ping: () => 'ok' };
+    globalWindow.agentWorldDesktop = api;
+
+    const normalized = getDesktopApi() as typeof api & { openWorkspace: () => boolean };
+    expect(normalized.openWorkspace).toBe(pickDirectory);
   });
 
   it('creates compatibility deleteChat fallback from deleteSession', () => {

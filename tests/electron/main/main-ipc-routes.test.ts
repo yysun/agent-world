@@ -27,6 +27,7 @@ function createHandlerMocks() {
   return {
     getWorkspaceState: vi.fn(async () => ({})),
     openWorkspaceDialog: vi.fn(async () => ({})),
+    pickDirectoryDialog: vi.fn(async () => ({ canceled: true, directoryPath: null })),
     loadWorldsFromWorkspace: vi.fn(async () => ([])),
     loadSpecificWorld: vi.fn(async () => ({})),
     importWorld: vi.fn(async () => ({})),
@@ -51,7 +52,10 @@ function createHandlerMocks() {
     stopChatMessage: vi.fn(async () => ({ stopped: true })),
     deleteMessageFromChat: vi.fn(async () => ({ deleted: true })),
     subscribeChatEvents: vi.fn(async () => ({ subscribed: true })),
-    unsubscribeChatEvents: vi.fn(async () => ({ unsubscribed: true }))
+    unsubscribeChatEvents: vi.fn(async () => ({ unsubscribed: true })),
+    getSystemSettings: vi.fn(async () => ({})),
+    saveSystemSettings: vi.fn(async () => true),
+    openFileDialog: vi.fn(async () => ({ canceled: true, filePath: null }))
   };
 }
 
@@ -63,6 +67,7 @@ describe('buildMainIpcRoutes', () => {
     expect(routes.map((route) => route.channel)).toEqual([
       'workspace:get',
       'workspace:open',
+      'dialog:pickDirectory',
       'world:loadFromFolder',
       'world:load',
       'world:import',
@@ -88,7 +93,10 @@ describe('buildMainIpcRoutes', () => {
       'chat:stopMessage',
       'message:delete',
       'chat:subscribeEvents',
-      'chat:unsubscribeEvents'
+      'chat:unsubscribeEvents',
+      'settings:get',
+      'settings:save',
+      'dialog:pickFile'
     ]);
   });
 
@@ -97,20 +105,30 @@ describe('buildMainIpcRoutes', () => {
     const routes = buildMainIpcRoutes(handlers);
 
     await routes.find((route) => route.channel === 'world:saveLastSelected')?.handler({}, 'world-99');
+    await routes.find((route) => route.channel === 'workspace:open')?.handler({}, { directoryPath: '/tmp/workspace' });
+    await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'message:edit')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     await routes.find((route) => route.channel === 'hitl:respond')?.handler({}, { worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     await routes.find((route) => route.channel === 'chat:stopMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
+    await routes.find((route) => route.channel === 'settings:get')?.handler({});
+    await routes.find((route) => route.channel === 'settings:save')?.handler({}, { storageType: 'sqlite' });
+    await routes.find((route) => route.channel === 'dialog:pickFile')?.handler({});
 
     expect(handlers.writeWorldPreference).toHaveBeenCalledWith('world-99');
+    expect(handlers.openWorkspaceDialog).toHaveBeenCalledWith({ directoryPath: '/tmp/workspace' });
+    expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
     expect(handlers.editMessageInChat).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     expect(handlers.respondHitlOption).toHaveBeenCalledWith({ worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
     expect(handlers.stopChatMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1' });
+    expect(handlers.getSystemSettings).toHaveBeenCalledTimes(1);
+    expect(handlers.saveSystemSettings).toHaveBeenCalledWith({ storageType: 'sqlite' });
+    expect(handlers.openFileDialog).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -130,7 +148,7 @@ describe('registerIpcRoutes', () => {
     );
     expect(ipcMainLike.handle).toHaveBeenNthCalledWith(
       routes.length,
-      'chat:unsubscribeEvents',
+      'dialog:pickFile',
       expect.any(Function)
     );
   });

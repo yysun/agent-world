@@ -28,6 +28,7 @@ export const CHAT_EVENT_CHANNEL = 'chat:event' as const;
 export const DESKTOP_INVOKE_CHANNELS = {
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_OPEN: 'workspace:open',
+  DIALOG_PICK_DIRECTORY: 'dialog:pickDirectory',
   WORLD_LOAD_FROM_FOLDER: 'world:loadFromFolder',
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
@@ -53,7 +54,10 @@ export const DESKTOP_INVOKE_CHANNELS = {
   CHAT_STOP_MESSAGE: 'chat:stopMessage',
   MESSAGE_DELETE: 'message:delete',
   CHAT_SUBSCRIBE_EVENTS: 'chat:subscribeEvents',
-  CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents'
+  CHAT_UNSUBSCRIBE_EVENTS: 'chat:unsubscribeEvents',
+  SETTINGS_GET: 'settings:get',
+  SETTINGS_SAVE: 'settings:save',
+  DIALOG_PICK_FILE: 'dialog:pickFile'
 } as const;
 
 export type DesktopInvokeChannel =
@@ -67,7 +71,7 @@ export interface WorldChatPayload extends WorldIdPayload {
   chatId: string;
 }
 
-export interface ChatStopPayload extends WorldChatPayload {}
+export interface ChatStopPayload extends WorldChatPayload { }
 
 export interface WorldLastSelectedPayload {
   worldId: string;
@@ -117,7 +121,8 @@ export interface SkillRegistrySummary {
 
 export interface DesktopApi {
   getWorkspace: () => Promise<unknown>;
-  openWorkspace: () => Promise<unknown>;
+  openWorkspace: (directoryPath?: string) => Promise<unknown>;
+  pickDirectory: () => Promise<unknown>;
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: () => Promise<unknown>;
@@ -145,4 +150,7 @@ export interface DesktopApi {
   subscribeChatEvents: (worldId: string, chatId: string, subscriptionId: string) => Promise<unknown>;
   unsubscribeChatEvents: (subscriptionId: string) => Promise<unknown>;
   onChatEvent: (callback: (payload: ChatEventPayload) => void) => () => void;
+  getSettings: () => Promise<unknown>;
+  saveSettings: (settings: Record<string, unknown>) => Promise<unknown>;
+  pickFile: () => Promise<unknown>;
 }

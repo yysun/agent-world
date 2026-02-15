@@ -169,7 +169,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
   }
 
-  async function openWorkspaceDialog() {
+  async function pickDirectoryDialog() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
     const result = await dialog.showOpenDialog(mainWindow as any, {
@@ -178,18 +178,36 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     });
 
     if (result.canceled || result.filePaths.length === 0) {
-      return { ...getWorkspaceState(), canceled: true };
+      return { canceled: true, directoryPath: null };
     }
 
     const selectedPath = result.filePaths[0];
     if (!selectedPath) {
+      return { canceled: true, directoryPath: null };
+    }
+
+    return {
+      canceled: false,
+      directoryPath: selectedPath
+    };
+  }
+
+  async function openWorkspaceDialog(payload?: any) {
+    const providedDirectoryPath = payload?.directoryPath == null
+      ? ''
+      : String(payload.directoryPath || '').trim();
+    const picked = providedDirectoryPath
+      ? { canceled: false, directoryPath: providedDirectoryPath }
+      : await pickDirectoryDialog();
+
+    if (picked.canceled || !picked.directoryPath) {
       return { ...getWorkspaceState(), canceled: true };
     }
 
     return {
       ...getWorkspaceState(),
       canceled: false,
-      workspacePath: selectedPath
+      workspacePath: picked.directoryPath
     };
   }
 
@@ -724,10 +742,25 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return submitWorldOptionResponse({ worldId, requestId, optionId });
   }
 
+  async function openFileDialog() {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) throw new Error('Main window not initialized');
+    const result = await dialog.showOpenDialog(mainWindow as any, {
+      title: 'Select File',
+      properties: ['openFile', 'createDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, filePath: null };
+    }
+    return { canceled: false, filePath: result.filePaths[0] || null };
+  }
+
   return {
     loadWorldsFromWorkspace,
     loadSpecificWorld,
+    pickDirectoryDialog,
     openWorkspaceDialog,
+    openFileDialog,
     listWorkspaceWorlds,
     listSkillRegistry,
     createWorkspaceWorld,

@@ -764,6 +764,8 @@ export default function App() {
   const [panelMode, setPanelMode] = useState('create-world');
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
+  const [systemSettings, setSystemSettings] = useState({ storageType: '', dataPath: '', sqliteDatabase: '' });
+  const savedSystemSettingsRef = useRef({ storageType: '', dataPath: '', sqliteDatabase: '' });
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [status, setStatus] = useState(() => getStatusBarStatus());
   const [creatingWorld, setCreatingWorld] = useState(getDefaultWorldForm);
@@ -1449,9 +1451,26 @@ export default function App() {
     }
   }, [themePreference]);
 
+  useEffect(() => {
+    if (!api.getSettings) return;
+    api.getSettings().then((s) => {
+      if (s && typeof s === 'object') {
+        setSystemSettings({
+          storageType: s.storageType || '',
+          dataPath: s.dataPath || '',
+          sqliteDatabase: s.sqliteDatabase || '',
+        });
+      }
+    }).catch(() => { });
+  }, []);
+
   const onOpenWorkspace = useCallback(async () => {
     try {
-      const nextWorkspace = await api.openWorkspace();
+      const picked = await api.pickDirectory();
+      if (picked?.canceled || !picked?.directoryPath) {
+        return;
+      }
+      const nextWorkspace = await api.openWorkspace(String(picked.directoryPath));
       setWorkspace(nextWorkspace);
       setWorkspaceMenuOpen(false);
       setStatusText('Workspace path selected', 'success');
@@ -1587,6 +1606,55 @@ export default function App() {
     setPanelMode('create-world');
     setSelectedAgentId(null);
   }, [hasUnsavedWorldChanges, hasUnsavedAgentChanges]);
+
+  const onOpenSettingsPanel = useCallback(async () => {
+    setPanelMode('settings');
+    setPanelOpen(true);
+    if (!api.getSettings) return;
+    try {
+      const s = await api.getSettings();
+      if (s && typeof s === 'object') {
+        const loaded = {
+          storageType: s.storageType || '',
+          dataPath: s.dataPath || '',
+          sqliteDatabase: s.sqliteDatabase || '',
+        };
+        setSystemSettings(loaded);
+        savedSystemSettingsRef.current = loaded;
+      }
+    } catch { }
+  }, [api]);
+
+  const settingsNeedRestart = useMemo(() => {
+    const saved = savedSystemSettingsRef.current;
+    return (
+      systemSettings.storageType !== saved.storageType ||
+      systemSettings.dataPath !== saved.dataPath ||
+      systemSettings.sqliteDatabase !== saved.sqliteDatabase
+    );
+  }, [systemSettings]);
+
+  const onCancelSettings = useCallback(() => {
+    setSystemSettings(savedSystemSettingsRef.current);
+  }, []);
+
+  const onSaveSettings = useCallback(async () => {
+    if (!api.saveSettings) return;
+    const needsRestart = settingsNeedRestart;
+    if (needsRestart) {
+      const confirmed = window.confirm('Changes require a restart to take effect. Continue?');
+      if (!confirmed) return;
+    }
+    try {
+      await api.saveSettings({ ...systemSettings, restart: needsRestart });
+      if (!needsRestart) {
+        savedSystemSettingsRef.current = { ...systemSettings };
+        setStatusText('Settings saved.', 'success');
+      }
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to save settings.'), 'error');
+    }
+  }, [systemSettings, settingsNeedRestart]);
 
   const onOpenCreateWorldPanel = useCallback(() => {
     setPanelMode('create-world');
@@ -2758,73 +2826,30 @@ export default function App() {
               ) : null}
             </div>
             <div className="flex items-center justify-end gap-2" style={NO_DRAG_REGION_STYLE}>
-              <div className="inline-flex items-center rounded-md border border-input bg-card p-0.5">
-                {['system', 'light', 'dark'].map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setThemePreference(mode)}
-                    className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${themePreference === mode
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                      }`}
-                    title={`Use ${mode} theme`}
-                    aria-label={`Use ${mode} theme`}
-                  >
-                    {mode === 'system' ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                      >
-                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
-                      </svg>
-                    ) : mode === 'light' ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                      >
-                        <circle cx="12" cy="12" r="4" />
-                        <line x1="12" y1="2" x2="12" y2="4" />
-                        <line x1="12" y1="20" x2="12" y2="22" />
-                        <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
-                        <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
-                        <line x1="2" y1="12" x2="4" y2="12" />
-                        <line x1="20" y1="12" x2="22" y2="12" />
-                        <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
-                        <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
-                      </svg>
-                    ) : (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                      >
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
-                      </svg>
-                    )}
-                    <span className="sr-only capitalize">{mode}</span>
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                onClick={onOpenSettingsPanel}
+                className={`flex h-7 w-7 items-center justify-center rounded transition-colors ${panelMode === 'settings' && panelOpen
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                title="Settings"
+                aria-label="Settings"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                >
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
             </div>
           </header>
 
@@ -3035,13 +3060,15 @@ export default function App() {
                 <div className="flex h-full flex-col">
                   <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-xs uppercase tracking-wide text-sidebar-foreground/70">
-                      {panelMode === 'edit-world'
-                        ? 'Edit World'
-                        : panelMode === 'create-agent'
-                          ? 'Create Agent'
-                          : panelMode === 'edit-agent'
-                            ? 'Edit Agent'
-                            : 'Create World'}
+                      {panelMode === 'settings'
+                        ? 'System Settings'
+                        : panelMode === 'edit-world'
+                          ? 'Edit World'
+                          : panelMode === 'create-agent'
+                            ? 'Create Agent'
+                            : panelMode === 'edit-agent'
+                              ? 'Edit Agent'
+                              : 'Create World'}
                     </h2>
                     <button
                       type="button"
@@ -3057,7 +3084,155 @@ export default function App() {
                   </div>
 
                   <div className="min-h-0 flex flex-1 flex-col overflow-y-auto">
-                    {panelMode === 'edit-world' && loadedWorld ? (
+                    {panelMode === 'settings' ? (
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <div className="flex-1 space-y-4 overflow-y-auto">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-sidebar-foreground/90">Theme</label>
+                            <div className="inline-flex items-center rounded-md border border-sidebar-border bg-sidebar-accent p-0.5">
+                              {['system', 'light', 'dark'].map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => setThemePreference(mode)}
+                                  className={`flex h-6 w-6 items-center justify-center rounded transition-colors ${themePreference === mode
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-sidebar-foreground/70 hover:bg-sidebar-foreground/10 hover:text-sidebar-foreground'
+                                    }`}
+                                  title={`${mode.charAt(0).toUpperCase() + mode.slice(1)} theme`}
+                                >
+                                  {mode === 'system' ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                                      <line x1="8" y1="21" x2="16" y2="21" />
+                                      <line x1="12" y1="17" x2="12" y2="21" />
+                                    </svg>
+                                  ) : mode === 'light' ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                                      <circle cx="12" cy="12" r="4" />
+                                      <line x1="12" y1="2" x2="12" y2="4" />
+                                      <line x1="12" y1="20" x2="12" y2="22" />
+                                      <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
+                                      <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
+                                      <line x1="2" y1="12" x2="4" y2="12" />
+                                      <line x1="20" y1="12" x2="22" y2="12" />
+                                      <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
+                                      <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
+                                    </svg>
+                                  ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                                      <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+                                    </svg>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="border-t border-sidebar-border pt-4">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-sidebar-foreground/90">Storage Type</label>
+                                <div className="flex gap-3">
+                                  {['file', 'sqlite'].map((type) => (
+                                    <label key={type} className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="radio"
+                                        name="storageType"
+                                        value={type}
+                                        checked={(systemSettings.storageType || 'sqlite') === type}
+                                        onChange={() => setSystemSettings((s) => ({ ...s, storageType: type }))}
+                                        className="accent-primary"
+                                      />
+                                      <span className="text-xs text-sidebar-foreground">{type === 'file' ? 'File' : 'SQLite'}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {(systemSettings.storageType || 'sqlite') === 'file' ? (
+                                <div className="mt-4 flex flex-col gap-1">
+                                  <label className="text-xs font-bold text-sidebar-foreground/90">Data File Path</label>
+                                  <div className="flex gap-1">
+                                    <input
+                                      value={systemSettings.dataPath}
+                                      onChange={(e) => setSystemSettings((s) => ({ ...s, dataPath: e.target.value }))}
+                                      placeholder={workspace.workspacePath || 'Select folder...'}
+                                      className="min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/40 focus:border-sidebar-ring"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const result = typeof api.pickDirectory === 'function'
+                                          ? await api.pickDirectory()
+                                          : await api.openWorkspace();
+                                        const directoryPath = result?.directoryPath ?? result?.workspacePath;
+                                        if (!result.canceled && directoryPath) {
+                                          setSystemSettings((s) => ({ ...s, dataPath: String(directoryPath) }));
+                                        }
+                                      }}
+                                      className="flex h-auto shrink-0 items-center justify-center rounded-md border border-sidebar-border px-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                      title="Browse folder..."
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                  <span className="text-[10px] text-sidebar-foreground/50">AGENT_WORLD_DATA_PATH</span>
+                                </div>
+                              ) : (
+                                <div className="mt-4 flex flex-col gap-1">
+                                  <label className="text-xs font-bold text-sidebar-foreground/90">Database File</label>
+                                  <div className="flex gap-1">
+                                    <input
+                                      value={systemSettings.sqliteDatabase}
+                                      onChange={(e) => setSystemSettings((s) => ({ ...s, sqliteDatabase: e.target.value }))}
+                                      placeholder={workspace.workspacePath ? `${workspace.workspacePath}/database.db` : 'Select file...'}
+                                      className="min-w-0 flex-1 rounded-md border border-sidebar-border bg-sidebar-accent px-3 py-2 text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/40 focus:border-sidebar-ring"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const result = await api.pickFile();
+                                        if (!result.canceled && result.filePath) {
+                                          setSystemSettings((s) => ({ ...s, sqliteDatabase: String(result.filePath) }));
+                                        }
+                                      }}
+                                      className="flex h-auto shrink-0 items-center justify-center rounded-md border border-sidebar-border px-2 text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                      title="Browse file..."
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                  <span className="text-[10px] text-sidebar-foreground/50">AGENT_WORLD_SQLITE_DATABASE</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-auto flex justify-end gap-2 border-t border-sidebar-border bg-sidebar pt-2">
+                          <button
+                            type="button"
+                            onClick={onCancelSettings}
+                            className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onSaveSettings}
+                            className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                          >
+                            {settingsNeedRestart ? 'Save & Restart' : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : panelMode === 'edit-world' && loadedWorld ? (
                       <>
                         <form onSubmit={onUpdateWorld} className="flex min-h-0 flex-1 flex-col">
                           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">

@@ -72,7 +72,12 @@ function onChatEvent(
 export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer): DesktopApi {
   return {
     getWorkspace: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET),
-    openWorkspace: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN),
+    openWorkspace: (directoryPath) => invokeDesktopChannel(
+      ipcRendererLike,
+      DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN,
+      directoryPath ? { directoryPath } : undefined
+    ),
+    pickDirectory: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY),
     loadWorldFromFolder: () =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER),
     loadWorld: (worldId) =>
@@ -198,7 +203,10 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
         DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
         toUnsubscribePayload(subscriptionId)
       ),
-    onChatEvent: (callback) => onChatEvent(ipcRendererLike, callback)
+    onChatEvent: (callback) => onChatEvent(ipcRendererLike, callback),
+    getSettings: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_GET),
+    saveSettings: (settings) => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, settings),
+    pickFile: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE)
   };
 }
 

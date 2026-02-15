@@ -48,6 +48,7 @@ describe('electron preload bridge', () => {
     expect(key).toBe('agentWorldDesktop');
     expect(api).toMatchObject({
       getWorkspace: expect.any(Function),
+      pickDirectory: expect.any(Function),
       loadWorldFromFolder: expect.any(Function),
       listWorlds: expect.any(Function),
       listSkills: expect.any(Function),
@@ -71,6 +72,8 @@ describe('electron preload bridge', () => {
 
     const sendPayload = { worldId: 'world-1', chatId: 'chat-1', content: 'Hello' };
     api.sendMessage(sendPayload);
+    api.pickDirectory();
+    api.openWorkspace('/tmp/workspace');
     api.listSkills();
     api.editMessage('world-1', 'msg-1', 'Updated', 'chat-1');
     api.respondHitlOption('world-1', 'req-1', 'yes_once', 'chat-1');
@@ -79,29 +82,31 @@ describe('electron preload bridge', () => {
     api.unsubscribeChatEvents('sub-1');
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(1, 'chat:sendMessage', sendPayload);
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'skill:list');
-    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'message:edit', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, 'dialog:pickDirectory');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, 'workspace:open', { directoryPath: '/tmp/workspace' });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'skill:list');
+    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'message:edit', {
       worldId: 'world-1',
       messageId: 'msg-1',
       newContent: 'Updated',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(4, 'hitl:respond', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'hitl:respond', {
       worldId: 'world-1',
       requestId: 'req-1',
       optionId: 'yes_once',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(5, 'chat:stopMessage', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'chat:stopMessage', {
       worldId: 'world-1',
       chatId: 'chat-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(6, 'chat:subscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(8, 'chat:subscribeEvents', {
       worldId: 'world-1',
       chatId: 'chat-1',
       subscriptionId: 'sub-1'
     });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(7, 'chat:unsubscribeEvents', {
+    expect(mocks.invoke).toHaveBeenNthCalledWith(9, 'chat:unsubscribeEvents', {
       subscriptionId: 'sub-1'
     });
   });

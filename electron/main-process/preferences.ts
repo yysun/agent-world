@@ -72,3 +72,24 @@ export function writeWorldPreference(appLike: AppUserDataLike, worldId: string):
   writePreferences(appLike, prefs);
 }
 
+export interface SystemSettings {
+  storageType?: string;
+  dataPath?: string;
+  sqliteDatabase?: string;
+}
+
+export function readSystemSettings(appLike: AppUserDataLike): SystemSettings {
+  const prefs = readPreferences(appLike);
+  const settings = prefs.systemSettings;
+  if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+    return settings as SystemSettings;
+  }
+  return {};
+}
+
+export function writeSystemSettings(appLike: AppUserDataLike, settings: SystemSettings): void {
+  const prefs = readPreferences(appLike);
+  prefs.systemSettings = settings;
+  writePreferences(appLike, prefs);
+}
+

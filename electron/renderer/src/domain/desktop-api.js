@@ -22,15 +22,25 @@ export function getDesktopApi() {
     throw new Error('Desktop API bridge is unavailable.');
   }
 
+  const nextApi = { ...api };
+
+  if (typeof nextApi.pickDirectory !== 'function' && typeof nextApi.openWorkspace === 'function') {
+    nextApi.pickDirectory = nextApi.openWorkspace;
+  }
+
+  if (typeof nextApi.openWorkspace !== 'function' && typeof nextApi.pickDirectory === 'function') {
+    nextApi.openWorkspace = nextApi.pickDirectory;
+  }
+
   // Compatibility: older preload bridges exposed `deleteSession` but not `deleteChat`.
-  if (typeof api.deleteChat !== 'function' && typeof api.deleteSession === 'function') {
+  if (typeof nextApi.deleteChat !== 'function' && typeof nextApi.deleteSession === 'function') {
     return {
-      ...api,
-      deleteChat: api.deleteSession
+      ...nextApi,
+      deleteChat: nextApi.deleteSession
     };
   }
 
-  return api;
+  return nextApi;
 }
 
 export function safeMessage(error, fallback) {

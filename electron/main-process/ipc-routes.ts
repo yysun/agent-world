@@ -32,7 +32,8 @@ import {
 
 export interface MainIpcHandlers {
   getWorkspaceState: () => Promise<unknown> | unknown;
-  openWorkspaceDialog: () => Promise<unknown> | unknown;
+  openWorkspaceDialog: (payload?: unknown) => Promise<unknown> | unknown;
+  pickDirectoryDialog: () => Promise<unknown> | unknown;
   loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
   importWorld: () => Promise<unknown> | unknown;
@@ -58,12 +59,16 @@ export interface MainIpcHandlers {
   deleteMessageFromChat: (payload: unknown) => Promise<unknown> | unknown;
   subscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
   unsubscribeChatEvents: (payload: unknown) => Promise<unknown> | unknown;
+  getSystemSettings: () => Promise<unknown> | unknown;
+  saveSystemSettings: (payload: unknown) => Promise<unknown> | unknown;
+  openFileDialog: () => Promise<unknown> | unknown;
 }
 
 export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
   return [
     { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_GET, handler: async () => handlers.getWorkspaceState() },
-    { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN, handler: async () => handlers.openWorkspaceDialog() },
+    { channel: DESKTOP_INVOKE_CHANNELS.WORKSPACE_OPEN, handler: async (_event, payload) => handlers.openWorkspaceDialog(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_DIRECTORY, handler: async () => handlers.pickDirectoryDialog() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER, handler: async () => handlers.loadWorldsFromWorkspace() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, handler: async (_event, worldId) => handlers.loadSpecificWorld(worldId) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, handler: async () => handlers.importWorld() },
@@ -134,6 +139,9 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.CHAT_UNSUBSCRIBE_EVENTS,
       handler: async (_event, payload) => handlers.unsubscribeChatEvents(payload as ChatUnsubscribePayload)
-    }
+    },
+    { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_GET, handler: async () => handlers.getSystemSettings() },
+    { channel: DESKTOP_INVOKE_CHANNELS.SETTINGS_SAVE, handler: async (_event, payload) => handlers.saveSystemSettings(payload) },
+    { channel: DESKTOP_INVOKE_CHANNELS.DIALOG_PICK_FILE, handler: async () => handlers.openFileDialog() }
   ];
 }

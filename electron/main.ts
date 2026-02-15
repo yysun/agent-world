@@ -80,6 +80,7 @@ import { createRealtimeEventsRuntime } from './main-process/realtime-events.js';
 import { createWorkspaceRuntime } from './main-process/workspace-runtime.js';
 import { importCoreModule } from './main-process/core-module-loader.js';
 import {
+  applySystemSettings,
   configureProvidersFromEnv,
   configureWorkspaceStorage,
   loadEnvironmentVariables,
@@ -88,8 +89,10 @@ import {
 import {
   readWorldPreference,
   readWorkspacePreference,
+  readSystemSettings,
   writeWorldPreference,
   writeWorkspacePreference,
+  writeSystemSettings,
 } from './main-process/preferences.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -127,6 +130,7 @@ const CHAT_EVENT_CHANNEL = 'chat:event';
 let mainWindow: BrowserWindow | null = null;
 
 loadEnvironmentVariables(__dirname);
+applySystemSettings(readSystemSettings(app));
 
 let ensureCoreReady: () => Promise<void> = async () => {
   throw new Error('Workspace runtime not initialized');
@@ -201,6 +205,7 @@ function registerIpcHandlers() {
   const routes = buildMainIpcRoutes({
     getWorkspaceState,
     openWorkspaceDialog: ipcHandlers.openWorkspaceDialog,
+    pickDirectoryDialog: ipcHandlers.pickDirectoryDialog,
     loadWorldsFromWorkspace: ipcHandlers.loadWorldsFromWorkspace,
     loadSpecificWorld: (worldId) => ipcHandlers.loadSpecificWorld(String(worldId ?? '')),
     importWorld: ipcHandlers.importWorld,
@@ -228,7 +233,20 @@ function registerIpcHandlers() {
     stopChatMessage: ipcHandlers.stopChatMessage,
     deleteMessageFromChat: ipcHandlers.deleteMessageFromChat,
     subscribeChatEvents,
-    unsubscribeChatEvents
+    unsubscribeChatEvents,
+    getSystemSettings: () => readSystemSettings(app),
+    saveSystemSettings: (payload) => {
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const restart = !!p.restart;
+      delete p.restart;
+      writeSystemSettings(app, p);
+      if (restart) {
+        app.relaunch();
+        app.exit(0);
+      }
+      return true;
+    },
+    openFileDialog: ipcHandlers.openFileDialog
   });
   registerIpcRoutes(ipcMain, routes);
 }
