@@ -16,6 +16,8 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-02-15: Added coverage to ensure system-level mention-format rule is injected even when agent has no custom system prompt.
+ * - 2026-02-15: Added coverage for concise cross-agent addressing rule injection (`@<agent_id>, <message>`).
  * - 2026-02-14: Added coverage for `## Agent Skills` prompt injection and load_skill guidance.
  * - 2026-02-14: Updated default cwd expectation to core default working directory (user home fallback), replacing `./`.
  * - 2026-02-13: Added coverage for required working-directory system prompt suffix.
@@ -96,6 +98,29 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.content).toContain('<id>pdf-extract</id>');
     expect(messages[0]?.content).toContain('<description>Extract PDF content</description>');
     expect(messages[0]?.content).toContain('use the load_skill with skill id tool');
+    expect(messages[0]?.content).toContain('Always use this format when addressing a specific agent: @<agent>, <message>.');
+    expect(messages[0]?.content).toContain('Put @<agent> at the very start of the reply.');
+  });
+
+  test('injects mention-format system rule even without custom agent system prompt', async () => {
+    await updateWorld(worldId(), {
+      variables: 'working_directory=/tmp/agent-world'
+    });
+
+    const agent = await createAgent(worldId(), {
+      name: 'Prompt Agent No System Prompt',
+      type: 'assistant',
+      provider: LLMProvider.OPENAI,
+      model: 'gpt-4',
+      systemPrompt: ''
+    });
+
+    const messages = await prepareMessagesForLLM(worldId(), agent, null);
+    expect(messages[0]?.role).toBe('system');
+    expect(messages[0]?.content).toContain('working directory: ');
+    expect(messages[0]?.content).toContain('## Agent Skills');
+    expect(messages[0]?.content).toContain('Always use this format when addressing a specific agent: @<agent>, <message>.');
+    expect(messages[0]?.content).toContain('Put @<agent> at the very start of the reply.');
   });
 
   test('appends core default working directory when world value is missing', async () => {

@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
  * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
  * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
  * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
@@ -186,6 +187,14 @@ export function getEnvValueFromText(variablesText: string | undefined, key: stri
     return getDefaultWorkingDirectory();
   }
   return undefined;
+}
+
+function buildAgentMentionFormatRule(): string {
+  return [
+    'Always use this format when addressing a specific agent: @<agent>, <message>.',
+    'Put @<agent> at the very start of the reply.',
+    'Do not use other addressing styles (e.g. To @<agent>, Hi @<agent> or Hey @<agent> or mid-sentence mentions).'
+  ].join('\n');
 }
 
 /**
@@ -444,25 +453,29 @@ export async function prepareMessagesForLLM(
     freshSystemPrompt = agent.systemPrompt;
   }
 
-  // IDEMPOTENCE: Always add system message first (if available)
-  // System messages are NEVER saved to storage
-  if (freshSystemPrompt) {
-    const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt, worldEnvMap);
-    const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
-    const promptWithWorkingDirectory = interpolatedPrompt.endsWith('\n')
+  // IDEMPOTENCE: Always add a system message first.
+  // System messages are NEVER saved to storage.
+  const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
+  const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
+  const promptWithWorkingDirectory = interpolatedPrompt.trim().length > 0
+    ? (interpolatedPrompt.endsWith('\n')
       ? `${interpolatedPrompt}working directory: ${workingDirectory}`
-      : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`;
-    const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
-    const promptWithSkills = promptWithWorkingDirectory.endsWith('\n')
-      ? `${promptWithWorkingDirectory}\n${agentSkillsPromptSection}`
-      : `${promptWithWorkingDirectory}\n\n${agentSkillsPromptSection}`;
+      : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`)
+    : `working directory: ${workingDirectory}`;
+  const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
+  const promptWithSkills = promptWithWorkingDirectory.endsWith('\n')
+    ? `${promptWithWorkingDirectory}\n${agentSkillsPromptSection}`
+    : `${promptWithWorkingDirectory}\n\n${agentSkillsPromptSection}`;
+  const mentionFormatRule = buildAgentMentionFormatRule();
+  const promptWithMentionRule = promptWithSkills.endsWith('\n')
+    ? `${promptWithSkills}\n${mentionFormatRule}`
+    : `${promptWithSkills}\n\n${mentionFormatRule}`;
 
-    messages.push({
-      role: 'system',
-      content: promptWithSkills,
-      createdAt: new Date()
-    });
-  }
+  messages.push({
+    role: 'system',
+    content: promptWithMentionRule,
+    createdAt: new Date()
+  });
 
   // Load FRESH conversation history from storage (not from in-memory agent)
   // This ensures we always have the latest messages
