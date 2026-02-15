@@ -113,4 +113,40 @@ describe('formatResultForLLM', () => {
     expect(formatted).toContain('pwd');
     expect(formatted).toContain('/home/user');
   });
+
+  test('should return bounded preview output by default (minimal mode)', () => {
+    const result: CommandExecutionResult = {
+      command: 'echo',
+      parameters: ['x'],
+      stdout: 'a'.repeat(1000),
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date(),
+      duration: 5
+    };
+
+    const formatted = formatResultForLLM(result);
+    expect(formatted).toContain('Standard Output (preview)');
+    expect(formatted).toContain('Output truncated to minimum necessary preview');
+    expect(formatted).not.toContain('**Executed at:**');
+  });
+
+  test('should include full output and timestamp in full detail mode', () => {
+    const result: CommandExecutionResult = {
+      command: 'echo',
+      parameters: ['full'],
+      stdout: 'full-output',
+      stderr: '',
+      exitCode: 0,
+      signal: null,
+      executedAt: new Date(),
+      duration: 5
+    };
+
+    const formatted = formatResultForLLM(result, { detail: 'full' });
+    expect(formatted).toContain('### Standard Output');
+    expect(formatted).toContain('full-output');
+    expect(formatted).toContain('**Executed at:**');
+  });
 });

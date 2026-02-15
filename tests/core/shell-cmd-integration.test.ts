@@ -15,6 +15,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-15: Added `output_format=json` integration coverage and artifact hashing metadata assertions.
  * - 2026-02-14: Added assertion that built-in `load_skill` tool is registered alongside `shell_cmd`.
  * - 2026-02-14: Updated unresolved-cwd fallback test to reflect core default working directory behavior (user home fallback) instead of `./`.
  * - 2026-02-14: Added hard-fail coverage for inline script execution (`sh -c`) and short-option path prefixes (`-I/path`) outside world working_directory.
@@ -24,6 +25,7 @@
  */
 
 import { describe, test, expect } from 'vitest';
+import { fileURLToPath } from 'url';
 import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
@@ -31,6 +33,8 @@ import { setupTestWorld } from '../helpers/world-test-setup.js';
 import { clearExecutionHistory, getExecutionHistory } from '../../core/shell-cmd-tool.js';
 
 describe('shell_cmd integration with worlds', () => {
+  const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
+
   const { worldId, getWorld: getTestWorld } = setupTestWorld({
     name: 'test-world-shell-cmd',
     description: 'Test world for shell_cmd tool',
@@ -77,8 +81,98 @@ describe('shell_cmd integration with worlds', () => {
     expect(shellCmdTool.parameters.properties).toHaveProperty('parameters');
     expect(shellCmdTool.parameters.properties).toHaveProperty('directory');
     expect(shellCmdTool.parameters.properties).toHaveProperty('timeout');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('output_format');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('output_detail');
+    expect(shellCmdTool.parameters.properties).toHaveProperty('artifact_paths');
     expect(shellCmdTool.parameters.required).toContain('command');
     expect(shellCmdTool.parameters.required).not.toContain('directory');
+  });
+
+  test('should return structured json result when output_format is json', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const rawResult = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['json-output-test'],
+        output_format: 'json'
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    const parsed = JSON.parse(rawResult);
+    expect(parsed).toHaveProperty('exit_code');
+    expect(typeof parsed.exit_code === 'number' || parsed.exit_code === null).toBe(true);
+    expect(parsed).toHaveProperty('stdout');
+    expect(parsed.stderr).toBeTypeOf('string');
+    expect(parsed.timed_out).toBe(false);
+    expect(parsed.duration_ms).toBeTypeOf('number');
+    expect(Array.isArray(parsed.artifacts)).toBe(true);
+  });
+
+  test('should include artifact metadata in structured json output', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    const artifactTarget = 'artifact-test-output.txt';
+    const absoluteArtifactPath = fileURLToPath(new URL(`../../${artifactTarget}`, import.meta.url));
+
+    const rawResult = await shellCmdTool.execute(
+      {
+        command: 'echo',
+        parameters: ['artifact-test'],
+        output_format: 'json',
+        artifact_paths: [absoluteArtifactPath]
+      },
+      undefined,
+      undefined,
+      {
+        world: {
+          id: worldId(),
+          variables: `working_directory=${workspaceRoot}`
+        }
+      }
+    );
+
+    const parsed = JSON.parse(rawResult);
+    expect(parsed.artifacts.length).toBeGreaterThanOrEqual(1);
+    const artifact = parsed.artifacts.find((item: any) => String(item.path).endsWith(artifactTarget));
+    expect(artifact).toBeDefined();
+    expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(typeof artifact.bytes).toBe('number');
+    expect(artifact.bytes).toBeGreaterThanOrEqual(0);
+  });
+
+  test('should reject artifact paths outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const shellCmdTool = tools.shell_cmd;
+
+    await expect(
+      shellCmdTool.execute(
+        {
+          command: 'echo',
+          parameters: ['artifact-scope-test'],
+          output_format: 'json',
+          artifact_paths: ['/etc/passwd']
+        },
+        undefined,
+        undefined,
+        {
+          world: {
+            id: worldId(),
+            variables: `working_directory=${workspaceRoot}`
+          }
+        }
+      )
+    ).rejects.toThrow('Working directory mismatch');
   });
 
   test('should execute shell_cmd tool through tool interface', async () => {
@@ -273,6 +367,10 @@ describe('shell_cmd integration with worlds', () => {
   test('should be available even without MCP config', async () => {
     // Verify world has no MCP config
     const world = await getTestWorld();
+    expect(world).not.toBeNull();
+    if (!world) {
+      throw new Error('Expected test world to exist');
+    }
     expect(world.mcpConfig).toBeUndefined();
 
     // shell_cmd should still be available

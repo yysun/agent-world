@@ -305,7 +305,7 @@ Execute shell commands with full output capture and execution history. Perfect f
 // Available to LLMs as 'shell_cmd' tool
 {
   "command": "ls",
-  "parameters": ["-la", "/tmp"]
+	"parameters": ["-la", "./"]
 }
 ```
 

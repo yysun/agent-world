@@ -32,6 +32,8 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-15: Added optional `output_format=json` for machine-readable command results.
+ * - 2026-02-15: Added optional `artifact_paths` support with SHA-256 hashing and byte-size metadata for files within trusted scope.
  * - 2026-02-14: Default trusted cwd now falls back to shared core default working directory (user home by default) instead of `./` when world variable is unset.
  * - 2026-02-14: Added inline-script execution guard (e.g. `sh -c`, `node -e`) to prevent embedded path bypass outside trusted cwd.
  * - 2026-02-14: Hardened cwd containment checks by canonicalizing absolute paths and validating additional path argument forms (`./`, `../`, and `--flag=/path`).
@@ -73,9 +75,10 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
-import { resolve, join } from 'path';
+import { resolve, join, relative } from 'path';
+import { createHash } from 'crypto';
 import { homedir } from 'os';
-import { realpathSync } from 'fs';
+import { realpathSync, promises as fsPromises } from 'fs';
 import { createCategoryLogger } from './logger.js';
 import { validateToolParameters } from './tool-utils.js';
 import { publishSSE } from './events/index.js';
@@ -127,8 +130,51 @@ export interface CommandExecutionResult {
   signal: string | null;
   error?: string;
   canceled?: boolean;
+  timedOut?: boolean;
   executedAt: Date;
   duration: number; // milliseconds
+}
+
+export interface CommandExecutionArtifact {
+  path: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface StructuredCommandExecutionResult {
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  timed_out: boolean;
+  duration_ms: number;
+  artifacts: CommandExecutionArtifact[];
+  stdout_truncated?: boolean;
+  stderr_truncated?: boolean;
+}
+
+interface OutputSnippet {
+  text: string;
+  truncated: boolean;
+}
+
+interface OutputFormattingOptions {
+  detail?: 'minimal' | 'full';
+  maxOutputChars?: number;
+}
+
+const DEFAULT_MIN_OUTPUT_CHARS = 400;
+
+function buildOutputSnippet(content: string, maxOutputChars: number): OutputSnippet {
+  if (!content) {
+    return { text: '', truncated: false };
+  }
+  if (maxOutputChars <= 0 || content.length <= maxOutputChars) {
+    return { text: content, truncated: false };
+  }
+  return {
+    text: content.slice(0, maxOutputChars),
+    truncated: true
+  };
 }
 
 /**
@@ -181,7 +227,7 @@ export function validateShellDirectoryRequest(
 function stripWrappingQuotes(value: string): string {
   const trimmed = value.trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
     return trimmed.slice(1, -1).trim();
   }
   return trimmed;
@@ -369,6 +415,56 @@ function tokenizeCommand(command: string): string[] {
   return command.match(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|[^\s]+/g) ?? [];
 }
 
+function hasDisallowedShellSyntax(value: string): boolean {
+  if (!value) return false;
+
+  return value.includes('&&') ||
+    value.includes('||') ||
+    value.includes('|') ||
+    value.includes(';') ||
+    value.includes('>') ||
+    value.includes('<') ||
+    value.includes('$(') ||
+    value.includes('`') ||
+    value.includes('&') ||
+    value.includes('\n') ||
+    value.includes('\r');
+}
+
+function validateSingleCommandContract(command: unknown): { valid: true; executable: string } | { valid: false; error: string } {
+  if (typeof command !== 'string' || !command.trim()) {
+    return {
+      valid: false,
+      error: 'Invalid command: command must be a non-empty string.'
+    };
+  }
+
+  if (hasDisallowedShellSyntax(command)) {
+    return {
+      valid: false,
+      error: 'Invalid command: shell control syntax is not allowed (`&&`, `||`, `|`, `;`, redirects, command substitution, backgrounding). Provide a single executable in `command` and pass arguments via `parameters`.'
+    };
+  }
+
+  const commandTokens = tokenizeCommand(command).map(stripWrappingQuotes).filter(Boolean);
+  if (commandTokens.length !== 1) {
+    return {
+      valid: false,
+      error: 'Invalid command format: provide a single executable in `command` and pass all arguments as separate `parameters` tokens.'
+    };
+  }
+
+  const executable = commandTokens[0];
+  if (!executable || /\s/.test(executable)) {
+    return {
+      valid: false,
+      error: 'Invalid command executable: `command` must be a single token without whitespace.'
+    };
+  }
+
+  return { valid: true, executable };
+}
+
 function getExecutableName(command: string): string {
   const tokens = tokenizeCommand(command);
   if (tokens.length === 0) return '';
@@ -435,8 +531,8 @@ function findInlineScriptExecutionFlag(
     }
     for (const scriptFlag of scriptFlags) {
       if ((scriptFlag.startsWith('-') || scriptFlag.startsWith('/')) &&
-          arg.startsWith(scriptFlag) &&
-          arg.length > scriptFlag.length) {
+        arg.startsWith(scriptFlag) &&
+        arg.length > scriptFlag.length) {
         return { executable, flag: rawArg };
       }
     }
@@ -450,6 +546,26 @@ export function validateShellCommandScope(
   parameters: unknown,
   trustedWorkingDirectory: string
 ): { valid: true } | { valid: false; error: string } {
+  const singleCommandValidation = validateSingleCommandContract(command);
+  if (!singleCommandValidation.valid) {
+    return singleCommandValidation;
+  }
+
+  if (Array.isArray(parameters)) {
+    for (const parameter of parameters) {
+      if (typeof parameter !== 'string') {
+        continue;
+      }
+
+      if (hasDisallowedShellSyntax(parameter)) {
+        return {
+          valid: false,
+          error: `Invalid parameter: shell control syntax is not allowed in parameters (received "${parameter}").`
+        };
+      }
+    }
+  }
+
   const inlineScriptUsage = findInlineScriptExecutionFlag(command, parameters);
   if (inlineScriptUsage) {
     return {
@@ -677,6 +793,7 @@ export async function executeShellCommand(
 
         if (timedOut) {
           result.error = `Command execution timed out after ${timeout}ms`;
+          result.timedOut = true;
           transitionShellProcessExecution(executionId, 'timed_out', {
             finishedAt: new Date().toISOString(),
             exitCode: code,
@@ -930,6 +1047,101 @@ export function clearExecutionHistory(): number {
   return count;
 }
 
+async function collectCommandArtifacts(
+  artifactPaths: string[],
+  trustedWorkingDirectory: string
+): Promise<CommandExecutionArtifact[]> {
+  if (!Array.isArray(artifactPaths) || artifactPaths.length === 0) {
+    return [];
+  }
+
+  const trustedCanonical = canonicalizePath(trustedWorkingDirectory);
+  const artifacts: CommandExecutionArtifact[] = [];
+
+  for (const rawPath of artifactPaths) {
+    if (typeof rawPath !== 'string') {
+      continue;
+    }
+
+    const candidate = stripWrappingQuotes(rawPath);
+    if (!candidate) {
+      continue;
+    }
+
+    const resolvedPath = resolveTokenPath(candidate, trustedWorkingDirectory);
+    if (!isPathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory)) {
+      throw new Error(`Working directory mismatch: artifact path "${candidate}" is outside world working directory "${trustedWorkingDirectory}".`);
+    }
+
+    const statFn = (fsPromises as any).stat;
+    if (typeof statFn === 'function') {
+      let stat;
+      try {
+        stat = await statFn(resolvedPath);
+      } catch {
+        throw new Error(`Artifact not found: "${candidate}"`);
+      }
+
+      if (typeof stat?.isFile === 'function' && !stat.isFile()) {
+        throw new Error(`Artifact path is not a file: "${candidate}"`);
+      }
+    }
+
+    const readFileFn = (fsPromises as any).readFile;
+    let fileBuffer: Buffer | string = '';
+    if (typeof readFileFn === 'function') {
+      try {
+        const readResult = await readFileFn(resolvedPath);
+        fileBuffer = (readResult ?? '') as Buffer | string;
+      } catch {
+        throw new Error(`Artifact not found: "${candidate}"`);
+      }
+    }
+
+    const sha256 = createHash('sha256').update(fileBuffer).digest('hex');
+    const bytes = Buffer.isBuffer(fileBuffer)
+      ? fileBuffer.byteLength
+      : Buffer.byteLength(fileBuffer);
+    const canonicalArtifactPath = canonicalizePath(resolvedPath);
+    const relativePath = relative(trustedCanonical, canonicalArtifactPath).replace(/\\/g, '/');
+    const isOutsideTrusted = relativePath.startsWith('..') || !relativePath;
+
+    artifacts.push({
+      path: isOutsideTrusted ? candidate : relativePath,
+      sha256,
+      bytes
+    });
+  }
+
+  return artifacts;
+}
+
+export function formatStructuredResult(
+  result: CommandExecutionResult,
+  artifacts: CommandExecutionArtifact[] = [],
+  options: OutputFormattingOptions = {}
+): StructuredCommandExecutionResult {
+  const detail = options.detail ?? 'minimal';
+  const maxOutputChars = options.maxOutputChars ?? DEFAULT_MIN_OUTPUT_CHARS;
+  const stdoutSnippet = detail === 'full'
+    ? { text: result.stdout, truncated: false }
+    : buildOutputSnippet(result.stdout, maxOutputChars);
+  const stderrSnippet = detail === 'full'
+    ? { text: result.stderr, truncated: false }
+    : buildOutputSnippet(result.stderr, maxOutputChars);
+
+  return {
+    exit_code: result.exitCode,
+    stdout: stdoutSnippet.text,
+    stderr: stderrSnippet.text,
+    timed_out: Boolean(result.timedOut || result.error?.includes('timed out')),
+    duration_ms: result.duration,
+    artifacts,
+    ...(stdoutSnippet.truncated ? { stdout_truncated: true } : {}),
+    ...(stderrSnippet.truncated ? { stderr_truncated: true } : {})
+  };
+}
+
 /**
  * Format command execution result for LLM consumption
  * Provides a human-readable summary of the execution with improved markdown formatting
@@ -937,7 +1149,18 @@ export function clearExecutionHistory(): number {
  * @param result - Command execution result
  * @returns Formatted markdown string suitable for LLM and display
  */
-export function formatResultForLLM(result: CommandExecutionResult): string {
+export function formatResultForLLM(
+  result: CommandExecutionResult,
+  options: OutputFormattingOptions = {}
+): string {
+  const detail = options.detail ?? 'minimal';
+  const maxOutputChars = options.maxOutputChars ?? DEFAULT_MIN_OUTPUT_CHARS;
+  const stdoutSnippet = detail === 'full'
+    ? { text: result.stdout, truncated: false }
+    : buildOutputSnippet(result.stdout, maxOutputChars);
+  const stderrSnippet = detail === 'full'
+    ? { text: result.stderr, truncated: false }
+    : buildOutputSnippet(result.stderr, maxOutputChars);
   const parts: string[] = [];
 
   // Command info section
@@ -952,7 +1175,9 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
   });
   parts.push(`**Command:** \`${result.command} ${quotedParams.join(' ')}\``);
   parts.push(`**Duration:** ${result.duration}ms`);
-  parts.push(`**Executed at:** ${result.executedAt.toISOString()}`);
+  if (detail === 'full') {
+    parts.push(`**Executed at:** ${result.executedAt.toISOString()}`);
+  }
 
   if (result.error) {
     parts.push(`**Status:** ❌ Error`);
@@ -962,27 +1187,33 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
   }
 
   // Standard output section
-  if (result.stdout) {
+  if (stdoutSnippet.text) {
     parts.push('');
-    parts.push('### Standard Output');
+    parts.push(detail === 'full' ? '### Standard Output' : '### Standard Output (preview)');
     parts.push('');
     parts.push('```');
-    parts.push(result.stdout);
+    parts.push(stdoutSnippet.text);
     parts.push('```');
+    if (stdoutSnippet.truncated) {
+      parts.push('*(Output truncated to minimum necessary preview. Use `output_detail: "full"` for full output.)*');
+    }
   }
 
   // Standard error section (only show if there's content)
-  if (result.stderr) {
+  if (stderrSnippet.text) {
     parts.push('');
-    parts.push('### Standard Error');
+    parts.push(detail === 'full' ? '### Standard Error' : '### Standard Error (preview)');
     parts.push('');
     parts.push('```');
-    parts.push(result.stderr);
+    parts.push(stderrSnippet.text);
     parts.push('```');
+    if (stderrSnippet.truncated) {
+      parts.push('*(Error output truncated to minimum necessary preview. Use `output_detail: "full"` for full output.)*');
+    }
   }
 
   // No output case
-  if (!result.stdout && !result.stderr && !result.error) {
+  if (!stdoutSnippet.text && !stderrSnippet.text && !result.error) {
     parts.push('');
     parts.push('*(No output)*');
   }
@@ -998,7 +1229,7 @@ export function formatResultForLLM(result: CommandExecutionResult): string {
  */
 export function createShellCmdToolDefinition() {
   return {
-    description: 'Execute a shell command with parameters and capture output. Use this tool to run system commands, scripts, or utilities. Working directory is controlled by trusted world context (`working_directory`) and defaults to the user home directory when unset. If the model provides a different `directory`, execution is rejected with an error. When the user asks to run in a different folder, put that folder in `directory` (not in command/parameters paths).',
+    description: 'Execute a user-requested shell command and capture output. Use this only when the user explicitly asks to run a command. Contract: `command` must be a single executable token, and each argument must be a separate `parameters` token (no mini-scripts in `command`). Working directory is resolved from trusted world context (`working_directory`) and defaults to the core default working directory (user home by default) when unset. Optional `directory` is allowed only when it resolves inside trusted scope; outside-scope requests are rejected. Path-like command arguments are scope-validated. Shell control syntax is blocked (`&&`, `||`, pipes, redirects, command substitution, backgrounding), and inline eval modes (for example `sh -c`, `node -e`, `python -c`, `powershell -Command`) are blocked. Execution uses OS shell mode (`shell: true`), so do not pass untrusted text as command content. Optional `output_format` supports `markdown` (default) and `json`; `output_detail` defaults to `minimal` to return minimum necessary output and can be set to `full`; `artifact_paths` can include files to hash and report in output metadata.',
 
     parameters: {
       type: 'object',
@@ -1010,15 +1241,30 @@ export function createShellCmdToolDefinition() {
         parameters: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Array of parameters/arguments for the command (e.g., ["-la", "/tmp"])'
+          description: 'Array of parameters/arguments for the command (e.g., ["-la", "./src"]). Pass each argument as a separate token.'
         },
         directory: {
           type: 'string',
-          description: 'Optional model-provided directory. Runtime only allows this when it resolves to the same path as trusted world `working_directory`; mismatches are rejected. If user asks for a target folder, set it here.'
+          description: 'Optional model-provided target directory. Runtime allows this only when it resolves inside trusted world working-directory scope; outside-scope requests are rejected. If user asks for a target folder, set it here.'
         },
         timeout: {
           type: 'number',
           description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
+        },
+        output_format: {
+          type: 'string',
+          enum: ['markdown', 'json'],
+          description: 'Output format for tool result. Use "markdown" (default) for human-readable output or "json" for structured output.'
+        },
+        output_detail: {
+          type: 'string',
+          enum: ['minimal', 'full'],
+          description: 'Output detail level. `minimal` (default) returns bounded previews and essential metadata only; `full` returns complete stdout/stderr and timestamp fields.'
+        },
+        artifact_paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional file paths (within trusted working-directory scope) to include as hashed artifacts in result output.'
         }
       },
       required: ['command'],
@@ -1036,15 +1282,30 @@ export function createShellCmdToolDefinition() {
           parameters: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of parameters/arguments for the command (e.g., ["-la", "/tmp"])'
+            description: 'Array of parameters/arguments for the command (e.g., ["-la", "./src"]). Pass each argument as a separate token.'
           },
           directory: {
             type: 'string',
-            description: 'Optional model-provided directory. Runtime only allows this when it resolves to the same path as trusted world `working_directory`; mismatches are rejected. If user asks for a target folder, set it here.'
+            description: 'Optional model-provided target directory. Runtime allows this only when it resolves inside trusted world working-directory scope; outside-scope requests are rejected. If user asks for a target folder, set it here.'
           },
           timeout: {
             type: 'number',
             description: 'Timeout in milliseconds (default: 600000 = 10 minutes). Command will be terminated if it exceeds this time.'
+          },
+          output_format: {
+            type: 'string',
+            enum: ['markdown', 'json'],
+            description: 'Output format for tool result. Use "markdown" (default) for human-readable output or "json" for structured output.'
+          },
+          output_detail: {
+            type: 'string',
+            enum: ['minimal', 'full'],
+            description: 'Output detail level. `minimal` (default) returns bounded previews and essential metadata only; `full` returns complete stdout/stderr and timestamp fields.'
+          },
+          artifact_paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional file paths (within trusted working-directory scope) to include as hashed artifacts in result output.'
           }
         },
         required: ['command']
@@ -1066,7 +1327,14 @@ export function createShellCmdToolDefinition() {
         });
       }
 
-      const { command, parameters = [], timeout } = validation.correctedArgs;
+      const {
+        command,
+        parameters = [],
+        timeout,
+        output_format: outputFormat = 'markdown',
+        output_detail: outputDetail = 'minimal',
+        artifact_paths: artifactPaths = []
+      } = validation.correctedArgs;
 
       // Ensure parameters is always an array
       const validParameters = Array.isArray(parameters) ?
@@ -1129,8 +1397,16 @@ export function createShellCmdToolDefinition() {
         throw new DOMException('Shell command execution canceled by user', 'AbortError');
       }
 
-      // Return formatted result for LLM
-      return formatResultForLLM(result);
+      const validatedArtifactPaths = Array.isArray(artifactPaths)
+        ? artifactPaths.filter((artifactPath: any) => typeof artifactPath === 'string')
+        : [];
+      const artifacts = await collectCommandArtifacts(validatedArtifactPaths, resolvedDirectory);
+
+      if (outputFormat === 'json') {
+        return JSON.stringify(formatStructuredResult(result, artifacts, { detail: outputDetail }), null, 2);
+      }
+
+      return formatResultForLLM(result, { detail: outputDetail });
     }
   };
 }

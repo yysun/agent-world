@@ -956,7 +956,7 @@ export async function mcpToolsToAiTools(
     let enhancedDescription = t.description ?? '';
     if (t.name === 'execute_command') {
       const originalDesc = t.description ?? '';
-      enhancedDescription = 'Execute a shell command ONLY when explicitly requested by keywords like: "run", "execute", "list files", "check directory", "show files", "ls", "cat file". DO NOT use for: greetings (hi, hello), questions (how are you, what is), or general conversation. User must explicitly indicate they want to run a shell command.';
+      enhancedDescription = 'Execute a user-requested shell command only when the user explicitly asks to run one. Do not use for greetings, general Q&A, or normal conversation. Contract: command must be a single executable token and arguments must be passed as separate argv tokens (no mini scripts). Keep execution inside the trusted working directory/scope configured by runtime guardrails. Reject out-of-scope path requests, shell control syntax (`&&`, `||`, pipes, redirects, substitution, backgrounding), and inline eval/script modes such as `sh -c`, `node -e`, `python -c`, or `powershell -Command`. Because commands run through an OS shell, do not execute untrusted command text.';
 
       logger.debug(`Enhanced tool description for execute_command`, {
         toolName: t.name,
