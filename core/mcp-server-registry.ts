@@ -116,6 +116,11 @@ import { getWorld } from './managers.js';
 import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
 import { createLoadSkillToolDefinition } from './load-skill-tool.js';
+import {
+  createReadFileToolDefinition,
+  createListFilesToolDefinition,
+  createGrepToolDefinition,
+} from './file-tools.js';
 import { wrapToolWithValidation } from './tool-utils.js';
 import { type World } from './types.js';
 
@@ -1595,16 +1600,26 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * Built-in tools:
  * - shell_cmd: Execute shell commands
  * - load_skill: Load full SKILL.md instructions by registry skill_id
+ * - read_file: Read file contents with pagination controls
+ * - list_files: List directory entries
+ * - grep: Recursive text search across files
  * 
  * @returns Record of built-in tool definitions
  */
 function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
   const loadSkillTool = createLoadSkillToolDefinition();
+  const readFileTool = createReadFileToolDefinition();
+  const listFilesTool = createListFilesToolDefinition();
+  const grepTool = createGrepToolDefinition();
 
   return {
     'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
     'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
+    'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
+    'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
+    'grep': wrapToolWithValidation(grepTool, 'grep'),
+    'grep_search': wrapToolWithValidation(grepTool, 'grep_search'),
   };
 }
 

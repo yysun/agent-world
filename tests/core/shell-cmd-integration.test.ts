@@ -5,6 +5,7 @@
  * Features tested:
  * - shell_cmd tool availability in all worlds
  * - load_skill built-in tool availability in all worlds
+ * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
  * - Error handling and reporting
@@ -15,6 +16,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.
  * - 2026-02-15: Added `output_format=json` integration coverage and artifact hashing metadata assertions.
  * - 2026-02-14: Added assertion that built-in `load_skill` tool is registered alongside `shell_cmd`.
  * - 2026-02-14: Updated unresolved-cwd fallback test to reflect core default working directory behavior (user home fallback) instead of `./`.
@@ -57,6 +59,105 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.load_skill).toBeDefined();
     expect(tools.load_skill.parameters).toBeDefined();
     expect(tools.load_skill.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('read_file');
+    expect(tools.read_file).toBeDefined();
+    expect(tools.read_file.parameters).toBeDefined();
+    expect(tools.read_file.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('list_files');
+    expect(tools.list_files).toBeDefined();
+    expect(tools.list_files.parameters).toBeDefined();
+    expect(tools.list_files.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('grep');
+    expect(tools.grep).toBeDefined();
+    expect(tools.grep.parameters).toBeDefined();
+    expect(tools.grep.execute).toBeInstanceOf(Function);
+
+    // Backward compatibility alias
+    expect(tools).toHaveProperty('grep_search');
+    expect(tools.grep_search).toBeDefined();
+  });
+
+  test('should execute read_file, list_files, and grep tools through tool interface', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const testWorkingDirectory = process.cwd();
+
+    const readResultRaw = await tools.read_file.execute({
+      filePath: 'package.json',
+      offset: 1,
+      limit: 5,
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof readResultRaw === 'string' && readResultRaw.startsWith('Error:')) {
+      throw new Error(readResultRaw);
+    }
+    const readResult = JSON.parse(readResultRaw);
+    expect(readResult).toHaveProperty('filePath');
+    expect(readResult).toHaveProperty('content');
+    expect(typeof readResult.content).toBe('string');
+    expect(readResult).toHaveProperty('offset', 1);
+    expect(readResult).toHaveProperty('limit', 5);
+
+    const listResultRaw = await tools.list_files.execute({
+      path: 'core',
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof listResultRaw === 'string' && listResultRaw.startsWith('Error:')) {
+      throw new Error(listResultRaw);
+    }
+    const listResult = JSON.parse(listResultRaw);
+    expect(listResult).toHaveProperty('entries');
+    expect(Array.isArray(listResult.entries)).toBe(true);
+    expect(listResult).toHaveProperty('path');
+
+    const grepResultRaw = await tools.grep.execute({
+      query: 'createShellCmdToolDefinition',
+      isRegexp: false,
+      directoryPath: 'core',
+      includePattern: '**/*.ts',
+      maxResults: 10,
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof grepResultRaw === 'string' && grepResultRaw.startsWith('Error:')) {
+      throw new Error(grepResultRaw);
+    }
+    const grepResult = JSON.parse(grepResultRaw);
+    expect(grepResult).toHaveProperty('matches');
+    expect(Array.isArray(grepResult.matches)).toBe(true);
+    expect(grepResult).toHaveProperty('query', 'createShellCmdToolDefinition');
+  });
+
+  test('should reject file tool paths outside world working_directory', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const restrictedContext = {
+      world: {
+        id: worldId(),
+        variables: 'working_directory=/tmp/project',
+      },
+    };
+
+    const readResultRaw = await tools.read_file.execute(
+      { filePath: '../../etc/passwd', offset: 1, limit: 1 },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(readResultRaw).toContain('Working directory mismatch');
+
+    const listResultRaw = await tools.list_files.execute(
+      { path: '../../etc' },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(listResultRaw).toContain('Working directory mismatch');
+
+    const grepResultRaw = await tools.grep.execute(
+      { query: 'root', directoryPath: '../../etc', isRegexp: false },
+      undefined,
+      undefined,
+      restrictedContext,
+    );
+    expect(grepResultRaw).toContain('Working directory mismatch');
   });
 
   test('should execute load_skill tool through tool interface', async () => {
