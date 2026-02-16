@@ -18,6 +18,7 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-16: Treat non-zero exit status from instruction-referenced skill scripts as execution errors so UI receives tool-error feedback.
  * - 2026-02-15: Reject `load_skill` script execution when a referenced script resolves outside the active execution working directory.
  * - 2026-02-15: Execute skill scripts in the project working directory (from context) instead of the skill root.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
@@ -54,6 +55,13 @@ type LoadSkillToolContext = {
   abortSignal?: AbortSignal;
   workingDirectory?: string;
 };
+
+class SkillScriptExecutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SkillScriptExecutionError';
+  }
+}
 
 function escapeXmlText(value: string): string {
   return value
@@ -409,6 +417,16 @@ async function executeSkillScripts(options: {
         trustedWorkingDirectory: executionDirectory,
       },
     );
+
+    if (executionResult.exitCode !== 0 || executionResult.error) {
+      const exitCode = executionResult.exitCode === null ? 'unknown' : String(executionResult.exitCode);
+      const stderr = executionResult.stderr.trim();
+      const stderrSuffix = stderr ? ` stderr: ${stderr}` : '';
+      throw new SkillScriptExecutionError(
+        `Skill script "${relativeScriptPath}" failed with exit code ${exitCode}.${stderrSuffix}`,
+      );
+    }
+
     scriptOutputs.push({
       source: relativeScriptPath,
       output: formatResultForLLM(executionResult),
@@ -532,6 +550,9 @@ export function createLoadSkillToolDefinition() {
           referenceFiles,
         });
       } catch (error) {
+        if (error instanceof SkillScriptExecutionError) {
+          throw error;
+        }
         const message = error instanceof Error ? error.message : String(error);
         return buildReadErrorResult(requestedSkillId, message);
       }

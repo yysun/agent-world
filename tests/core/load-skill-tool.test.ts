@@ -16,6 +16,7 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-02-16: Added coverage verifying non-zero referenced script exits are surfaced as load_skill execution errors.
  * - 2026-02-15: Added coverage ensuring referenced scripts outside `workingDirectory` are rejected and not executed.
  * - 2026-02-15: Added coverage verifying skill scripts execute in the project working directory from context.
  * - 2026-02-14: Added coverage ensuring SKILL.md YAML front matter is stripped from injected `<instructions>`.
@@ -263,6 +264,53 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('<active_resources>');
     expect(result).toContain('<script_output source="scripts/build.sh">');
     expect(result).toContain('formatted script output');
+  });
+
+  it('throws when referenced script exits with non-zero code', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '# PDF Extraction Instructions',
+      'Run `scripts/build.sh` before processing.',
+    ].join('\n') as any);
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false };
+      }
+      throw new Error('ENOENT');
+    });
+    mockedExecuteShellCommand.mockResolvedValueOnce({
+      executionId: 'exec-2',
+      command: 'bash',
+      parameters: ['scripts/build.sh'],
+      stdout: '',
+      stderr: 'script failed',
+      exitCode: 2,
+      signal: null,
+      error: 'Command exited with code 2',
+      executedAt: new Date('2026-02-14T12:00:00.000Z'),
+      duration: 15,
+    });
+
+    const tool = createLoadSkillToolDefinition();
+
+    await expect(
+      tool.execute(
+        { skill_id: 'pdf-extract' },
+        undefined,
+        undefined,
+        {
+          world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+          chatId: 'chat-1',
+          workingDirectory: '/skills/pdf-extract',
+        },
+      ),
+    ).rejects.toThrow('Skill script "scripts/build.sh" failed with exit code 2');
   });
 
   it('returns declined output when HITL skill approval is declined', async () => {
