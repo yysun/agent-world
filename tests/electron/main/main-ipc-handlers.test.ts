@@ -239,6 +239,58 @@ describe('createMainIpcHandlers.respondHitlOption', () => {
   });
 });
 
+describe('createMainIpcHandlers.listSkillRegistry', () => {
+  it('syncs and filters skills using projectPath-scoped roots when provided', async () => {
+    const syncSkills = vi.fn(async () => ({ added: 0, updated: 0, removed: 0, unchanged: 0, total: 1 }));
+    const getSkillsForSystemPrompt = vi.fn(() => ([
+      {
+        skill_id: 'pptx',
+        description: 'PPTX operations',
+        hash: 'abc12345',
+        lastUpdated: '2026-02-16T00:00:00.000Z'
+      }
+    ]));
+    const getSkillSourceScope = vi.fn(() => 'project');
+
+    const { handlers } = await createHandlers({
+      syncSkills,
+      getSkillsForSystemPrompt,
+      getSkillSourceScope
+    });
+
+    const projectPath = '/Users/esun/Documents/Projects/test-agent-world';
+    const result = await handlers.listSkillRegistry({
+      includeGlobalSkills: true,
+      includeProjectSkills: true,
+      projectPath,
+    });
+
+    expect(syncSkills).toHaveBeenCalledWith({
+      projectSkillRoots: [
+        '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
+        '/Users/esun/Documents/Projects/test-agent-world/skills',
+      ]
+    });
+    expect(getSkillsForSystemPrompt).toHaveBeenCalledWith({
+      includeGlobal: true,
+      includeProject: true,
+      projectSkillRoots: [
+        '/Users/esun/Documents/Projects/test-agent-world/.agents/skills',
+        '/Users/esun/Documents/Projects/test-agent-world/skills',
+      ]
+    });
+    expect(result).toEqual([
+      {
+        skill_id: 'pptx',
+        description: 'PPTX operations',
+        hash: 'abc12345',
+        lastUpdated: '2026-02-16T00:00:00.000Z',
+        sourceScope: 'project'
+      }
+    ]);
+  });
+});
+
 describe('createMainIpcHandlers.sendChatMessage', () => {
   it('rejects sending when provided chatId cannot be restored', async () => {
     const restoreChat = vi.fn(async () => null);

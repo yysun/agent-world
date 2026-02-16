@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-16: Added optional `projectPath` filter support for `listSkillRegistry` so project-scope skill discovery can follow the currently selected project folder.
  * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
  * - 2026-02-16: Updated `agent:create` fallback defaults to provider `ollama` and model `llama3.1:8b` for new-agent creation.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
@@ -69,8 +70,16 @@ interface MainIpcHandlerFactoryDependencies {
   listChats: (worldId: string) => Promise<any[]>;
   listWorlds: () => Promise<any[]>;
   getSkillSourceScope: (skillId: string) => 'global' | 'project' | undefined;
-  getSkillsForSystemPrompt: (options?: { includeGlobal?: boolean; includeProject?: boolean }) => any[];
-  syncSkills: () => Promise<any> | any;
+  getSkillsForSystemPrompt: (options?: {
+    includeGlobal?: boolean;
+    includeProject?: boolean;
+    userSkillRoots?: string[];
+    projectSkillRoots?: string[];
+  }) => any[];
+  syncSkills: (options?: {
+    userSkillRoots?: string[];
+    projectSkillRoots?: string[];
+  }) => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
@@ -229,10 +238,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
 
   async function listSkillRegistry(payload?: unknown) {
     await ensureCoreReady();
-    await syncSkills();
-
     const normalizedPayload = payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown }
+      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown; projectPath?: unknown }
       : null;
 
     const includeGlobalSkills = typeof normalizedPayload?.includeGlobalSkills === 'boolean'
@@ -242,9 +249,19 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       ? normalizedPayload.includeProjectSkills
       : String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
 
+    const projectPath = typeof normalizedPayload?.projectPath === 'string'
+      ? normalizedPayload.projectPath.trim()
+      : '';
+    const projectSkillRoots = projectPath.length > 0
+      ? [path.join(projectPath, '.agents', 'skills'), path.join(projectPath, 'skills')]
+      : undefined;
+
+    await syncSkills({ projectSkillRoots });
+
     const scopedSkills = getSkillsForSystemPrompt({
       includeGlobal: includeGlobalSkills,
       includeProject: includeProjectSkills,
+      projectSkillRoots,
     });
     const skills = Array.isArray(scopedSkills) ? scopedSkills : [];
     return skills

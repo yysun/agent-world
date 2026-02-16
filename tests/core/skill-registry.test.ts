@@ -12,6 +12,7 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-02-16: Added coverage ensuring default project-skill roots follow `AGENT_WORLD_PROJECT_PATH` when set.
  * - 2026-02-16: Added coverage for `getSkillsForSystemPrompt` source-scope filtering (global vs project).
  * - 2026-02-14: Added source-path lookup coverage for `load_skill` runtime resolution.
  * - 2026-02-14: Added default-root coverage for `~/.codex/skills` and precedence regression for project overrides even with older mtimes.
@@ -114,6 +115,9 @@ describe('core/skill-registry', () => {
   beforeEach(() => {
     clearSkillsForTests();
     vi.clearAllMocks();
+    delete process.env.AGENT_WORLD_PROJECT_PATH;
+    delete process.env.AGENT_WORLD_WORKSPACE_PATH;
+    delete process.env.AGENT_WORLD_DATA_PATH;
   });
 
   it('adds skills from user and project roots using front-matter name as skill_id', async () => {
@@ -308,6 +312,22 @@ describe('core/skill-registry', () => {
 
     expect(accessCalls.some((value) => value.includes('.agents/skills'))).toBe(true);
     expect(accessCalls.some((value) => value.includes('.codex/skills'))).toBe(true);
+  });
+
+  it('uses AGENT_WORLD_PROJECT_PATH for default project roots when available', async () => {
+    process.env.AGENT_WORLD_PROJECT_PATH = '/workspace/test-agent-world';
+    setupFsScenario({}, {});
+
+    await syncSkills({ userSkillRoots: [] });
+
+    const accessCalls = vi
+      .mocked((fs as any).access)
+      .mock
+      .calls
+      .map((call: any[]) => String(call[0]));
+
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/.agents/skills'))).toBe(true);
+    expect(accessCalls.some((value) => value.endsWith('/workspace/test-agent-world/skills'))).toBe(true);
   });
 
   it('updates when file is newer and full SKILL.md content hash changes', async () => {

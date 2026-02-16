@@ -19,6 +19,7 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-02-16: Default project-skill roots now resolve from active workspace env (`AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH`) before falling back to process cwd.
  * - 2026-02-16: Added source-scope filtering helper so callers can include/exclude global or project skills when building system prompts.
  * - 2026-02-14: Added `getSkillSourcePath` API and source-path tracking map for on-demand `SKILL.md` loading.
  * - 2026-02-14: Added `~/.codex/skills` to default user skill roots for Codex-managed skills discovery.
@@ -84,8 +85,15 @@ function buildDefaultUserSkillRoots(): string[] {
 }
 
 function buildDefaultProjectSkillRoots(): string[] {
-  const cwd = process.cwd();
-  return [path.join(cwd, '.agents', 'skills'), path.join(cwd, 'skills')];
+  const envWorkspace = [
+    process.env.AGENT_WORLD_PROJECT_PATH,
+    process.env.AGENT_WORLD_WORKSPACE_PATH,
+    process.env.AGENT_WORLD_DATA_PATH,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => value.length > 0);
+  const projectRoot = envWorkspace || process.cwd();
+  return [path.join(projectRoot, '.agents', 'skills'), path.join(projectRoot, 'skills')];
 }
 
 function normalizeRoots(roots: string[]): string[] {

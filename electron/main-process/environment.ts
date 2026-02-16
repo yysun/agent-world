@@ -12,6 +12,7 @@
  * - Preserves existing CLI-parity defaults for storage and Ollama base URL.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `AGENT_WORLD_PROJECT_PATH`/`AGENT_WORLD_WORKSPACE_PATH` assignment in workspace setup so project-scope skill discovery follows the active workspace.
  * - 2026-02-16: Added system-setting env wiring for `AGENT_WORLD_ENABLE_GLOBAL_SKILLS` and `AGENT_WORLD_ENABLE_PROJECT_SKILLS`.
  * - 2026-02-12: Extracted environment + provider configuration logic from `electron/main.ts`.
  */
@@ -90,6 +91,8 @@ export function workspaceFromCommandLine(argv: string[]): string | null {
 
 export function configureWorkspaceStorage(workspacePath: string): void {
   fs.mkdirSync(workspacePath, { recursive: true });
+  process.env.AGENT_WORLD_PROJECT_PATH = workspacePath;
+  process.env.AGENT_WORLD_WORKSPACE_PATH = workspacePath;
 
   if (!process.env.AGENT_WORLD_STORAGE_TYPE) {
     process.env.AGENT_WORLD_STORAGE_TYPE = 'sqlite';

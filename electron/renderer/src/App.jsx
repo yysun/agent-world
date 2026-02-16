@@ -1287,9 +1287,11 @@ export default function App() {
     setLoadingSkillRegistry(true);
     setSkillRegistryError('');
     try {
+      const scopedProjectPath = String(selectedProjectPath || workspace.workspacePath || '').trim();
       const rawEntries = await api.listSkills({
         includeGlobalSkills: true,
         includeProjectSkills: true,
+        projectPath: scopedProjectPath || undefined,
       });
       setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
     } catch (error) {
@@ -1298,7 +1300,7 @@ export default function App() {
     } finally {
       setLoadingSkillRegistry(false);
     }
-  }, [api]);
+  }, [api, selectedProjectPath, workspace.workspacePath]);
 
   const disabledGlobalSkillIdSet = useMemo(
     () => new Set(normalizeStringList(systemSettings.disabledGlobalSkillIds)),

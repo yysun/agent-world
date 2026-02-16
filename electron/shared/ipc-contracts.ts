@@ -129,6 +129,7 @@ export interface SkillRegistrySummary {
 export interface SkillListFilterPayload {
   includeGlobalSkills?: boolean;
   includeProjectSkills?: boolean;
+  projectPath?: string;
 }
 
 export interface DesktopApi {
