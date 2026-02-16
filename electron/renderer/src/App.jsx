@@ -448,6 +448,50 @@ function isHumanMessage(message) {
   return role === 'user' && !sender;
 }
 
+function isTrueAgentResponseMessage(message) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role !== 'assistant') {
+    return false;
+  }
+
+  const sender = String(message?.sender || '').trim().toLowerCase();
+  if (sender === 'system' || sender === 'tool') {
+    return false;
+  }
+
+  if (Boolean(message?.logEvent)) {
+    return false;
+  }
+
+  if (Boolean(message?.isToolStreaming)) {
+    return false;
+  }
+
+  const messageType = String(message?.type || '').trim().toLowerCase();
+  if (messageType === 'tool' || messageType === 'log' || messageType === 'system' || messageType === 'error') {
+    return false;
+  }
+
+  if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+    return false;
+  }
+
+  if (message?.tool_call_id) {
+    return false;
+  }
+
+  if (message?.toolCallStatus && typeof message.toolCallStatus === 'object') {
+    return false;
+  }
+
+  const content = String(message?.content || '').trim().toLowerCase();
+  if (content.startsWith('[error]') || content.startsWith('error:')) {
+    return false;
+  }
+
+  return true;
+}
+
 function getMessageIdentity(message) {
   return String(message?.messageId || '').trim();
 }
@@ -2562,14 +2606,14 @@ export default function App() {
 
     const targetChatId = resolveMessageTargetChatId(message);
     const targetMessageId = String(message?.messageId || '').trim();
-    const role = String(message?.role || '').toLowerCase();
+    const isBranchable = isTrueAgentResponseMessage(message);
 
     if (!targetChatId || !targetMessageId) {
       setStatusText('Cannot branch: message is not bound to a chat session.', 'error');
       return;
     }
 
-    if (role !== 'assistant') {
+    if (!isBranchable) {
       setStatusText('Branch is only available for agent messages.', 'error');
       return;
     }
@@ -3228,8 +3272,7 @@ export default function App() {
                       const messageKey = message.messageId;
                       const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
                       const isHuman = isHumanMessage(message);
-                      const messageRole = String(message?.role || '').toLowerCase();
-                      const isBranchableAgentMessage = !isHuman && messageRole === 'assistant' && Boolean(message.messageId);
+                      const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
                       const normalizedEditedText = editingText.trim();
                       const normalizedOriginalText = String(message?.content || '').trim();
                       const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;

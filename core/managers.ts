@@ -843,8 +843,23 @@ export async function branchChatFromMessage(
   }
 
   const targetMessage = sourceMessages[targetIndex];
-  const targetRole = String(targetMessage?.role || '').toLowerCase();
-  if (targetRole !== 'assistant') {
+  const targetRole = String(targetMessage?.role || '').trim().toLowerCase();
+  const targetSender = String(targetMessage?.sender || '').trim().toLowerCase();
+  const targetContent = String(targetMessage?.content || '').trim().toLowerCase();
+  const hasToolCalls = Array.isArray((targetMessage as any)?.tool_calls) && (targetMessage as any).tool_calls.length > 0;
+  const hasToolCallId = Boolean((targetMessage as any)?.tool_call_id);
+  const hasToolCallStatus = Boolean((targetMessage as any)?.toolCallStatus);
+  const isSystemOrToolSender = targetSender === 'system' || targetSender === 'tool';
+  const isErrorLikeAssistantMessage = targetContent.startsWith('[error]') || targetContent.startsWith('error:');
+
+  if (
+    targetRole !== 'assistant' ||
+    isSystemOrToolSender ||
+    hasToolCalls ||
+    hasToolCallId ||
+    hasToolCallStatus ||
+    isErrorLikeAssistantMessage
+  ) {
     throw new Error('Can only branch from assistant messages.');
   }
 
