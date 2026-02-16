@@ -10,6 +10,7 @@
  * - Output accumulation
  * 
  * Changes:
+ * - 2026-02-15: Added coverage for core execute-time cwd boundary enforcement via `trustedWorkingDirectory`.
  * - 2026-02-15: Added single-command contract tests and shell control-syntax blocking (`&&`, pipes, redirects, substitution, backgrounding).
  * - 2026-02-14: Added inline-script guard coverage (`sh -c`) and short-option path-prefix checks (`-I/path`).
  * - 2026-02-14: Added scope-regression tests for relative escape paths (`./../../...`) and option assignment paths (`--flag=/...`).
@@ -48,6 +49,15 @@ describe('shell command execution', () => {
 
     expect(result.stdout).toContain('test');
     expect(result.exitCode).toBe(0);
+  });
+
+  test('should reject execution directory outside trusted working directory', async () => {
+    const result = await executeShellCommand('echo', ['test'], './', {
+      trustedWorkingDirectory: './tests'
+    });
+
+    expect(result.error).toContain('outside trusted working directory');
+    expect(result.exitCode).toBeNull();
   });
 });
 

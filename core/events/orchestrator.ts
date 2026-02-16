@@ -693,6 +693,7 @@ export async function processAgentMessage(
                 abortSignal: processingHandle?.signal,
                 worldId: world.id,
                 chatId: targetChatId ?? undefined,
+                trustedWorkingDirectory,
                 onStdout: (chunk) => {
                   publishSSE(world, {
                     type: 'tool-stream',

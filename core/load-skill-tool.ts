@@ -18,6 +18,8 @@
  * - Keeps payload format deterministic for stable downstream parsing
  *
  * Recent Changes:
+ * - 2026-02-15: Reject `load_skill` script execution when a referenced script resolves outside the active execution working directory.
+ * - 2026-02-15: Execute skill scripts in the project working directory (from context) instead of the skill root.
  * - 2026-02-14: Strip SKILL.md YAML front matter from injected `<instructions>` content.
  * - 2026-02-14: Omit `<active_resources>` from `load_skill` payloads when no instruction-referenced scripts are present.
  * - 2026-02-14: Added skill-level HITL gating so `load_skill` requires approval even when no script references are present.
@@ -48,6 +50,7 @@ type LoadSkillToolContext = {
   world?: { id?: string; currentChatId?: string | null; eventEmitter?: unknown };
   chatId?: string | null;
   abortSignal?: AbortSignal;
+  workingDirectory?: string;
 };
 
 function escapeXmlText(value: string): string {
@@ -296,6 +299,7 @@ async function executeSkillScripts(options: {
 
   const worldId = String(options.context?.world?.id || '').trim();
   const chatId = options.context?.chatId ?? options.context?.world?.currentChatId ?? null;
+  const executionDirectory = options.context?.workingDirectory || options.skillRoot;
 
   if (!worldId || !options.context?.world) {
     return [{
@@ -340,11 +344,11 @@ async function executeSkillScripts(options: {
     const relativeScriptPath = normalizedAbsoluteScriptPath.startsWith(`${normalizedRootPath}/`)
       ? normalizedAbsoluteScriptPath.slice(normalizedRootPath.length + 1)
       : path.relative(options.skillRoot, absoluteScriptPath).replace(/\\/g, '/');
-    const commandScriptPath = normalizeScriptPath(relativeScriptPath);
-    const commandSpec = resolveScriptCommand(commandScriptPath);
+    const relativeCommandPath = normalizeScriptPath(relativeScriptPath);
+    const relativeCommandSpec = resolveScriptCommand(relativeCommandPath);
     const scopeValidation = validateShellCommandScope(
-      commandSpec.command,
-      commandSpec.parameters,
+      relativeCommandSpec.command,
+      relativeCommandSpec.parameters,
       options.skillRoot,
     );
     if (!scopeValidation.valid) {
@@ -355,15 +359,25 @@ async function executeSkillScripts(options: {
       continue;
     }
 
+    const absoluteCommandSpec = resolveScriptCommand(normalizedAbsoluteScriptPath);
+    if (!isPathWithinRoot(executionDirectory, normalizedAbsoluteScriptPath)) {
+      scriptOutputs.push({
+        source: relativeScriptPath,
+        output: `Script path rejected: "${relativeScriptPath}" resolves outside execution working directory "${executionDirectory}".`,
+      });
+      continue;
+    }
+
     const executionResult = await executeShellCommand(
-      commandSpec.command,
-      commandSpec.parameters,
-      options.skillRoot,
+      absoluteCommandSpec.command,
+      absoluteCommandSpec.parameters,
+      executionDirectory,
       {
         timeout: SCRIPT_TIMEOUT_MS,
         abortSignal: options.context?.abortSignal,
         worldId,
         chatId: chatId ?? undefined,
+        trustedWorkingDirectory: executionDirectory,
       },
     );
     scriptOutputs.push({

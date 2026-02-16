@@ -32,6 +32,7 @@
  * - Uses universal validation framework for consistent parameter checking
  *
  * Recent Changes:
+ * - 2026-02-15: Moved core cwd-boundary enforcement into `executeShellCommand` via optional `trustedWorkingDirectory` execution option.
  * - 2026-02-15: Added optional `output_format=json` for machine-readable command results.
  * - 2026-02-15: Added optional `artifact_paths` support with SHA-256 hashing and byte-size metadata for files within trusted scope.
  * - 2026-02-14: Default trusted cwd now falls back to shared core default working directory (user home by default) instead of `./` when world variable is unset.
@@ -634,6 +635,7 @@ export async function executeShellCommand(
     worldId?: string;
     chatId?: string;
     onStatusChange?: (event: ShellProcessStatusEvent) => void;
+    trustedWorkingDirectory?: string;
   } = {}
 ): Promise<CommandExecutionResult> {
   const startTime = Date.now();
@@ -658,7 +660,8 @@ export async function executeShellCommand(
     parameters,
     timeout,
     directory,
-    resolvedDirectory
+    resolvedDirectory,
+    trustedWorkingDirectory: options.trustedWorkingDirectory || null
   });
 
   return new Promise((resolve) => {
@@ -689,6 +692,13 @@ export async function executeShellCommand(
     }
 
     try {
+      const trustedWorkingDirectory = String(options.trustedWorkingDirectory || '').trim();
+      if (trustedWorkingDirectory && !isPathWithinTrustedDirectory(resolvedDirectory, trustedWorkingDirectory)) {
+        throw new Error(
+          `Working directory mismatch: execution directory "${resolvedDirectory}" is outside trusted working directory "${trustedWorkingDirectory}".`
+        );
+      }
+
       // Quote parameters that contain spaces, tabs, or newlines for shell execution
       const quotedParams = parameters.map(param => {
         if (param.includes(' ') || param.includes('\t') || param.includes('\n') || param.includes('"')) {
@@ -1369,6 +1379,7 @@ export function createShellCmdToolDefinition() {
         abortSignal,
         worldId: world?.id,
         chatId,
+        trustedWorkingDirectory: resolvedDirectory,
         onStdout: world ? (chunk) => {
           // Publish streaming events to world event system
           publishSSE(world, {

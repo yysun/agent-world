@@ -16,6 +16,8 @@
  * - Uses mocked in-memory fs APIs only (no filesystem access)
  *
  * Recent changes:
+ * - 2026-02-15: Added coverage ensuring referenced scripts outside `workingDirectory` are rejected and not executed.
+ * - 2026-02-15: Added coverage verifying skill scripts execute in the project working directory from context.
  * - 2026-02-14: Added coverage ensuring SKILL.md YAML front matter is stripped from injected `<instructions>`.
  * - 2026-02-14: Added coverage ensuring `<active_resources>` is omitted when no instruction-referenced scripts are present.
  * - 2026-02-14: Added coverage for skill-level HITL gating when skills have no local script references.
@@ -193,6 +195,7 @@ describe('core/load-skill-tool', () => {
       {
         world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
         chatId: 'chat-1',
+        workingDirectory: '/skills/pdf-extract',
       },
     );
 
@@ -204,7 +207,7 @@ describe('core/load-skill-tool', () => {
     );
     expect(mockedExecuteShellCommand).toHaveBeenCalledWith(
       'bash',
-      ['scripts/build.sh'],
+      [expect.stringContaining('scripts/build.sh')],
       '/skills/pdf-extract',
       expect.objectContaining({
         timeout: 120000,
@@ -353,5 +356,41 @@ describe('core/load-skill-tool', () => {
     expect(result).not.toContain('name: find-skills');
     expect(result).not.toContain('description: Helps users discover skills.');
     expect(result).not.toContain('\n---\n');
+  });
+
+  it('rejects referenced scripts that resolve outside workingDirectory and skips execution', async () => {
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+    vi.mocked(fs.readFile).mockResolvedValue([
+      '# PDF Extraction Instructions',
+      'Run `scripts/build.sh` before processing.',
+    ].join('\n') as any);
+    vi.mocked((fs as any).stat).mockImplementation(async (targetPath: string) => {
+      if (String(targetPath).endsWith('/skills/pdf-extract/scripts/build.sh')) {
+        return { isFile: () => true, isDirectory: () => false };
+      }
+      throw new Error('ENOENT');
+    });
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute(
+      { skill_id: 'pdf-extract' },
+      undefined,
+      undefined,
+      {
+        world: { id: 'world-1', currentChatId: 'chat-1', eventEmitter: { emit: vi.fn() } },
+        chatId: 'chat-1',
+        workingDirectory: '/projects/my-project',
+      },
+    );
+
+    expect(mockedRequestWorldOption).toHaveBeenCalledTimes(1);
+    expect(mockedExecuteShellCommand).not.toHaveBeenCalled();
+    expect(result).toContain('resolves outside execution working directory');
   });
 });
