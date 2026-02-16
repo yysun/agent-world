@@ -11,6 +11,7 @@
  * - Tests route build + registration helpers together.
  *
  * Recent Changes:
+ * - 2026-02-16: Added channel/order/payload assertions for `session:branchFromMessage` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `hitl:respond` route wiring.
  * - 2026-02-14: Added channel/order/payload assertions for `skill:list` route wiring.
  * - 2026-02-13: Added channel/order/payload assertions for `message:edit` route wiring.
@@ -43,6 +44,7 @@ function createHandlerMocks() {
     writeWorldPreference: vi.fn(async () => true),
     listWorldSessions: vi.fn(async () => ([])),
     createWorldSession: vi.fn(async () => ({})),
+    branchWorldSessionFromMessage: vi.fn(async () => ({})),
     deleteWorldSession: vi.fn(async () => ({ deleted: true })),
     selectWorldSession: vi.fn(async () => true),
     getSessionMessages: vi.fn(async () => ([])),
@@ -83,6 +85,7 @@ describe('buildMainIpcRoutes', () => {
       'world:saveLastSelected',
       'session:list',
       'session:create',
+      'session:branchFromMessage',
       'chat:delete',
       'session:delete',
       'session:select',
@@ -109,6 +112,7 @@ describe('buildMainIpcRoutes', () => {
     await routes.find((route) => route.channel === 'dialog:pickDirectory')?.handler({});
     await routes.find((route) => route.channel === 'skill:list')?.handler({});
     await routes.find((route) => route.channel === 'session:list')?.handler({}, { worldId: 'w-1' });
+    await routes.find((route) => route.channel === 'session:branchFromMessage')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });
     await routes.find((route) => route.channel === 'chat:delete')?.handler({}, { worldId: 'w-1', chatId: 'c-1' });
     await routes.find((route) => route.channel === 'message:edit')?.handler({}, { worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     await routes.find((route) => route.channel === 'hitl:respond')?.handler({}, { worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });
@@ -122,6 +126,7 @@ describe('buildMainIpcRoutes', () => {
     expect(handlers.pickDirectoryDialog).toHaveBeenCalledTimes(1);
     expect(handlers.listSkillRegistry).toHaveBeenCalledTimes(1);
     expect(handlers.listWorldSessions).toHaveBeenCalledWith('w-1');
+    expect(handlers.branchWorldSessionFromMessage).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1' });
     expect(handlers.deleteWorldSession).toHaveBeenCalledWith('w-1', 'c-1');
     expect(handlers.editMessageInChat).toHaveBeenCalledWith({ worldId: 'w-1', chatId: 'c-1', messageId: 'm-1', newContent: 'updated' });
     expect(handlers.respondHitlOption).toHaveBeenCalledWith({ worldId: 'w-1', requestId: 'req-1', optionId: 'yes_once' });

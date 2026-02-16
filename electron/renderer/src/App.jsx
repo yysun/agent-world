@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Added agent-message `branch` action to create a new chat branched from the selected assistant message and auto-select it on success.
  * - 2026-02-16: Disabled message-edit `Save` until content is changed from the original message text.
  * - 2026-02-16: Aligned edit/load fallback defaults for agent provider/model to `ollama` and `llama3.1:8b`.
  * - 2026-02-16: Changed new-agent default LLM settings to provider `ollama` and model `llama3.1:8b`.
@@ -2550,6 +2551,52 @@ export default function App() {
     }
   }, [api, loadedWorld, setStatusText, refreshMessages, resolveMessageTargetChatId]);
 
+  const onBranchFromMessage = useCallback(async (message) => {
+    const worldId = String(loadedWorld?.id || '').trim();
+    if (!worldId) {
+      setStatusText('Cannot branch: no world loaded.', 'error');
+      return;
+    }
+
+    const targetChatId = resolveMessageTargetChatId(message);
+    const targetMessageId = String(message?.messageId || '').trim();
+    const role = String(message?.role || '').toLowerCase();
+
+    if (!targetChatId || !targetMessageId) {
+      setStatusText('Cannot branch: message is not bound to a chat session.', 'error');
+      return;
+    }
+
+    if (role !== 'assistant') {
+      setStatusText('Branch is only available for agent messages.', 'error');
+      return;
+    }
+
+    try {
+      const branchResult = await api.branchSessionFromMessage(worldId, targetChatId, targetMessageId);
+      const branchWarning = getRefreshWarning(branchResult);
+      const nextSessions = sortSessionsByNewest(branchResult?.sessions || []);
+      const nextSessionId = String(branchResult?.currentChatId || '').trim() || nextSessions[0]?.id || null;
+
+      setSessions(nextSessions);
+
+      let selectWarning = '';
+      if (nextSessionId) {
+        const selectResult = await api.selectSession(worldId, nextSessionId);
+        selectWarning = getRefreshWarning(selectResult);
+        setSelectedSessionId(nextSessionId);
+      }
+
+      const warning = [...new Set([branchWarning, selectWarning].filter(Boolean))].join(' ');
+      setStatusText(
+        warning ? `Branched chat created. ${warning}` : 'Branched chat created.',
+        warning ? 'error' : 'success'
+      );
+    } catch (error) {
+      setStatusText(safeMessage(error, 'Failed to branch chat from message.'), 'error');
+    }
+  }, [api, loadedWorld?.id, resolveMessageTargetChatId, setStatusText]);
+
   const onComposerKeyDown = useCallback((event) => {
     if (event.nativeEvent?.isComposing || event.keyCode === 229) {
       return;
@@ -3179,6 +3226,8 @@ export default function App() {
                       const messageKey = message.messageId;
                       const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
                       const isHuman = isHumanMessage(message);
+                      const messageRole = String(message?.role || '').toLowerCase();
+                      const isBranchableAgentMessage = !isHuman && messageRole === 'assistant' && Boolean(message.messageId);
                       const normalizedEditedText = editingText.trim();
                       const normalizedOriginalText = String(message?.content || '').trim();
                       const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
@@ -3266,6 +3315,25 @@ export default function App() {
                                 >
                                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M18 6L6 18M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </div>
+                            ) : null}
+
+                            {isBranchableAgentMessage && editingMessageId !== getMessageIdentity(message) ? (
+                              <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() => onBranchFromMessage(message)}
+                                  className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
+                                  title="Branch chat from this message"
+                                  aria-label="Branch chat from this message"
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M6 3v12" />
+                                    <circle cx="18" cy="6" r="3" />
+                                    <circle cx="6" cy="18" r="3" />
+                                    <path d="M9 18h6a3 3 0 0 0 3-3V9" />
                                   </svg>
                                 </button>
                               </div>

@@ -13,6 +13,7 @@
  * - Keeps expectations aligned with main-process payload contracts.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `toBranchSessionPayload` coverage for session branch-from-message invoke payloads.
  * - 2026-02-14: Added `toHitlResponsePayload` coverage for HITL option-response invoke payloads.
  * - 2026-02-12: Moved into layer-based tests/electron subfolder and updated module import paths.
  * - 2026-02-12: Added Phase 4 tests for preload payload shape normalization.
@@ -21,6 +22,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   toAgentPayload,
+  toBranchSessionPayload,
   toHitlResponsePayload,
   toMessageDeletePayload,
   toSubscribePayload,
@@ -59,6 +61,14 @@ describe('preload payload helpers', () => {
       worldId: 'w',
       messageId: 'm',
       chatId: 'c'
+    });
+  });
+
+  it('builds branch session payload', () => {
+    expect(toBranchSessionPayload('w', 'c', 'm')).toEqual({
+      worldId: 'w',
+      chatId: 'c',
+      messageId: 'm'
     });
   });
 

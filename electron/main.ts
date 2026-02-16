@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-16: Wired `session:branchFromMessage` IPC to core `branchChatFromMessage` for branch-chat creation from assistant messages.
  * - 2026-02-14: Added `hitl:respond` IPC wiring so renderer approvals can resolve core HITL option requests.
  * - 2026-02-14: Added `skill:list` IPC wiring backed by core `syncSkills/getSkills` for empty-session welcome skill cards in renderer.
  * - 2026-02-14: Set `AGENT_WORLD_DEFAULT_WORKING_DIRECTORY` from `app.getPath('home')` at startup so core cwd fallback is stable in packaged Electron runs.
@@ -112,6 +113,7 @@ const {
   listChats,
   listWorlds,
   newChat,
+  branchChatFromMessage,
   publishMessage,
   submitWorldOptionResponse,
   stopMessageProcessing,
@@ -194,6 +196,7 @@ const ipcHandlers = createMainIpcHandlers({
   getSkillsForSystemPrompt,
   syncSkills,
   newChat,
+  branchChatFromMessage,
   publishMessage,
   submitWorldOptionResponse,
   stopMessageProcessing,
@@ -226,6 +229,7 @@ function registerIpcHandlers() {
     },
     listWorldSessions: ipcHandlers.listWorldSessions,
     createWorldSession: ipcHandlers.createWorldSession,
+    branchWorldSessionFromMessage: ipcHandlers.branchWorldSessionFromMessage,
     deleteWorldSession: ipcHandlers.deleteWorldSession,
     selectWorldSession: ipcHandlers.selectWorldSession,
     getSessionMessages: ipcHandlers.getSessionMessages,

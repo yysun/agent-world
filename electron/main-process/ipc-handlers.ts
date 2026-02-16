@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
  * - 2026-02-16: Updated `agent:create` fallback defaults to provider `ollama` and model `llama3.1:8b` for new-agent creation.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
@@ -71,6 +72,7 @@ interface MainIpcHandlerFactoryDependencies {
   getSkillsForSystemPrompt: (options?: { includeGlobal?: boolean; includeProject?: boolean }) => any[];
   syncSkills: () => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
+  branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
   submitWorldOptionResponse: (params: { worldId: string; requestId: string; optionId: string }) => {
     accepted: boolean;
@@ -105,6 +107,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getSkillsForSystemPrompt,
     syncSkills,
     newChat,
+    branchChatFromMessage,
     publishMessage,
     submitWorldOptionResponse,
     stopMessageProcessing,
@@ -627,6 +630,30 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     };
   }
 
+  async function branchWorldSessionFromMessage(payload: any) {
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    const chatId = String(payload?.chatId || '').trim();
+    const messageId = String(payload?.messageId || '').trim();
+
+    if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Source chat ID is required.');
+    if (!messageId) throw new Error('Message ID is required.');
+
+    const branchResult = await branchChatFromMessage(worldId, chatId, messageId);
+    const refreshWarning = await refreshWorldSubscription(worldId);
+
+    const chats = await listChats(worldId);
+    const sessions = await serializeChatsWithMessageCounts(worldId, chats, getMemory);
+
+    return {
+      currentChatId: branchResult?.newChatId || null,
+      copiedMessageCount: Number(branchResult?.copiedMessageCount || 0),
+      sessions,
+      ...(refreshWarning ? { refreshWarning } : {})
+    };
+  }
+
   async function deleteWorldSession(worldId: unknown, chatId: unknown) {
     await ensureCoreReady();
     const id = String(worldId || '');
@@ -849,6 +876,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     importWorld,
     listWorldSessions,
     createWorldSession,
+    branchWorldSessionFromMessage,
     deleteWorldSession,
     selectWorldSession,
     getSessionMessages,

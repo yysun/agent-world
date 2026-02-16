@@ -126,6 +126,7 @@ export {
 // === CHAT MANAGEMENT ===
 export {
   newChat,
+  branchChatFromMessage,
   listChats,
   updateChat,
   deleteChat,

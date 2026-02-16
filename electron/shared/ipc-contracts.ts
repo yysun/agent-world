@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
  * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
  * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
@@ -44,6 +45,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_SAVE_LAST_SELECTED: 'world:saveLastSelected',
   SESSION_LIST: 'session:list',
   SESSION_CREATE: 'session:create',
+  SESSION_BRANCH_FROM_MESSAGE: 'session:branchFromMessage',
   CHAT_DELETE: 'chat:delete',
   SESSION_DELETE: 'session:delete',
   SESSION_SELECT: 'session:select',
@@ -69,6 +71,10 @@ export interface WorldIdPayload {
 
 export interface WorldChatPayload extends WorldIdPayload {
   chatId: string;
+}
+
+export interface BranchSessionFromMessagePayload extends WorldChatPayload {
+  messageId: string;
 }
 
 export interface ChatStopPayload extends WorldChatPayload { }
@@ -144,6 +150,7 @@ export interface DesktopApi {
   saveLastSelectedWorld: (worldId: string) => Promise<unknown>;
   listSessions: (worldId: string) => Promise<unknown>;
   createSession: (worldId: string) => Promise<unknown>;
+  branchSessionFromMessage: (worldId: string, chatId: string, messageId: string) => Promise<unknown>;
   deleteChat: (worldId: string, chatId: string) => Promise<unknown>;
   deleteSession: (worldId: string, chatId: string) => Promise<unknown>;
   selectSession: (worldId: string, chatId: string) => Promise<unknown>;

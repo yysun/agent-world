@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `branchSessionFromMessage(worldId, chatId, messageId)` bridge method for chat branching from assistant messages.
  * - 2026-02-14: Added `respondHitlOption()` bridge method for renderer resolution of world HITL option requests.
  * - 2026-02-14: Typed `listSkills()` bridge invoke response as `SkillRegistrySummary[]` to satisfy DesktopApi contract.
  * - 2026-02-14: Added `listSkills()` bridge method for renderer welcome-screen skill registry cards.
@@ -35,6 +36,7 @@ import {
 import { invokeDesktopChannel } from './invoke.js';
 import {
   toAgentPayload,
+  toBranchSessionPayload,
   toHitlResponsePayload,
   toMessageEditPayload,
   toMessageDeletePayload,
@@ -141,6 +143,12 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
         ipcRendererLike,
         DESKTOP_INVOKE_CHANNELS.SESSION_CREATE,
         toWorldPayload(worldId)
+      ),
+    branchSessionFromMessage: (worldId, chatId, messageId) =>
+      invokeDesktopChannel(
+        ipcRendererLike,
+        DESKTOP_INVOKE_CHANNELS.SESSION_BRANCH_FROM_MESSAGE,
+        toBranchSessionPayload(worldId, chatId, messageId)
       ),
     deleteChat: (worldId, chatId) =>
       invokeDesktopChannel(

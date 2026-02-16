@@ -13,6 +13,7 @@
  * - Main-process handlers remain responsible for hard validation.
  *
  * Recent Changes:
+ * - 2026-02-16: Added branch-session payload helper (`toBranchSessionPayload`) for session branching from a target message.
  * - 2026-02-14: Added HITL-response payload helper (`toHitlResponsePayload`) for generic world option prompts.
  * - 2026-02-13: Added message-edit payload helper (`toMessageEditPayload`) for core-driven edit IPC.
  * - 2026-02-12: Added preload payload helpers for Phase 4 bridge modularization.
@@ -20,6 +21,7 @@
 
 import type {
   AgentPayload,
+  BranchSessionFromMessagePayload,
   HitlResponsePayload,
   MessageEditPayload,
   ChatSubscribePayload,
@@ -46,6 +48,18 @@ export function toWorldChatPayload(worldId: unknown, chatId: unknown): WorldChat
   return {
     worldId: toId(worldId),
     chatId: toId(chatId)
+  };
+}
+
+export function toBranchSessionPayload(
+  worldId: unknown,
+  chatId: unknown,
+  messageId: unknown
+): BranchSessionFromMessagePayload {
+  return {
+    worldId: toId(worldId),
+    chatId: toId(chatId),
+    messageId: toId(messageId)
   };
 }
 

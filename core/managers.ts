@@ -25,6 +25,7 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-16: Added `branchChatFromMessage` to create a new chat branched from an assistant message and copy source-chat history up to the target message.
  * - 2026-02-14: Updated `editUserMessage` to be fully core-managed for clear+resend behavior without client-side subscription refresh logic.
  *   - Edit resubmission now prefers active subscribed world runtimes.
  *   - Removed current-session gating checks and always resubmits to the provided `chatId`.
@@ -803,6 +804,144 @@ export async function newChat(worldId: string): Promise<World | null> {
     captureChat: false
   });
   return await updateWorld(resolvedWorldId, { currentChatId: chatData.id });
+}
+
+/**
+ * Create a branched chat from a source chat up to (and including) the provided message.
+ */
+export async function branchChatFromMessage(
+  worldId: string,
+  sourceChatId: string,
+  messageId: string
+): Promise<{ world: World; newChatId: string; copiedMessageCount: number }> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const normalizedSourceChatId = String(sourceChatId || '').trim();
+  const normalizedMessageId = String(messageId || '').trim();
+
+  if (!normalizedSourceChatId) {
+    throw new Error('Source chat ID is required.');
+  }
+
+  if (!normalizedMessageId) {
+    throw new Error('Message ID is required.');
+  }
+
+  const sourceChat = await storageWrappers!.loadChatData(resolvedWorldId, normalizedSourceChatId);
+  if (!sourceChat) {
+    throw new Error(`Source chat not found: ${normalizedSourceChatId}`);
+  }
+
+  const sourceMessages = await storageWrappers!.getMemory(resolvedWorldId, normalizedSourceChatId);
+  const targetIndex = sourceMessages.findIndex((entry) =>
+    String(entry?.messageId || '') === normalizedMessageId &&
+    String(entry?.chatId || '') === normalizedSourceChatId
+  );
+
+  if (targetIndex < 0) {
+    throw new Error(`Message not found in source chat: ${normalizedMessageId}`);
+  }
+
+  const targetMessage = sourceMessages[targetIndex];
+  const targetRole = String(targetMessage?.role || '').toLowerCase();
+  if (targetRole !== 'assistant') {
+    throw new Error('Can only branch from assistant messages.');
+  }
+
+  const toEpochMillis = (value: unknown): number => {
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+    if (value) {
+      const parsed = new Date(String(value)).getTime();
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return Date.now();
+  };
+
+  const cutoffTimestamp = toEpochMillis(targetMessage?.createdAt);
+
+  const updatedWorld = await newChat(resolvedWorldId);
+  if (!updatedWorld || !updatedWorld.currentChatId) {
+    throw new Error('Failed to create branch chat.');
+  }
+
+  const newChatId = String(updatedWorld.currentChatId || '').trim();
+  if (!newChatId) {
+    throw new Error('Failed to resolve new chat ID for branch.');
+  }
+
+  let copiedMessageCount = 0;
+  const agents = await listAgents(resolvedWorldId);
+
+  try {
+    for (const agent of agents) {
+      const loadedAgent = await storageWrappers!.loadAgent(resolvedWorldId, agent.id);
+      if (!loadedAgent || !Array.isArray(loadedAgent.memory)) {
+        continue;
+      }
+
+      const sourceAgentMessages = loadedAgent.memory.filter(
+        (entry) => String(entry?.chatId || '') === normalizedSourceChatId
+      );
+      if (sourceAgentMessages.length === 0) {
+        continue;
+      }
+
+      const branchMessages: AgentMessage[] = [];
+      let reachedTarget = false;
+
+      for (const sourceEntry of sourceAgentMessages) {
+        branchMessages.push({
+          ...sourceEntry,
+          chatId: newChatId
+        });
+        if (String(sourceEntry?.messageId || '') === normalizedMessageId) {
+          reachedTarget = true;
+          break;
+        }
+      }
+
+      const effectiveBranchMessages = reachedTarget
+        ? branchMessages
+        : sourceAgentMessages
+          .filter((entry) => toEpochMillis(entry?.createdAt) <= cutoffTimestamp)
+          .map((entry) => ({
+            ...entry,
+            chatId: newChatId
+          }));
+
+      if (effectiveBranchMessages.length === 0) {
+        continue;
+      }
+
+      copiedMessageCount += effectiveBranchMessages.length;
+      await storageWrappers!.saveAgentMemory(
+        resolvedWorldId,
+        loadedAgent.id,
+        [...loadedAgent.memory, ...effectiveBranchMessages]
+      );
+    }
+  } catch (error) {
+    try {
+      await deleteChat(resolvedWorldId, newChatId);
+    } catch (rollbackError) {
+      logger.error('Failed to rollback branched chat after copy error', {
+        worldId: resolvedWorldId,
+        newChatId,
+        rollbackError: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+      });
+    }
+    throw error;
+  }
+
+  return {
+    world: updatedWorld,
+    newChatId,
+    copiedMessageCount
+  };
 }
 
 export async function listChats(worldId: string): Promise<Chat[]> {

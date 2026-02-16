@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-16: Added `session:branchFromMessage` route wiring for creating branch sessions from assistant messages.
  * - 2026-02-14: Added `hitl:respond` route wiring for world HITL option responses from renderer.
  * - 2026-02-14: Added `skill:list` route wiring for renderer welcome-screen skill registry hydration.
  * - 2026-02-13: Added `message:edit` route wiring for core-driven message edit/resubmission.
@@ -21,6 +22,7 @@
 import type { MainIpcRoute } from './ipc-registration.js';
 import {
   DESKTOP_INVOKE_CHANNELS,
+  type BranchSessionFromMessagePayload,
   type ChatSubscribePayload,
   type ChatUnsubscribePayload,
   type HitlResponsePayload,
@@ -49,6 +51,7 @@ export interface MainIpcHandlers {
   writeWorldPreference: (worldId: unknown) => Promise<unknown> | unknown;
   listWorldSessions: (worldId: unknown) => Promise<unknown> | unknown;
   createWorldSession: (worldId: unknown) => Promise<unknown> | unknown;
+  branchWorldSessionFromMessage: (payload: unknown) => Promise<unknown> | unknown;
   deleteWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   selectWorldSession: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
   getSessionMessages: (worldId: unknown, chatId: unknown) => Promise<unknown> | unknown;
@@ -89,6 +92,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     {
       channel: DESKTOP_INVOKE_CHANNELS.SESSION_CREATE,
       handler: async (_event, payload) => handlers.createWorldSession((payload as WorldIdPayload | undefined)?.worldId)
+    },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.SESSION_BRANCH_FROM_MESSAGE,
+      handler: async (_event, payload) => handlers.branchWorldSessionFromMessage(payload as BranchSessionFromMessagePayload)
     },
     {
       channel: DESKTOP_INVOKE_CHANNELS.CHAT_DELETE,
