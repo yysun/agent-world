@@ -23,6 +23,7 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-16: Disabled message-edit `Update` button until trimmed content differs from original message text.
  * - 2026-02-15: Suppressed reply-target sender labels when the sender agent has `autoReply` disabled; now shows plain sender for parity with Electron.
  * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
  * - 2026-02-14: Added send/stop composer toggle so web users can stop active chat processing.
@@ -436,6 +437,9 @@ export default function WorldChat(props: WorldChatProps) {
 
               const isUserMessage = senderType === SenderType.HUMAN;
               const isEditing = editingMessageId === message.id;
+              const normalizedEditedText = editingText.trim();
+              const normalizedOriginalText = String(message.text || '').trim();
+              const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
 
               // Build display label matching export format
               let displayLabel = '';
@@ -502,6 +506,7 @@ export default function WorldChat(props: WorldChatProps) {
                           <button
                             className="btn-primary"
                             $onclick={['save-edit-message', message.id]}
+                            disabled={!isEditChanged}
                           >
                             Update
                           </button>

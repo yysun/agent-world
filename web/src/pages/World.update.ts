@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
  * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
  * - 2026-02-14: Added `stop-message-processing` event handler for chat-scoped processing cancellation from web composer.
@@ -1140,6 +1141,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         editingMessageId: null,
         editingText: ''
       };
+      return;
+    }
+
+    const currentText = String(message.text || '').trim();
+    if (editedText === currentText) {
       return;
     }
 

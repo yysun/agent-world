@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Disabled message-edit `Save` until content is changed from the original message text.
+ * - 2026-02-16: Aligned edit/load fallback defaults for agent provider/model to `ollama` and `llama3.1:8b`.
+ * - 2026-02-16: Changed new-agent default LLM settings to provider `ollama` and model `llama3.1:8b`.
+ * - 2026-02-16: Swapped edit-form button order to `Cancel` then `Save` and retained a defensive no-op guard for unchanged content.
  * - 2026-02-16: Added System Settings skill-scope toggles (`Enable Global Skills`, `Enable Project Skills`) with darker switch styling.
  * - 2026-02-15: Suppressed reply-target sender labels when the replying agent has `autoReply` disabled; chat rows now show plain sender names in that mode.
  * - 2026-02-15: Updated welcome-card visibility to depend on user/assistant conversation messages only, so tool/system/error-only event rows do not hide onboarding content.
@@ -154,8 +158,8 @@ const DEFAULT_AGENT_FORM = {
   id: '',
   name: '',
   autoReply: true,
-  provider: 'openai',
-  model: 'gpt-4o-mini',
+  provider: 'ollama',
+  model: 'llama3.1:8b',
   systemPrompt: '',
   temperature: '',
   maxTokens: ''
@@ -807,7 +811,7 @@ function validateAgentForm(agentForm) {
     data: {
       name,
       autoReply: agentForm.autoReply !== false,
-      provider: String(agentForm.provider || 'openai').trim() || 'openai',
+      provider: String(agentForm.provider || 'ollama').trim() || 'ollama',
       model,
       systemPrompt: String(agentForm.systemPrompt || ''),
       temperature: parseOptionalNumber(agentForm.temperature),
@@ -1171,8 +1175,8 @@ export default function App() {
         name,
         initials: getAgentInitials(name),
         autoReply: agent?.autoReply !== false,
-        provider: String(agent?.provider || 'openai'),
-        model: String(agent?.model || 'gpt-4o-mini'),
+        provider: String(agent?.provider || 'ollama'),
+        model: String(agent?.model || 'llama3.1:8b'),
         systemPrompt: String(agent?.systemPrompt || ''),
         temperature: Number.isFinite(Number(agent?.temperature)) ? Number(agent.temperature) : null,
         maxTokens: Number.isFinite(Number(agent?.maxTokens)) ? Number(agent.maxTokens) : null,
@@ -1926,8 +1930,8 @@ export default function App() {
       id: targetAgent.id,
       name: targetAgent.name,
       autoReply: targetAgent.autoReply !== false,
-      provider: targetAgent.provider || 'openai',
-      model: targetAgent.model || 'gpt-4o-mini',
+      provider: targetAgent.provider || 'ollama',
+      model: targetAgent.model || 'llama3.1:8b',
       systemPrompt: targetAgent.systemPrompt || '',
       temperature: targetAgent.temperature ?? '',
       maxTokens: targetAgent.maxTokens ?? ''
@@ -2404,6 +2408,11 @@ export default function App() {
     const editedText = editingText.trim();
     if (!editedText) {
       setStatusText('Message cannot be empty', 'error');
+      return;
+    }
+
+    const currentText = String(message?.content || '').trim();
+    if (editedText === currentText) {
       return;
     }
 
@@ -3170,6 +3179,9 @@ export default function App() {
                       const messageKey = message.messageId;
                       const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
                       const isHuman = isHumanMessage(message);
+                      const normalizedEditedText = editingText.trim();
+                      const normalizedOriginalText = String(message?.content || '').trim();
+                      const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
                       return (
                         <div
                           key={messageKey}
@@ -3209,18 +3221,18 @@ export default function App() {
                                 <div className="flex gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => onSaveEditMessage(message)}
-                                    disabled={!editingText.trim()}
-                                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    type="button"
                                     onClick={onCancelEditMessage}
                                     className="rounded-md border border-sidebar-border bg-sidebar px-3 py-1.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-accent focus:outline-none focus:ring-2 focus:ring-sidebar-ring/50 transition-all"
                                   >
                                     Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSaveEditMessage(message)}
+                                    disabled={!isEditChanged}
+                                    className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                  >
+                                    Save
                                   </button>
                                 </div>
                               </div>

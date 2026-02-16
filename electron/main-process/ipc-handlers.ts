@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-16: Updated `agent:create` fallback defaults to provider `ollama` and model `llama3.1:8b` for new-agent creation.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
  *   - Validates chat existence before edit delegation.
@@ -386,8 +387,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!name) throw new Error('Agent name is required.');
 
     const type = String(payload?.type || 'assistant').trim() || 'assistant';
-    const provider = String(payload?.provider || 'openai').trim() || 'openai';
-    const model = String(payload?.model || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
+    const provider = String(payload?.provider || 'ollama').trim() || 'ollama';
+    const model = String(payload?.model || 'llama3.1:8b').trim() || 'llama3.1:8b';
 
     const params: Record<string, unknown> = {
       name,
