@@ -15,13 +15,6 @@ These rules apply to ALL code you write in this project.  If any user request co
 **Default Local Storage:** SQLite → `~/agent-world/database.db`  
 **Debug Tests:** Simple debug tests may be written as `.ts` files and run using `npx tsx`.
 
-**Test Method (Node 22 via nvm):**
-- Always run tests using Node 22 in this workspace.
-- Use:
-   - `export NVM_DIR="$HOME/.nvm"; if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; fi; nvm use 22 >/dev/null; node -v`
-   - Full suite: `npm test`
-   - Focused suite example: `npm test -- tests/core/shell-cmd-format.test.ts tests/core/shell-cmd-tool.test.ts tests/core/shell-cmd-integration.test.ts`
-
 ---
 
 ## Unit Test Rules (Strict)

@@ -24,6 +24,36 @@
 import { World, Agent, ChatMessage, WorldSSEEvent } from './types.js';
 import { publishToolEvent } from './events/index.js';
 
+function normalizeKnownParameterAliases(toolName: string, args: any): {
+  normalizedArgs: any;
+  corrections: string[];
+} {
+  if (!args || typeof args !== 'object') {
+    return { normalizedArgs: args, corrections: [] };
+  }
+
+  const normalizedArgs = { ...args };
+  const corrections: string[] = [];
+
+  if (toolName === 'list_files' && normalizedArgs.path === undefined && normalizedArgs.directory !== undefined) {
+    normalizedArgs.path = normalizedArgs.directory;
+    delete normalizedArgs.directory;
+    corrections.push("directory -> path");
+  }
+
+  if (
+    (toolName === 'grep' || toolName === 'grep_search')
+    && normalizedArgs.directoryPath === undefined
+    && normalizedArgs.directory !== undefined
+  ) {
+    normalizedArgs.directoryPath = normalizedArgs.directory;
+    delete normalizedArgs.directory;
+    corrections.push("directory -> directoryPath");
+  }
+
+  return { normalizedArgs, corrections };
+}
+
 /**
  * Minimal fallback ID generator
  * Generates a simple unique identifier without external dependencies
@@ -127,20 +157,28 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
     };
   }
 
+  const aliasNormalization = normalizeKnownParameterAliases(toolName, args);
+  const normalizedArgs = aliasNormalization.normalizedArgs;
+
   const corrected: any = {};
   const corrections: string[] = [];
+  corrections.push(...aliasNormalization.corrections);
   const requiredParams = toolSchema.required || [];
   const errors: string[] = [];
 
   // Check required parameters
   for (const requiredParam of requiredParams) {
-    if (args[requiredParam] === undefined || args[requiredParam] === null || args[requiredParam] === '') {
+    if (
+      normalizedArgs[requiredParam] === undefined
+      || normalizedArgs[requiredParam] === null
+      || normalizedArgs[requiredParam] === ''
+    ) {
       errors.push(`Required parameter '${requiredParam}' is missing or empty`);
     }
   }
 
   // Validate and correct parameter types
-  for (const [key, value] of Object.entries(args)) {
+  for (const [key, value] of Object.entries(normalizedArgs)) {
     const propSchema = toolSchema.properties[key];
     if (!propSchema) {
       // Property not in schema - pass through as-is

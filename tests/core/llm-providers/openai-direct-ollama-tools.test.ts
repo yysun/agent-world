@@ -169,4 +169,87 @@ describe('openai-direct tool attachment by provider', () => {
     expect(requestParams.tools).toHaveLength(1);
     expect(requestParams.tools[0].function.name).toBe('weather_lookup');
   });
+
+  it('keeps tool_calls shape when all non-streaming tool calls are invalid', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+
+    const create = vi.fn().mockResolvedValue({
+      choices: [{
+        message: {
+          content: 'final text after invalid tool call',
+          tool_calls: [{
+            id: 'tc-invalid',
+            type: 'function',
+            function: { name: '', arguments: '{}' },
+          }],
+        }
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+
+    const fakeClient = { chat: { completions: { create } } } as any;
+    const response = await openaiDirect.generateOpenAIResponse(
+      fakeClient,
+      'gpt-4o-mini',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-openai', provider: 'openai', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any
+    );
+
+    expect(response.type).toBe('tool_calls');
+    expect(Array.isArray(response.tool_calls)).toBe(true);
+    expect(response.tool_calls).toHaveLength(0);
+  });
+
+  it('reconstructs delayed streaming tool call name across chunks', async () => {
+    vi.doUnmock('../../../core/openai-direct');
+    vi.doUnmock('../../../core/openai-direct.js');
+    const openaiDirect = await import('../../../core/openai-direct.js');
+
+    const stream = (async function* () {
+      yield {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'tc-1',
+              function: { arguments: '{"path":"' },
+            }],
+          },
+        }],
+      };
+      yield {
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              function: { name: 'read_file', arguments: 'README.md"}' },
+            }],
+          },
+        }],
+      };
+    })();
+
+    const create = vi.fn().mockResolvedValue(stream);
+    const fakeClient = { chat: { completions: { create } } } as any;
+
+    const response = await openaiDirect.streamOpenAIResponse(
+      fakeClient,
+      'gpt-4o-mini',
+      [{ role: 'user', content: 'hello' }],
+      { id: 'agent-openai', provider: 'openai', temperature: 0.1, maxTokens: 1000 } as any,
+      mcpTools as any,
+      { id: 'world-1' } as any,
+      vi.fn(),
+      'message-1'
+    );
+
+    expect(response.type).toBe('tool_calls');
+    expect(response.tool_calls).toHaveLength(1);
+    expect(response.tool_calls?.[0]?.function?.name).toBe('read_file');
+    expect(response.tool_calls?.[0]?.function?.arguments).toContain('README.md');
+  });
 });

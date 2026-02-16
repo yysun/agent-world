@@ -87,4 +87,59 @@ describe('google direct replay compatibility', () => {
     expect(allParts.some((part: any) => 'functionCall' in part)).toBe(false);
     expect(allParts.some((part: any) => 'functionResponse' in part)).toBe(false);
   });
+
+  it('keeps tool_calls shape when all returned function calls are invalid', async () => {
+    const generateContent = vi.fn().mockResolvedValue({
+      response: {
+        text: () => 'plain answer after invalid function call',
+        candidates: [{
+          content: {
+            parts: [
+              { text: 'plain answer after invalid function call' },
+              { functionCall: { name: '', args: {} } }
+            ]
+          }
+        }]
+      }
+    });
+
+    const getGenerativeModel = vi.fn().mockReturnValue({ generateContent });
+    const fakeClient = { getGenerativeModel } as any;
+
+    const agent: Agent = {
+      id: 'g1',
+      name: 'g1',
+      type: 'assistant',
+      provider: 'google' as any,
+      model: 'gemini-3-flash-preview',
+      llmCallCount: 0,
+      memory: []
+    };
+
+    const world: World = {
+      id: 'gemini',
+      name: 'gemini',
+      turnLimit: 5,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      totalAgents: 0,
+      totalMessages: 0,
+      eventEmitter: {} as any,
+      agents: new Map(),
+      chats: new Map()
+    };
+
+    const response = await generateGoogleResponse(
+      fakeClient,
+      'gemini-3-flash-preview',
+      [{ role: 'user', content: 'hello' }],
+      agent,
+      {},
+      world
+    );
+
+    expect(response.type).toBe('tool_calls');
+    expect(Array.isArray(response.tool_calls)).toBe(true);
+    expect(response.tool_calls).toHaveLength(0);
+  });
 });

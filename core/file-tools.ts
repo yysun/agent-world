@@ -15,12 +15,17 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-02-16: Switched `list_files` scanning to `fast-glob` with depth control and default ignore rules.
+ * - 2026-02-16: Added optional `recursive` mode to `list_files` for nested directory traversal in a single call.
+ * - 2026-02-16: `list_files` now includes hidden dot-prefixed entries by default (set `includeHidden: false` to exclude).
  * - 2026-02-16: Switched `path` import to namespace style for Vitest mock compatibility.
  * - 2026-02-16: Initial implementation of built-in file inspection tools.
+ * - 2026-02-16: Enhanced `list_files` empty-directory and not-found reporting with structured flags.
  */
 
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import fg from 'fast-glob';
 import {
   resolveTrustedShellWorkingDirectory,
   validateShellDirectoryRequest,
@@ -270,7 +275,7 @@ export function createReadFileToolDefinition() {
 export function createListFilesToolDefinition() {
   return {
     description:
-      'List files and directories available in a directory path for quick workspace exploration.',
+      'List files and directories available in a directory path for quick workspace exploration. Use recursive=true to include nested entries.',
     parameters: {
       type: 'object',
       properties: {
@@ -280,7 +285,11 @@ export function createListFilesToolDefinition() {
         },
         includeHidden: {
           type: 'boolean',
-          description: 'Include dot-prefixed files and folders when true (default: false).',
+          description: 'Include dot-prefixed files and folders when true (default: true).',
+        },
+        recursive: {
+          type: 'boolean',
+          description: 'When true, include nested entries recursively (default: false).',
         },
       },
       required: ['path'],
@@ -289,27 +298,42 @@ export function createListFilesToolDefinition() {
     execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
       try {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
-        const resolvedPath = resolveTargetPath(String(args.path), trustedWorkingDirectory);
+        const requestedPath = String(args.path);
+        const resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
-        const includeHidden = Boolean(args.includeHidden ?? false);
-        const rawEntries = await fs.readdir(resolvedPath, { withFileTypes: true });
-        const entries = toArray<{ isDirectory: () => boolean; name: string }>(rawEntries);
+        const includeHidden = Boolean(args.includeHidden ?? true);
+        const recursive = Boolean(args.recursive ?? false);
 
-        const items = entries
-          .filter((entry) => includeHidden || !entry.name.startsWith('.'))
-          .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+        const items = await fg(['**/*'], {
+          cwd: resolvedPath,
+          deep: recursive ? Infinity : 1,
+          ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**'],
+          onlyFiles: false,
+          markDirectories: true,
+          dot: includeHidden,
+        });
+
+        const normalizedItems = items
+          .map((entry) => normalizePath(entry))
           .sort((left, right) => left.localeCompare(right));
 
         return JSON.stringify(
           {
+            requestedPath,
             path: resolvedPath,
-            total: items.length,
-            entries: items,
+            recursive,
+            total: normalizedItems.length,
+            entries: normalizedItems,
+            found: normalizedItems.length > 0,
+            message: normalizedItems.length > 0 ? undefined : 'No files or directories found in the requested path.',
           },
           null,
           2,
         );
       } catch (error) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+          return `Error: list_files failed - Directory not found: ${String(args.path)}`;
+        }
         const message = error instanceof Error ? error.message : String(error);
         return `Error: list_files failed - ${message}`;
       }

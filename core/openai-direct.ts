@@ -27,6 +27,7 @@
  * - NO event emission, NO storage, NO tool execution
  *
  * Recent Changes:
+ * - 2026-02-16: Fixed streaming tool-call chunk merge to preserve delayed tool `id`/`name` fields across deltas.
  * - 2026-02-13: Added abort-signal support for streaming and non-streaming calls to enable chat stop cancellation.
  * - 2026-02-10: Added env-flagged Ollama tool attachment support via ENABLE_OLLAMA_TOOLS
  * - 2026-02-07: Disabled tool definitions for Ollama provider requests
@@ -232,6 +233,18 @@ export async function streamOpenAIResponse(
               };
             }
 
+            if (!functionCalls[toolCall.index].id && toolCall.id) {
+              functionCalls[toolCall.index].id = toolCall.id;
+            }
+
+            if (
+              toolCall.function?.name
+              && toolCall.function.name.trim() !== ''
+              && !functionCalls[toolCall.index].function.name
+            ) {
+              functionCalls[toolCall.index].function.name = toolCall.function.name;
+            }
+
             if (toolCall.function?.arguments) {
               functionCalls[toolCall.index].function.arguments += toolCall.function.arguments;
             }
@@ -263,7 +276,7 @@ export async function streamOpenAIResponse(
       });
 
       const toolCallsFormatted = validCalls.map(fc => ({
-        id: fc.id!,
+        id: fc.id || generateFallbackId(),
         type: 'function' as const,
         function: {
           name: fc.function!.name!,
@@ -372,7 +385,7 @@ export async function generateOpenAIResponse(
       const toolCallsFormatted = validToolCalls.map(tc => {
         const funcCall = tc as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall;
         return {
-          id: tc.id,
+          id: tc.id || generateFallbackId(),
           type: 'function' as const,
           function: {
             name: funcCall.function.name,

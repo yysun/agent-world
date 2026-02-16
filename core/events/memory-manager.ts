@@ -20,6 +20,13 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
+ * - 2026-02-16: Max tool-hop guardrail now emits UI/tool errors and injects transient LLM context, then continues loop instead of returning.
+ * - 2026-02-16: Removed plain-text tool-intent reminder/retry path; continuation now relies only on tool-call loop + hop guardrail.
+ * - 2026-02-16: Empty/invalid continuation tool_calls now write a synthetic tool-error result back to memory before continuing the LLM loop.
+ * - 2026-02-16: Added bounded retry when continuation returns empty/invalid `tool_calls` so agent loops do not stop silently.
+ * - 2026-02-16: Added bounded retry when post-tool continuation returns empty text so tool loops (e.g., load_skill) do not stop silently.
+ * - 2026-02-16: Added multi-hop tool continuation support when post-tool LLM responses contain additional tool_calls.
  * - 2026-02-15: Sanitized agent self-mentions in `handleTextResponse` before auto-mentioning to prevent `@self` prefixes.
  * - 2026-02-13: Added per-agent `autoReply` gate; disables sender auto-mention when set to false.
  * - 2026-02-13: Hardened title output normalization with markdown/prefix stripping and low-quality fallback hierarchy.
@@ -42,7 +49,13 @@ import type {
   StorageAPI
 } from '../types.js';
 import { SenderType } from '../types.js';
-import { generateId, determineSenderType, prepareMessagesForLLM } from '../utils.js';
+import {
+  generateId,
+  determineSenderType,
+  prepareMessagesForLLM,
+  getEnvValueFromText,
+  getDefaultWorkingDirectory,
+} from '../utils.js';
 import { parseMessageContent } from '../message-prep.js';
 import { createCategoryLogger } from '../logger.js';
 import { beginWorldActivity } from '../activity-tracker.js';
@@ -58,7 +71,8 @@ import {
   hasAnyMentionAtBeginning,
   removeSelfMentions
 } from './mention-logic.js';
-import { publishMessage, publishMessageWithId, publishSSE, publishEvent, isStreamingEnabled } from './publishers.js';
+import { publishMessage, publishMessageWithId, publishSSE, publishEvent, publishToolEvent, isStreamingEnabled } from './publishers.js';
+import { logToolBridge } from './tool-bridge-logging.js';
 
 const loggerMemory = createCategoryLogger('memory');
 const loggerAgent = createCategoryLogger('agent');
@@ -199,6 +213,183 @@ function isTitleGenerationCanceledError(error: unknown): boolean {
   return false;
 }
 
+function parseToolCallArguments(rawArguments: unknown): Record<string, any> {
+  if (rawArguments == null) return {};
+
+  if (typeof rawArguments === 'object' && !Array.isArray(rawArguments)) {
+    return rawArguments as Record<string, any>;
+  }
+
+  if (typeof rawArguments !== 'string') {
+    return {};
+  }
+
+  const trimmed = rawArguments.trim();
+  if (!trimmed) return {};
+
+  const parsed = JSON.parse(trimmed);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, any>;
+  }
+
+  return {};
+}
+
+function decodeControlTokens(value: string): string {
+  return value.replace(/<ctrl(\d+)>/gi, (_match, codeRaw) => {
+    const code = Number(codeRaw);
+    if (!Number.isFinite(code)) return '';
+    try {
+      return String.fromCharCode(code);
+    } catch {
+      return '';
+    }
+  });
+}
+
+function parseLooseScalar(rawValue: string): unknown {
+  const decoded = decodeControlTokens(String(rawValue || '').trim());
+  if (!decoded) return '';
+
+  if (
+    (decoded.startsWith('"') && decoded.endsWith('"'))
+    || (decoded.startsWith("'") && decoded.endsWith("'"))
+  ) {
+    return decoded.slice(1, -1);
+  }
+
+  if (/^(true|false)$/i.test(decoded)) {
+    return decoded.toLowerCase() === 'true';
+  }
+
+  if (/^null$/i.test(decoded)) {
+    return null;
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(decoded)) {
+    return Number(decoded);
+  }
+
+  return decoded;
+}
+
+function splitTopLevelCommaSeparated(body: string): string[] {
+  const parts: string[] = [];
+  let buffer = '';
+  let quote: '"' | "'" | null = null;
+  let escapeNext = false;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const current = body[index];
+
+    if (escapeNext) {
+      buffer += current;
+      escapeNext = false;
+      continue;
+    }
+
+    if (current === '\\') {
+      buffer += current;
+      escapeNext = true;
+      continue;
+    }
+
+    if ((current === '"' || current === "'")) {
+      if (!quote) {
+        quote = current;
+      } else if (quote === current) {
+        quote = null;
+      }
+      buffer += current;
+      continue;
+    }
+
+    if (current === ',' && !quote) {
+      if (buffer.trim()) {
+        parts.push(buffer.trim());
+      }
+      buffer = '';
+      continue;
+    }
+
+    buffer += current;
+  }
+
+  if (buffer.trim()) {
+    parts.push(buffer.trim());
+  }
+
+  return parts;
+}
+
+function parseLooseObjectLiteral(rawObject: string): Record<string, unknown> | null {
+  const decoded = decodeControlTokens(rawObject.trim());
+  if (!decoded.startsWith('{') || !decoded.endsWith('}')) {
+    return null;
+  }
+
+  const innerBody = decoded.slice(1, -1).trim();
+  if (!innerBody) {
+    return {};
+  }
+
+  const entries = splitTopLevelCommaSeparated(innerBody);
+  const parsed: Record<string, unknown> = {};
+
+  for (const entry of entries) {
+    const separatorIndex = entry.indexOf(':');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const keyRaw = entry.slice(0, separatorIndex).trim();
+    const valueRaw = entry.slice(separatorIndex + 1).trim();
+    if (!keyRaw) continue;
+
+    const normalizedKey = keyRaw.replace(/^['"]|['"]$/g, '').trim();
+    if (!normalizedKey) continue;
+
+    parsed[normalizedKey] = parseLooseScalar(valueRaw);
+  }
+
+  return parsed;
+}
+
+function parsePlainTextToolIntent(content: string): {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+} | null {
+  const normalized = String(content || '').trim();
+  if (!normalized) return null;
+
+  const match = normalized.match(/^calling\s+tool\s*:\s*([a-zA-Z0-9_\-]+)\s*(\{[\s\S]*\})?\s*$/i);
+  if (!match) {
+    return null;
+  }
+
+  const toolName = String(match[1] || '').trim();
+  if (!toolName) {
+    return null;
+  }
+
+  const rawArgs = String(match[2] || '').trim();
+  if (!rawArgs) {
+    return { toolName, toolArgs: {} };
+  }
+
+  try {
+    const strictParsed = parseToolCallArguments(rawArgs);
+    return { toolName, toolArgs: strictParsed };
+  } catch {
+    const looseParsed = parseLooseObjectLiteral(rawArgs);
+    if (looseParsed && typeof looseParsed === 'object' && !Array.isArray(looseParsed)) {
+      return { toolName, toolArgs: looseParsed };
+    }
+  }
+
+  return { toolName, toolArgs: {} };
+}
+
 /**
  * Save incoming message to agent memory with auto-save
  * Uses explicit chatId from the message event for concurrency-safe saving
@@ -271,10 +462,63 @@ export async function continueLLMAfterToolExecution(
   chatId?: string | null,
   options?: {
     abortSignal?: AbortSignal;
+    hopCount?: number;
+    emptyTextRetryCount?: number;
+    emptyToolCallRetryCount?: number;
   }
 ): Promise<void> {
   const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
   try {
+    let hopCount = options?.hopCount ?? 0;
+    const maxToolHops = 50;
+    const emptyTextRetryCount = options?.emptyTextRetryCount ?? 0;
+    const maxEmptyTextRetries = 2;
+    const emptyToolCallRetryCount = options?.emptyToolCallRetryCount ?? 0;
+    const maxEmptyToolCallRetries = 2;
+    let transientGuardrailError: string | undefined;
+
+    if (hopCount > maxToolHops) {
+      const guardrailErrorMessage = `[Error] Tool continuation exceeded ${maxToolHops} hops. Guardrail triggered; reporting error and continuing.`;
+      const guardrailToolCallId = generateId();
+
+      loggerAgent.error('Tool continuation hop limit reached; reporting error and continuing loop', {
+        agentId: agent.id,
+        chatId: chatId ?? world.currentChatId ?? null,
+        hopCount,
+        maxToolHops,
+      });
+
+      publishEvent(world, 'system', {
+        message: guardrailErrorMessage,
+        type: 'error',
+      });
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-error',
+        messageId: guardrailToolCallId,
+        chatId: chatId ?? world.currentChatId ?? null,
+        toolExecution: {
+          toolName: '__tool_continuation_guardrail__',
+          toolCallId: guardrailToolCallId,
+          error: guardrailErrorMessage,
+        },
+      });
+
+      logToolBridge('CONTINUE HOP_GUARDRAIL', {
+        worldId: world.id,
+        agentId: agent.id,
+        chatId: chatId ?? world.currentChatId ?? null,
+        hopCount,
+        maxToolHops,
+        guardrailToolCallId,
+      });
+
+      transientGuardrailError =
+        `System error: tool continuation exceeded ${maxToolHops} hops and was guardrailed. Continue the task and avoid unnecessary additional tool calls.`;
+      hopCount = 0;
+    }
+
     throwIfMessageProcessingStopped(options?.abortSignal);
 
     // Use explicit chatId when provided, fallback to world.currentChatId.
@@ -309,15 +553,25 @@ export async function continueLLMAfterToolExecution(
     );
     throwIfMessageProcessingStopped(options?.abortSignal);
 
+    const llmMessages = transientGuardrailError
+      ? [
+        ...messages,
+        {
+          role: 'user',
+          content: transientGuardrailError,
+        },
+      ]
+      : messages;
+
     loggerAgent.debug('Calling LLM with memory after tool execution', {
       agentId: agent.id,
       targetChatId,
-      preparedMessageCount: messages.length,
-      systemMessagesInPrepared: messages.filter(m => m.role === 'system').length,
-      userMessages: messages.filter(m => m.role === 'user').length,
-      assistantMessages: messages.filter(m => m.role === 'assistant').length,
-      toolMessages: messages.filter(m => m.role === 'tool').length,
-      lastThreeMessages: messages.slice(-3).map(m => ({
+      preparedMessageCount: llmMessages.length,
+      systemMessagesInPrepared: llmMessages.filter(m => m.role === 'system').length,
+      userMessages: llmMessages.filter(m => m.role === 'user').length,
+      assistantMessages: llmMessages.filter(m => m.role === 'assistant').length,
+      toolMessages: llmMessages.filter(m => m.role === 'tool').length,
+      lastThreeMessages: llmMessages.slice(-3).map((m: any) => ({
         role: m.role,
         hasContent: !!m.content,
         contentPreview: m.content?.substring(0, 100),
@@ -356,7 +610,7 @@ export async function continueLLMAfterToolExecution(
       const result = await streamAgentResponse(
         world,
         agent,
-        messages as any,
+        llmMessages as any,
         publishSSEWithChatId,
         targetChatId ?? null,
         options?.abortSignal
@@ -368,7 +622,7 @@ export async function continueLLMAfterToolExecution(
       const result = await generateAgentResponse(
         world,
         agent,
-        messages as any,
+        llmMessages as any,
         undefined,
         false,
         targetChatId ?? null,
@@ -386,15 +640,523 @@ export async function continueLLMAfterToolExecution(
       toolCallCount: llmResponse.tool_calls?.length || 0
     });
 
+    logToolBridge('LLM -> CONTINUE', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: targetChatId,
+      responseType: llmResponse.type,
+      hasContent: !!llmResponse.content,
+      contentPreview: String(llmResponse.content || '').substring(0, 200),
+      toolCallCount: Array.isArray(llmResponse.tool_calls) ? llmResponse.tool_calls.length : 0,
+    });
+
+    if (llmResponse.type === 'text' && typeof llmResponse.content === 'string' && llmResponse.content.trim()) {
+      const parsedPlainTextToolIntent = parsePlainTextToolIntent(llmResponse.content);
+      if (parsedPlainTextToolIntent) {
+        const syntheticToolCallId = generateId();
+        loggerAgent.warn('Continuation received plain-text tool intent; synthesizing tool_call fallback', {
+          agentId: agent.id,
+          chatId: targetChatId,
+          toolName: parsedPlainTextToolIntent.toolName,
+          syntheticToolCallId,
+        });
+
+        logToolBridge('CONTINUE PLAINTEXT_TOOL_INTENT_FALLBACK', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          toolName: parsedPlainTextToolIntent.toolName,
+          toolArgs: parsedPlainTextToolIntent.toolArgs,
+          syntheticToolCallId,
+        });
+
+        llmResponse = {
+          type: 'tool_calls',
+          content: llmResponse.content,
+          tool_calls: [{
+            id: syntheticToolCallId,
+            type: 'function',
+            function: {
+              name: parsedPlainTextToolIntent.toolName,
+              arguments: JSON.stringify(parsedPlainTextToolIntent.toolArgs || {}),
+            },
+          }],
+          assistantMessage: {
+            role: 'assistant',
+            content: llmResponse.content,
+            tool_calls: [{
+              id: syntheticToolCallId,
+              type: 'function',
+              function: {
+                name: parsedPlainTextToolIntent.toolName,
+                arguments: JSON.stringify(parsedPlainTextToolIntent.toolArgs || {}),
+              },
+            }],
+          },
+        } as any;
+      }
+    }
+
+    if (llmResponse.type === 'tool_calls') {
+      const returnedToolCalls = Array.isArray(llmResponse.tool_calls) ? llmResponse.tool_calls : [];
+      const validReturnedToolCalls = returnedToolCalls.filter((tc: any) => {
+        const name = String(tc?.function?.name || '').trim();
+        return name.length > 0;
+      });
+      const executableToolCalls = validReturnedToolCalls.slice(0, 1);
+
+      if (returnedToolCalls.length > validReturnedToolCalls.length) {
+        loggerAgent.warn('Continuation LLM returned invalid tool calls; dropping calls with empty names', {
+          agentId: agent.id,
+          returnedToolCallCount: returnedToolCalls.length,
+          validToolCallCount: validReturnedToolCalls.length,
+          emptyToolCallRetryCount,
+          maxEmptyToolCallRetries,
+        });
+      }
+
+      if (validReturnedToolCalls.length > executableToolCalls.length) {
+        loggerAgent.warn('Continuation LLM returned multiple tool calls; processing first call only', {
+          agentId: agent.id,
+          returnedToolCallCount: validReturnedToolCalls.length,
+          processedToolCallIds: executableToolCalls.map(tc => tc.id),
+          droppedToolCallIds: validReturnedToolCalls.slice(1).map(tc => tc.id)
+        });
+      }
+
+      const toolCall = executableToolCalls[0];
+      if (!toolCall) {
+        const firstInvalidToolCall = returnedToolCalls[0] as any;
+        const toolCallId = String(firstInvalidToolCall?.id || generateId());
+        const rawToolName = String(firstInvalidToolCall?.function?.name || '').trim();
+        const fallbackToolName = rawToolName || '__invalid_tool_call__';
+        const fallbackToolArguments = typeof firstInvalidToolCall?.function?.arguments === 'string'
+          ? firstInvalidToolCall.function.arguments
+          : '{}';
+        const malformedToolErrorContent = rawToolName
+          ? `Error executing tool: Invalid tool call payload for '${rawToolName}'`
+          : 'Error executing tool: Invalid tool call payload - empty or missing tool name';
+
+        loggerAgent.warn('Continuation returned tool_calls without executable tool; reporting tool error back to LLM context', {
+          agentId: agent.id,
+          messageId,
+          targetChatId,
+          emptyToolCallRetryCount,
+          maxEmptyToolCallRetries,
+          returnedToolCallCount: returnedToolCalls.length,
+          toolCallId,
+          fallbackToolName,
+        });
+
+        const assistantMalformedToolCallMessage: AgentMessage = {
+          role: 'assistant',
+          content: llmResponse.content || `Calling tool: ${fallbackToolName}`,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId,
+          tool_calls: [{
+            id: toolCallId,
+            type: 'function',
+            function: {
+              name: fallbackToolName,
+              arguments: fallbackToolArguments,
+            },
+          }] as any,
+          agentId: agent.id,
+          toolCallStatus: {
+            [toolCallId]: {
+              complete: true,
+              result: malformedToolErrorContent,
+            },
+          },
+        };
+        agent.memory.push(assistantMalformedToolCallMessage);
+
+        const malformedToolCallEvent: WorldMessageEvent = {
+          content: assistantMalformedToolCallMessage.content || '',
+          sender: agent.id,
+          timestamp: assistantMalformedToolCallMessage.createdAt || new Date(),
+          messageId: assistantMalformedToolCallMessage.messageId!,
+          chatId: assistantMalformedToolCallMessage.chatId,
+        };
+        (malformedToolCallEvent as any).role = 'assistant';
+        (malformedToolCallEvent as any).tool_calls = assistantMalformedToolCallMessage.tool_calls;
+        (malformedToolCallEvent as any).toolCallStatus = assistantMalformedToolCallMessage.toolCallStatus;
+        world.eventEmitter.emit('message', malformedToolCallEvent);
+
+        const malformedToolResultMessage: AgentMessage = {
+          role: 'tool',
+          content: malformedToolErrorContent,
+          tool_call_id: toolCallId,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId: generateId(),
+          replyToMessageId: messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(malformedToolResultMessage);
+
+        publishToolEvent(world, {
+          agentName: agent.id,
+          type: 'tool-error',
+          messageId: toolCallId,
+          chatId: targetChatId,
+          toolExecution: {
+            toolName: fallbackToolName,
+            toolCallId,
+            input: fallbackToolArguments,
+            error: malformedToolErrorContent,
+          },
+        });
+
+        logToolBridge('CONTINUE TOOL_CALLS_INVALID', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          toolCallId,
+          fallbackToolName,
+          emptyToolCallRetryCount,
+          maxEmptyToolCallRetries,
+        });
+
+        try {
+          const storage = await getStorageWrappers();
+          await storage.saveAgent(world.id, agent);
+        } catch (error) {
+          loggerMemory.error('Failed to save malformed continuation tool error context', {
+            agentId: agent.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
+        if (emptyToolCallRetryCount < maxEmptyToolCallRetries) {
+          throwIfMessageProcessingStopped(options?.abortSignal);
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            ...options,
+            hopCount: hopCount + 1,
+            emptyToolCallRetryCount: emptyToolCallRetryCount + 1,
+          });
+          return;
+        }
+
+        publishEvent(world, 'system', {
+          message: '[Warning] Agent repeatedly returned invalid tool calls after tool execution. Please refine the prompt.',
+          type: 'warning',
+        });
+        return;
+      }
+
+      const assistantToolCallMessage: AgentMessage = {
+        role: 'assistant',
+        content: llmResponse.content || `Calling tool: ${toolCall.function.name}`,
+        sender: agent.id,
+        createdAt: new Date(),
+        chatId: targetChatId,
+        messageId,
+        tool_calls: executableToolCalls as any,
+        agentId: agent.id,
+        toolCallStatus: executableToolCalls.reduce((acc, tc) => {
+          acc[tc.id] = { complete: false, result: null };
+          return acc;
+        }, {} as Record<string, { complete: boolean; result: any }>),
+      };
+
+      agent.memory.push(assistantToolCallMessage);
+
+      try {
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+      } catch (error) {
+        loggerMemory.error('Failed to save assistant tool_call message during continuation', {
+          agentId: agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      const toolCallEvent: WorldMessageEvent = {
+        content: assistantToolCallMessage.content || '',
+        sender: agent.id,
+        timestamp: assistantToolCallMessage.createdAt || new Date(),
+        messageId: assistantToolCallMessage.messageId!,
+        chatId: assistantToolCallMessage.chatId,
+      };
+      (toolCallEvent as any).role = 'assistant';
+      (toolCallEvent as any).tool_calls = assistantToolCallMessage.tool_calls;
+      (toolCallEvent as any).toolCallStatus = assistantToolCallMessage.toolCallStatus;
+      world.eventEmitter.emit('message', toolCallEvent);
+
+      const { getMCPToolsForWorld } = await import('../mcp-server-registry.js');
+      const mcpTools = await getMCPToolsForWorld(world.id);
+      const toolDef = mcpTools[toolCall.function.name];
+      const trustedWorkingDirectory = String(
+        getEnvValueFromText(world.variables, 'working_directory') || getDefaultWorkingDirectory()
+      ).trim() || getDefaultWorkingDirectory();
+
+      if (!toolDef) {
+        const missingToolResult: AgentMessage = {
+          role: 'tool',
+          content: `Error executing tool: Tool not found: ${toolCall.function.name}`,
+          tool_call_id: toolCall.id,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId: generateId(),
+          replyToMessageId: messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(missingToolResult);
+
+        if (assistantToolCallMessage.toolCallStatus) {
+          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
+            complete: true,
+            result: missingToolResult.content,
+          };
+        }
+
+        publishToolEvent(world, {
+          agentName: agent.id,
+          type: 'tool-error',
+          messageId: toolCall.id,
+          chatId: targetChatId,
+          toolExecution: {
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            error: `Tool not found: ${toolCall.function.name}`,
+          },
+        });
+
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+        await continueLLMAfterToolExecution(world, agent, targetChatId, {
+          ...options,
+          hopCount: hopCount + 1,
+        });
+        return;
+      }
+
+      let toolArgs: Record<string, any> = {};
+      try {
+        toolArgs = parseToolCallArguments(toolCall.function.arguments);
+      } catch (parseError) {
+        const parseErrorResult: AgentMessage = {
+          role: 'tool',
+          content: `Error executing tool: Invalid JSON in tool arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+          tool_call_id: toolCall.id,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId: generateId(),
+          replyToMessageId: messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(parseErrorResult);
+
+        if (assistantToolCallMessage.toolCallStatus) {
+          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
+            complete: true,
+            result: parseErrorResult.content,
+          };
+        }
+
+        publishToolEvent(world, {
+          agentName: agent.id,
+          type: 'tool-error',
+          messageId: toolCall.id,
+          chatId: targetChatId,
+          toolExecution: {
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            error: parseError instanceof Error ? parseError.message : String(parseError),
+          },
+        });
+
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+        await continueLLMAfterToolExecution(world, agent, targetChatId, {
+          ...options,
+          hopCount: hopCount + 1,
+        });
+        return;
+      }
+
+      publishToolEvent(world, {
+        agentName: agent.id,
+        type: 'tool-start',
+        messageId: toolCall.id,
+        chatId: targetChatId,
+        toolExecution: {
+          toolName: toolCall.function.name,
+          toolCallId: toolCall.id,
+          input: toolArgs,
+          metadata: {
+            isStreaming: isStreamingEnabled(),
+          },
+        },
+      });
+
+      try {
+        const toolContext = {
+          world,
+          messages: agent.memory,
+          toolCallId: toolCall.id,
+          chatId: targetChatId,
+          abortSignal: options?.abortSignal,
+          workingDirectory: trustedWorkingDirectory,
+        };
+
+        const toolResult = await toolDef.execute(toolArgs, undefined, undefined, toolContext);
+        const serializedToolResult = typeof toolResult === 'string'
+          ? toolResult
+          : JSON.stringify(toolResult) ?? String(toolResult);
+
+        const toolResultMessage: AgentMessage = {
+          role: 'tool',
+          content: serializedToolResult,
+          tool_call_id: toolCall.id,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId: generateId(),
+          replyToMessageId: messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(toolResultMessage);
+
+        if (assistantToolCallMessage.toolCallStatus) {
+          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
+            complete: true,
+            result: serializedToolResult,
+          };
+        }
+
+        publishToolEvent(world, {
+          agentName: agent.id,
+          type: 'tool-result',
+          messageId: toolCall.id,
+          chatId: targetChatId,
+          toolExecution: {
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            input: toolArgs,
+            result: serializedToolResult.slice(0, 4000),
+            resultType: typeof toolResult === 'string'
+              ? 'string'
+              : Array.isArray(toolResult)
+                ? 'array'
+                : toolResult === null
+                  ? 'null'
+                  : 'object',
+            resultSize: serializedToolResult.length,
+          },
+        });
+      } catch (toolError) {
+        const errorContent = `Error executing tool: ${toolError instanceof Error ? toolError.message : String(toolError)}`;
+        const toolErrorMessage: AgentMessage = {
+          role: 'tool',
+          content: errorContent,
+          tool_call_id: toolCall.id,
+          sender: agent.id,
+          createdAt: new Date(),
+          chatId: targetChatId,
+          messageId: generateId(),
+          replyToMessageId: messageId,
+          agentId: agent.id,
+        };
+        agent.memory.push(toolErrorMessage);
+
+        if (assistantToolCallMessage.toolCallStatus) {
+          assistantToolCallMessage.toolCallStatus[toolCall.id] = {
+            complete: true,
+            result: errorContent,
+          };
+        }
+
+        publishToolEvent(world, {
+          agentName: agent.id,
+          type: 'tool-error',
+          messageId: toolCall.id,
+          chatId: targetChatId,
+          toolExecution: {
+            toolName: toolCall.function.name,
+            toolCallId: toolCall.id,
+            input: toolArgs,
+            error: toolError instanceof Error ? toolError.message : String(toolError),
+          },
+        });
+      }
+
+      try {
+        const storage = await getStorageWrappers();
+        await storage.saveAgent(world.id, agent);
+      } catch (error) {
+        loggerMemory.error('Failed to save continuation tool result to memory', {
+          agentId: agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      throwIfMessageProcessingStopped(options?.abortSignal);
+      await continueLLMAfterToolExecution(world, agent, targetChatId, {
+        ...options,
+        hopCount: hopCount + 1,
+      });
+      return;
+    }
+
     if (llmResponse.type !== 'text' || !llmResponse.content) {
+      if (llmResponse.type === 'text' && !llmResponse.content && emptyTextRetryCount < maxEmptyTextRetries) {
+        loggerAgent.warn('Post-tool continuation returned empty text; retrying continuation call', {
+          agentId: agent.id,
+          chatId: targetChatId,
+          hopCount,
+          emptyTextRetryCount,
+          maxEmptyTextRetries,
+        });
+
+        logToolBridge('CONTINUE EMPTY_TEXT_RETRY', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          emptyTextRetryCount,
+          maxEmptyTextRetries,
+        });
+
+        throwIfMessageProcessingStopped(options?.abortSignal);
+        await continueLLMAfterToolExecution(world, agent, targetChatId, {
+          ...options,
+          emptyTextRetryCount: emptyTextRetryCount + 1,
+        });
+        return;
+      }
+
       loggerAgent.warn('LLM response after tool execution is not text or empty - no message will be published', {
         agentId: agent.id,
         responseType: llmResponse.type,
         hasContent: !!llmResponse.content,
         contentLength: llmResponse.content?.length || 0,
         hasToolCalls: !!llmResponse.tool_calls,
-        toolCallCount: llmResponse.tool_calls?.length || 0
+        toolCallCount: llmResponse.tool_calls?.length || 0,
+        emptyTextRetryCount,
+        maxEmptyTextRetries,
       });
+
+      if (llmResponse.type === 'text' && !llmResponse.content && emptyTextRetryCount >= maxEmptyTextRetries) {
+        publishEvent(world, 'system', {
+          message: '[Warning] Agent returned empty follow-up after tool execution. Please retry or refine the prompt.',
+          type: 'warning'
+        });
+
+        logToolBridge('CONTINUE EMPTY_TEXT_STOP', {
+          worldId: world.id,
+          agentId: agent.id,
+          chatId: targetChatId,
+          emptyTextRetryCount,
+          maxEmptyTextRetries,
+        });
+      }
+
       return;
     }
 
@@ -442,6 +1204,13 @@ export async function continueLLMAfterToolExecution(
         chatId: chatId ?? world.currentChatId ?? null,
         error: error instanceof Error ? error.message : String(error)
       });
+
+      logToolBridge('CONTINUE CANCELED', {
+        worldId: world.id,
+        agentId: agent.id,
+        chatId: chatId ?? world.currentChatId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return;
     }
 
@@ -452,6 +1221,13 @@ export async function continueLLMAfterToolExecution(
     publishEvent(world, 'system', {
       message: `[Error] ${(error as Error).message}`,
       type: 'error'
+    });
+
+    logToolBridge('CONTINUE ERROR', {
+      worldId: world.id,
+      agentId: agent.id,
+      chatId: chatId ?? world.currentChatId ?? null,
+      error: error instanceof Error ? error.message : String(error),
     });
   } finally {
     completeActivity();

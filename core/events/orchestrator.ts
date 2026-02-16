@@ -44,6 +44,8 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-16: Added `LOG_LLM_TOOL_BRIDGE` gate for LLM↔tool console bridge logs.
+ * - 2026-02-16: Added explicit console debug logs for LLM↔tool request/result/error handoff payloads.
  * - 2026-02-14: Shell tool trusted cwd fallback now uses core default working directory (user home) when world `working_directory` is missing.
  * - 2026-02-13: Fixed shell_cmd mismatch handling by validating path targets in command parameters (e.g. `~/`) against world working_directory before execution.
  * - 2026-02-13: Added hard-stop guard for shell_cmd directory mismatches (LLM-requested `directory` must match world `working_directory`).
@@ -105,6 +107,8 @@ import {
   isMessageProcessingCanceledError,
   throwIfMessageProcessingStopped
 } from '../message-processing-control.js';
+
+import { logToolBridge, getToolResultPreview } from './tool-bridge-logging.js';
 
 const loggerAgent = createCategoryLogger('agent');
 const loggerResponse = createCategoryLogger('response');
@@ -659,6 +663,15 @@ export async function processAgentMessage(
             }
           });
 
+          logToolBridge('LLM -> TOOL', {
+            worldId: world.id,
+            agentId: agent.id,
+            chatId: targetChatId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            args: toolArgs,
+          });
+
           if (toolCall.function.name === 'shell_cmd') {
             const directoryValidation = validateShellDirectoryRequest(
               toolArgs.directory,
@@ -928,6 +941,15 @@ export async function processAgentMessage(
             }
           });
 
+          logToolBridge('TOOL -> LLM', {
+            worldId: world.id,
+            agentId: agent.id,
+            chatId: targetChatId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            resultPreview: getToolResultPreview(toolResult),
+          });
+
           // Save tool result to agent memory
           const toolResultMessage: AgentMessage = {
             role: 'tool',
@@ -1036,6 +1058,15 @@ export async function processAgentMessage(
             }
           });
 
+          logToolBridge('TOOL ERROR -> LLM', {
+            worldId: world.id,
+            agentId: agent.id,
+            chatId: targetChatId,
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
           // Save error as tool result
           const errorMessage: AgentMessage = {
             role: 'tool',
@@ -1051,6 +1082,16 @@ export async function processAgentMessage(
 
           agent.memory.push(errorMessage);
 
+          const toolCallMsg = agent.memory.find(
+            m => m.role === 'assistant' && (m as any).tool_calls?.some((tc: any) => tc.id === toolCall.id)
+          );
+          if (toolCallMsg && (toolCallMsg as any).toolCallStatus) {
+            (toolCallMsg as any).toolCallStatus[toolCall.id] = {
+              complete: true,
+              result: errorMessage.content
+            };
+          }
+
           try {
             const storage = await getStorageWrappers();
             await storage.saveAgent(world.id, agent);
@@ -1060,6 +1101,18 @@ export async function processAgentMessage(
               error: saveError instanceof Error ? saveError.message : saveError
             });
           }
+
+          loggerAgent.debug('Continuing LLM loop with tool error result', {
+            agentId: agent.id,
+            toolCallId: toolCall.id,
+            targetChatId
+          });
+
+          throwIfMessageProcessingStopped(processingHandle?.signal);
+          const { continueLLMAfterToolExecution } = await import('./memory-manager.js');
+          await continueLLMAfterToolExecution(world, agent, targetChatId, {
+            abortSignal: processingHandle?.signal
+          });
         }
       }
 

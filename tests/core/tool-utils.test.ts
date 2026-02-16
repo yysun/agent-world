@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { filterAndHandleEmptyNamedFunctionCalls } from '../../core/tool-utils.js';
+import { filterAndHandleEmptyNamedFunctionCalls, validateToolParameters } from '../../core/tool-utils.js';
 import type { World, Agent } from '../../core/types.js';
 import { LLMProvider } from '../../core/types.js';
 import { EventEmitter } from 'events';
@@ -324,5 +324,56 @@ describe('Tool Utils - filterAndHandleEmptyNamedFunctionCalls', () => {
     expect(events.publishToolEvent).toHaveBeenCalledWith(mockWorld, expect.objectContaining({
       agentName: 'FallbackName',
     }));
+  });
+});
+
+describe('Tool Utils - validateToolParameters', () => {
+  test('normalizes list_files directory alias to path', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters({ directory: '.' }, schema, 'list_files');
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({ path: '.' });
+  });
+
+  test('normalizes grep directory alias to directoryPath', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        directoryPath: { type: 'string' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters({ query: 'foo', directory: './core' }, schema, 'grep');
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({ query: 'foo', directoryPath: './core' });
+  });
+
+  test('still fails when required path is absent and no alias is provided', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters({}, schema, 'list_files');
+
+    expect(validation.valid).toBe(false);
+    expect(validation.error).toContain("Required parameter 'path' is missing or empty");
   });
 });

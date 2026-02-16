@@ -16,6 +16,8 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
+ * - 2026-02-16: Added explicit empty-directory `list_files` coverage (`found=false` + message).
  * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.
  * - 2026-02-15: Added `output_format=json` integration coverage and artifact hashing metadata assertions.
  * - 2026-02-14: Added assertion that built-in `load_skill` tool is registered alongside `shell_cmd`.
@@ -28,6 +30,9 @@
 
 import { describe, test, expect } from 'vitest';
 import { fileURLToPath } from 'url';
+import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import * as path from 'path';
 import { getWorld } from '../../core/managers.js';
 import { getMCPToolsForWorld } from '../../core/mcp-server-registry.js';
 import { LLMProvider } from '../../core/types.js';
@@ -110,6 +115,16 @@ describe('shell_cmd integration with worlds', () => {
     expect(Array.isArray(listResult.entries)).toBe(true);
     expect(listResult).toHaveProperty('path');
 
+    const listAliasResultRaw = await tools.list_files.execute({
+      directory: 'core',
+    }, undefined, undefined, { workingDirectory: testWorkingDirectory });
+    if (typeof listAliasResultRaw === 'string' && listAliasResultRaw.startsWith('Error:')) {
+      throw new Error(listAliasResultRaw);
+    }
+    const listAliasResult = JSON.parse(listAliasResultRaw);
+    expect(Array.isArray(listAliasResult.entries)).toBe(true);
+    expect(listAliasResult).toHaveProperty('path');
+
     const grepResultRaw = await tools.grep.execute({
       query: 'createShellCmdToolDefinition',
       isRegexp: false,
@@ -158,6 +173,87 @@ describe('shell_cmd integration with worlds', () => {
       restrictedContext,
     );
     expect(grepResultRaw).toContain('Working directory mismatch');
+  });
+
+  test('should report empty list_files results explicitly for LLMs', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-'));
+    const emptyDirName = 'empty';
+    const emptyDirPath = path.join(tempRoot, emptyDirName);
+
+    try {
+      await mkdir(emptyDirPath);
+
+      const listResultRaw = await tools.list_files.execute(
+        { path: emptyDirName },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof listResultRaw === 'string' && listResultRaw.startsWith('Error:')) {
+        throw new Error(listResultRaw);
+      }
+
+      const listResult = JSON.parse(listResultRaw);
+      expect(listResult).toHaveProperty('total', 0);
+      expect(listResult).toHaveProperty('entries');
+      expect(Array.isArray(listResult.entries)).toBe(true);
+      expect(listResult.entries).toEqual([]);
+      expect(listResult).toHaveProperty('found', false);
+      expect(typeof listResult.message).toBe('string');
+      expect(listResult.message).toContain('No files or directories found');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('should support recursive list_files traversal when requested', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-recursive-'));
+
+    try {
+      await mkdir(path.join(tempRoot, 'nested', 'child'), { recursive: true });
+      await mkdir(path.join(tempRoot, 'flat'));
+      await writeFile(path.join(tempRoot, 'top.txt'), 'top');
+      await writeFile(path.join(tempRoot, 'nested', 'child', 'deep.txt'), 'deep');
+
+      const nonRecursiveRaw = await tools.list_files.execute(
+        { path: '.', recursive: false },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof nonRecursiveRaw === 'string' && nonRecursiveRaw.startsWith('Error:')) {
+        throw new Error(nonRecursiveRaw);
+      }
+
+      const nonRecursive = JSON.parse(nonRecursiveRaw);
+      expect(nonRecursive).toHaveProperty('recursive', false);
+      expect(nonRecursive.entries).toContain('nested/');
+      expect(nonRecursive.entries).toContain('top.txt');
+      expect(nonRecursive.entries).not.toContain('nested/child/');
+      expect(nonRecursive.entries).not.toContain('nested/child/deep.txt');
+
+      const recursiveRaw = await tools.list_files.execute(
+        { path: '.', recursive: true },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof recursiveRaw === 'string' && recursiveRaw.startsWith('Error:')) {
+        throw new Error(recursiveRaw);
+      }
+
+      const recursiveResult = JSON.parse(recursiveRaw);
+      expect(recursiveResult).toHaveProperty('recursive', true);
+      expect(recursiveResult.entries).toContain('nested/child/');
+      expect(recursiveResult.entries).toContain('nested/child/deep.txt');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('should execute load_skill tool through tool interface', async () => {
