@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Restored inline `<agent> is working...` visibility parity with web by showing it for pending-response/busy session states even when activity sources are temporarily empty.
  * - 2026-02-16: Classified assistant "Calling tool ..." status lines as tool-related messages so they use tool styling and are excluded from branch-chat actions.
  * - 2026-02-16: Added agent-message `branch` action to create a new chat branched from the selected assistant message and auto-select it on success.
  * - 2026-02-16: Disabled message-edit `Save` until content is changed from the original message text.
@@ -2777,8 +2778,11 @@ export default function App() {
     activeTools.length > 0 ||
     activeStreamCount > 0 ||
     isBusy;
-  const showInlineWorkingIndicator =
-    Boolean(selectedSessionId) && isAgentWorkInProgress;
+  const showInlineWorkingIndicator = Boolean(selectedSessionId) && (
+    isCurrentSessionPendingResponse ||
+    isAgentWorkInProgress ||
+    isBusy
+  );
   const inlineWorkingAgentLabel = useMemo(() => {
     const resolveAgentName = (source) => {
       const rawSource = String(source || '').trim();
