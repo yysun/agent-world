@@ -21,6 +21,9 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Removed streaming fallback from inline working-indicator visibility to match web behavior (`pendingOperations > 0` only).
+ * - 2026-02-16: Aligned inline working-indicator visibility with web behavior using session activity pending-operations (`pendingOperations > 0`) as the sole show/hide signal.
+ * - 2026-02-16: Simplified inline working-indicator visibility to depend only on active agent sources from session activity.
  * - 2026-02-16: Restored inline `<agent> is working...` visibility parity with web by showing it for pending-response/busy session states even when activity sources are temporarily empty.
  * - 2026-02-16: Classified assistant "Calling tool ..." status lines as tool-related messages so they use tool styling and are excluded from branch-chat actions.
  * - 2026-02-16: Added agent-message `branch` action to create a new chat branched from the selected assistant message and auto-select it on success.
@@ -2778,11 +2781,9 @@ export default function App() {
     activeTools.length > 0 ||
     activeStreamCount > 0 ||
     isBusy;
-  const showInlineWorkingIndicator = Boolean(selectedSessionId) && (
-    isCurrentSessionPendingResponse ||
-    isAgentWorkInProgress ||
-    isBusy
-  );
+  const showInlineWorkingIndicator =
+    Boolean(selectedSessionId)
+    && Number(sessionActivity.pendingOperations || 0) > 0;
   const inlineWorkingAgentLabel = useMemo(() => {
     const resolveAgentName = (source) => {
       const rawSource = String(source || '').trim();

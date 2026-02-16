@@ -13,6 +13,9 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
+ * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
+ * - 2026-02-16: Added assistant-message inference from sender when `role` is missing so response-state clears reliably for backend messages published without explicit role.
  * - 2026-02-13: Enhanced log-derived status text to include structured error details (error/message/toolCallId) instead of generic category-message only.
  * - 2026-02-13: Added system-event routing callback support so session metadata (chat titles) can refresh on realtime updates.
  * - 2026-02-13: Global log fallback now publishes via shared status-bar service so any module can surface footer status without App callback threading.
@@ -23,6 +26,21 @@
 
 import { createLogMessage, upsertMessageList } from './message-updates.js';
 import { publishStatusBarStatus } from './status-bar.js';
+
+function isAssistantLikeMessage(message) {
+  if (!message) return false;
+
+  const role = String(message.role || '').toLowerCase().trim();
+  if (role === 'assistant') return true;
+  if (role === 'user' || role === 'tool' || role === 'system') return false;
+
+  const sender = String(message.sender || '').toLowerCase().trim();
+  if (!sender) return false;
+  if (sender === 'human' || sender === 'system' || sender === 'world') return false;
+  if (sender.startsWith('user')) return false;
+
+  return true;
+}
 
 function buildLogStatusText(logEvent) {
   const category = String(logEvent?.category || 'system');
@@ -120,7 +138,17 @@ export function createChatSubscriptionEventHandler({
       if (!incomingMessage) return;
 
       const incomingChatId = incomingMessage.chatId || payload.chatId || null;
-      if (selectedSessionId && incomingChatId !== selectedSessionId) return;
+      if (selectedSessionId && incomingChatId !== selectedSessionId) {
+        if (
+          !incomingChatId
+          && isAssistantLikeMessage(incomingMessage)
+          && typeof onSessionResponseStateChange === 'function'
+        ) {
+          onSessionResponseStateChange(selectedSessionId, false);
+          endAllToolStreams();
+        }
+        return;
+      }
 
       setMessages((existing) => upsertMessageList(existing, {
         ...incomingMessage,
@@ -131,7 +159,7 @@ export function createChatSubscriptionEventHandler({
 
       // Tool stream chunks can outlive their owning tool call in some flows.
       // Once assistant output is finalized, close any lingering tool stream state.
-      if (String(incomingMessage.role || '').toLowerCase() === 'assistant') {
+      if (isAssistantLikeMessage(incomingMessage)) {
         if (typeof onSessionResponseStateChange === 'function' && incomingChatId) {
           onSessionResponseStateChange(incomingChatId, false);
         }
@@ -145,18 +173,28 @@ export function createChatSubscriptionEventHandler({
       if (!streamPayload) return;
 
       const streamChatId = streamPayload.chatId || payload.chatId || null;
-      if (selectedSessionId && streamChatId !== selectedSessionId) return;
+      if (selectedSessionId && streamChatId && streamChatId !== selectedSessionId) return;
+      const responseChatId = streamChatId || selectedSessionId || null;
 
       const eventType = String(streamPayload.eventType || '').toLowerCase();
       const messageId = streamPayload.messageId;
-      if (!messageId) return;
-
       const streaming = streamingStateRef.current;
       if (!streaming) return;
 
+      if (!messageId) {
+        if (eventType === 'end' || eventType === 'error') {
+          if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+            onSessionResponseStateChange(responseChatId, false);
+          }
+          endAllToolStreams();
+          syncActiveStreamCount();
+        }
+        return;
+      }
+
       if (eventType === 'start') {
-        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
-          onSessionResponseStateChange(streamChatId, true);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, true);
         }
         endAllToolStreams();
         streaming.handleStart(messageId, streamPayload.agentName || 'assistant');
@@ -164,14 +202,14 @@ export function createChatSubscriptionEventHandler({
       } else if (eventType === 'chunk') {
         streaming.handleChunk(messageId, streamPayload.content || '');
       } else if (eventType === 'end') {
-        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
-          onSessionResponseStateChange(streamChatId, false);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, false);
         }
         streaming.handleEnd(messageId);
         syncActiveStreamCount();
       } else if (eventType === 'error') {
-        if (typeof onSessionResponseStateChange === 'function' && streamChatId) {
-          onSessionResponseStateChange(streamChatId, false);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, false);
         }
         streaming.handleError(messageId, streamPayload.error || 'Stream error');
         syncActiveStreamCount();
@@ -194,7 +232,8 @@ export function createChatSubscriptionEventHandler({
       const toolPayload = payload.tool;
       if (!toolPayload) return;
       const toolChatId = payload.chatId || toolPayload.chatId || null;
-      if (selectedSessionId && toolChatId !== selectedSessionId) return;
+      if (selectedSessionId && toolChatId && toolChatId !== selectedSessionId) return;
+      const responseChatId = toolChatId || selectedSessionId || null;
 
       const activity = activityStateRef.current;
       if (!activity) return;
@@ -204,13 +243,13 @@ export function createChatSubscriptionEventHandler({
       if (!toolUseId) return;
 
       if (toolEventType === 'tool-start') {
-        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
-          onSessionResponseStateChange(toolChatId, true);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, true);
         }
         activity.handleToolStart(toolUseId, toolPayload.toolName || 'unknown', toolPayload.toolInput);
       } else if (toolEventType === 'tool-result') {
-        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
-          onSessionResponseStateChange(toolChatId, false);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, false);
         }
         activity.handleToolResult(toolUseId, toolPayload.result || '');
         const streaming = streamingStateRef.current;
@@ -221,8 +260,8 @@ export function createChatSubscriptionEventHandler({
           endAllToolStreams();
         }
       } else if (toolEventType === 'tool-error') {
-        if (typeof onSessionResponseStateChange === 'function' && toolChatId) {
-          onSessionResponseStateChange(toolChatId, false);
+        if (typeof onSessionResponseStateChange === 'function' && responseChatId) {
+          onSessionResponseStateChange(responseChatId, false);
         }
         activity.handleToolError(toolUseId, toolPayload.error || 'Tool error');
         const streaming = streamingStateRef.current;
@@ -242,7 +281,7 @@ export function createChatSubscriptionEventHandler({
       if (!activityPayload) return;
 
       const activityChatId = payload.chatId || null;
-      if (selectedSessionId && activityChatId !== selectedSessionId) return;
+      if (selectedSessionId && activityChatId && activityChatId !== selectedSessionId) return;
 
       if (typeof onSessionActivityUpdate === 'function') {
         onSessionActivityUpdate({
@@ -252,6 +291,16 @@ export function createChatSubscriptionEventHandler({
           source: activityPayload.source || null,
           activeSources: Array.isArray(activityPayload.activeSources) ? activityPayload.activeSources : []
         });
+      }
+
+      if (typeof onSessionResponseStateChange === 'function') {
+        const pendingOperations = Number(activityPayload.pendingOperations) || 0;
+        if (pendingOperations <= 0) {
+          const responseChatId = activityChatId || selectedSessionId || null;
+          if (responseChatId) {
+            onSessionResponseStateChange(responseChatId, false);
+          }
+        }
       }
     }
 

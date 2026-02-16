@@ -11,6 +11,7 @@
  * - Avoids Electron runtime and filesystem dependencies.
  *
  * Recent Changes:
+ * - 2026-02-16: Added coverage for world-level activity events forwarded to chat-scoped subscriptions.
  * - 2026-02-13: Updated system-event forwarding coverage to structured payload content.
  * - 2026-02-13: Added system-event forwarding coverage for chat title update notifications.
  * - 2026-02-13: Enforced strict non-reuse coverage across runtime resets.
@@ -387,6 +388,105 @@ describe('createRealtimeEventsRuntime', () => {
       content: { eventType: 'chat-title-updated', title: 'Unscoped' },
       messageId: 'sys-unscoped',
       timestamp: new Date('2026-02-13T00:00:00.000Z')
+    });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('forwards world-level activity events (no chatId) to chat-scoped subscriptions', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-activity',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    // Activity events emitted by activity-tracker have no chatId
+    worldSubscription.world.eventEmitter.emit('world', {
+      type: 'response-start',
+      pendingOperations: 1,
+      activityId: 1,
+      source: 'agent-1',
+      activeSources: ['agent-1']
+    });
+
+    worldSubscription.world.eventEmitter.emit('world', {
+      type: 'idle',
+      pendingOperations: 0,
+      activityId: 1,
+      source: 'agent-1',
+      activeSources: []
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'activity',
+        subscriptionId: 'sub-activity',
+        worldId: 'world-1',
+        activity: expect.objectContaining({
+          eventType: 'response-start',
+          pendingOperations: 1
+        })
+      })
+    );
+    expect(send).toHaveBeenCalledWith(
+      'chat:event',
+      expect.objectContaining({
+        type: 'activity',
+        subscriptionId: 'sub-activity',
+        worldId: 'world-1',
+        activity: expect.objectContaining({
+          eventType: 'idle',
+          pendingOperations: 0
+        })
+      })
+    );
+  });
+
+  it('filters out activity events explicitly scoped to a different chat', async () => {
+    const send = vi.fn();
+    const worldSubscription = createWorldSubscription();
+
+    const runtime = createRealtimeEventsRuntime({
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send }
+      }),
+      chatEventChannel: 'chat:event',
+      addLogStreamCallback: () => () => { },
+      subscribeWorld: async () => worldSubscription,
+      ensureCoreReady: async () => { }
+    });
+
+    await runtime.subscribeChatEvents({
+      subscriptionId: 'sub-scoped',
+      worldId: 'world-1',
+      chatId: 'chat-1'
+    });
+
+    // Activity event with a chatId for a different chat should be filtered
+    worldSubscription.world.eventEmitter.emit('world', {
+      type: 'response-start',
+      pendingOperations: 1,
+      activityId: 1,
+      chatId: 'chat-other',
+      source: 'agent-1',
+      activeSources: ['agent-1']
     });
 
     expect(send).not.toHaveBeenCalled();

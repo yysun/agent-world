@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
  * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.
  * - 2026-02-13: Preserved unsubscribe tombstones across runtime resets and lifecycle cleanup to keep subscription IDs non-reusable.
  * - 2026-02-13: Moved reused-subscription validation ahead of world subscription to prevent invalid subscribe side effects.
@@ -234,14 +235,20 @@ export function createRealtimeEventsRuntime(
         return;
       }
       const eventChatId = event?.chatId ? String(event.chatId) : null;
-      if (chatId && eventChatId !== chatId) return;
       if (eventType.startsWith('tool-')) {
+        // Tool events: strict chatId filtering
+        if (chatId && eventChatId !== chatId) return;
         sendRealtimeEventToRenderer({
           ...serializeRealtimeToolEvent(worldId, eventChatId || chatId, event),
           subscriptionId
         });
         return;
       }
+
+      // Activity events (response-start, response-end, idle) are world-level
+      // and typically carry no chatId. Only filter out events that explicitly
+      // belong to a different chat; allow unscoped events through.
+      if (chatId && eventChatId && eventChatId !== chatId) return;
 
       sendRealtimeEventToRenderer({
         ...serializeRealtimeActivityEvent(worldId, eventChatId || chatId, event),

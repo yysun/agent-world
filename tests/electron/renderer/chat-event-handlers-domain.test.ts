@@ -160,6 +160,7 @@ describe('createChatSubscriptionEventHandler', () => {
 
   it('ignores message events without chatId when a session is selected', () => {
     const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
       loadedWorldId: 'world-1',
@@ -167,7 +168,8 @@ describe('createChatSubscriptionEventHandler', () => {
       streamingStateRef: { current: null },
       activityStateRef: { current: null },
       setMessages: harness.setMessages,
-      setActiveStreamCount: vi.fn()
+      setActiveStreamCount: vi.fn(),
+      onSessionResponseStateChange
     });
 
     handler({
@@ -181,6 +183,37 @@ describe('createChatSubscriptionEventHandler', () => {
       }
     });
 
+    expect(harness.getMessages()).toHaveLength(0);
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+  });
+
+  it('clears response state for unscoped agent message when role is missing', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'm-unscoped-agent',
+        sender: 'a1',
+        content: 'final answer from agent'
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
     expect(harness.getMessages()).toHaveLength(0);
   });
 
@@ -268,6 +301,134 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
   });
 
+  it('clears selected session on unscoped SSE end events', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+    const setActiveStreamCount = vi.fn();
+    const streamingStateRef = {
+      current: {
+        getActiveCount: vi.fn(() => 0),
+        endAllToolStreams: vi.fn(() => []),
+        handleStart: vi.fn(),
+        handleChunk: vi.fn(),
+        handleEnd: vi.fn(),
+        handleError: vi.fn(),
+        handleToolStreamStart: vi.fn(),
+        handleToolStreamChunk: vi.fn(),
+        handleToolStreamEnd: vi.fn(),
+        isActive: vi.fn(() => false)
+      }
+    };
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount,
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'end',
+        messageId: 'm-1',
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+    expect(streamingStateRef.current.handleEnd).toHaveBeenCalledWith('m-1');
+  });
+
+  it('clears selected session on SSE end without messageId', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+    const setActiveStreamCount = vi.fn();
+    const streamingStateRef = {
+      current: {
+        getActiveCount: vi.fn(() => 0),
+        endAllToolStreams: vi.fn(() => ['tool-1']),
+        handleStart: vi.fn(),
+        handleChunk: vi.fn(),
+        handleEnd: vi.fn(),
+        handleError: vi.fn(),
+        handleToolStreamStart: vi.fn(),
+        handleToolStreamChunk: vi.fn(),
+        handleToolStreamEnd: vi.fn(),
+        isActive: vi.fn(() => false)
+      }
+    };
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      activityStateRef: { current: { setActiveStreamCount: vi.fn() } },
+      setMessages: harness.setMessages,
+      setActiveStreamCount,
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'sse',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      sse: {
+        eventType: 'end'
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+    expect(streamingStateRef.current.endAllToolStreams).toHaveBeenCalledTimes(1);
+    expect(setActiveStreamCount).toHaveBeenCalledWith(0);
+    expect(streamingStateRef.current.handleEnd).not.toHaveBeenCalled();
+  });
+
+  it('clears selected session on unscoped tool-result events', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+    const activityStateRef = {
+      current: {
+        setActiveStreamCount: vi.fn(),
+        handleToolStart: vi.fn(),
+        handleToolResult: vi.fn(),
+        handleToolError: vi.fn(),
+        handleToolProgress: vi.fn()
+      }
+    };
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef,
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'tool',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      tool: {
+        eventType: 'tool-result',
+        toolUseId: 'tool-1',
+        result: 'done'
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+    expect(activityStateRef.current.handleToolResult).toHaveBeenCalledWith('tool-1', 'done');
+  });
+
   it('forwards activity events to session activity callback', () => {
     const harness = createMessageStateHarness();
     const onSessionActivityUpdate = vi.fn();
@@ -304,6 +465,69 @@ describe('createChatSubscriptionEventHandler', () => {
       source: 'agent:planner',
       activeSources: ['agent:planner', 'agent:coder']
     });
+  });
+
+  it('clears session response state when activity reports no pending work', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'response-end',
+        pendingOperations: 0,
+        activityId: 43,
+        source: 'agent:planner',
+        activeSources: []
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+  });
+
+  it('clears selected session response state when activity completion is unscoped', () => {
+    const harness = createMessageStateHarness();
+    const onSessionResponseStateChange = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      activity: {
+        eventType: 'idle',
+        pendingOperations: 0,
+        activityId: 99,
+        source: 'agent:a1',
+        activeSources: []
+      }
+    });
+
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
   });
 
   it('ignores activity events for non-selected chat', () => {
