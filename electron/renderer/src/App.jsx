@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Classified assistant "Calling tool ..." status lines as tool-related messages so they use tool styling and are excluded from branch-chat actions.
  * - 2026-02-16: Added agent-message `branch` action to create a new chat branched from the selected assistant message and auto-select it on success.
  * - 2026-02-16: Disabled message-edit `Save` until content is changed from the original message text.
  * - 2026-02-16: Aligned edit/load fallback defaults for agent provider/model to `ollama` and `llama3.1:8b`.
@@ -283,8 +284,7 @@ function formatLogMessage(logEvent) {
  * Preserves special formatting for tool output and log messages
  */
 function MessageContent({ message }) {
-  const role = String(message?.role || '').toLowerCase();
-  const isToolMessage = role === 'tool' || message.isToolStreaming;
+  const isToolMessage = isToolRelatedMessage(message);
   const [isToolCollapsed, setIsToolCollapsed] = useState(true);
   const MAX_TOOL_OUTPUT_LENGTH = 50000;
 
@@ -448,6 +448,20 @@ function isHumanMessage(message) {
   return role === 'user' && !sender;
 }
 
+function isToolRelatedMessage(message) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  if (role === 'tool' || Boolean(message?.isToolStreaming)) {
+    return true;
+  }
+
+  const content = String(message?.content || '').trim();
+  if (!content) {
+    return false;
+  }
+
+  return /^calling tool(?::|\s)/i.test(content);
+}
+
 function isTrueAgentResponseMessage(message) {
   const role = String(message?.role || '').trim().toLowerCase();
   if (role !== 'assistant') {
@@ -464,6 +478,10 @@ function isTrueAgentResponseMessage(message) {
   }
 
   if (Boolean(message?.isToolStreaming)) {
+    return false;
+  }
+
+  if (isToolRelatedMessage(message)) {
     return false;
   }
 
@@ -525,7 +543,7 @@ function isCrossAgentAssistantMessage(message, messagesById, messages, currentIn
 function getMessageCardClassName(message, messagesById, messages, currentIndex) {
   const role = String(message?.role || '').toLowerCase();
   const isUser = isHumanMessage(message);
-  const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
+  const isTool = isToolRelatedMessage(message);
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
   const isCrossAgent = isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex);
 
@@ -625,7 +643,7 @@ function resolveMessageAvatar(message, agentsById, agentsByName) {
 
   const role = String(message?.role || '').toLowerCase();
   const isSystem = role === 'system' || message?.type === 'log' || Boolean(message?.logEvent);
-  const isTool = role === 'tool' || Boolean(message?.isToolStreaming);
+  const isTool = isToolRelatedMessage(message);
 
   const fromAgentId = String(message?.fromAgentId || '').trim();
   if (fromAgentId && agentsById.has(fromAgentId)) {
