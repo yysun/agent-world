@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-16: Added env-driven global/project skill-scope filtering for the `## Agent Skills` system prompt section.
  * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
  * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
  * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
@@ -51,7 +52,8 @@
 import { nanoid } from 'nanoid';
 import { homedir } from 'os';
 import { filterClientSideMessages } from './message-prep.js';
-import { getSkills, waitForInitialSkillSync } from './skill-registry.js';
+import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from './skill-registry.js';
+import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { createCategoryLogger } from './logger.js';
 
 const logger = createCategoryLogger('core.utils');
@@ -224,9 +226,30 @@ function escapeXmlText(value: string): string {
 async function buildAgentSkillsPromptSection(): Promise<string> {
   await waitForInitialSkillSync();
 
-  const availableSkills = [...getSkills()].sort((left, right) =>
-    left.skill_id.localeCompare(right.skill_id),
-  );
+  const includeGlobalSkills = String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
+  const includeProjectSkills = String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
+
+  const availableSkills = getSkillsForSystemPrompt({
+    includeGlobal: includeGlobalSkills,
+    includeProject: includeProjectSkills,
+  });
+
+  const disabledGlobalSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS);
+  const disabledProjectSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS);
+
+  const filteredAvailableSkills = availableSkills.filter((skill) => {
+    const skillId = String(skill?.skill_id || '').trim();
+    if (!skillId) {
+      return false;
+    }
+
+    const sourceScope = getSkillSourceScope(skillId);
+    if (sourceScope === 'project') {
+      return !disabledProjectSkillIds.has(skillId);
+    }
+
+    return !disabledGlobalSkillIds.has(skillId);
+  });
 
   const lines: string[] = [
     '## Agent Skills',
@@ -238,7 +261,7 @@ async function buildAgentSkillsPromptSection(): Promise<string> {
     '<available_skills>',
   ];
 
-  for (const skill of availableSkills) {
+  for (const skill of filteredAvailableSkills) {
     lines.push('  <skill>');
     lines.push(`    <id>${escapeXmlText(skill.skill_id)}</id>`);
     lines.push(`    <description>${escapeXmlText(skill.description)}</description>`);

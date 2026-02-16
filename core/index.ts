@@ -83,9 +83,13 @@ export {
   syncSkills,
   waitForInitialSkillSync,
   getSkills,
+  getSkillsForSystemPrompt,
   getSkill,
+  getSkillSourceScope,
   clearSkillsForTests,
   type SkillRegistryEntry,
+  type SkillSourceScope,
+  type SkillScopeFilterOptions,
   type SyncSkillsOptions,
   type SyncSkillsResult,
 } from './skill-registry.js';

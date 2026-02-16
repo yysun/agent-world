@@ -12,6 +12,7 @@
  * - Exercises syncSkills through exported singleton helpers
  *
  * Recent Changes:
+ * - 2026-02-16: Added coverage for `getSkillsForSystemPrompt` source-scope filtering (global vs project).
  * - 2026-02-14: Added source-path lookup coverage for `load_skill` runtime resolution.
  * - 2026-02-14: Added default-root coverage for `~/.codex/skills` and precedence regression for project overrides even with older mtimes.
  * - 2026-02-14: Added precedence coverage ensuring project-root skill definitions override user-root collisions by shared front-matter `name`.
@@ -24,6 +25,7 @@ import * as fsModule from 'fs';
 import {
   clearSkillsForTests,
   getSkill,
+  getSkillsForSystemPrompt,
   getSkillSourcePath,
   getSkills,
   syncSkills,
@@ -167,6 +169,66 @@ describe('core/skill-registry', () => {
     ]);
     expect(getSkill('pdf-extract')?.description).toBe('Extract content from PDF files');
     expect(getSkill('pdf-extract')?.hash).toMatch(/^[a-f0-9]{8}$/);
+  });
+
+  it('filters skills by source scope for system prompts', async () => {
+    setupFsScenario(
+      {
+        'user-root': [{ name: 'pdf-folder', type: 'directory' }],
+        'user-root/pdf-folder': [{ name: 'SKILL.md', type: 'file' }],
+        'project-root': [{ name: 'apprun-folder', type: 'directory' }],
+        'project-root/apprun-folder': [{ name: 'SKILL.md', type: 'file' }],
+      },
+      {
+        'user-root/pdf-folder/SKILL.md': {
+          content: [
+            '---',
+            'name: pdf-extract',
+            'description: Extract content from PDF files',
+            '---',
+          ].join('\n'),
+          mtime: new Date('2026-02-14T08:00:00.000Z'),
+        },
+        'project-root/apprun-folder/SKILL.md': {
+          content: [
+            '---',
+            'name: apprun-skills',
+            'description: Build AppRun components',
+            '---',
+          ].join('\n'),
+          mtime: new Date('2026-02-14T08:05:00.000Z'),
+        },
+      },
+    );
+
+    await syncSkills({
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+
+    const globalOnly = getSkillsForSystemPrompt({
+      includeGlobal: true,
+      includeProject: false,
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+    expect(globalOnly.map((entry) => entry.skill_id)).toEqual(['pdf-extract']);
+
+    const projectOnly = getSkillsForSystemPrompt({
+      includeGlobal: false,
+      includeProject: true,
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+    expect(projectOnly.map((entry) => entry.skill_id)).toEqual(['apprun-skills']);
+
+    const noneEnabled = getSkillsForSystemPrompt({
+      includeGlobal: false,
+      includeProject: false,
+      userSkillRoots: ['user-root'],
+      projectSkillRoots: ['project-root'],
+    });
+    expect(noneEnabled).toEqual([]);
   });
 
   it('prefers project skill when user and project roots define the same skill_id, even if project mtime is older', async () => {

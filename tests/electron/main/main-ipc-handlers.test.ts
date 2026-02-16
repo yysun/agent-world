@@ -48,6 +48,9 @@ function createDependencies(overrides: Record<string, unknown> = {}) {
     getWorld: vi.fn(async () => null),
     listChats: vi.fn(async () => []),
     listWorlds: vi.fn(async () => []),
+    getSkillSourceScope: vi.fn(() => 'global'),
+    getSkillsForSystemPrompt: vi.fn(() => []),
+    syncSkills: vi.fn(async () => ({ added: 0, updated: 0, removed: 0, unchanged: 0, total: 0 })),
     newChat: vi.fn(async () => null),
     publishMessage: vi.fn(() => ({})),
     submitWorldOptionResponse: vi.fn(() => ({ accepted: true })),
@@ -259,5 +262,68 @@ describe('createMainIpcHandlers.sendChatMessage', () => {
 
     expect(restoreChat).toHaveBeenCalledWith('world-1', 'chat-missing');
     expect(publishMessage).not.toHaveBeenCalled();
+  });
+
+  it('applies provided skill settings payload to env before publishing', async () => {
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const publishMessage = vi.fn(() => ({
+      messageId: 'msg-1',
+      sender: 'human',
+      content: 'hello',
+      timestamp: Date.now(),
+    }));
+
+    const previousGlobalEnabled = process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
+    const previousProjectEnabled = process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
+    const previousGlobalDisabled = process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS;
+    const previousProjectDisabled = process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
+
+    try {
+      const { handlers } = await createHandlers({ ensureWorldSubscribed, restoreChat, publishMessage });
+
+      await handlers.sendChatMessage({
+        worldId: 'world-1',
+        chatId: 'chat-1',
+        content: 'hello',
+        sender: 'human',
+        systemSettings: {
+          enableGlobalSkills: false,
+          enableProjectSkills: true,
+          disabledGlobalSkillIds: ['find-skills', 'rpd'],
+          disabledProjectSkillIds: ['apprun-skills']
+        }
+      });
+
+      expect(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS).toBe('false');
+      expect(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS).toBe('true');
+      expect(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS).toBe('find-skills,rpd');
+      expect(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS).toBe('apprun-skills');
+      expect(publishMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousGlobalEnabled === undefined) {
+        delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
+      } else {
+        process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = previousGlobalEnabled;
+      }
+
+      if (previousProjectEnabled === undefined) {
+        delete process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
+      } else {
+        process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS = previousProjectEnabled;
+      }
+
+      if (previousGlobalDisabled === undefined) {
+        delete process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS;
+      } else {
+        process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS = previousGlobalDisabled;
+      }
+
+      if (previousProjectDisabled === undefined) {
+        delete process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
+      } else {
+        process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS = previousProjectDisabled;
+      }
+    }
   });
 });

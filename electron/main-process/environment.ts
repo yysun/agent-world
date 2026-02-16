@@ -12,6 +12,7 @@
  * - Preserves existing CLI-parity defaults for storage and Ollama base URL.
  *
  * Recent Changes:
+ * - 2026-02-16: Added system-setting env wiring for `AGENT_WORLD_ENABLE_GLOBAL_SKILLS` and `AGENT_WORLD_ENABLE_PROJECT_SKILLS`.
  * - 2026-02-12: Extracted environment + provider configuration logic from `electron/main.ts`.
  */
 
@@ -42,7 +43,15 @@ export function loadEnvironmentVariables(baseDir: string): void {
   }
 }
 
-export function applySystemSettings(settings: { storageType?: string; dataPath?: string; sqliteDatabase?: string }): void {
+export function applySystemSettings(settings: {
+  storageType?: string;
+  dataPath?: string;
+  sqliteDatabase?: string;
+  enableGlobalSkills?: boolean;
+  enableProjectSkills?: boolean;
+  disabledGlobalSkillIds?: string[];
+  disabledProjectSkillIds?: string[];
+}): void {
   if (settings.storageType) {
     process.env.AGENT_WORLD_STORAGE_TYPE = settings.storageType;
   }
@@ -51,6 +60,24 @@ export function applySystemSettings(settings: { storageType?: string; dataPath?:
   }
   if (settings.sqliteDatabase) {
     process.env.AGENT_WORLD_SQLITE_DATABASE = settings.sqliteDatabase;
+  }
+  if (typeof settings.enableGlobalSkills === 'boolean') {
+    process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = String(settings.enableGlobalSkills);
+  }
+  if (typeof settings.enableProjectSkills === 'boolean') {
+    process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS = String(settings.enableProjectSkills);
+  }
+  if (Array.isArray(settings.disabledGlobalSkillIds)) {
+    process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS = settings.disabledGlobalSkillIds
+      .map((value) => String(value || '').trim())
+      .filter((value) => value.length > 0)
+      .join(',');
+  }
+  if (Array.isArray(settings.disabledProjectSkillIds)) {
+    process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS = settings.disabledProjectSkillIds
+      .map((value) => String(value || '').trim())
+      .filter((value) => value.length > 0)
+      .join(',');
   }
 }
 

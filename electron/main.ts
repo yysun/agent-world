@@ -107,7 +107,8 @@ const {
   deleteWorld,
   getMemory,
   getWorld,
-  getSkills,
+  getSkillSourceScope,
+  getSkillsForSystemPrompt,
   listChats,
   listWorlds,
   newChat,
@@ -189,7 +190,8 @@ const ipcHandlers = createMainIpcHandlers({
   getWorld,
   listChats,
   listWorlds,
-  getSkills,
+  getSkillSourceScope,
+  getSkillsForSystemPrompt,
   syncSkills,
   newChat,
   publishMessage,
@@ -240,6 +242,7 @@ function registerIpcHandlers() {
       const restart = !!p.restart;
       delete p.restart;
       writeSystemSettings(app, p);
+      applySystemSettings(p);
       if (restart) {
         app.relaunch();
         app.exit(0);
@@ -298,6 +301,11 @@ function setupAppLifecycle() {
 
 async function bootstrap() {
   await app.whenReady();
+
+  // Re-apply persisted settings after Electron is ready to ensure userData-backed
+  // preferences are resolved consistently across startup environments.
+  applySystemSettings(readSystemSettings(app));
+
   if (!process.env.AGENT_WORLD_DEFAULT_WORKING_DIRECTORY) {
     const homePath = app.getPath('home');
     const trimmedHomePath = typeof homePath === 'string' ? homePath.trim() : '';

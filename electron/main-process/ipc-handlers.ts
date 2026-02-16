@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
  *   - Validates chat existence before edit delegation.
  *   - Validates target message exists in chat and is a user-role message.
@@ -65,7 +66,8 @@ interface MainIpcHandlerFactoryDependencies {
   getWorld: (worldId: string) => Promise<any>;
   listChats: (worldId: string) => Promise<any[]>;
   listWorlds: () => Promise<any[]>;
-  getSkills: () => any[];
+  getSkillSourceScope: (skillId: string) => 'global' | 'project' | undefined;
+  getSkillsForSystemPrompt: (options?: { includeGlobal?: boolean; includeProject?: boolean }) => any[];
   syncSkills: () => Promise<any> | any;
   newChat: (worldId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
@@ -98,7 +100,8 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     getWorld,
     listChats,
     listWorlds,
-    getSkills,
+    getSkillSourceScope,
+    getSkillsForSystemPrompt,
     syncSkills,
     newChat,
     publishMessage,
@@ -220,16 +223,33 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     return worlds.map((world) => serializeWorldInfo(world));
   }
 
-  async function listSkillRegistry() {
+  async function listSkillRegistry(payload?: unknown) {
     await ensureCoreReady();
     await syncSkills();
-    const skills = Array.isArray(getSkills()) ? getSkills() : [];
+
+    const normalizedPayload = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as { includeGlobalSkills?: unknown; includeProjectSkills?: unknown }
+      : null;
+
+    const includeGlobalSkills = typeof normalizedPayload?.includeGlobalSkills === 'boolean'
+      ? normalizedPayload.includeGlobalSkills
+      : String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
+    const includeProjectSkills = typeof normalizedPayload?.includeProjectSkills === 'boolean'
+      ? normalizedPayload.includeProjectSkills
+      : String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
+
+    const scopedSkills = getSkillsForSystemPrompt({
+      includeGlobal: includeGlobalSkills,
+      includeProject: includeProjectSkills,
+    });
+    const skills = Array.isArray(scopedSkills) ? scopedSkills : [];
     return skills
       .map((skill) => ({
         skill_id: String(skill?.skill_id || '').trim(),
         description: String(skill?.description || '').trim(),
         hash: String(skill?.hash || '').trim(),
-        lastUpdated: String(skill?.lastUpdated || '').trim()
+        lastUpdated: String(skill?.lastUpdated || '').trim(),
+        sourceScope: getSkillSourceScope(String(skill?.skill_id || '').trim()) || 'global'
       }))
       .filter((skill) => skill.skill_id.length > 0);
   }
@@ -665,6 +685,37 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const chatId = payload?.chatId ? String(payload.chatId) : null;
     const content = String(payload?.content || '').trim();
     const sender = payload?.sender ? String(payload.sender).trim() : 'human';
+    const systemSettingsPayload = payload?.systemSettings && typeof payload.systemSettings === 'object'
+      ? payload.systemSettings as {
+        enableGlobalSkills?: unknown;
+        enableProjectSkills?: unknown;
+        disabledGlobalSkillIds?: unknown;
+        disabledProjectSkillIds?: unknown;
+      }
+      : null;
+
+    if (systemSettingsPayload) {
+      if (typeof systemSettingsPayload.enableGlobalSkills === 'boolean') {
+        process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = String(systemSettingsPayload.enableGlobalSkills);
+      }
+      if (typeof systemSettingsPayload.enableProjectSkills === 'boolean') {
+        process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS = String(systemSettingsPayload.enableProjectSkills);
+      }
+
+      if (Array.isArray(systemSettingsPayload.disabledGlobalSkillIds)) {
+        process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS = systemSettingsPayload.disabledGlobalSkillIds
+          .map((value) => String(value || '').trim())
+          .filter((value) => value.length > 0)
+          .join(',');
+      }
+
+      if (Array.isArray(systemSettingsPayload.disabledProjectSkillIds)) {
+        process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS = systemSettingsPayload.disabledProjectSkillIds
+          .map((value) => String(value || '').trim())
+          .filter((value) => value.length > 0)
+          .join(',');
+      }
+    }
 
     if (!worldId) throw new Error('World ID is required.');
     if (!content) throw new Error('Message content is required.');

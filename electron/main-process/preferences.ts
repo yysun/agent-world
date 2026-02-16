@@ -76,6 +76,10 @@ export interface SystemSettings {
   storageType?: string;
   dataPath?: string;
   sqliteDatabase?: string;
+  enableGlobalSkills?: boolean;
+  enableProjectSkills?: boolean;
+  disabledGlobalSkillIds?: string[];
+  disabledProjectSkillIds?: string[];
 }
 
 export function readSystemSettings(appLike: AppUserDataLike): SystemSettings {

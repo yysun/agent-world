@@ -37,12 +37,14 @@ import {
 import {
   getSkill,
   getSkillSourcePath,
+  getSkillSourceScope,
   waitForInitialSkillSync,
 } from '../../core/skill-registry.js';
 
 vi.mock('../../core/skill-registry.js', () => ({
   getSkill: vi.fn(),
   getSkillSourcePath: vi.fn(),
+  getSkillSourceScope: vi.fn(() => 'global'),
   waitForInitialSkillSync: vi.fn(async () => ({
     added: 0,
     updated: 0,
@@ -79,6 +81,7 @@ vi.mock('../../core/shell-cmd-tool.js', () => ({
 const fs = vi.mocked(fsModule.promises);
 const mockedGetSkill = vi.mocked(getSkill);
 const mockedGetSkillSourcePath = vi.mocked(getSkillSourcePath);
+const mockedGetSkillSourceScope = vi.mocked(getSkillSourceScope);
 const mockedWaitForInitialSkillSync = vi.mocked(waitForInitialSkillSync);
 const mockedRequestWorldOption = vi.mocked(requestWorldOption);
 const mockedExecuteShellCommand = vi.mocked(executeShellCommand);
@@ -113,6 +116,12 @@ describe('core/load-skill-tool', () => {
     });
     mockedValidateShellCommandScope.mockReturnValue({ valid: true });
     mockedFormatResultForLLM.mockReturnValue('formatted script output');
+    mockedGetSkillSourceScope.mockReturnValue('global');
+
+    delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
+    delete process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
+    delete process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS;
+    delete process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
   });
 
   it('returns skill context with full SKILL.md content when skill exists', async () => {
@@ -147,6 +156,42 @@ describe('core/load-skill-tool', () => {
     expect(result).toContain('<skill_context id="missing-skill">');
     expect(result).toContain('<error>');
     expect(result).toContain('was not found in the current registry');
+  });
+
+  it('blocks load_skill when global skills are disabled in system settings', async () => {
+    process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = 'false';
+    mockedGetSkillSourceScope.mockReturnValue('global');
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'pdf-extract',
+      description: 'Extract PDF content',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/pdf-extract/SKILL.md');
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute({ skill_id: 'pdf-extract' });
+
+    expect(result).toContain('is disabled by current system settings');
+    expect(fs.readFile).not.toHaveBeenCalled();
+  });
+
+  it('blocks load_skill when skill id is disabled by per-skill settings', async () => {
+    process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS = 'find-skills';
+    mockedGetSkillSourceScope.mockReturnValue('project');
+    mockedGetSkill.mockReturnValue({
+      skill_id: 'find-skills',
+      description: 'Find skills',
+      hash: 'e99a18ad',
+      lastUpdated: '2026-02-14T12:00:00.000Z',
+    });
+    mockedGetSkillSourcePath.mockReturnValue('/skills/find-skills/SKILL.md');
+
+    const tool = createLoadSkillToolDefinition();
+    const result = await tool.execute({ skill_id: 'find-skills' });
+
+    expect(result).toContain('is disabled by current system settings');
+    expect(fs.readFile).not.toHaveBeenCalled();
   });
 
   it('returns structured read-error output when skill file cannot be read', async () => {

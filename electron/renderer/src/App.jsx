@@ -21,6 +21,7 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Added System Settings skill-scope toggles (`Enable Global Skills`, `Enable Project Skills`) with darker switch styling.
  * - 2026-02-15: Suppressed reply-target sender labels when the replying agent has `autoReply` disabled; chat rows now show plain sender names in that mode.
  * - 2026-02-15: Updated welcome-card visibility to depend on user/assistant conversation messages only, so tool/system/error-only event rows do not hide onboarding content.
  * - 2026-02-15: Stabilized desktop chat layout by constraining horizontal overflow, top-aligning empty-session welcome content, and adding a bounded scroll area for long skill lists.
@@ -170,6 +171,85 @@ const WORLD_PROVIDER_OPTIONS = [
 const DRAG_REGION_STYLE = { WebkitAppRegion: 'drag' };
 const NO_DRAG_REGION_STYLE = { WebkitAppRegion: 'no-drag' };
 const HUMAN_SENDER_VALUES = new Set(['human', 'user', 'you']);
+const DEFAULT_SYSTEM_SETTINGS = {
+  storageType: '',
+  dataPath: '',
+  sqliteDatabase: '',
+  enableGlobalSkills: true,
+  enableProjectSkills: true,
+  disabledGlobalSkillIds: [],
+  disabledProjectSkillIds: [],
+};
+
+function normalizeStringList(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  const unique = new Set(
+    values
+      .map((value) => String(value || '').trim())
+      .filter((value) => value.length > 0)
+  );
+  return [...unique].sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeSystemSettings(settings) {
+  if (!settings || typeof settings !== 'object') {
+    return { ...DEFAULT_SYSTEM_SETTINGS };
+  }
+
+  return {
+    storageType: String(settings.storageType || ''),
+    dataPath: String(settings.dataPath || ''),
+    sqliteDatabase: String(settings.sqliteDatabase || ''),
+    enableGlobalSkills: settings.enableGlobalSkills !== false,
+    enableProjectSkills: settings.enableProjectSkills !== false,
+    disabledGlobalSkillIds: normalizeStringList(settings.disabledGlobalSkillIds),
+    disabledProjectSkillIds: normalizeStringList(settings.disabledProjectSkillIds),
+  };
+}
+
+function SettingsSwitch({ label, checked, onClick }) {
+  return (
+    <div className="flex items-center justify-between rounded-md pr-1 py-1">
+      <span className="text-xs font-bold text-sidebar-foreground/90">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-label={label}
+        aria-checked={checked}
+        onClick={onClick}
+        className="rounded-full"
+      >
+        <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? 'bg-sidebar-primary/62' : 'bg-sidebar-foreground/24'}`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-4' : 'translate-x-1'}`} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function SettingsSkillSwitch({ label, checked, onClick, disabled }) {
+  return (
+    <div className="flex items-center justify-between rounded-md px-1 py-1">
+      <span className={`text-xs ${disabled ? 'text-sidebar-foreground/45' : 'text-sidebar-foreground/80'}`}>{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-label={label}
+        aria-checked={checked}
+        onClick={onClick}
+        disabled={disabled}
+        className="rounded-full disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${checked ? 'bg-sidebar-primary/62' : 'bg-sidebar-foreground/24'}`}>
+          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </span>
+      </button>
+    </div>
+  );
+}
 
 function formatLogMessage(logEvent) {
   const baseMessage = String(logEvent?.message || '');
@@ -744,7 +824,8 @@ function normalizeSkillSummaryEntries(rawEntries) {
       const skillId = String(entry?.skill_id || entry?.name || '').trim();
       if (!skillId) return null;
       const description = String(entry?.description || '').trim();
-      return { skillId, description };
+      const sourceScope = String(entry?.sourceScope || '').trim() === 'project' ? 'project' : 'global';
+      return { skillId, description, sourceScope };
     })
     .filter(Boolean);
 
@@ -790,8 +871,8 @@ export default function App() {
   const [panelMode, setPanelMode] = useState('create-world');
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [themePreference, setThemePreference] = useState(getStoredThemePreference);
-  const [systemSettings, setSystemSettings] = useState({ storageType: '', dataPath: '', sqliteDatabase: '' });
-  const savedSystemSettingsRef = useRef({ storageType: '', dataPath: '', sqliteDatabase: '' });
+  const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
+  const savedSystemSettingsRef = useRef(DEFAULT_SYSTEM_SETTINGS);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [status, setStatus] = useState(() => getStatusBarStatus());
   const [creatingWorld, setCreatingWorld] = useState(getDefaultWorldForm);
@@ -803,6 +884,7 @@ export default function App() {
   const [updatingWorld, setUpdatingWorld] = useState(false);
   const [deletingWorld, setDeletingWorld] = useState(false);
   const [refreshingWorldInfo, setRefreshingWorldInfo] = useState(false);
+  const [savingSystemSettings, setSavingSystemSettings] = useState(false);
   const [savingAgent, setSavingAgent] = useState(false);
   const [deletingAgent, setDeletingAgent] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState(null);
@@ -1200,7 +1282,10 @@ export default function App() {
     setLoadingSkillRegistry(true);
     setSkillRegistryError('');
     try {
-      const rawEntries = await api.listSkills();
+      const rawEntries = await api.listSkills({
+        includeGlobalSkills: true,
+        includeProjectSkills: true,
+      });
       setSkillRegistryEntries(normalizeSkillSummaryEntries(rawEntries));
     } catch (error) {
       setSkillRegistryEntries([]);
@@ -1209,6 +1294,59 @@ export default function App() {
       setLoadingSkillRegistry(false);
     }
   }, [api]);
+
+  const disabledGlobalSkillIdSet = useMemo(
+    () => new Set(normalizeStringList(systemSettings.disabledGlobalSkillIds)),
+    [systemSettings.disabledGlobalSkillIds],
+  );
+
+  const disabledProjectSkillIdSet = useMemo(
+    () => new Set(normalizeStringList(systemSettings.disabledProjectSkillIds)),
+    [systemSettings.disabledProjectSkillIds],
+  );
+
+  const visibleSkillRegistryEntries = useMemo(() => {
+    return skillRegistryEntries.filter((entry) => {
+      const isProject = entry.sourceScope === 'project';
+      if (isProject) {
+        if (systemSettings.enableProjectSkills === false) return false;
+        return !disabledProjectSkillIdSet.has(entry.skillId);
+      }
+
+      if (systemSettings.enableGlobalSkills === false) return false;
+      return !disabledGlobalSkillIdSet.has(entry.skillId);
+    });
+  }, [disabledGlobalSkillIdSet, disabledProjectSkillIdSet, skillRegistryEntries, systemSettings.enableGlobalSkills, systemSettings.enableProjectSkills]);
+
+  const globalSkillEntries = useMemo(
+    () => skillRegistryEntries.filter((entry) => entry.sourceScope !== 'project'),
+    [skillRegistryEntries],
+  );
+
+  const projectSkillEntries = useMemo(
+    () => skillRegistryEntries.filter((entry) => entry.sourceScope === 'project'),
+    [skillRegistryEntries],
+  );
+
+  const toggleSkillEnabled = useCallback((sourceScope, skillId) => {
+    const normalizedSkillId = String(skillId || '').trim();
+    if (!normalizedSkillId) return;
+
+    setSystemSettings((settings) => {
+      const key = sourceScope === 'project' ? 'disabledProjectSkillIds' : 'disabledGlobalSkillIds';
+      const existing = new Set(normalizeStringList(settings[key]));
+      if (existing.has(normalizedSkillId)) {
+        existing.delete(normalizedSkillId);
+      } else {
+        existing.add(normalizedSkillId);
+      }
+
+      return {
+        ...settings,
+        [key]: [...existing].sort((left, right) => left.localeCompare(right)),
+      };
+    });
+  }, []);
 
   const initialize = useCallback(async () => {
     try {
@@ -1478,13 +1616,7 @@ export default function App() {
   useEffect(() => {
     if (!api.getSettings) return;
     api.getSettings().then((s) => {
-      if (s && typeof s === 'object') {
-        setSystemSettings({
-          storageType: s.storageType || '',
-          dataPath: s.dataPath || '',
-          sqliteDatabase: s.sqliteDatabase || '',
-        });
-      }
+      setSystemSettings(normalizeSystemSettings(s));
     }).catch(() => { });
   }, []);
 
@@ -1631,11 +1763,31 @@ export default function App() {
     return false;
   }, [panelMode, creatingAgent, editingAgent, selectedAgentForPanel]);
 
+  const hasUnsavedSystemSettingsChanges = useCallback(() => {
+    if (panelMode !== 'settings') {
+      return false;
+    }
+
+    const saved = normalizeSystemSettings(savedSystemSettingsRef.current);
+    const current = normalizeSystemSettings(systemSettings);
+
+    return (
+      current.storageType !== saved.storageType ||
+      current.dataPath !== saved.dataPath ||
+      current.sqliteDatabase !== saved.sqliteDatabase ||
+      current.enableGlobalSkills !== saved.enableGlobalSkills ||
+      current.enableProjectSkills !== saved.enableProjectSkills ||
+      normalizeStringList(current.disabledGlobalSkillIds).join('|') !== normalizeStringList(saved.disabledGlobalSkillIds).join('|') ||
+      normalizeStringList(current.disabledProjectSkillIds).join('|') !== normalizeStringList(saved.disabledProjectSkillIds).join('|')
+    );
+  }, [panelMode, systemSettings]);
+
   const closePanel = useCallback(() => {
     const hasWorldChanges = hasUnsavedWorldChanges();
     const hasAgentChanges = hasUnsavedAgentChanges();
+    const hasSettingsChanges = hasUnsavedSystemSettingsChanges();
 
-    if (hasWorldChanges || hasAgentChanges) {
+    if (hasWorldChanges || hasAgentChanges || hasSettingsChanges) {
       const confirmed = window.confirm('You have unsaved changes. Are you sure you want to close this panel?');
       if (!confirmed) return;
     }
@@ -1643,7 +1795,7 @@ export default function App() {
     setPanelOpen(false);
     setPanelMode('create-world');
     setSelectedAgentId(null);
-  }, [hasUnsavedWorldChanges, hasUnsavedAgentChanges]);
+  }, [hasUnsavedWorldChanges, hasUnsavedAgentChanges, hasUnsavedSystemSettingsChanges]);
 
   const onOpenSettingsPanel = useCallback(async () => {
     setPanelMode('settings');
@@ -1651,15 +1803,9 @@ export default function App() {
     if (!api.getSettings) return;
     try {
       const s = await api.getSettings();
-      if (s && typeof s === 'object') {
-        const loaded = {
-          storageType: s.storageType || '',
-          dataPath: s.dataPath || '',
-          sqliteDatabase: s.sqliteDatabase || '',
-        };
-        setSystemSettings(loaded);
-        savedSystemSettingsRef.current = loaded;
-      }
+      const loaded = normalizeSystemSettings(s);
+      setSystemSettings(loaded);
+      savedSystemSettingsRef.current = loaded;
     } catch { }
   }, [api]);
 
@@ -1673,26 +1819,33 @@ export default function App() {
   }, [systemSettings]);
 
   const onCancelSettings = useCallback(() => {
-    setSystemSettings(savedSystemSettingsRef.current);
-  }, []);
+    setSystemSettings(normalizeSystemSettings(savedSystemSettingsRef.current));
+    closePanel();
+  }, [closePanel]);
 
   const onSaveSettings = useCallback(async () => {
-    if (!api.saveSettings) return;
+    if (!api.saveSettings || savingSystemSettings) return;
     const needsRestart = settingsNeedRestart;
     if (needsRestart) {
       const confirmed = window.confirm('Changes require a restart to take effect. Continue?');
       if (!confirmed) return;
     }
+    setSavingSystemSettings(true);
     try {
       await api.saveSettings({ ...systemSettings, restart: needsRestart });
+      savedSystemSettingsRef.current = { ...systemSettings };
       if (!needsRestart) {
-        savedSystemSettingsRef.current = { ...systemSettings };
+        await refreshSkillRegistry();
+        setPanelOpen(false);
+        setPanelMode('create-world');
         setStatusText('Settings saved.', 'success');
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to save settings.'), 'error');
+    } finally {
+      setSavingSystemSettings(false);
     }
-  }, [systemSettings, settingsNeedRestart]);
+  }, [api, refreshSkillRegistry, savingSystemSettings, setStatusText, settingsNeedRestart, systemSettings]);
 
   const onOpenCreateWorldPanel = useCallback(() => {
     setPanelMode('create-world');
@@ -2095,7 +2248,13 @@ export default function App() {
         worldId: loadedWorld.id,
         chatId: activeSessionId,
         content,
-        sender: 'human'
+        sender: 'human',
+        systemSettings: {
+          enableGlobalSkills: systemSettings.enableGlobalSkills !== false,
+          enableProjectSkills: systemSettings.enableProjectSkills !== false,
+          disabledGlobalSkillIds: normalizeStringList(systemSettings.disabledGlobalSkillIds),
+          disabledProjectSkillIds: normalizeStringList(systemSettings.disabledProjectSkillIds),
+        }
       });
       setComposer('');
     } catch (error) {
@@ -2113,7 +2272,7 @@ export default function App() {
         return next;
       });
     }
-  }, [api, composer, selectedSessionId, loadedWorld, setStatusText, sendingSessionIds]);
+  }, [api, composer, selectedSessionId, loadedWorld, setStatusText, sendingSessionIds, systemSettings]);
 
   const onStopMessage = useCallback(async () => {
     if (!loadedWorld?.id || !selectedSessionId) {
@@ -2961,16 +3120,16 @@ export default function App() {
                           <div className="mb-2 flex items-center justify-between">
                             <h3 className="text-sm font-medium text-foreground/90">Skills</h3>
                             <span className="text-xs text-muted-foreground">
-                              {skillRegistryEntries.length}
+                              {visibleSkillRegistryEntries.length}
                             </span>
                           </div>
 
                           {loadingSkillRegistry ? (
                             <p className="text-sm text-muted-foreground">Loading skills...</p>
-                          ) : skillRegistryEntries.length > 0 ? (
+                          ) : visibleSkillRegistryEntries.length > 0 ? (
                             <div className="max-h-[48vh] overflow-y-auto pr-1">
                               <ul className="grid gap-1.5 sm:grid-cols-2">
-                                {skillRegistryEntries.map((entry) => (
+                                {visibleSkillRegistryEntries.map((entry) => (
                                   <li
                                     key={entry.skillId}
                                     className="rounded-md bg-muted/20 px-2.5 py-2"
@@ -3291,6 +3450,50 @@ export default function App() {
                                   <span className="text-[10px] text-sidebar-foreground/50">AGENT_WORLD_SQLITE_DATABASE</span>
                                 </div>
                               )}
+
+                              <div className="mt-2 border-t border-sidebar-border pt-2">
+                                <SettingsSwitch
+                                  label="Enable Global Skills"
+                                  checked={systemSettings.enableGlobalSkills !== false}
+                                  onClick={() => setSystemSettings((s) => ({ ...s, enableGlobalSkills: s.enableGlobalSkills === false }))}
+                                />
+                                <div className="ml-1 space-y-0.5">
+                                  {globalSkillEntries.length > 0 ? (
+                                    globalSkillEntries.map((entry) => (
+                                      <SettingsSkillSwitch
+                                        key={`global-${entry.skillId}`}
+                                        label={entry.skillId}
+                                        checked={!disabledGlobalSkillIdSet.has(entry.skillId)}
+                                        onClick={() => toggleSkillEnabled('global', entry.skillId)}
+                                        disabled={systemSettings.enableGlobalSkills === false}
+                                      />
+                                    ))
+                                  ) : (
+                                    <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No global skills discovered.</p>
+                                  )}
+                                </div>
+
+                                <SettingsSwitch
+                                  label="Enable Project Skills"
+                                  checked={systemSettings.enableProjectSkills !== false}
+                                  onClick={() => setSystemSettings((s) => ({ ...s, enableProjectSkills: s.enableProjectSkills === false }))}
+                                />
+                                <div className="ml-1 space-y-0.5">
+                                  {projectSkillEntries.length > 0 ? (
+                                    projectSkillEntries.map((entry) => (
+                                      <SettingsSkillSwitch
+                                        key={`project-${entry.skillId}`}
+                                        label={entry.skillId}
+                                        checked={!disabledProjectSkillIdSet.has(entry.skillId)}
+                                        onClick={() => toggleSkillEnabled('project', entry.skillId)}
+                                        disabled={systemSettings.enableProjectSkills === false}
+                                      />
+                                    ))
+                                  ) : (
+                                    <p className="px-1 py-1 text-[11px] text-sidebar-foreground/50">No project skills discovered.</p>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -3299,16 +3502,18 @@ export default function App() {
                           <button
                             type="button"
                             onClick={onCancelSettings}
-                            className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent"
+                            disabled={savingSystemSettings}
+                            className="rounded-xl border border-sidebar-border px-3 py-1 text-xs text-sidebar-foreground hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             Cancel
                           </button>
                           <button
                             type="button"
                             onClick={onSaveSettings}
-                            className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                            disabled={savingSystemSettings}
+                            className="rounded-xl bg-sidebar-primary px-3 py-1 text-xs font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            {settingsNeedRestart ? 'Save & Restart' : 'Save'}
+                            {savingSystemSettings ? 'Saving...' : (settingsNeedRestart ? 'Save & Restart' : 'Save')}
                           </button>
                         </div>
                       </div>

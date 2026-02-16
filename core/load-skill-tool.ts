@@ -31,6 +31,7 @@ import * as path from 'path';
 import {
   getSkill,
   getSkillSourcePath,
+  getSkillSourceScope,
   waitForInitialSkillSync,
 } from './skill-registry.js';
 import {
@@ -38,6 +39,7 @@ import {
   formatResultForLLM,
   validateShellCommandScope,
 } from './shell-cmd-tool.js';
+import { parseSkillIdListFromEnv } from './skill-settings.js';
 import { requestWorldOption } from './hitl.js';
 
 const APPROVAL_OPTION_YES_ONCE = 'yes_once';
@@ -94,6 +96,33 @@ function buildDeclinedResult(skillId: string): string {
     '  </error>',
     '</skill_context>',
   ].join('\n');
+}
+
+function buildDisabledBySettingsResult(skillId: string): string {
+  const escapedSkillId = escapeXmlText(skillId);
+  return [
+    `<skill_context id="${escapedSkillId}">`,
+    '  <error>',
+    `    Skill "${escapedSkillId}" is disabled by current system settings and cannot be loaded.`,
+    '  </error>',
+    '</skill_context>',
+  ].join('\n');
+}
+
+function isSkillEnabledBySettings(skillId: string): boolean {
+  const includeGlobalSkills = String(process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS ?? 'true').toLowerCase() !== 'false';
+  const includeProjectSkills = String(process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS ?? 'true').toLowerCase() !== 'false';
+  const disabledGlobalSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS);
+  const disabledProjectSkillIds = parseSkillIdListFromEnv(process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS);
+
+  const sourceScope = getSkillSourceScope(skillId);
+  if (sourceScope === 'project') {
+    if (!includeProjectSkills) return false;
+    return !disabledProjectSkillIds.has(skillId);
+  }
+
+  if (!includeGlobalSkills) return false;
+  return !disabledGlobalSkillIds.has(skillId);
 }
 
 function normalizeScriptPath(scriptPath: string): string {
@@ -470,6 +499,10 @@ export function createLoadSkillToolDefinition() {
       const sourcePath = getSkillSourcePath(requestedSkillId);
       if (!entry || !sourcePath) {
         return buildNotFoundResult(requestedSkillId);
+      }
+
+      if (!isSkillEnabledBySettings(requestedSkillId)) {
+        return buildDisabledBySettingsResult(requestedSkillId);
       }
 
       try {

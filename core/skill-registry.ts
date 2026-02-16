@@ -19,6 +19,7 @@
  * - Project roots are scanned after user roots, so later collisions always override earlier ones
  *
  * Recent Changes:
+ * - 2026-02-16: Added source-scope filtering helper so callers can include/exclude global or project skills when building system prompts.
  * - 2026-02-14: Added `getSkillSourcePath` API and source-path tracking map for on-demand `SKILL.md` loading.
  * - 2026-02-14: Added `~/.codex/skills` to default user skill roots for Codex-managed skills discovery.
  * - 2026-02-14: Removed timestamp-gated update blocking so project-scope collisions always override user-scope entries when hashes differ.
@@ -42,6 +43,8 @@ export interface SkillRegistryEntry {
   lastUpdated: string;
 }
 
+export type SkillSourceScope = 'global' | 'project';
+
 export interface SyncSkillsOptions {
   userSkillRoots?: string[];
   projectSkillRoots?: string[];
@@ -55,9 +58,17 @@ export interface SyncSkillsResult {
   total: number;
 }
 
+export interface SkillScopeFilterOptions {
+  includeGlobal?: boolean;
+  includeProject?: boolean;
+  userSkillRoots?: string[];
+  projectSkillRoots?: string[];
+}
+
 interface DiscoveredSkill {
   skillFilePath: string;
   lastUpdated: string;
+  sourceScope: SkillSourceScope;
 }
 
 interface SkillFrontMatter {
@@ -83,6 +94,11 @@ function normalizeRoots(roots: string[]): string[] {
     .filter((candidate) => candidate.length > 0)
     .map((candidate) => path.resolve(candidate));
   return [...new Set(resolved)];
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function createContentHash(content: string): string {
@@ -228,10 +244,12 @@ async function readSkillStats(skillFilePath: string): Promise<Stats | null> {
   }
 }
 
-async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSkill>> {
+async function discoverSkills(
+  roots: Array<{ rootPath: string; sourceScope: SkillSourceScope }>,
+): Promise<Map<string, DiscoveredSkill>> {
   const discovered = new Map<string, DiscoveredSkill>();
 
-  for (const rootPath of roots) {
+  for (const { rootPath, sourceScope } of roots) {
     const exists = await pathExists(rootPath);
     if (!exists) {
       continue;
@@ -247,6 +265,7 @@ async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSk
       discovered.set(skillFilePath, {
         skillFilePath,
         lastUpdated: stats.mtime.toISOString(),
+        sourceScope,
       });
     }
   }
@@ -257,12 +276,15 @@ async function discoverSkills(roots: string[]): Promise<Map<string, DiscoveredSk
 function createSkillRegistrySingleton() {
   const registry = new Map<string, SkillRegistryEntry>();
   const registrySourcePaths = new Map<string, string>();
+  const registryScopes = new Map<string, SkillSourceScope>();
 
   async function syncSkills(options: SyncSkillsOptions = {}): Promise<SyncSkillsResult> {
-    const roots = normalizeRoots([
-      ...(options.userSkillRoots ?? buildDefaultUserSkillRoots()),
-      ...(options.projectSkillRoots ?? buildDefaultProjectSkillRoots()),
-    ]);
+    const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
+    const projectRoots = normalizeRoots(options.projectSkillRoots ?? buildDefaultProjectSkillRoots());
+    const roots = [
+      ...userRoots.map((rootPath) => ({ rootPath, sourceScope: 'global' as const })),
+      ...projectRoots.map((rootPath) => ({ rootPath, sourceScope: 'project' as const })),
+    ];
 
     const discovered = await discoverSkills(roots);
     const discoveredIds = new Set<string>();
@@ -273,7 +295,13 @@ function createSkillRegistrySingleton() {
 
     const resolvedDiscovered = new Map<
       string,
-      { description: string; hash: string; lastUpdated: string; skillFilePath: string }
+      {
+        description: string;
+        hash: string;
+        lastUpdated: string;
+        skillFilePath: string;
+        sourceScope: SkillSourceScope;
+      }
     >();
     for (const discoveredSkill of discovered.values()) {
       let content: string;
@@ -295,6 +323,7 @@ function createSkillRegistrySingleton() {
         hash: createContentHash(content),
         lastUpdated: discoveredSkill.lastUpdated,
         skillFilePath: discoveredSkill.skillFilePath,
+        sourceScope: discoveredSkill.sourceScope,
       });
     }
 
@@ -306,6 +335,7 @@ function createSkillRegistrySingleton() {
       const existing = registry.get(skillId);
       const nextHash = discoveredSkill.hash;
       registrySourcePaths.set(skillId, discoveredSkill.skillFilePath);
+      registryScopes.set(skillId, discoveredSkill.sourceScope);
       if (existing && existing.hash === nextHash) {
         unchanged += 1;
         continue;
@@ -330,6 +360,7 @@ function createSkillRegistrySingleton() {
       if (!discoveredIds.has(skillId)) {
         registry.delete(skillId);
         registrySourcePaths.delete(skillId);
+        registryScopes.delete(skillId);
         removed += 1;
       }
     }
@@ -357,12 +388,59 @@ function createSkillRegistrySingleton() {
     return registrySourcePaths.get(skillId);
   }
 
+  function getSkillSourceScope(skillId: string): SkillSourceScope | undefined {
+    return registryScopes.get(skillId);
+  }
+
+  function getSkillsForSystemPrompt(options: SkillScopeFilterOptions = {}): SkillRegistryEntry[] {
+    const includeGlobal = options.includeGlobal !== false;
+    const includeProject = options.includeProject !== false;
+
+    if (!includeGlobal && !includeProject) {
+      return [];
+    }
+
+    const userRoots = normalizeRoots(options.userSkillRoots ?? buildDefaultUserSkillRoots());
+    const projectRoots = normalizeRoots(options.projectSkillRoots ?? buildDefaultProjectSkillRoots());
+
+    return [...registry.values()]
+      .filter((skill) => {
+        const sourcePath = registrySourcePaths.get(skill.skill_id);
+        const sourceScope = registryScopes.get(skill.skill_id);
+        if (sourceScope === 'project') {
+          return includeProject;
+        }
+        if (sourceScope === 'global') {
+          return includeGlobal;
+        }
+
+        if (!sourcePath) {
+          return includeGlobal || includeProject;
+        }
+
+        const resolvedSourcePath = path.resolve(sourcePath);
+        const isProjectSkill = projectRoots.some((rootPath) => isPathWithinRoot(resolvedSourcePath, rootPath));
+        if (isProjectSkill) {
+          return includeProject;
+        }
+
+        const isGlobalSkill = userRoots.some((rootPath) => isPathWithinRoot(resolvedSourcePath, rootPath));
+        if (isGlobalSkill) {
+          return includeGlobal;
+        }
+
+        return includeGlobal && includeProject;
+      })
+      .sort((left, right) => left.skill_id.localeCompare(right.skill_id));
+  }
+
   function clearSkillsForTests(): void {
     registry.clear();
     registrySourcePaths.clear();
+    registryScopes.clear();
   }
 
-  return { syncSkills, getSkills, getSkill, getSkillSourcePath, clearSkillsForTests };
+  return { syncSkills, getSkills, getSkill, getSkillSourcePath, getSkillSourceScope, getSkillsForSystemPrompt, clearSkillsForTests };
 }
 
 export const skillRegistry = createSkillRegistrySingleton();
@@ -370,6 +448,8 @@ export const syncSkills = skillRegistry.syncSkills;
 export const getSkills = skillRegistry.getSkills;
 export const getSkill = skillRegistry.getSkill;
 export const getSkillSourcePath = skillRegistry.getSkillSourcePath;
+export const getSkillSourceScope = skillRegistry.getSkillSourceScope;
+export const getSkillsForSystemPrompt = skillRegistry.getSkillsForSystemPrompt;
 export const clearSkillsForTests = skillRegistry.clearSkillsForTests;
 
 const EMPTY_SYNC_RESULT: SyncSkillsResult = {

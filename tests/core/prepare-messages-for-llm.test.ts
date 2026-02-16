@@ -16,6 +16,7 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-02-16: Updated skill-registry mocking to `getSkillsForSystemPrompt` and added coverage for global/project skill-scope env flags.
  * - 2026-02-15: Added coverage to ensure system-level mention-format rule is injected even when agent has no custom system prompt.
  * - 2026-02-15: Added coverage for concise cross-agent addressing rule injection (`@<agent_id>, <message>`).
  * - 2026-02-14: Added coverage for `## Agent Skills` prompt injection and load_skill guidance.
@@ -27,11 +28,12 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAgent, updateWorld } from '../../core/managers.js';
 import { LLMProvider } from '../../core/types.js';
 import { getDefaultWorkingDirectory, prepareMessagesForLLM } from '../../core/utils.js';
-import { getSkills, waitForInitialSkillSync } from '../../core/skill-registry.js';
+import { getSkillSourceScope, getSkillsForSystemPrompt, waitForInitialSkillSync } from '../../core/skill-registry.js';
 import { setupTestWorld } from '../helpers/world-test-setup.js';
 
 vi.mock('../../core/skill-registry.js', () => ({
-  getSkills: vi.fn(() => []),
+  getSkillSourceScope: vi.fn((skillId: string) => (skillId === 'apprun-skills' ? 'project' : 'global')),
+  getSkillsForSystemPrompt: vi.fn(() => []),
   waitForInitialSkillSync: vi.fn(async () => ({
     added: 0,
     updated: 0,
@@ -41,7 +43,8 @@ vi.mock('../../core/skill-registry.js', () => ({
   })),
 }));
 
-const mockedGetSkills = vi.mocked(getSkills);
+const mockedGetSkillsForSystemPrompt = vi.mocked(getSkillsForSystemPrompt);
+const mockedGetSkillSourceScope = vi.mocked(getSkillSourceScope);
 const mockedWaitForInitialSkillSync = vi.mocked(waitForInitialSkillSync);
 
 describe('prepareMessagesForLLM', () => {
@@ -58,7 +61,7 @@ describe('prepareMessagesForLLM', () => {
       unchanged: 0,
       total: 2,
     });
-    mockedGetSkills.mockReturnValue([
+    mockedGetSkillsForSystemPrompt.mockReturnValue([
       {
         skill_id: 'apprun-skills',
         description: 'Build AppRun components',
@@ -72,6 +75,14 @@ describe('prepareMessagesForLLM', () => {
         lastUpdated: '2026-02-14T09:01:00.000Z',
       },
     ]);
+    mockedGetSkillSourceScope.mockImplementation((skillId: string) =>
+      skillId === 'apprun-skills' ? 'project' : 'global'
+    );
+
+    delete process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS;
+    delete process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS;
+    delete process.env.AGENT_WORLD_DISABLED_GLOBAL_SKILLS;
+    delete process.env.AGENT_WORLD_DISABLED_PROJECT_SKILLS;
   });
 
   test('appends configured world working directory to system prompt', async () => {
@@ -140,5 +151,28 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain(`working directory: ${getDefaultWorkingDirectory()}`);
     expect(messages[0]?.content).toContain('## Agent Skills');
+  });
+
+  test('passes skill-scope flags from environment to system-prompt skill lookup', async () => {
+    process.env.AGENT_WORLD_ENABLE_GLOBAL_SKILLS = 'false';
+    process.env.AGENT_WORLD_ENABLE_PROJECT_SKILLS = 'false';
+
+    await updateWorld(worldId(), {
+      variables: 'working_directory=/tmp/agent-world'
+    });
+
+    const agent = await createAgent(worldId(), {
+      name: 'Prompt Agent Scope Test',
+      type: 'assistant',
+      provider: LLMProvider.OPENAI,
+      model: 'gpt-4',
+      systemPrompt: 'Scoped skills test.'
+    });
+
+    await prepareMessagesForLLM(worldId(), agent, null);
+    expect(mockedGetSkillsForSystemPrompt).toHaveBeenCalledWith({
+      includeGlobal: false,
+      includeProject: false,
+    });
   });
 });

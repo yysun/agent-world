@@ -117,6 +117,12 @@ export interface SkillRegistrySummary {
   description: string;
   hash: string;
   lastUpdated: string;
+  sourceScope?: 'global' | 'project';
+}
+
+export interface SkillListFilterPayload {
+  includeGlobalSkills?: boolean;
+  includeProjectSkills?: boolean;
 }
 
 export interface DesktopApi {
@@ -127,7 +133,7 @@ export interface DesktopApi {
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: () => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
-  listSkills: () => Promise<SkillRegistrySummary[]>;
+  listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;
   createWorld: (payload: Record<string, unknown>) => Promise<unknown>;
   updateWorld: (worldId: string, payload: Record<string, unknown>) => Promise<unknown>;
   deleteWorld: (worldId: string) => Promise<unknown>;
