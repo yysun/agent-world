@@ -21,6 +21,10 @@
  * - Message deduplication handles multi-agent scenarios (user messages shown once)
  *
  * Recent Changes:
+ * - 2026-02-16: Standardized tool-call request headers to `⚙️ Tool request → <tool_name>`.
+ * - 2026-02-16: Fixed tool-call request labeling so `Calling tool: ...` rows show request-oriented headers instead of output-oriented headers.
+ * - 2026-02-16: Refined tool-message wording to user-friendly labels (`Terminal output`, `Execution result`) with less technical fallback text.
+ * - 2026-02-16: Improved tool-message headers to show context-aware labels (e.g., tool names from `Calling tool:` lines) instead of generic `Tool output`.
  * - 2026-02-16: Removed streaming fallback from inline working-indicator visibility to match web behavior (`pendingOperations > 0` only).
  * - 2026-02-16: Aligned inline working-indicator visibility with web behavior using session activity pending-operations (`pendingOperations > 0`) as the sole show/hide signal.
  * - 2026-02-16: Simplified inline working-indicator visibility to depend only on active agent sources from session activity.
@@ -282,6 +286,58 @@ function formatLogMessage(logEvent) {
   return `${baseMessage}: ${detailParts.join(' | ')}`;
 }
 
+function extractToolNameFromMessage(message) {
+  const explicitToolName = String(message?.toolName || message?.tool_name || '').trim();
+  if (explicitToolName) {
+    return explicitToolName;
+  }
+
+  const content = String(message?.content || '');
+  const callingToolMatch = content.match(/calling tool\s*:\s*([a-z0-9_.:-]+)/i);
+  if (callingToolMatch?.[1]) {
+    return callingToolMatch[1];
+  }
+
+  return '';
+}
+
+function getToolMessageHeaderLabel(message) {
+  const content = String(message?.content || '');
+  const isToolCallRequest = /calling tool\s*:/i.test(content);
+  const toolName = extractToolNameFromMessage(message);
+  const normalizedToolName = toolName.toLowerCase();
+  const isShellCommandTool = normalizedToolName === 'shell_cmd' || normalizedToolName === 'shell-cmd' || normalizedToolName === 'shell';
+  const streamType = String(message?.streamType || '').toLowerCase();
+
+  if (isToolCallRequest) {
+    return toolName ? `⚙️ Tool request → ${toolName}` : '⚙️ Tool request';
+  }
+
+  if (message?.isToolStreaming) {
+    if (isShellCommandTool) {
+      return '⚙️ Running command...';
+    }
+    return toolName ? `⚙️ Running ${toolName}...` : '⚙️ Running action...';
+  }
+
+  if (streamType === 'stderr') {
+    if (isShellCommandTool) {
+      return '⚙️ Command errors';
+    }
+    return toolName ? `⚙️ ${toolName} errors` : '⚙️ Execution errors';
+  }
+
+  if (isShellCommandTool) {
+    return '⚙️ Terminal output';
+  }
+
+  if (toolName) {
+    return `⚙️ ${toolName} result`;
+  }
+
+  return '⚙️ Execution result';
+}
+
 /**
  * Message Content Renderer Component
  * Renders message content with markdown support for regular messages
@@ -337,12 +393,13 @@ function MessageContent({ message }) {
     const toolContent = String(message.content || '');
     const isTruncated = toolContent.length > MAX_TOOL_OUTPUT_LENGTH;
     const visibleContent = isTruncated ? toolContent.slice(0, MAX_TOOL_OUTPUT_LENGTH) : toolContent;
+    const toolHeaderLabel = getToolMessageHeaderLabel(message);
 
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {message.isToolStreaming ? '⚙️ Executing...' : '⚙️ Tool output'}
+            {toolHeaderLabel}
           </div>
           <button
             type="button"
