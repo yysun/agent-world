@@ -17,10 +17,10 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { safeMessage } from '../domain/desktop-api.js';
-import { resolveSelectedSessionId } from '../domain/session-selection.js';
-import { sortSessionsByNewest } from '../utils/data-transform.js';
-import { getRefreshWarning } from '../utils/formatting.js';
+import { safeMessage } from '../domain/desktop-api';
+import { resolveSelectedSessionId } from '../domain/session-selection';
+import { sortSessionsByNewest } from '../utils/data-transform';
+import { getRefreshWarning } from '../utils/formatting';
 
 export function useSessionManagement({
   api,

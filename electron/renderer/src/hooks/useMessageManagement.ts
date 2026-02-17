@@ -17,10 +17,10 @@
  */
 
 import { useCallback, useState } from 'react';
-import { safeMessage } from '../domain/desktop-api.js';
-import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform.js';
-import { getRefreshWarning } from '../utils/formatting.js';
-import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils.js';
+import { safeMessage } from '../domain/desktop-api';
+import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
+import { getRefreshWarning } from '../utils/formatting';
+import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
 
 export function useMessageManagement({
   api,

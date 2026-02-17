@@ -16,7 +16,7 @@
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
-import { HUMAN_SENDER_VALUES } from '../constants/app-constants.js';
+import { HUMAN_SENDER_VALUES } from '../constants/app-constants';
 
 export function isHumanMessage(message) {
   const role = String(message?.role || '').toLowerCase();

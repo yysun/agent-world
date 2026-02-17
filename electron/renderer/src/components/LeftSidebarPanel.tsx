@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import WorldInfoCard from './WorldInfoCard.jsx';
+import WorldInfoCard from './WorldInfoCard';
 
 export default function LeftSidebarPanel({
   leftSidebarCollapsed,

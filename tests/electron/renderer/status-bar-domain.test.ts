@@ -21,7 +21,7 @@ import {
   getStatusBarStatus,
   publishStatusBarStatus,
   subscribeStatusBarStatus
-} from '../../../electron/renderer/src/domain/status-bar.js';
+} from '../../../electron/renderer/src/domain/status-bar';
 
 afterEach(() => {
   clearStatusBarStatus();

@@ -21,17 +21,17 @@ import {
   normalizeSystemSettings,
   sortSessionsByNewest,
   upsertEnvVariable,
-} from '../../../electron/renderer/src/utils/data-transform.js';
+} from '../../../electron/renderer/src/utils/data-transform';
 import {
   compactSkillDescription,
   formatLogMessage,
   formatTime,
   getRefreshWarning,
-} from '../../../electron/renderer/src/utils/formatting.js';
+} from '../../../electron/renderer/src/utils/formatting';
 import {
   validateAgentForm,
   validateWorldForm,
-} from '../../../electron/renderer/src/utils/validation.js';
+} from '../../../electron/renderer/src/utils/validation';
 import {
   getMessageCardClassName,
   getMessageIdentity,
@@ -40,7 +40,7 @@ import {
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
-} from '../../../electron/renderer/src/utils/message-utils.js';
+} from '../../../electron/renderer/src/utils/message-utils';
 
 describe('extracted data-transform utils', () => {
   it('normalizes and sorts string lists with deduplication', () => {

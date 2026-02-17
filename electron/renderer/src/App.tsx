@@ -139,23 +139,23 @@ import {
   AppFrameLayout,
   MainWorkspaceLayout,
   AppOverlaysHost,
-} from './components/index.js';
-import { getDesktopApi, safeMessage } from './domain/desktop-api.js';
+} from './components/index';
+import { getDesktopApi, safeMessage } from './domain/desktop-api';
 import {
   getStatusBarStatus,
   publishStatusBarStatus,
   subscribeStatusBarStatus
-} from './domain/status-bar.js';
+} from './domain/status-bar';
 import {
   createGlobalLogEventHandler,
   createChatSubscriptionEventHandler
-} from './domain/chat-event-handlers.js';
-import { useSkillRegistry } from './hooks/useSkillRegistry.js';
-import { useStreamingActivity } from './hooks/useStreamingActivity.js';
-import { useMessageManagement } from './hooks/useMessageManagement.js';
-import { useSessionManagement } from './hooks/useSessionManagement.js';
-import { useThemeSettings } from './hooks/useThemeSettings.js';
-import { useWorldManagement } from './hooks/useWorldManagement.js';
+} from './domain/chat-event-handlers';
+import { useSkillRegistry } from './hooks/useSkillRegistry';
+import { useStreamingActivity } from './hooks/useStreamingActivity';
+import { useMessageManagement } from './hooks/useMessageManagement';
+import { useSessionManagement } from './hooks/useSessionManagement';
+import { useThemeSettings } from './hooks/useThemeSettings';
+import { useWorldManagement } from './hooks/useWorldManagement';
 import {
   COMPOSER_MAX_ROWS,
   DEFAULT_TURN_LIMIT,
@@ -168,21 +168,21 @@ import {
   DRAG_REGION_STYLE,
   NO_DRAG_REGION_STYLE,
   HUMAN_SENDER_VALUES,
-} from './constants/app-constants.js';
+} from './constants/app-constants';
 import {
   upsertEnvVariable,
-} from './utils/data-transform.js';
+} from './utils/data-transform';
 import {
   formatTime,
   getRefreshWarning,
-} from './utils/formatting.js';
+} from './utils/formatting';
 import {
   validateWorldForm,
   validateAgentForm,
-} from './utils/validation.js';
+} from './utils/validation';
 import {
   isHumanMessage,
-} from './utils/message-utils.js';
+} from './utils/message-utils';
 
 function getAgentDisplayName(agent, fallbackIndex) {
   const name = typeof agent?.name === 'string' ? agent.name.trim() : '';

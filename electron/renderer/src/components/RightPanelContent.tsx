@@ -16,14 +16,14 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
-import AgentFormFields from './AgentFormFields.jsx';
-import SettingsSwitch from './SettingsSwitch.jsx';
-import SettingsSkillSwitch from './SettingsSkillSwitch.jsx';
+import AgentFormFields from './AgentFormFields';
+import SettingsSwitch from './SettingsSwitch';
+import SettingsSkillSwitch from './SettingsSkillSwitch';
 import {
   AGENT_PROVIDER_OPTIONS,
   MIN_TURN_LIMIT,
   WORLD_PROVIDER_OPTIONS,
-} from '../constants/app-constants.js';
+} from '../constants/app-constants';
 
 export default function RightPanelContent({
   panelMode,

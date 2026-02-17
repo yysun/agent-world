@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createActivityState } from '../../../electron/renderer/src/activity-state.js';
+import { createActivityState } from '../../../electron/renderer/src/activity-state';
 
 describe('createActivityState', () => {
   let callbacks;

@@ -16,30 +16,38 @@
  * Recent Changes:
  * - 2026-02-13: Hardened API to return/emit shallow copies to prevent accidental external mutation of internal state.
  * - 2026-02-13: Initial shared status bar service extracted from App-local state updates.
+ * - 2026-02-17: Migrated module from JS to TS with typed status/listener contracts.
  */
 
-const STATUS_KINDS = new Set(['info', 'success', 'error']);
+export type StatusKind = 'info' | 'success' | 'error';
 
-let currentStatus = {
+export interface StatusBarState {
+  text: string;
+  kind: StatusKind;
+}
+
+const STATUS_KINDS = new Set<StatusKind>(['info', 'success', 'error']);
+
+let currentStatus: StatusBarState = {
   text: '',
-  kind: 'info'
+  kind: 'info',
 };
 
-const listeners = new Set();
+const listeners = new Set<(status: StatusBarState) => void>();
 
-function cloneStatus(status) {
+function cloneStatus(status: Partial<StatusBarState>): StatusBarState {
   return {
     text: String(status?.text || ''),
-    kind: normalizeStatusKind(status?.kind)
+    kind: normalizeStatusKind(status?.kind),
   };
 }
 
-function normalizeStatusKind(kind) {
-  const normalized = String(kind || 'info').trim().toLowerCase();
+function normalizeStatusKind(kind: unknown): StatusKind {
+  const normalized = String(kind || 'info').trim().toLowerCase() as StatusKind;
   return STATUS_KINDS.has(normalized) ? normalized : 'info';
 }
 
-function normalizeStatusText(text) {
+function normalizeStatusText(text: unknown): string {
   if (typeof text !== 'string') {
     if (text == null) return '';
     return String(text);
@@ -52,34 +60,33 @@ function notifyListeners() {
     try {
       listener(cloneStatus(currentStatus));
     } catch {
-      // Ignore listener errors to keep status notifications resilient.
     }
   }
 }
 
-export function getStatusBarStatus() {
+export function getStatusBarStatus(): StatusBarState {
   return cloneStatus(currentStatus);
 }
 
-export function publishStatusBarStatus(text, kind = 'info') {
+export function publishStatusBarStatus(text: unknown, kind: StatusKind | string = 'info'): StatusBarState {
   currentStatus = {
     text: normalizeStatusText(text),
-    kind: normalizeStatusKind(kind)
+    kind: normalizeStatusKind(kind),
   };
   notifyListeners();
   return cloneStatus(currentStatus);
 }
 
-export function clearStatusBarStatus() {
+export function clearStatusBarStatus(): StatusBarState {
   currentStatus = {
     text: '',
-    kind: 'info'
+    kind: 'info',
   };
   notifyListeners();
   return cloneStatus(currentStatus);
 }
 
-export function subscribeStatusBarStatus(listener) {
+export function subscribeStatusBarStatus(listener: ((status: StatusBarState) => void) | unknown): () => void {
   if (typeof listener !== 'function') {
     return () => { };
   }

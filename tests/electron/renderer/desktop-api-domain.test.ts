@@ -16,7 +16,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { getDesktopApi, safeMessage } from '../../../electron/renderer/src/domain/desktop-api.js';
+import { getDesktopApi, safeMessage } from '../../../electron/renderer/src/domain/desktop-api';
 
 const globalWindow = ((globalThis as any).window ||= {});
 const originalApi = globalWindow.agentWorldDesktop;

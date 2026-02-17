@@ -17,11 +17,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { safeMessage } from '../domain/desktop-api.js';
-import { resolveSelectedSessionId } from '../domain/session-selection.js';
-import { sortSessionsByNewest } from '../utils/data-transform.js';
-import { getRefreshWarning } from '../utils/formatting.js';
-import { validateWorldForm } from '../utils/validation.js';
+import { safeMessage } from '../domain/desktop-api';
+import { resolveSelectedSessionId } from '../domain/session-selection';
+import { sortSessionsByNewest } from '../utils/data-transform';
+import { getRefreshWarning } from '../utils/formatting';
+import { validateWorldForm } from '../utils/validation';
 
 export function useWorldManagement({
   api,

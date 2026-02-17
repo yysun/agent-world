@@ -17,10 +17,10 @@
  * - 2026-02-17: Simplified integration contract to grouped prop objects for message/composer/right-panel composition.
  */
 
-import ComposerBar from './ComposerBar.jsx';
-import MessageListPanel from './MessageListPanel.jsx';
-import RightPanelContent from './RightPanelContent.jsx';
-import RightPanelShell from './RightPanelShell.jsx';
+import ComposerBar from './ComposerBar';
+import MessageListPanel from './MessageListPanel';
+import RightPanelContent from './RightPanelContent';
+import RightPanelShell from './RightPanelShell';
 
 export default function MainContentArea({
   messageListProps,

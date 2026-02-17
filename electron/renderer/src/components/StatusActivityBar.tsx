@@ -16,8 +16,8 @@
  * - 2026-02-17: Extracted from `App.jsx` during Phase 4 component decomposition.
  */
 
-import ActivityPulse from './ActivityPulse.jsx';
-import ElapsedTimeCounter from './ElapsedTimeCounter.jsx';
+import ActivityPulse from './ActivityPulse';
+import ElapsedTimeCounter from './ElapsedTimeCounter';
 
 export default function StatusActivityBar({
   status,

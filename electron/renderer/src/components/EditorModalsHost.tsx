@@ -16,8 +16,8 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
 
-import PromptEditorModal from './PromptEditorModal.jsx';
-import WorldConfigEditorModal from './WorldConfigEditorModal.jsx';
+import PromptEditorModal from './PromptEditorModal';
+import WorldConfigEditorModal from './WorldConfigEditorModal';
 
 export default function EditorModalsHost({
   promptEditorOpen,

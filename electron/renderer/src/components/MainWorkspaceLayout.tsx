@@ -16,9 +16,9 @@
  * - 2026-02-17: Added for Phase 5 final integration cleanup.
  */
 
-import MainHeaderBar from './MainHeaderBar.jsx';
-import MainContentArea from './MainContentArea.jsx';
-import StatusActivityBar from './StatusActivityBar.jsx';
+import MainHeaderBar from './MainHeaderBar';
+import MainContentArea from './MainContentArea';
+import StatusActivityBar from './StatusActivityBar';
 
 export default function MainWorkspaceLayout({
   mainHeaderProps,

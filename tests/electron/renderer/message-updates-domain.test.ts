@@ -20,7 +20,7 @@ import {
   createLogMessage,
   getMessageTimestamp,
   upsertMessageList
-} from '../../../electron/renderer/src/domain/message-updates.js';
+} from '../../../electron/renderer/src/domain/message-updates';
 
 describe('message-updates domain helpers', () => {
   it('returns zero timestamp for invalid values', () => {

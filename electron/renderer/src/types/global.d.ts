@@ -14,7 +14,7 @@
  * - 2026-02-12: Added global bridge typing for Phase 4 typed preload contracts.
  */
 
-import type { DesktopApi } from './desktop-api.js';
+import type { DesktopApi } from './desktop-api';
 
 declare global {
   interface Window {

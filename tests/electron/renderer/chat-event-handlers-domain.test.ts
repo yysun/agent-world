@@ -23,7 +23,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createChatSubscriptionEventHandler,
   createGlobalLogEventHandler
-} from '../../../electron/renderer/src/domain/chat-event-handlers.js';
+} from '../../../electron/renderer/src/domain/chat-event-handlers';
 
 function createMessageStateHarness(initial = []) {
   let value = [...initial];

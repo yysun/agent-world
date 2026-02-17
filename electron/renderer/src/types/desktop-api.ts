@@ -15,4 +15,4 @@
  * - 2026-02-12: Added renderer type bridge to consume shared IPC contracts in Phase 4.
  */
 
-export type { ChatEventPayload, DesktopApi } from '../../../shared/ipc-contracts.js';
+export type { ChatEventPayload, DesktopApi } from '../../../shared/ipc-contracts';

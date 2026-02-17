@@ -18,57 +18,56 @@
  *
  * Recent Changes:
  * - 2026-02-10: Initial implementation
+ * - 2026-02-17: Migrated module from JS to TS with explicit callback/tool entry typings.
  */
 
-const ELAPSED_UPDATE_INTERVAL_MS = 1000; // 1 second
+const ELAPSED_UPDATE_INTERVAL_MS = 1000;
 
-/**
- * @typedef {Object} ToolEntry
- * @property {string} toolUseId
- * @property {string} toolName
- * @property {Object} [toolInput]
- * @property {'running'|'completed'|'error'} status
- * @property {string|null} result
- * @property {string|null} errorMessage
- * @property {string|null} progress
- * @property {string} startedAt
- * @property {string|null} completedAt
- */
+export type ToolStatus = 'running' | 'completed' | 'error';
 
-/**
- * @typedef {Object} ActivityStateCallbacks
- * @property {(entry: ToolEntry) => void} onToolStart
- * @property {(toolUseId: string, result: string) => void} onToolResult
- * @property {(toolUseId: string, errorMessage: string) => void} onToolError
- * @property {(toolUseId: string, progress: string) => void} onToolProgress
- * @property {(elapsedMs: number) => void} onElapsedUpdate
- * @property {(isBusy: boolean) => void} onBusyChange
- */
+export interface ToolEntry {
+  toolUseId: string;
+  toolName: string;
+  toolInput?: Record<string, unknown> | null;
+  status: ToolStatus;
+  result: string | null;
+  errorMessage: string | null;
+  progress: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
 
-/**
- * Create an activity state manager
- * @param {ActivityStateCallbacks} callbacks
- * @returns {Object} Activity state API
- */
-export function createActivityState(callbacks) {
-  /** @type {Map<string, ToolEntry>} */
-  const tools = new Map();
+export interface ActivityStateCallbacks {
+  onToolStart: (entry: ToolEntry) => void;
+  onToolResult: (toolUseId: string, result: string) => void;
+  onToolError: (toolUseId: string, errorMessage: string) => void;
+  onToolProgress: (toolUseId: string, progress: string) => void;
+  onElapsedUpdate: (elapsedMs: number) => void;
+  onBusyChange: (isBusy: boolean) => void;
+}
 
-  /** @type {number|null} Activity start timestamp */
-  let activityStartTime = null;
+export interface ActivityStateApi {
+  handleToolStart: (toolUseId: string, toolName: string, toolInput?: Record<string, unknown>) => ToolEntry;
+  handleToolResult: (toolUseId: string, result: string) => void;
+  handleToolError: (toolUseId: string, errorMessage: string) => void;
+  handleToolProgress: (toolUseId: string, progress: string) => void;
+  setActiveStreamCount: (count: number) => void;
+  getTool: (toolUseId: string) => ToolEntry | null;
+  getActiveToolCount: () => number;
+  getActiveTools: () => ToolEntry[];
+  getIsBusy: () => boolean;
+  getElapsedMs: () => number;
+  cleanup: () => void;
+}
 
-  /** @type {number|null} Interval ID for elapsed updates */
-  let elapsedIntervalId = null;
+export function createActivityState(callbacks: ActivityStateCallbacks): ActivityStateApi {
+  const tools = new Map<string, ToolEntry>();
 
-  /** @type {boolean} */
+  let activityStartTime: number | null = null;
+  let elapsedIntervalId: ReturnType<typeof setInterval> | null = null;
   let isBusy = false;
-
-  /** @type {number} External stream count (from streaming-state) */
   let activeStreamCount = 0;
 
-  /**
-   * Update busy state and notify if changed
-   */
   function updateBusyState() {
     const newBusy = activeStreamCount > 0 || tools.size > 0;
     if (newBusy !== isBusy) {
@@ -83,9 +82,6 @@ export function createActivityState(callbacks) {
     }
   }
 
-  /**
-   * Start the elapsed time timer
-   */
   function startElapsedTimer() {
     activityStartTime = Date.now();
     callbacks.onElapsedUpdate(0);
@@ -98,9 +94,6 @@ export function createActivityState(callbacks) {
     }, ELAPSED_UPDATE_INTERVAL_MS);
   }
 
-  /**
-   * Stop the elapsed time timer
-   */
   function stopElapsedTimer() {
     if (elapsedIntervalId !== null) {
       clearInterval(elapsedIntervalId);
@@ -109,15 +102,8 @@ export function createActivityState(callbacks) {
     activityStartTime = null;
   }
 
-  /**
-   * Handle tool start event
-   * @param {string} toolUseId
-   * @param {string} toolName
-   * @param {Object} [toolInput]
-   * @returns {ToolEntry}
-   */
-  function handleToolStart(toolUseId, toolName, toolInput) {
-    const entry = {
+  function handleToolStart(toolUseId: string, toolName: string, toolInput?: Record<string, unknown>): ToolEntry {
+    const entry: ToolEntry = {
       toolUseId,
       toolName,
       toolInput: toolInput || null,
@@ -126,7 +112,7 @@ export function createActivityState(callbacks) {
       errorMessage: null,
       progress: null,
       startedAt: new Date().toISOString(),
-      completedAt: null
+      completedAt: null,
     };
 
     tools.set(toolUseId, entry);
@@ -135,34 +121,19 @@ export function createActivityState(callbacks) {
     return entry;
   }
 
-  /**
-   * Handle tool result event
-   * @param {string} toolUseId
-   * @param {string} result
-   */
-  function handleToolResult(toolUseId, result) {
+  function handleToolResult(toolUseId: string, result: string) {
     tools.delete(toolUseId);
     callbacks.onToolResult(toolUseId, result);
     updateBusyState();
   }
 
-  /**
-   * Handle tool error event
-   * @param {string} toolUseId
-   * @param {string} errorMessage
-   */
-  function handleToolError(toolUseId, errorMessage) {
+  function handleToolError(toolUseId: string, errorMessage: string) {
     tools.delete(toolUseId);
     callbacks.onToolError(toolUseId, errorMessage);
     updateBusyState();
   }
 
-  /**
-   * Handle tool progress event
-   * @param {string} toolUseId
-   * @param {string} progress
-   */
-  function handleToolProgress(toolUseId, progress) {
+  function handleToolProgress(toolUseId: string, progress: string) {
     const entry = tools.get(toolUseId);
     if (entry) {
       entry.progress = progress;
@@ -170,60 +141,32 @@ export function createActivityState(callbacks) {
     callbacks.onToolProgress(toolUseId, progress);
   }
 
-  /**
-   * Set the active stream count (from streaming-state)
-   * @param {number} count
-   */
-  function setActiveStreamCount(count) {
+  function setActiveStreamCount(count: number) {
     activeStreamCount = count;
     updateBusyState();
   }
 
-  /**
-   * Get a tool entry by ID
-   * @param {string} toolUseId
-   * @returns {ToolEntry|null}
-   */
-  function getTool(toolUseId) {
+  function getTool(toolUseId: string) {
     return tools.get(toolUseId) || null;
   }
 
-  /**
-   * Get count of active tools
-   * @returns {number}
-   */
   function getActiveToolCount() {
     return tools.size;
   }
 
-  /**
-   * Get all active tool entries
-   * @returns {ToolEntry[]}
-   */
   function getActiveTools() {
     return Array.from(tools.values());
   }
 
-  /**
-   * Check if any activity is in progress
-   * @returns {boolean}
-   */
   function getIsBusy() {
     return isBusy;
   }
 
-  /**
-   * Get current elapsed time in milliseconds
-   * @returns {number}
-   */
   function getElapsedMs() {
     if (activityStartTime === null) return 0;
     return Date.now() - activityStartTime;
   }
 
-  /**
-   * Clean up all state (for session switch)
-   */
   function cleanup() {
     tools.clear();
     activeStreamCount = 0;
@@ -245,7 +188,7 @@ export function createActivityState(callbacks) {
     getActiveTools,
     getIsBusy,
     getElapsedMs,
-    cleanup
+    cleanup,
   };
 }
 

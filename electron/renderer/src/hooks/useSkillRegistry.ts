@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { safeMessage } from '../domain/desktop-api.js';
+import { safeMessage } from '../domain/desktop-api';
 
 function normalizeSkillSummaryEntries(rawEntries) {
   if (!Array.isArray(rawEntries)) return [];

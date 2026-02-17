@@ -20,7 +20,7 @@ import {
   MIN_TURN_LIMIT,
   DEFAULT_WORLD_CHAT_LLM_PROVIDER,
   DEFAULT_WORLD_CHAT_LLM_MODEL,
-} from '../constants/app-constants.js';
+} from '../constants/app-constants';
 
 function parseOptionalNumber(value) {
   const text = String(value ?? '').trim();

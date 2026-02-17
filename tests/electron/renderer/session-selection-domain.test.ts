@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveSelectedSessionId } from '../../../electron/renderer/src/domain/session-selection.js';
+import { resolveSelectedSessionId } from '../../../electron/renderer/src/domain/session-selection';
 
 describe('resolveSelectedSessionId', () => {
   it('prefers current selected session when available in sessions', () => {

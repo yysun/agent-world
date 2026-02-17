@@ -20,12 +20,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_SYSTEM_SETTINGS,
   THEME_STORAGE_KEY,
-} from '../constants/app-constants.js';
+} from '../constants/app-constants';
 import {
   normalizeStringList,
   normalizeSystemSettings,
-} from '../utils/data-transform.js';
-import { safeMessage } from '../domain/desktop-api.js';
+} from '../utils/data-transform';
+import { safeMessage } from '../domain/desktop-api';
 
 function getStoredThemePreference() {
   if (typeof window === 'undefined') return 'system';

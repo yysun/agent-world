@@ -17,9 +17,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createStreamingState } from '../streaming-state.js';
-import { createActivityState } from '../activity-state.js';
-import { upsertMessageList } from '../domain/message-updates.js';
+import { createStreamingState } from '../streaming-state';
+import { createActivityState } from '../activity-state';
+import { upsertMessageList } from '../domain/message-updates';
 
 function createIdleSessionActivity() {
   return {

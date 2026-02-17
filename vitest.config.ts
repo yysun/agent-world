@@ -18,6 +18,12 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  poolOptions: {
+    forks: {
+      singleFork: true
+    }
+  },
+
   test: {
     // Environment
     environment: 'node',
@@ -57,11 +63,6 @@ export default defineConfig({
 
     // Sequential execution (equivalent to Jest maxWorkers: 1)
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true
-      }
-    },
 
     // No globals - explicit imports required
     globals: false,

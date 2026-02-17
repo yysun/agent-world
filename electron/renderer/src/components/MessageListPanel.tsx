@@ -16,8 +16,8 @@
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
-import MessageContent from './MessageContent.jsx';
-import { compactSkillDescription, formatTime } from '../utils/formatting.js';
+import MessageContent from './MessageContent';
+import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
   getMessageCardClassName,
   getMessageIdentity,
@@ -25,7 +25,7 @@ import {
   isHumanMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
-} from '../utils/message-utils.js';
+} from '../utils/message-utils';
 
 export default function MessageListPanel({
   messagesContainerRef,

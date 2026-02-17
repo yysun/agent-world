@@ -14,16 +14,31 @@
  *
  * Recent Changes:
  * - 2026-02-12: Extracted message upsert/log conversion helpers from App orchestration.
+ * - 2026-02-17: Migrated module from JS to TS with explicit message shape contracts.
  */
 
-export function getMessageTimestamp(message) {
+export interface MessageLike {
+  id?: string;
+  messageId?: string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+export interface LogEventLike {
+  messageId?: string;
+  message?: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+export function getMessageTimestamp(message: MessageLike): number {
   const value = message?.createdAt;
   if (!value) return 0;
   const timestamp = new Date(value).getTime();
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-export function createLogMessage(logEvent) {
+export function createLogMessage(logEvent: LogEventLike): MessageLike {
   return {
     id: `log-${logEvent?.messageId || Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     messageId: `log-${Date.now()}`,
@@ -33,11 +48,11 @@ export function createLogMessage(logEvent) {
     role: 'system',
     type: 'log',
     createdAt: logEvent?.timestamp || new Date().toISOString(),
-    logEvent
+    logEvent,
   };
 }
 
-export function upsertMessageList(existingMessages, incomingMessage) {
+export function upsertMessageList(existingMessages: MessageLike[], incomingMessage: MessageLike): MessageLike[] {
   const incomingId = String(incomingMessage?.messageId || '').trim();
   if (!incomingId) return existingMessages;
 
@@ -49,13 +64,13 @@ export function upsertMessageList(existingMessages, incomingMessage) {
       ...next[existingIndex],
       ...incomingMessage,
       id: incomingId,
-      messageId: incomingId
+      messageId: incomingId,
     };
   } else {
     next.push({
       ...incomingMessage,
       id: incomingId,
-      messageId: incomingId
+      messageId: incomingId,
     });
   }
 

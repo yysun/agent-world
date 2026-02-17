@@ -14,15 +14,22 @@
  *
  * Recent Changes:
  * - 2026-02-12: Extracted desktop bridge access and error normalization from App orchestration.
+ * - 2026-02-17: Migrated module from JS to TS and bound helpers to typed DesktopApi contract.
  */
 
-export function getDesktopApi() {
+import type { DesktopApi } from '../types/desktop-api';
+
+type DesktopApiWithCompat = DesktopApi & {
+  deleteSession?: DesktopApi['deleteChat'];
+};
+
+export function getDesktopApi(): DesktopApi {
   const api = window.agentWorldDesktop;
   if (!api) {
     throw new Error('Desktop API bridge is unavailable.');
   }
 
-  const nextApi = { ...api };
+  const nextApi: DesktopApiWithCompat = { ...api };
 
   if (typeof nextApi.pickDirectory !== 'function' && typeof nextApi.openWorkspace === 'function') {
     nextApi.pickDirectory = nextApi.openWorkspace;
@@ -32,18 +39,17 @@ export function getDesktopApi() {
     nextApi.openWorkspace = nextApi.pickDirectory;
   }
 
-  // Compatibility: older preload bridges exposed `deleteSession` but not `deleteChat`.
   if (typeof nextApi.deleteChat !== 'function' && typeof nextApi.deleteSession === 'function') {
     return {
       ...nextApi,
-      deleteChat: nextApi.deleteSession
+      deleteChat: nextApi.deleteSession,
     };
   }
 
   return nextApi;
 }
 
-export function safeMessage(error, fallback) {
+export function safeMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }

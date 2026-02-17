@@ -15,8 +15,8 @@
  * - 2026-02-17: Added for Phase 5 final integration cleanup.
  */
 
-import HitlPromptModal from './HitlPromptModal.jsx';
-import EditorModalsHost from './EditorModalsHost.jsx';
+import HitlPromptModal from './HitlPromptModal';
+import EditorModalsHost from './EditorModalsHost';
 
 export default function AppOverlaysHost({ hitlPromptProps, editorModalsProps }) {
   return (

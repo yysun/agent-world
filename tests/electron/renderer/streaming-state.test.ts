@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createStreamingState } from '../../../electron/renderer/src/streaming-state.js';
+import { createStreamingState } from '../../../electron/renderer/src/streaming-state';
 
 describe('createStreamingState', () => {
   let callbacks;

@@ -18,8 +18,8 @@
 
 import { useMemo, useState } from 'react';
 import { renderMarkdown } from '../utils/markdown';
-import { formatLogMessage } from '../utils/formatting.js';
-import { isToolRelatedMessage } from '../utils/message-utils.js';
+import { formatLogMessage } from '../utils/formatting';
+import { isToolRelatedMessage } from '../utils/message-utils';
 
 function extractToolNameFromMessage(message) {
   const explicitToolName = String(message?.toolName || message?.tool_name || '').trim();
