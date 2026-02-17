@@ -105,14 +105,6 @@ Structured output with artifact metadata:
 }
 ```
 
-## AI Command Behavior
-
-For supported AI commands (`codex`, `gemini`, `copilot`):
-
-- Successful runs can publish clean assistant output directly
-- Failed runs include formatted error context
-- Tool results are still preserved in tool-role history for traceability
-
 ## Common Rejection Cases
 
 - Requested `directory` is outside trusted `working_directory`

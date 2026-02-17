@@ -5,12 +5,7 @@
  * - Execute shell commands in child processes with parameter support
  * - Capture stdout and stderr output
  * - Persist command execution history (command, parameters, results, exceptions)
- * - Return results to LLM for further processing (except AI commands)
- * - AI command special handling (gemini, copilot, codex):
- *   * Full tool result saved as 'tool' role message
- *   * Exit code 0: Only stdout saved as 'assistant' message (clean output)
- *   * Exit code != 0: Full formatted result saved as 'assistant' message (includes stderr, errors)
- *   * No additional LLM call to process the output
+ * - Return results to LLM for further processing
  * - Error handling and exception tracking
  * - Long-running command support with 10-minute default timeout
  * - Trusted working-directory enforcement from world/tool context
@@ -54,14 +49,7 @@
  * - 2025-11-11: CRITICAL FIX - Quote parameters for shell execution
  *   * Parameters with spaces/tabs/newlines now properly quoted before spawn
  *   * Prevents shell from splitting multi-word parameters
- *   * Fixes "unrecognized subcommand" errors with commands like "codex exec 'review the last commit'"
  *   * Applied to both execution AND display formatting
- * - 2025-11-11: AI commands (gemini, copilot, codex) bypass LLM:
- *   * Save full tool result as 'tool' message
- *   * Exit code 0: Save only stdout as 'assistant' message (clean output)
- *   * Exit code != 0: Save full formatted result as 'assistant' message (with errors)
- *   * Skip LLM processing entirely
- *   * Improved markdown formatting with headers, code blocks, and status icons
  * - 2025-11-10: Fixed shell execution - enabled shell: true to support PATH resolution and installed commands
  * - Integrated universal parameter validation for consistent tool execution
  * - Enhanced validation to check required parameters and auto-correct types
