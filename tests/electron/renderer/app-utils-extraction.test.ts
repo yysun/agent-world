@@ -1,0 +1,172 @@
+/**
+ * App Utility Extraction Tests
+ * Purpose:
+ * - Verify behavior parity for utilities extracted from App.jsx.
+ *
+ * Key Features:
+ * - Covers data transforms, formatting helpers, and form validation helpers.
+ * - Ensures sorting, env upsert, and warning parsing remain stable.
+ *
+ * Implementation Notes:
+ * - Uses pure-function tests with deterministic input/output.
+ * - No filesystem or network dependencies.
+ *
+ * Recent Changes:
+ * - 2026-02-16: Added tests for extracted constants/util modules from App.jsx.
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  normalizeStringList,
+  normalizeSystemSettings,
+  sortSessionsByNewest,
+  upsertEnvVariable,
+} from '../../../electron/renderer/src/utils/data-transform.js';
+import {
+  compactSkillDescription,
+  formatLogMessage,
+  formatTime,
+  getRefreshWarning,
+} from '../../../electron/renderer/src/utils/formatting.js';
+import {
+  validateAgentForm,
+  validateWorldForm,
+} from '../../../electron/renderer/src/utils/validation.js';
+import {
+  getMessageCardClassName,
+  getMessageIdentity,
+  getMessageSenderLabel,
+  isHumanMessage,
+  isToolRelatedMessage,
+  isTrueAgentResponseMessage,
+  resolveMessageAvatar,
+} from '../../../electron/renderer/src/utils/message-utils.js';
+
+describe('extracted data-transform utils', () => {
+  it('normalizes and sorts string lists with deduplication', () => {
+    expect(normalizeStringList([' b ', 'a', 'b', '', null])).toEqual(['a', 'b']);
+  });
+
+  it('normalizes system settings with safe defaults', () => {
+    const result = normalizeSystemSettings({
+      storageType: 'sqlite',
+      enableGlobalSkills: false,
+      disabledGlobalSkillIds: ['z', 'a', 'z']
+    });
+
+    expect(result.storageType).toBe('sqlite');
+    expect(result.enableGlobalSkills).toBe(false);
+    expect(result.enableProjectSkills).toBe(true);
+    expect(result.disabledGlobalSkillIds).toEqual(['a', 'z']);
+  });
+
+  it('sorts sessions by newest timestamp', () => {
+    const sessions = [
+      { id: '1', createdAt: '2026-02-10T00:00:00.000Z' },
+      { id: '2', updatedAt: '2026-02-16T00:00:00.000Z' },
+      { id: '3', createdAt: '2026-02-12T00:00:00.000Z' },
+    ];
+
+    expect(sortSessionsByNewest(sessions).map((session) => session.id)).toEqual(['2', '3', '1']);
+  });
+
+  it('upserts env variable in text', () => {
+    const initial = 'FOO=bar\nBAZ=qux';
+    expect(upsertEnvVariable(initial, 'FOO', '/tmp/work')).toContain('FOO=/tmp/work');
+    expect(upsertEnvVariable(initial, 'NEW_KEY', 'value')).toContain('NEW_KEY=value');
+  });
+});
+
+describe('extracted formatting utils', () => {
+  it('formats log message with detail data', () => {
+    const message = formatLogMessage({
+      message: 'Tool failed',
+      data: { error: 'timeout', toolCallId: 'abc123' }
+    });
+
+    expect(message).toContain('Tool failed');
+    expect(message).toContain('timeout');
+    expect(message).toContain('toolCallId=abc123');
+  });
+
+  it('formats time safely', () => {
+    expect(formatTime('invalid-date')).toBe('');
+    expect(formatTime('2026-02-16T12:30:00.000Z')).toMatch(/\d{2}:\d{2}/);
+  });
+
+  it('extracts refresh warnings safely', () => {
+    expect(getRefreshWarning({ refreshWarning: '  warning  ' })).toBe('warning');
+    expect(getRefreshWarning({ refreshWarning: 1 })).toBe('');
+  });
+
+  it('compacts long skill descriptions', () => {
+    const value = compactSkillDescription('a'.repeat(120));
+    expect(value.length).toBe(96);
+    expect(value.endsWith('...')).toBe(true);
+  });
+});
+
+describe('extracted validation utils', () => {
+  it('validates world form and enforces required fields', () => {
+    expect(validateWorldForm({ name: '' }).valid).toBe(false);
+
+    const validResult = validateWorldForm({
+      name: 'World',
+      turnLimit: 3,
+      mcpConfig: '{"ok":true}'
+    });
+    expect(validResult.valid).toBe(true);
+    expect(validResult.data?.name).toBe('World');
+  });
+
+  it('rejects invalid world mcp json', () => {
+    const result = validateWorldForm({ name: 'World', mcpConfig: '{invalid' });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('MCP Config');
+  });
+
+  it('validates agent form and requires name/model', () => {
+    expect(validateAgentForm({ name: '', model: 'x' }).valid).toBe(false);
+    expect(validateAgentForm({ name: 'a', model: '' }).valid).toBe(false);
+
+    const valid = validateAgentForm({
+      name: 'Agent',
+      model: 'llama3.1:8b',
+      temperature: '0.7',
+      maxTokens: '2048'
+    });
+
+    expect(valid.valid).toBe(true);
+    expect(valid.data?.temperature).toBe(0.7);
+    expect(valid.data?.maxTokens).toBe(2048);
+  });
+});
+
+describe('extracted message utils', () => {
+  it('classifies human/tool/assistant message roles correctly', () => {
+    expect(isHumanMessage({ role: 'user' })).toBe(true);
+    expect(isToolRelatedMessage({ role: 'tool' })).toBe(true);
+    expect(isTrueAgentResponseMessage({ role: 'assistant', sender: 'agent-a', content: 'hello' })).toBe(true);
+    expect(isTrueAgentResponseMessage({ role: 'assistant', content: 'Calling tool: shell_cmd' })).toBe(false);
+  });
+
+  it('returns stable message identity and style class', () => {
+    const message = { messageId: 'msg-1', role: 'assistant', sender: 'Agent A' };
+    expect(getMessageIdentity(message)).toBe('msg-1');
+    const className = getMessageCardClassName(message, new Map(), [message], 0);
+    expect(className).toContain('rounded-lg');
+  });
+
+  it('builds sender label and avatar fallbacks', () => {
+    const agentById = new Map([
+      ['a1', { name: 'Planner', initials: 'PL', autoReply: true }]
+    ]);
+    const agentByName = new Map([
+      ['planner', { name: 'Planner', initials: 'PL', autoReply: true }]
+    ]);
+
+    const message = { role: 'assistant', sender: 'Planner', fromAgentId: 'a1', messageId: 'm1' };
+    expect(getMessageSenderLabel(message, new Map(), [message], 0, agentById, agentByName)).toBe('Planner');
+    expect(resolveMessageAvatar(message, agentById, agentByName)).toEqual({ name: 'Planner', initials: 'PL' });
+  });
+});
