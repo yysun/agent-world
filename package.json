@@ -38,7 +38,7 @@
     "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "build:core": "npm run build --workspace=core",
     "build:core:watch": "npm run build --workspace=core -- --watch --preserveWatchOutput",
-    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web",
+    "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run main:build --prefix electron",
     "server:dev": "npx tsx server/index.ts",
     "server:watch": "npx tsx --watch server/index.ts",
     "server:start": "node dist/server/index.js",

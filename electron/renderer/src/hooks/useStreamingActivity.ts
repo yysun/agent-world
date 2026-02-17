@@ -21,6 +21,14 @@ import { createStreamingState } from '../streaming-state';
 import { createActivityState } from '../activity-state';
 import { upsertMessageList } from '../domain/message-updates';
 
+type SessionActivityState = {
+  eventType: string;
+  pendingOperations: number;
+  activityId: number;
+  source: string | null;
+  activeSources: string[];
+};
+
 function createIdleSessionActivity() {
   return {
     eventType: 'idle',
@@ -37,9 +45,9 @@ export function useStreamingActivity({ setMessages }) {
 
   const [isBusy, setIsBusy] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [activeTools, setActiveTools] = useState([]);
+  const [activeTools, setActiveTools] = useState<any[]>([]);
   const [activeStreamCount, setActiveStreamCount] = useState(0);
-  const [sessionActivity, setSessionActivity] = useState(createIdleSessionActivity);
+  const [sessionActivity, setSessionActivity] = useState<SessionActivityState>(createIdleSessionActivity);
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({

@@ -30,10 +30,10 @@ export function useSessionManagement({
   setLoading,
   messageRefreshCounter,
 }) {
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [sessionSearch, setSessionSearch] = useState('');
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
-  const [deletingSessionId, setDeletingSessionId] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   const filteredSessions = useMemo(() => {
     const query = String(sessionSearch || '').trim().toLowerCase();
@@ -41,7 +41,7 @@ export function useSessionManagement({
     return sessions.filter((session) => String(session?.name || '').toLowerCase().includes(query));
   }, [sessions, sessionSearch]);
 
-  const refreshSessions = useCallback(async (worldId, preferredSessionId = null) => {
+  const refreshSessions = useCallback(async (worldId: string | null | undefined, preferredSessionId: string | null = null) => {
     if (!worldId) {
       setSessions([]);
       setSelectedSessionId(null);

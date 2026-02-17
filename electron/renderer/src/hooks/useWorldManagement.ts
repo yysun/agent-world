@@ -35,12 +35,12 @@ export function useWorldManagement({
   getDefaultWorldForm,
   getWorldFormFromWorld,
 }) {
-  const [loadedWorld, setLoadedWorld] = useState(null);
-  const [worldLoadError, setWorldLoadError] = useState(null);
+  const [loadedWorld, setLoadedWorld] = useState<any>(null);
+  const [worldLoadError, setWorldLoadError] = useState<string | null>(null);
   const [loadingWorld, setLoadingWorld] = useState(false);
-  const [availableWorlds, setAvailableWorlds] = useState([]);
-  const [creatingWorld, setCreatingWorld] = useState(getDefaultWorldForm);
-  const [editingWorld, setEditingWorld] = useState(getDefaultWorldForm);
+  const [availableWorlds, setAvailableWorlds] = useState<any[]>([]);
+  const [creatingWorld, setCreatingWorld] = useState<any>(getDefaultWorldForm);
+  const [editingWorld, setEditingWorld] = useState<any>(getDefaultWorldForm);
   const [updatingWorld, setUpdatingWorld] = useState(false);
   const [deletingWorld, setDeletingWorld] = useState(false);
   const [refreshingWorldInfo, setRefreshingWorldInfo] = useState(false);

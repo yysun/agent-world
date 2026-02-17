@@ -42,12 +42,12 @@ export function useMessageManagement({
   setSessionActivity,
 }) {
   const [composer, setComposer] = useState('');
-  const [sendingSessionIds, setSendingSessionIds] = useState(new Set());
-  const [stoppingSessionIds, setStoppingSessionIds] = useState(new Set());
-  const [pendingResponseSessionIds, setPendingResponseSessionIds] = useState(new Set());
-  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [sendingSessionIds, setSendingSessionIds] = useState<Set<string>>(new Set());
+  const [stoppingSessionIds, setStoppingSessionIds] = useState<Set<string>>(new Set());
+  const [pendingResponseSessionIds, setPendingResponseSessionIds] = useState<Set<string>>(new Set());
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
-  const [deletingMessageId, setDeletingMessageId] = useState(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
 
   const resolveMessageTargetChatId = useCallback((message) => {
     const directChatId = String(message?.chatId || '').trim();
