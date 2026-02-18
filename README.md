@@ -204,12 +204,17 @@ npm run test:watch       # Watch mode
 ### Environment Setup
 
 Export your API keys as environment variables 
+For Azure OpenAI, all four `AZURE_OPENAI_*` variables are required together.
 
 ```bash
 # Required if Choose one or more
 export OPENAI_API_KEY="your-key-here"
 export ANTHROPIC_API_KEY="your-key-here"  
 export GOOGLE_API_KEY="your-key-here"
+export AZURE_OPENAI_API_KEY="your-key-here"
+export AZURE_OPENAI_RESOURCE_NAME="your-resource-name"
+export AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name"
+export AZURE_OPENAI_API_VERSION="2024-10-21-preview"
 
 # Default: For local models
 export OLLAMA_BASE_URL="http://localhost:11434"
@@ -221,6 +226,10 @@ Or create a `.env` file in your working directory with:
 OPENAI_API_KEY=your-key-here
 ANTHROPIC_API_KEY=your-key-here
 GOOGLE_API_KEY=your-key-here
+AZURE_OPENAI_API_KEY=your-key-here
+AZURE_OPENAI_RESOURCE_NAME=your-resource-name
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+AZURE_OPENAI_API_VERSION=2024-10-21-preview
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
