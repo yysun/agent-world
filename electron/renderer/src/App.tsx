@@ -13,6 +13,8 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-19: Restricted inline working indicator to the initial `calling LLM...` phase only; hides during streaming/done/tool phases.
+ * - 2026-02-19: Split activity text surfaces: status bar shows full per-agent state, inline indicator shows first active agent state only.
  * - 2026-02-19: Kept per-agent inline activity visible during active runs with explicit done/active/pending labels (e.g. `a1: done; a2: streaming response...`).
  * - 2026-02-19: Limited inline working indicator details to agent-focused activity only (no generic status-bar text).
  * - 2026-02-19: Expanded inline chat working indicator with multi-agent status, queue/tool counts, and elapsed time.
@@ -801,9 +803,6 @@ export default function App() {
     activeTools.length > 0 ||
     activeStreamCount > 0 ||
     isBusy;
-  const showInlineWorkingIndicator =
-    Boolean(selectedSessionId)
-    && Number(sessionActivity.pendingOperations || 0) > 0;
   const inlineWorkingAgentLabel = useMemo(() => {
     if (Array.isArray(activeAgentSources) && activeAgentSources.length > 0) {
       const firstResolved = resolveAgentName(activeAgentSources[0]);
@@ -864,15 +863,19 @@ export default function App() {
       phaseText,
       fallbackAgentName: inlineWorkingAgentLabel,
     });
+    const inlineStatusText = phaseText === 'calling LLM...'
+      ? `${activeAgentNames[0] || inlineWorkingAgentLabel} calling LLM...`
+      : '';
     if (statusText) {
       detailParts.push(statusText);
     }
 
     return {
-      primaryText: statusText || primaryText,
+      primaryText: inlineStatusText || statusText || primaryText,
       detailText: detailParts.length > 1 ? detailParts.slice(1).join(' · ') : '',
       elapsedMs,
       statusText,
+      inlineStatusText,
     };
   }, [
     activeAgentSources,
@@ -885,6 +888,9 @@ export default function App() {
     worldAgents,
     elapsedMs,
   ]);
+  const showInlineWorkingIndicator =
+    Boolean(selectedSessionId)
+    && Boolean(inlineWorkingIndicatorState?.inlineStatusText);
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some((message: any) => {
@@ -1033,6 +1039,7 @@ export default function App() {
 
   const statusActivityBarProps = createStatusActivityBarProps({
     status,
+    agentStatusText: inlineWorkingIndicatorState?.statusText || '',
     hasComposerActivity,
     isAgentWorkInProgress,
     activeTools,

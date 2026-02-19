@@ -13,6 +13,7 @@
  * - Preserves existing renderer behavior and visual styling from the previous inline block.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `agentStatusText` support so full per-agent runtime states can be shown in the status bar.
  * - 2026-02-17: Extracted from `App.jsx` during Phase 4 component decomposition.
  */
 
@@ -21,6 +22,7 @@ import ElapsedTimeCounter from './ElapsedTimeCounter';
 
 export default function StatusActivityBar({
   status,
+  agentStatusText,
   hasComposerActivity,
   isAgentWorkInProgress,
   activeTools,
@@ -49,7 +51,12 @@ export default function StatusActivityBar({
                   · {activeTools.length} tool{activeTools.length === 1 ? '' : 's'}
                 </span>
               ) : null}
-              {status.text ? (
+              {agentStatusText ? (
+                <span className="truncate text-muted-foreground">
+                  · {agentStatusText}
+                </span>
+              ) : null}
+              {!agentStatusText && status.text ? (
                 <span
                   className={`truncate ${status.kind === 'error'
                     ? 'text-destructive'

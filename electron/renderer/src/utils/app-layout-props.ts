@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-19: Added status-bar `agentStatusText` wiring for full per-agent activity summaries.
  * - 2026-02-19: Added inline working indicator state wiring for richer chat activity details.
  * - 2026-02-19: Added left-sidebar prop wiring for world export action.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
@@ -172,6 +173,7 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
 export function createStatusActivityBarProps<T extends PropBag>(input: T) {
   return {
     status: input.status,
+    agentStatusText: input.agentStatusText,
     hasComposerActivity: input.hasComposerActivity,
     isAgentWorkInProgress: input.isAgentWorkInProgress,
     activeTools: input.activeTools,
