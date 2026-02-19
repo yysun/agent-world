@@ -1,5 +1,16 @@
 *
+.docs/
 !dist/
+!dist/index.js
+!dist/index.d.ts
+!dist/core/
+!dist/core/**
+!dist/cli/
+!dist/cli/**
+!dist/server/
+!dist/server/**
+!dist/public/
+!dist/public/**
 !package.json
 !README.md
 !LICENSE
