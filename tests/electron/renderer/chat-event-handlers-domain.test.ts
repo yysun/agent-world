@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-19: Added coverage for realtime CRUD callback routing and chat-scope filtering.
  * - 2026-02-19: Added coverage for elapsed reset on idle→active activity transitions.
  * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
  * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
@@ -732,5 +733,73 @@ describe('createChatSubscriptionEventHandler', () => {
     });
 
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it('forwards CRUD events to session callback', () => {
+    const harness = createMessageStateHarness();
+    const onSessionCrudEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionCrudEvent
+    });
+
+    handler({
+      type: 'crud',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      crud: {
+        operation: 'create',
+        entityType: 'agent',
+        entityId: 'agent-2',
+        createdAt: '2026-02-19T18:00:00.000Z',
+        entityData: { id: 'agent-2' }
+      }
+    });
+
+    expect(onSessionCrudEvent).toHaveBeenCalledWith({
+      operation: 'create',
+      entityType: 'agent',
+      entityId: 'agent-2',
+      chatId: null,
+      createdAt: '2026-02-19T18:00:00.000Z',
+      entityData: { id: 'agent-2' }
+    });
+  });
+
+  it('ignores CRUD events for non-selected chat when chatId is explicit', () => {
+    const harness = createMessageStateHarness();
+    const onSessionCrudEvent = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+      onSessionCrudEvent
+    });
+
+    handler({
+      type: 'crud',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-2',
+      crud: {
+        operation: 'update',
+        entityType: 'agent',
+        entityId: 'agent-2'
+      }
+    });
+
+    expect(onSessionCrudEvent).not.toHaveBeenCalled();
   });
 });

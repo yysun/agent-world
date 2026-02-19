@@ -5,7 +5,7 @@
  *
  * Features:
  * - Global log event handler for status or message timeline updates
- * - Session-scoped realtime handler for message/sse/tool events
+ * - Session-scoped realtime handler for message/sse/tool/system/CRUD events
  * - Stream/activity synchronization helpers
  *
  * Implementation Notes:
@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-19: Added CRUD-event callback routing so renderer can refresh world metadata after background agent updates.
  * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
@@ -85,6 +86,14 @@ interface ChatHandlerOptions {
     messageId: string | null;
     createdAt: string | null;
     content: unknown;
+  }) => void;
+  onSessionCrudEvent?: (event: {
+    operation: string;
+    entityType: string;
+    entityId: string;
+    chatId: string | null;
+    createdAt: string | null;
+    entityData: unknown;
   }) => void;
 }
 
@@ -174,6 +183,7 @@ export function createChatSubscriptionEventHandler({
   onSessionResponseStateChange,
   onSessionActivityUpdate,
   onSessionSystemEvent,
+  onSessionCrudEvent,
 }: ChatHandlerOptions) {
   let lastActivityPendingOperations = 0;
 
@@ -398,6 +408,25 @@ export function createChatSubscriptionEventHandler({
           messageId: systemPayload.messageId ? String(systemPayload.messageId) : null,
           createdAt: systemPayload.createdAt ? String(systemPayload.createdAt) : null,
           content: systemPayload.content,
+        });
+      }
+    }
+
+    if (payload.type === 'crud') {
+      const crudPayload = payload.crud as Record<string, unknown> | undefined;
+      if (!crudPayload) return;
+
+      const crudChatId = String(payload.chatId || crudPayload.chatId || '').trim() || null;
+      if (selectedSessionId && crudChatId && crudChatId !== selectedSessionId) return;
+
+      if (typeof onSessionCrudEvent === 'function') {
+        onSessionCrudEvent({
+          operation: String(crudPayload.operation || ''),
+          entityType: String(crudPayload.entityType || ''),
+          entityId: String(crudPayload.entityId || ''),
+          chatId: crudChatId,
+          createdAt: crudPayload.createdAt ? String(crudPayload.createdAt) : null,
+          entityData: crudPayload.entityData,
         });
       }
     }

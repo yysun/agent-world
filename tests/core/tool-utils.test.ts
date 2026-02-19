@@ -12,6 +12,9 @@
  * - Tests with valid calls to ensure they pass through
  * - Tests with mixed valid and invalid calls
  * - Verifies tool_call_id handling with fallback
+ *
+ * Recent Changes:
+ * - 2026-02-19: Added `create_agent` alias normalization coverage for `auto-reply`/`auto_reply` and `next agent` variants.
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
@@ -375,5 +378,67 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(false);
     expect(validation.error).toContain("Required parameter 'path' is missing or empty");
+  });
+
+  test('normalizes create_agent aliases to canonical autoReply and nextAgent fields', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        autoReply: { type: 'boolean' },
+        nextAgent: { type: 'string' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        name: 'Planner',
+        'auto-reply': false,
+        'next agent': 'executor',
+      },
+      schema,
+      'create_agent',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      name: 'Planner',
+      autoReply: false,
+      nextAgent: 'executor',
+    });
+  });
+
+  test('keeps canonical create_agent fields when aliases are also present', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        autoReply: { type: 'boolean' },
+        nextAgent: { type: 'string' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        name: 'Planner',
+        autoReply: true,
+        'auto-reply': false,
+        nextAgent: 'reviewer',
+        next_agent: 'executor',
+      },
+      schema,
+      'create_agent',
+    );
+
+    expect(validation.valid).toBe(true);
+    expect(validation.correctedArgs).toEqual({
+      name: 'Planner',
+      autoReply: true,
+      nextAgent: 'reviewer',
+    });
   });
 });

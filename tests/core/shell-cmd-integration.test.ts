@@ -5,6 +5,7 @@
  * Features tested:
  * - shell_cmd tool availability in all worlds
  * - load_skill built-in tool availability in all worlds
+ * - create_agent built-in tool availability in all worlds
  * - read_file/list_files/grep built-in tool availability in all worlds
  * - Tool schema and parameter validation
  * - Command execution through tool interface
@@ -16,6 +17,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-19: Added assertion that built-in `create_agent` tool is registered alongside existing built-ins.
  * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
  * - 2026-02-16: Added explicit empty-directory `list_files` coverage (`found=false` + message).
  * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.
@@ -64,6 +66,11 @@ describe('shell_cmd integration with worlds', () => {
     expect(tools.load_skill).toBeDefined();
     expect(tools.load_skill.parameters).toBeDefined();
     expect(tools.load_skill.execute).toBeInstanceOf(Function);
+
+    expect(tools).toHaveProperty('create_agent');
+    expect(tools.create_agent).toBeDefined();
+    expect(tools.create_agent.parameters).toBeDefined();
+    expect(tools.create_agent.execute).toBeInstanceOf(Function);
 
     expect(tools).toHaveProperty('read_file');
     expect(tools.read_file).toBeDefined();

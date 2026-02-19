@@ -8,6 +8,7 @@
  * - Event parsing and routing via AppRun
  * - Streaming message state management
  * - Tool execution event handling (start, progress, result, error)
+ * - CRUD event routing for real-time world/agent refresh handling
  * - Log event processing with error detail extraction
  * - Shell command output streaming (stdout/stderr) with real-time display
  * - Tool call data preservation in streaming chunks
@@ -105,6 +106,18 @@ interface SSEWorldData extends SSEBaseData {
   };
 }
 
+interface SSECrudData extends SSEBaseData {
+  type: 'crud';
+  data?: {
+    operation?: 'create' | 'update' | 'delete';
+    entityType?: 'agent' | 'chat' | 'world';
+    entityId?: string;
+    entityData?: any;
+    chatId?: string | null;
+    timestamp?: string;
+  };
+}
+
 type SSEData =
   | SSEStreamingData
   | SSEMessageData
@@ -112,6 +125,7 @@ type SSEData =
   | SSEConnectionData
   | SSECompleteData
   | SSEWorldData
+  | SSECrudData
   | SSEBaseData;
 
 // Streaming state management
@@ -169,6 +183,9 @@ const handleSSEData = (data: SSEData): void => {
       break;
     case 'world':
       publishEvent('handleWorldActivity', data.data ?? data.payload ?? data);
+      break;
+    case 'crud':
+      publishEvent('handleCrudEvent', data.data ?? data.payload ?? data);
       break;
   }
 };

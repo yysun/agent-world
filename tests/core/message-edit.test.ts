@@ -8,9 +8,10 @@
  *
  * Implementation Notes:
  * - Uses in-memory storage only.
- * - Uses in-memory event storage to emulate persisted system events.
+ * - Uses in-memory event storage to emulate persisted system/CRUD events.
  *
  * Recent Changes:
+ * - 2026-02-19: Updated title-reset coverage to use persisted chat CRUD update events.
  * - 2026-02-14: Updated edit-message expectations for core-managed clear+resend behavior that no longer gates resubmission on `world.currentChatId`.
  * - 2026-02-13: Added coverage for core-managed edit resubmission title reset based on persisted `chat-title-updated` events.
  *
@@ -338,11 +339,15 @@ describe('Message Edit Feature', () => {
         id: 'evt-title-1',
         worldId: world.id,
         chatId: 'chat-1',
-        type: 'system',
+        type: 'crud',
         payload: {
-          eventType: 'chat-title-updated',
-          title: 'hi',
-          source: 'idle'
+          operation: 'update',
+          entityType: 'chat',
+          entityId: 'chat-1',
+          entityData: {
+            name: 'hi',
+            source: 'idle'
+          }
         },
         createdAt: new Date()
       });
@@ -371,11 +376,15 @@ describe('Message Edit Feature', () => {
         id: 'evt-title-2',
         worldId: 'test-world',
         chatId: 'chat-1',
-        type: 'system',
+        type: 'crud',
         payload: {
-          eventType: 'chat-title-updated',
-          title: 'hi',
-          source: 'idle'
+          operation: 'update',
+          entityType: 'chat',
+          entityId: 'chat-1',
+          entityData: {
+            name: 'hi',
+            source: 'idle'
+          }
         },
         createdAt: new Date()
       });

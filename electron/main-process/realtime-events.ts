@@ -11,6 +11,7 @@
  * - Uses dependency injection for window lookup and world subscription API.
  *
  * Recent Changes:
+ * - 2026-02-19: Added realtime CRUD-event forwarding so renderer can refresh agent/world state after tool-driven updates.
  * - 2026-02-16: Fixed activity events (response-start, idle) being filtered out when subscription has a chatId — activity events are world-level and carry no chatId.
  * - 2026-02-13: Added system-event forwarding for chat-title update notifications to renderer subscribers.
  * - 2026-02-13: Preserved unsubscribe tombstones across runtime resets and lifecycle cleanup to keep subscription IDs non-reusable.
@@ -24,6 +25,7 @@
 
 import {
   serializeRealtimeActivityEvent,
+  serializeRealtimeCrudEvent,
   serializeRealtimeLogEvent,
   serializeRealtimeMessageEvent,
   serializeRealtimeSSEEvent,
@@ -265,10 +267,20 @@ export function createRealtimeEventsRuntime(
       });
     };
 
+    const crudHandler = (event: any) => {
+      const eventChatId = event?.chatId ? String(event.chatId) : null;
+      if (chatId && eventChatId && eventChatId !== chatId) return;
+      sendRealtimeEventToRenderer({
+        ...serializeRealtimeCrudEvent(worldId, eventChatId || chatId, event),
+        subscriptionId
+      });
+    };
+
     world.eventEmitter.on('message', messageHandler);
     world.eventEmitter.on('sse', sseHandler);
     world.eventEmitter.on('world', worldHandler);
     world.eventEmitter.on('system', systemHandler);
+    world.eventEmitter.on('crud', crudHandler);
     const subscription: ChatEventSubscription = {
       version: subscriptionVersion,
       worldId,
@@ -278,6 +290,7 @@ export function createRealtimeEventsRuntime(
         world.eventEmitter.off('sse', sseHandler);
         world.eventEmitter.off('world', worldHandler);
         world.eventEmitter.off('system', systemHandler);
+        world.eventEmitter.off('crud', crudHandler);
       }
     };
     chatEventSubscriptions.set(subscriptionId, subscription);

@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-19: Wired chat subscription hook with `refreshWorldDetails` so realtime agent CRUD updates refresh Electron world state.
  * - 2026-02-19: Restricted inline working indicator to the initial `calling LLM...` phase only; hides during streaming/done/tool phases.
  * - 2026-02-19: Split activity text surfaces: status bar shows full per-agent state, inline indicator shows first active agent state only.
  * - 2026-02-19: Kept per-agent inline activity visible during active runs with explicit done/active/pending labels (e.g. `a1: done; a2: streaming response...`).
@@ -607,6 +608,7 @@ export default function App() {
     setPendingResponseSessionIds,
     setSessionActivity,
     refreshSessions,
+    refreshWorldDetails,
     setStatusText,
     resetActivityRuntimeState,
     setHitlPromptQueue,

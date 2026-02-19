@@ -16,6 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-02-19: Added `create_agent` alias normalization (`auto-reply`/`auto_reply` -> `autoReply`, `next agent`/`next-agent`/`next_agent` -> `nextAgent`).
  * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
  * - 2026-02-06: Removed legacy manual tool-intervention functionality
  * - Simplified wrapToolWithValidation to focus on parameter validation only
@@ -70,6 +71,36 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     normalizedArgs.directoryPath = normalizedArgs.path;
     delete normalizedArgs.path;
     corrections.push("path -> directoryPath");
+  }
+
+  if (toolName === 'create_agent') {
+    if (normalizedArgs.autoReply === undefined) {
+      if (normalizedArgs['auto-reply'] !== undefined) {
+        normalizedArgs.autoReply = normalizedArgs['auto-reply'];
+        corrections.push("auto-reply -> autoReply");
+      } else if (normalizedArgs.auto_reply !== undefined) {
+        normalizedArgs.autoReply = normalizedArgs.auto_reply;
+        corrections.push("auto_reply -> autoReply");
+      }
+    }
+    delete normalizedArgs['auto-reply'];
+    delete normalizedArgs.auto_reply;
+
+    if (normalizedArgs.nextAgent === undefined) {
+      if (normalizedArgs['next agent'] !== undefined) {
+        normalizedArgs.nextAgent = normalizedArgs['next agent'];
+        corrections.push("next agent -> nextAgent");
+      } else if (normalizedArgs['next-agent'] !== undefined) {
+        normalizedArgs.nextAgent = normalizedArgs['next-agent'];
+        corrections.push("next-agent -> nextAgent");
+      } else if (normalizedArgs.next_agent !== undefined) {
+        normalizedArgs.nextAgent = normalizedArgs.next_agent;
+        corrections.push("next_agent -> nextAgent");
+      }
+    }
+    delete normalizedArgs['next agent'];
+    delete normalizedArgs['next-agent'];
+    delete normalizedArgs.next_agent;
   }
 
   return { normalizedArgs, corrections };

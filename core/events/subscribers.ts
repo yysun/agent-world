@@ -20,7 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
- * - 2026-02-13: Updated `chat-title-updated` system event to structured payload (`eventType`, `title`, `source`) for stable consumer parsing.
+ * - 2026-02-19: Moved chat-title update notifications from `system` to chat `crud` update events.
  * - 2026-02-13: Added no-activity user-message fallback title scheduling to cover edited chats with no agent response.
  * - 2026-02-13: Switched title commit path to compare-and-set storage update to avoid concurrent overwrite races.
  * - 2026-02-13: Added conditional commit checks and in-flight dedupe for idle title updates.
@@ -40,7 +40,7 @@ import { extractParagraphBeginningMentions } from '../utils.js';
 import { createCategoryLogger } from '../logger.js';
 import { createStorageWithWrappers } from '../storage/storage-factory.js';
 import {
-  publishEvent,
+  publishCRUDEvent,
   subscribeToMessages
 } from './publishers.js';
 import {
@@ -213,16 +213,11 @@ async function tryGenerateAndApplyTitle(
     }
 
     currentChat.name = title;
-    publishEvent(
-      world,
-      'system',
-      {
-        eventType: 'chat-title-updated',
-        title,
-        source
-      },
-      targetChatId
-    );
+    publishCRUDEvent(world, 'update', 'chat', targetChatId, {
+      id: targetChatId,
+      name: title,
+      source
+    }, targetChatId);
   } finally {
     titleGenerationInFlight.delete(inFlightKey);
   }

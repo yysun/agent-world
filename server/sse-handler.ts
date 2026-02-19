@@ -5,9 +5,10 @@
  *
  * Features:
  * - Sets up SSE response headers and connection
- * - Wires world event listeners (MESSAGE, SSE, SYSTEM, WORLD)
+ * - Wires world event listeners (MESSAGE, SSE, SYSTEM, WORLD, CRUD)
  * - Handles world activity state tracking (response-start, idle)
  * - Forwards tool events (tool-start, tool-result, tool-error, tool-progress) as SSE events
+ * - Forwards CRUD events so frontends can refresh world/agent state in real time
  * - Automatic stream completion when world becomes idle
  * - Timeout fallback (60s) if world never becomes idle
  * - Proper cleanup on client disconnect or stream end
@@ -285,6 +286,15 @@ export function createSSEHandler(
   };
   world.eventEmitter.on(EventType.SYSTEM, systemListener);
   listeners.set(EventType.SYSTEM, systemListener);
+
+  const crudListener = (eventData: any) => {
+    if (!isChatEventInScope(eventData?.chatId, true)) {
+      return;
+    }
+    sendSSE({ type: EventType.CRUD, data: eventData });
+  };
+  world.eventEmitter.on(EventType.CRUD, crudListener);
+  listeners.set(EventType.CRUD, crudListener);
 
   // Cleanup function to remove all listeners
   const cleanupListeners = () => {

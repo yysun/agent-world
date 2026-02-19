@@ -40,7 +40,7 @@ export const DEFAULT_AGENT_FORM = {
   autoReply: false,
   provider: DEFAULT_WORLD_CHAT_LLM_PROVIDER,
   model: DEFAULT_WORLD_CHAT_LLM_MODEL,
-  systemPrompt: `You are agent X. You role is ...
+  systemPrompt: `You are agent X. Your role is ...
 
 Always respond in exactly this structure:
 @<next agent>

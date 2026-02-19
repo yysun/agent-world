@@ -44,6 +44,8 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-19: Moved chat-title refresh handling from `system` events to chat `crud` update events.
+ * - 2026-02-19: Added CRUD SSE refresh handler so new/updated/deleted agents appear without manual page reload.
  * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
  * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
@@ -469,6 +471,47 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   // No return = no re-render
 };
 
+const handleCrudEvent = async (state: WorldComponentState, eventData: any): Promise<WorldComponentState> => {
+  if (!eventData) {
+    return state;
+  }
+
+  const entityType = String(eventData.entityType || '').trim();
+  if (entityType !== 'agent' && entityType !== 'chat') {
+    return state;
+  }
+
+  if (!state.worldName) {
+    return state;
+  }
+
+  try {
+    const refreshedWorld = await api.getWorld(state.worldName);
+    const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
+    const resolvedChatId = resolveActiveChatId(refreshedWorld as any, activeChatId) || undefined;
+    const chats = Array.isArray(refreshedWorld.chats) ? refreshedWorld.chats : [];
+    const agents = Array.isArray(refreshedWorld.agents) ? refreshedWorld.agents : [];
+    const currentChat = chats.find((chat: any) => chat.id === resolvedChatId) || null;
+    const selectedAgentId = state.selectedAgent?.id || null;
+    const selectedAgent = selectedAgentId
+      ? agents.find((agent: any) => agent.id === selectedAgentId) || null
+      : null;
+
+    return {
+      ...state,
+      world: refreshedWorld,
+      currentChat,
+      selectedAgent,
+      error: null
+    };
+  } catch (error: any) {
+    return {
+      ...state,
+      error: error?.message || 'Failed to refresh world after agent update.'
+    };
+  }
+};
+
 // World initialization with core auto-restore
 async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
@@ -574,16 +617,6 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     messages: [...(state.messages || []), systemMessage],
     needScroll: true
   };
-
-  // Handle specific system events
-  if (eventType === 'chat-title-updated') {
-    // Refresh current chat context to update chat list/title without switching sessions.
-    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
-    const updates = initWorld(newState, newState.worldName, activeChatId);
-    for await (const update of updates) {
-      return { ...newState, ...update };
-    }
-  }
 
   const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
   if (hitlPrompt) {
@@ -965,6 +998,9 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStream': handleToolStream,
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
+  },
+  'handleCrudEvent': (state: WorldComponentState, payload: WorldEventPayload<'handleCrudEvent'>): Promise<WorldComponentState> => {
+    return handleCrudEvent(state, payload);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

@@ -15,6 +15,7 @@
  * - Exercises subscriber behavior through emitted `world` events.
  *
  * Recent Changes:
+ * - 2026-02-19: Asserted chat-title CRUD payload shape.
  * - 2026-02-13: Asserted structured `chat-title-updated` system payload shape.
  * - 2026-02-13: Added repeated-idle dedupe and no-activity human-message title-generation coverage.
  * - 2026-02-13: Added low-quality-title fallback and cancellation no-op coverage.
@@ -174,9 +175,9 @@ describe('World activity-based title update', () => {
     world.chats.set('chat-2', { id: 'chat-2', name: 'New Chat' } as any);
     mocks.chatNameById.set('chat-2', 'New Chat');
 
-    const systemEvents: any[] = [];
-    world.eventEmitter.on('system', (event: any) => {
-      systemEvents.push(event);
+    const crudEvents: any[] = [];
+    world.eventEmitter.on('crud', (event: any) => {
+      crudEvents.push(event);
     });
 
     mocks.generateAgentResponse.mockImplementationOnce(async () => {
@@ -201,10 +202,11 @@ describe('World activity-based title update', () => {
     expect(world.chats.get('chat-1')!.name).toBe('Scoped Chat Title');
     expect(world.chats.get('chat-2')!.name).toBe('New Chat');
     expect(mocks.updateChatNameIfCurrent).toHaveBeenCalledWith('world-1', 'chat-1', 'New Chat', 'Scoped Chat Title');
-    expect(systemEvents.at(-1)?.chatId).toBe('chat-1');
-    expect(systemEvents.at(-1)?.content).toMatchObject({
-      eventType: 'chat-title-updated',
-      title: 'Scoped Chat Title',
+    expect(crudEvents.at(-1)?.entityType).toBe('chat');
+    expect(crudEvents.at(-1)?.entityId).toBe('chat-1');
+    expect(crudEvents.at(-1)?.entityData).toMatchObject({
+      id: 'chat-1',
+      name: 'Scoped Chat Title',
       source: 'idle'
     });
   });

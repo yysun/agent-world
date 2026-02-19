@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-19: Added `handleCrudEvent` variant for realtime world refresh after CRUD updates.
  * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
  * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
  * - 2026-02-08: Removed legacy manual tool-intervention event variants
@@ -204,6 +205,9 @@ export type WorldEvents =
 
   /** Handle world activity event */
   | { name: 'handleWorldActivity'; payload: any }
+
+  /** Handle CRUD event from SSE (agent/chat/world updates) */
+  | { name: 'handleCrudEvent'; payload: any }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
