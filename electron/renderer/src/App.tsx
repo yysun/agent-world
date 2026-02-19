@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-19: Wired world export action through `useWorldManagement` into sidebar props.
  * - 2026-02-18: Aligned renderer agent provider/model fallbacks with the selected world's chat LLM provider/model.
  * - 2026-02-17: CC cleanup reduced file size by extracting pure helpers and removing redundant/unused orchestration sections.
  */
@@ -168,6 +169,7 @@ export default function App() {
     onUpdateWorld,
     onDeleteWorld,
     onImportWorld,
+    onExportWorld,
   } = useWorldManagement({
     api,
     setStatusText,
@@ -898,6 +900,7 @@ export default function App() {
     loadedWorld,
     onOpenCreateWorldPanel,
     onImportWorld,
+    onExportWorld,
     onSelectWorld,
     loadingWorld,
     worldLoadError,

@@ -12,6 +12,8 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-19: Simplified desktop world export to file-storage-only (removed SQLite export option).
+ * - 2026-02-19: Added CLI-parity world import/export handlers for folder-validated imports, id/name conflict checks, and storage-target export flows.
  * - 2026-02-18: Updated `agent:create` fallback defaults to inherit provider/model from the world chat LLM settings.
  * - 2026-02-16: Added optional `projectPath` filter support for `listSkillRegistry` so project-scope skill discovery can follow the currently selected project folder.
  * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
@@ -92,6 +94,8 @@ interface MainIpcHandlerFactoryDependencies {
   updateWorld: (worldId: string, updates: Record<string, unknown>) => Promise<any>;
   editUserMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<any>;
   removeMessagesFrom: (worldId: string, messageId: string, chatId: string) => Promise<any>;
+  createStorage: (config: any) => Promise<any>;
+  createStorageFromEnv: () => Promise<any>;
 }
 
 export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDependencies) {
@@ -123,8 +127,85 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     restoreChat,
     updateWorld,
     editUserMessage,
-    removeMessagesFrom
+    removeMessagesFrom,
+    createStorage,
+    createStorageFromEnv
   } = dependencies;
+
+  interface StorageLike {
+    saveWorld: (worldData: any) => Promise<void>;
+    loadWorld: (worldId: string) => Promise<any>;
+    deleteWorld: (worldId: string) => Promise<boolean>;
+    listWorlds: () => Promise<any[]>;
+    saveAgent: (worldId: string, agent: any) => Promise<void>;
+    listAgents: (worldId: string) => Promise<any[]>;
+    saveChatData: (worldId: string, chat: any) => Promise<void>;
+    listChats: (worldId: string) => Promise<any[]>;
+    eventStorage?: {
+      getEventsByWorldAndChat: (worldId: string, chatId: string | null) => Promise<any[]>;
+      saveEvents: (events: any[]) => Promise<void>;
+    };
+  }
+
+  function isDirectoryOnDisk(folderPath: string): boolean {
+    if (!fs.existsSync(folderPath)) {
+      return false;
+    }
+    try {
+      return fs.statSync(folderPath).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  function getWorldFolderValidationError(worldFolderPath: string): string | null {
+    if (!isDirectoryOnDisk(worldFolderPath)) {
+      return 'Selected path is not a folder';
+    }
+    const configPath = path.join(worldFolderPath, 'config.json');
+    if (!fs.existsSync(configPath)) {
+      return 'Selected folder does not contain a valid world (missing config.json)';
+    }
+    return null;
+  }
+
+  async function promptForOverwrite(
+    mainWindow: BrowserWindowLike,
+    title: string,
+    message: string,
+    detail?: string
+  ): Promise<boolean> {
+    const confirmation = await dialog.showMessageBox(mainWindow as any, {
+      type: 'warning',
+      title,
+      message,
+      detail,
+      buttons: ['Overwrite', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true
+    });
+    return confirmation.response === 0;
+  }
+
+  async function pickTargetDirectory(mainWindow: BrowserWindowLike, title: string, buttonLabel: string): Promise<string | null> {
+    const result = await dialog.showOpenDialog(mainWindow as any, {
+      title,
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0] || null;
+  }
+
+  async function ensureDeleteExistingTarget(targetPath: string, worldId: string): Promise<void> {
+    const worldPath = path.join(targetPath, worldId);
+    if (fs.existsSync(worldPath)) {
+      fs.rmSync(worldPath, { recursive: true, force: true });
+    }
+  }
 
   async function loadWorldsFromWorkspace() {
     try {
@@ -535,13 +616,9 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
   async function importWorld() {
     const mainWindow = getMainWindow();
     if (!mainWindow) throw new Error('Main window not initialized');
-    const result = await dialog.showOpenDialog(mainWindow as any, {
-      title: 'Import World from Folder',
-      properties: ['openDirectory'],
-      buttonLabel: 'Import'
-    });
+    const selectedWorldFolder = await pickTargetDirectory(mainWindow, 'Import World Folder', 'Import');
 
-    if (result.canceled || result.filePaths.length === 0) {
+    if (!selectedWorldFolder) {
       return {
         success: false,
         error: 'Import canceled',
@@ -549,69 +626,130 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
       };
     }
 
-    const folderPath = result.filePaths[0];
-
     try {
       await ensureCoreReady();
 
-      const normalizedPath = path.normalize(folderPath);
-      const absolutePath = path.resolve(normalizedPath);
-
-      if (!fs.existsSync(absolutePath)) {
-        return {
-          success: false,
-          error: 'Folder not found',
-          message: 'The selected folder does not exist'
-        };
-      }
-
-      const stats = fs.statSync(absolutePath);
-      if (!stats.isDirectory()) {
-        return {
-          success: false,
-          error: 'Not a directory',
-          message: 'Selected path is not a folder'
-        };
-      }
-
-      const worldConfigFile = path.join(absolutePath, '.world');
-      const hasWorldConfig = fs.existsSync(worldConfigFile);
-
-      if (!hasWorldConfig) {
+      const absoluteWorldFolder = path.resolve(path.normalize(selectedWorldFolder));
+      const validationError = getWorldFolderValidationError(absoluteWorldFolder);
+      if (validationError) {
         return {
           success: false,
           error: 'Invalid world folder',
-          message: 'Selected folder does not contain a valid world (.world file not found)'
+          message: validationError
         };
       }
 
-      const worldId = path.basename(absolutePath);
+      const sourceWorldId = path.basename(absoluteWorldFolder);
+      const sourceRootPath = path.dirname(absoluteWorldFolder);
+      const sourceStorage = await createStorage({
+        type: 'file',
+        rootPath: sourceRootPath
+      }) as StorageLike;
 
-      const worlds = await listWorlds();
-      if (worlds.some((w) => w.id === worldId)) {
+      const worldData = await sourceStorage.loadWorld(sourceWorldId);
+      if (!worldData) {
         return {
           success: false,
-          error: 'World already exists',
-          message: `A world with ID '${worldId}' already exists in this workspace`
+          error: 'Failed to load source world',
+          message: `Could not load world '${sourceWorldId}' from the selected folder`
         };
       }
 
-      const importedWorld = await getWorld(worldId);
+      const existingWorlds = await listWorlds();
+      const idConflict = existingWorlds.find((world) => String(world?.id || '') === String(worldData?.id || ''));
+      const nameConflict = existingWorlds.find((world) => String(world?.name || '').trim().toLowerCase() === String(worldData?.name || '').trim().toLowerCase());
+
+      if (idConflict && nameConflict && String(idConflict.id) !== String(nameConflict.id)) {
+        return {
+          success: false,
+          error: 'Multiple conflicts detected',
+          message: `Cannot import because ID conflict ('${idConflict.id}') and name conflict ('${nameConflict.name}') refer to different worlds. Resolve conflicts manually and retry.`
+        };
+      }
+
+      const conflictWorld = idConflict || nameConflict;
+      if (conflictWorld) {
+        const conflictType = idConflict && nameConflict ? 'id and name' : (idConflict ? 'id' : 'name');
+        const shouldOverwrite = await promptForOverwrite(
+          mainWindow,
+          'Overwrite Existing World?',
+          `A world with the same ${conflictType} already exists.`,
+          `Existing world: ${conflictWorld.name} (${conflictWorld.id})\nIncoming world: ${worldData.name} (${worldData.id})`
+        );
+        if (!shouldOverwrite) {
+          return {
+            success: false,
+            error: 'Import canceled',
+            message: 'Import canceled. Existing world was not modified.'
+          };
+        }
+
+        await removeWorldSubscriptions(String(conflictWorld.id));
+        const deleted = await deleteWorld(String(conflictWorld.id));
+        if (!deleted) {
+          return {
+            success: false,
+            error: 'Overwrite failed',
+            message: `Could not remove existing world '${conflictWorld.id}' before import`
+          };
+        }
+      }
+
+      const targetStorage = await createStorageFromEnv() as StorageLike;
+      const sourceAgents = await sourceStorage.listAgents(sourceWorldId);
+      const sourceChats = await sourceStorage.listChats(sourceWorldId);
+
+      await targetStorage.saveWorld(worldData);
+
+      for (const agent of sourceAgents) {
+        await targetStorage.saveAgent(worldData.id, agent);
+      }
+
+      for (const chat of sourceChats) {
+        await targetStorage.saveChatData(worldData.id, chat);
+      }
+
+      let eventCount = 0;
+      if (sourceStorage.eventStorage && targetStorage.eventStorage) {
+        try {
+          const worldEvents = await sourceStorage.eventStorage.getEventsByWorldAndChat(worldData.id, null);
+          if (Array.isArray(worldEvents) && worldEvents.length > 0) {
+            await targetStorage.eventStorage.saveEvents(worldEvents);
+            eventCount += worldEvents.length;
+          }
+          for (const chat of sourceChats) {
+            const chatEvents = await sourceStorage.eventStorage.getEventsByWorldAndChat(worldData.id, chat.id);
+            if (Array.isArray(chatEvents) && chatEvents.length > 0) {
+              await targetStorage.eventStorage.saveEvents(chatEvents);
+              eventCount += chatEvents.length;
+            }
+          }
+        } catch {
+          // Keep import successful even if event copy fails.
+        }
+      }
+
+      const importedWorld = await getWorld(worldData.id);
       if (!importedWorld) {
         return {
           success: false,
-          error: 'Failed to load world',
-          message: 'Could not load world data from the selected folder'
+          error: 'Post-import load failed',
+          message: `World '${worldData.id}' was imported but could not be loaded`
         };
       }
 
-      const chats = await listChats(worldId);
-      const sessions = await serializeChatsWithMessageCounts(worldId, chats, getMemory);
+      const chats = await listChats(worldData.id);
+      const sessions = await serializeChatsWithMessageCounts(worldData.id, chats, getMemory);
 
       return {
         success: true,
         world: serializeWorldInfo(importedWorld),
-        sessions
+        sessions,
+        importSummary: {
+          agents: sourceAgents.length,
+          chats: sourceChats.length,
+          events: eventCount
+        }
       };
     } catch (error) {
       const err = error as Error;
@@ -621,6 +759,119 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
         message: `Failed to import world: ${err.message || 'Unknown error occurred'}`
       };
     }
+  }
+
+  async function exportWorld(payload: any) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow) throw new Error('Main window not initialized');
+
+    await ensureCoreReady();
+    const worldId = String(payload?.worldId || '').trim();
+    if (!worldId) {
+      throw new Error('World ID is required.');
+    }
+
+    const world = await getWorld(worldId);
+    if (!world) {
+      throw new Error(`World not found: ${worldId}`);
+    }
+
+    const targetPath = String(payload?.targetPath || '').trim()
+      || await pickTargetDirectory(mainWindow, 'Choose Export Folder', 'Export')
+      || '';
+    if (!targetPath) {
+      return {
+        success: false,
+        error: 'Export canceled',
+        message: 'World export was canceled'
+      };
+    }
+
+    const normalizedTargetPath = path.resolve(path.normalize(targetPath));
+    if (!fs.existsSync(normalizedTargetPath)) {
+      fs.mkdirSync(normalizedTargetPath, { recursive: true });
+    }
+    const activeStoragePath = String(getWorkspaceState()?.storagePath || '').trim();
+    if (activeStoragePath && path.resolve(activeStoragePath) === normalizedTargetPath) {
+      return {
+        success: false,
+        error: 'Invalid export target',
+        message: 'Choose a different folder than the active workspace storage path.'
+      };
+    }
+
+    const existingTarget = fs.existsSync(path.join(normalizedTargetPath, world.id));
+
+    if (existingTarget) {
+      const detail = `Existing target world folder: ${path.join(normalizedTargetPath, world.id)}`;
+      const shouldOverwrite = await promptForOverwrite(
+        mainWindow,
+        'Overwrite Existing Export Target?',
+        'Export target already contains data that will be replaced.',
+        detail
+      );
+      if (!shouldOverwrite) {
+        return {
+          success: false,
+          error: 'Export canceled',
+          message: 'Export canceled. Existing target data was not modified.'
+        };
+      }
+      await ensureDeleteExistingTarget(normalizedTargetPath, world.id);
+    }
+
+    const targetStorage = await createStorage({
+      type: 'file',
+      rootPath: normalizedTargetPath
+    }) as StorageLike;
+
+    await targetStorage.saveWorld(world);
+
+    const worldAgents = world?.agents && typeof world.agents.values === 'function'
+      ? Array.from(world.agents.values())
+      : [];
+    for (const agent of worldAgents) {
+      await targetStorage.saveAgent(world.id, agent);
+    }
+
+    const chats = await listChats(world.id);
+    for (const chat of chats) {
+      await targetStorage.saveChatData(world.id, chat);
+    }
+
+    let eventCount = 0;
+    if (world.eventStorage && targetStorage.eventStorage) {
+      try {
+        const worldEvents = await world.eventStorage.getEventsByWorldAndChat(world.id, null);
+        if (Array.isArray(worldEvents) && worldEvents.length > 0) {
+          await targetStorage.eventStorage.saveEvents(worldEvents);
+          eventCount += worldEvents.length;
+        }
+        for (const chat of chats) {
+          const chatEvents = await world.eventStorage.getEventsByWorldAndChat(world.id, chat.id);
+          if (Array.isArray(chatEvents) && chatEvents.length > 0) {
+            await targetStorage.eventStorage.saveEvents(chatEvents);
+            eventCount += chatEvents.length;
+          }
+        }
+      } catch {
+        // Keep export successful even when event copy fails.
+      }
+    }
+
+    return {
+      success: true,
+      message: `World '${world.name}' exported successfully.`,
+      data: {
+        worldId: world.id,
+        worldName: world.name,
+        storageType: 'file',
+        path: normalizedTargetPath,
+        agentCount: worldAgents.length,
+        chatCount: chats.length,
+        eventCount
+      }
+    };
   }
 
   async function listWorldSessions(worldId: unknown) {
@@ -896,6 +1147,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     deleteWorldAgent,
     deleteWorkspaceWorld,
     importWorld,
+    exportWorld,
     listWorldSessions,
     createWorldSession,
     branchWorldSessionFromMessage,

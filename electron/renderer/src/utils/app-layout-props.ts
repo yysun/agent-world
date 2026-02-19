@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-19: Added left-sidebar prop wiring for world export action.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
@@ -126,6 +127,7 @@ export function createLeftSidebarProps<T extends PropBag>(input: T) {
     loadedWorld: input.loadedWorld,
     onOpenCreateWorldPanel: input.onOpenCreateWorldPanel,
     onImportWorld: input.onImportWorld,
+    onExportWorld: input.onExportWorld,
     onSelectWorld: input.onSelectWorld,
     loadingWorld: input.loadingWorld,
     worldLoadError: input.worldLoadError,

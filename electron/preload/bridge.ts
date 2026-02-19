@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `exportWorld(worldId)` bridge method for desktop world save/export workflow.
  * - 2026-02-16: Added `branchSessionFromMessage(worldId, chatId, messageId)` bridge method for chat branching from assistant messages.
  * - 2026-02-14: Added `respondHitlOption()` bridge method for renderer resolution of world HITL option requests.
  * - 2026-02-14: Typed `listSkills()` bridge invoke response as `SkillRegistrySummary[]` to satisfy DesktopApi contract.
@@ -85,6 +86,8 @@ export function createDesktopApi(ipcRendererLike: IpcRendererLike = ipcRenderer)
     loadWorld: (worldId) =>
       invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, worldId),
     importWorld: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT),
+    exportWorld: (worldId) =>
+      invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT, toWorldPayload(worldId)),
     listWorlds: () => invokeDesktopChannel(ipcRendererLike, DESKTOP_INVOKE_CHANNELS.WORLD_LIST),
     listSkills: (filters) =>
       invokeDesktopChannel<SkillRegistrySummary[]>(

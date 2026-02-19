@@ -10,6 +10,7 @@
  * - Keeps channel naming and payload routing in one module.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `world:export` route wiring for desktop world save/export flows.
  * - 2026-02-16: Added `session:branchFromMessage` route wiring for creating branch sessions from assistant messages.
  * - 2026-02-14: Added `hitl:respond` route wiring for world HITL option responses from renderer.
  * - 2026-02-14: Added `skill:list` route wiring for renderer welcome-screen skill registry hydration.
@@ -28,6 +29,7 @@ import {
   type HitlResponsePayload,
   type MessageEditPayload,
   type MessageDeletePayload,
+  type WorldExportPayload,
   type WorldChatPayload,
   type WorldIdPayload
 } from '../shared/ipc-contracts.js';
@@ -39,6 +41,7 @@ export interface MainIpcHandlers {
   loadWorldsFromWorkspace: () => Promise<unknown> | unknown;
   loadSpecificWorld: (worldId: unknown) => Promise<unknown> | unknown;
   importWorld: () => Promise<unknown> | unknown;
+  exportWorld: (payload: unknown) => Promise<unknown> | unknown;
   listWorkspaceWorlds: () => Promise<unknown> | unknown;
   listSkillRegistry: (payload?: unknown) => Promise<unknown> | unknown;
   createWorkspaceWorld: (payload: unknown) => Promise<unknown> | unknown;
@@ -75,6 +78,10 @@ export function buildMainIpcRoutes(handlers: MainIpcHandlers): MainIpcRoute[] {
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD_FROM_FOLDER, handler: async () => handlers.loadWorldsFromWorkspace() },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LOAD, handler: async (_event, worldId) => handlers.loadSpecificWorld(worldId) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_IMPORT, handler: async () => handlers.importWorld() },
+    {
+      channel: DESKTOP_INVOKE_CHANNELS.WORLD_EXPORT,
+      handler: async (_event, payload) => handlers.exportWorld(payload as WorldExportPayload)
+    },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_LIST, handler: async () => handlers.listWorkspaceWorlds() },
     { channel: DESKTOP_INVOKE_CHANNELS.SKILL_LIST, handler: async (_event, payload) => handlers.listSkillRegistry(payload) },
     { channel: DESKTOP_INVOKE_CHANNELS.WORLD_CREATE, handler: async (_event, payload) => handlers.createWorkspaceWorld(payload) },

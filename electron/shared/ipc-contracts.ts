@@ -15,6 +15,7 @@
  * - Runtime validation remains in main-process handlers for behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
  * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
  * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
@@ -33,6 +34,7 @@ export const DESKTOP_INVOKE_CHANNELS = {
   WORLD_LOAD_FROM_FOLDER: 'world:loadFromFolder',
   WORLD_LOAD: 'world:load',
   WORLD_IMPORT: 'world:import',
+  WORLD_EXPORT: 'world:export',
   WORLD_LIST: 'world:list',
   SKILL_LIST: 'skill:list',
   WORLD_CREATE: 'world:create',
@@ -67,6 +69,10 @@ export type DesktopInvokeChannel =
 
 export interface WorldIdPayload {
   worldId: string;
+}
+
+export interface WorldExportPayload extends WorldIdPayload {
+  targetPath?: string;
 }
 
 export interface WorldChatPayload extends WorldIdPayload {
@@ -139,6 +145,7 @@ export interface DesktopApi {
   loadWorldFromFolder: () => Promise<unknown>;
   loadWorld: (worldId: string) => Promise<unknown>;
   importWorld: () => Promise<unknown>;
+  exportWorld: (worldId: string) => Promise<unknown>;
   listWorlds: () => Promise<unknown>;
   listSkills: (filters?: SkillListFilterPayload) => Promise<SkillRegistrySummary[]>;
   createWorld: (payload: Record<string, unknown>) => Promise<unknown>;
