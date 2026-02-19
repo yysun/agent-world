@@ -16,6 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
  * - 2026-02-06: Removed legacy manual tool-intervention functionality
  * - Simplified wrapToolWithValidation to focus on parameter validation only
  * - Initial implementation for empty/missing name validation
@@ -42,6 +43,16 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
   }
 
   if (
+    (toolName === 'read_file' || toolName === 'read_files')
+    && normalizedArgs.filePath === undefined
+    && normalizedArgs.path !== undefined
+  ) {
+    normalizedArgs.filePath = normalizedArgs.path;
+    delete normalizedArgs.path;
+    corrections.push("path -> filePath");
+  }
+
+  if (
     (toolName === 'grep' || toolName === 'grep_search')
     && normalizedArgs.directoryPath === undefined
     && normalizedArgs.directory !== undefined
@@ -49,6 +60,16 @@ function normalizeKnownParameterAliases(toolName: string, args: any): {
     normalizedArgs.directoryPath = normalizedArgs.directory;
     delete normalizedArgs.directory;
     corrections.push("directory -> directoryPath");
+  }
+
+  if (
+    (toolName === 'grep' || toolName === 'grep_search')
+    && normalizedArgs.directoryPath === undefined
+    && normalizedArgs.path !== undefined
+  ) {
+    normalizedArgs.directoryPath = normalizedArgs.path;
+    delete normalizedArgs.path;
+    corrections.push("path -> directoryPath");
   }
 
   return { normalizedArgs, corrections };

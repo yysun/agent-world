@@ -33,11 +33,12 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-19: Replaced raw `working directory: <value>` system-prompt suffix with explicit `shell_cmd` scope instructions and a no-echo directive.
  * - 2026-02-16: Added env-driven global/project skill-scope filtering for the `## Agent Skills` system prompt section.
  * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
  * - 2026-02-14: prepareMessagesForLLM now injects an `## Agent Skills` section with registry-backed `<available_skills>` entries and `load_skill` guidance.
  * - 2026-02-14: Added shared default working-directory resolver (env override -> user home -> `./`) and switched missing world `working_directory` fallback from `./` to user home.
- * - 2026-02-13: prepareMessagesForLLM now appends `working directory: <value>` to every system prompt using world `working_directory`.
+ * - 2026-02-13: prepareMessagesForLLM began appending execution-directory context from world `working_directory`.
  * - 2026-02-08: Fixed wouldAgentHaveRespondedToHistoricalMessage to include assistant messages with tool_calls
  *   (prevents OpenAI error: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'")
  * - Enhanced comment documentation with detailed feature descriptions
@@ -480,15 +481,16 @@ export async function prepareMessagesForLLM(
   // System messages are NEVER saved to storage.
   const interpolatedPrompt = interpolateTemplateVariables(freshSystemPrompt || '', worldEnvMap);
   const workingDirectory = getEnvValueFromText(worldVariablesText, 'working_directory') || getDefaultWorkingDirectory();
-  const promptWithWorkingDirectory = interpolatedPrompt.trim().length > 0
+  const shellExecutionRule = 'When using `shell_cmd`, execute commands only within this trusted working directory scope: ' + workingDirectory;
+  const promptWithShellExecutionRule = interpolatedPrompt.trim().length > 0
     ? (interpolatedPrompt.endsWith('\n')
-      ? `${interpolatedPrompt}working directory: ${workingDirectory}`
-      : `${interpolatedPrompt}\nworking directory: ${workingDirectory}`)
-    : `working directory: ${workingDirectory}`;
+      ? `${interpolatedPrompt}${shellExecutionRule}`
+      : `${interpolatedPrompt}\n${shellExecutionRule}`)
+    : shellExecutionRule;
   const agentSkillsPromptSection = await buildAgentSkillsPromptSection();
-  const promptWithSkills = promptWithWorkingDirectory.endsWith('\n')
-    ? `${promptWithWorkingDirectory}\n${agentSkillsPromptSection}`
-    : `${promptWithWorkingDirectory}\n\n${agentSkillsPromptSection}`;
+  const promptWithSkills = promptWithShellExecutionRule.endsWith('\n')
+    ? `${promptWithShellExecutionRule}\n${agentSkillsPromptSection}`
+    : `${promptWithShellExecutionRule}\n\n${agentSkillsPromptSection}`;
   const mentionFormatRule = buildAgentMentionFormatRule();
   const promptWithMentionRule = promptWithSkills.endsWith('\n')
     ? `${promptWithSkills}\n${mentionFormatRule}`

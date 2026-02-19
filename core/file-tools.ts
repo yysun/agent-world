@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-02-19: Aligned file-tool path behavior with `shell_cmd`: `list_files` now defaults to trusted working directory when `path` is omitted, and `read_file` accepts `path` alias.
  * - 2026-02-16: Switched `list_files` scanning to `fast-glob` with depth control and default ignore rules.
  * - 2026-02-16: Added optional `recursive` mode to `list_files` for nested directory traversal in a single call.
  * - 2026-02-16: `list_files` now includes hidden dot-prefixed entries by default (set `includeHidden: false` to exclude).
@@ -219,13 +220,17 @@ async function searchInFile(options: {
 export function createReadFileToolDefinition() {
   return {
     description:
-      'Read a file for context gathering. Supports line-based pagination with optional offset and limit.',
+      'Read a file for context gathering. Supports line-based pagination with optional offset and limit. Paths resolve within the trusted working-directory scope.',
     parameters: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
           description: 'File path to read. Relative paths resolve from runtime working directory.',
+        },
+        path: {
+          type: 'string',
+          description: 'Alias for filePath.',
         },
         offset: {
           type: 'number',
@@ -236,13 +241,17 @@ export function createReadFileToolDefinition() {
           description: `Maximum number of lines to return (default: ${DEFAULT_READ_LIMIT}, max: ${MAX_READ_LIMIT}).`,
         },
       },
-      required: ['filePath'],
+      required: [],
       additionalProperties: false,
     },
     execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
       try {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
-        const resolvedPath = resolveTargetPath(String(args.filePath), trustedWorkingDirectory);
+        const requestedFilePath = String(args.filePath ?? args.path ?? '').trim();
+        if (!requestedFilePath) {
+          return 'Error: read_file failed - filePath is required';
+        }
+        const resolvedPath = resolveTargetPath(requestedFilePath, trustedWorkingDirectory);
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
         const rawContent = await fs.readFile(resolvedPath, 'utf8');
         const fileContent = toUtf8String(rawContent);
@@ -275,13 +284,13 @@ export function createReadFileToolDefinition() {
 export function createListFilesToolDefinition() {
   return {
     description:
-      'List files and directories available in a directory path for quick workspace exploration. Use recursive=true to include nested entries.',
+      'List files and directories available in a directory path for quick workspace exploration. Defaults to trusted working directory when path is omitted. Use recursive=true to include nested entries.',
     parameters: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Directory path to list. Relative paths resolve from runtime working directory.',
+          description: 'Optional directory path to list. Relative paths resolve from runtime working directory. Defaults to trusted working directory.',
         },
         includeHidden: {
           type: 'boolean',
@@ -292,13 +301,13 @@ export function createListFilesToolDefinition() {
           description: 'When true, include nested entries recursively (default: false).',
         },
       },
-      required: ['path'],
+      required: [],
       additionalProperties: false,
     },
     execute: async (args: any, _sequenceId?: string, _parentToolCall?: string, context?: ToolContext) => {
       try {
         const trustedWorkingDirectory = getTrustedWorkingDirectory(context);
-        const requestedPath = String(args.path);
+        const requestedPath = String(args.path ?? '.');
         const resolvedPath = resolveTargetPath(requestedPath, trustedWorkingDirectory);
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
         const includeHidden = Boolean(args.includeHidden ?? true);
