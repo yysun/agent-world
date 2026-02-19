@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-19: Added web chat branch handler and chat-history search state updates for MVP parity.
  * - 2026-02-19: Moved chat-title refresh handling from `system` events to chat `crud` update events.
  * - 2026-02-19: Added CRUD SSE refresh handler so new/updated/deleted agents appear without manual page reload.
  * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
@@ -1332,6 +1333,11 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
+  'update-chat-search': (state: WorldComponentState, payload: WorldEventPayload<'update-chat-search'>): WorldComponentState => ({
+    ...state,
+    chatSearchQuery: String(payload?.target?.value || '')
+  }),
+
   'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       // Phase 2: Cleanup streaming state before loading new chat
@@ -1366,6 +1372,49 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       history.pushState(null, '', path);
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to load chat from history');
+    }
+  },
+
+  'branch-chat-from-message': async function* (
+    state: WorldComponentState,
+    payload: WorldEventPayload<'branch-chat-from-message'>
+  ): AsyncGenerator<WorldComponentState> {
+    const messageId = String(payload?.messageId || '').trim();
+    const sourceChatId = String(payload?.chatId || state.currentChat?.id || state.world?.currentChatId || '').trim();
+    if (!messageId || !sourceChatId) {
+      yield {
+        ...state,
+        error: 'Cannot branch chat: missing source chat or message ID.'
+      };
+      return;
+    }
+
+    try {
+      yield {
+        ...state,
+        messagesLoading: true,
+        error: null
+      };
+
+      const result = await api.branchChatFromMessage(state.worldName, sourceChatId, messageId);
+      if (!result?.success || !result?.chatId) {
+        yield {
+          ...state,
+          messagesLoading: false,
+          error: 'Failed to branch chat from message.'
+        };
+        return;
+      }
+
+      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, result.chatId);
+      app.route(path);
+      history.pushState(null, '', path);
+    } catch (error: any) {
+      yield {
+        ...state,
+        messagesLoading: false,
+        error: error?.message || 'Failed to branch chat from message.'
+      };
     }
   },
 

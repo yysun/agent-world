@@ -13,6 +13,7 @@
  * - The UI no longer submits `type`; backend defaults/retained values handle compatibility.
  *
  * Recent Changes:
+ * - 2026-02-19: Moved auto-reply checkbox to sit directly beside the "Auto Reply" label text; help text now renders on a separate line.
  * - 2026-02-13: Removed implicit `type` submission from web agent create/update UI payloads.
  */
 
@@ -262,7 +263,6 @@ export default class AgentEdit extends Component<AgentEditState> {
                 {/* Model/Provider row (now above temperature/maxTokens) */}
                 <div className="form-section">
                   <div className="form-group">
-                    <label htmlFor="agent-auto-reply">Auto Reply</label>
                     <div className="form-checkbox-row">
                       <input
                         id="agent-auto-reply"
@@ -271,8 +271,9 @@ export default class AgentEdit extends Component<AgentEditState> {
                         $bind="agent.autoReply"
                         disabled={state.loading}
                       />
-                      <span className="form-help-text">Automatically reply to sender when no explicit @mention is provided</span>
+                      <label htmlFor="agent-auto-reply" className="form-checkbox-title">Auto Reply</label>
                     </div>
+                    <p className="form-help-text form-checkbox-help">Automatically reply to sender when no explicit @mention is provided</p>
                   </div>
 
                   <div className="form-row">

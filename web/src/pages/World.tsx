@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-19: Added chat-history search query state wiring for session filtering in the right panel.
  * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
  * - 2026-02-14: Added web send/stop composer wiring via `currentChatId` and `isStopping` props.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
@@ -63,6 +64,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     connectionStatus: 'disconnected',
     needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
+    chatSearchQuery: '',
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
@@ -256,6 +258,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
             <WorldChatHistory
               world={state.world}
+              chatSearchQuery={state.chatSearchQuery}
             />
           </div>
         </div>

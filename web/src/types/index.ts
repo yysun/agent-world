@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-19: Added web chat history search/branching support types (`chatSearchQuery` and branch event payload usage).
  * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
  * - 2026-02-14: Added stop-processing UI state and currentChatId prop support for send/stop composer toggle.
  * - 2026-02-08: Removed legacy manual tool-intervention message and state types
@@ -280,9 +281,8 @@ export interface AgentEditState {
 
 // Chat History Component Props
 export interface WorldChatHistoryProps {
-  // Simplified to only the field used by WorldChatHistory component
-  // Changes: Removed unused props (worldName, chats, currentChatId, onChatSelect, onChatDelete)
   world: World | null;
+  chatSearchQuery: string;
 }
 
 // ========================================
@@ -328,6 +328,7 @@ export interface WorldComponentState extends SSEComponentState {
   // Chat management state
   currentChat: Chat | null;
   chatToDelete: Chat | null;
+  chatSearchQuery: string;
 
   // Message edit state
   editingMessageId: string | null;
