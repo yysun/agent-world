@@ -12,6 +12,9 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-19: Updated phase-label expectations to `calling LLM...` and `streaming response...`.
+ * - 2026-02-19: Added coverage for per-agent inline status summary formatting (`buildInlineAgentStatusSummary`).
+ * - 2026-02-19: Added coverage for inline agent work phase text helper (`getAgentWorkPhaseText`).
  * - 2026-02-16: Added tests for extracted constants/util modules from App.jsx.
  */
 
@@ -32,6 +35,10 @@ import {
   validateAgentForm,
   validateWorldForm,
 } from '../../../electron/renderer/src/utils/validation';
+import {
+  buildInlineAgentStatusSummary,
+  getAgentWorkPhaseText,
+} from '../../../electron/renderer/src/utils/app-helpers';
 import {
   getMessageCardClassName,
   getMessageIdentity,
@@ -103,6 +110,76 @@ describe('extracted formatting utils', () => {
     const value = compactSkillDescription('a'.repeat(120));
     expect(value.length).toBe(96);
     expect(value.endsWith('...')).toBe(true);
+  });
+});
+
+describe('extracted app-helpers utils', () => {
+  it('prefers tool-calling phase text when tools are active', () => {
+    expect(getAgentWorkPhaseText({
+      activeTools: [{ toolName: 'read_file' }],
+      activeStreamCount: 1,
+      activeAgentCount: 1,
+      pendingAgentCount: 2,
+    })).toBe('calling tool: read_file');
+
+    expect(getAgentWorkPhaseText({
+      activeTools: [{ toolName: 'read_file' }, { toolName: 'write_file' }],
+      activeStreamCount: 0,
+      activeAgentCount: 1,
+      pendingAgentCount: 0,
+    })).toBe('calling 2 tools');
+  });
+
+  it('uses waiting/queued fallback phases when no tools are active', () => {
+    expect(getAgentWorkPhaseText({
+      activeTools: [],
+      activeStreamCount: 1,
+      activeAgentCount: 1,
+      pendingAgentCount: 0,
+    })).toBe('streaming response...');
+
+    expect(getAgentWorkPhaseText({
+      activeTools: [],
+      activeStreamCount: 0,
+      activeAgentCount: 1,
+      pendingAgentCount: 0,
+    })).toBe('calling LLM...');
+
+    expect(getAgentWorkPhaseText({
+      activeTools: [],
+      activeStreamCount: 0,
+      activeAgentCount: 0,
+      pendingAgentCount: 2,
+    })).toBe('queued');
+  });
+
+  it('builds per-agent inline status summary text', () => {
+    expect(buildInlineAgentStatusSummary({
+      activeAgentNames: ['a1'],
+      doneAgentNames: [],
+      pendingAgentNames: ['a2'],
+      pendingAgentCount: 1,
+      phaseText: 'streaming response...',
+      fallbackAgentName: 'Agent',
+    })).toBe('a1: streaming response...; a2: pending ...');
+
+    expect(buildInlineAgentStatusSummary({
+      activeAgentNames: ['a1', 'a2'],
+      doneAgentNames: [],
+      pendingAgentNames: [],
+      pendingAgentCount: 1,
+      phaseText: 'calling 2 tools',
+      fallbackAgentName: 'Agent',
+    })).toBe('a1: calling 2 tools; a2: calling 2 tools; 1 pending ...');
+
+    expect(buildInlineAgentStatusSummary({
+      activeAgentNames: ['a2'],
+      doneAgentNames: ['a1'],
+      pendingAgentNames: [],
+      pendingAgentCount: 0,
+      phaseText: 'streaming response...',
+      fallbackAgentName: 'Agent',
+    })).toBe('a1: done; a2: streaming response...');
   });
 });
 

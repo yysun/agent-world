@@ -17,6 +17,7 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-02-19: Added explicit elapsed reset API so session activity start can zero timer at agent-work boundary.
  * - 2026-02-10: Initial implementation
  * - 2026-02-17: Migrated module from JS to TS with explicit callback/tool entry typings.
  */
@@ -57,6 +58,7 @@ export interface ActivityStateApi {
   getActiveTools: () => ToolEntry[];
   getIsBusy: () => boolean;
   getElapsedMs: () => number;
+  resetElapsed: () => void;
   cleanup: () => void;
 }
 
@@ -167,6 +169,13 @@ export function createActivityState(callbacks: ActivityStateCallbacks): Activity
     return Date.now() - activityStartTime;
   }
 
+  function resetElapsed() {
+    callbacks.onElapsedUpdate(0);
+    if (isBusy) {
+      activityStartTime = Date.now();
+    }
+  }
+
   function cleanup() {
     tools.clear();
     activeStreamCount = 0;
@@ -188,6 +197,7 @@ export function createActivityState(callbacks: ActivityStateCallbacks): Activity
     getActiveTools,
     getIsBusy,
     getElapsedMs,
+    resetElapsed,
     cleanup,
   };
 }

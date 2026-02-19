@@ -13,6 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
+ * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
  * - 2026-02-16: Added assistant-message inference from sender when `role` is missing so response-state clears reliably for backend messages published without explicit role.
@@ -58,6 +59,7 @@ interface ActivityRefs {
     handleToolResult: (toolUseId: string, result: string) => void;
     handleToolError: (toolUseId: string, error: string) => void;
     handleToolProgress: (toolUseId: string, progress: string) => void;
+    resetElapsed?: () => void;
   } | null;
 }
 
@@ -173,6 +175,8 @@ export function createChatSubscriptionEventHandler({
   onSessionActivityUpdate,
   onSessionSystemEvent,
 }: ChatHandlerOptions) {
+  let lastActivityPendingOperations = 0;
+
   const syncActiveStreamCount = () => {
     const streaming = streamingStateRef.current;
     if (!streaming) return;
@@ -364,8 +368,13 @@ export function createChatSubscriptionEventHandler({
         });
       }
 
+      const pendingOperations = Number(activityPayload.pendingOperations) || 0;
+      if (pendingOperations > 0 && lastActivityPendingOperations <= 0) {
+        activityStateRef.current?.resetElapsed?.();
+      }
+      lastActivityPendingOperations = pendingOperations;
+
       if (typeof onSessionResponseStateChange === 'function') {
-        const pendingOperations = Number(activityPayload.pendingOperations) || 0;
         if (pendingOperations <= 0) {
           const responseChatId = activityChatId || selectedSessionId || null;
           if (responseChatId) {

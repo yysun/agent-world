@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-19: Kept per-agent inline activity visible during active runs with explicit done/active/pending labels (e.g. `a1: done; a2: streaming response...`).
  * - 2026-02-19: Limited inline working indicator details to agent-focused activity only (no generic status-bar text).
  * - 2026-02-19: Expanded inline chat working indicator with multi-agent status, queue/tool counts, and elapsed time.
  * - 2026-02-19: Wired world export action through `useWorldManagement` into sidebar props.
@@ -58,7 +59,9 @@ import {
   isHumanMessage,
 } from './utils/message-utils';
 import {
+  buildInlineAgentStatusSummary,
   getAgentDisplayName,
+  getAgentWorkPhaseText,
   getAgentInitials,
   getDefaultWorldForm,
   getEnvValueFromText,
@@ -143,6 +146,7 @@ export default function App() {
   // HITL option prompt queue (generic world option requests)
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
+  const [recentlyActiveAgentNames, setRecentlyActiveAgentNames] = useState<string[]>([]);
 
   const setStatusText = useCallback((text: string, kind: string = 'info') => {
     publishStatusBarStatus(text, kind);
@@ -580,6 +584,7 @@ export default function App() {
     if (loadedWorld?.id) return;
     resetMessageRuntimeState();
     resetActivityRuntimeState();
+    setRecentlyActiveAgentNames([]);
     setHitlPromptQueue([]);
     setSubmittingHitlRequestId(null);
   }, [loadedWorld?.id, resetActivityRuntimeState, resetMessageRuntimeState]);
@@ -749,6 +754,44 @@ export default function App() {
 
     return Array.from(unique);
   }, [sessionActivity.activeSources]);
+  const resolveAgentName = useCallback((source: any) => {
+    const rawSource = String(source || '').trim();
+    if (!rawSource) return '';
+
+    const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
+    if (!normalizedSource) return '';
+    if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
+
+    const matchedAgent = worldAgents.find((agent) => {
+      const normalizedId = String(agent?.id || '').trim().toLowerCase();
+      const normalizedName = String(agent?.name || '').trim().toLowerCase();
+      return normalizedSource === normalizedId || normalizedSource === normalizedName;
+    });
+
+    return String(matchedAgent?.name || rawSource);
+  }, [worldAgents]);
+
+  useEffect(() => {
+    if (!selectedSessionId || Number(sessionActivity.pendingOperations || 0) <= 0) {
+      setRecentlyActiveAgentNames([]);
+      return;
+    }
+
+    const activeAgentNames = Array.from(
+      new Set(
+        activeAgentSources
+          .map((source) => resolveAgentName(source))
+          .map((name) => String(name || '').trim())
+          .filter(Boolean)
+      )
+    );
+    if (activeAgentNames.length === 0) return;
+
+    setRecentlyActiveAgentNames((existing) => {
+      const merged = new Set([...existing, ...activeAgentNames]);
+      return Array.from(merged);
+    });
+  }, [activeAgentSources, resolveAgentName, selectedSessionId, sessionActivity.pendingOperations]);
   const workingAgentCount = activeAgentSources.length;
   const pendingAgentCount = Math.max(0, Number(sessionActivity.pendingOperations || 0) - workingAgentCount);
   const isAgentWorkInProgress = workingAgentCount > 0;
@@ -762,23 +805,6 @@ export default function App() {
     Boolean(selectedSessionId)
     && Number(sessionActivity.pendingOperations || 0) > 0;
   const inlineWorkingAgentLabel = useMemo(() => {
-    const resolveAgentName = (source: any) => {
-      const rawSource = String(source || '').trim();
-      if (!rawSource) return '';
-
-      const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
-      if (!normalizedSource) return '';
-      if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
-
-      const matchedAgent = worldAgents.find((agent) => {
-        const normalizedId = String(agent?.id || '').trim().toLowerCase();
-        const normalizedName = String(agent?.name || '').trim().toLowerCase();
-        return normalizedSource === normalizedId || normalizedSource === normalizedName;
-      });
-
-      return String(matchedAgent?.name || rawSource);
-    };
-
     if (Array.isArray(activeAgentSources) && activeAgentSources.length > 0) {
       const firstResolved = resolveAgentName(activeAgentSources[0]);
       if (firstResolved) return firstResolved;
@@ -793,25 +819,8 @@ export default function App() {
     }
 
     return 'Agent';
-  }, [activeAgentSources, worldAgents, loadedWorld?.mainAgent]);
+  }, [activeAgentSources, resolveAgentName, worldAgents, loadedWorld?.mainAgent]);
   const inlineWorkingIndicatorState = useMemo(() => {
-    const resolveAgentName = (source: any) => {
-      const rawSource = String(source || '').trim();
-      if (!rawSource) return '';
-
-      const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
-      if (!normalizedSource) return '';
-      if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
-
-      const matchedAgent = worldAgents.find((agent) => {
-        const normalizedId = String(agent?.id || '').trim().toLowerCase();
-        const normalizedName = String(agent?.name || '').trim().toLowerCase();
-        return normalizedSource === normalizedId || normalizedSource === normalizedName;
-      });
-
-      return String(matchedAgent?.name || rawSource);
-    };
-
     const activeAgentNames = Array.from(
       new Set(
         activeAgentSources
@@ -826,20 +835,54 @@ export default function App() {
       : inlineWorkingAgentLabel;
 
     const detailParts: string[] = [];
-    if (pendingAgentCount > 0) {
-      detailParts.push(`${pendingAgentCount} queued`);
+    const phaseText = getAgentWorkPhaseText({
+      activeTools,
+      activeStreamCount,
+      activeAgentCount: workingAgentCount,
+      pendingAgentCount,
+    });
+    const allAgentNames = Array.from(
+      new Set(
+        (Array.isArray(worldAgents) ? worldAgents : [])
+          .map((agent) => String(agent?.name || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    const activeAgentNameSet = new Set(activeAgentNames.map((name) => name.toLowerCase()));
+    const doneAgentNames = recentlyActiveAgentNames.filter(
+      (name) => !activeAgentNameSet.has(String(name || '').toLowerCase()),
+    );
+    const doneAgentNameSet = new Set(doneAgentNames.map((name) => String(name || '').toLowerCase()));
+    const pendingAgentNames = allAgentNames
+      .filter((name) => !activeAgentNameSet.has(name.toLowerCase()) && !doneAgentNameSet.has(name.toLowerCase()))
+      .slice(0, Math.max(0, pendingAgentCount));
+    const statusText = buildInlineAgentStatusSummary({
+      activeAgentNames,
+      doneAgentNames,
+      pendingAgentNames,
+      pendingAgentCount,
+      phaseText,
+      fallbackAgentName: inlineWorkingAgentLabel,
+    });
+    if (statusText) {
+      detailParts.push(statusText);
     }
 
     return {
-      primaryText,
-      detailText: detailParts.join(' · '),
+      primaryText: statusText || primaryText,
+      detailText: detailParts.length > 1 ? detailParts.slice(1).join(' · ') : '',
       elapsedMs,
+      statusText,
     };
   }, [
     activeAgentSources,
-    worldAgents,
+    activeStreamCount,
+    activeTools,
     inlineWorkingAgentLabel,
     pendingAgentCount,
+    recentlyActiveAgentNames,
+    resolveAgentName,
+    worldAgents,
     elapsedMs,
   ]);
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;

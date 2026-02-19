@@ -13,6 +13,10 @@
  * - Keep defaults aligned with existing renderer constants.
  *
  * Recent Changes:
+ * - 2026-02-19: Extended `buildInlineAgentStatusSummary` with explicit done-state rendering for completed agents during active runs.
+ * - 2026-02-19: Updated LLM phase wording to distinguish pre-stream (`calling LLM...`) vs active stream (`streaming response...`).
+ * - 2026-02-19: Added `buildInlineAgentStatusSummary` for per-agent inline activity text composition.
+ * - 2026-02-19: Added `getAgentWorkPhaseText` to describe inline agent activity phases (LLM wait/tool calls/queue).
  * - 2026-02-17: Extracted from App.tsx during CC pass to reduce top-level file size.
  */
 
@@ -124,4 +128,99 @@ export function getWorldFormFromWorld(world: unknown) {
     mcpConfig: worldValue.mcpConfig == null ? '' : String(worldValue.mcpConfig),
     variables: worldValue.variables == null ? '' : String(worldValue.variables)
   };
+}
+
+export function getAgentWorkPhaseText({
+  activeTools,
+  activeStreamCount,
+  activeAgentCount,
+  pendingAgentCount,
+}: {
+  activeTools: Array<{ toolName?: unknown }>;
+  activeStreamCount: number;
+  activeAgentCount: number;
+  pendingAgentCount: number;
+}): string {
+  const toolCount = Array.isArray(activeTools) ? activeTools.length : 0;
+  if (toolCount > 0) {
+    const toolNames = Array.from(
+      new Set(
+        activeTools
+          .map((tool) => String(tool?.toolName || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    if (toolCount === 1 && toolNames.length > 0) {
+      return `calling tool: ${toolNames[0]}`;
+    }
+    return `calling ${toolCount} tools`;
+  }
+
+  if (Number(activeStreamCount) > 0) {
+    return 'streaming response...';
+  }
+
+  if (Number(activeAgentCount) > 0) {
+    return 'calling LLM...';
+  }
+
+  if (Number(pendingAgentCount) > 0) {
+    return 'queued';
+  }
+
+  return '';
+}
+
+export function buildInlineAgentStatusSummary({
+  activeAgentNames,
+  doneAgentNames,
+  pendingAgentNames,
+  pendingAgentCount,
+  phaseText,
+  fallbackAgentName,
+}: {
+  activeAgentNames: string[];
+  doneAgentNames: string[];
+  pendingAgentNames: string[];
+  pendingAgentCount: number;
+  phaseText: string;
+  fallbackAgentName: string;
+}): string {
+  const normalizedPhase = String(phaseText || '').trim() || 'working';
+  const activeNames = Array.isArray(activeAgentNames)
+    ? activeAgentNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const doneNames = Array.isArray(doneAgentNames)
+    ? doneAgentNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const pendingNames = Array.isArray(pendingAgentNames)
+    ? pendingAgentNames.map((name) => String(name || '').trim()).filter(Boolean)
+    : [];
+  const safeFallback = String(fallbackAgentName || '').trim() || 'Agent';
+
+  const parts: string[] = [];
+  if (doneNames.length > 0) {
+    parts.push(...doneNames.map((name) => `${name}: done`));
+  }
+
+  if (activeNames.length > 0) {
+    parts.push(...activeNames.map((name) => `${name}: ${normalizedPhase}`));
+  } else if (normalizedPhase) {
+    parts.push(`${safeFallback}: ${normalizedPhase}`);
+  }
+
+  if (pendingNames.length > 0) {
+    parts.push(...pendingNames.map((name) => `${name}: pending ...`));
+  }
+
+  const remainingPending = Math.max(0, Number(pendingAgentCount) - pendingNames.length);
+  if (remainingPending > 0) {
+    parts.push(
+      remainingPending === 1
+        ? '1 pending ...'
+        : `${remainingPending} pending ...`,
+    );
+  }
+
+  return parts.join('; ').trim();
 }

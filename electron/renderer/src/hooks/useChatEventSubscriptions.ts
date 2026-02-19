@@ -13,6 +13,7 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
+ * - 2026-02-19: Extended activity-state typing with optional elapsed reset hook used by activity event transitions.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
@@ -59,6 +60,7 @@ type ActivityState = {
   handleToolResult: (toolUseId: string, result: string) => void;
   handleToolError: (toolUseId: string, error: string) => void;
   handleToolProgress: (toolUseId: string, progress: string) => void;
+  resetElapsed?: () => void;
   cleanup: () => void;
 };
 

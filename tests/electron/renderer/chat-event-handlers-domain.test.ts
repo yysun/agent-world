@@ -11,6 +11,7 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
+ * - 2026-02-19: Added coverage for elapsed reset on idle→active activity transitions.
  * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
  * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
  * - 2026-02-13: Added coverage for tool lifecycle response-state transitions and chat-id filtering.
@@ -299,6 +300,76 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(setActiveStreamCount).toHaveBeenCalledWith(1);
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', true);
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+  });
+
+  it('resets elapsed timer when activity transitions from idle to active', () => {
+    const harness = createMessageStateHarness();
+    const resetElapsed = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: {
+        current: {
+          setActiveStreamCount: vi.fn(),
+          handleToolStart: vi.fn(),
+          handleToolResult: vi.fn(),
+          handleToolError: vi.fn(),
+          handleToolProgress: vi.fn(),
+          resetElapsed,
+        }
+      },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn(),
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'start',
+        pendingOperations: 1,
+      }
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'update',
+        pendingOperations: 2,
+      }
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'idle',
+        pendingOperations: 0,
+      }
+    });
+
+    handler({
+      type: 'activity',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      chatId: 'chat-1',
+      activity: {
+        eventType: 'start',
+        pendingOperations: 1,
+      }
+    });
+
+    expect(resetElapsed).toHaveBeenCalledTimes(2);
   });
 
   it('clears selected session on unscoped SSE end events', () => {
