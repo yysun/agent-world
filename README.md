@@ -43,17 +43,18 @@ Paste that prompt. Agents come alive instantly.
 - ✅ Multiple AI Providers - Use different models for different agents
 - ✅ Web + CLI + Electron - Modern interfaces with real-time streaming and status feedback
 
-## Latest Highlights (v0.11.0)
+## Latest Highlights (since v0.11.1)
 
-- Electron desktop app with workspace-folder world loading, recents, and improved world info
-- Concurrent chat session isolation with chat-scoped event routing and stop controls
-- World-level `mainAgent` routing and agent-level `autoReply` configuration
-- Core-owned edit/resubmit and chat-title flows for consistent behavior across clients
-- World variables as `.env` text with runtime interpolation support
-- Progressive skills (`load_skill`) with skill registry sync and HITL-gated activation
+- Web app now includes a Settings page, chat-history search, and branch-from-message workflow
+- Built-in `create_agent` tool now supports approval-first creation and inherits world chat defaults
+- File exploration is easier with built-in `read_file`, `list_files` (including recursive mode), and `grep`
+- Electron now supports folder-based world import/export with validation and conflict handling
+- Chat UX is smoother with clearer inline working status, better streaming feedback, and UI refinements
+- Real-time refresh behavior is improved across web and desktop when agents/world data changes
 
 ## Release Notes
 
+- **v0.12.0** - Web settings/search/branching, built-in `create_agent`, new file tools, Electron folder import/export, and chat/status UX improvements
 - **v0.11.0** - Electron desktop workflow, concurrent chat sessions, main-agent routing, progressive skills + HITL, and runtime safety hardening
 - Full history: [CHANGELOG.md](CHANGELOG.md)
 

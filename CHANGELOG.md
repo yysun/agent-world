@@ -1,3 +1,34 @@
+v0.12.0
+
+**Web App: Settings, Search & Branching**
+- Added a Settings page in the web app
+- Added chat history search so you can quickly find past conversations
+- Added branch-from-message so you can fork a new chat path from an assistant response
+- Improved chat layout, icon actions, and message alignment for a cleaner UI
+- Improved streaming feedback so working status is clearer while responses are in progress
+
+**Agent Creation, Defaults & Approval Flow**
+- Added a built-in `create_agent` tool with approval before execution
+- New agents now inherit world chat model/provider defaults, reducing setup work
+- Agent and world changes now refresh in real time across web and desktop clients
+
+**Tools, Skills & Runtime Safety**
+- Added built-in file tools (`read_file`, `list_files`, `grep`) for easier project exploration
+- Added recursive folder listing to `list_files`
+- Improved file path handling so commands behave more like shell usage
+- Improved safety for shell command execution within trusted project boundaries
+- Improved skill controls with clearer project/global behavior and better script error reporting
+
+**Electron & Desktop Runtime**
+- Added folder-based world import/export in Electron, including validation and overwrite conflict handling
+- Improved desktop chat state handling so active/pending agent activity is clearer
+- Improved reliability of event-driven updates in the desktop app
+
+**Developer Experience & Maintenance**
+- Improved tool call labels and message context so tool activity is easier to follow
+- Updated Azure OpenAI environment variable naming for consistency
+- Updated dependencies and improved `agent-world` CLI entrypoint behavior
+
 v0.11.0
 
 **Desktop & Workspace Experience**
