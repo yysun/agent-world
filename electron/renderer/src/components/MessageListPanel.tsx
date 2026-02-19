@@ -13,10 +13,12 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-19: Replaced single-agent inline working label with richer activity details and elapsed time.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component extraction.
  */
 
 import MessageContent from './MessageContent';
+import ElapsedTimeCounter from './ElapsedTimeCounter';
 import { compactSkillDescription, formatTime } from '../utils/formatting';
 import {
   getMessageCardClassName,
@@ -50,8 +52,12 @@ export default function MessageListPanel({
   onDeleteMessage,
   onBranchFromMessage,
   showInlineWorkingIndicator,
-  inlineWorkingAgentLabel,
+  inlineWorkingIndicatorState,
 }) {
+  const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
+  const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
+  const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
+
   return (
     <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
       <div
@@ -256,11 +262,17 @@ export default function MessageListPanel({
 
         {showInlineWorkingIndicator ? (
           <div className="flex w-full items-start gap-2 justify-start">
-            <div className="flex items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 px-1 py-1 text-[13px] text-muted-foreground">
               <span className="inline-block h-2 w-2 rounded-full bg-foreground/70 animate-pulse" aria-hidden="true"></span>
               <div className="text-[13px]">
-                {inlineWorkingAgentLabel} is working...
+                {inlinePrimaryText} working...
               </div>
+              {inlineDetailText ? (
+                <div className="text-[12px] text-muted-foreground/85">
+                  · {inlineDetailText}
+                </div>
+              ) : null}
+              <ElapsedTimeCounter elapsedMs={inlineElapsedMs} showIcon={false} />
             </div>
           </div>
         ) : null}

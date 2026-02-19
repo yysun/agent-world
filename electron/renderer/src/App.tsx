@@ -13,6 +13,8 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-19: Limited inline working indicator details to agent-focused activity only (no generic status-bar text).
+ * - 2026-02-19: Expanded inline chat working indicator with multi-agent status, queue/tool counts, and elapsed time.
  * - 2026-02-19: Wired world export action through `useWorldManagement` into sidebar props.
  * - 2026-02-18: Aligned renderer agent provider/model fallbacks with the selected world's chat LLM provider/model.
  * - 2026-02-17: CC cleanup reduced file size by extracting pure helpers and removing redundant/unused orchestration sections.
@@ -792,6 +794,54 @@ export default function App() {
 
     return 'Agent';
   }, [activeAgentSources, worldAgents, loadedWorld?.mainAgent]);
+  const inlineWorkingIndicatorState = useMemo(() => {
+    const resolveAgentName = (source: any) => {
+      const rawSource = String(source || '').trim();
+      if (!rawSource) return '';
+
+      const normalizedSource = normalizeActivitySourceLabel(rawSource).toLowerCase();
+      if (!normalizedSource) return '';
+      if (!Array.isArray(worldAgents) || worldAgents.length === 0) return rawSource;
+
+      const matchedAgent = worldAgents.find((agent) => {
+        const normalizedId = String(agent?.id || '').trim().toLowerCase();
+        const normalizedName = String(agent?.name || '').trim().toLowerCase();
+        return normalizedSource === normalizedId || normalizedSource === normalizedName;
+      });
+
+      return String(matchedAgent?.name || rawSource);
+    };
+
+    const activeAgentNames = Array.from(
+      new Set(
+        activeAgentSources
+          .map((source) => resolveAgentName(source))
+          .map((name) => String(name || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const primaryText = activeAgentNames.length > 0
+      ? activeAgentNames.join(', ')
+      : inlineWorkingAgentLabel;
+
+    const detailParts: string[] = [];
+    if (pendingAgentCount > 0) {
+      detailParts.push(`${pendingAgentCount} queued`);
+    }
+
+    return {
+      primaryText,
+      detailText: detailParts.join(' · '),
+      elapsedMs,
+    };
+  }, [
+    activeAgentSources,
+    worldAgents,
+    inlineWorkingAgentLabel,
+    pendingAgentCount,
+    elapsedMs,
+  ]);
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some((message: any) => {
@@ -822,7 +872,7 @@ export default function App() {
     onDeleteMessage,
     onBranchFromMessage,
     showInlineWorkingIndicator,
-    inlineWorkingAgentLabel,
+    inlineWorkingIndicatorState,
   });
 
   const mainContentComposerProps = createMainContentComposerProps({

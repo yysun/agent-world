@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-19: Added inline working indicator state wiring for richer chat activity details.
  * - 2026-02-19: Added left-sidebar prop wiring for world export action.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
@@ -41,7 +42,7 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     onDeleteMessage: input.onDeleteMessage,
     onBranchFromMessage: input.onBranchFromMessage,
     showInlineWorkingIndicator: input.showInlineWorkingIndicator,
-    inlineWorkingAgentLabel: input.inlineWorkingAgentLabel,
+    inlineWorkingIndicatorState: input.inlineWorkingIndicatorState,
   };
 }
 
