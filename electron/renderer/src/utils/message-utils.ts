@@ -129,12 +129,12 @@ export function getMessageCardClassName(message, messagesById, messages, current
   const roleClassName = isUser
     ? 'ml-auto w-[80%] border-l-sidebar-border bg-sidebar-accent'
     : isTool
-      ? 'mr-auto w-[92%] border-l-amber-500/50'
+      ? 'ml-auto w-[92%] border-l-amber-500/50'
       : isCrossAgent
-        ? 'mr-auto w-[86%] border-l-violet-500/50'
+        ? 'ml-auto w-[92%] border-l-violet-500/50'
         : isSystem
           ? 'mr-auto w-[90%] border-l-border bg-muted/40'
-          : 'mr-auto w-[86%] border-l-sky-500/40';
+          : 'ml-auto w-[92%] border-l-sky-500/40';
 
   return `group relative rounded-lg border-l p-3 ${roleClassName}`;
 }

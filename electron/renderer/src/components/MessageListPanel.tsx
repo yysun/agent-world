@@ -23,6 +23,7 @@ import {
   getMessageIdentity,
   getMessageSenderLabel,
   isHumanMessage,
+  isToolRelatedMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
 } from '../utils/message-utils';
@@ -135,6 +136,8 @@ export default function MessageListPanel({
             const messageKey = message.messageId;
             const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
             const isHuman = isHumanMessage(message);
+            const messageRole = String(message?.role || '').toLowerCase();
+            const shouldRightAlignMessage = isHuman || isToolRelatedMessage(message) || messageRole === 'assistant';
             const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
             const normalizedEditedText = editingText.trim();
             const normalizedOriginalText = String(message?.content || '').trim();
@@ -142,7 +145,7 @@ export default function MessageListPanel({
             return (
               <div
                 key={messageKey}
-                className={`flex min-w-0 w-full items-start gap-2 ${isHuman ? 'justify-end' : 'justify-start'}`}
+                className={`flex min-w-0 w-full items-start gap-2 ${shouldRightAlignMessage ? 'justify-end' : 'justify-start'}`}
               >
                 {messageAvatar ? (
                   <div
