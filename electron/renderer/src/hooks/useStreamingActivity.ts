@@ -13,6 +13,7 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-19: Prevented empty assistant cards by creating stream messages on first chunk instead of stream start.
  * - 2026-02-17: Extracted streaming/activity lifecycle from `App.jsx` during Phase 3.
  */
 
@@ -51,23 +52,26 @@ export function useStreamingActivity({ setMessages }) {
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({
-      onStreamStart: (entry) => {
-        setMessages((existing) => upsertMessageList(existing, {
-          id: entry.messageId,
-          messageId: entry.messageId,
-          role: 'assistant',
-          sender: entry.agentName,
-          content: '',
-          createdAt: entry.createdAt,
-          isStreaming: true
-        }));
+      onStreamStart: () => {
+        // Intentionally no-op: avoid rendering empty assistant cards before first chunk.
       },
-      onStreamUpdate: (messageId, content) => {
+      onStreamUpdate: (entry) => {
         setMessages((existing) => {
-          const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
-          if (index < 0) return existing;
+          const messageId = String(entry.messageId || '');
+          const index = existing.findIndex((message) => String(message.messageId || '') === messageId);
+          if (index < 0) {
+            return upsertMessageList(existing, {
+              id: messageId,
+              messageId,
+              role: 'assistant',
+              sender: entry.agentName,
+              content: entry.content,
+              createdAt: entry.createdAt,
+              isStreaming: true
+            });
+          }
           const next = [...existing];
-          next[index] = { ...next[index], content };
+          next[index] = { ...next[index], sender: entry.agentName, content: entry.content, isStreaming: true };
           return next;
         });
       },

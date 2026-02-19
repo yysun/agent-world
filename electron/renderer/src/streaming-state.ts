@@ -17,6 +17,7 @@
  * - Cleanup method for session switches
  *
  * Recent Changes:
+ * - 2026-02-19: Deferred assistant message rendering to first chunk by emitting stream updates with full entry data.
  * - 2026-02-10: Added getActiveToolStreamIds/endAllToolStreams to prevent stale tool-stream busy state
  * - 2026-02-10: Added tool streaming support (handleToolStreamStart/Chunk/End)
  * - 2026-02-10: Added 50K character truncation for tool output
@@ -43,7 +44,7 @@ export interface StreamEntry {
 
 export interface StreamingStateCallbacks {
   onStreamStart: (entry: StreamEntry) => void;
-  onStreamUpdate: (messageId: string, content: string) => void;
+  onStreamUpdate: (entry: StreamEntry) => void;
   onStreamEnd: (messageId: string) => void;
   onStreamError: (messageId: string, errorMessage: string) => void;
   onToolStreamStart?: (entry: StreamEntry) => void;
@@ -76,7 +77,7 @@ export interface StreamingStateApi {
 
 export function createStreamingState(callbacks: StreamingStateCallbacks): StreamingStateApi {
   const streams = new Map<string, StreamEntry>();
-  const pendingUpdates = new Map<string, string>();
+  const pendingUpdates = new Map<string, StreamEntry>();
   const pendingToolUpdates = new Map<string, PendingToolUpdate>();
 
   let debounceFrameId: number | null = null;
@@ -94,8 +95,8 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       debounceFrameId = null;
     }
 
-    for (const [messageId, content] of pendingUpdates) {
-      callbacks.onStreamUpdate(messageId, content);
+    for (const [, entry] of pendingUpdates) {
+      callbacks.onStreamUpdate(entry);
     }
     pendingUpdates.clear();
 
@@ -107,8 +108,8 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     pendingToolUpdates.clear();
   }
 
-  function scheduleUpdate(messageId: string, content: string) {
-    pendingUpdates.set(messageId, content);
+  function scheduleUpdate(entry: StreamEntry) {
+    pendingUpdates.set(entry.messageId, { ...entry });
 
     if (debounceFrameId === null) {
       debounceFrameId = requestAnimationFrame(() => {
@@ -159,11 +160,12 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
       };
       streams.set(messageId, newEntry);
       callbacks.onStreamStart(newEntry);
+      scheduleUpdate(newEntry);
       return;
     }
 
     entry.content += chunk;
-    scheduleUpdate(messageId, entry.content);
+    scheduleUpdate(entry);
   }
 
   function handleEnd(messageId: string) {
@@ -171,7 +173,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     if (!entry) return null;
 
     if (pendingUpdates.has(messageId)) {
-      callbacks.onStreamUpdate(messageId, entry.content);
+      callbacks.onStreamUpdate({ ...entry });
       pendingUpdates.delete(messageId);
     }
 
@@ -190,7 +192,7 @@ export function createStreamingState(callbacks: StreamingStateCallbacks): Stream
     }
 
     if (pendingUpdates.has(messageId)) {
-      callbacks.onStreamUpdate(messageId, entry.content);
+      callbacks.onStreamUpdate({ ...entry });
       pendingUpdates.delete(messageId);
     }
 
