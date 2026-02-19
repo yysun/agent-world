@@ -408,7 +408,7 @@ export default function RightPanelContent({
       ) : panelMode === 'create-agent' && loadedWorld ? (
         <>
           <form onSubmit={onCreateAgent} className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
               <AgentFormFields
                 agent={creatingAgent}
                 setAgent={setCreatingAgent}
@@ -446,7 +446,7 @@ export default function RightPanelContent({
       ) : panelMode === 'edit-agent' && loadedWorld && selectedAgentForPanel ? (
         <>
           <form onSubmit={onUpdateAgent} className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
               <AgentFormFields
                 agent={editingAgent}
                 setAgent={setEditingAgent}
