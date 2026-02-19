@@ -13,11 +13,16 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
 
 import { useCallback } from 'react';
-import { DEFAULT_AGENT_FORM } from '../constants/app-constants';
+import {
+  DEFAULT_AGENT_FORM,
+  DEFAULT_WORLD_CHAT_LLM_MODEL,
+  DEFAULT_WORLD_CHAT_LLM_PROVIDER,
+} from '../constants/app-constants';
 import { safeMessage } from '../domain/desktop-api';
 import { upsertEnvVariable } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
@@ -112,8 +117,17 @@ export function useAppActionHandlers({
       setStatusText('Load a world before creating an agent.', 'error');
       return;
     }
+
+    const worldProvider = String(loadedWorld.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
+    const worldModel = String(loadedWorld.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+
     setSelectedAgentId(null);
-    setCreatingAgent(DEFAULT_AGENT_FORM);
+    setCreatingAgent({
+      ...DEFAULT_AGENT_FORM,
+      provider: worldProvider,
+      model: worldModel,
+      autoReply: false,
+    });
     setPanelMode('create-agent');
     setPanelOpen(true);
   }, [loadedWorld, setCreatingAgent, setPanelMode, setPanelOpen, setSelectedAgentId, setStatusText]);
@@ -125,20 +139,23 @@ export function useAppActionHandlers({
       return;
     }
 
+    const worldProvider = String(loadedWorld?.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
+    const worldModel = String(loadedWorld?.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+
     setSelectedAgentId(targetAgent.id);
     setEditingAgent({
       id: targetAgent.id,
       name: targetAgent.name,
       autoReply: targetAgent.autoReply !== false,
-      provider: targetAgent.provider || 'ollama',
-      model: targetAgent.model || 'llama3.1:8b',
+      provider: targetAgent.provider || worldProvider,
+      model: targetAgent.model || worldModel,
       systemPrompt: targetAgent.systemPrompt || '',
       temperature: targetAgent.temperature ?? '',
       maxTokens: targetAgent.maxTokens ?? ''
     });
     setPanelMode('edit-agent');
     setPanelOpen(true);
-  }, [setEditingAgent, setPanelMode, setPanelOpen, setSelectedAgentId, setStatusText, worldAgents]);
+  }, [loadedWorld?.chatLLMModel, loadedWorld?.chatLLMProvider, setEditingAgent, setPanelMode, setPanelOpen, setSelectedAgentId, setStatusText, worldAgents]);
 
   const onCreateAgent = useCallback(async (event) => {
     event.preventDefault();

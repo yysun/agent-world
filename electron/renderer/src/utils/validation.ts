@@ -12,6 +12,7 @@
  * - Uses shared constants for default/fallback behavior.
  *
  * Recent Changes:
+ * - 2026-02-18: Aligned agent provider fallback with shared world/provider default constant.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
@@ -79,7 +80,7 @@ export function validateAgentForm(agentForm) {
     data: {
       name,
       autoReply: agentForm.autoReply !== false,
-      provider: String(agentForm.provider || 'ollama').trim() || 'ollama',
+      provider: String(agentForm.provider || DEFAULT_WORLD_CHAT_LLM_PROVIDER).trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER,
       model,
       systemPrompt: String(agentForm.systemPrompt || ''),
       temperature: parseOptionalNumber(agentForm.temperature),

@@ -12,9 +12,9 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-18: Updated `agent:create` fallback defaults to inherit provider/model from the world chat LLM settings.
  * - 2026-02-16: Added optional `projectPath` filter support for `listSkillRegistry` so project-scope skill discovery can follow the currently selected project folder.
  * - 2026-02-16: Added `session:branchFromMessage` IPC handler to create a branched chat and copy source-chat messages up to an assistant message.
- * - 2026-02-16: Updated `agent:create` fallback defaults to provider `ollama` and model `llama3.1:8b` for new-agent creation.
  * - 2026-02-16: Updated `listSkillRegistry` to return scope-filtered skills (global/project) using the same env-driven rules as system-prompt skill injection.
  * - 2026-02-15: Aligned `message:edit` IPC preconditions with web/API semantics.
  *   - Validates chat existence before edit delegation.
@@ -406,9 +406,14 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const name = String(payload?.name || '').trim();
     if (!name) throw new Error('Agent name is required.');
 
+    const world = await getWorld(worldId);
+    if (!world) throw new Error(`World not found: ${worldId}`);
+
     const type = String(payload?.type || 'assistant').trim() || 'assistant';
-    const provider = String(payload?.provider || 'ollama').trim() || 'ollama';
-    const model = String(payload?.model || 'llama3.1:8b').trim() || 'llama3.1:8b';
+    const worldProvider = String(world?.chatLLMProvider || '').trim() || 'ollama';
+    const worldModel = String(world?.chatLLMModel || '').trim() || 'llama3.2:3b';
+    const provider = String(payload?.provider || worldProvider).trim() || worldProvider;
+    const model = String(payload?.model || worldModel).trim() || worldModel;
 
     const params: Record<string, unknown> = {
       name,

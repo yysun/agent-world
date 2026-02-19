@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-18: Aligned renderer agent provider/model fallbacks with the selected world's chat LLM provider/model.
  * - 2026-02-17: CC cleanup reduced file size by extracting pure helpers and removing redundant/unused orchestration sections.
  */
 
@@ -42,6 +43,8 @@ import {
   MIN_TURN_LIMIT,
   MAX_HEADER_AGENT_AVATARS,
   DEFAULT_AGENT_FORM,
+  DEFAULT_WORLD_CHAT_LLM_PROVIDER,
+  DEFAULT_WORLD_CHAT_LLM_MODEL,
   DRAG_REGION_STYLE,
   NO_DRAG_REGION_STYLE,
 } from './constants/app-constants';
@@ -324,6 +327,9 @@ export default function App() {
   }, [messages, rawWorldAgents, selectedSessionId]);
 
   const worldAgents = useMemo(() => {
+    const worldDefaultProvider = String(loadedWorld?.chatLLMProvider || '').trim() || DEFAULT_WORLD_CHAT_LLM_PROVIDER;
+    const worldDefaultModel = String(loadedWorld?.chatLLMModel || '').trim() || DEFAULT_WORLD_CHAT_LLM_MODEL;
+
     return rawWorldAgents.map((agent: any, index: number) => {
       const name = getAgentDisplayName(agent, index);
       const id = String(agent?.id || `agent-${index + 1}`);
@@ -333,8 +339,8 @@ export default function App() {
         name,
         initials: getAgentInitials(name),
         autoReply: agent?.autoReply !== false,
-        provider: String(agent?.provider || 'ollama'),
-        model: String(agent?.model || 'llama3.1:8b'),
+        provider: String(agent?.provider || worldDefaultProvider),
+        model: String(agent?.model || worldDefaultModel),
         systemPrompt: String(agent?.systemPrompt || ''),
         temperature: Number.isFinite(Number(agent?.temperature)) ? Number(agent.temperature) : null,
         maxTokens: Number.isFinite(Number(agent?.maxTokens)) ? Number(agent.maxTokens) : null,
@@ -344,7 +350,7 @@ export default function App() {
           : 0
       };
     });
-  }, [messageCountByAgentId, rawWorldAgents]);
+  }, [loadedWorld?.chatLLMModel, loadedWorld?.chatLLMProvider, messageCountByAgentId, rawWorldAgents]);
 
   const worldAgentsById = useMemo(() => {
     const next = new Map();
