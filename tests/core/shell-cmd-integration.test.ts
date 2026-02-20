@@ -17,7 +17,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
- * - 2026-02-19: Added assertion that built-in `create_agent` tool is registered alongside existing built-ins.
+ * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
  * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
  * - 2026-02-16: Added explicit empty-directory `list_files` coverage (`found=false` + message).
  * - 2026-02-16: Added integration assertions for built-in `read_file`, `list_files`, and `grep` tools.

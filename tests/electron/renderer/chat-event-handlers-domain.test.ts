@@ -11,7 +11,8 @@
  * - Focuses on orchestration behavior, not UI rendering.
  *
  * Recent Changes:
- * - 2026-02-19: Added coverage for realtime CRUD callback routing and chat-scope filtering.
+ * - 2026-02-20: Added optimistic user-message reconciliation coverage for message-event ordering and identical consecutive user sends.
+ * - 2026-02-20: Added coverage that `hitl-option-request` system events bypass chatId filtering so approval prompts are not dropped.
  * - 2026-02-19: Added coverage for elapsed reset on idle→active activity transitions.
  * - 2026-02-13: Updated system-event coverage to structured payload content (`eventType` + metadata object).
  * - 2026-02-13: Added coverage for session-scoped realtime system events (chat title update notifications).
@@ -133,6 +134,112 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(harness.getMessages()[0].messageId).toBe('m-1');
   });
 
+  it('reconciles incoming user message event into pending optimistic message', () => {
+    const harness = createMessageStateHarness([{
+      messageId: 'optimistic-user-1',
+      id: 'optimistic-user-1',
+      role: 'user',
+      sender: 'human',
+      chatId: 'chat-1',
+      content: 'hello',
+      optimisticUserPending: true,
+      createdAt: '2026-02-20T10:00:00.000Z'
+    }]);
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn()
+    });
+
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'server-user-1',
+        chatId: 'chat-1',
+        role: 'user',
+        sender: 'human',
+        content: 'hello',
+        createdAt: '2026-02-20T10:00:01.000Z'
+      }
+    });
+
+    expect(harness.getMessages()).toHaveLength(1);
+    expect(harness.getMessages()[0].messageId).toBe('server-user-1');
+    expect(harness.getMessages()[0].optimisticUserPending).toBe(false);
+  });
+
+  it('keeps identical consecutive user sends distinct when message events arrive', () => {
+    const harness = createMessageStateHarness([
+      {
+        messageId: 'optimistic-user-1',
+        id: 'optimistic-user-1',
+        role: 'user',
+        sender: 'human',
+        chatId: 'chat-1',
+        content: 'repeat',
+        optimisticUserPending: true,
+        createdAt: '2026-02-20T10:00:00.000Z'
+      },
+      {
+        messageId: 'optimistic-user-2',
+        id: 'optimistic-user-2',
+        role: 'user',
+        sender: 'human',
+        chatId: 'chat-1',
+        content: 'repeat',
+        optimisticUserPending: true,
+        createdAt: '2026-02-20T10:00:01.000Z'
+      }
+    ]);
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef: { current: null },
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount: vi.fn()
+    });
+
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'server-user-1',
+        chatId: 'chat-1',
+        role: 'user',
+        sender: 'human',
+        content: 'repeat',
+        createdAt: '2026-02-20T10:00:02.000Z'
+      }
+    });
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'server-user-2',
+        chatId: 'chat-1',
+        role: 'user',
+        sender: 'human',
+        content: 'repeat',
+        createdAt: '2026-02-20T10:00:03.000Z'
+      }
+    });
+
+    const messages = harness.getMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.messageId)).toEqual(['server-user-1', 'server-user-2']);
+    expect(messages.every((message) => message.optimisticUserPending !== true)).toBe(true);
+  });
+
   it('ignores mismatched subscriptions/world IDs', () => {
     const harness = createMessageStateHarness();
     const handler = createChatSubscriptionEventHandler({
@@ -217,6 +324,49 @@ describe('createChatSubscriptionEventHandler', () => {
 
     expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
     expect(harness.getMessages()).toHaveLength(0);
+  });
+
+  it('finalizes matching active assistant stream when final assistant message arrives', () => {
+    const harness = createMessageStateHarness();
+    const setActiveStreamCount = vi.fn();
+    const streamingStateRef = {
+      current: {
+        getActiveCount: vi.fn(() => 0),
+        endAllToolStreams: vi.fn(() => []),
+        isActive: vi.fn((messageId: string) => messageId === 'stream-1'),
+        handleEnd: vi.fn(),
+      }
+    };
+    const onSessionResponseStateChange = vi.fn();
+
+    const handler = createChatSubscriptionEventHandler({
+      subscriptionId: 'sub-1',
+      loadedWorldId: 'world-1',
+      selectedSessionId: 'chat-1',
+      streamingStateRef,
+      activityStateRef: { current: null },
+      setMessages: harness.setMessages,
+      setActiveStreamCount,
+      onSessionResponseStateChange
+    });
+
+    handler({
+      type: 'message',
+      subscriptionId: 'sub-1',
+      worldId: 'world-1',
+      message: {
+        messageId: 'stream-1',
+        chatId: 'chat-1',
+        role: 'assistant',
+        sender: 'a1',
+        content: 'final response'
+      }
+    });
+
+    expect(streamingStateRef.current.handleEnd).toHaveBeenCalledWith('stream-1');
+    expect(setActiveStreamCount).toHaveBeenCalledWith(0);
+    expect(onSessionResponseStateChange).toHaveBeenCalledWith('chat-1', false);
+    expect(harness.getMessages()).toHaveLength(1);
   });
 
   it('delegates SSE and tool lifecycle events to state managers', () => {
@@ -735,9 +885,9 @@ describe('createChatSubscriptionEventHandler', () => {
     expect(onSessionSystemEvent).not.toHaveBeenCalled();
   });
 
-  it('forwards CRUD events to session callback', () => {
+  it('forwards hitl-option-request system events even when chatId differs', () => {
     const harness = createMessageStateHarness();
-    const onSessionCrudEvent = vi.fn();
+    const onSessionSystemEvent = vi.fn();
 
     const handler = createChatSubscriptionEventHandler({
       subscriptionId: 'sub-1',
@@ -747,59 +897,30 @@ describe('createChatSubscriptionEventHandler', () => {
       activityStateRef: { current: null },
       setMessages: harness.setMessages,
       setActiveStreamCount: vi.fn(),
-      onSessionCrudEvent
+      onSessionSystemEvent
     });
 
     handler({
-      type: 'crud',
-      subscriptionId: 'sub-1',
-      worldId: 'world-1',
-      crud: {
-        operation: 'create',
-        entityType: 'agent',
-        entityId: 'agent-2',
-        createdAt: '2026-02-19T18:00:00.000Z',
-        entityData: { id: 'agent-2' }
-      }
-    });
-
-    expect(onSessionCrudEvent).toHaveBeenCalledWith({
-      operation: 'create',
-      entityType: 'agent',
-      entityId: 'agent-2',
-      chatId: null,
-      createdAt: '2026-02-19T18:00:00.000Z',
-      entityData: { id: 'agent-2' }
-    });
-  });
-
-  it('ignores CRUD events for non-selected chat when chatId is explicit', () => {
-    const harness = createMessageStateHarness();
-    const onSessionCrudEvent = vi.fn();
-
-    const handler = createChatSubscriptionEventHandler({
-      subscriptionId: 'sub-1',
-      loadedWorldId: 'world-1',
-      selectedSessionId: 'chat-1',
-      streamingStateRef: { current: null },
-      activityStateRef: { current: null },
-      setMessages: harness.setMessages,
-      setActiveStreamCount: vi.fn(),
-      onSessionCrudEvent
-    });
-
-    handler({
-      type: 'crud',
+      type: 'system',
       subscriptionId: 'sub-1',
       worldId: 'world-1',
       chatId: 'chat-2',
-      crud: {
-        operation: 'update',
-        entityType: 'agent',
-        entityId: 'agent-2'
+      system: {
+        eventType: 'hitl-option-request',
+        messageId: 'sys-hitl',
+        content: {
+          eventType: 'hitl-option-request',
+          requestId: 'req-1',
+          title: 'Approval required',
+          options: [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }]
+        }
       }
     });
 
-    expect(onSessionCrudEvent).not.toHaveBeenCalled();
+    expect(onSessionSystemEvent).toHaveBeenCalledWith(expect.objectContaining({
+      eventType: 'hitl-option-request',
+      chatId: 'chat-2',
+      messageId: 'sys-hitl'
+    }));
   });
 });

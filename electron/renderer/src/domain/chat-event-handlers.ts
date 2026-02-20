@@ -5,7 +5,7 @@
  *
  * Features:
  * - Global log event handler for status or message timeline updates
- * - Session-scoped realtime handler for message/sse/tool/system/CRUD events
+ * - Session-scoped realtime handler for message/sse/tool events
  * - Stream/activity synchronization helpers
  *
  * Implementation Notes:
@@ -13,7 +13,7 @@
  * - Session filtering relies on canonical payload `worldId` and `chatId`.
  *
  * Recent Changes:
- * - 2026-02-19: Added CRUD-event callback routing so renderer can refresh world metadata after background agent updates.
+ * - 2026-02-20: Allow `hitl-option-request` system events to bypass strict chatId session filtering so approval prompts remain visible when event scope is stale/unscoped.
  * - 2026-02-19: Reset elapsed activity timer on idle→active session-activity transition so new agent work starts from 0s.
  * - 2026-02-16: Added defensive SSE end/error handling when `messageId` is missing by clearing response state and ending lingering streams.
  * - 2026-02-16: Added selected-session fallback for unscoped SSE/tool completion events so waiting indicators clear when `chatId` is omitted.
@@ -87,14 +87,6 @@ interface ChatHandlerOptions {
     createdAt: string | null;
     content: unknown;
   }) => void;
-  onSessionCrudEvent?: (event: {
-    operation: string;
-    entityType: string;
-    entityId: string;
-    chatId: string | null;
-    createdAt: string | null;
-    entityData: unknown;
-  }) => void;
 }
 
 function isAssistantLikeMessage(message: Record<string, unknown> | null | undefined) {
@@ -142,6 +134,19 @@ function buildLogStatusText(logEvent: Record<string, unknown> | null | undefined
   return `${category} - ${baseMessage}: ${detailParts.join(' | ')}`;
 }
 
+function isHitlRequestPayload(systemPayload: Record<string, unknown>): boolean {
+  const topLevelType = String(systemPayload.eventType || '').trim();
+  if (topLevelType === 'hitl-option-request') {
+    return true;
+  }
+  const nestedContent = systemPayload.content;
+  if (nestedContent && typeof nestedContent === 'object') {
+    const eventType = String((nestedContent as Record<string, unknown>).eventType || '').trim();
+    return eventType === 'hitl-option-request';
+  }
+  return false;
+}
+
 export function createGlobalLogEventHandler({
   loadedWorldId,
   selectedSessionId,
@@ -183,7 +188,6 @@ export function createChatSubscriptionEventHandler({
   onSessionResponseStateChange,
   onSessionActivityUpdate,
   onSessionSystemEvent,
-  onSessionCrudEvent,
 }: ChatHandlerOptions) {
   let lastActivityPendingOperations = 0;
 
@@ -208,6 +212,29 @@ export function createChatSubscriptionEventHandler({
     }
   };
 
+  const endResponseStreamByMessage = (incomingMessage: Record<string, unknown>) => {
+    const streaming = streamingStateRef.current;
+    if (!streaming) return;
+    if (typeof streaming.isActive !== 'function' || typeof streaming.handleEnd !== 'function') return;
+
+    const candidateIds = [
+      String(incomingMessage.messageId || '').trim(),
+      String(incomingMessage.id || '').trim(),
+    ].filter(Boolean);
+
+    let ended = false;
+    for (const candidateId of candidateIds) {
+      if (!streaming.isActive(candidateId)) continue;
+      streaming.handleEnd(candidateId);
+      ended = true;
+      break;
+    }
+
+    if (ended) {
+      syncActiveStreamCount();
+    }
+  };
+
   return (payload: BasePayload) => {
     if (!payload) return;
     if (payload.subscriptionId && payload.subscriptionId !== subscriptionId) return;
@@ -225,6 +252,7 @@ export function createChatSubscriptionEventHandler({
           && typeof onSessionResponseStateChange === 'function'
         ) {
           onSessionResponseStateChange(selectedSessionId, false);
+          endResponseStreamByMessage(incomingMessage);
           endAllToolStreams();
         }
         return;
@@ -241,6 +269,7 @@ export function createChatSubscriptionEventHandler({
         if (typeof onSessionResponseStateChange === 'function' && incomingChatId) {
           onSessionResponseStateChange(incomingChatId, false);
         }
+        endResponseStreamByMessage(incomingMessage);
         endAllToolStreams();
       }
       return;
@@ -399,7 +428,8 @@ export function createChatSubscriptionEventHandler({
       if (!systemPayload) return;
 
       const systemChatId = String(payload.chatId || systemPayload.chatId || '').trim() || null;
-      if (selectedSessionId && systemChatId !== selectedSessionId) return;
+      const isHitlRequest = isHitlRequestPayload(systemPayload);
+      if (!isHitlRequest && selectedSessionId && systemChatId !== selectedSessionId) return;
 
       if (typeof onSessionSystemEvent === 'function') {
         onSessionSystemEvent({
@@ -408,25 +438,6 @@ export function createChatSubscriptionEventHandler({
           messageId: systemPayload.messageId ? String(systemPayload.messageId) : null,
           createdAt: systemPayload.createdAt ? String(systemPayload.createdAt) : null,
           content: systemPayload.content,
-        });
-      }
-    }
-
-    if (payload.type === 'crud') {
-      const crudPayload = payload.crud as Record<string, unknown> | undefined;
-      if (!crudPayload) return;
-
-      const crudChatId = String(payload.chatId || crudPayload.chatId || '').trim() || null;
-      if (selectedSessionId && crudChatId && crudChatId !== selectedSessionId) return;
-
-      if (typeof onSessionCrudEvent === 'function') {
-        onSessionCrudEvent({
-          operation: String(crudPayload.operation || ''),
-          entityType: String(crudPayload.entityType || ''),
-          entityId: String(crudPayload.entityId || ''),
-          chatId: crudChatId,
-          createdAt: crudPayload.createdAt ? String(crudPayload.createdAt) : null,
-          entityData: crudPayload.entityData,
         });
       }
     }

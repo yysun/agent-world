@@ -103,6 +103,7 @@
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
  * 2026-02-19: Added built-in `create_agent` tool registration with approval-gated agent creation.
  */
@@ -1634,7 +1635,7 @@ function getBuiltInTools(): Record<string, any> {
 /**
  * Get MCP tools available for a world with registry-level caching
  * Uses cache-first strategy to avoid repeated tool fetching during ephemeral connections
- * Includes built-in tools (`shell_cmd`, `load_skill`) in addition to MCP server tools
+ * Includes built-in tools (`shell_cmd`, `load_skill`, `create_agent`) in addition to MCP server tools
  */
 export async function getMCPToolsForWorld(worldId: string): Promise<Record<string, any>> {
   const startTime = performance.now();

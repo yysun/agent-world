@@ -13,8 +13,8 @@
  * - Tests with mixed valid and invalid calls
  * - Verifies tool_call_id handling with fallback
  *
- * Recent Changes:
- * - 2026-02-19: Added `create_agent` alias normalization coverage for `auto-reply`/`auto_reply` and `next agent` variants.
+ * Recent changes:
+ * - 2026-02-20: Added alias normalization coverage for `create_agent` (`auto-reply` and `next agent` variants).
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
@@ -380,7 +380,7 @@ describe('Tool Utils - validateToolParameters', () => {
     expect(validation.error).toContain("Required parameter 'path' is missing or empty");
   });
 
-  test('normalizes create_agent aliases to canonical autoReply and nextAgent fields', () => {
+  test('normalizes create_agent aliases for autoReply and nextAgent', () => {
     const schema = {
       type: 'object',
       properties: {
@@ -393,24 +393,20 @@ describe('Tool Utils - validateToolParameters', () => {
     };
 
     const validation = validateToolParameters(
-      {
-        name: 'Planner',
-        'auto-reply': false,
-        'next agent': 'executor',
-      },
+      { name: 'Router', 'auto-reply': false, 'next agent': 'reviewer' },
       schema,
       'create_agent',
     );
 
     expect(validation.valid).toBe(true);
     expect(validation.correctedArgs).toEqual({
-      name: 'Planner',
+      name: 'Router',
       autoReply: false,
-      nextAgent: 'executor',
+      nextAgent: 'reviewer',
     });
   });
 
-  test('keeps canonical create_agent fields when aliases are also present', () => {
+  test('keeps canonical create_agent keys when aliases are also present', () => {
     const schema = {
       type: 'object',
       properties: {
@@ -424,11 +420,11 @@ describe('Tool Utils - validateToolParameters', () => {
 
     const validation = validateToolParameters(
       {
-        name: 'Planner',
+        name: 'Router',
         autoReply: true,
         'auto-reply': false,
-        nextAgent: 'reviewer',
-        next_agent: 'executor',
+        nextAgent: 'human',
+        'next agent': 'reviewer',
       },
       schema,
       'create_agent',
@@ -436,9 +432,9 @@ describe('Tool Utils - validateToolParameters', () => {
 
     expect(validation.valid).toBe(true);
     expect(validation.correctedArgs).toEqual({
-      name: 'Planner',
+      name: 'Router',
       autoReply: true,
-      nextAgent: 'reviewer',
+      nextAgent: 'human',
     });
   });
 });

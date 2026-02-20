@@ -1,141 +1,151 @@
-# Architecture Plan: Approval-Gated `create_agent` Built-in Tool
+# Architecture Plan (Reset): Approval-Gated `create_agent` Built-in Tool
 
-**Date**: 2026-02-19  
+**Date**: 2026-02-20  
 **Related Requirement**: `/Users/esun/Documents/Projects/agent-world/.docs/reqs/2026-02-19/req-create-agent-tool.md`
 
 ## Overview
 
-Implement a new built-in tool `create_agent` that creates an agent only after explicit user approval, accepts required `name` plus optional `auto-reply`, `role`, and `next agent`, and generates a deterministic system prompt template.
+Reset and redo the implementation plan for `create_agent` as a built-in tool that:
+- requires explicit user approval before creation,
+- accepts required `name` and optional `auto-reply`, `role`, `next agent`,
+- and produces a deterministic system prompt shape required by the spec.
+
+## Reset Notes
+
+- This plan intentionally clears prior completion state and restarts execution tracking from zero.
+- All checklists below are reset to pending (`[ ]`).
+- Prior implementation notes should be treated as historical context, not current execution state.
 
 ## Architecture Decisions
 
-- Add `create_agent` as a built-in tool in the existing built-in registry path (`getBuiltInTools()`), consistent with `load_skill`, `read_file`, and `shell_cmd`.
-- Use existing generic HITL option runtime (`requestWorldOption`) for mandatory approval, avoiding new API/event protocols.
-- Use canonical internal argument keys (`autoReply`, `role`, `nextAgent`) with alias normalization for user-requested spellings (`auto-reply`, `next agent`) and common variants (`auto_reply`, `next_agent`).
-- Build system prompt in one deterministic formatter function to prevent drift across call paths.
-- Default unresolved/omitted `next agent` to `human` (deterministic handoff target), while still allowing explicit override.
-- Resolve new-agent `provider`/`model` from world-level `chatLLMProvider`/`chatLLMModel` when configured, with deterministic fallback only when world values are unset.
+- Keep `create_agent` as a built-in tool in `getBuiltInTools()` to match current built-in discovery behavior.
+- Enforce approval using existing HITL option flow (`requestWorldOption`) rather than introducing a new approval protocol.
+- Normalize input aliases to canonical runtime keys:
+  - `auto-reply` / `auto_reply` -> `autoReply`
+  - `next agent` / `next-agent` / `next_agent` -> `nextAgent`
+- Generate system prompt through one deterministic formatter function to avoid drift.
+- Default unresolved `nextAgent` to `human` for deterministic routing when omitted.
+- Resolve provider/model from world settings (`chatLLMProvider`, `chatLLMModel`) when present; otherwise use existing deterministic defaults.
+- Freeze prompt first-line variants to deterministic forms:
+  - with `role`: `You are agent <name>. Your role is <role>.`
+  - without `role`: `You are agent <name>.`
 
-## AR Review Outcome (AP)
+## AR Review Outcome
 
-- **Status:** ✅ Approved for implementation.
-- **Resolved 1:** Approval is enforced inside `create_agent` execution via HITL runtime; denied/timeout returns non-creation result.
-- **Resolved 2:** Hyphen/space parameter names are aliases, not primary persisted field names.
-- **Resolved 3:** Missing `next agent` defaults to `human` to avoid accidental agent-loop fan-out and keep deterministic behavior.
-- **Resolved 4:** Tool implementation calls existing `createAgent()` manager function to preserve standard persistence behavior and CRUD event emission.
-- **Resolved 5:** New agent provider/model inherit from world settings (`chatLLMProvider`/`chatLLMModel`) whenever present.
+- **Date:** 2026-02-20
+- **Status:** Approved after in-place spec tightening.
+- **Fixed in AR:** Removed prompt-format ambiguity by specifying exact first-line output when `role` is omitted.
+- **Fixed in AR:** Reconfirmed input alias handling as parse-time normalization only; canonical keys remain runtime/persistence contract.
+- **Fixed in AR:** Reconfirmed deterministic `nextAgent` default to `human` as documented behavior.
 
 ## Scope Map
 
 - **In scope:**
-  - New built-in `create_agent` tool definition + prompt formatter.
-  - Built-in tool registry wiring.
-  - Parameter alias normalization for create-agent argument variants.
-  - Core tests for approval path, parameter handling, prompt formatting, and creation behavior.
+  - `create_agent` tool definition and handler behavior.
+  - Built-in registry wiring and validation wrapping.
+  - Alias normalization for optional parameter variants.
+  - Tests for validation, approval, persistence behavior, and result payload.
 - **Out of scope:**
-  - UI redesign for approval prompts (reuse existing generic HITL prompt UX).
-  - Changes to existing REST `/agents` API contract.
-  - Refactors unrelated to tool creation/approval flow.
+  - New approval UX or protocol changes.
+  - REST API contract redesign for `/agents`.
+  - Unrelated core/runtime refactors.
 
 ## Flow
 
 ```mermaid
 flowchart TD
-  A["LLM calls create_agent"] --> B["validate + normalize params"]
+  A["LLM invokes create_agent"] --> B["validate + normalize args"]
   B --> C["requestWorldOption approval"]
   C --> D{"approved?"}
   D -->|No / Timeout| E["return denial result (no create)"]
   D -->|Yes| F["build deterministic system prompt"]
-  F --> G["call createAgent() manager"]
-  G --> H["return structured success result"]
+  F --> G["createAgent(worldId, params)"]
+  G --> H["return structured success payload"]
 ```
 
 ## Implementation Phases
 
-### Phase 1: New Tool Module
-- [x] Add `core/create-agent-tool.ts` with function-based implementation.
-- [x] Define tool schema with required `name` and optional `autoReply`, `role`, `nextAgent`.
-- [x] Implement deterministic prompt builder:
-  - `You are agent <name>. <You role is ...>`
+### Phase 1: Tool Contract + Formatter
+- [x] Define `create_agent` schema with required `name`.
+- [x] Support optional inputs: `autoReply`, `role`, `nextAgent` (plus aliases via normalization layer).
+- [x] Implement deterministic prompt formatter:
+  - when `role` exists: `You are agent <name>. Your role is <role>.`
+  - when `role` is missing: `You are agent <name>.`
   - blank line
   - `Always respond in exactly this structure:`
   - `@<next agent>`
   - `{Your response}`
-- [x] Implement approval gate using `requestWorldOption(...)` with options:
-  - `yes`
-  - `no`
-- [x] On approval, call `createAgent(worldId, params)` with deterministic defaults:
-  - `type: "default"`
+- [x] Document deterministic default for missing `nextAgent` (`human`).
+
+### Phase 2: Approval-Gated Execution Path
+- [x] Add/confirm tool module implementation in `core/create-agent-tool.ts`.
+- [x] Enforce approval before any write using `requestWorldOption` with explicit yes/no options.
+- [x] Ensure denied/timeout branch never calls persistence and returns structured denial payload.
+- [x] On approval, call manager-level `createAgent(...)` exactly once.
+
+### Phase 3: Built-in Registry + Input Normalization
+- [x] Wire tool in `core/mcp-server-registry.ts` using existing validation wrapper path.
+- [x] Extend/confirm alias normalization in `core/tool-utils.ts` for `auto-reply` and `next agent` variants.
+- [x] Preserve non-destructive normalization behavior (canonical key wins when already present).
+- [x] Confirm no behavior regression for existing built-in tools.
+
+### Phase 4: Persistence Defaults + Result Contract
+- [x] Apply deterministic defaults:
   - `autoReply: true` when omitted
-  - `provider` = world `chatLLMProvider` when set; otherwise existing deterministic default (`openai`)
-  - `model` = world `chatLLMModel` when set; otherwise existing deterministic default (`gpt-4`)
-  - `systemPrompt` from formatter
-- [x] Return structured success/denial/error results as deterministic JSON string payloads.
+  - `type: "default"`
+  - provider/model inherited from world settings when set
+  - deterministic fallback provider/model when unset
+- [x] Return structured success payload including created agent identity and effective settings.
+- [x] Return clear structured error payload for validation/persistence conflicts (e.g., duplicate ID/name).
+- [x] Guarantee no partial writes on failures.
 
-### Phase 2: Built-in Registry Wiring
-- [x] Import `createCreateAgentToolDefinition` into `/Users/esun/Documents/Projects/agent-world/core/mcp-server-registry.ts`.
-- [x] Register `create_agent` in `getBuiltInTools()` via `wrapToolWithValidation(...)`.
-- [x] Keep existing built-in tools unchanged.
-
-### Phase 3: Parameter Alias Normalization
-- [x] Extend `/Users/esun/Documents/Projects/agent-world/core/tool-utils.ts` alias normalization to map:
-  - `auto-reply` / `auto_reply` → `autoReply`
-  - `next agent` / `next-agent` / `next_agent` → `nextAgent`
-- [x] Ensure normalization is non-destructive and only applies when canonical key is absent.
-- [x] Preserve existing alias behavior for other tools.
-
-### Phase 4: Test Coverage
-- [x] Add `/Users/esun/Documents/Projects/agent-world/tests/core/create-agent-tool.test.ts` covering:
-  - missing `name` validation failure
-  - approval denied path (no create call)
-  - timeout/denial handling behavior
-  - alias normalization for `auto-reply` and `next agent` variants
-  - deterministic prompt content with/without optional `role` and `nextAgent`
-  - world provider/model inheritance behavior (configured vs unset world values)
-  - duplicate-agent error path passthrough
-- [x] Update `/Users/esun/Documents/Projects/agent-world/tests/core/shell-cmd-integration.test.ts` to assert `create_agent` is present in built-ins.
-- [x] Keep tests isolated with in-memory fixtures/mocks and no real LLM calls.
-
-### Phase 5: Regression + Validation
-- [x] Run targeted core tests for tool utils, built-in registry integration, and new create-agent tests.
-- [x] Validate no regressions in existing load-skill approval behavior and existing agent create API flows.
-- [x] Confirm deterministic output shape for success/denial/error results.
+### Phase 5: Tests + Validation
+- [x] Add/confirm unit tests in `tests/core/create-agent-tool.test.ts` for:
+  - missing/invalid `name`
+  - approval denied and timeout behavior
+  - alias normalization behavior
+  - prompt formatting with and without optional fields
+  - provider/model inheritance and fallback behavior
+  - duplicate conflict error handling
+- [x] Add/confirm built-in presence assertion in `tests/core/shell-cmd-integration.test.ts`.
+- [x] Run targeted vitest suite for tool + registry + normalization.
+- [ ] Execute manual smoke validation in web/CLI approval flow.
 
 ## Risks and Mitigations
 
-- **Risk:** Parameter keys containing spaces/hyphens may be emitted inconsistently by models.  
-  **Mitigation:** Canonical internal keys + alias normalization for multiple variants.
-- **Risk:** HITL channel unavailable in non-interactive contexts.  
-  **Mitigation:** Return explicit non-creation error/denial result rather than bypassing approval.
-- **Risk:** Agent provider/model drift from world settings.  
-  **Mitigation:** Resolve provider/model directly from world config at execution time and assert via unit tests.
-- **Risk:** Prompt injection via free-form `role` text.  
-  **Mitigation:** Normalize whitespace and bound role length before interpolating into system prompt.
-- **Risk:** Agent ID collisions from duplicate names.  
-  **Mitigation:** Keep manager-level collision checks as source of truth; surface clear error payload.
+- **Risk:** LLM emits non-canonical argument keys.  
+  **Mitigation:** Central alias normalization before validation/persistence.
+- **Risk:** Approval bypass in non-interactive or edge flows.  
+  **Mitigation:** Keep approval check in tool execution path and fail closed on missing approval.
+- **Risk:** Inconsistent provider/model on created agents.  
+  **Mitigation:** Resolve effective model settings from world config at execution time and assert in tests.
+- **Risk:** Prompt template drift across future edits.  
+  **Mitigation:** Single formatter function + direct snapshot/string tests.
+- **Risk:** Conflict errors partially persist state.  
+  **Mitigation:** Keep manager create path as single write boundary and assert no-create on errors.
 
 ## Validation Plan
 
-- [x] Unit tests pass for new tool behavior and alias normalization.
-- [x] Built-in tool availability test includes `create_agent`.
-- [ ] Manual smoke in web/CLI:
-  - invoke `create_agent`
-  - deny approval and verify no new agent appears
-  - approve once and verify agent appears with expected system prompt template
+- [x] Automated: `create_agent` behavior tests pass with in-memory storage and mocked LLM usage.
+- [x] Automated: built-in registry test shows `create_agent` discoverable in tool list.
+- [ ] Manual: invoke `create_agent`, deny approval, verify no agent created.
+- [ ] Manual: invoke `create_agent`, approve once, verify one agent created with required prompt structure.
+- [ ] Manual: verify optional `role` and `next agent` values are reflected correctly.
 
 ## Exit Criteria
 
-- [x] `create_agent` is discoverable as a built-in tool.
-- [x] Approval is mandatory and enforced before creation.
-- [x] Agent creation uses required parameter contract and deterministic defaults.
-- [x] Generated system prompt matches required structure.
-- [x] Tests for new behavior are in place and green.
+- [x] `create_agent` is discoverable as a built-in tool in standard world tool listing.
+- [x] Approval is mandatory and denial/timeout paths do not create agents.
+- [x] Required/optional input contract is enforced with clear validation errors.
+- [x] Persisted agent settings and system prompt match requirement behavior.
+- [x] Tests for tool behavior, alias normalization, and registry integration are passing.
 
 ## Progress Notes
 
-- 2026-02-19: Implemented `core/create-agent-tool.ts` with approval-gated creation and deterministic prompt generation.
-- 2026-02-19: Registered `create_agent` as a built-in tool via `core/mcp-server-registry.ts`.
-- 2026-02-19: Added `create_agent` alias normalization (`auto-reply`, `next agent`) in `core/tool-utils.ts`.
-- 2026-02-19: Added unit coverage in `tests/core/create-agent-tool.test.ts` and alias tests in `tests/core/tool-utils.test.ts`.
-- 2026-02-19: Updated built-in integration assertions in `tests/core/shell-cmd-integration.test.ts`.
-- 2026-02-19: Ran targeted tests: `npx vitest run tests/core/create-agent-tool.test.ts tests/core/tool-utils.test.ts tests/core/shell-cmd-integration.test.ts` (45 passed).
+- 2026-02-20: Plan reset requested; execution tracking restarted with all tasks pending.
+- 2026-02-20: Implemented `core/create-agent-tool.ts` with mandatory HITL approval, deterministic prompt generation, and structured result payloads.
+- 2026-02-20: Registered built-in `create_agent` in `core/mcp-server-registry.ts`.
+- 2026-02-20: Added alias normalization for `create_agent` optional input variants in `core/tool-utils.ts`.
+- 2026-02-20: Added unit tests in `tests/core/create-agent-tool.test.ts` and normalization coverage in `tests/core/tool-utils.test.ts`.
+- 2026-02-20: Added built-in availability assertion for `create_agent` in `tests/core/shell-cmd-integration.test.ts`.
+- 2026-02-20: Ran targeted tests: `npx vitest run tests/core/create-agent-tool.test.ts tests/core/tool-utils.test.ts tests/core/shell-cmd-integration.test.ts` (47 passed).

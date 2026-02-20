@@ -52,7 +52,7 @@ The tool must accept a required `name` parameter and optional `auto-reply`, `rol
 The created agent system prompt **MUST** follow this exact structure:
 
 ```text
-You are agent <name>. <Your role is ...>
+You are agent <name>. [Your role is <role>.]
 
 Always respond in exactly this structure:
 @<next agent>
@@ -60,7 +60,10 @@ Always respond in exactly this structure:
 ```
 
 - `name` **MUST** be the provided agent name.
-- If `role` is provided, the role phrase **MUST** be populated accordingly.
+- If `role` is provided, the first line **MUST** be exactly:
+  - `You are agent <name>. Your role is <role>.`
+- If `role` is not provided, the first line **MUST** be exactly:
+  - `You are agent <name>.`
 - If `next agent` is provided, the mention target **MUST** use that value.
 - If `next agent` is not provided, the system **MUST** apply a deterministic default mention target and document that default in tool behavior.
 
@@ -99,6 +102,8 @@ Always respond in exactly this structure:
 ### Decision
 
 - Keep `create_agent` as a built-in tool aligned with existing tool wrapping/validation and approval patterns.
+- Freeze deterministic prompt behavior for both `role` present and `role` omitted cases to remove formatting ambiguity.
+- Keep canonical internal keys at runtime boundaries and treat `auto-reply` / `next agent` spellings as input aliases only.
 
 ### Tradeoffs
 
@@ -108,3 +113,6 @@ Always respond in exactly this structure:
 - **Flexible prompt generation (rejected)**:
   - Pros: more expressive prompts.
   - Cons: inconsistent behavior and routing structure.
+- **Default `next agent` = `human` (selected)**:
+  - Pros: deterministic fallback and safe handoff target.
+  - Cons: less autonomous chaining when caller omits routing target.
