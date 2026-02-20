@@ -144,6 +144,8 @@ export {
 export {
   beginWorldActivity,
   trackWorldActivity,
+  getActiveProcessingChatIds,
+  isChatProcessing,
   type WorldActivityEventPayload,
   type WorldActivityEventType,
 } from './activity-tracker.js';

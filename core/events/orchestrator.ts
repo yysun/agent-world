@@ -377,12 +377,11 @@ export async function processAgentMessage(
   agent: Agent,
   messageEvent: WorldMessageEvent
 ): Promise<void> {
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  // Derive target chatId before activity begins so it is captured in per-chat tracking
+  const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, targetChatId ?? undefined);
   let processingHandle: ReturnType<typeof beginChatMessageProcessing> | null = null;
   try {
-    // Derive target chatId from the originating message event for concurrency-safe processing
-    // This ensures processing stays bound to the originating session even if world.currentChatId changes
-    const targetChatId = messageEvent.chatId ?? world.currentChatId ?? null;
     if (targetChatId) {
       processingHandle = beginChatMessageProcessing(world.id, targetChatId);
     }

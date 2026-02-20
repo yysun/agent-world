@@ -44,9 +44,8 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
- * - 2026-02-19: Added web chat branch handler and chat-history search state updates for MVP parity.
- * - 2026-02-19: Moved chat-title refresh handling from `system` events to chat `crud` update events.
- * - 2026-02-19: Added CRUD SSE refresh handler so new/updated/deleted agents appear without manual page reload.
+ * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
+ * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
  * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
  * - 2026-02-15: Updated init chat selection to prioritize current selected chat ID, with backend currentChatId as fallback.
  * - 2026-02-14: Added generic HITL option prompt queue handling and response submission event for web approval flows.
@@ -472,47 +471,6 @@ const handleWorldActivity = (state: WorldComponentState, activity: any): WorldCo
   // No return = no re-render
 };
 
-const handleCrudEvent = async (state: WorldComponentState, eventData: any): Promise<WorldComponentState> => {
-  if (!eventData) {
-    return state;
-  }
-
-  const entityType = String(eventData.entityType || '').trim();
-  if (entityType !== 'agent' && entityType !== 'chat') {
-    return state;
-  }
-
-  if (!state.worldName) {
-    return state;
-  }
-
-  try {
-    const refreshedWorld = await api.getWorld(state.worldName);
-    const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
-    const resolvedChatId = resolveActiveChatId(refreshedWorld as any, activeChatId) || undefined;
-    const chats = Array.isArray(refreshedWorld.chats) ? refreshedWorld.chats : [];
-    const agents = Array.isArray(refreshedWorld.agents) ? refreshedWorld.agents : [];
-    const currentChat = chats.find((chat: any) => chat.id === resolvedChatId) || null;
-    const selectedAgentId = state.selectedAgent?.id || null;
-    const selectedAgent = selectedAgentId
-      ? agents.find((agent: any) => agent.id === selectedAgentId) || null
-      : null;
-
-    return {
-      ...state,
-      world: refreshedWorld,
-      currentChat,
-      selectedAgent,
-      error: null
-    };
-  } catch (error: any) {
-    return {
-      ...state,
-      error: error?.message || 'Failed to refresh world after agent update.'
-    };
-  }
-};
-
 // World initialization with core auto-restore
 async function* initWorld(state: WorldComponentState, name: string, chatId?: string): AsyncGenerator<WorldComponentState> {
   if (!name) {
@@ -619,11 +577,32 @@ const handleSystemEvent = async (state: WorldComponentState, data: any): Promise
     needScroll: true
   };
 
+  // Handle specific system events
+  if (eventType === 'chat-title-updated') {
+    // Refresh current chat context to update chat list/title without switching sessions.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
+    for await (const update of updates) {
+      return { ...newState, ...update };
+    }
+  }
+
+  if (eventType === 'agent-created') {
+    // Re-fetch world to pick up the new agent in the agents list.
+    const activeChatId = newState.currentChat?.id || newState.world?.currentChatId || undefined;
+    const updates = initWorld(newState, newState.worldName, activeChatId);
+    for await (const update of updates) {
+      return { ...newState, ...update };
+    }
+  }
+
   const hitlPrompt = HitlDomain.parseHitlPromptRequest(data);
   if (hitlPrompt) {
+    const currentQueue = newState.hitlPromptQueue || [];
+    const nextQueue = HitlDomain.enqueueHitlPrompt(currentQueue, hitlPrompt);
     return {
       ...newState,
-      hitlPromptQueue: HitlDomain.enqueueHitlPrompt(newState.hitlPromptQueue || [], hitlPrompt)
+      hitlPromptQueue: nextQueue,
     };
   }
 
@@ -835,12 +814,22 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     InputDomain.updateInput(state, payload.target.value),
 
   'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return;
+    }
     if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
       app.run('send-message');
     }
   },
 
   'send-message': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if ((state.hitlPromptQueue || []).length > 0) {
+      return {
+        ...state,
+        error: 'Resolve the pending HITL prompt before sending a new message.'
+      };
+    }
+
     const prepared = InputDomain.validateAndPrepareMessage(state.userInput, state.worldName);
     if (!prepared) return state;
 
@@ -983,6 +972,19 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         submittingHitlRequestId: null,
         hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId(state.hitlPromptQueue || [], requestId)
       };
+
+      if (prompt?.metadata?.refreshAfterDismiss) {
+        const activeChatId = state.currentChat?.id || state.world?.currentChatId || undefined;
+        const updates = initWorld(state, state.worldName, activeChatId);
+        for await (const update of updates) {
+          yield {
+            ...state,
+            ...update,
+            submittingHitlRequestId: null,
+            hitlPromptQueue: HitlDomain.removeHitlPromptByRequestId((update.hitlPromptQueue || state.hitlPromptQueue || []), requestId)
+          };
+        }
+      }
     } catch (error: any) {
       yield {
         ...state,
@@ -999,9 +1001,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
   'handleToolStream': handleToolStream,
   'handleWorldActivity': (state: WorldComponentState, activity: any): WorldComponentState | void => {
     return handleWorldActivity(state, activity);
-  },
-  'handleCrudEvent': (state: WorldComponentState, payload: WorldEventPayload<'handleCrudEvent'>): Promise<WorldComponentState> => {
-    return handleCrudEvent(state, payload);
   },
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 
@@ -1333,11 +1332,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     }
   },
 
-  'update-chat-search': (state: WorldComponentState, payload: WorldEventPayload<'update-chat-search'>): WorldComponentState => ({
-    ...state,
-    chatSearchQuery: String(payload?.target?.value || '')
-  }),
-
   'load-chat-from-history': async function* (state: WorldComponentState, chatId: WorldEventPayload<'load-chat-from-history'>): AsyncGenerator<WorldComponentState> {
     try {
       // Phase 2: Cleanup streaming state before loading new chat
@@ -1358,7 +1352,7 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
         activityStartTime: null,
         elapsedIntervalId: null,
         hitlPromptQueue: [],
-        submittingHitlRequestId: null
+        submittingHitlRequestId: null,
       };
 
       yield ChatHistoryDomain.createChatLoadingState(cleanState);
@@ -1372,49 +1366,6 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       history.pushState(null, '', path);
     } catch (error: any) {
       yield ChatHistoryDomain.createChatErrorState(state, error.message || 'Failed to load chat from history');
-    }
-  },
-
-  'branch-chat-from-message': async function* (
-    state: WorldComponentState,
-    payload: WorldEventPayload<'branch-chat-from-message'>
-  ): AsyncGenerator<WorldComponentState> {
-    const messageId = String(payload?.messageId || '').trim();
-    const sourceChatId = String(payload?.chatId || state.currentChat?.id || state.world?.currentChatId || '').trim();
-    if (!messageId || !sourceChatId) {
-      yield {
-        ...state,
-        error: 'Cannot branch chat: missing source chat or message ID.'
-      };
-      return;
-    }
-
-    try {
-      yield {
-        ...state,
-        messagesLoading: true,
-        error: null
-      };
-
-      const result = await api.branchChatFromMessage(state.worldName, sourceChatId, messageId);
-      if (!result?.success || !result?.chatId) {
-        yield {
-          ...state,
-          messagesLoading: false,
-          error: 'Failed to branch chat from message.'
-        };
-        return;
-      }
-
-      const path = ChatHistoryDomain.buildChatRoutePath(state.worldName, result.chatId);
-      app.route(path);
-      history.pushState(null, '', path);
-    } catch (error: any) {
-      yield {
-        ...state,
-        messagesLoading: false,
-        error: error?.message || 'Failed to branch chat from message.'
-      };
     }
   },
 

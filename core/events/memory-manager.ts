@@ -467,7 +467,7 @@ export async function continueLLMAfterToolExecution(
     emptyToolCallRetryCount?: number;
   }
 ): Promise<void> {
-  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`);
+  const completeActivity = beginWorldActivity(world, `agent:${agent.id}`, chatId ?? undefined);
   try {
     let hopCount = options?.hopCount ?? 0;
     const maxToolHops = 50;
