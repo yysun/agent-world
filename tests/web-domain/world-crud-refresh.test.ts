@@ -1,16 +1,13 @@
 /**
- * Web World CRUD Refresh Tests
+ * Web World System Refresh Tests
  *
  * Purpose:
- * - Ensure agent CRUD SSE events trigger a world refresh so new agents appear in the UI.
+ * - Ensure system events that mutate visible world state trigger a world refresh.
  *
  * Coverage:
- * - Ignores unrelated CRUD events.
- * - Refreshes world/currentChat on agent/chat CRUD events.
+ * - Ignores unrelated system events.
+ * - Refreshes world/currentChat on `agent-created` and `chat-title-updated` events.
  * - Surfaces refresh failures as UI errors.
- *
- * Recent Changes:
- * - 2026-02-19: Added coverage for `handleCrudEvent` in World.update handlers.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -32,26 +29,28 @@ function createBaseState() {
   } as any;
 }
 
-describe('web world update CRUD refresh', () => {
+describe('web world update system refresh', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('ignores unrelated CRUD events', async () => {
+  it('ignores unrelated system events', async () => {
     const state = createBaseState();
     const getWorldSpy = vi.spyOn(api, 'getWorld');
 
-    const nextState = await (worldUpdateHandlers['handleCrudEvent'] as any)(state, {
-      operation: 'create',
-      entityType: 'world',
-      entityId: 'world-1'
+    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      content: {
+        eventType: 'noop-event'
+      }
     });
 
-    expect(nextState).toBe(state);
+    expect(nextState).not.toBe(state);
+    expect(nextState.messages).toHaveLength(1);
+    expect(nextState.messages[0]?.type).toBe('system');
     expect(getWorldSpy).not.toHaveBeenCalled();
   });
 
-  it('refreshes world for agent CRUD events', async () => {
+  it('refreshes world for agent-created system events', async () => {
     const state = createBaseState();
     vi.spyOn(api, 'getWorld').mockResolvedValue({
       id: 'world-1',
@@ -61,10 +60,10 @@ describe('web world update CRUD refresh', () => {
       agents: [{ id: 'new-agent', name: 'new-agent' }]
     } as any);
 
-    const nextState = await (worldUpdateHandlers['handleCrudEvent'] as any)(state, {
-      operation: 'create',
-      entityType: 'agent',
-      entityId: 'new-agent'
+    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      content: {
+        eventType: 'agent-created'
+      }
     });
 
     expect(api.getWorld).toHaveBeenCalledWith('world-1');
@@ -74,7 +73,7 @@ describe('web world update CRUD refresh', () => {
     expect(nextState.error).toBeNull();
   });
 
-  it('refreshes world for chat CRUD events', async () => {
+  it('refreshes world for chat-title-updated system events', async () => {
     const state = createBaseState();
     vi.spyOn(api, 'getWorld').mockResolvedValue({
       id: 'world-1',
@@ -84,10 +83,10 @@ describe('web world update CRUD refresh', () => {
       agents: []
     } as any);
 
-    const nextState = await (worldUpdateHandlers['handleCrudEvent'] as any)(state, {
-      operation: 'update',
-      entityType: 'chat',
-      entityId: 'chat-1'
+    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      content: {
+        eventType: 'chat-title-updated'
+      }
     });
 
     expect(api.getWorld).toHaveBeenCalledWith('world-1');
@@ -99,10 +98,10 @@ describe('web world update CRUD refresh', () => {
     const state = createBaseState();
     vi.spyOn(api, 'getWorld').mockRejectedValue(new Error('refresh failed'));
 
-    const nextState = await (worldUpdateHandlers['handleCrudEvent'] as any)(state, {
-      operation: 'create',
-      entityType: 'agent',
-      entityId: 'new-agent'
+    const nextState = await (worldUpdateHandlers['handleSystemEvent'] as any)(state, {
+      content: {
+        eventType: 'agent-created'
+      }
     });
 
     expect(nextState.error).toContain('refresh failed');

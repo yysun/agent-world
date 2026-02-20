@@ -76,6 +76,27 @@ export interface ComposerActionState {
   actionButtonText: string;
 }
 
+export function isBranchableAgentMessage(message: Message): boolean {
+  if (!message || message.role !== 'assistant') return false;
+
+  const sender = String(message.sender || '').toLowerCase().trim();
+  if (!sender || sender === 'system' || sender === 'tool' || sender === 'human' || sender === 'user') {
+    return false;
+  }
+
+  const text = String(message.text || '').trim();
+  if (!text || /^error\s*:/i.test(text)) {
+    return false;
+  }
+
+  const anyMessage = message as any;
+  if (Array.isArray(anyMessage.tool_calls) && anyMessage.tool_calls.length > 0) return false;
+  if (anyMessage.tool_call_id) return false;
+  if (anyMessage.toolCallStatus) return false;
+
+  return true;
+}
+
 export function getComposerActionState(params: {
   currentChatId: string | null;
   isWaiting: boolean;

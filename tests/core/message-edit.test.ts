@@ -339,15 +339,12 @@ describe('Message Edit Feature', () => {
         id: 'evt-title-1',
         worldId: world.id,
         chatId: 'chat-1',
-        type: 'crud',
+        type: 'system',
         payload: {
-          operation: 'update',
-          entityType: 'chat',
-          entityId: 'chat-1',
-          entityData: {
-            name: 'hi',
-            source: 'idle'
-          }
+          eventType: 'chat-title-updated',
+          chatId: 'chat-1',
+          title: 'hi',
+          source: 'idle'
         },
         createdAt: new Date()
       });
@@ -376,15 +373,12 @@ describe('Message Edit Feature', () => {
         id: 'evt-title-2',
         worldId: 'test-world',
         chatId: 'chat-1',
-        type: 'crud',
+        type: 'system',
         payload: {
-          operation: 'update',
-          entityType: 'chat',
-          entityId: 'chat-1',
-          entityData: {
-            name: 'hi',
-            source: 'idle'
-          }
+          eventType: 'chat-title-updated',
+          chatId: 'chat-1',
+          title: 'hi',
+          source: 'idle'
         },
         createdAt: new Date()
       });

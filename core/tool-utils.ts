@@ -16,6 +16,7 @@
  * - Consistent parameter validation for both MCP and built-in tools
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced JSON-schema `additionalProperties: false` by rejecting unknown tool arguments during validation.
  * - 2026-02-20: Added `hitl_request` alias normalization for `prompt` -> `question` and snake/kebab-case confirmation/input fields.
  * - 2026-02-20: Added `create_agent` alias normalization for `auto-reply`/`auto_reply` -> `autoReply` and `next agent` variants -> `nextAgent`.
  * - 2026-02-19: Added parameter alias normalization for `read_file`/`read_files` (`path` -> `filePath`) and `grep` path aliases (`path` -> `directoryPath`) to align with shell-style path handling.
@@ -246,6 +247,7 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
   corrections.push(...aliasNormalization.corrections);
   const requiredParams = toolSchema.required || [];
   const errors: string[] = [];
+  const allowsAdditionalProperties = toolSchema.additionalProperties !== false;
 
   // Check required parameters
   for (const requiredParam of requiredParams) {
@@ -262,7 +264,11 @@ export function validateToolParameters(args: any, toolSchema: any, toolName: str
   for (const [key, value] of Object.entries(normalizedArgs)) {
     const propSchema = toolSchema.properties[key];
     if (!propSchema) {
-      // Property not in schema - pass through as-is
+      if (!allowsAdditionalProperties) {
+        errors.push(`Unknown parameter '${key}' is not allowed`);
+        continue;
+      }
+      // Property not in schema - pass through as-is when allowed by schema.
       corrected[key] = value;
       continue;
     }

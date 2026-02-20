@@ -5,10 +5,9 @@
  *
  * Features:
  * - Sets up SSE response headers and connection
- * - Wires world event listeners (MESSAGE, SSE, SYSTEM, WORLD, CRUD)
+ * - Wires world event listeners (MESSAGE, SSE, SYSTEM, WORLD)
  * - Handles world activity state tracking (response-start, idle)
  * - Forwards tool events (tool-start, tool-result, tool-error, tool-progress) as SSE events
- * - Forwards CRUD events so frontends can refresh world/agent state in real time
  * - Automatic stream completion when world becomes idle
  * - Timeout fallback (60s) if world never becomes idle
  * - Proper cleanup on client disconnect or stream end
@@ -30,8 +29,9 @@
  * ```
  *
  * Created: 2025-11-10 - Extracted from api.ts for reusability
- * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
+ * Updated: 2026-02-20 - Removed stale legacy event-channel SSE forwarding from this handler.
  * Updated: 2026-02-20 - Keep `hitl-option-request` system events bypassing strict chat scope filtering so HITL prompts are always delivered.
+ * Updated: 2026-02-11 - Extended fallback timeout on tool-stream events to prevent premature timeout
  * Updated: 2026-02-08 - Removed manual tool-intervention SSE commentary and kept generic tool_call forwarding
  * Updated: 2025-11-10 - Added tool event forwarding to SSE channel
  */
@@ -43,7 +43,6 @@ const loggerStream = createCategoryLogger('api.stream');
 
 // Timeout constants for streaming (fallback only)
 const STREAM_TIMEOUT_NO_EVENTS_MS = 15000;
-
 // Event payload types
 interface MessageEventPayload {
   sender: string;
@@ -302,15 +301,6 @@ export function createSSEHandler(
   };
   world.eventEmitter.on(EventType.SYSTEM, systemListener);
   listeners.set(EventType.SYSTEM, systemListener);
-
-  const crudListener = (eventData: any) => {
-    if (!isChatEventInScope(eventData?.chatId, true)) {
-      return;
-    }
-    sendSSE({ type: EventType.CRUD, data: eventData });
-  };
-  world.eventEmitter.on(EventType.CRUD, crudListener);
-  listeners.set(EventType.CRUD, crudListener);
 
   // Cleanup function to remove all listeners
   const cleanupListeners = () => {

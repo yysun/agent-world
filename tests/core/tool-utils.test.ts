@@ -437,4 +437,32 @@ describe('Tool Utils - validateToolParameters', () => {
       nextAgent: 'human',
     });
   });
+
+  test('rejects unknown parameters when schema disables additional properties', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        question: { type: 'string' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+      required: ['question', 'options'],
+      additionalProperties: false,
+    };
+
+    const validation = validateToolParameters(
+      {
+        question: 'Pick one',
+        options: ['A', 'B'],
+        answer: 'free text should be rejected',
+      },
+      schema,
+      'hitl_request',
+    );
+
+    expect(validation.valid).toBe(false);
+    expect(String(validation.error || '')).toContain("Unknown parameter 'answer' is not allowed");
+  });
 });
