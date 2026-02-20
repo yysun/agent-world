@@ -140,23 +140,26 @@ Each Agent World has a collection of agents that can communicate through a share
 
 ### Quick Start
 
+Use npm package invocations (shown below). GitHub shorthand commands such as
+`npx agent-world/agent-world` are not supported entrypoints.
+
 **Option 1: Web Interface**
 ```bash
-npx agent-world-server
+npx agent-world@latest
 ```
 
 **Option 2: CLI Interface**
 1. Interactive Mode
 ```bash
-npx agent-world
+npx -p agent-world@latest agent-world-cli
 ```
 2. Command Mode
 ```bash
-npx agent-world -w default-world "hi" 
+npx -p agent-world@latest agent-world-cli -w default-world "hi" 
 ```
 3. Pipeline Mode
 ```bash
-echo "hi" | npx agent-world -w default-world
+echo "hi" | npx -p agent-world@latest agent-world-cli -w default-world
 ```
 
 **Option 3: Electron Desktop App (repo)**

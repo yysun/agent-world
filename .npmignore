@@ -11,6 +11,10 @@
 !dist/server/**
 !dist/public/
 !dist/public/**
+!migrations/
+!migrations/**
+!bin/
+!bin/**
 !package.json
 !README.md
 !LICENSE
