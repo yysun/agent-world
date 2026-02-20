@@ -13,6 +13,7 @@
  * - Helper functions are intentionally colocated to preserve behavior parity.
  *
  * Recent Changes:
+ * - 2026-02-20: Added `isRenderableMessageEntry` so welcome-state and list rendering share identical message-presence logic.
  * - 2026-02-16: Extracted from App.jsx into dedicated utility module.
  */
 
@@ -91,6 +92,10 @@ export function isTrueAgentResponseMessage(message) {
 
 export function getMessageIdentity(message) {
   return String(message?.messageId || '').trim();
+}
+
+export function isRenderableMessageEntry(message) {
+  return getMessageIdentity(message).length > 0;
 }
 
 function isCrossAgentAssistantMessage(message, messagesById, messages, currentIndex) {

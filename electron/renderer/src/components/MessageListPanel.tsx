@@ -13,6 +13,8 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
+ * - 2026-02-20: Aligned renderable message filtering with App welcome-state logic to prevent empty-state flicker.
  * - 2026-02-20: Suppressed edit/delete actions for pending optimistic user messages until backend confirmation.
  * - 2026-02-19: Inline indicator now supports primary single-agent status text (`inlineStatusText`) separate from full status-bar state.
  * - 2026-02-19: Added support for preformatted inline activity status text (per-agent phase strings).
@@ -27,6 +29,7 @@ import {
   getMessageCardClassName,
   getMessageIdentity,
   getMessageSenderLabel,
+  isRenderableMessageEntry,
   isHumanMessage,
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
@@ -35,6 +38,7 @@ import {
 
 export default function MessageListPanel({
   messagesContainerRef,
+  messagesLoading,
   hasConversationMessages,
   selectedSession,
   refreshSkillRegistry,
@@ -65,17 +69,30 @@ export default function MessageListPanel({
   ).trim();
   const inlineDetailText = String(inlineWorkingIndicatorState?.detailText || '').trim();
   const inlineElapsedMs = Number(inlineWorkingIndicatorState?.elapsedMs || 0);
+  const renderableMessages = messages.filter(isRenderableMessageEntry);
+  const shouldShowLoading = messagesLoading && renderableMessages.length === 0;
+  const shouldShowWelcome = !messagesLoading && !hasConversationMessages;
 
   return (
     <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden p-5">
       <div
         className={
-          !hasConversationMessages && selectedSession
+          shouldShowWelcome && selectedSession
             ? 'mx-auto flex min-h-full w-full max-w-[920px] items-start justify-center py-4'
             : 'mx-auto w-full max-w-[750px] space-y-3'
         }
       >
-        {!hasConversationMessages ? (
+        {shouldShowLoading ? (
+          selectedSession ? (
+            <section className="w-full max-w-[680px] rounded-xl bg-card/40 px-6 py-5">
+              <p className="text-sm text-muted-foreground">Loading messages...</p>
+            </section>
+          ) : (
+            <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+              Select a session from the left column.
+            </div>
+          )
+        ) : shouldShowWelcome ? (
           selectedSession ? (
             <section className="w-full max-w-[680px] rounded-xl bg-card/60 px-6 py-5">
               <div className="flex items-start justify-between gap-3">
@@ -137,12 +154,11 @@ export default function MessageListPanel({
             </div>
           )
         ) : (
-          messages.map((message, messageIndex) => {
-            if (!message?.messageId) return null;
+          renderableMessages.map((message, messageIndex) => {
             const senderLabel = getMessageSenderLabel(
               message,
               messagesById,
-              messages,
+              renderableMessages,
               messageIndex,
               worldAgentsById,
               worldAgentsByName
@@ -172,7 +188,7 @@ export default function MessageListPanel({
                   </div>
                 ) : null}
 
-                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, messages, messageIndex)}`}>
+                <article className={`min-w-0 ${getMessageCardClassName(message, messagesById, renderableMessages, messageIndex)}`}>
                   <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{senderLabel}</span>
                     <span>{formatTime(message.createdAt)}</span>

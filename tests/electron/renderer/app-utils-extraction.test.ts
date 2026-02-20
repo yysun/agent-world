@@ -12,6 +12,7 @@
  * - No filesystem or network dependencies.
  *
  * Recent Changes:
+ * - 2026-02-20: Added coverage for `isRenderableMessageEntry` used by Electron welcome-card visibility logic.
  * - 2026-02-19: Updated phase-label expectations to `calling LLM...` and `streaming response...`.
  * - 2026-02-19: Added coverage for per-agent inline status summary formatting (`buildInlineAgentStatusSummary`).
  * - 2026-02-19: Added coverage for inline agent work phase text helper (`getAgentWorkPhaseText`).
@@ -44,6 +45,7 @@ import {
   getMessageIdentity,
   getMessageSenderLabel,
   isHumanMessage,
+  isRenderableMessageEntry,
   isToolRelatedMessage,
   isTrueAgentResponseMessage,
   resolveMessageAvatar,
@@ -230,6 +232,8 @@ describe('extracted message utils', () => {
   it('returns stable message identity and style class', () => {
     const message = { messageId: 'msg-1', role: 'assistant', sender: 'Agent A' };
     expect(getMessageIdentity(message)).toBe('msg-1');
+    expect(isRenderableMessageEntry(message)).toBe(true);
+    expect(isRenderableMessageEntry({ role: 'assistant' })).toBe(false);
     const className = getMessageCardClassName(message, new Map(), [message], 0);
     expect(className).toContain('rounded-lg');
   });

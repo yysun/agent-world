@@ -13,7 +13,11 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
- * - 2026-02-19: Wired chat subscription hook with `refreshWorldDetails` so realtime agent CRUD updates refresh Electron world state.
+ * - 2026-02-20: Disabled new-message sending while HITL prompt queue is non-empty.
+ * - 2026-02-20: Moved HITL prompt UX from overlay modal to inline message-flow cards inside the message list.
+ * - 2026-02-20: Enforced options-only HITL handling in renderer response wiring.
+ * - 2026-02-20: Wired active streaming-agent IDs into header props so top avatars can animate during response activity.
+ * - 2026-02-20: Fixed welcome-card flicker by deriving message-presence from renderable message identity rather than role-only checks.
  * - 2026-02-19: Restricted inline working indicator to the initial `calling LLM...` phase only; hides during streaming/done/tool phases.
  * - 2026-02-19: Split activity text surfaces: status bar shows full per-agent state, inline indicator shows first active agent state only.
  * - 2026-02-19: Kept per-agent inline activity visible during active runs with explicit done/active/pending labels (e.g. `a1: done; a2: streaming response...`).
@@ -60,6 +64,7 @@ import {
 } from './utils/validation';
 import {
   isHumanMessage,
+  isRenderableMessageEntry,
 } from './utils/message-utils';
 import {
   buildInlineAgentStatusSummary,
@@ -103,7 +108,9 @@ type HitlPrompt = {
   chatId: string | null;
   title: string;
   message: string;
+  mode: 'option';
   options: Array<{ id: string; label: string; description?: string }>;
+  defaultOptionId?: string;
   metadata?: {
     refreshAfterDismiss?: boolean;
     kind?: string;
@@ -153,6 +160,7 @@ export default function App() {
   // HITL option prompt queue (generic world option requests)
   const [hitlPromptQueue, setHitlPromptQueue] = useState<HitlPrompt[]>([]);
   const [submittingHitlRequestId, setSubmittingHitlRequestId] = useState<string | null>(null);
+  const hasActiveHitlPrompt = hitlPromptQueue.length > 0;
   const [recentlyActiveAgentNames, setRecentlyActiveAgentNames] = useState<string[]>([]);
 
   const setStatusText = useCallback((text: string, kind: string = 'info') => {
@@ -241,7 +249,7 @@ export default function App() {
   }, []);
 
   const respondToHitlPrompt = useCallback(async (prompt: HitlPrompt, optionId: string) => {
-    if (!prompt || !optionId) return;
+    if (!prompt) return;
     const worldId = String(loadedWorld?.id || '').trim();
     if (!worldId) {
       setStatusText('No world loaded to respond to approval request.', 'error');
@@ -254,9 +262,15 @@ export default function App() {
       return;
     }
 
+    const normalizedOptionId = String(optionId || '').trim();
+    if (!normalizedOptionId) {
+      setStatusText('Invalid HITL response payload.', 'error');
+      return;
+    }
+
     setSubmittingHitlRequestId(requestId);
     try {
-      await api.respondHitlOption(worldId, requestId, optionId, prompt.chatId || null);
+      await api.respondHitlOption(worldId, requestId, normalizedOptionId, prompt.chatId || null);
       setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
 
       if (prompt?.metadata?.refreshAfterDismiss) {
@@ -266,10 +280,10 @@ export default function App() {
 
       if (prompt?.metadata?.kind === 'create_agent_created') {
         setStatusText('Agent created confirmation dismissed.', 'success');
-      } else if (optionId === 'no') {
+      } else if (normalizedOptionId === 'no') {
         setStatusText('Skill execution was declined.', 'info');
       } else {
-        setStatusText('Skill execution approved.', 'success');
+        setStatusText('HITL response submitted.', 'success');
       }
     } catch (error) {
       setStatusText(safeMessage(error, 'Failed to submit approval response.'), 'error');
@@ -512,6 +526,7 @@ export default function App() {
     setActiveTools,
     setIsBusy,
     setSessionActivity,
+    hasActiveHitlPrompt,
   });
 
   const initialize = useCallback(async () => {
@@ -620,7 +635,6 @@ export default function App() {
     setPendingResponseSessionIds,
     setSessionActivity,
     refreshSessions,
-    refreshWorldDetails,
     setStatusText,
     resetActivityRuntimeState,
     setHitlPromptQueue,
@@ -716,6 +730,7 @@ export default function App() {
     sendingSessionIds,
     stoppingSessionIds,
     pendingResponseSessionIds,
+    hasActiveHitlPrompt,
     composer,
     onSendMessage,
     loadSystemSettings,
@@ -808,6 +823,28 @@ export default function App() {
       return Array.from(merged);
     });
   }, [activeAgentSources, resolveAgentName, selectedSessionId, sessionActivity.pendingOperations]);
+  const activeHeaderAgentIds = useMemo(() => {
+    if (!Array.isArray(activeAgentSources) || activeAgentSources.length === 0) return [];
+    if (!Array.isArray(worldAgents) || worldAgents.length === 0) return [];
+
+    const activeIds = new Set<string>();
+    for (const source of activeAgentSources) {
+      const normalizedSource = normalizeActivitySourceLabel(source).toLowerCase();
+      if (!normalizedSource) continue;
+
+      const matchedAgent = worldAgents.find((agent) => {
+        const normalizedId = String(agent?.id || '').trim().toLowerCase();
+        const normalizedName = String(agent?.name || '').trim().toLowerCase();
+        return normalizedSource === normalizedId || normalizedSource === normalizedName;
+      });
+
+      if (matchedAgent?.id) {
+        activeIds.add(String(matchedAgent.id));
+      }
+    }
+
+    return Array.from(activeIds);
+  }, [activeAgentSources, worldAgents]);
   const workingAgentCount = activeAgentSources.length;
   const pendingAgentCount = Math.max(0, Number(sessionActivity.pendingOperations || 0) - workingAgentCount);
   const isAgentWorkInProgress = workingAgentCount > 0;
@@ -907,14 +944,12 @@ export default function App() {
     && hasComposerActivity;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const hasConversationMessages = useMemo(() => {
-    return messages.some((message: any) => {
-      const role = String(message?.role || '').toLowerCase();
-      return role === 'user' || role === 'assistant';
-    });
+    return messages.some(isRenderableMessageEntry);
   }, [messages]);
 
   const mainContentMessageListProps = createMainContentMessageListProps({
     messagesContainerRef,
+    messagesLoading: loading.messages,
     hasConversationMessages,
     selectedSession,
     refreshSkillRegistry,
@@ -936,6 +971,9 @@ export default function App() {
     onBranchFromMessage,
     showInlineWorkingIndicator,
     inlineWorkingIndicatorState,
+    activeHitlPrompt,
+    submittingHitlRequestId,
+    onRespondHitlOption: (prompt: HitlPrompt, optionId: string) => respondToHitlPrompt(prompt, optionId),
   });
 
   const mainContentComposerProps = createMainContentComposerProps({
@@ -949,6 +987,7 @@ export default function App() {
     canStopCurrentSession,
     isCurrentSessionStopping,
     isCurrentSessionSending,
+    hasActiveHitlPrompt,
   });
 
   const mainContentRightPanelShellProps = createMainContentRightPanelShellProps({
@@ -1042,6 +1081,7 @@ export default function App() {
     selectedSession,
     visibleWorldAgents,
     hiddenWorldAgentCount,
+    activeHeaderAgentIds,
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
     onOpenSettingsPanel,
@@ -1078,11 +1118,6 @@ export default function App() {
       )}
       overlays={(
         <AppOverlaysHost
-          hitlPromptProps={{
-            activeHitlPrompt,
-            submittingHitlRequestId,
-            onRespond: respondToHitlPrompt,
-          }}
           editorModalsProps={{
             promptEditorOpen,
             promptEditorValue,
