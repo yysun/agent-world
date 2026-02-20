@@ -163,6 +163,7 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,
+    onRefreshWorld: input.onRefreshWorldInfo,
     panelMode: input.panelMode,
     panelOpen: input.panelOpen,
     dragRegionStyle: input.DRAG_REGION_STYLE,

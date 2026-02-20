@@ -14,6 +14,7 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-02-20: Added refresh button next to the settings gear to reload world agents.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
 
@@ -27,6 +28,7 @@ export default function MainHeaderBar({
   onOpenEditAgentPanel,
   onOpenCreateAgentPanel,
   onOpenSettingsPanel,
+  onRefreshWorld,
   panelMode,
   panelOpen,
   dragRegionStyle,
@@ -123,6 +125,30 @@ export default function MainHeaderBar({
         ) : null}
       </div>
       <div className="flex items-center justify-end gap-2" style={noDragRegionStyle}>
+        {selectedWorld ? (
+          <button
+            type="button"
+            onClick={onRefreshWorld}
+            className="flex h-7 w-7 items-center justify-center rounded transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            title="Refresh world"
+            aria-label="Refresh world"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-4 w-4"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onOpenSettingsPanel}

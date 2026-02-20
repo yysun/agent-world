@@ -1033,6 +1033,7 @@ export default function App() {
     onOpenEditAgentPanel,
     onOpenCreateAgentPanel,
     onOpenSettingsPanel,
+    onRefreshWorldInfo,
     panelMode,
     panelOpen,
     DRAG_REGION_STYLE,
