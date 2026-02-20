@@ -369,6 +369,7 @@ export interface World {
   eventStorage?: any; // EventStorage interface - optional for backward compatibility
   _eventPersistenceCleanup?: () => void; // Internal cleanup function for event listeners
   _activityListenerCleanup?: () => void; // Internal cleanup function for activity listener
+  _agentUnsubscribers?: Map<string, () => void>; // Per-agent message listener unsubscribe functions
 }
 
 // Unified Storage Interface - Consolidated from StorageManager and StorageAPI

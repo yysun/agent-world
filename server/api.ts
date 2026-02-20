@@ -800,11 +800,18 @@ async function handleStreamingChat(
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat', chatId);
 
-  // Clean up subscription when the HTTP response finishes to prevent stale world
+  // Clean up subscription when the HTTP response closes/finishes to prevent stale world
   // instances from accumulating in activeSubscribedWorlds.
-  res.on('finish', () => {
-    subscription?.unsubscribe();
-  });
+  let subscriptionCleanedUp = false;
+  const cleanupSubscription = () => {
+    if (subscriptionCleanedUp) {
+      return;
+    }
+    subscriptionCleanedUp = true;
+    void subscription.unsubscribe();
+  };
+  res.on('finish', cleanupSubscription);
+  res.on('close', cleanupSubscription);
 
   try {
     // Publish message - events will be automatically streamed
@@ -922,6 +929,15 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
 
     const sseHandler = createSSEHandler(req, res, subscription.world, 'edit', chatId);
 
+    let subscriptionCleanedUp = false;
+    const cleanupSubscription = () => {
+      if (subscriptionCleanedUp) {
+        return;
+      }
+      subscriptionCleanedUp = true;
+      void subscription.unsubscribe();
+    };
+
     const finalizeWithError = (message: string, data?: any): void => {
       sseHandler.sendSSE({
         type: 'error',
@@ -930,14 +946,13 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       });
       setTimeout(() => {
         sseHandler.endResponse();
-        subscription?.unsubscribe();
+        cleanupSubscription();
       }, 500);
     };
 
-    // Clean up subscription when the HTTP response finishes.
-    res.on('finish', () => {
-      subscription?.unsubscribe();
-    });
+    // Clean up subscription when the HTTP response closes/finishes.
+    res.on('finish', cleanupSubscription);
+    res.on('close', cleanupSubscription);
 
     // Pass subscription.world so editUserMessage emits on the same eventEmitter
     // that the SSE handler is listening on, avoiding stale-world mismatch.

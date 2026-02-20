@@ -294,7 +294,15 @@ export function subscribeAgentToMessages(world: World, agent: Agent): () => void
     }
   };
 
-  return subscribeToMessages(world, handler);
+  const unsubscribe = subscribeToMessages(world, handler);
+
+  // Track the unsubscribe function so deleteAgent can remove this listener.
+  if (!world._agentUnsubscribers) {
+    world._agentUnsubscribers = new Map();
+  }
+  world._agentUnsubscribers.set(agent.id, unsubscribe);
+
+  return unsubscribe;
 }
 
 /**
