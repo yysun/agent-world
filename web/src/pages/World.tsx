@@ -15,7 +15,8 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
- * - 2026-02-19: Added chat-history search query state wiring for session filtering in the right panel.
+ * - 2026-02-20: Moved HITL prompts from modal overlays to inline chat-flow cards (options-only).
+ * - 2026-02-20: Highlighted the world main agent in the top agent row.
  * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
  * - 2026-02-14: Added web send/stop composer wiring via `currentChatId` and `isStopping` props.
  * - 2026-02-08: Removed legacy manual tool-intervention dialog rendering and state wiring
@@ -35,6 +36,15 @@ import WorldChatHistory from '../components/world-chat-history';
 import AgentEdit from '../components/agent-edit';
 import WorldEdit from '../components/world-edit';
 import { worldUpdateHandlers } from './World.update';
+
+function isWorldMainAgent(agent: Agent, worldMainAgent: string | null | undefined): boolean {
+  const normalizedMainAgent = String(worldMainAgent || '').trim().toLowerCase();
+  if (!normalizedMainAgent) return false;
+
+  const normalizedAgentId = String(agent?.id || '').trim().toLowerCase();
+  const normalizedAgentName = String(agent?.name || '').trim().toLowerCase();
+  return normalizedMainAgent === normalizedAgentId || normalizedMainAgent === normalizedAgentName;
+}
 
 export default class WorldComponent extends Component<WorldComponentState, WorldEventName> {
   //                                                   ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
@@ -64,7 +74,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
     connectionStatus: 'disconnected',
     needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
-    chatSearchQuery: '',
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
@@ -84,7 +93,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
     // HITL approval prompt state
     hitlPromptQueue: [],
-    submittingHitlRequestId: null
+    submittingHitlRequestId: null,
   };
 
   override view = (state: WorldComponentState) => {
@@ -174,10 +183,20 @@ export default class WorldComponent extends Component<WorldComponentState, World
                       {state.world?.agents.map((agent, index) => {
                         const isSelected = state.selectedSettingsTarget === 'agent' && state.selectedAgent?.id === agent.id;
                         const isFilterActive = state.activeAgentFilters.includes(agent.id);
+                        const isMainAgent = isWorldMainAgent(agent, state.world?.mainAgent);
                         return (
-                          <div key={`agent-${agent.id || index}`} className={`agent-item ${isSelected ? 'selected' : ''} flex flex-col items-center gap-1 px-4 cursor-pointer`} $onclick={['open-agent-edit', agent]}>
+                          <div
+                            key={`agent-${agent.id || index}`}
+                            className={`agent-item ${isSelected ? 'selected' : ''} ${isMainAgent ? 'main-agent' : ''} flex flex-col items-center gap-1 px-4 cursor-pointer`}
+                            $onclick={['open-agent-edit', agent]}
+                          >
                             <div className="agent-sprite-container relative">
                               <div className={`agent-sprite sprite-${agent.spriteIndex} w-16 h-16`}></div>
+                              {isMainAgent ? (
+                                <div className="main-agent-badge absolute" title="Main agent">
+                                  MAIN
+                                </div>
+                              ) : null}
                               <div
                                 className={`message-badge ${isFilterActive ? 'active' : ''} absolute`}
                                 $onclick={['toggle-agent-filter', agent.id]}
@@ -216,6 +235,8 @@ export default class WorldComponent extends Component<WorldComponentState, World
               elapsedMs={state.elapsedMs}
               activeTools={state.activeTools}
               isStopping={state.isStopping}
+              activeHitlPrompt={activeHitlPrompt}
+              submittingHitlRequestId={state.submittingHitlRequestId}
             />
           </div>
 
@@ -258,7 +279,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
 
             <WorldChatHistory
               world={state.world}
-              chatSearchQuery={state.chatSearchQuery}
             />
           </div>
         </div>
@@ -279,36 +299,6 @@ export default class WorldComponent extends Component<WorldComponentState, World
             parentComponent={this}
           />
         }
-
-        {activeHitlPrompt && (
-          <div className="modal-overlay fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="modal-content chat-history-modal bg-white rounded-lg p-6 max-w-md" onclick={(e: Event) => e.stopPropagation()}>
-              <h3 className="text-xl font-bold mb-4">{activeHitlPrompt.title || 'Approval required'}</h3>
-              <p className="delete-confirmation-text whitespace-pre-wrap mb-4">
-                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
-              </p>
-              <div className="form-actions flex gap-2 justify-end flex-nowrap overflow-x-auto pb-1">
-                {activeHitlPrompt.options.map((option) => {
-                  const isSubmitting = state.submittingHitlRequestId === activeHitlPrompt.requestId;
-                  return (
-                    <button
-                      key={option.id}
-                      className="btn-secondary px-4 py-2 rounded shrink-0"
-                      disabled={isSubmitting}
-                      $onclick={['respond-hitl-option', {
-                        requestId: activeHitlPrompt.requestId,
-                        optionId: option.id,
-                        chatId: activeHitlPrompt.chatId
-                      }]}
-                    >
-                      <div className="font-bold">{option.label}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Chat Delete Confirmation Modal */}
         {state.chatToDelete && (

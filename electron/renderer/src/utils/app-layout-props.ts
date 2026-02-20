@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
  * - 2026-02-19: Added status-bar `agentStatusText` wiring for full per-agent activity summaries.
  * - 2026-02-19: Added inline working indicator state wiring for richer chat activity details.
  * - 2026-02-19: Added left-sidebar prop wiring for world export action.
@@ -161,6 +162,7 @@ export function createMainHeaderProps<T extends PropBag>(input: T) {
     selectedSession: input.selectedSession,
     visibleWorldAgents: input.visibleWorldAgents,
     hiddenWorldAgentCount: input.hiddenWorldAgentCount,
+    activeHeaderAgentIds: input.activeHeaderAgentIds,
     onOpenEditAgentPanel: input.onOpenEditAgentPanel,
     onOpenCreateAgentPanel: input.onOpenCreateAgentPanel,
     onOpenSettingsPanel: input.onOpenSettingsPanel,

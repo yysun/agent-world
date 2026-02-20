@@ -14,9 +14,24 @@
  * - Preserves existing drag/no-drag region behavior for Electron title area.
  *
  * Recent Changes:
+ * - 2026-02-20: Added active-streaming avatar animation state for header agent badges.
+ * - 2026-02-20: Highlighted the world main agent in the top header avatar strip.
  * - 2026-02-20: Added refresh button next to the settings gear to reload world agents.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
+
+function normalizeMainAgentValue(value: unknown): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isMainWorldAgent(agent: { id?: unknown; name?: unknown }, selectedWorld: { mainAgent?: unknown } | null | undefined): boolean {
+  const normalizedMainAgent = normalizeMainAgentValue(selectedWorld?.mainAgent);
+  if (!normalizedMainAgent) return false;
+
+  const normalizedAgentId = normalizeMainAgentValue(agent?.id);
+  const normalizedAgentName = normalizeMainAgentValue(agent?.name);
+  return normalizedMainAgent === normalizedAgentId || normalizedMainAgent === normalizedAgentName;
+}
 
 export default function MainHeaderBar({
   leftSidebarCollapsed,
@@ -25,6 +40,7 @@ export default function MainHeaderBar({
   selectedSession,
   visibleWorldAgents,
   hiddenWorldAgentCount,
+  activeHeaderAgentIds,
   onOpenEditAgentPanel,
   onOpenCreateAgentPanel,
   onOpenSettingsPanel,
@@ -34,6 +50,12 @@ export default function MainHeaderBar({
   dragRegionStyle,
   noDragRegionStyle,
 }) {
+  const activeHeaderAgentIdSet = new Set(
+    (Array.isArray(activeHeaderAgentIds) ? activeHeaderAgentIds : [])
+      .map((id) => normalizeMainAgentValue(id))
+      .filter(Boolean),
+  );
+
   return (
     <header
       className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-border pb-3 pt-2 ${leftSidebarCollapsed ? 'pl-24 pr-5' : 'px-5'
@@ -76,21 +98,33 @@ export default function MainHeaderBar({
       <div className="flex items-center justify-center" style={noDragRegionStyle}>
         {selectedWorld ? (
           <div className="inline-flex items-center gap-2 rounded-md bg-card/70 px-2 py-1">
-            {visibleWorldAgents.map((agent, index) => (
-              <button
-                key={`${agent.id}-${index}`}
-                type="button"
-                onClick={() => onOpenEditAgentPanel(agent.id)}
-                className="relative flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground transition-colors hover:bg-secondary/80"
-                title={`${agent.name} • ${agent.messageCount} message${agent.messageCount === 1 ? '' : 's'}`}
-                aria-label={`Edit agent ${agent.name}`}
-              >
-                {agent.initials}
-                <span className="pointer-events-none absolute -top-1 -right-1 min-w-4 rounded-full border border-border/70 bg-card px-1 text-[9px] font-medium leading-4 text-foreground/80">
-                  {agent.messageCount}
-                </span>
-              </button>
-            ))}
+            {visibleWorldAgents.map((agent, index) => {
+              const isMainAgent = isMainWorldAgent(agent, selectedWorld);
+              const isActiveStreamingAgent = activeHeaderAgentIdSet.has(normalizeMainAgentValue(agent?.id));
+              return (
+                <button
+                  key={`${agent.id}-${index}`}
+                  type="button"
+                  onClick={() => onOpenEditAgentPanel(agent.id)}
+                  className={`relative flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-colors ${isMainAgent
+                    ? 'bg-amber-200 text-amber-900 ring-2 ring-amber-400 hover:bg-amber-300'
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                    } ${isActiveStreamingAgent ? 'header-agent-active' : ''}`}
+                  title={`${agent.name} • ${agent.messageCount} message${agent.messageCount === 1 ? '' : 's'}${isMainAgent ? ' • Main agent' : ''}${isActiveStreamingAgent ? ' • Responding' : ''}`}
+                  aria-label={`Edit agent ${agent.name}${isMainAgent ? ' (main agent)' : ''}${isActiveStreamingAgent ? ' (responding)' : ''}`}
+                >
+                  {agent.initials}
+                  {isMainAgent ? (
+                    <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-100 px-1 text-[8px] font-semibold leading-3 text-amber-800">
+                      MAIN
+                    </span>
+                  ) : null}
+                  <span className="pointer-events-none absolute -top-1 -right-1 min-w-4 rounded-full border border-border/70 bg-card px-1 text-[9px] font-medium leading-4 text-foreground/80">
+                    {agent.messageCount}
+                  </span>
+                </button>
+              );
+            })}
             {hiddenWorldAgentCount > 0 ? (
               <div
                 className="flex h-7 min-w-7 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium text-muted-foreground"
