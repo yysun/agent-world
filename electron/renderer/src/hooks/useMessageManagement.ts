@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
 
@@ -21,6 +22,12 @@ import { safeMessage } from '../domain/desktop-api';
 import { normalizeStringList, sortSessionsByNewest } from '../utils/data-transform';
 import { getRefreshWarning } from '../utils/formatting';
 import { getMessageIdentity, isTrueAgentResponseMessage } from '../utils/message-utils';
+import {
+  createOptimisticUserMessage,
+  reconcileOptimisticUserMessage,
+  removeOptimisticUserMessage,
+  upsertMessageList,
+} from '../domain/message-updates';
 
 export function useMessageManagement({
   api,
@@ -75,11 +82,18 @@ export function useMessageManagement({
 
     const content = composer.trim();
     if (!content) return;
+    const optimisticMessage = createOptimisticUserMessage({
+      chatId: activeSessionId,
+      content,
+      sender: 'human',
+    });
+    const optimisticMessageId = String(optimisticMessage.messageId || '').trim();
 
     setPendingResponseSessionIds((prev) => new Set([...prev, activeSessionId]));
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
+    setMessages((existing) => upsertMessageList(existing, optimisticMessage));
     try {
-      await api.sendMessage({
+      const sendResult = await api.sendMessage({
         worldId: loadedWorldId,
         chatId: activeSessionId,
         content,
@@ -90,9 +104,28 @@ export function useMessageManagement({
           disabledGlobalSkillIds: normalizeStringList(systemSettings.disabledGlobalSkillIds),
           disabledProjectSkillIds: normalizeStringList(systemSettings.disabledProjectSkillIds),
         }
-      });
+      }) as Record<string, unknown>;
+      const confirmedMessageId = String(sendResult?.messageId || '').trim();
+      const confirmedCreatedAt = String(sendResult?.createdAt || '').trim() || new Date().toISOString();
+      if (optimisticMessageId && confirmedMessageId) {
+        setMessages((existing) => reconcileOptimisticUserMessage(existing, {
+          tempMessageId: optimisticMessageId,
+          confirmedMessage: {
+            messageId: confirmedMessageId,
+            id: confirmedMessageId,
+            role: 'user',
+            sender: String(sendResult?.sender || 'human'),
+            content,
+            chatId: activeSessionId,
+            createdAt: confirmedCreatedAt,
+          },
+        }));
+      }
       setComposer('');
     } catch (error) {
+      if (optimisticMessageId) {
+        setMessages((existing) => removeOptimisticUserMessage(existing, optimisticMessageId));
+      }
       setPendingResponseSessionIds((prev) => {
         const next = new Set(prev);
         next.delete(activeSessionId);
@@ -106,7 +139,7 @@ export function useMessageManagement({
         return next;
       });
     }
-  }, [api, composer, loadedWorldId, selectedSessionId, sendingSessionIds, setStatusText, systemSettings]);
+  }, [api, composer, loadedWorldId, selectedSessionId, sendingSessionIds, setMessages, setStatusText, systemSettings]);
 
   const onStopMessage = useCallback(async () => {
     if (!loadedWorldId || !selectedSessionId) {

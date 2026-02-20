@@ -904,7 +904,7 @@ export default function App() {
   ]);
   const showInlineWorkingIndicator =
     Boolean(selectedSessionId)
-    && Boolean(inlineWorkingIndicatorState?.inlineStatusText);
+    && hasComposerActivity;
   const activeHitlPrompt = hitlPromptQueue.length > 0 ? hitlPromptQueue[0] : null;
   const hasConversationMessages = useMemo(() => {
     return messages.some((message: any) => {

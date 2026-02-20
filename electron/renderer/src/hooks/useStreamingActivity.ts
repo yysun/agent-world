@@ -13,6 +13,7 @@
  * - Keeps manager setup/teardown centralized in one hook.
  *
  * Recent Changes:
+ * - 2026-02-20: Restored web-aligned assistant placeholder lifecycle (start placeholder, chunk updates, end removes placeholder).
  * - 2026-02-19: Prevented empty assistant cards by creating stream messages on first chunk instead of stream start.
  * - 2026-02-17: Extracted streaming/activity lifecycle from `App.jsx` during Phase 3.
  */
@@ -52,8 +53,16 @@ export function useStreamingActivity({ setMessages }) {
 
   useEffect(() => {
     streamingStateRef.current = createStreamingState({
-      onStreamStart: () => {
-        // Intentionally no-op: avoid rendering empty assistant cards before first chunk.
+      onStreamStart: (entry) => {
+        setMessages((existing) => upsertMessageList(existing, {
+          id: entry.messageId,
+          messageId: entry.messageId,
+          role: 'assistant',
+          sender: entry.agentName,
+          content: '...',
+          createdAt: entry.createdAt,
+          isStreaming: true
+        }));
       },
       onStreamUpdate: (entry) => {
         setMessages((existing) => {
@@ -77,11 +86,11 @@ export function useStreamingActivity({ setMessages }) {
       },
       onStreamEnd: (messageId) => {
         setMessages((existing) => {
-          const index = existing.findIndex((message) => String(message.messageId || '') === String(messageId));
-          if (index < 0) return existing;
-          const next = [...existing];
-          next[index] = { ...next[index], isStreaming: false };
-          return next;
+          const normalizedId = String(messageId || '');
+          return existing.filter((message) => {
+            const sameMessageId = String(message.messageId || '') === normalizedId;
+            return !(sameMessageId && message.isStreaming === true);
+          });
         });
       },
       onStreamError: (messageId, errorMessage) => {

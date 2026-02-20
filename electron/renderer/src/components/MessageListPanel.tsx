@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-20: Suppressed edit/delete actions for pending optimistic user messages until backend confirmation.
  * - 2026-02-19: Inline indicator now supports primary single-agent status text (`inlineStatusText`) separate from full status-bar state.
  * - 2026-02-19: Added support for preformatted inline activity status text (per-agent phase strings).
  * - 2026-02-19: Replaced single-agent inline working label with richer activity details and elapsed time.
@@ -149,6 +150,7 @@ export default function MessageListPanel({
             const messageKey = message.messageId;
             const messageAvatar = resolveMessageAvatar(message, worldAgentsById, worldAgentsByName);
             const isHuman = isHumanMessage(message);
+            const isPendingOptimisticUserMessage = isHuman && message?.optimisticUserPending === true;
             const messageRole = String(message?.role || '').toLowerCase();
             const shouldRightAlignMessage = isHuman || isToolRelatedMessage(message) || messageRole === 'assistant';
             const isBranchableAgentMessage = !isHuman && isTrueAgentResponseMessage(message) && Boolean(message.messageId);
@@ -213,7 +215,7 @@ export default function MessageListPanel({
                     <MessageContent message={message} />
                   )}
 
-                  {isHumanMessage(message) && message.messageId && editingMessageId !== getMessageIdentity(message) ? (
+                  {isHumanMessage(message) && message.messageId && !isPendingOptimisticUserMessage && editingMessageId !== getMessageIdentity(message) ? (
                     <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         type="button"
