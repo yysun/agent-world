@@ -994,7 +994,16 @@ export async function shouldAgentRespond(world: World, agent: Agent, messageEven
   if (agent.llmCallCount >= worldTurnLimit) {
     loggerTurnLimit.debug('Turn limit reached, sending turn limit message', { agentId: agent.id, llmCallCount: agent.llmCallCount, worldTurnLimit });
     const turnLimitMessage = `@human Turn limit reached (${worldTurnLimit} LLM calls). Please take control of the conversation.`;
-    publishMessage(world, turnLimitMessage, agent.id);
+    const turnLimitChatId = messageEvent.chatId ?? world.currentChatId ?? null;
+    if (turnLimitChatId) {
+      publishMessage(world, turnLimitMessage, agent.id, turnLimitChatId);
+    } else {
+      loggerTurnLimit.warn('Skipping turn limit message publish without chat context', {
+        agentId: agent.id,
+        worldId: world.id,
+        messageId: messageEvent.messageId,
+      });
+    }
     return false;
   }
 

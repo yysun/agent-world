@@ -195,24 +195,29 @@ export function normalizeSessionMessages(messages: any[]): any[] {
   return deduplicated;
 }
 
-export function serializeRealtimeMessageEvent(worldId: string, event: any): Record<string, unknown> | null {
+export function serializeRealtimeMessageEvent(
+  worldId: string,
+  event: any,
+): Record<string, unknown> | null {
   const messageId = String(event?.messageId || '').trim();
   if (!messageId) {
     return null;
   }
 
   const createdAt = toIsoTimestamp(event?.timestamp);
+  const resolvedChatId = event?.chatId || null;
+
   return {
     type: 'message',
     worldId,
-    chatId: event?.chatId || null,
+    chatId: resolvedChatId,
     message: {
       id: messageId,
       role: deriveEventRole(event),
       sender: event?.sender || 'unknown',
       content: event?.content || '',
       createdAt,
-      chatId: event?.chatId || null,
+      chatId: resolvedChatId,
       messageId,
       replyToMessageId: event?.replyToMessageId || null
     }

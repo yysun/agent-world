@@ -103,6 +103,17 @@ export interface MessageEditPayload extends WorldChatPayload {
   newContent: string;
 }
 
+export interface ChatSendMessagePayload extends WorldChatPayload {
+  content: string;
+  sender?: string;
+  systemSettings?: {
+    enableGlobalSkills?: boolean;
+    enableProjectSkills?: boolean;
+    disabledGlobalSkillIds?: string[];
+    disabledProjectSkillIds?: string[];
+  };
+}
+
 export interface HitlResponsePayload extends WorldIdPayload {
   requestId: string;
   optionId: string;
@@ -163,7 +174,7 @@ export interface DesktopApi {
   deleteSession: (worldId: string, chatId: string) => Promise<unknown>;
   selectSession: (worldId: string, chatId: string) => Promise<unknown>;
   getMessages: (worldId: string, chatId: string) => Promise<unknown>;
-  sendMessage: (payload: Record<string, unknown>) => Promise<unknown>;
+  sendMessage: (payload: ChatSendMessagePayload) => Promise<unknown>;
   editMessage: (worldId: string, messageId: string, newContent: string, chatId: string) => Promise<unknown>;
   respondHitlOption: (worldId: string, requestId: string, optionId: string, chatId?: string | null) => Promise<unknown>;
   stopMessage: (worldId: string, chatId: string) => Promise<unknown>;

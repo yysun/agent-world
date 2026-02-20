@@ -562,7 +562,7 @@ export default function App() {
 
   useEffect(() => {
     refreshMessages(loadedWorld?.id, selectedSessionId);
-  }, [loadedWorld, selectedSessionId, refreshMessages]);
+  }, [loadedWorld?.id, selectedSessionId, refreshMessages]);
 
   useEffect(() => {
     const normalizedSessionId = String(selectedSessionId || '').trim();

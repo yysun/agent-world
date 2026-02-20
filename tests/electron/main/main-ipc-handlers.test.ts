@@ -292,6 +292,29 @@ describe('createMainIpcHandlers.listSkillRegistry', () => {
 });
 
 describe('createMainIpcHandlers.sendChatMessage', () => {
+  it('rejects sending when chatId is missing', async () => {
+    const restoreChat = vi.fn(async () => ({ currentChatId: 'chat-1' }));
+    const publishMessage = vi.fn();
+    const ensureWorldSubscribed = vi.fn(async () => ({ id: 'world-1' }));
+
+    const { handlers } = await createHandlers({
+      restoreChat,
+      publishMessage,
+      ensureWorldSubscribed
+    });
+
+    await expect(
+      handlers.sendChatMessage({
+        worldId: 'world-1',
+        content: 'hello',
+        sender: 'human'
+      })
+    ).rejects.toThrow('Chat ID is required.');
+
+    expect(restoreChat).not.toHaveBeenCalled();
+    expect(publishMessage).not.toHaveBeenCalled();
+  });
+
   it('rejects sending when provided chatId cannot be restored', async () => {
     const restoreChat = vi.fn(async () => null);
     const publishMessage = vi.fn();

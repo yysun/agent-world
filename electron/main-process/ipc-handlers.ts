@@ -1020,9 +1020,10 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     }
 
     if (!worldId) throw new Error('World ID is required.');
+    if (!chatId) throw new Error('Chat ID is required.');
     if (!content) throw new Error('Message content is required.');
 
-    if (chatId) {
+    {
       const restoredWorld = await restoreChat(worldId, chatId);
       if (!restoredWorld || restoredWorld.currentChatId !== chatId) {
         throw new Error(`Chat not found: ${chatId}`);
@@ -1032,7 +1033,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const world = await ensureWorldSubscribed(worldId);
     if (!world) throw new Error(`World not found: ${worldId}`);
 
-    const event = publishMessage(world, content, sender, chatId || undefined);
+    const event = publishMessage(world, content, sender, chatId);
     return {
       messageId: event.messageId,
       sender: event.sender,

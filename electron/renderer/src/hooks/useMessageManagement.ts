@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
  * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
  */
@@ -93,6 +94,10 @@ export function useMessageManagement({
     setSendingSessionIds((prev) => new Set([...prev, activeSessionId]));
     setMessages((existing) => upsertMessageList(existing, optimisticMessage));
     try {
+      if (!activeSessionId || !String(activeSessionId).trim()) {
+        throw new Error('Chat ID is required before sending a message.');
+      }
+
       const sendResult = await api.sendMessage({
         worldId: loadedWorldId,
         chatId: activeSessionId,
