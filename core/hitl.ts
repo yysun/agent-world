@@ -52,6 +52,7 @@ interface PendingHitlRequest {
   requestId: string;
   chatId: string | null;
   optionIds: Set<string>;
+  metadata: Record<string, unknown> | null;
   resolve: (resolution: HitlOptionResolution) => void;
   timeoutHandle: NodeJS.Timeout | null;
 }
@@ -129,6 +130,7 @@ export async function requestWorldOption(
       requestId,
       chatId,
       optionIds: new Set(normalizedOptions.map((option) => option.id)),
+      metadata: request.metadata || null,
       timeoutHandle: null,
       resolve: (resolution) => resolve(resolution),
     };
@@ -173,7 +175,7 @@ export function submitWorldOptionResponse(params: {
   worldId: string;
   requestId: string;
   optionId: string;
-}): { accepted: boolean; reason?: string } {
+}): { accepted: boolean; reason?: string; metadata?: Record<string, unknown> | null } {
   const worldId = String(params.worldId || '').trim();
   const requestId = String(params.requestId || '').trim();
   const optionId = String(params.optionId || '').trim();
@@ -205,7 +207,7 @@ export function submitWorldOptionResponse(params: {
     source: 'user',
   });
 
-  return { accepted: true };
+  return { accepted: true, metadata: pending.metadata };
 }
 
 export function clearHitlStateForTests(): void {

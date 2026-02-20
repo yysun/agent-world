@@ -104,6 +104,10 @@ type HitlPrompt = {
   title: string;
   message: string;
   options: Array<{ id: string; label: string; description?: string }>;
+  metadata?: {
+    refreshAfterDismiss?: boolean;
+    kind?: string;
+  };
 };
 
 export default function App() {
@@ -236,7 +240,7 @@ export default function App() {
     return subscribeStatusBarStatus(setStatus);
   }, []);
 
-  const respondToHitlPrompt = useCallback(async (prompt: any, optionId: string) => {
+  const respondToHitlPrompt = useCallback(async (prompt: HitlPrompt, optionId: string) => {
     if (!prompt || !optionId) return;
     const worldId = String(loadedWorld?.id || '').trim();
     if (!worldId) {
@@ -253,8 +257,16 @@ export default function App() {
     setSubmittingHitlRequestId(requestId);
     try {
       await api.respondHitlOption(worldId, requestId, optionId, prompt.chatId || null);
-      setHitlPromptQueue((existing: any[]) => existing.filter((entry: any) => entry.requestId !== requestId));
-      if (optionId === 'no') {
+      setHitlPromptQueue((existing: HitlPrompt[]) => existing.filter((entry) => entry.requestId !== requestId));
+
+      if (prompt?.metadata?.refreshAfterDismiss) {
+        await refreshWorldDetails(worldId);
+        await refreshSessions(worldId, prompt?.chatId || selectedSessionId || null);
+      }
+
+      if (prompt?.metadata?.kind === 'create_agent_created') {
+        setStatusText('Agent created confirmation dismissed.', 'success');
+      } else if (optionId === 'no') {
         setStatusText('Skill execution was declined.', 'info');
       } else {
         setStatusText('Skill execution approved.', 'success');
@@ -264,7 +276,7 @@ export default function App() {
     } finally {
       setSubmittingHitlRequestId((current: string | null) => (current === requestId ? null : current));
     }
-  }, [api, loadedWorld?.id, setStatusText]);
+  }, [api, loadedWorld?.id, refreshSessions, refreshWorldDetails, selectedSessionId, setStatusText]);
 
   const selectedSession = useMemo(
     () => sessions.find((session: any) => session.id === selectedSessionId) || null,

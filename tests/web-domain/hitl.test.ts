@@ -65,6 +65,27 @@ describe('web/domain/hitl', () => {
     expect(parsed?.defaultOptionId).toBe('no');
   });
 
+  it('parses metadata used for refresh-after-dismiss behavior', () => {
+    const parsed = parseHitlPromptRequest({
+      content: {
+        eventType: 'hitl-option-request',
+        requestId: 'req-meta',
+        options: [
+          { id: 'dismiss', label: 'Dismiss' },
+        ],
+        metadata: {
+          kind: 'create_agent_created',
+          refreshAfterDismiss: true,
+        },
+      },
+    });
+
+    expect(parsed?.metadata).toEqual({
+      kind: 'create_agent_created',
+      refreshAfterDismiss: true,
+    });
+  });
+
   it('returns null for non-hitl system payloads', () => {
     const parsed = parseHitlPromptRequest({
       content: {

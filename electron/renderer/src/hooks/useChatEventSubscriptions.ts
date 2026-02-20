@@ -40,6 +40,10 @@ type HitlPrompt = {
   title: string;
   message: string;
   options: HitlOption[];
+  metadata?: {
+    refreshAfterDismiss?: boolean;
+    kind?: string;
+  };
 };
 
 type RealtimeState = {
@@ -181,6 +185,9 @@ export function useChatEventSubscriptions({
           if (existing.some((entry) => entry.requestId === requestId)) {
             return existing;
           }
+          const metadata = content?.metadata && typeof content.metadata === 'object'
+            ? (content.metadata as Record<string, unknown>)
+            : null;
           return [
             ...existing,
             {
@@ -188,7 +195,11 @@ export function useChatEventSubscriptions({
               chatId: systemEvent?.chatId || selectedSessionId || null,
               title: String(content?.title || 'Approval required').trim() || 'Approval required',
               message: String(content?.message || '').trim(),
-              options
+              options,
+              metadata: {
+                refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
+                kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
+              },
             }
           ];
         });

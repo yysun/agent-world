@@ -75,6 +75,10 @@ export interface HitlPromptRequest {
   message: string;
   options: HitlPromptOption[];
   defaultOptionId: string;
+  metadata?: {
+    refreshAfterDismiss?: boolean;
+    kind?: string;
+  };
 }
 
 // Web UI Message Interface - extends core with streaming states

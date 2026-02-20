@@ -59,13 +59,23 @@ export function parseHitlPromptRequest(eventData: unknown): HitlPromptRequest | 
     ? preferredDefault
     : (options.find((option) => option.id === 'no')?.id || options[0].id);
 
+  const metadata = content.metadata && typeof content.metadata === 'object'
+    ? {
+      refreshAfterDismiss: (content.metadata as Record<string, unknown>).refreshAfterDismiss === true,
+      kind: typeof (content.metadata as Record<string, unknown>).kind === 'string'
+        ? String((content.metadata as Record<string, unknown>).kind)
+        : undefined,
+    }
+    : undefined;
+
   return {
     requestId,
     chatId: envelope?.chatId ? String(envelope.chatId) : null,
     title: String(content.title || 'Approval required').trim() || 'Approval required',
     message: String(content.message || '').trim(),
     options,
-    defaultOptionId
+    defaultOptionId,
+    ...(metadata ? { metadata } : {}),
   };
 }
 

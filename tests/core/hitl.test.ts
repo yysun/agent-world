@@ -64,7 +64,7 @@ describe('core/hitl', () => {
       requestId: capturedRequestId,
       optionId: 'yes_once',
     });
-    expect(submitResult).toEqual({ accepted: true });
+    expect(submitResult).toEqual({ accepted: true, metadata: null });
 
     const resolution = await pending;
     expect(resolution).toMatchObject({
