@@ -593,6 +593,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     if (!agentId) throw new Error('Agent ID is required.');
 
     const success = await deleteAgent(worldId, agentId);
+    if (!success) throw new Error(`Failed to delete agent '${agentId}' — agent may not exist or could not be removed.`);
     return { success };
   }
 
