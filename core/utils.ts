@@ -194,9 +194,9 @@ export function getEnvValueFromText(variablesText: string | undefined, key: stri
 
 function buildAgentMentionFormatRule(): string {
   return [
-    'Always use this format when addressing a specific agent: @<agent>, <message>.',
-    'Put @<agent> at the very start of the reply.',
-    'Do not use other addressing styles (e.g. To @<agent>, Hi @<agent>, Hey @<agent>, Hello @<agent>, or mid-sentence mentions).'
+    'Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.',
+    'Place each @<agent> at the start of a paragraph.',
+    'For multiple agents, use one paragraph-beginning mention per target.'
   ].join('\n');
 }
 

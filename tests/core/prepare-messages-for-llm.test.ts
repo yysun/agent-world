@@ -16,6 +16,9 @@
  * - Focuses on prompt formatting only (no tool execution).
  *
  * Recent changes:
+ * - 2026-02-20: Shortened mention-format prompt assertions to compact handoff-focused wording.
+ * - 2026-02-20: Added explicit assertion that normal user-facing replies should not include @mentions unless addressing another agent.
+ * - 2026-02-20: Relaxed mention-format prompt assertions to conditional paragraph-beginning multi-agent guidance.
  * - 2026-02-16: Updated skill-registry mocking to `getSkillsForSystemPrompt` and added coverage for global/project skill-scope env flags.
  * - 2026-02-15: Added coverage to ensure system-level mention-format rule is injected even when agent has no custom system prompt.
  * - 2026-02-15: Added coverage for concise cross-agent addressing rule injection (`@<agent_id>, <message>`).
@@ -109,8 +112,9 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.content).toContain('<id>pdf-extract</id>');
     expect(messages[0]?.content).toContain('<description>Extract PDF content</description>');
     expect(messages[0]?.content).toContain('use the load_skill with skill id tool');
-    expect(messages[0]?.content).toContain('Always use this format when addressing a specific agent: @<agent>, <message>.');
-    expect(messages[0]?.content).toContain('Put @<agent> at the very start of the reply.');
+    expect(messages[0]?.content).toContain('Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.');
+    expect(messages[0]?.content).toContain('Place each @<agent> at the start of a paragraph.');
+    expect(messages[0]?.content).toContain('For multiple agents, use one paragraph-beginning mention per target.');
   });
 
   test('injects mention-format system rule even without custom agent system prompt', async () => {
@@ -130,8 +134,8 @@ describe('prepareMessagesForLLM', () => {
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain('working directory scope: ');
     expect(messages[0]?.content).toContain('## Agent Skills');
-    expect(messages[0]?.content).toContain('Always use this format when addressing a specific agent: @<agent>, <message>.');
-    expect(messages[0]?.content).toContain('Put @<agent> at the very start of the reply.');
+    expect(messages[0]?.content).toContain('Only use @mentions when handing off to another agent; for normal user replies, do not mention agents.');
+    expect(messages[0]?.content).toContain('Place each @<agent> at the start of a paragraph.');
   });
 
   test('appends core default working directory when world value is missing', async () => {
