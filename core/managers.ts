@@ -25,6 +25,8 @@
  * - Error log persistence with 100-entry retention policy
  *
  * Recent Changes:
+ * - 2026-02-20: Added `claimAgentCreationSlot` to allow `create_agent` tool to hold the TOCTOU slot before showing approval dialog, preventing duplicate-approval race conditions.
+ * - 2026-02-20: Added `createAgent` option `allowWhileWorldProcessing` so approval-gated in-flight tool calls can create agents without disabling default processing guards.
  * - 2026-02-16: Added `branchChatFromMessage` to create a new chat branched from an assistant message and copy source-chat history up to the target message.
  * - 2026-02-14: Updated `editUserMessage` to be fully core-managed for clear+resend behavior without client-side subscription refresh logic.
  *   - Edit resubmission now prefers active subscribed world runtimes.
@@ -33,7 +35,7 @@
  * - 2026-02-13: Added world-level `mainAgent` routing config and agent-level `autoReply` toggle support.
  * - 2026-02-13: Moved edit-resubmission title-regeneration reset into core `editUserMessage` so all clients share the same behavior.
  *   - Auto-generated chat titles are reset to `New Chat` before edit resubmission only when the latest persisted
- *     chat-title CRUD payload name still matches the current chat name.
+ *     `chat-title-updated` payload title still matches the current chat name.
  * - 2026-02-13: Centralized default chat-title semantics via shared chat constants.
  *   - Uses a single `NEW_CHAT_TITLE` source for reusable chat detection and creation paths.
  * - 2026-02-12: Hardened `getMemory` to auto-migrate legacy messages missing `messageId` before returning memory payloads.
@@ -76,7 +78,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorldDir } from './storage/world-storage.js';
 import { getDefaultRootPath } from './storage/storage-factory.js';
-import { publishCRUDEvent } from './events/index.js';
 import { NEW_CHAT_TITLE, isDefaultChatTitle } from './chat-constants.js';
 import { hasActiveChatMessageProcessing, stopMessageProcessing } from './message-processing-control.js';
 
@@ -113,12 +114,67 @@ function ensureInitialization(): Promise<void> {
 }
 const NEW_CHAT_CONFIG = { REUSABLE_CHAT_TITLE: NEW_CHAT_TITLE } as const;
 
-function extractGeneratedChatTitleFromCrudPayload(payload: any): string | null {
+type CreateAgentOptions = {
+  allowWhileWorldProcessing?: boolean;
+  /** Set to true when the creation slot was already claimed via claimAgentCreationSlot(). */
+  slotAlreadyClaimed?: boolean;
+};
+
+// TOCTOU guard: prevents two concurrent createAgent calls from both passing the
+// `agentExists` check before either write lands. Maps worldId → Set<agentId>.
+const pendingAgentCreates = new Map<string, Set<string>>();
+
+export type ClaimAgentCreationSlotResult =
+  | { claimed: true; release: () => void }
+  | { claimed: false; reason: 'already_pending' | 'already_exists'; name: string };
+
+/**
+ * Pre-claim an agent creation slot before showing an approval dialog.
+ * Prevents race conditions where two concurrent create_agent tool calls both
+ * pass approval before either calls createAgent.
+ * Returns a release() function that MUST be called if createAgent is not called.
+ * createAgent({ slotAlreadyClaimed: true }) also cleans up the slot itself,
+ * so calling release() after createAgent is safe (idempotent).
+ */
+export async function claimAgentCreationSlot(
+  worldId: string,
+  agentName: string,
+): Promise<ClaimAgentCreationSlotResult> {
+  await ensureInitialization();
+  const resolvedWorldId = await getResolvedWorldId(worldId);
+  const agentId = utils.toKebabCase(agentName);
+
+  const worldPending = pendingAgentCreates.get(resolvedWorldId) ?? new Set<string>();
+  if (!pendingAgentCreates.has(resolvedWorldId)) {
+    pendingAgentCreates.set(resolvedWorldId, worldPending);
+  }
+
+  if (worldPending.has(agentId)) {
+    return { claimed: false, reason: 'already_pending', name: agentName };
+  }
+
+  const exists = await storageWrappers!.agentExists(resolvedWorldId, agentId);
+  if (exists) {
+    return { claimed: false, reason: 'already_exists', name: agentName };
+  }
+
+  worldPending.add(agentId);
+
+  return {
+    claimed: true,
+    release: () => {
+      worldPending.delete(agentId);
+      if (worldPending.size === 0) {
+        pendingAgentCreates.delete(resolvedWorldId);
+      }
+    },
+  };
+}
+
+function extractGeneratedChatTitleFromSystemPayload(payload: any): string | null {
   if (!payload || typeof payload !== 'object') return null;
-  if (payload.operation !== 'update') return null;
-  if (payload.entityType !== 'chat') return null;
-  const entityData = payload.entityData && typeof payload.entityData === 'object' ? payload.entityData : null;
-  const title = typeof entityData?.name === 'string' ? entityData.name.trim() : '';
+  if (payload.eventType !== 'chat-title-updated') return null;
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
   return title || null;
 }
 
@@ -141,21 +197,21 @@ async function resetAutoGeneratedChatTitleForEditResubmission(
 
   let latestGeneratedTitle: string | null = null;
   try {
-    const crudEvents = await eventStorage.getEventsByWorldAndChat(world.id, chatId, {
-      types: ['crud'],
+    const systemEvents = await eventStorage.getEventsByWorldAndChat(world.id, chatId, {
+      types: ['system'],
       order: 'desc',
       limit: 25
     });
 
-    for (const event of crudEvents) {
-      const generatedTitle = extractGeneratedChatTitleFromCrudPayload(event?.payload);
+    for (const event of systemEvents) {
+      const generatedTitle = extractGeneratedChatTitleFromSystemPayload(event?.payload);
       if (generatedTitle) {
         latestGeneratedTitle = generatedTitle;
         break;
       }
     }
   } catch (error) {
-    logger.debug('Skipping auto-title reset because chat CRUD events could not be queried', {
+    logger.debug('Skipping auto-title reset because system events could not be queried', {
       worldId: world.id,
       chatId,
       error: error instanceof Error ? error.message : String(error)
@@ -501,7 +557,7 @@ export async function getWorld(worldId: string): Promise<World | null> {
 export async function createAgent(
   worldId: string,
   params: CreateAgentParams,
-  options?: { allowWhileProcessing?: boolean }
+  options: CreateAgentOptions = {},
 ): Promise<Agent> {
   await ensureInitialization();
   const resolvedWorldId = await getResolvedWorldId(worldId);
@@ -510,44 +566,65 @@ export async function createAgent(
   const { getActiveSubscribedWorld } = await import('./subscription.js');
   const activeSubscribedWorld = getActiveSubscribedWorld(resolvedWorldId);
   const world = activeSubscribedWorld || await getWorld(resolvedWorldId);
-  if (world?.isProcessing && options?.allowWhileProcessing !== true) {
+  if (world?.isProcessing && !options.allowWhileWorldProcessing) {
     throw new Error('Cannot create agent while world is processing');
   }
 
   const agentId = params.id || utils.toKebabCase(params.name);
 
-  const exists = await storageWrappers!.agentExists(resolvedWorldId, agentId);
-  if (exists) {
-    throw new Error(`Agent with ID '${agentId}' already exists`);
+  // Resolve the pending-creates Set (needed in finally regardless of who claimed it).
+  const worldPending = pendingAgentCreates.get(resolvedWorldId) ?? new Set<string>();
+  if (!pendingAgentCreates.has(resolvedWorldId)) {
+    pendingAgentCreates.set(resolvedWorldId, worldPending);
   }
 
-  const now = new Date();
-  const agent: Agent = {
-    id: agentId,
-    name: params.name,
-    type: params.type,
-    autoReply: params.autoReply ?? true,
-    status: 'inactive',
-    provider: params.provider,
-    model: params.model,
-    systemPrompt: params.systemPrompt,
-    temperature: params.temperature,
-    maxTokens: params.maxTokens,
-    createdAt: now,
-    lastActive: now,
-    llmCallCount: 0,
-    memory: [],
-  };
-
-  await storageWrappers!.saveAgent(resolvedWorldId, agent);
-
-  // Emit CRUD event for real-time updates
-  if (world) {
-    world.agents.set(agent.id, agent);
-    publishCRUDEvent(world, 'create', 'agent', agent.id, agent);
+  if (!options.slotAlreadyClaimed) {
+    // TOCTOU guard: claim the slot before the async agentExists check.
+    // Skipped when the caller already claimed the slot via claimAgentCreationSlot().
+    if (worldPending.has(agentId)) {
+      throw new Error(`Agent '${agentId}' is already being created`);
+    }
+    worldPending.add(agentId);
   }
 
-  return agent;
+  try {
+    const exists = await storageWrappers!.agentExists(resolvedWorldId, agentId);
+    if (exists) {
+      throw new Error(`Agent with ID '${agentId}' already exists`);
+    }
+
+    const now = new Date();
+    const agent: Agent = {
+      id: agentId,
+      name: params.name,
+      type: params.type,
+      autoReply: params.autoReply ?? true,
+      status: 'inactive',
+      provider: params.provider,
+      model: params.model,
+      systemPrompt: params.systemPrompt,
+      temperature: params.temperature,
+      maxTokens: params.maxTokens,
+      createdAt: now,
+      lastActive: now,
+      llmCallCount: 0,
+      memory: [],
+    };
+
+    await storageWrappers!.saveAgent(resolvedWorldId, agent);
+
+    if (world) {
+      world.agents.set(agent.id, agent);
+    }
+
+    return agent;
+  } finally {
+    // Clean up the slot whether it was claimed here or via claimAgentCreationSlot().
+    worldPending.delete(agentId);
+    if (worldPending.size === 0) {
+      pendingAgentCreates.delete(resolvedWorldId);
+    }
+  }
 }
 
 /**
@@ -602,16 +679,13 @@ export async function updateAgent(worldId: string, agentId: string, updates: Upd
 
   await storageWrappers!.saveAgent(resolvedWorldId, updatedAgent);
 
-  // Emit CRUD event for real-time updates
   if (world) {
     const runtimeAgent = world.agents.get(resolvedAgentId);
     if (runtimeAgent) {
       Object.assign(runtimeAgent, updatedAgent);
       world.agents.set(resolvedAgentId, runtimeAgent);
-      publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, runtimeAgent);
     } else {
       world.agents.set(resolvedAgentId, updatedAgent);
-      publishCRUDEvent(world, 'update', 'agent', resolvedAgentId, updatedAgent);
     }
   }
 
@@ -636,10 +710,15 @@ export async function deleteAgent(worldId: string, agentId: string): Promise<boo
 
   const success = await storageWrappers!.deleteAgent(resolvedWorldId, resolvedAgentId);
 
-  // Emit CRUD event for real-time updates
   if (success && world) {
+    // Remove the agent's message listener BEFORE removing from the agents map
+    // to prevent the stale closure from continuing to process messages.
+    const unsubscribe = world._agentUnsubscribers?.get(resolvedAgentId);
+    if (unsubscribe) {
+      unsubscribe();
+      world._agentUnsubscribers!.delete(resolvedAgentId);
+    }
     world.agents.delete(resolvedAgentId);
-    publishCRUDEvent(world, 'delete', 'agent', resolvedAgentId);
   }
 
   return success;
@@ -776,11 +855,9 @@ async function createChat(worldId: string, params: CreateChatParams): Promise<Ch
 
   await storageWrappers!.saveChatData(worldId, chatData);
 
-  // Emit CRUD event for real-time updates
   const world = await getWorld(worldId);
   if (world) {
     world.chats.set(chatData.id, chatData);
-    publishCRUDEvent(world, 'create', 'chat', chatData.id, chatData, chatData.id);
   }
 
   return chatData;
@@ -1007,11 +1084,6 @@ export async function deleteChat(worldId: string, chatId: string): Promise<boole
 
   if (world && world.currentChatId === chatId) {
     shouldSetNewCurrentChat = true;
-  }
-
-  // Emit CRUD event BEFORE deletion (while chat_id still exists in DB)
-  if (world) {
-    publishCRUDEvent(world, 'delete', 'chat', chatId, undefined, chatId);
   }
 
   // Then delete the chat itself

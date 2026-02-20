@@ -13,6 +13,7 @@
  * - Focuses on update flow where active world runtime already exists.
  *
  * Recent changes:
+ * - 2026-02-20: Added create-agent processing-guard coverage for default block behavior and tool-only override (`allowWhileWorldProcessing`).
  * - 2026-02-15: Added regression test for `autoReply=false` not taking effect on active subscribed runtimes.
  * - 2026-02-15: Added create/delete agent runtime sync coverage for active subscribed worlds.
  */
@@ -163,6 +164,130 @@ describe('updateAgent runtime sync', () => {
     expect(runtimeCreated.autoReply).toBe(false);
     expect(storageWrappers.saveAgent).toHaveBeenCalled();
     expect(publishCRUDEvent).toHaveBeenCalled();
+  });
+
+  it('blocks createAgent by default when active world is processing', async () => {
+    vi.resetModules();
+
+    const persistedWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      turnLimit: 5,
+      mainAgent: null,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+
+    const activeWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      isProcessing: true,
+      turnLimit: 5,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map([['chat-1', { id: 'chat-1', name: 'New Chat', messageCount: 0 }]]),
+      totalAgents: 0,
+      totalMessages: 0
+    } as any;
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      agentExists: vi.fn().mockResolvedValue(false),
+      saveAgent: vi.fn().mockResolvedValue(undefined)
+    };
+
+    vi.doMock('../../core/storage/storage-factory.js', () => ({
+      createStorageWithWrappers: vi.fn().mockResolvedValue(storageWrappers),
+      getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+    }));
+
+    vi.doMock('../../core/events/index.js', () => ({
+      publishCRUDEvent: vi.fn()
+    }));
+
+    vi.doMock('../../core/subscription.js', () => ({
+      getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
+    }));
+
+    const managers = await import('../../core/managers.js');
+
+    await expect(
+      managers.createAgent('world-1', {
+        name: 'Blocked Agent',
+        type: 'default',
+        autoReply: false,
+        provider: 'openai',
+        model: 'gpt-4'
+      }),
+    ).rejects.toThrow('Cannot create agent while world is processing');
+
+    expect(storageWrappers.saveAgent).not.toHaveBeenCalled();
+  });
+
+  it('allows createAgent when processing override is explicitly enabled', async () => {
+    vi.resetModules();
+
+    const persistedWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      turnLimit: 5,
+      mainAgent: null,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+
+    const activeWorld = {
+      id: 'world-1',
+      name: 'World 1',
+      isProcessing: true,
+      turnLimit: 5,
+      createdAt: new Date(),
+      lastUpdated: new Date(),
+      eventEmitter: new EventEmitter(),
+      agents: new Map(),
+      chats: new Map([['chat-1', { id: 'chat-1', name: 'New Chat', messageCount: 0 }]]),
+      totalAgents: 0,
+      totalMessages: 0
+    } as any;
+
+    const storageWrappers = {
+      loadWorld: vi.fn().mockResolvedValue(persistedWorld),
+      agentExists: vi.fn().mockResolvedValue(false),
+      saveAgent: vi.fn().mockResolvedValue(undefined)
+    };
+
+    vi.doMock('../../core/storage/storage-factory.js', () => ({
+      createStorageWithWrappers: vi.fn().mockResolvedValue(storageWrappers),
+      getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
+    }));
+
+    vi.doMock('../../core/events/index.js', () => ({
+      publishCRUDEvent: vi.fn()
+    }));
+
+    vi.doMock('../../core/subscription.js', () => ({
+      getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
+    }));
+
+    const managers = await import('../../core/managers.js');
+
+    const created = await managers.createAgent(
+      'world-1',
+      {
+        name: 'Allowed Agent',
+        type: 'default',
+        autoReply: false,
+        provider: 'openai',
+        model: 'gpt-4'
+      },
+      { allowWhileWorldProcessing: true },
+    );
+
+    expect(created.name).toBe('Allowed Agent');
+    expect(storageWrappers.saveAgent).toHaveBeenCalled();
+    expect(activeWorld.agents.has(created.id)).toBe(true);
   });
 
   it('syncs deleteAgent into active subscribed runtime world', async () => {
