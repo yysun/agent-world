@@ -77,10 +77,7 @@ describe('updateAgent runtime sync', () => {
       getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
     }));
 
-    const publishCRUDEvent = vi.fn();
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     vi.doMock('../../core/subscription.js', () => ({
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
@@ -98,7 +95,6 @@ describe('updateAgent runtime sync', () => {
     expect(runtimeAgentAfterUpdate?.autoReply).toBe(false);
 
     expect(storageWrappers.saveAgent).toHaveBeenCalled();
-    expect(publishCRUDEvent).toHaveBeenCalled();
   });
 
   it('syncs createAgent into active subscribed runtime world', async () => {
@@ -139,10 +135,7 @@ describe('updateAgent runtime sync', () => {
       getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
     }));
 
-    const publishCRUDEvent = vi.fn();
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     vi.doMock('../../core/subscription.js', () => ({
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
@@ -163,7 +156,6 @@ describe('updateAgent runtime sync', () => {
     expect(runtimeCreated).toBeDefined();
     expect(runtimeCreated.autoReply).toBe(false);
     expect(storageWrappers.saveAgent).toHaveBeenCalled();
-    expect(publishCRUDEvent).toHaveBeenCalled();
   });
 
   it('blocks createAgent by default when active world is processing', async () => {
@@ -203,9 +195,7 @@ describe('updateAgent runtime sync', () => {
       getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
     }));
 
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent: vi.fn()
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     vi.doMock('../../core/subscription.js', () => ({
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
@@ -263,9 +253,7 @@ describe('updateAgent runtime sync', () => {
       getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
     }));
 
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent: vi.fn()
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     vi.doMock('../../core/subscription.js', () => ({
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
@@ -340,10 +328,7 @@ describe('updateAgent runtime sync', () => {
       getDefaultRootPath: vi.fn().mockReturnValue('/test/data')
     }));
 
-    const publishCRUDEvent = vi.fn();
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     vi.doMock('../../core/subscription.js', () => ({
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
@@ -356,6 +341,5 @@ describe('updateAgent runtime sync', () => {
     expect(deleted).toBe(true);
     expect(activeWorld.agents.has('agent-delete')).toBe(false);
     expect(storageWrappers.deleteAgent).toHaveBeenCalled();
-    expect(publishCRUDEvent).toHaveBeenCalled();
   });
 });

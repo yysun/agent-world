@@ -101,7 +101,7 @@ describe('prepareMessagesForLLM', () => {
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
     expect(messages[0]?.content).toContain('You are helping agent-world.');
-    expect(messages[0]?.content).toContain('working directory: /tmp/agent-world');
+    expect(messages[0]?.content).toContain('working directory scope: /tmp/agent-world');
     expect(messages[0]?.content).toContain('## Agent Skills');
     expect(messages[0]?.content).toContain('<available_skills>');
     expect(messages[0]?.content).toContain('<id>apprun-skills</id>');
@@ -128,7 +128,7 @@ describe('prepareMessagesForLLM', () => {
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain('working directory: ');
+    expect(messages[0]?.content).toContain('working directory scope: ');
     expect(messages[0]?.content).toContain('## Agent Skills');
     expect(messages[0]?.content).toContain('Always use this format when addressing a specific agent: @<agent>, <message>.');
     expect(messages[0]?.content).toContain('Put @<agent> at the very start of the reply.');
@@ -149,7 +149,7 @@ describe('prepareMessagesForLLM', () => {
 
     const messages = await prepareMessagesForLLM(worldId(), agent, null);
     expect(messages[0]?.role).toBe('system');
-    expect(messages[0]?.content).toContain(`working directory: ${getDefaultWorkingDirectory()}`);
+    expect(messages[0]?.content).toContain(`working directory scope: ${getDefaultWorkingDirectory()}`);
     expect(messages[0]?.content).toContain('## Agent Skills');
   });
 

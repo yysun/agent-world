@@ -111,9 +111,7 @@ describe('chatId isolation for edit flows', () => {
       getActiveSubscribedWorld: vi.fn().mockReturnValue(activeWorld)
     }));
 
-    vi.doMock('../../core/events/index.js', () => ({
-      publishCRUDEvent: vi.fn()
-    }));
+    vi.doMock('../../core/events/index.js', () => ({}));
 
     const managers = await import('../../core/managers.js');
     const beforeChatId = activeWorld.currentChatId;
