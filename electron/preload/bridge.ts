@@ -14,6 +14,7 @@
  * - Payload normalization helpers preserve existing invoke payload formats.
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only HITL bridge surface (`respondHitlOption` only).
  * - 2026-02-19: Added `exportWorld(worldId)` bridge method for desktop world save/export workflow.
  * - 2026-02-16: Added `branchSessionFromMessage(worldId, chatId, messageId)` bridge method for chat branching from assistant messages.
  * - 2026-02-14: Added `respondHitlOption()` bridge method for renderer resolution of world HITL option requests.

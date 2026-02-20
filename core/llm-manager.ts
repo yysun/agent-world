@@ -94,6 +94,8 @@
  * - Queue-based serialization prevents API rate limits and resource conflicts
  *
  * Recent Changes:
+ * - 2026-02-20: Switched injected tool-usage guidance to shared `buildToolUsagePromptSection()` so HITL and other tool rules are centralized in one utility.
+ * - 2026-02-20: Updated injected tool-usage guidance to direct LLMs to use `hitl_request`/`human_intervention_request` for human clarifications and confirmations.
  * - 2026-02-13: Reclassified stop-triggered aborts as cancellation/info logs (not errors) in queue and non-streaming paths.
  * - 2026-02-13: Added merged external+queue abort-signal support so chat stop requests can cancel follow-up continuation calls.
  * - 2026-02-13: Added chat-scoped LLM cancellation controls so Electron stop requests can abort active and queued calls by `worldId` + `chatId`.
@@ -131,7 +133,7 @@ import {
   generateGoogleResponse
 } from './google-direct.js';
 
-import { generateId } from './utils.js';
+import { buildToolUsagePromptSection, generateId } from './utils.js';
 import { createCategoryLogger } from './logger.js';
 import { createStorageWithWrappers } from './storage/storage-factory.js';
 import type { StorageAPI } from './storage/storage-factory.js';
@@ -168,14 +170,18 @@ function stripCustomFieldsFromMessages(messages: AgentMessage[]): ChatMessage[] 
  * Append tool usage guidance to system message when tools are available
  * Returns a new array with updated system message (doesn't mutate original)
  */
-function appendToolRulesToSystemMessage(messages: AgentMessage[], hasMCPTools: boolean): AgentMessage[] {
-  if (!hasMCPTools || messages.length === 0 || messages[0].role !== 'system') {
+function appendToolRulesToSystemMessage(messages: AgentMessage[], toolNames: string[]): AgentMessage[] {
+  if (messages.length === 0 || messages[0].role !== 'system') {
     return messages;
   }
 
   const systemMessage = messages[0];
-  // Simple guidance: Only use tools when user explicitly requests an action
-  const toolRules = '\n\nYou have access to tools. Use them only when the user explicitly requests an action.';
+  const toolUsageSection = buildToolUsagePromptSection({ toolNames });
+  if (!toolUsageSection) {
+    return messages;
+  }
+
+  const toolRules = ['', '', toolUsageSection].join('\n');
 
   return [
     { ...systemMessage, content: systemMessage.content + toolRules },
@@ -533,10 +539,11 @@ async function executeStreamAgentResponse(
 
     // Get MCP tools for this world
     const mcpTools = await getMCPToolsForWorld(world.id);
-    const hasMCPTools = Object.keys(mcpTools).length > 0;
+    const mcpToolNames = Object.keys(mcpTools);
+    const hasMCPTools = mcpToolNames.length > 0;
 
     // Add tool usage instructions to system message when tools are available
-    preparedMessages = appendToolRulesToSystemMessage(preparedMessages, hasMCPTools);
+    preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames);
 
     if (hasMCPTools) {
       loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);
@@ -696,10 +703,11 @@ async function executeGenerateAgentResponse(
 
   // Get MCP tools for this world (skip if requested, e.g., for title generation)
   const mcpTools = skipTools ? {} : await getMCPToolsForWorld(world.id);
-  const hasMCPTools = Object.keys(mcpTools).length > 0;
+  const mcpToolNames = Object.keys(mcpTools);
+  const hasMCPTools = mcpToolNames.length > 0;
 
   // Add tool usage instructions to system message when tools are available
-  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, hasMCPTools);
+  preparedMessages = appendToolRulesToSystemMessage(preparedMessages, mcpToolNames);
 
   if (hasMCPTools) {
     loggerMCP.debug(`LLM: Including ${Object.keys(mcpTools).length} MCP tools for agent=${agent.id}, world=${world.id}`);

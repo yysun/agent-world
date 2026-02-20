@@ -23,8 +23,8 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
- * - 2026-02-19: Replaced edit/delete/branch emoji action buttons with SVG icons for consistent UI rendering.
- * - 2026-02-19: Added branch action support for eligible assistant messages (`branch-chat-from-message`).
+ * - 2026-02-20: Disabled new-message sending while a HITL prompt is pending; users must resolve HITL first.
+ * - 2026-02-20: Replaced popup HITL prompt UX with inline message-flow HITL cards (options-only).
  * - 2026-02-16: Disabled message-edit `Update` button until trimmed content differs from original message text.
  * - 2026-02-15: Suppressed reply-target sender labels when the sender agent has `autoReply` disabled; now shows plain sender for parity with Electron.
  * - 2026-02-14: Extracted message body rendering to `web/src/domain/message-content.tsx`
@@ -82,6 +82,7 @@ export function getComposerActionState(params: {
   isBusy: boolean;
   isStopping: boolean;
   isSending: boolean;
+  hasActiveHitlPrompt: boolean;
   userInput: string;
 }): ComposerActionState {
   const {
@@ -90,13 +91,14 @@ export function getComposerActionState(params: {
     isBusy,
     isStopping,
     isSending,
+    hasActiveHitlPrompt,
     userInput,
   } = params;
 
   const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
   const actionButtonDisabled = canStopCurrentSession
     ? isStopping
-    : (!userInput.trim() || isSending || isWaiting || isStopping);
+    : (!userInput.trim() || isSending || isWaiting || isStopping || hasActiveHitlPrompt);
   const actionButtonClass = canStopCurrentSession ? 'send-button stop-button' : 'send-button';
   const actionButtonText = canStopCurrentSession
     ? (isStopping ? 'Stopping...' : 'Stop')
@@ -108,30 +110,6 @@ export function getComposerActionState(params: {
     actionButtonClass,
     actionButtonText,
   };
-}
-
-export function isBranchableAgentMessage(message: Message): boolean {
-  const role = String(message?.role || '').trim().toLowerCase();
-  const sender = String(message?.sender || '').trim().toLowerCase();
-  const content = String(message?.text || '').trim().toLowerCase();
-  const messageData = message as Message & {
-    tool_calls?: unknown[];
-    tool_call_id?: string;
-    toolCallStatus?: string;
-  };
-
-  const hasToolCalls = Array.isArray(messageData.tool_calls) && messageData.tool_calls.length > 0;
-  const hasToolCallId = Boolean(messageData.tool_call_id);
-  const hasToolCallStatus = Boolean(messageData.toolCallStatus);
-  const isSystemOrToolSender = sender === 'system' || sender === 'tool';
-  const isErrorLikeAssistantMessage = content.startsWith('[error]') || content.startsWith('error:');
-
-  return role === 'assistant'
-    && !isSystemOrToolSender
-    && !hasToolCalls
-    && !hasToolCallId
-    && !hasToolCallStatus
-    && !isErrorLikeAssistantMessage;
 }
 
 export default function WorldChat(props: WorldChatProps) {
@@ -153,19 +131,24 @@ export default function WorldChat(props: WorldChatProps) {
     agentFilters = [],  // Agent IDs to filter by
     isBusy = false,
     elapsedMs = 0,
-    isStopping = false
+    isStopping = false,
+    activeHitlPrompt = null,
+    submittingHitlRequestId = null,
   } = props;
 
   const promptReady = !isWaiting;
   const promptIndicator = promptReady ? '>' : '…';
-  const inputPlaceholder = promptReady ? 'Type your message...' : 'Waiting for agents...';
-  const inputDisabled = isSending || isWaiting || isStopping;
+  const inputPlaceholder = activeHitlPrompt
+    ? 'Resolve pending HITL prompt before sending a new message...'
+    : (promptReady ? 'Type your message...' : 'Waiting for agents...');
+  const inputDisabled = isSending || isWaiting || isStopping || Boolean(activeHitlPrompt);
   const { canStopCurrentSession, actionButtonDisabled, actionButtonClass, actionButtonText } = getComposerActionState({
     currentChatId,
     isWaiting,
     isBusy,
     isStopping,
     isSending,
+    hasActiveHitlPrompt: Boolean(activeHitlPrompt),
     userInput,
   });
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
@@ -466,7 +449,6 @@ export default function WorldChat(props: WorldChatProps) {
               const normalizedEditedText = editingText.trim();
               const normalizedOriginalText = String(message.text || '').trim();
               const isEditChanged = Boolean(normalizedEditedText) && normalizedEditedText !== normalizedOriginalText;
-              const isBranchable = isBranchableAgentMessage(message) && !message.isStreaming;
 
               // Build display label matching export format
               let displayLabel = '';
@@ -556,10 +538,7 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Edit message"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                              </svg>
+                              ✏️
                             </button>
                             <button
                               className="message-delete-btn"
@@ -572,33 +551,7 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Delete message and all after it"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                <path d="M10 11v6" />
-                                <path d="M14 11v6" />
-                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                              </svg>
-                            </button>
-                          </div>
-                        )}
-                        {isBranchable && (
-                          <div className="message-actions">
-                            <button
-                              className="message-edit-btn"
-                              $onclick={['branch-chat-from-message', {
-                                messageId: message.messageId,
-                                chatId: message.chatId || currentChatId
-                              }]}
-                              title="Branch chat from this message"
-                              disabled={!message.messageId || !(message.chatId || currentChatId)}
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M6 3v12" />
-                                <circle cx="18" cy="6" r="3" />
-                                <circle cx="6" cy="18" r="3" />
-                                <path d="M9 18h6a3 3 0 0 0 3-3V9" />
-                              </svg>
+                              🗑️
                             </button>
                           </div>
                         )}
@@ -646,6 +599,41 @@ export default function WorldChat(props: WorldChatProps) {
               </div>
             </div>
           )}
+
+          {activeHitlPrompt ? (
+            <div className="message-row message-row-left">
+              <div className="message-avatar-container" title="Human input required">
+                <div className="message-avatar sprite-4"></div>
+              </div>
+              <div className="message system-message hitl-inline-message">
+                <div className="message-sender">
+                  {activeHitlPrompt.title || 'Human input required'}
+                </div>
+                <div className="message-content">
+                  {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+                </div>
+                <div className="hitl-inline-actions hitl-inline-option-actions">
+                  {activeHitlPrompt.options.map((option) => {
+                    const isSubmitting = submittingHitlRequestId === activeHitlPrompt.requestId;
+                    return (
+                      <button
+                        key={option.id}
+                        className="btn-secondary px-4 py-2 rounded shrink-0"
+                        disabled={isSubmitting}
+                        $onclick={['respond-hitl-option', {
+                          requestId: activeHitlPrompt.requestId,
+                          optionId: option.id,
+                          chatId: activeHitlPrompt.chatId
+                        }]}
+                      >
+                        <div className="font-bold">{option.label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* User Input Area */}

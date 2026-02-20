@@ -5,7 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
- * - 2026-02-19: Added chat branch endpoint `POST /worlds/:worldName/chats/:chatId/branch/:messageId` for web branching UX.
+ * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
  * - 2026-02-13: Added core-managed message edit endpoint `PUT /worlds/:worldName/messages/:messageId`
  *   - Delegates edit/remove/resubmit flow to `core.editUserMessage` for cross-client consistency
@@ -73,10 +73,9 @@ import {
   getMemory as coreGetMemory,
   exportWorldToMarkdown,
   removeMessagesFrom,
-  branchChatFromMessage,
   editUserMessage,
   stopMessageProcessing,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   type World,
   type Agent,
   type Chat,
@@ -1079,11 +1078,12 @@ router.post('/worlds/:worldName/hitl/respond', validateWorld, async (req: Reques
     }
 
     const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-    const { requestId, optionId } = validation.data;
-    const result = submitWorldOptionResponse({
+    const { requestId, optionId, chatId } = validation.data;
+    const result = submitWorldHitlResponse({
       worldId: worldCtx.id,
       requestId,
-      optionId
+      optionId,
+      ...(chatId !== undefined ? { chatId } : {}),
     });
     res.json(result);
   } catch (error) {
@@ -1177,36 +1177,6 @@ router.post('/worlds/:worldName/chats', validateWorld, async (req: Request, res:
   } catch (error) {
     loggerChat.error('Error creating new chat', { error: error instanceof Error ? error.message : error, worldName: req.params.worldName });
     sendError(res, 500, 'Failed to create new chat', 'NEW_CHAT_ERROR');
-  }
-});
-
-router.post('/worlds/:worldName/chats/:chatId/branch/:messageId', validateWorld, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { chatId, messageId } = req.params;
-    const worldCtx = (req as any).worldCtx as ReturnType<typeof createWorldContext>;
-
-    if (!(await chatExists(worldCtx, chatId))) {
-      sendError(res, 404, 'Chat not found', 'CHAT_NOT_FOUND');
-      return;
-    }
-
-    const result = await branchChatFromMessage(worldCtx.id, chatId, messageId);
-    res.json({
-      success: true,
-      world: serializeWorld(result.world),
-      chatId: result.newChatId,
-      copiedMessageCount: result.copiedMessageCount,
-    });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const isNotFound = errorMessage.includes('not found');
-    const isClientValidationError =
-      errorMessage.includes('required') ||
-      errorMessage.includes('Can only branch from assistant messages.') ||
-      errorMessage.includes('Message not found in source chat');
-    const status = isNotFound ? 404 : (isClientValidationError ? 400 : 500);
-    const code = isNotFound ? 'CHAT_BRANCH_NOT_FOUND' : 'CHAT_BRANCH_ERROR';
-    sendError(res, status, errorMessage || 'Failed to branch chat', code);
   }
 });
 

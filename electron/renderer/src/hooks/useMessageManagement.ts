@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-20: Blocked composer sends while HITL prompt queue is non-empty to enforce resolve-first workflow.
  * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
  * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 3 custom hook migration.
@@ -48,6 +49,7 @@ export function useMessageManagement({
   setActiveTools,
   setIsBusy,
   setSessionActivity,
+  hasActiveHitlPrompt = false,
 }) {
   const [composer, setComposer] = useState('');
   const [sendingSessionIds, setSendingSessionIds] = useState<Set<string>>(new Set());
@@ -74,6 +76,11 @@ export function useMessageManagement({
   }, [messagesById]);
 
   const onSendMessage = useCallback(async () => {
+    if (hasActiveHitlPrompt) {
+      setStatusText('Resolve the pending HITL prompt before sending a new message.', 'info');
+      return;
+    }
+
     const activeSessionId = String(selectedSessionId || '').trim() || null;
     if (activeSessionId && sendingSessionIds.has(activeSessionId)) return;
     if (!loadedWorldId || !activeSessionId) {
@@ -144,7 +151,7 @@ export function useMessageManagement({
         return next;
       });
     }
-  }, [api, composer, loadedWorldId, selectedSessionId, sendingSessionIds, setMessages, setStatusText, systemSettings]);
+  }, [api, composer, hasActiveHitlPrompt, loadedWorldId, selectedSessionId, sendingSessionIds, setMessages, setStatusText, systemSettings]);
 
   const onStopMessage = useCallback(async () => {
     if (!loadedWorldId || !selectedSessionId) {

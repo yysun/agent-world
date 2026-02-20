@@ -13,6 +13,7 @@
  * - Uses dependency injection for state setters and collaborators.
  *
  * Recent Changes:
+ * - 2026-02-20: Blocked Enter-to-send while HITL prompt queue is non-empty.
  * - 2026-02-18: Updated create-agent panel defaults to inherit world chat LLM provider/model and default auto-reply to false.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
@@ -52,6 +53,7 @@ export function useAppActionHandlers({
   sendingSessionIds,
   stoppingSessionIds,
   pendingResponseSessionIds,
+  hasActiveHitlPrompt,
   composer,
   onSendMessage,
   loadSystemSettings,
@@ -275,6 +277,9 @@ export function useAppActionHandlers({
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
+      if (hasActiveHitlPrompt) {
+        return;
+      }
       const isCurrentSessionSending = selectedSessionId && sendingSessionIds.has(selectedSessionId);
       const isCurrentSessionStopping = selectedSessionId && stoppingSessionIds.has(selectedSessionId);
       const isCurrentSessionPendingResponse = selectedSessionId && pendingResponseSessionIds.has(selectedSessionId);
@@ -289,6 +294,7 @@ export function useAppActionHandlers({
     }
   }, [
     composer,
+    hasActiveHitlPrompt,
     onSendMessage,
     pendingResponseSessionIds,
     selectedSessionId,

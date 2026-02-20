@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-20: Added inline message-flow HITL prompt card rendering for option prompts, replacing overlay-only HITL UX.
  * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
  * - 2026-02-20: Aligned renderable message filtering with App welcome-state logic to prevent empty-state flicker.
  * - 2026-02-20: Suppressed edit/delete actions for pending optimistic user messages until backend confirmation.
@@ -60,6 +61,9 @@ export default function MessageListPanel({
   onBranchFromMessage,
   showInlineWorkingIndicator,
   inlineWorkingIndicatorState,
+  activeHitlPrompt,
+  submittingHitlRequestId,
+  onRespondHitlOption,
 }) {
   const inlinePrimaryText = String(inlineWorkingIndicatorState?.primaryText || 'Agent');
   const inlineStatusText = String(
@@ -284,6 +288,34 @@ export default function MessageListPanel({
             );
           })
         )}
+
+        {activeHitlPrompt ? (
+          <div className="flex min-w-0 w-full items-start gap-2 justify-start">
+            <article className="min-w-0 w-full rounded-lg border border-dashed border-border bg-card/70 px-3 py-3">
+              <div className="mb-1 text-xs font-semibold text-foreground">
+                {activeHitlPrompt.title || 'Human input required'}
+              </div>
+              <div className="whitespace-pre-wrap text-xs text-muted-foreground">
+                {(activeHitlPrompt.message || 'Please choose an option to continue.').replace(/\n\s*\n+/g, '\n')}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {activeHitlPrompt.options.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={submittingHitlRequestId === activeHitlPrompt.requestId}
+                    onClick={() => onRespondHitlOption(activeHitlPrompt, option.id)}
+                    className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    title={option.description || option.label}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </article>
+          </div>
+        ) : null}
 
         {showInlineWorkingIndicator ? (
           <div className="flex w-full items-start gap-2 justify-start">

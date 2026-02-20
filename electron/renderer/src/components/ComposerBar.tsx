@@ -11,6 +11,7 @@
  * - Keeps action-button sizing and iconography consistent with desktop UI updates
  *
  * Recent Changes:
+ * - 2026-02-20: Disabled new-message composer actions while a HITL prompt is pending.
  * - 2026-02-14: Extracted from App.jsx to simplify renderer orchestration logic.
  */
 
@@ -26,8 +27,10 @@ export default function ComposerBar({
   selectedProjectPath,
   canStopCurrentSession,
   isCurrentSessionStopping,
-  isCurrentSessionSending
+  isCurrentSessionSending,
+  hasActiveHitlPrompt
 }) {
+  const composerDisabled = Boolean(hasActiveHitlPrompt) && !canStopCurrentSession;
   return (
     <form onSubmit={onSubmitMessage} className="px-4 pt-4 pb-2">
       <div className="mx-auto flex w-full max-w-[750px] flex-col gap-2 rounded-lg border border-input bg-card p-3">
@@ -37,9 +40,10 @@ export default function ComposerBar({
           onChange={(event) => onComposerChange(event.target.value)}
           onKeyDown={onComposerKeyDown}
           rows={1}
-          placeholder="Send a message..."
+          placeholder={composerDisabled ? 'Resolve pending HITL prompt before sending a new message...' : 'Send a message...'}
           className="w-full resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           aria-label="Message input"
+          disabled={composerDisabled}
         />
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -85,7 +89,7 @@ export default function ComposerBar({
           </div>
           <button
             type="submit"
-            disabled={canStopCurrentSession ? isCurrentSessionStopping : (isCurrentSessionSending || !composer.trim())}
+            disabled={canStopCurrentSession ? isCurrentSessionStopping : (isCurrentSessionSending || !composer.trim() || composerDisabled)}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={canStopCurrentSession ? 'Stop message processing' : 'Send message'}
             title={canStopCurrentSession ? 'Stop processing' : 'Send message'}

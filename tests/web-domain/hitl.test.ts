@@ -40,6 +40,7 @@ describe('web/domain/hitl', () => {
       chatId: 'chat-1',
       title: 'Run scripts?',
       message: 'Choose one option.',
+      mode: 'option',
       defaultOptionId: 'yes_once',
       options: [
         { id: 'yes_once', label: 'Yes once', description: undefined },
@@ -101,6 +102,7 @@ describe('web/domain/hitl', () => {
       chatId: null,
       title: 'A',
       message: 'B',
+      mode: 'option',
       defaultOptionId: 'no',
       options: [{ id: 'no', label: 'No' }],
     });
@@ -109,6 +111,7 @@ describe('web/domain/hitl', () => {
       chatId: null,
       title: 'C',
       message: 'D',
+      mode: 'option',
       defaultOptionId: 'no',
       options: [{ id: 'no', label: 'No' }],
     });
@@ -124,6 +127,7 @@ describe('web/domain/hitl', () => {
           chatId: null,
           title: 'A',
           message: 'A',
+          mode: 'option',
           defaultOptionId: 'no',
           options: [{ id: 'no', label: 'No' }],
         },
@@ -132,6 +136,7 @@ describe('web/domain/hitl', () => {
           chatId: null,
           title: 'B',
           message: 'B',
+          mode: 'option',
           defaultOptionId: 'no',
           options: [{ id: 'no', label: 'No' }],
         },
@@ -142,4 +147,3 @@ describe('web/domain/hitl', () => {
     expect(remaining[0]?.requestId).toBe('req-2');
   });
 });
-

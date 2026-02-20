@@ -8,6 +8,9 @@
  * - Stop mode activates only for active current-chat processing.
  * - Stop mode disabled state while stop request is in flight.
  * - Send mode labels/disable rules for idle and sending states.
+ *
+ * Recent Changes:
+ * - 2026-02-20: Added coverage for send-button disable behavior while a HITL prompt is active.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,6 +24,7 @@ describe('web/world-chat composer action', () => {
       isBusy: false,
       isStopping: false,
       isSending: false,
+      hasActiveHitlPrompt: false,
       userInput: 'hello',
     });
 
@@ -37,6 +41,7 @@ describe('web/world-chat composer action', () => {
       isBusy: true,
       isStopping: true,
       isSending: false,
+      hasActiveHitlPrompt: false,
       userInput: 'hello',
     });
 
@@ -52,6 +57,7 @@ describe('web/world-chat composer action', () => {
       isBusy: false,
       isStopping: false,
       isSending: false,
+      hasActiveHitlPrompt: false,
       userInput: '   ',
     });
 
@@ -68,11 +74,28 @@ describe('web/world-chat composer action', () => {
       isBusy: false,
       isStopping: false,
       isSending: true,
+      hasActiveHitlPrompt: false,
       userInput: 'hello',
     });
 
     expect(state.canStopCurrentSession).toBe(false);
     expect(state.actionButtonText).toBe('Sending...');
+    expect(state.actionButtonDisabled).toBe(true);
+  });
+
+  it('disables send mode while HITL prompt is active', () => {
+    const state = getComposerActionState({
+      currentChatId: 'chat-1',
+      isWaiting: false,
+      isBusy: false,
+      isStopping: false,
+      isSending: false,
+      hasActiveHitlPrompt: true,
+      userInput: 'hello',
+    });
+
+    expect(state.canStopCurrentSession).toBe(false);
+    expect(state.actionButtonText).toBe('Send');
     expect(state.actionButtonDisabled).toBe(true);
   });
 });

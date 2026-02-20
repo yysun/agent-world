@@ -31,6 +31,7 @@
  * - Internal utilities: initializeLogger, getCategoryLogLevel
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only HITL exports by removing input-mode helpers from public core surface.
  * - 2026-02-14: Exported generic HITL option request/response APIs for world-scoped user approval flows.
  * - 2026-02-14: Exported `waitForInitialSkillSync` to allow callers to await startup skill-registry auto-sync completion.
  * - 2026-02-13: Exported chat-scoped stop-message processing controls for Electron IPC stop action.
@@ -96,11 +97,13 @@ export {
 
 export {
   requestWorldOption,
+  submitWorldHitlResponse,
   submitWorldOptionResponse,
   clearHitlStateForTests,
   type HitlOption,
   type HitlOptionRequest,
   type HitlOptionResolution,
+  type HitlResponseResolution,
 } from './hitl.js';
 
 // === SHELL COMMAND TOOL ===

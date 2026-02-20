@@ -12,6 +12,7 @@
  * - Avoids direct coupling to app bootstrap internals.
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only `hitl:respond` handler payload validation.
  * - 2026-02-19: Simplified desktop world export to file-storage-only (removed SQLite export option).
  * - 2026-02-19: Added CLI-parity world import/export handlers for folder-validated imports, id/name conflict checks, and storage-target export flows.
  * - 2026-02-18: Updated `agent:create` fallback defaults to inherit provider/model from the world chat LLM settings.
@@ -85,7 +86,7 @@ interface MainIpcHandlerFactoryDependencies {
   newChat: (worldId: string) => Promise<any>;
   branchChatFromMessage: (worldId: string, sourceChatId: string, messageId: string) => Promise<any>;
   publishMessage: (world: any, content: string, sender: string, chatId?: string) => any;
-  submitWorldOptionResponse: (params: { worldId: string; requestId: string; optionId: string }) => {
+  submitWorldHitlResponse: (params: { worldId: string; requestId: string; optionId: string; chatId?: string | null }) => {
     accepted: boolean;
     reason?: string;
   };
@@ -122,7 +123,7 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     newChat,
     branchChatFromMessage,
     publishMessage,
-    submitWorldOptionResponse,
+    submitWorldHitlResponse,
     stopMessageProcessing,
     restoreChat,
     updateWorld,
@@ -1115,10 +1116,16 @@ export function createMainIpcHandlers(dependencies: MainIpcHandlerFactoryDepende
     const worldId = String(payload?.worldId || '').trim();
     const requestId = String(payload?.requestId || '').trim();
     const optionId = String(payload?.optionId || '').trim();
+    const chatId = payload?.chatId !== undefined ? String(payload.chatId || '').trim() || null : undefined;
     if (!worldId) throw new Error('World ID is required.');
     if (!requestId) throw new Error('requestId is required.');
     if (!optionId) throw new Error('optionId is required.');
-    return submitWorldOptionResponse({ worldId, requestId, optionId });
+    return submitWorldHitlResponse({
+      worldId,
+      requestId,
+      optionId,
+      ...(chatId !== undefined ? { chatId } : {}),
+    });
   }
 
   async function openFileDialog() {

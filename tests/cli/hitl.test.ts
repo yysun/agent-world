@@ -39,6 +39,7 @@ describe('cli/hitl', () => {
       title: 'Run scripts?',
       message: 'Please confirm.',
       chatId: 'chat-1',
+      mode: 'option',
       defaultOptionId: 'yes_once',
       options: [
         { id: 'yes_once', label: 'Yes once', description: undefined },
@@ -86,4 +87,3 @@ describe('cli/hitl', () => {
     expect(resolveHitlOptionSelectionInput(options, '999', 'no')).toBeNull();
   });
 });
-

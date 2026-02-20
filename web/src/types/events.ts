@@ -25,8 +25,7 @@
  * ```
  * 
  * Changes:
- * - 2026-02-19: Added `update-chat-search` and `branch-chat-from-message` event variants for web MVP parity.
- * - 2026-02-19: Added `handleCrudEvent` variant for realtime world refresh after CRUD updates.
+ * - 2026-02-20: Enforced options-only HITL event set.
  * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
  * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
  * - 2026-02-08: Removed legacy manual tool-intervention event variants
@@ -149,12 +148,6 @@ export type WorldEvents =
   /** Load chat from history */
   | { name: 'load-chat-from-history'; payload: string }
 
-  /** Update chat history search query */
-  | { name: 'update-chat-search'; payload: { target: { value: string } } }
-
-  /** Branch current world chat from an eligible assistant message */
-  | { name: 'branch-chat-from-message'; payload: { messageId: string; chatId?: string | null } }
-
   /** Delete chat from history */
   | { name: 'delete-chat-from-history'; payload: { chatId: string } }
 
@@ -212,9 +205,6 @@ export type WorldEvents =
 
   /** Handle world activity event */
   | { name: 'handleWorldActivity'; payload: any }
-
-  /** Handle CRUD event from SSE (agent/chat/world updates) */
-  | { name: 'handleCrudEvent'; payload: any }
 
   // Note: handleMemoryOnlyMessage removed - memory-only events no longer sent via SSE
 

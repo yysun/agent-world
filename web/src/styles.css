@@ -1130,6 +1130,26 @@ legend {
   /* Gray for system messages */
 }
 
+.hitl-inline-message {
+  background-color: color-mix(in srgb, var(--bg-accent) 65%, white 35%);
+  border-style: dashed;
+}
+
+.hitl-inline-actions {
+  margin-top: 0.75rem;
+}
+
+.hitl-inline-option-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hitl-inline-buttons {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .message-sender {
   font-weight: bold;
   font-size: 1.2rem;

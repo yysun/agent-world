@@ -14,6 +14,7 @@
  * - Work with loaded world without importing (uses external storage path)
  * 
  * Changes:
+ * - 2026-02-20: Enforced options-only HITL handling in interactive and pipeline modes.
  * - 2026-02-14: Added interactive + pipeline HITL option response handling for generic approval requests.
  * - 2026-02-11: Fixed tool-stream timeout: extendTimeout() resets idle timeout on streaming data
  * - 2026-02-11: Pipeline mode now listens for tool-stream SSE events to extend timeout
@@ -82,7 +83,7 @@ import readline from 'readline';
 import {
   listWorlds,
   subscribeWorld,
-  submitWorldOptionResponse,
+  submitWorldHitlResponse,
   ClientConnection,
   createCategoryLogger,
   LLMProvider,
@@ -109,9 +110,8 @@ import {
   log as statusLog,
 } from './display.js';
 import {
-  parseHitlOptionRequest,
+  parseHitlPromptRequest,
   resolveHitlOptionSelectionInput,
-  type HitlOptionPayload,
   type HitlOptionRequestPayload,
 } from './hitl.js';
 
@@ -599,18 +599,18 @@ function attachCLIListeners(
 
   // System events
   const systemListener = (eventData: SystemEventPayload) => {
-    const hitlRequest = parseHitlOptionRequest(eventData);
+    const hitlRequest = parseHitlPromptRequest(eventData);
     if (hitlRequest) {
       hitlPromptChain = hitlPromptChain
         .then(async () => {
           if (streaming && globalState && rl && statusLine) {
             globalState.hitlPromptActive = true;
             try {
-              const selectedOptionId = await promptHitlOptionSelection(hitlRequest, statusLine, rl);
-              const result = submitWorldOptionResponse({
+              const result = submitWorldHitlResponse({
                 worldId: world.id,
                 requestId: hitlRequest.requestId,
-                optionId: selectedOptionId
+                optionId: await promptHitlOptionSelection(hitlRequest, statusLine, rl),
+                chatId: hitlRequest.chatId,
               });
               if (!result.accepted) {
                 statusLine.pause();
@@ -619,7 +619,7 @@ function attachCLIListeners(
                 return;
               }
               statusLine.pause();
-              console.log(green(`Approved option: ${selectedOptionId}`));
+              console.log(green('Submitted HITL option response.'));
               statusLine.resume();
               return;
             } finally {
@@ -628,10 +628,11 @@ function attachCLIListeners(
           }
 
           // Pipeline/non-interactive mode: auto-respond with default option to avoid blocking.
-          const result = submitWorldOptionResponse({
+          const result = submitWorldHitlResponse({
             worldId: world.id,
             requestId: hitlRequest.requestId,
-            optionId: hitlRequest.defaultOptionId
+            optionId: hitlRequest.defaultOptionId,
+            chatId: hitlRequest.chatId,
           });
           if (!result.accepted) {
             console.error(boldRed(`Failed to auto-respond HITL request: ${result.reason || 'unknown error'}`));

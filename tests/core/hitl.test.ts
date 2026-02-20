@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearHitlStateForTests,
   requestWorldOption,
+  submitWorldHitlResponse,
   submitWorldOptionResponse,
 } from '../../core/hitl.js';
 
@@ -101,5 +102,50 @@ describe('core/hitl', () => {
 
     expect(resolution.optionId).toBe('no');
     expect(resolution.source).toBe('timeout');
+  });
+
+  it('rejects mismatched chat scope in generic response submission', async () => {
+    const worldEventEmitter = new EventEmitter();
+    const world = {
+      id: 'world-3',
+      currentChatId: 'chat-3',
+      eventEmitter: worldEventEmitter,
+    } as any;
+    let capturedRequestId = '';
+    worldEventEmitter.on('system', (event: any) => {
+      capturedRequestId = String(event?.content?.requestId || '');
+    });
+
+    const pending = requestWorldOption(world, {
+      title: 'Approval required',
+      message: 'Continue?',
+      options: [
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
+      ],
+      chatId: 'chat-3',
+      timeoutMs: 5000,
+    });
+
+    await Promise.resolve();
+    expect(capturedRequestId).not.toBe('');
+
+    const rejection = submitWorldHitlResponse({
+      worldId: 'world-3',
+      requestId: capturedRequestId,
+      optionId: 'yes',
+      chatId: 'different-chat',
+    });
+    expect(rejection.accepted).toBe(false);
+    expect(String(rejection.reason || '')).toContain('belongs to chat');
+
+    submitWorldOptionResponse({
+      worldId: 'world-3',
+      requestId: capturedRequestId,
+      optionId: 'yes',
+      chatId: 'chat-3',
+    });
+    const resolution = await pending;
+    expect(resolution.optionId).toBe('yes');
   });
 });

@@ -18,6 +18,7 @@
  * - 2026-02-19: Added `world:export` invoke contract for desktop world save/export flows aligned with CLI storage options.
  * - 2026-02-16: Added `session:branchFromMessage` invoke contract for creating a branched chat from an assistant message.
  * - 2026-02-14: Added `hitl:respond` invoke contract for resolving world HITL option prompts from renderer.
+ * - 2026-02-20: Enforced options-only HITL response payload (`optionId` required).
  * - 2026-02-14: Added `skill:list` invoke contract for renderer welcome-screen skill registry display.
  * - 2026-02-13: Added `message:edit` invoke contract for core-driven message edit + resubmission flow.
  * - 2026-02-13: Added chat stop-message invoke contract for session-scoped processing interruption.

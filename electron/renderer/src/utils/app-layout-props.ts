@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
  * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
  * - 2026-02-19: Added status-bar `agentStatusText` wiring for full per-agent activity summaries.
  * - 2026-02-19: Added inline working indicator state wiring for richer chat activity details.
@@ -46,6 +47,9 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     onBranchFromMessage: input.onBranchFromMessage,
     showInlineWorkingIndicator: input.showInlineWorkingIndicator,
     inlineWorkingIndicatorState: input.inlineWorkingIndicatorState,
+    activeHitlPrompt: input.activeHitlPrompt,
+    submittingHitlRequestId: input.submittingHitlRequestId,
+    onRespondHitlOption: input.onRespondHitlOption,
   };
 }
 
@@ -61,6 +65,7 @@ export function createMainContentComposerProps<T extends PropBag>(input: T) {
     canStopCurrentSession: input.canStopCurrentSession,
     isCurrentSessionStopping: input.isCurrentSessionStopping,
     isCurrentSessionSending: input.isCurrentSessionSending,
+    hasActiveHitlPrompt: input.hasActiveHitlPrompt,
   };
 }
 

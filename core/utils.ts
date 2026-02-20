@@ -33,6 +33,8 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
+ * - 2026-02-20: Added `buildToolUsagePromptSection()` for centralized, tool-aware system-prompt guidance (including HITL usage guidance when available).
  * - 2026-02-19: Replaced raw `working directory: <value>` system-prompt suffix with explicit `shell_cmd` scope instructions and a no-echo directive.
  * - 2026-02-16: Added env-driven global/project skill-scope filtering for the `## Agent Skills` system prompt section.
  * - 2026-02-15: prepareMessagesForLLM now appends a concise, strict cross-agent addressing rule requiring `@<agent_id>, <message>` when targeting a specific agent.
@@ -198,6 +200,38 @@ function buildAgentMentionFormatRule(): string {
     'Place each @<agent> at the start of a paragraph.',
     'For multiple agents, use one paragraph-beginning mention per target.'
   ].join('\n');
+}
+
+/**
+ * Build tool-usage guidance section for the system prompt.
+ * Guidance is tool-aware and only includes HITL instructions when HITL tool names are present.
+ */
+export function buildToolUsagePromptSection(options: { toolNames: string[] }): string {
+  const toolNames = Array.isArray(options?.toolNames)
+    ? options.toolNames.map((toolName) => String(toolName || '').trim()).filter(Boolean)
+    : [];
+  if (toolNames.length === 0) {
+    return '';
+  }
+
+  const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
+  const hasHitlTool = normalizedToolNames.has('hitl_request') || normalizedToolNames.has('human_intervention_request');
+
+  const lines = [
+    'You have access to tools.',
+    'Use tools when the user requests an action that requires tool execution.',
+  ];
+
+  if (hasHitlTool) {
+    lines.push(
+      'If you need to ask the human a clarifying question, request an option choice, or request confirmation, call hitl_request (alias: human_intervention_request) instead of asking directly in plain assistant text.'
+    );
+    lines.push(
+      'Use multiple-choice options only; do not request free-text HITL input.'
+    );
+  }
+
+  return lines.join('\n');
 }
 
 /**

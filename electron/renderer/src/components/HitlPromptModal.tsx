@@ -13,13 +13,14 @@
  * - Preserves existing modal styling and behavior from the inline renderer block.
  *
  * Recent Changes:
+ * - 2026-02-20: Enforced options-only HITL modal rendering.
  * - 2026-02-17: Extracted from `App.jsx` as part of Phase 4 component decomposition.
  */
 
 export default function HitlPromptModal({
   activeHitlPrompt,
   submittingHitlRequestId,
-  onRespond,
+  onRespondOption,
 }) {
   if (!activeHitlPrompt) return null;
 
@@ -40,7 +41,7 @@ export default function HitlPromptModal({
               key={option.id}
               type="button"
               disabled={isSubmitting}
-              onClick={() => onRespond(activeHitlPrompt, option.id)}
+              onClick={() => onRespondOption(activeHitlPrompt, option.id)}
               className="rounded-lg border border-border bg-background px-3 py-2 text-left text-xs hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <div className="font-medium text-foreground">{option.label}</div>

@@ -40,5 +40,5 @@ describe('web api hitl response', () => {
     });
     expect(result).toEqual({ accepted: true });
   });
-});
 
+});

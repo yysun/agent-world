@@ -103,6 +103,7 @@
  * Scenario-based logging: Split into lifecycle, connection, tools, execution (October 2025)
  * Lifecycle management: Connection resilience and automatic reconnection (November 2025)
  * Explicit execution safety system: Replaced heuristic detection with structured metadata (November 2025)
+ * 2026-02-20: Added built-in `hitl_request`/`human_intervention_request` tool registration for generic human-in-the-loop prompts.
  * 2026-02-20: Added built-in `create_agent` tool registration for approval-gated agent creation.
  * 2026-02-14: Added built-in `load_skill` tool registration for progressive skill instruction loading.
  * 2026-02-19: Added built-in `create_agent` tool registration with approval-gated agent creation.
@@ -119,6 +120,7 @@ import { createCategoryLogger } from './logger.js';
 import { createShellCmdToolDefinition } from './shell-cmd-tool.js';
 import { createLoadSkillToolDefinition } from './load-skill-tool.js';
 import { createCreateAgentToolDefinition } from './create-agent-tool.js';
+import { createHitlToolDefinition } from './hitl-tool.js';
 import {
   createReadFileToolDefinition,
   createListFilesToolDefinition,
@@ -1604,6 +1606,7 @@ export async function updateMCPServersForWorld(worldId: string, newMcpConfig: st
  * - shell_cmd: Execute shell commands
  * - load_skill: Load full SKILL.md instructions by registry skill_id
  * - create_agent: Create a new agent after explicit user approval
+ * - hitl_request: Ask a human question with options/input and optional confirmation
  * - read_file: Read file contents with pagination controls
  * - list_files: List directory entries
  * - grep: Recursive text search across files
@@ -1614,6 +1617,7 @@ function getBuiltInTools(): Record<string, any> {
   const shellCmdTool = createShellCmdToolDefinition();
   const loadSkillTool = createLoadSkillToolDefinition();
   const createAgentTool = createCreateAgentToolDefinition();
+  const hitlTool = createHitlToolDefinition();
   const readFileTool = createReadFileToolDefinition();
   const listFilesTool = createListFilesToolDefinition();
   const grepTool = createGrepToolDefinition();
@@ -1622,6 +1626,8 @@ function getBuiltInTools(): Record<string, any> {
     'shell_cmd': wrapToolWithValidation(shellCmdTool, 'shell_cmd'),
     'load_skill': wrapToolWithValidation(loadSkillTool, 'load_skill'),
     'create_agent': wrapToolWithValidation(createAgentTool, 'create_agent'),
+    'hitl_request': wrapToolWithValidation(hitlTool, 'hitl_request'),
+    'human_intervention_request': wrapToolWithValidation(hitlTool, 'human_intervention_request'),
     'read_file': wrapToolWithValidation(readFileTool, 'read_file'),
     'list_files': wrapToolWithValidation(listFilesTool, 'list_files'),
     'grep': wrapToolWithValidation(grepTool, 'grep'),

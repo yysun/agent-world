@@ -355,6 +355,21 @@ HITL options for skill activation:
 - `yes_in_session`: approve this `skill_id` in the current world/chat session
 - `no`: decline
 
+### hitl_request (Generic Human Input)
+
+`hitl_request` lets the model ask a human question, present options, and optionally require explicit confirmation.
+The tool is options-only (no free-text mode).
+
+Option example:
+
+```json
+{
+  "question": "Choose deployment strategy",
+  "options": ["Blue/Green", "Canary", "Rolling"],
+  "requireConfirmation": true
+}
+```
+
 ## Experimental Features
 
 - **MCP Support** - *Currently in experiment* - Model Context Protocol integration for tools like search and code execution. e.g.,

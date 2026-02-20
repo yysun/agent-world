@@ -13,8 +13,7 @@
  * - Accepts state setters/callbacks via dependency injection.
  *
  * Recent Changes:
- * - 2026-02-19: Moved chat-title refresh handling from system events to chat CRUD updates.
- * - 2026-02-19: Added realtime agent-CRUD handling to refresh world details after background agent creation/updates.
+ * - 2026-02-20: Enforced options-only HITL parsing and queue ingestion.
  * - 2026-02-19: Extended activity-state typing with optional elapsed reset hook used by activity event transitions.
  * - 2026-02-17: Extracted from App.tsx during CC pass.
  */
@@ -39,7 +38,9 @@ type HitlPrompt = {
   chatId: string | null;
   title: string;
   message: string;
+  mode: 'option';
   options: HitlOption[];
+  defaultOptionId?: string;
   metadata?: {
     refreshAfterDismiss?: boolean;
     kind?: string;
@@ -88,7 +89,6 @@ type UseChatEventSubscriptionsArgs = {
     activeSources: string[];
   }>>;
   refreshSessions: (worldId: string, preferredSessionId?: string | null) => Promise<void>;
-  refreshWorldDetails: (worldId: string) => Promise<any>;
   setStatusText: (text: string, kind?: string) => void;
   resetActivityRuntimeState: () => void;
   setHitlPromptQueue: Dispatch<SetStateAction<HitlPrompt[]>>;
@@ -106,7 +106,6 @@ export function useChatEventSubscriptions({
   setPendingResponseSessionIds,
   setSessionActivity,
   refreshSessions,
-  refreshWorldDetails,
   setStatusText,
   resetActivityRuntimeState,
   setHitlPromptQueue,
@@ -156,6 +155,11 @@ export function useChatEventSubscriptions({
       onSessionSystemEvent: (systemEvent) => {
         if (!loadedWorld?.id) return;
         const eventType = String(systemEvent?.eventType || '').trim();
+        if (eventType === 'chat-title-updated') {
+          const targetChatId = String(systemEvent?.chatId || selectedSessionId || '').trim() || null;
+          refreshSessions(loadedWorld.id, targetChatId).catch(() => { });
+          return;
+        }
         if (eventType !== 'hitl-option-request') {
           return;
         }
@@ -170,12 +174,12 @@ export function useChatEventSubscriptions({
 
         const options = Array.isArray(content?.options)
           ? content.options
-            .map((option) => ({
-              id: String(option?.id || '').trim(),
-              label: String(option?.label || '').trim(),
-              description: option?.description ? String(option.description) : ''
-            }))
-            .filter((option) => option.id && option.label)
+              .map((option) => ({
+                id: String(option?.id || '').trim(),
+                label: String(option?.label || '').trim(),
+                description: option?.description ? String(option.description) : ''
+              }))
+              .filter((option) => option.id && option.label)
           : [];
         if (options.length === 0) {
           return;
@@ -195,7 +199,9 @@ export function useChatEventSubscriptions({
               chatId: systemEvent?.chatId || selectedSessionId || null,
               title: String(content?.title || 'Approval required').trim() || 'Approval required',
               message: String(content?.message || '').trim(),
+              mode: 'option',
               options,
+              ...(typeof content?.defaultOptionId === 'string' ? { defaultOptionId: String(content.defaultOptionId) } : {}),
               metadata: {
                 refreshAfterDismiss: metadata?.refreshAfterDismiss === true,
                 kind: typeof metadata?.kind === 'string' ? metadata.kind : undefined,
@@ -203,22 +209,7 @@ export function useChatEventSubscriptions({
             }
           ];
         });
-      },
-      onSessionCrudEvent: (crudEvent) => {
-        if (!loadedWorld?.id) return;
-        const entityType = String(crudEvent?.entityType || '').trim();
-        if (entityType === 'agent') {
-          refreshWorldDetails(loadedWorld.id).catch(() => { });
-          return;
-        }
-        if (entityType === 'chat') {
-          const preferredChatId = String(
-            crudEvent?.entityId || crudEvent?.chatId || selectedSessionId || ''
-          ).trim() || null;
-          refreshSessions(loadedWorld.id, preferredChatId).catch(() => { });
-          return;
-        }
-      },
+      }
     }));
 
     api.subscribeChatEvents(loadedWorld.id, selectedSessionId, subscriptionId).catch((error: unknown) => {
@@ -245,7 +236,6 @@ export function useChatEventSubscriptions({
     chatSubscriptionCounter,
     loadedWorld,
     refreshSessions,
-    refreshWorldDetails,
     resetActivityRuntimeState,
     selectedSessionId,
     setActiveStreamCount,
