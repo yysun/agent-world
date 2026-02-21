@@ -16,6 +16,8 @@
  * - Keeps helper logic local to this domain module for focused maintenance
  *
  * Recent Changes:
+ * - 2026-02-21: Switched tool output toggle to an SVG icon button and aligned label typography with regular message text sizing.
+ * - 2026-02-21: Updated tool output header layout to show `Tool Output` label with right-aligned Open/Collapse control.
  * - 2026-02-14: Extracted from `world-chat` for cleaner component composition
  */
 
@@ -63,17 +65,33 @@ export function renderMessageContent(message: Message) {
     const { content, wasTruncated } = truncateToolOutput(message.text);
     const isExpanded = message.isToolOutputExpanded || false;
     const outputClass = isStderrOutput(message) ? 'tool-output-stderr' : 'tool-output-stdout';
+    const toggleTitle = isExpanded ? 'Collapse output' : 'Open output';
 
     return (
       <div className="tool-output-container">
         <div className="tool-output-header">
+          <span className="tool-label">Tool Output</span>
           <button
             className="tool-output-toggle"
             $onclick={['toggle-tool-output', message.id]}
-            title={isExpanded ? 'Collapse output' : 'Expand output'}
+            title={toggleTitle}
+            aria-label={toggleTitle}
+            aria-expanded={isExpanded}
           >
-            <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
-            <span className="tool-label">⚙️ Tool output</span>
+            <svg
+              className="tool-toggle-icon"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {isExpanded
+                ? <path d="M5 8l5 5 5-5" />
+                : <path d="M8 5l5 5-5 5" />}
+            </svg>
           </button>
         </div>
         {isExpanded && (

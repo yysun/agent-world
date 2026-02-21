@@ -12,6 +12,8 @@
  * - Balances AppRun/Tailwind utility usage with stylesheet-level overrides for complex chat behavior.
  *
  * Summary of Recent Changes:
+ * - 2026-02-21: Changed tool output toggle to an SVG icon button and set `Tool Output` label size to regular message text.
+ * - 2026-02-21: Updated tool output header to left label + right Open/Collapse control and removed tool output card border.
  * - 2026-02-21: Made composer float above conversation content so chat messages render beneath it.
  * - 2026-02-21: Restyled composer toolbar to match Electron app structure shown in product reference (plus action, project pill, gray circular send button).
  * - 2026-02-21: Updated world chat composer styling to mirror Electron's textarea-based composer shell and icon send/stop button.
@@ -934,6 +936,15 @@ legend {
 .chat-fieldset .message-row,
 .chat-fieldset .message-row .message {
   max-width: 100%;
+}
+
+/* Ensure tool output spans message width despite doodle's fieldset descendant max-width rule */
+.chat-fieldset .message .tool-output-container,
+.chat-fieldset .message .tool-output-content,
+.chat-fieldset .message .tool-output-text {
+  width: 100%;
+  max-width: 100% !important;
+  min-width: 0;
 }
 
 /* Keep composer constrained/centered on large screens despite doodle/chat-fieldset overrides */
@@ -3379,7 +3390,7 @@ legend {
 /* Tool Output Container */
 .tool-output-container {
   margin: 8px 0;
-  border: 1px solid var(--border-subtle);
+  border: none;
   border-radius: 6px;
   overflow: hidden;
   background-color: var(--bg-secondary);
@@ -3389,46 +3400,57 @@ legend {
 .tool-output-header {
   display: flex;
   align-items: center;
-  padding: 0;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
 }
 
 /* Tool Output Toggle Button */
 .tool-output-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  background-color: var(--bg-secondary);
-  border: none;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background-color: transparent;
+  border: 0 !important;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.875rem;
-  color: var(--text-primary);
-  text-align: left;
-  transition: background-color 0.2s ease;
+  color: var(--text-secondary);
+  outline: none;
+  box-shadow: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .tool-output-toggle:hover {
   background-color: var(--bg-tertiary);
+  color: var(--accent-primary);
 }
 
-/* Toggle Icon */
-.toggle-icon {
-  font-size: 0.75em;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
+.tool-output-toggle:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Tool Label */
 .tool-label {
-  font-weight: 500;
-  flex-grow: 1;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.48;
+}
+
+.tool-toggle-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  display: block;
 }
 
 /* Tool Output Content */
 .tool-output-content {
   padding: 12px;
+  width: 100%;
+  box-sizing: border-box;
   animation: expandOutput 0.3s ease-out;
 }
 
@@ -3469,7 +3491,7 @@ legend {
 .tool-output-stdout .tool-output-text {
   background-color: #1e1e1e;
   color: #d4d4d4;
-  border: 1px solid #333;
+  border: none;
 }
 
 /* Stderr Output (red-tinted) */
@@ -3483,7 +3505,7 @@ legend {
 .tool-output-stderr .tool-output-text {
   background-color: #2a1a1a;
   color: #ffcccc;
-  border: 1px solid #4a2a2a;
+  border: none;
 }
 
 /* Truncation Warning */

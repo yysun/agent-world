@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-21: Prevented tool output expand/collapse actions from consuming pending auto-scroll state and jumping to transcript bottom.
  * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
  * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
  * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
@@ -1164,7 +1165,8 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
 
     return {
       ...state,
-      messages
+      messages,
+      needScroll: false
     };
   },
 
