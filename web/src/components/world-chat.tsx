@@ -23,6 +23,7 @@
  * - AppRun JSX with props-based state management
  *
  * Changes:
+ * - 2026-02-21: Aligned web composer UI/behavior with Electron (textarea composer shell, icon action button, and Enter/Shift+Enter semantics).
  * - 2026-02-20: Disabled new-message sending while a HITL prompt is pending; users must resolve HITL first.
  * - 2026-02-20: Replaced popup HITL prompt UX with inline message-flow HITL cards (options-only).
  * - 2026-02-16: Disabled message-edit `Update` button until trimmed content differs from original message text.
@@ -71,9 +72,10 @@ const SYSTEM_AVATAR_SPRITE_INDEX = 4;
 
 export interface ComposerActionState {
   canStopCurrentSession: boolean;
+  composerDisabled: boolean;
   actionButtonDisabled: boolean;
   actionButtonClass: string;
-  actionButtonText: string;
+  actionButtonLabel: string;
 }
 
 export function isBranchableAgentMessage(message: Message): boolean {
@@ -117,19 +119,19 @@ export function getComposerActionState(params: {
   } = params;
 
   const canStopCurrentSession = Boolean(currentChatId) && (isWaiting || isBusy);
+  const composerDisabled = hasActiveHitlPrompt && !canStopCurrentSession;
   const actionButtonDisabled = canStopCurrentSession
     ? isStopping
-    : (!userInput.trim() || isSending || isWaiting || isStopping || hasActiveHitlPrompt);
-  const actionButtonClass = canStopCurrentSession ? 'send-button stop-button' : 'send-button';
-  const actionButtonText = canStopCurrentSession
-    ? (isStopping ? 'Stopping...' : 'Stop')
-    : (isSending ? 'Sending...' : 'Send');
+    : (isSending || !userInput.trim() || composerDisabled);
+  const actionButtonClass = canStopCurrentSession ? 'composer-submit-button stop-button' : 'composer-submit-button';
+  const actionButtonLabel = canStopCurrentSession ? 'Stop message processing' : 'Send message';
 
   return {
     canStopCurrentSession,
+    composerDisabled,
     actionButtonDisabled,
     actionButtonClass,
-    actionButtonText,
+    actionButtonLabel,
   };
 }
 
@@ -157,13 +159,7 @@ export default function WorldChat(props: WorldChatProps) {
     submittingHitlRequestId = null,
   } = props;
 
-  const promptReady = !isWaiting;
-  const promptIndicator = promptReady ? '>' : '…';
-  const inputPlaceholder = activeHitlPrompt
-    ? 'Resolve pending HITL prompt before sending a new message...'
-    : (promptReady ? 'Type your message...' : 'Waiting for agents...');
-  const inputDisabled = isSending || isWaiting || isStopping || Boolean(activeHitlPrompt);
-  const { canStopCurrentSession, actionButtonDisabled, actionButtonClass, actionButtonText } = getComposerActionState({
+  const { canStopCurrentSession, composerDisabled, actionButtonDisabled, actionButtonClass, actionButtonLabel } = getComposerActionState({
     currentChatId,
     isWaiting,
     isBusy,
@@ -172,6 +168,9 @@ export default function WorldChat(props: WorldChatProps) {
     hasActiveHitlPrompt: Boolean(activeHitlPrompt),
     userInput,
   });
+  const inputPlaceholder = composerDisabled
+    ? 'Resolve pending HITL prompt before sending a new message...'
+    : 'Send a message...';
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
@@ -341,7 +340,7 @@ export default function WorldChat(props: WorldChatProps) {
           queuedAgents={queuedAgents}
         />
         <ActivityPulse isBusy={isBusy || false} />
-        {(isBusy || (elapsedMs && elapsedMs > 0)) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
+        {(isBusy || elapsedMs > 0) && <ElapsedTimeCounter elapsedMs={elapsedMs || 0} />}
       </legend>
       <div className="chat-container">
         {/* Conversation Area */}
@@ -559,7 +558,9 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Edit message"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              ✏️
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1.003 1.003 0 0 0 0-1.42L18.37 3.29a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z" />
+                              </svg>
                             </button>
                             <button
                               className="message-delete-btn"
@@ -572,7 +573,9 @@ export default function WorldChat(props: WorldChatProps) {
                               title="Delete message and all after it"
                               disabled={!message.messageId || message.userEntered}
                             >
-                              🗑️
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z" />
+                              </svg>
                             </button>
                           </div>
                         )}
@@ -659,24 +662,53 @@ export default function WorldChat(props: WorldChatProps) {
 
         {/* User Input Area */}
         <div className="input-area">
-          <div className="input-container">
-            <input
-              type="text"
-              className="message-input"
+          <div className="composer-shell">
+            <textarea
+              className="composer-textarea"
               placeholder={inputPlaceholder}
               value={userInput || ''}
               $oninput='update-input'
-              $onkeypress='key-press'
-              disabled={inputDisabled}
+              $onkeydown='key-press'
+              rows={1}
+              aria-label="Message input"
+              disabled={composerDisabled}
             />
-            <button
-              className={actionButtonClass}
-              $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
-              disabled={actionButtonDisabled}
-              title={canStopCurrentSession ? 'Stop processing' : 'Send message'}
-            >
-              {actionButtonText}
-            </button>
+            <div className="composer-toolbar">
+              <div className="composer-toolbar-left"></div>
+              <button
+                className={actionButtonClass}
+                $onclick={canStopCurrentSession ? 'stop-message-processing' : 'send-message'}
+                disabled={actionButtonDisabled}
+                title={actionButtonLabel}
+                aria-label={actionButtonLabel}
+              >
+                {canStopCurrentSession ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    className="composer-submit-icon"
+                    aria-hidden="true"
+                  >
+                    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="composer-submit-icon"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>

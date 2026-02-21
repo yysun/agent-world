@@ -16,6 +16,7 @@
  * - Gradient effects and box shadows for visual depth
  * 
  * Recent Changes:
+ * - 2026-02-21: Updated world chat composer styling to mirror Electron's textarea-based composer shell and icon send/stop button.
  * - 2026-02-20: Added top-row main-agent highlight treatment and badge.
  * - Matched system/log message typography with regular agent message font in world chat
  * - Prevented wide markdown content from stretching the chat column by constraining overflow inside message content
@@ -277,9 +278,17 @@ h2 {
 }
 
 .world-card-btn .world-name {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   font-weight: bold;
-  font-size: 1.5rem;
+  font-size: clamp(0.85rem, 2.2vw, 1.5rem);
   font-style: italic;
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: center;
 }
 
 /* Description card */
@@ -921,7 +930,7 @@ legend {
   height: 100%;
   min-height: 0;
   width: 100%;
-  max-width: none;
+  max-width: 100% !important;
 }
 
 /* Chat fieldset - takes up the remaining space in chat column */
@@ -933,6 +942,16 @@ legend {
   width: auto;
   max-width: none;
   height: 100%;
+}
+
+/* Override doodle.css ".doodle fieldset *" max-width constraint for chat layout elements */
+.chat-fieldset .chat-container,
+.chat-fieldset .conversation-area,
+.chat-fieldset .input-area,
+.chat-fieldset .composer-shell,
+.chat-fieldset .message-row,
+.chat-fieldset .message-row .message {
+  max-width: 100%;
 }
 
 /* Settings fieldset - takes up the remaining space in settings column */
@@ -1507,34 +1526,100 @@ legend {
   background-color: transparent;
 }
 
-.input-container {
+.composer-shell {
   display: flex;
-  gap: 1rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  background-color: var(--bg-primary);
+  padding: 0.6rem 0.75rem;
+  box-shadow: var(--shadow-sm);
 }
 
-.prompt-indicator {
-  font-family: 'Short Stack', cursive;
-  font-size: 1rem;
-  font-weight: bold;
-  color: var(--text-tertiary);
-  min-width: 1rem;
-  display: inline-flex;
-  justify-content: center;
-  transition: color 0.2s ease;
-}
-
-.prompt-indicator.prompt-ready {
-  color: var(--accent-primary);
-}
-
-.prompt-indicator.prompt-waiting {
-  color: var(--text-tertiary);
-  animation: prompt-waiting-pulse 1.5s ease-in-out infinite;
-}
-
-.message-input {
+.composer-textarea {
   flex: 1;
+  width: 100%;
+  min-height: 1.75rem;
+  max-height: 8rem;
+  padding: 0.2rem 0.1rem;
+  border: none;
+  resize: vertical;
+  outline: none;
+  background-color: transparent;
+  font-family: 'Short Stack', cursive;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--text-primary);
+  overflow-y: auto;
+}
+
+.composer-textarea:focus {
+  outline: none;
+}
+
+.composer-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.composer-textarea:disabled {
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-toolbar-left {
+  min-height: 1.75rem;
+}
+
+.composer-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 9999px;
+  border: none;
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+.composer-submit-button:hover:not(:disabled) {
+  background-color: var(--text-secondary);
+  transform: translateY(-1px);
+}
+
+.composer-submit-button.stop-button {
+  background-color: var(--text-secondary);
+}
+
+.composer-submit-button.stop-button:hover:not(:disabled) {
+  background-color: var(--text-primary);
+}
+
+.composer-submit-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.composer-submit-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Shared text input fields (e.g., chat history search) */
+.message-input {
+  width: 100%;
   padding: 0.4rem 0.6rem;
   border: 2px solid var(--border-primary);
   border-radius: 4px;
@@ -1552,39 +1637,6 @@ legend {
 
 .message-input::placeholder {
   color: var(--text-tertiary);
-}
-
-.send-button {
-  padding: 0.4rem 0.8rem;
-  background-color: var(--accent-primary);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-family: 'Short Stack', cursive;
-  font-size: 0.85rem;
-  font-weight: bold;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.send-button:hover:not(:disabled) {
-  background-color: var(--accent-secondary);
-  color: white;
-  transform: translateY(-1px);
-}
-
-.send-button.stop-button {
-  background-color: var(--text-secondary);
-}
-
-.send-button.stop-button:hover:not(:disabled) {
-  background-color: var(--text-primary);
-  color: white;
-}
-
-.send-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Chat Settings Area */
@@ -1727,15 +1779,50 @@ legend {
   .message {
     width: 100%;
     max-width: 100%;
+    padding: 0.875rem;
   }
 
   .message-row .message {
-    width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
-    max-width: calc(100% - var(--chat-message-avatar-size) - var(--chat-message-avatar-gap));
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .message-row .user-message,
+  .message-row .agent-message,
+  .message-row .system-message {
+    width: 100%;
+    max-width: 100%;
+    align-self: stretch;
+  }
+
+  .message-row .user-message {
+    padding-right: 2.25rem !important;
+  }
+
+  .message-row .user-message .message-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 1;
+    flex-direction: column;
+    justify-content: flex-start;
+    margin-top: 0;
   }
 
   .message-row {
     --chat-message-avatar-size: 65px;
+    --chat-message-avatar-gap: 0;
+    display: block;
+    width: 100%;
+  }
+
+  .message-avatar-container {
+    display: none;
+  }
+
+  .message-row-left,
+  .message-row-right {
+    justify-content: stretch;
   }
 
   .conversation-area {
@@ -1793,17 +1880,17 @@ legend {
     min-height: 70px;
   }
 
-  .input-container {
-    flex-direction: column;
-    gap: 0.75rem;
+  .composer-shell {
+    padding: 0.55rem 0.6rem;
   }
 
-  .message-input {
-    width: 100%;
+  .composer-textarea {
+    font-size: 0.8rem;
   }
 
-  .send-button {
-    width: 100%;
+  .composer-submit-button {
+    width: 1.9rem;
+    height: 1.9rem;
   }
 
   .agents-list {

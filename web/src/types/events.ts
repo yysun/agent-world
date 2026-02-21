@@ -25,6 +25,7 @@
  * ```
  * 
  * Changes:
+ * - 2026-02-21: Extended `key-press` payload typing with keyboard modifier/preventDefault fields for textarea Enter/Shift+Enter composer behavior.
  * - 2026-02-20: Enforced options-only HITL event set.
  * - 2026-02-14: Added HITL option-response event variant for web approval prompts.
  * - 2026-02-14: Added `stop-message-processing` event variant for chat-scoped stop controls.
@@ -58,8 +59,16 @@ export type WorldEvents =
   /** Update user input field value */
   | { name: 'update-input'; payload: { target: { value: string } } }
 
-  /** Handle key press in input field */
-  | { name: 'key-press'; payload: { key: string } }
+  /** Handle key press in message composer */
+  | {
+    name: 'key-press'; payload: {
+      key: string;
+      shiftKey?: boolean;
+      keyCode?: number;
+      preventDefault?: () => void;
+      nativeEvent?: { isComposing?: boolean };
+    }
+  }
 
   /** Send message to agents */
   | { name: 'send-message'; payload: void }

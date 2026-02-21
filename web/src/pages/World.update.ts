@@ -44,6 +44,7 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
  * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
  * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
  * - 2026-02-16: Added no-op edit guard to skip save when message content is unchanged.
@@ -814,10 +815,14 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
     InputDomain.updateInput(state, payload.target.value),
 
   'key-press': (state: WorldComponentState, payload: WorldEventPayload<'key-press'>) => {
+    if (payload.nativeEvent?.isComposing || payload.keyCode === 229) {
+      return;
+    }
     if ((state.hitlPromptQueue || []).length > 0) {
       return;
     }
-    if (InputDomain.shouldSendOnEnter(payload.key, state.userInput)) {
+    if (InputDomain.shouldSendOnEnter(payload.key, payload.shiftKey, state.userInput)) {
+      payload.preventDefault?.();
       app.run('send-message');
     }
   },
