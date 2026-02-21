@@ -18,10 +18,7 @@ import { World } from './types.js';
 import { getWorld } from './managers.js';
 import { createCategoryLogger, type LogLevel, addLogStreamCallback } from './logger.js';
 import { subscribeAgentToMessages, subscribeWorldToMessages } from './events/index.js';
-
-function toKebabCase(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-}
+import { toKebabCase } from './utils.js';
 
 // Create subscription category logger (part of core functionality)
 const logger = createCategoryLogger('world.subscription');

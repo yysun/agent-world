@@ -125,6 +125,8 @@ export function toKebabCase(str: string): string {
   if (!str) return '';
 
   return str
+    .normalize("NFD")               // Decompose combined graphemes
+    .replace(/[\u0300-\u036f]/g, '') // Remove diacritics (accents)
     .replace(/\s+/g, '-')           // Replace spaces with hyphens
     .replace(/([a-z])([A-Z])/g, '$1-$2')  // Insert hyphen between camelCase
     .replace(/[^a-zA-Z0-9-]/g, '-') // Replace special characters with hyphens
@@ -311,6 +313,41 @@ export function extractMentions(content: string): string[] {
   return firstValidMention ? [firstValidMention] : [];
 }
 
+function normalizeMentionToken(rawMention: string): string {
+  return rawMention
+    .trim()
+    .replace(/[,:;.!?]+$/g, '')
+    .replace(/\s+/g, '-')
+    .toLowerCase();
+}
+
+function parseParagraphBeginningMention(line: string): string | null {
+  const trimmed = line.trimStart();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutGreetingPrefix = trimmed.replace(/^(?:hey|hi|hello|to)\s+/i, '');
+  const directMatch = /^@([A-Za-z0-9][A-Za-z0-9_-]*)\b/.exec(withoutGreetingPrefix);
+  if (!directMatch?.[1]) {
+    return null;
+  }
+
+  let mention = directMatch[1];
+
+  // For display-name mentions like "@Madame Pedagogue", allow additional TitleCase words.
+  // Keep existing behavior for id-like mentions (contains '-' or '_').
+  if (!mention.includes('-') && !mention.includes('_')) {
+    const remainder = withoutGreetingPrefix.slice(directMatch[0].length);
+    const nextWordMatch = /^\s+([A-Z][A-Za-z0-9_-]*)\b/.exec(remainder);
+    if (nextWordMatch?.[1]) {
+      mention += ` ${nextWordMatch[1]}`;
+    }
+  }
+
+  return normalizeMentionToken(mention);
+}
+
 /**
  * Extract @mentions that appear at the beginning of paragraphs
  * Implements paragraph-beginning-only logic for agent response triggering
@@ -322,17 +359,12 @@ export function extractParagraphBeginningMentions(content: string): string[] {
   if (!content) return [];
 
   const validMentions: string[] = [];
-  const mentionPattern = /^(?:hey|hi|hello|to)\s+@(\w+(?:[-_]\w+)*)\b|^@(\w+(?:[-_]\w+)*)\b/i;
   const lines = content.split(/\n/);
 
   for (const line of lines) {
-    const trimmed = line.trimStart();
-    const match = mentionPattern.exec(trimmed);
-    if (match) {
-      const mention = match[1] || match[2];
-      if (mention) {
-        validMentions.push(mention.toLowerCase());
-      }
+    const mention = parseParagraphBeginningMention(line);
+    if (mention) {
+      validMentions.push(mention);
     }
   }
 

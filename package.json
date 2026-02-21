@@ -17,7 +17,8 @@
   "type": "module",
   "workspaces": [
     "core",
-    "web"
+    "web",
+    "packages/opik"
   ],
   "bin": {
     "agent-world": "scripts/launch-electron.js",
@@ -35,7 +36,7 @@
     "web:start": "npm run build && npm run server:start",
     "cli:start": "npm run build && node dist/cli/index.js",
     "electron:start": "npm run build:core && npm run start --prefix electron",
-    "build": "npm run build --workspace=core && tsc --project tsconfig.build.json && npm run build --workspace=web",
+    "build": "npm run build --workspace=core && npm run build --workspace=packages/opik && tsc --project tsconfig.build.json && npm run build --workspace=web",
     "build:core": "npm run build --workspace=core",
     "build:core:watch": "npm run build --workspace=core -- --watch --preserveWatchOutput",
     "check": "tsc --noEmit --project tsconfig.build.json && npm run check --workspace=core && npm run check --workspace=web && npm run main:build --prefix electron",
@@ -53,7 +54,9 @@
     "test:e2e": "npx tsx tests/e2e/test-agent-response-rules.ts",
     "test:e2e:interactive": "npx tsx tests/e2e/test-agent-response-rules.ts -i",
     "integration": "vitest run --config vitest.integration.config.ts",
-    "pkill": "pkill -f tsx"
+    "pkill": "pkill -f tsx",
+    "opik:eval": "npx tsx tests/opik/eval-robustness.ts",
+    "opik:storage-export-world": "npx tsx scripts/opik-export-world-storage.ts"
   },
   "description": "World-mediated agent management system with clean API surface",
   "keywords": [

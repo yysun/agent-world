@@ -20,6 +20,7 @@
  * - storage (runtime)
  * 
  * Changes:
+ * - 2026-02-20: Added Infinite-Etude handoff safeguard to enforce Pedagogue -> Engraver final mention when missing.
  * - 2026-02-16: Added plain-text tool-intent fallback parser in continuation to synthesize executable `tool_calls` when providers return `Calling tool: ...` text.
  * - 2026-02-16: Max tool-hop guardrail now emits UI/tool errors and injects transient LLM context, then continues loop instead of returning.
  * - 2026-02-16: Removed plain-text tool-intent reminder/retry path; continuation now relies only on tool-call loop + hop guardrail.
@@ -1251,10 +1252,19 @@ export async function handleTextResponse(
 
   const sanitizedResponse = removeSelfMentions(responseText, agent.id);
 
+  const needsInfiniteEtudePedagogueHandoff =
+    world.id === 'infinite-etude' &&
+    agent.id === 'madame-pedagogue' &&
+    !/^\s*@monsieur-engraver\b/im.test(sanitizedResponse);
+
+  const responseWithRequiredHandoff = needsInfiniteEtudePedagogueHandoff
+    ? `${sanitizedResponse.trimEnd()}\n\n@monsieur-engraver please render this.`
+    : sanitizedResponse;
+
   // Apply auto-mention logic if needed
-  let finalResponse = sanitizedResponse;
-  if (agent.autoReply !== false && shouldAutoMention(sanitizedResponse, messageEvent.sender, agent.id)) {
-    finalResponse = addAutoMention(sanitizedResponse, messageEvent.sender);
+  let finalResponse = responseWithRequiredHandoff;
+  if (agent.autoReply !== false && shouldAutoMention(responseWithRequiredHandoff, messageEvent.sender, agent.id)) {
+    finalResponse = addAutoMention(responseWithRequiredHandoff, messageEvent.sender);
     loggerAutoMention.debug('Auto-mention applied', {
       agentId: agent.id,
       originalSender: messageEvent.sender,

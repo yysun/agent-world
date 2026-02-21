@@ -224,6 +224,24 @@ GOOGLE_API_KEY=your-key-here
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
+### Optional Opik Layer
+
+Opik is optional and fully gated.
+
+```bash
+OPIK_ENABLED=false
+OPIK_SAFETY_ENABLED=false
+OPIK_EVAL_ENABLED=false
+OPIK_API_KEY=
+OPIK_WORKSPACE=
+OPIK_PROJECT=agent-world-debugging
+```
+
+Rules:
+- `OPIK_ENABLED=false`: all Opik integration/safety/eval paths are inert.
+- `OPIK_ENABLED=true`: tracing can attach only if `OPIK_API_KEY` + `OPIK_WORKSPACE` are set.
+- Safety and eval still require their sub-flags (`OPIK_SAFETY_ENABLED`, `OPIK_EVAL_ENABLED`).
+
 ## Testing
 
 **Run all tests:**

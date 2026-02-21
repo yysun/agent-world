@@ -83,6 +83,8 @@ import {
   EventType
 } from '../core/index.js';
 import { subscribeWorld, ClientConnection } from '../core/index.js';
+// Opik integration: optional tracer attach for API-managed world subscriptions.
+import { attachOptionalOpikTracer } from '../core/optional-tracers/opik-runtime.js';
 import {
   listMCPServers,
   restartMCPServer,
@@ -190,9 +192,7 @@ function sendError(res: Response, status: number, message: string, code?: string
   res.status(status).json(error);
 }
 
-function toKebabCase(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-}
+import { toKebabCase } from '../core/utils.js';
 
 async function isAgentNameUnique(worldCtx: ReturnType<typeof createWorldContext>, agentName: string, excludeAgent?: string): Promise<boolean> {
   const normalizedAgentName = toKebabCase(agentName);
@@ -669,7 +669,7 @@ async function handleNonStreamingChat(
       };
 
       // Subscribe with minimal client (no forwarding callbacks)
-      subscribeWorld(worldName, { isOpen: true }).then(sub => {
+      subscribeWorld(worldName, { isOpen: true }).then(async sub => {
         if (!sub) {
           hasError = true;
           errorMessage = 'Failed to subscribe to world';
@@ -678,6 +678,7 @@ async function handleNonStreamingChat(
         }
         subscription = sub;
         const world = subscription.world;
+        await attachOptionalOpikTracer(world, { source: 'server' });
 
         // Listen to world activity events to detect when all processing is complete
         const worldActivityListener = (eventData: WorldActivityEventPayload) => {
@@ -794,6 +795,7 @@ async function handleStreamingChat(
   }
 
   const world = subscription.world;
+  await attachOptionalOpikTracer(world, { source: 'server' });
 
   // Create SSE handler - automatically sets up headers, listeners, and cleanup
   const sseHandler = createSSEHandler(req, res, world, 'chat', chatId);
@@ -917,6 +919,7 @@ router.put('/worlds/:worldName/messages/:messageId', validateWorld, async (req: 
       res.end();
       return;
     }
+    await attachOptionalOpikTracer(subscription.world, { source: 'server' });
 
     const sseHandler = createSSEHandler(req, res, subscription.world, 'edit', chatId);
 
