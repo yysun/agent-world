@@ -19,6 +19,7 @@
  * - Defaults to SQLite storage and workspace path if env vars not set
  *
  * Recent Changes:
+ * - 2026-02-21: Added single-instance guard with `app.requestSingleInstanceLock()` and second-instance focus/restore handling.
  * - 2026-02-19: Added `world:export` IPC wiring and storage-factory dependency injection for CLI-parity desktop world import/export flows.
  * - 2026-02-16: Wired `session:branchFromMessage` IPC to core `branchChatFromMessage` for branch-chat creation from assistant messages.
  * - 2026-02-14: Added `hitl:respond` IPC wiring so renderer approvals can resolve core HITL option requests.
@@ -133,6 +134,11 @@ const { createStorage, createStorageFromEnv } = await importCoreStorageFactoryMo
 const CHAT_EVENT_CHANNEL = 'chat:event';
 
 let mainWindow: BrowserWindow | null = null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 loadEnvironmentVariables(__dirname);
 applySystemSettings(readSystemSettings(app));
@@ -295,6 +301,20 @@ function createMainWindow() {
     console.error('Failed to load renderer:', error);
   });
 }
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    return;
+  }
+
+  if (app.isReady()) {
+    createMainWindow();
+  }
+});
 
 function setupAppLifecycle() {
   setupMainLifecycle({
