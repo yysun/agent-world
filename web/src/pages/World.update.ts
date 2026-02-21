@@ -44,6 +44,8 @@
  *   Solution: Single findIndex with OR condition catches both messageId and temp message
  *
  * Changes:
+ * - 2026-02-21: Switched project-folder selection to browser File API flow and preserved UI-enriched world agent fields after updates.
+ * - 2026-02-21: Added `select-project-folder` handler to persist `working_directory` from composer Project button selection.
  * - 2026-02-21: Updated composer key handling for textarea parity with Electron (Enter sends, Shift+Enter inserts newline, composition-safe).
  * - 2026-02-20: Blocked new outbound message sends while HITL prompt queue is non-empty.
  * - 2026-02-20: Enforced options-only HITL handlers and removed free-text prompt events.
@@ -89,6 +91,8 @@ import * as WorldExportDomain from '../domain/world-export';
 import * as MessageDisplayDomain from '../domain/message-display';
 import * as HitlDomain from '../domain/hitl';
 import { resolveActiveChatId } from '../domain/chat-selection';
+import { getEnvValueFromText, upsertEnvVariable } from '../domain/world-variables';
+import { pickProjectFolderPath } from '../domain/project-folder-picker';
 import {
   sendChatMessage,
   editChatMessage,
@@ -259,6 +263,39 @@ const deduplicateMessages = (messages: Message[], agents: Agent[] = []): Message
       return roleOrderA - roleOrderB;
     });
 };
+
+function mergeUpdatedWorldWithUiState(
+  currentWorld: WorldComponentState['world'],
+  updatedWorld: WorldComponentState['world']
+): WorldComponentState['world'] {
+  if (!updatedWorld) {
+    return currentWorld;
+  }
+
+  if (!currentWorld) {
+    return updatedWorld;
+  }
+
+  const existingAgentById = new Map<string, Agent>();
+  for (const existingAgent of currentWorld.agents || []) {
+    existingAgentById.set(existingAgent.id, existingAgent);
+  }
+
+  const mergedAgents = (updatedWorld.agents || []).map((agent, index) => {
+    const existingAgent = existingAgentById.get(agent.id);
+    return {
+      ...agent,
+      spriteIndex: existingAgent?.spriteIndex ?? (index % 9),
+      messageCount: existingAgent?.messageCount ?? 0,
+    };
+  });
+
+  return {
+    ...currentWorld,
+    ...updatedWorld,
+    agents: mergedAgents,
+  };
+}
 
 // ========================================
 // PHASE 2: STREAMING STATE HELPERS (RAF Debouncing)
@@ -515,11 +552,13 @@ async function* initWorld(state: WorldComponentState, name: string, chatId?: str
     // Apply deduplication to loaded messages (same as SSE streaming path)
     // Pass agents array so user messages get correct seenByAgents
     const messages = deduplicateMessages([...rawMessages], agents);
+    const selectedProjectPath = getEnvValueFromText(world.variables, 'working_directory');
 
     yield {
       ...state,
       world,
       currentChat: world.chats.find(c => c.id === chatId) || null,
+      selectedProjectPath,
       messages,
       rawMessages,
       loading: false,
@@ -855,6 +894,47 @@ export const worldUpdateHandlers: Update<WorldComponentState, WorldEventName> = 
       return InputDomain.createSentState(newState);
     } catch (error: any) {
       return InputDomain.createSendErrorState(newState, error.message || 'Failed to send message');
+    }
+  },
+
+  'select-project-folder': async (state: WorldComponentState): Promise<WorldComponentState> => {
+    if (!state.world?.name) {
+      return {
+        ...state,
+        error: 'Load a world before selecting a project folder.'
+      };
+    }
+
+    try {
+      const pickerResult = await pickProjectFolderPath(state.selectedProjectPath || null);
+      if (pickerResult?.canceled || !pickerResult?.directoryPath) {
+        return state;
+      }
+
+      const selectedPath = String(pickerResult.directoryPath || '').trim();
+      if (!selectedPath) {
+        return state;
+      }
+
+      const nextVariables = upsertEnvVariable(
+        state.world.variables || '',
+        'working_directory',
+        selectedPath
+      );
+
+      const updatedWorld = await api.updateWorld(state.worldName, { variables: nextVariables });
+      const mergedWorld = mergeUpdatedWorldWithUiState(state.world, updatedWorld);
+      return {
+        ...state,
+        world: mergedWorld,
+        selectedProjectPath: selectedPath,
+        error: null
+      };
+    } catch (error: any) {
+      return {
+        ...state,
+        error: error?.message || 'Failed to select project folder.'
+      };
     }
   },
 

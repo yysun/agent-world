@@ -5,6 +5,7 @@
  * Supports world/agent/chat management with optimized serialization and error handling.
  *
  * Changes:
+ * - 2026-02-21: Removed temporary server-side folder-picker endpoint in favor of web File API based selection.
  * - 2026-02-20: Enforced options-only HITL response endpoint `POST /worlds/:worldName/hitl/respond` (`optionId` required).
  * - 2026-02-14: Added HITL option response endpoint `POST /worlds/:worldName/hitl/respond` for web/CLI approval submissions.
  * - 2026-02-13: Added core-managed message edit endpoint `PUT /worlds/:worldName/messages/:messageId`

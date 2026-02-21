@@ -22,6 +22,7 @@
  * - Message deletion uses DELETE /worlds/:worldName/messages/:messageId endpoint
  *
  * Changes:
+ * - 2026-02-21: Removed server-side project-folder picker call; web now uses browser File API flow.
  * - 2026-02-20: Enforced options-only HITL response API (`respondHitlOption`).
  * - 2026-02-14: Added respondHitlOption() API call for generic HITL option approvals.
  * - 2026-02-14: Added stopMessageProcessing() API call to cancel active chat processing from web UI.

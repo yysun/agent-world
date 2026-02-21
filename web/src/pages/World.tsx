@@ -15,6 +15,7 @@
  * - Custom CSS for agent sprites, animations, and message styling
  * 
  * Recent Changes:
+ * - 2026-02-21: Passed selected project-folder context into chat composer for Electron-style `Project` button parity.
  * - 2026-02-20: Moved HITL prompts from modal overlays to inline chat-flow cards (options-only).
  * - 2026-02-20: Highlighted the world main agent in the top agent row.
  * - 2026-02-14: Added generic HITL approval modal for option-list system prompts with web response submission wiring.
@@ -74,6 +75,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
     connectionStatus: 'disconnected',
     needScroll: false,  // Always false by default, set true only when new content added
     currentChat: null,
+    selectedProjectPath: null,
     editingMessageId: null,
     editingText: '',
     messageToDelete: null,
@@ -228,6 +230,7 @@ export default class WorldComponent extends Component<WorldComponentState, World
               selectedAgent={state.selectedSettingsTarget === 'agent' ? state.selectedAgent : null}
               currentChat={state.currentChat?.name}
               currentChatId={state.currentChat?.id || null}
+              selectedProjectPath={state.selectedProjectPath}
               editingMessageId={state.editingMessageId}
               editingText={state.editingText}
               agentFilters={state.activeAgentFilters}

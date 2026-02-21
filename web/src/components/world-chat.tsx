@@ -12,6 +12,7 @@
  * - Message body rendering is delegated to domain helpers to keep this file focused on view composition.
  *
  * Summary of Recent Changes:
+ * - 2026-02-21: Wired `Project` button to web project-folder selection flow and dynamic folder tooltip text.
  * - 2026-02-21: Matched web composer toolbar structure to Electron (plus icon + project pill + round arrow action).
  * - 2026-02-21: Aligned web composer UI/behavior with Electron (textarea composer shell, icon action button, and Enter/Shift+Enter semantics).
  * - 2026-02-20: Disabled new-message sending while a HITL prompt is pending; users must resolve HITL first.
@@ -107,6 +108,7 @@ export default function WorldChat(props: WorldChatProps) {
     agents = [],
     currentChat,
     currentChatId = null,
+    selectedProjectPath = null,
     editingMessageId = null,
     editingText = '',
     agentFilters = [],  // Agent IDs to filter by
@@ -129,6 +131,9 @@ export default function WorldChat(props: WorldChatProps) {
   const inputPlaceholder = composerDisabled
     ? 'Resolve pending HITL prompt before sending a new message...'
     : 'Send a message...';
+  const projectButtonTitle = selectedProjectPath
+    ? `Project folder: ${selectedProjectPath}`
+    : 'Select project folder for context';
   const waitingAgentName = activeAgent?.name?.trim() || agents[0]?.name?.trim() || 'Agent';
   const agentSpriteByName = new Map<string, number>();
   const agentSpriteById = new Map<string, number>();
@@ -656,8 +661,9 @@ export default function WorldChat(props: WorldChatProps) {
                 <button
                   type="button"
                   className="composer-project-button"
-                  aria-label="Project"
-                  title="Project"
+                  $onclick='select-project-folder'
+                  aria-label="Select project folder"
+                  title={projectButtonTitle}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

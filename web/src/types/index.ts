@@ -18,6 +18,7 @@
  * - SSE event data structures for real-time updates
  * 
  * Changes:
+ * - 2026-02-21: Added project-folder selection props/state (`selectedProjectPath`) for web composer parity with Electron.
  * - 2026-02-20: Added inline HITL card props to `WorldChatProps` for in-flow prompt rendering (replacing popup-only HITL UI).
  * - 2026-02-20: Enforced options-only HITL prompt typing.
  * - 2026-02-14: Added HITL prompt state/types for generic option-list approvals in web chat flows.
@@ -223,6 +224,7 @@ export interface WorldChatProps {
   selectedAgent?: { id?: string; name: string } | null;
   currentChat?: string;
   currentChatId?: string | null;
+  selectedProjectPath?: string | null;
   editingMessageId?: string | null;
   editingText?: string;
   agentFilters?: string[];  // Agent IDs to filter messages by
@@ -338,6 +340,7 @@ export interface WorldComponentState extends SSEComponentState {
 
   // Chat management state
   currentChat: Chat | null;
+  selectedProjectPath: string | null;
   chatToDelete: Chat | null;
 
   // Message edit state
