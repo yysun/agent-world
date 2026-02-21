@@ -1,3 +1,24 @@
+v0.13.0
+
+**Highlights**
+- Clearer inline human-intervention prompts directly in chat
+- New post-create confirmation for `create_agent`
+- Better streaming UX: active-agent animations and stronger main-agent highlighting
+- Smoother message rendering with less flicker during loading/streaming
+
+**Chat & Agent Workflow**
+- Improved @mention formatting for clearer agent references
+- Better support for creating agents while world processing is in progress
+- Electron chat flow now better matches web behavior for optimistic messages and streaming lifecycle updates
+
+**World Reliability**
+- Added a header refresh button to reload world agents/state quickly
+- Improved reliability for agent add/delete operations (race-condition and silent-failure fixes)
+- Switched to structured runtime events for more consistent real-time updates
+
+**CLI & Startup**
+- Added Node.js preflight checks to CLI/server launchers for clearer startup behavior
+
 v0.12.0
 
 **Web App: Settings, Search & Branching**
