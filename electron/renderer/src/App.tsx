@@ -13,6 +13,7 @@
  * - Uses desktop IPC bridge (`window.agentWorldDesktop`) via domain helper APIs.
  *
  * Recent Changes:
+ * - 2026-02-21: Wired assistant-message raw-markdown copy action into message-list props for desktop chat cards.
  * - 2026-02-20: Disabled new-message sending while HITL prompt queue is non-empty.
  * - 2026-02-20: Moved HITL prompt UX from overlay modal to inline message-flow cards inside the message list.
  * - 2026-02-20: Enforced options-only HITL handling in renderer response wiring.
@@ -507,6 +508,7 @@ export default function App() {
     onSaveEditMessage,
     onDeleteMessage,
     onBranchFromMessage,
+    onCopyRawMarkdownFromMessage,
     resetMessageRuntimeState,
   } = useMessageManagement({
     api,
@@ -969,6 +971,7 @@ export default function App() {
     onStartEditMessage,
     onDeleteMessage,
     onBranchFromMessage,
+    onCopyRawMarkdownFromMessage,
     showInlineWorkingIndicator,
     inlineWorkingIndicatorState,
     activeHitlPrompt,

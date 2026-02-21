@@ -17,6 +17,7 @@
  * - Executes real local shell commands and validates formatted tool output.
  * 
  * Changes:
+ * - 2026-02-21: Added `list_files` bounding/filtering coverage (`maxEntries`, `includePattern`) to prevent oversized tool results from inflating continuation tokens.
  * - 2026-02-21: Added LLM minimal-result mode coverage for `shell_cmd` (status-only result contract).
  * - 2026-02-20: Added assertion that built-in `create_agent` is registered alongside other always-on tools.
  * - 2026-02-16: Added recursive `list_files` integration coverage (`recursive=true`) with nested entry assertions.
@@ -259,6 +260,63 @@ describe('shell_cmd integration with worlds', () => {
       expect(recursiveResult).toHaveProperty('recursive', true);
       expect(recursiveResult.entries).toContain('nested/child/');
       expect(recursiveResult.entries).toContain('nested/child/deep.txt');
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('should bound list_files output and support includePattern filtering', async () => {
+    const tools = await getMCPToolsForWorld(worldId());
+    const tempRoot = await mkdtemp(path.join(tmpdir(), 'agent-world-list-files-bounded-'));
+
+    try {
+      for (let index = 0; index < 240; index += 1) {
+        const extension = index % 2 === 0 ? 'md' : 'txt';
+        await writeFile(path.join(tempRoot, `file-${index}.${extension}`), `content-${index}`);
+      }
+
+      const defaultBoundedRaw = await tools.list_files.execute(
+        { path: '.', recursive: false },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof defaultBoundedRaw === 'string' && defaultBoundedRaw.startsWith('Error:')) {
+        throw new Error(defaultBoundedRaw);
+      }
+
+      const defaultBounded = JSON.parse(defaultBoundedRaw);
+      expect(defaultBounded).toHaveProperty('total', 240);
+      expect(defaultBounded).toHaveProperty('maxEntries', 200);
+      expect(defaultBounded).toHaveProperty('returned', 200);
+      expect(defaultBounded).toHaveProperty('truncated', true);
+      expect(Array.isArray(defaultBounded.entries)).toBe(true);
+      expect(defaultBounded.entries.length).toBe(200);
+      expect(typeof defaultBounded.message).toBe('string');
+      expect(defaultBounded.message).toContain('Result truncated');
+
+      const markdownOnlyRaw = await tools.list_files.execute(
+        {
+          path: '.',
+          recursive: false,
+          includePattern: '**/*.md',
+          maxEntries: 500,
+        },
+        undefined,
+        undefined,
+        { workingDirectory: tempRoot },
+      );
+
+      if (typeof markdownOnlyRaw === 'string' && markdownOnlyRaw.startsWith('Error:')) {
+        throw new Error(markdownOnlyRaw);
+      }
+
+      const markdownOnly = JSON.parse(markdownOnlyRaw);
+      expect(markdownOnly).toHaveProperty('total', 120);
+      expect(markdownOnly).toHaveProperty('truncated', false);
+      expect(markdownOnly).toHaveProperty('returned', 120);
+      expect(markdownOnly.entries.every((entry: string) => entry.endsWith('.md'))).toBe(true);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

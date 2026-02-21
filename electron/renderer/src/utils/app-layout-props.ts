@@ -12,6 +12,7 @@
  * - Data-only transformations from provided inputs.
  *
  * Recent Changes:
+ * - 2026-02-21: Added message-list prop wiring for assistant raw-markdown copy action.
  * - 2026-02-20: Added inline HITL message-card props to main message-list wiring (replacing overlay HITL modal usage).
  * - 2026-02-20: Added `activeHeaderAgentIds` wiring so header avatars can reflect active streaming agents.
  * - 2026-02-19: Added status-bar `agentStatusText` wiring for full per-agent activity summaries.
@@ -45,6 +46,7 @@ export function createMainContentMessageListProps<T extends PropBag>(input: T) {
     onStartEditMessage: input.onStartEditMessage,
     onDeleteMessage: input.onDeleteMessage,
     onBranchFromMessage: input.onBranchFromMessage,
+    onCopyRawMarkdownFromMessage: input.onCopyRawMarkdownFromMessage,
     showInlineWorkingIndicator: input.showInlineWorkingIndicator,
     inlineWorkingIndicatorState: input.inlineWorkingIndicatorState,
     activeHitlPrompt: input.activeHitlPrompt,

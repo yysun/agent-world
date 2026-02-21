@@ -15,6 +15,7 @@
  * - Errors are returned as tool-friendly `Error:` strings
  *
  * Recent Changes:
+ * - 2026-02-21: Added `list_files` output bounding (`maxEntries`) and optional `includePattern` filtering with truncation metadata to reduce continuation token spikes and tool-hop churn on large workspaces.
  * - 2026-02-19: Aligned file-tool path behavior with `shell_cmd`: `list_files` now defaults to trusted working directory when `path` is omitted, and `read_file` accepts `path` alias.
  * - 2026-02-16: Switched `list_files` scanning to `fast-glob` with depth control and default ignore rules.
  * - 2026-02-16: Added optional `recursive` mode to `list_files` for nested directory traversal in a single call.
@@ -41,6 +42,8 @@ type ToolContext = {
 
 const DEFAULT_READ_LIMIT = 200;
 const MAX_READ_LIMIT = 2000;
+const DEFAULT_LIST_MAX_ENTRIES = 200;
+const MAX_LIST_MAX_ENTRIES = 2000;
 const DEFAULT_GREP_MAX_RESULTS = 200;
 const MAX_GREP_MAX_RESULTS = 2000;
 const MAX_GREP_FILE_BYTES = 1024 * 1024;
@@ -146,10 +149,20 @@ function shouldIncludeFile(relativePath: string, includePattern?: string): boole
   }
 
   return patterns.some((pattern) => {
-    if (!pattern.includes('*') && !pattern.includes('?')) {
-      return normalizedRelativePath.includes(normalizePath(pattern));
-    }
-    return globToRegExp(pattern).test(normalizedRelativePath);
+    const normalizedPattern = normalizePath(pattern);
+    const candidatePatterns = normalizedPattern.startsWith('**/')
+      ? [normalizedPattern, normalizedPattern.slice(3)]
+      : [normalizedPattern];
+
+    return candidatePatterns.some((candidatePattern) => {
+      if (!candidatePattern) {
+        return false;
+      }
+      if (!candidatePattern.includes('*') && !candidatePattern.includes('?')) {
+        return normalizedRelativePath.includes(candidatePattern);
+      }
+      return globToRegExp(candidatePattern).test(normalizedRelativePath);
+    });
   });
 }
 
@@ -284,7 +297,7 @@ export function createReadFileToolDefinition() {
 export function createListFilesToolDefinition() {
   return {
     description:
-      'List files and directories available in a directory path for quick workspace exploration. Defaults to trusted working directory when path is omitted. Use recursive=true to include nested entries.',
+      'List files and directories available in a directory path for quick workspace exploration. Defaults to trusted working directory when path is omitted. Use recursive=true for nested entries and includePattern/maxEntries to keep results bounded.',
     parameters: {
       type: 'object',
       properties: {
@@ -300,6 +313,14 @@ export function createListFilesToolDefinition() {
           type: 'boolean',
           description: 'When true, include nested entries recursively (default: false).',
         },
+        includePattern: {
+          type: 'string',
+          description: 'Optional glob-like filter (supports comma-separated patterns), for example: **/*.md',
+        },
+        maxEntries: {
+          type: 'number',
+          description: `Maximum number of returned entries (default: ${DEFAULT_LIST_MAX_ENTRIES}, max: ${MAX_LIST_MAX_ENTRIES}).`,
+        },
       },
       required: [],
       additionalProperties: false,
@@ -312,6 +333,12 @@ export function createListFilesToolDefinition() {
         ensurePathWithinTrustedDirectory(resolvedPath, trustedWorkingDirectory);
         const includeHidden = Boolean(args.includeHidden ?? true);
         const recursive = Boolean(args.recursive ?? false);
+        const includePattern = String(args.includePattern ?? '').trim();
+        const maxEntries = clamp(
+          Number(args.maxEntries ?? DEFAULT_LIST_MAX_ENTRIES),
+          1,
+          MAX_LIST_MAX_ENTRIES,
+        );
 
         const items = await fg(['**/*'], {
           cwd: resolvedPath,
@@ -322,19 +349,34 @@ export function createListFilesToolDefinition() {
           dot: includeHidden,
         });
 
-        const normalizedItems = items
+        const filteredItems = items
           .map((entry) => normalizePath(entry))
+          .filter((entry) => shouldIncludeFile(entry, includePattern))
           .sort((left, right) => left.localeCompare(right));
+        const totalMatchedEntries = filteredItems.length;
+        const truncated = totalMatchedEntries > maxEntries;
+        const returnedEntries = truncated ? filteredItems.slice(0, maxEntries) : filteredItems;
+        const message = totalMatchedEntries === 0
+          ? 'No files or directories found in the requested path.'
+          : (
+            truncated
+              ? `Result truncated to ${maxEntries} entries out of ${totalMatchedEntries}. Narrow with includePattern or path.`
+              : undefined
+          );
 
         return JSON.stringify(
           {
             requestedPath,
             path: resolvedPath,
             recursive,
-            total: normalizedItems.length,
-            entries: normalizedItems,
-            found: normalizedItems.length > 0,
-            message: normalizedItems.length > 0 ? undefined : 'No files or directories found in the requested path.',
+            includePattern: includePattern || undefined,
+            maxEntries,
+            total: totalMatchedEntries,
+            returned: returnedEntries.length,
+            truncated,
+            entries: returnedEntries,
+            found: totalMatchedEntries > 0,
+            message,
           },
           null,
           2,

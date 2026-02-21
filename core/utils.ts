@@ -33,6 +33,7 @@
  * - Agent memory filtering prevents LLM context pollution from irrelevant messages
  *
  * Recent Changes:
+ * - 2026-02-21: Added `list_files` prompt guidance to prefer `includePattern` and bounded `maxEntries` for file-type searches to reduce oversized tool results and continuation churn.
  * - 2026-02-21: Excluded persisted shell stdout stream assistant messages (messageId suffix `-stdout`) from LLM-history relevance filtering to prevent tool-continuation token amplification loops.
  * - 2026-02-20: Updated HITL tool system-prompt guidance to enforce options-only HITL usage.
  * - 2026-02-20: Added `buildToolUsagePromptSection()` for centralized, tool-aware system-prompt guidance (including HITL usage guidance when available).
@@ -217,6 +218,7 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
 
   const normalizedToolNames = new Set(toolNames.map((toolName) => toolName.toLowerCase()));
   const hasHitlTool = normalizedToolNames.has('human_intervention_request');
+  const hasListFilesTool = normalizedToolNames.has('list_files');
 
   const lines = [
     'You have access to tools.',
@@ -229,6 +231,12 @@ export function buildToolUsagePromptSection(options: { toolNames: string[] }): s
     );
     lines.push(
       'Use multiple-choice options only; do not request free-text HITL input.'
+    );
+  }
+
+  if (hasListFilesTool) {
+    lines.push(
+      'When using list_files for file-type searches, always narrow with includePattern (for example, **/*.md) and keep maxEntries small to avoid oversized results.'
     );
   }
 

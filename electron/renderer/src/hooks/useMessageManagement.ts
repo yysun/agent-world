@@ -13,6 +13,7 @@
  * - Keeps branch/session refresh semantics aligned with the existing desktop IPC flows.
  *
  * Recent Changes:
+ * - 2026-02-21: Added assistant-message raw-markdown copy action with clipboard API + legacy fallback.
  * - 2026-02-20: Blocked composer sends while HITL prompt queue is non-empty to enforce resolve-first workflow.
  * - 2026-02-20: Added defensive renderer-side chatId invariant before IPC send so UI fails fast when session context is missing.
  * - 2026-02-20: Added optimistic user-message insertion and reconciliation aligned with web message timing behavior.
@@ -440,6 +441,52 @@ export function useMessageManagement({
     }
   }, [api, loadedWorldId, resolveMessageTargetChatId, setSelectedSessionId, setSessions, setStatusText]);
 
+  const onCopyRawMarkdownFromMessage = useCallback(async (message) => {
+    const messageContent = message?.content;
+    const rawMarkdown = typeof messageContent === 'string'
+      ? messageContent
+      : String(messageContent ?? '');
+
+    if (!rawMarkdown) {
+      setStatusText('Cannot copy: message content is empty.', 'error');
+      return;
+    }
+
+    const fallbackCopy = () => {
+      if (typeof document === 'undefined' || !document.body) return false;
+      const textarea = document.createElement('textarea');
+      textarea.value = rawMarkdown;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return copied;
+    };
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(rawMarkdown);
+      } else if (!fallbackCopy()) {
+        throw new Error('Clipboard API unavailable.');
+      }
+      setStatusText('Copied raw markdown.', 'success');
+    } catch (error) {
+      if (fallbackCopy()) {
+        setStatusText('Copied raw markdown.', 'success');
+        return;
+      }
+      setStatusText(safeMessage(error, 'Failed to copy raw markdown.'), 'error');
+    }
+  }, [setStatusText]);
+
   const resetMessageRuntimeState = useCallback(() => {
     setSendingSessionIds(new Set());
     setStoppingSessionIds(new Set());
@@ -468,6 +515,7 @@ export function useMessageManagement({
     onSaveEditMessage,
     onDeleteMessage,
     onBranchFromMessage,
+    onCopyRawMarkdownFromMessage,
     resetMessageRuntimeState,
   };
 }

@@ -13,6 +13,7 @@
  * - Receives state/actions via props from App orchestration.
  *
  * Recent Changes:
+ * - 2026-02-21: Added assistant-message action button to copy raw markdown beside branch action.
  * - 2026-02-20: Added inline message-flow HITL prompt card rendering for option prompts, replacing overlay-only HITL UX.
  * - 2026-02-20: Added message-loading guard so session switches render loading state instead of welcome-card flicker.
  * - 2026-02-20: Aligned renderable message filtering with App welcome-state logic to prevent empty-state flicker.
@@ -59,6 +60,7 @@ export default function MessageListPanel({
   onStartEditMessage,
   onDeleteMessage,
   onBranchFromMessage,
+  onCopyRawMarkdownFromMessage,
   showInlineWorkingIndicator,
   inlineWorkingIndicatorState,
   activeHitlPrompt,
@@ -279,6 +281,18 @@ export default function MessageListPanel({
                           <circle cx="18" cy="6" r="3" />
                           <circle cx="6" cy="18" r="3" />
                           <path d="M9 18h6a3 3 0 0 0 3-3V9" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onCopyRawMarkdownFromMessage(message)}
+                        className="rounded p-1 text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-foreground/10 focus:outline-none focus:ring-2 focus:ring-sidebar-ring transition-all bg-background/80 backdrop-blur-sm"
+                        title="Copy raw markdown"
+                        aria-label="Copy raw markdown"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                         </svg>
                       </button>
                     </div>
